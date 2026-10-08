@@ -250,7 +250,13 @@ export function AnalysisTab({
                 </details>
               </>
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
-              <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
+              <>
+                <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
+                {/* Already the API's longest list, so there is no "show all". */}
+                {detail.data.rows_total != null && detail.data.rows_total > detail.data.rows.length && (
+                  <RowsShown shown={detail.data.rows.length} total={detail.data.rows_total} />
+                )}
+              </>
             ) : detail.data.rows.length > 0 ? (
               <>
                 <ReportTable

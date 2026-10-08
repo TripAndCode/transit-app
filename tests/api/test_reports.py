@@ -1994,6 +1994,37 @@ async def test_ranking_counts_every_ranked_group_beyond_the_limit(reports_client
 
 
 @pytest.mark.asyncio
+async def test_compare_ranking_counts_every_compared_route_beyond_the_limit(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    for code in ("C1", "C2", "C3"):
+        await _seed_route(pool, agency_id, code, "平日", "2026-05-19", [120] * 15)
+        await _seed_route(pool, agency_id, code, "土日祝", "2026-05-23", [360] * 15)
+    _run_analyze(agency_id, ch_client)
+    data = (await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24&limit=2")).json()
+    assert len(data["rows"]) == 2
+    assert data["rows_total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_live_compare_ranking_counts_every_compared_route_beyond_the_limit(
+    reports_client, ch_client, ch_async_client
+):
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    for code in ("L1", "L2", "L3"):
+        await _seed_route_at(pool, agency_id, code, "平日", "2026-05-19", "12:30", [120] * 15)
+        await _seed_route_at(pool, agency_id, code, "土日祝", "2026-05-23", "12:30", [300] * 15)
+    mirror_updates_to_ch(ch_client, agency_id)
+    url = f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24&time_band=noon&limit=2"
+    data = (await client.get(url)).json()
+    assert len(data["rows"]) == 2
+    assert data["rows_total"] == 3
+
+
+@pytest.mark.asyncio
 async def test_non_ranking_reports_carry_no_ranking_counts(reports_client):
     client, agency_id, _ = reports_client
     data = (await client.get(f"/api/{agency_id}/reports/on_time")).json()

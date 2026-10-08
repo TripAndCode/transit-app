@@ -178,9 +178,10 @@ class ReportResponse(BaseModel):
     # instead of assuming it does.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
-    # ranking/ranking_best only (None elsewhere): how many groups qualified
-    # before `limit` cut the list, and the observation count below which a
-    # group's average is too thin to trust.
+    # How many groups qualified before `limit` cut the list (ranking,
+    # ranking_best and compare_ranking; None elsewhere), and, for
+    # ranking/ranking_best only, the observation count below which a group's
+    # average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
 
@@ -870,7 +871,9 @@ async def get_report(
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n, late_tolerance_sec=late_tolerance_sec)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
-        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n, ch=ch)
+        compared = await compute_compare_ranking(agency_id, ctx, conn, limit=None, ch=ch)
+        rows_total = len(compared)
+        rows = compared[:n]
         intent = {"query_type": "compare_ranking", "limit": n}
     elif report_type == "dow_weekend":
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n, ch=ch)
