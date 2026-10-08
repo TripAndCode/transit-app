@@ -191,9 +191,20 @@ def _ci_frontend_scripts() -> set[str]:
     return set(re.findall(r"npm run ([\w:-]+)", runs))
 
 
+def _commands(block: str) -> str:
+    """The block's shell outside comments and double-quoted strings. A
+    run_step label and an echo's text are double-quoted; the commands
+    themselves are not (a `bash -c` body is single-quoted), so a label that
+    names a script is not mistaken for running it."""
+    code = "\n".join(line for line in block.splitlines() if not line.lstrip().startswith("#"))
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+
+
 def _runs(block: str, script: str) -> bool:
-    """Whether `block` runs exactly `script`: `lint` is not `lint:i18n`."""
-    return re.search(rf"npm run {re.escape(script)}(?![\w:-])", block) is not None
+    """Whether `block` invokes exactly `script` (`lint` is not `lint:i18n`),
+    with or without npm flags before it."""
+    pattern = rf"npm run(?: --?[\w-]+)* {re.escape(script)}(?![\w:-])"
+    return re.search(pattern, _commands(block)) is not None
 
 
 def test_frontend_gate_runs_every_check_ci_runs():
@@ -211,10 +222,15 @@ def test_frontend_gate_runs_every_check_ci_runs():
         assert script in header, f"{script} runs in CI only, but the hook header does not say so"
 
 
-def test_a_script_counts_as_run_only_under_its_exact_name():
+def test_a_script_counts_as_run_only_when_a_command_invokes_it_by_its_exact_name():
     assert _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint:i18n")
     assert not _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint")
     assert not _runs("npm run lint:i18n-strings", "lint:i18n")
+    assert not _runs('run_step 120 "npm run check:react-compiler (label)" x true', "check:react-compiler")
+    assert not _runs('    # npm run deadcode, described\n    echo "== npm run deadcode =="', "deadcode")
+    assert _runs("run_with_timeout 90 x npm run --silent deadcode -- --reporter json", "deadcode")
+    build_step = "run_step 480 \"label\" x bash -c 'npm run build:bundle && npm run check:entry-chunk'"
+    assert _runs(build_step, "check:entry-chunk")
 
 
 def _deadcode_classifier() -> str:
