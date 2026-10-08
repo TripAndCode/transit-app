@@ -60,11 +60,12 @@ export default tseslint.config(
       // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
       // at 'warn'; `npm run lint` runs with `--max-warnings 0`, so a
       // bailout now fails the build instead of passing silently.
-      // `react-hooks/todo` ("unimplemented compiler features", Hint
-      // severity, off by default upstream) is deliberately left at its
-      // default: it isn't a bailout diagnostic, and promoting an
-      // off-by-default rule needs its own verified-clean lint run first.
+      // `react-hooks/todo` (off by default upstream) reports syntax the
+      // compiler has not implemented, such as a `try/finally` in a
+      // component. The compiler then skips that whole component, so it is
+      // a bailout too and joins them at 'warn'.
       ...reactHooks.configs['recommended-latest'].rules,
+      'react-hooks/todo': 'warn',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
       // Honor the underscore-prefix convention for intentionally-unused bindings.

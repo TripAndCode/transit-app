@@ -50,6 +50,24 @@ describe("react compiler manual-memoization bans actually fire", () => {
     expect(ids).not.toContain("no-restricted-imports");
   });
 
+  test("a component the compiler would skip over a try/finally is flagged (react-hooks/todo)", () => {
+    const code =
+      'import { useState } from "react";\n' +
+      "export function Saver({ save }: { save: () => Promise<void> }) {\n" +
+      "  const [busy, setBusy] = useState(false);\n" +
+      "  async function onClick() {\n" +
+      "    setBusy(true);\n" +
+      "    try {\n" +
+      "      await save();\n" +
+      "    } finally {\n" +
+      "      setBusy(false);\n" +
+      "    }\n" +
+      "  }\n" +
+      "  return <button disabled={busy} onClick={onClick} />;\n" +
+      "}\n";
+    expect(ruleIds(code)).toContain("react-hooks/todo");
+  });
+
   test("ordinary code with no manual memoization is clean", () => {
     const code = "export function f() {\n  return 1 + 1;\n}\n";
     expect(ruleIds(code)).toEqual([]);

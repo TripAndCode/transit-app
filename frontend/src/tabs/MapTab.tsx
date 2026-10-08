@@ -108,6 +108,32 @@ function freshnessFor(timestamp: string | null | undefined, now: number): Freshn
   return "stale";
 }
 
+/** Asks the server to poll the feed now, refetches what the feed drives, and
+ *  returns the line the refresh button reports. It never throws, so its caller
+ *  always clears the pending state. It sits outside the component because the
+ *  React Compiler skips a component whose `try` holds a conditional
+ *  expression. */
+async function refreshFeed(
+  agencyId: number,
+  signal: AbortSignal,
+  t: ReturnType<typeof useTranslation>["t"],
+  refetchAll: () => Promise<{ failed: boolean; latestCapturedAt: string | null }>,
+): Promise<string> {
+  try {
+    const { inserted } = await apiPost<{ status: string; inserted: number }>(`/api/${agencyId}/delays/refresh`, {}, { signal });
+    const { failed, latestCapturedAt } = await refetchAll();
+    if (failed) return t("operations.refresh_failed");
+    return inserted > 0 && latestCapturedAt
+      ? t("operations.refresh_updated", { when: relativeTime(latestCapturedAt), count: inserted })
+      : t("operations.refresh_unchanged");
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : null;
+    if (status === 429) return t("operations.refresh_rate_limited");
+    if (status === 401) return t("operations.refresh_sign_in");
+    return t("operations.refresh_failed");
+  }
+}
+
 export function MapTab() {
   const id = useAgencyId();
   const { t, i18n } = useTranslation();
@@ -492,39 +518,19 @@ export function MapTab() {
     setIsRefreshing(true);
     const controller = new AbortController();
     refreshAbortRef.current = controller;
-    try {
-      const refreshResult = await apiPost<{ status: string; inserted: number }>(
-        `/api/${id}/delays/refresh`,
-        {},
-        { signal: controller.signal },
-      );
+    const message = await refreshFeed(id, controller.signal, t, async () => {
       const [liveResult, summaryResult, progressResult] = await Promise.all([
         liveQuery.refetch(),
         summaryQuery.refetch(),
         effectiveTrip ? progressQuery.refetch() : Promise.resolve(null),
       ]);
-      if (liveResult.isError || summaryResult.isError || progressResult?.isError) {
-        showRefreshMessage(t("operations.refresh_failed"));
-        return;
-      }
-      const nextObservation = liveResult.data?.latest_captured_at ?? null;
-      const message = refreshResult.inserted > 0 && nextObservation
-        ? t("operations.refresh_updated", {
-          when: relativeTime(nextObservation),
-          count: refreshResult.inserted,
-        })
-        : t("operations.refresh_unchanged");
-      showRefreshMessage(message);
-    } catch (error) {
-      const status = error instanceof ApiError ? error.status : null;
-      showRefreshMessage(status === 429
-        ? t("operations.refresh_rate_limited")
-        : status === 401
-          ? t("operations.refresh_sign_in")
-          : t("operations.refresh_failed"));
-    } finally {
-      setIsRefreshing(false);
-    }
+      return {
+        failed: liveResult.isError || summaryResult.isError || progressResult?.isError === true,
+        latestCapturedAt: liveResult.data?.latest_captured_at ?? null,
+      };
+    });
+    setIsRefreshing(false);
+    showRefreshMessage(message);
   }
 
   function showRefreshMessage(message: string) {
