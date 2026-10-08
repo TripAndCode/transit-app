@@ -7,7 +7,6 @@ import { TrendFocusProvider } from "./TrendFocusContext";
 import { isoDow, type TrendFocus, type TrendFocusSource, type TrendMark } from "./trendFocus";
 import { DailyChart } from "./DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
-import { BandGrid } from "./DowBandGrid";
 import { HeatSurface } from "./HeatSurface";
 import { BAND_ORDER, type ForecastOverviewGridCell, type TrendDay } from "../../api/types";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
@@ -35,9 +34,9 @@ vi.mock("./HourlyHeatmap", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./HourlyHeatmap")>();
   return { ...mod, HourlyHeatmap: countRenders(mod.HourlyHeatmap, "hourly") };
 });
-vi.mock("./DowBandGrid", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("./DowBandGrid")>();
-  return { ...mod, BandGrid: countRenders(mod.BandGrid, "dow") };
+vi.mock("./HeatSurface", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./HeatSurface")>();
+  return { ...mod, HeatSurface: countRenders(mod.HeatSurface, "dow") };
 });
 
 // 2026-05-18 is a Monday; 2026-05-25 is the following Monday, so the daily
@@ -57,6 +56,21 @@ function grid(): ForecastOverviewGridCell[] {
   return out;
 }
 
+/** The trend view's own trio, with the heat surface as the weekday chart. */
+function renderLinked() {
+  return renderWithProviders(
+    <MemoryRouter>
+      <TrendFocusProvider>
+        <div data-testid="daily">
+          <DailyChart days={DAYS} />
+        </div>
+        <HourlyHeatmap cells={CELLS} />
+        <HeatSurface hourly={CELLS} grid={grid()} worst={null} rangeDays={14} />
+      </TrendFocusProvider>
+    </MemoryRouter>,
+  );
+}
+
 /** The reference semantics the CSS rules must reproduce: a mark dims when it
  *  disagrees with another chart's focus on a dimension they both carry. */
 function isFocusDimmed(focus: TrendFocus | null, mark: TrendMark, viewer: TrendFocusSource): boolean {
@@ -68,24 +82,6 @@ function isFocusDimmed(focus: TrendFocus | null, mark: TrendMark, viewer: TrendF
     if (f !== m) return true;
   }
   return false;
-}
-
-function renderLinked() {
-  return renderWithProviders(
-    <MemoryRouter>
-      <TrendFocusProvider>
-        <div data-testid="daily">
-          <DailyChart days={DAYS} />
-        </div>
-        <div data-testid="hourly">
-          <HourlyHeatmap cells={CELLS} />
-        </div>
-        <div data-testid="dow">
-          <BandGrid grid={grid()} bandLabel={(b) => b} dayLabel={(d) => `dow${d}`} colorFor={() => "var(--accent)"} onTip={() => {}} onLeave={() => {}} />
-        </div>
-      </TrendFocusProvider>
-    </MemoryRouter>,
-  );
 }
 
 /** Renders per chart since `before`. */
@@ -112,8 +108,8 @@ function heatCell(container: HTMLElement, date: string, hour: number): Element {
 function dailyBar(container: HTMLElement, index: number): Element {
   return container.querySelector(`[data-testid='daily-bar'][data-index='${index}']`)!;
 }
-function dowCell(container: HTMLElement, dow: number): HTMLElement {
-  return container.querySelector<HTMLElement>(`[data-testid='ov-band-cell'][data-dow='${dow}']`)!;
+function surfaceCell(container: HTMLElement, dow: number, hour = 8): Element {
+  return container.querySelector(`.heat-surface__cell[data-dow='${dow}'][data-hour='${hour}']`)!;
 }
 function hoverDay(container: HTMLElement, index: number) {
   fireEvent.mouseEnter(within(container).getByTestId("daily").querySelector(`[data-testid='daily-day'][data-index='${index}']`)!);
@@ -152,9 +148,9 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     expect(dimmedByCss(container, dailyBar(container, 1))).toBe(true);
   });
 
-  it("dims by weekday from a day-of-week band cell", () => {
+  it("dims by weekday from a heat-surface cell", () => {
     const { container } = renderLinked();
-    fireEvent.mouseEnter(dowCell(container, 2));
+    fireEvent.mouseOver(surfaceCell(container, 2));
     expect(dimmedByCss(container, dailyBar(container, 0))).toBe(true);
     expect(dimmedByCss(container, dailyBar(container, 1))).toBe(false);
     expect(dimmedByCss(container, heatCell(container, MON, 8))).toBe(true);
@@ -166,7 +162,7 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     const hovers: Array<[() => void, TrendFocus]> = [
       [() => hoverDay(container, 0), { source: "daily", date: MON, dow: 1 }],
       [() => fireEvent.mouseEnter(heatCell(container, TUE, 9)), { source: "hourly", hour: 9, dow: 2 }],
-      [() => fireEvent.mouseEnter(dowCell(container, 1)), { source: "dow", dow: 1 }],
+      [() => fireEvent.mouseOver(surfaceCell(container, 1)), { source: "dow", dow: 1 }],
     ];
     for (const [hover, focus] of hovers) {
       hover();
@@ -177,39 +173,7 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
         expect(dimmedByCss(container, heatCell(container, c.date, c.hour))).toBe(isFocusDimmed(focus, { date: c.date, hour: c.hour, dow: isoDow(c.date) }, "hourly"));
       }
       for (let dow = 1; dow <= 7; dow++) {
-        expect(dimmedByCss(container, dowCell(container, dow))).toBe(isFocusDimmed(focus, { dow }, "dow"));
-      }
-    }
-  });
-
-  it("agrees with the reference semantics in the trend view's own trio, with the heat surface as the weekday chart", () => {
-    const { container } = renderWithProviders(
-      <MemoryRouter>
-        <TrendFocusProvider>
-          <div data-testid="daily">
-            <DailyChart days={DAYS} />
-          </div>
-          <HourlyHeatmap cells={CELLS} />
-          <HeatSurface hourly={CELLS} grid={grid()} worst={null} rangeDays={14} />
-        </TrendFocusProvider>
-      </MemoryRouter>,
-    );
-    const surfaceCell = (dow: number, hour: number) => container.querySelector(`.heat-surface__cell[data-dow='${dow}'][data-hour='${hour}']`)!;
-    const hovers: Array<[() => void, TrendFocus]> = [
-      [() => hoverDay(container, 0), { source: "daily", date: MON, dow: 1 }],
-      [() => fireEvent.mouseEnter(heatCell(container, TUE, 9)), { source: "hourly", hour: 9, dow: 2 }],
-      [() => fireEvent.mouseOver(surfaceCell(1, 8)), { source: "dow", dow: 1 }],
-    ];
-    for (const [hover, focus] of hovers) {
-      hover();
-      for (const [i, d] of DAYS.entries()) {
-        expect(dimmedByCss(container, dailyBar(container, i))).toBe(isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily"));
-      }
-      for (const c of CELLS) {
-        expect(dimmedByCss(container, heatCell(container, c.date, c.hour))).toBe(isFocusDimmed(focus, { date: c.date, hour: c.hour, dow: isoDow(c.date) }, "hourly"));
-      }
-      for (let dow = 1; dow <= 7; dow++) {
-        expect(dimmedByCss(container, surfaceCell(dow, 8))).toBe(isFocusDimmed(focus, { dow }, "dow"));
+        expect(dimmedByCss(container, surfaceCell(container, dow))).toBe(isFocusDimmed(focus, { dow }, "dow"));
       }
     }
   });
@@ -217,8 +181,9 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
   it("re-renders no chart for another chart's hover: only the provider's style element changes", () => {
     const { container } = renderLinked();
     // DailyChart and HourlyHeatmap hold hover state for their own tooltips,
-    // so the chart under the pointer renders once; BandGrid holds none. The
-    // two charts not under the pointer must not render at all.
+    // so the chart under the pointer renders once; the heat surface writes
+    // its hover onto the DOM and holds none. The two charts not under the
+    // pointer must not render at all.
     let before = { ...renders };
     hoverDay(container, 0);
     expect(rendersSince(before)).toEqual({ daily: 1, hourly: 0, dow: 0 });
@@ -226,7 +191,7 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     fireEvent.mouseEnter(heatCell(container, TUE, 9));
     expect(rendersSince(before)).toEqual({ daily: 0, hourly: 1, dow: 0 });
     before = { ...renders };
-    fireEvent.mouseEnter(dowCell(container, 3));
+    fireEvent.mouseOver(surfaceCell(container, 3));
     expect(rendersSince(before)).toEqual({ daily: 0, hourly: 0, dow: 0 });
   });
 
@@ -236,7 +201,7 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     expect((dailyBar(container, 0) as SVGElement).style.getPropertyValue("--mark-opacity")).toBe("0.7");
     expect(container.querySelector("[data-testid='daily-dot'][data-index='0']")!.classList).toContain("focus-dim-opacity");
     expect(heatCell(container, MON, 8).classList).toContain("focus-dim-fill");
-    expect(dowCell(container, 1).classList).toContain("focus-dim-filter");
+    expect(surfaceCell(container, 1).classList).toContain("focus-dim-opacity");
   });
 
   it("dims a severe outline together with its heat cell", () => {
@@ -259,12 +224,15 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     expect(dimmedByCss(container, outline)).toBe(true);
   });
 
-  it("leaves a grid rendered outside the provider inert", () => {
+  it("leaves a chart rendered outside the provider inert", () => {
     const { container } = renderWithProviders(
-      <BandGrid grid={grid()} bandLabel={(b) => b} dayLabel={(d) => `dow${d}`} colorFor={() => "var(--accent)"} onTip={() => {}} onLeave={() => {}} />,
+      <MemoryRouter>
+        <div data-testid="daily">
+          <DailyChart days={DAYS} />
+        </div>
+      </MemoryRouter>,
     );
-    fireEvent.mouseEnter(dowCell(container, 2));
+    hoverDay(container, 1);
     expect(container.querySelector(".trend-focus")).toBeNull();
-    expect(dowCell(container, 1).style.getPropertyValue("--cell-opacity")).toBe("1");
   });
 });

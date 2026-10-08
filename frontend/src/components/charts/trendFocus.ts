@@ -20,9 +20,9 @@ type SetTrendFocus = (focus: TrendFocus | null) => void;
  *  re-renders a chart that is not under the pointer. */
 export const TrendFocusCtx = createContext<SetTrendFocus>(() => {});
 
-/** Charts reused outside a `TrendFocusProvider` (the forecast tab mounts the
- *  same band grid) get an inert setter rather than having to know whether
- *  they are linked to anything. */
+/** Charts reused outside a `TrendFocusProvider` (an Ask answer and the
+ *  landing page mount the daily chart) get an inert setter rather than having
+ *  to know whether they are linked to anything. */
 export function useTrendFocus(): { setFocus: SetTrendFocus } {
   return { setFocus: useContext(TrendFocusCtx) };
 }
