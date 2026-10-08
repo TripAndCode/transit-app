@@ -18,11 +18,24 @@ describe("SVG text floor", () => {
   });
 
   it("fixed-height charts keep a 780px floor and labels that clear 12px at that scale", () => {
-    expect(src("styles/focusedAnalysis.css")).toMatch(/\.focus-chart\s*\{[^}]*min-width:\s*780px/);
+    const rule = src("styles/focusedAnalysis.css").match(/\.focus-chart\s*\{([^}]*)\}/)![1];
+    expect(rule).toMatch(/min-width:\s*780px/);
+    const boxHeight = Number(rule.match(/(?:^|;)\s*height:\s*(\d+)px/)![1]);
+    // The tallest viewBox any of them draws in sets the smallest scale.
+    const viewBoxHeight = Math.max(
+      ...["components/analysis/StopChart.tsx", "components/analysis/PeriodChart.tsx"].map((f) =>
+        Number(src(f).match(/viewBox="0 0 \d+ (\d+)"/)![1]),
+      ),
+    );
     for (const f of ["components/analysis/ChartAxis.tsx", "components/analysis/StopChart.tsx", "components/analysis/PeriodChart.tsx"]) {
       for (const m of src(f).matchAll(/fontSize=\{?"?(\d+)"?\}?/g)) {
-        expect(Number(m[1]) * (300 / 335), `${f}: ${m[0]}`).toBeGreaterThanOrEqual(12);
+        expect(Number(m[1]) * (boxHeight / viewBoxHeight), `${f}: ${m[0]}`).toBeGreaterThanOrEqual(12);
       }
     }
+  });
+
+  it("the landing page's stop chart keeps the same floor at every width", () => {
+    const css = src("pages/landing/ScrollNarrative.css").replace(/@media[^{]*\{(?:[^{}]*\{[^}]*\})*[^{}]*\}/g, "");
+    expect(css).toMatch(/\.landing-narrative-section__figure \.focus-chart\s*\{[^}]*min-width:\s*780px/);
   });
 });

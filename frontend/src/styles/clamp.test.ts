@@ -23,18 +23,24 @@ describe("two-line CJK clamp", () => {
     ["styles/overview.css", ".ov-pareto-label {"],
     ["styles/overview.css", ".ov-check-name {"],
     ["tabs/ask/investigation.css", ".investigation-steps button {"],
-  ])("%s %s clamps instead of truncating to one line", (file, selector) => {
+  ])("%s %s neither truncates to one line nor repeats the utility", (file, selector) => {
     const body = ruleBody(read(file), selector);
     expect(body).not.toMatch(/text-overflow:\s*ellipsis/);
-    expect(decl(body, "-webkit-line-clamp")).toBe("2");
+    expect(decl(body, "-webkit-line-clamp")).toBeNull();
   });
 
-  it.each(["components/RouteForecastSection.tsx", "components/ThreadSidebar.tsx"])(
+  it.each([
+    "components/RouteForecastSection.tsx",
+    "components/ThreadSidebar.tsx",
+    "components/ConcentrationBar.tsx",
+    "components/RoutesToCheckList.tsx",
+    "tabs/ask/InvestigationCanvas.tsx",
+  ])(
     "%s uses .clamp-2 rather than an inline ellipsis",
     (file) => {
       const src = read(file);
       expect(src).not.toMatch(/textOverflow:\s*"ellipsis"/);
-      expect(src).toMatch(/className="clamp-2"/);
+      expect(src).toMatch(/className="[^"]*\bclamp-2\b[^"]*"/);
     },
   );
 });

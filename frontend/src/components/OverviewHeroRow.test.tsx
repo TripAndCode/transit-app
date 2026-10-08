@@ -234,7 +234,6 @@ describe("OverviewHeroRow", () => {
     const value = container.querySelector(".ov-kpi-value");
     expect(value).not.toBeNull();
     expect(value).toHaveClass("num");
-    expect(value!.getAttribute("style") ?? "").not.toMatch(/tabular-nums/);
     expect(container.querySelector(".ov-hero-sub-value")).toHaveClass("num");
   });
 

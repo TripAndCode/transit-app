@@ -130,7 +130,7 @@ export function ConcentrationBar({
         const opacity = RANK_OPACITY[Math.min(idx, RANK_OPACITY.length - 1)];
         return (
           <div className="ov-pareto-row" key={r.route_code}>
-            <div className="ov-pareto-label">
+            <div className="ov-pareto-label clamp-2">
               {r.route_short_name
                 ? `${r.route_short_name} (${r.route_code})`
                 : r.route_code}
@@ -315,8 +315,7 @@ function LorenzCurve({
           </g>
         )}
       </svg>
-      {/* Axis labels in HTML, positioned in percent of the viewBox: SVG text
-          would scale with the chart's width and fall below the 12px floor. */}
+      {/* HTML axis labels (see .ov-chart-plot in overview.css). */}
       {[0, 50, 100].map((p) => (
         <span
           key={`xt-${p}`}

@@ -42,6 +42,9 @@
   padding: 20px;
   overflow-x: auto;
 }
+/* The stop chart keeps its drawn size at every width and scrolls sideways:
+   scaled to the figure, its labels shrink past reading. */
+.landing-narrative-section__figure .focus-chart { min-width: 780px; height: 300px; }
 
 .landing-narrative-section__hint {
   display: none;
@@ -50,11 +53,9 @@
   color: var(--text-tertiary);
 }
 
-/* A phone keeps each chart at its drawn size and scrolls it sideways:
-   scaled to the screen, the stop chart's labels shrink past reading. */
+/* A phone gets a tighter figure and a hint that the chart scrolls. */
 @media (max-width: 640px) {
   .landing-narrative-section__figure { padding: 12px; }
-  .landing-narrative-section__figure .focus-chart { min-width: 760px; }
   .landing-narrative-section__hint { display: block; }
 }
 

@@ -71,3 +71,9 @@ describe("overview.css living hero", () => {
     expect(decl(ruleBody(css, ".ov-hero-text {"), "position")).toBe("relative");
   });
 });
+
+describe("overview.css peak label", () => {
+  it("a flipped peak label moves left and stays centred on its callout, like an unflipped one", () => {
+    expect(decl(ruleBody(css, ".ov-peak-label--flip {"), "transform")).toBe("translate(-100%, -50%)");
+  });
+});

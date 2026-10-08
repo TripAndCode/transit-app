@@ -327,9 +327,7 @@ function ServiceSplitDailyChart({
           />
         )}
       </svg>
-      {/* Axis labels in HTML over the plot, positioned in percent of the
-          viewBox: SVG text would scale with the chart's width and fall
-          below the 12px floor on a narrow card. */}
+      {/* HTML axis labels (see .ov-chart-plot in overview.css). */}
       {yTicks.map((v, i) => (
         <span
           key={`yt-${i}`}

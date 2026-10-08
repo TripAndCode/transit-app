@@ -64,7 +64,7 @@ describe("AskTab layout", () => {
     const bar = container.querySelector(".ask-workspace-bar");
     expect(bar).not.toBeNull();
     expect(heading.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The bar no longer repeats the screen name beside the menu.
+    // The bar holds only the investigations menu; the screen name is the h1's.
     expect(bar!.textContent).not.toMatch(/^Ask/);
   });
 

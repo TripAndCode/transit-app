@@ -21,7 +21,7 @@ function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) return walk(full);
-    return /\.(css|tsx)$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [full] : [];
+    return /\.(css|tsx?)$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [full] : [];
   });
 }
 
@@ -42,7 +42,6 @@ function offendersIn(file: string): string[] {
       }
     }
   } else {
-    if (ALLOWED.has(rel)) return out;
     const tsx = readFileSync(file, "utf8");
     for (const m of tsx.matchAll(/\b((?:transition|animation)[A-Za-z]*)\s*:\s*(["'`])([^"'`]*)\2/g)) {
       if (LITERAL.test(m[3].replace(NOT_MOTION, "$1"))) out.push(`${rel}: ${m[1]}: ${m[3]}`);

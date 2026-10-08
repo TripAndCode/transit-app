@@ -76,6 +76,9 @@ function PeakHourChart({
   const peakIdx = peak_hour.peak_hour;
   const peakV = hourValues[peakIdx] ?? peak_hour.peak_avg_min;
   const peakBarX = PAD_LEFT + peakIdx * CELL_W;
+  // A late peak's callout and label go left, so the label stays on a narrow
+  // card instead of running past the chart's right edge.
+  const flip = peakIdx >= LATE_PEAK_HOUR;
   const peakBarY = toY(peakV);
 
   const avgY = toY(overallAvg);
@@ -187,17 +190,15 @@ function PeakHourChart({
           })}
 
           {overallAvg > 0 && (
-            <>
-              <line
-                x1={PAD_LEFT}
-                y1={avgY}
-                x2={W - PAD_RIGHT}
-                y2={avgY}
-                style={{ stroke: "var(--border-subtle)" }}
-                strokeWidth="1"
-                strokeDasharray="4 4"
-              />
-            </>
+            <line
+              x1={PAD_LEFT}
+              y1={avgY}
+              x2={W - PAD_RIGHT}
+              y2={avgY}
+              style={{ stroke: "var(--border-subtle)" }}
+              strokeWidth="1"
+              strokeDasharray="4 4"
+            />
           )}
 
           <g>
@@ -212,7 +213,7 @@ function PeakHourChart({
             <line
               x1={peakBarX + CELL_W / 2}
               y1={peakBarY - 12}
-              x2={peakBarX + CELL_W / 2 + 4}
+              x2={peakBarX + CELL_W / 2 + (flip ? -4 : 4)}
               y2={peakBarY - 12}
               style={{ stroke: "var(--trend-bad)" }}
               strokeWidth="1"
@@ -239,9 +240,7 @@ function PeakHourChart({
             />
           )}
         </svg>
-        {/* Labels in HTML, positioned in percent of the stretched svg: SVG text
-            here would be distorted by preserveAspectRatio="none" and scaled
-            below the 12px floor on a narrow card. */}
+        {/* HTML labels (see .ov-chart-plot in overview.css). */}
         {overallAvg > 0 && (
           <span
             className="ov-peak-label ov-peak-label--avg num"
@@ -250,13 +249,11 @@ function PeakHourChart({
             {t("overview.peak_hour.avg_label")}
           </span>
         )}
-        {/* A late peak's label goes left of its callout, so it stays on a
-            narrow card instead of running past the chart's right edge. */}
         <span
-          className={`ov-peak-label ov-peak-label--max num${peakIdx >= LATE_PEAK_HOUR ? " ov-peak-label--flip" : ""}`}
+          className={`ov-peak-label ov-peak-label--max num${flip ? " ov-peak-label--flip" : ""}`}
           style={{
             top: `${((peakBarY - 9) / H) * 100}%`,
-            left: `${((peakBarX + CELL_W / 2 + (peakIdx >= LATE_PEAK_HOUR ? -6 : 6)) / W) * 100}%`,
+            left: `${((peakBarX + CELL_W / 2 + (flip ? -6 : 6)) / W) * 100}%`,
           }}
         >
           {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}

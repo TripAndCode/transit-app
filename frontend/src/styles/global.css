@@ -236,8 +236,8 @@
   --font-display: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
   --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
                system-ui, sans-serif;
-  /* Figures in aligned columns (see .num). Condensed so a column of minutes
-     stays narrow; Japanese in the same run falls back to the body face. */
+  /* The numeral face (see .num). Condensed so a column of minutes stays
+     narrow; Japanese in the same run falls back to the body face. */
   --font-num: "Barlow Semi Condensed", "BIZ UDPGothic", system-ui, sans-serif;
   /* Identifiers that are read character by character — a user id, a route
      code, a hash, a clock time — where proportional digits and an ambiguous
@@ -529,7 +529,8 @@ table {
    outside a table — hero values, stat tiles, chart labels, counters — so a
    value that counts up or updates in place keeps its width instead of
    jittering. A table's numeric cells get tabular figures from
-   tableStyles' td({ align: "right" }) instead. */
+   tableStyles' td({ align: "right" }) instead, except ReportTable's delay
+   cells, which carry .num like the card headline they mirror. */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
