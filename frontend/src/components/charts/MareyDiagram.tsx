@@ -89,11 +89,10 @@ function tripSummary(trip: RouteTrip, t: (key: string) => string): string {
  *  they hear on each stop is the polite live readout below the chart, which
  *  sits outside the image subtree.
  *
- *  Below the phone breakpoint the diagram is opt-in. A 780-unit viewBox scaled
- *  into a phone-width column renders the axis labels at roughly half their
- *  intended size and closes the gaps between trips, so the table leads there
- *  and the chart is revealed on request inside a horizontal scroller that
- *  keeps it at a legible width.
+ *  The chart never draws narrower than its 780-unit viewBox, so its labels
+ *  keep their size; a narrower column scrolls it sideways. Below the phone
+ *  breakpoint, where that scroll would be most of the chart, the diagram is
+ *  opt-in: the table leads there and the chart is revealed on request.
  */
 export function MareyDiagram({
   trips,
