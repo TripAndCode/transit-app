@@ -90,6 +90,8 @@ const BOARD: AdminBoard = {
       params: { agency: "Toyama Bayline", days: 3 },
       text: "Toyama Bayline: aggregates 3 day(s) behind",
       href: "/admin/ops",
+      key: "boardwarn0000001",
+      acked: false,
     },
     {
       level: "info",
@@ -97,6 +99,8 @@ const BOARD: AdminBoard = {
       params: { count: 2 },
       text: "2 user(s) awaiting AI access approval",
       href: "/admin/users",
+      key: "boardinfo0000002",
+      acked: false,
     },
   ],
 };
@@ -175,8 +179,8 @@ describe("AdminBoardPage", () => {
       data: {
         ...BOARD,
         alerts: [
-          { level: "warn", code: "agencies_stale", params: { count: 5, days: 4 }, text: "", href: "/admin/ops" },
-          { level: "info", code: "agencies_never_analyzed", params: { count: 13 }, text: "", href: "/admin/agencies" },
+          { level: "warn", code: "agencies_stale", params: { count: 5, days: 4 }, text: "", href: "/admin/ops", key: "k1", acked: false },
+          { level: "info", code: "agencies_never_analyzed", params: { count: 13 }, text: "", href: "/admin/agencies", key: "k2", acked: false },
         ],
       },
     };
@@ -236,7 +240,7 @@ describe("AdminBoardPage", () => {
     mockQuery = {
       data: {
         ...BOARD,
-        alerts: [{ level: "warn", code: "invented_later", params: {}, text: "Something new happened", href: null }],
+        alerts: [{ level: "warn", code: "invented_later", params: {}, text: "Something new happened", href: null, key: "k3", acked: false }],
       },
       error: null,
       isPending: false,

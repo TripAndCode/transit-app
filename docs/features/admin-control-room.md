@@ -34,10 +34,12 @@ Alert center: every admin page's header carries a bell (`AlertCenter`) over
 the same board snapshot, with an unread count and a popover of its alerts
 grouped by level. On `/admin` it adds no poll of its own (the board page
 polls); elsewhere it polls the endpoint every minute. Acknowledging an alert
-is browser-only: a 7-day entry in localStorage (`transit.admin.ackedAlerts`,
-keyed by a hash of level, text and link), shared by the browser's tabs;
-other operators and devices do not see it. An alert whose figure changes
-(a lag that grows by a day, a count that moves) reads as a new alert.
+is shared by every admin on every device: `POST
+/api/admin/board/alerts/{key}/ack` stores it for 7 days in `admin_alert_acks`
+and audits it as `board_alert.ack`, and the board returns each alert's `key`
+(`api.admin_board.alert_key`, over its level, code, params and link) with
+whether it is `acked`. An alert whose figure changes (a lag that grows by a
+day, a count that moves) gets a new key and reads as a new alert.
 
 ## Agencies health + diagnostics drawer
 

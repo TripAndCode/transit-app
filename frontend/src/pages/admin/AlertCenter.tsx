@@ -1,11 +1,10 @@
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigationType } from "react-router-dom";
 import { Bell, X } from "lucide-react";
 import { OverlayBase } from "../../components/ui/OverlayBase";
 import { Z_INDEX } from "../../styles/zIndex";
-import { useAdminBoard, type BoardAlert } from "../../api/admin";
-import { ackAlert, ackedFromSnapshot, ackedSnapshot, hashAlertKey, subscribeAcked } from "./ackedAlerts";
+import { useAckBoardAlert, useAdminBoard, type BoardAlert } from "../../api/admin";
 import { alertText } from "./alertText";
 import "./alertCenter.css";
 
@@ -20,8 +19,8 @@ const BELL_POLL_MS = 60_000;
  * page. On the board page, whose own subscriber already polls, the bell adds
  * no timer; elsewhere it polls at `BELL_POLL_MS`.
  *
- * Acknowledging an alert silences it in this browser, in every tab of it
- * (`ackedAlerts.ts`).
+ * Acknowledging an alert silences it for every admin, on every device, for a
+ * week; the server stores it, and the board's poll carries it back.
  */
 export function AlertCenter() {
   const { t } = useTranslation();
@@ -42,13 +41,10 @@ export function AlertCenter() {
   const [anchor, setAnchor] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  // Expiry is read at the board's own fetch time, so an acknowledgement that
-  // lapses while the page stays open counts again on the next poll.
-  const acked = ackedFromSnapshot(useSyncExternalStore(subscribeAcked, ackedSnapshot, () => ""), board.dataUpdatedAt);
+  const ack = useAckBoardAlert();
 
-  const hashed = alerts.map((alert) => ({ alert, hash: hashAlertKey(alert.level, alert.text, alert.href) }));
-  const unread = hashed.filter(({ hash }) => !acked.has(hash));
-  const warnUnread = unread.some(({ alert }) => alert.level === "warn");
+  const unread = alerts.filter((alert) => !alert.acked);
+  const warnUnread = unread.some((alert) => alert.level === "warn");
 
   function close() {
     setOpen(false);
@@ -119,16 +115,17 @@ export function AlertCenter() {
           <p className="alert-center-empty">{t("admin.board.alerts_none")}</p>
         ) : (
           LEVELS.map((level) => {
-            const group = hashed.filter(({ alert }) => alert.level === level);
+            const group = alerts.filter((alert) => alert.level === level);
             if (group.length === 0) return null;
             return (
               <section key={level} className="alert-center-group">
                 <p className="alert-center-group-label">{t(`admin.alert_center.group.${level}`)}</p>
                 <ul className="alert-center-list">
-                  {group.map(({ alert, hash }) => {
-                    const isAcked = acked.has(hash);
+                  {group.map((alert) => {
+                    const sending = ack.isPending && ack.variables === alert.key;
+                    const failed = ack.isError && ack.variables === alert.key;
                     return (
-                      <li key={hash} className="alert-center-item" data-testid="alert-center-item" data-acked={isAcked}>
+                      <li key={alert.key} className="alert-center-item" data-testid="alert-center-item" data-acked={alert.acked}>
                         <span className="alert-center-item-text">{alertText(t, alert)}</span>
                         {alert.href && (
                           <Link to={alert.href} className="alert-center-link">
@@ -138,11 +135,12 @@ export function AlertCenter() {
                         <button
                           type="button"
                           className="alert-center-ack"
-                          disabled={isAcked}
-                          onClick={() => ackAlert(hash, Date.now())}
+                          disabled={alert.acked || sending}
+                          onClick={() => ack.mutate(alert.key)}
                         >
-                          {isAcked ? t("admin.alert_center.acked") : t("admin.alert_center.ack")}
+                          {alert.acked ? t("admin.alert_center.acked") : t("admin.alert_center.ack")}
                         </button>
+                        {failed && <p className="alert-center-ack-failed">{t("admin.alert_center.ack_failed")}</p>}
                       </li>
                     );
                   })}

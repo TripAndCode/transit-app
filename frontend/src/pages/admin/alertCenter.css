@@ -171,3 +171,10 @@
   color: var(--text-tertiary);
   border-color: transparent;
 }
+
+.alert-center-ack-failed {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
