@@ -109,6 +109,12 @@ describe("tweenFeatures", () => {
   const at = (stop_id: string, delay_min: number) => ({ stop_id, lon: 132.4585, lat: 34.397, delay_min });
   const props = (fc: ReturnType<typeof reliefFeatures>) => fc.features.map((f) => f.properties);
 
+  it("raises a newly reporting stop from the floor at the scale the reading is drawn at", () => {
+    const empty = reliefFeatures([]);
+    const scaled = reliefFeatures([at("NEW", 4)], 3);
+    expect(tweenFeatures(empty, scaled, 0).features[0].properties.h).toBeCloseTo(RELIEF_BASE_M * 3);
+  });
+
   it("runs each surviving stop's height and delay from the previous reading to the new one", () => {
     const prev = reliefFeatures([at("S1", 1)]);
     const next = reliefFeatures([at("S1", 3)]);

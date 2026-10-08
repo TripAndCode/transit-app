@@ -65,6 +65,15 @@ describe("useReliefLayer", () => {
     expect(heightOf(source(map).data)).toBe(reliefHeight(2));
   });
 
+  it("seeds a layer added after the style loads at the zoom it has by then", () => {
+    const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
+    mount(map, true, POINTS, 0);
+    map.setZoom(11);
+    map.fire("zoomend");
+    map.settleStyle();
+    expect(heightOf(source(map).data)).toBeCloseTo(reliefHeight(2) * reliefScale(11, map.getCenter().lat));
+  });
+
   it("stops re-sizing once the relief is off", () => {
     const map = liveMap();
     const view = mount(map, true, POINTS, 0);

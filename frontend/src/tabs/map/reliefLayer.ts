@@ -128,8 +128,10 @@ export function tweenFeatures(prev: ReliefCollection, next: ReliefCollection, t:
   return {
     type: "FeatureCollection",
     features: next.features.map((f) => {
-      const a = from.get(f.properties.stop_id) ?? { delay_min: 0, h: RELIEF_BASE_M };
       const b = f.properties;
+      // A stop new to the reading rises from the floor at the scale it is
+      // drawn at, the ground every other column of that reading stands on.
+      const a = from.get(b.stop_id) ?? { delay_min: 0, h: (RELIEF_BASE_M * b.h) / reliefHeight(b.delay_min) };
       return {
         ...f,
         properties: { stop_id: b.stop_id, delay_min: a.delay_min + (b.delay_min - a.delay_min) * t, h: a.h + (b.h - a.h) * t },
