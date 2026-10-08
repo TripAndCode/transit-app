@@ -16,19 +16,18 @@ function Probe() {
   return <div data-testid="location">{location.pathname + location.search}</div>;
 }
 
-function renderPicker(path: string) {
-  vi.spyOn(hooks, "useAgencies").mockReturnValue({
-    data: [agency(1, "Aomori City Bus"), agency(9, "Hiroshima Bus")],
-    isLoading: false,
-  } as never);
-  renderWithProviders(
+const TWO_AGENCIES = [agency(1, "Aomori City Bus"), agency(9, "Hiroshima Bus")];
+
+function renderPicker(path: string, { agencies = TWO_AGENCIES, isLoading = false, className = undefined as string | undefined } = {}) {
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: isLoading ? undefined : agencies, isLoading } as never);
+  return renderWithProviders(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route
           path="/agencies/:agencyId/*"
           element={
             <>
-              <AgencyPicker />
+              <AgencyPicker className={className} />
               <Probe />
             </>
           }
@@ -64,5 +63,16 @@ describe("AgencyPicker", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(trigger).toHaveFocus();
+  });
+
+  it.each([
+    ["several agencies", { agencies: TWO_AGENCIES }],
+    ["one agency", { agencies: [agency(9, "Hiroshima Bus")] }],
+    ["no agency", { agencies: [] }],
+    ["agencies still loading", { isLoading: true }],
+  ])("lets a className dress the picker with %s", (_, state) => {
+    const { container } = renderPicker("/agencies/9/pulse", { ...state, className: "ticket-agency" });
+    expect(container.querySelector(".ticket-agency")).not.toBeNull();
+    expect(container.querySelector(".ticket-agency button")?.getAttribute("style") ?? null).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
@@ -10,7 +10,6 @@ import {
   SquareDashed,
   ChevronLeft,
   ChevronRight,
-  MessageCircleQuestion,
   MoreHorizontal,
   Shield,
   X,
@@ -23,12 +22,14 @@ import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
-import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
+import { RailTooltip } from "./RailTooltip";
+import { SidebarLineMap } from "./SidebarLineMap";
+import { SidebarTicket } from "./SidebarTicket";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
@@ -67,27 +68,6 @@ function writeCollapsedPref(collapsed: boolean): void {
   } catch {
     /* ignore */
   }
-}
-
-/** Nav links only carry a tooltip while the rail is collapsed -- expanded,
- *  the label is already on screen and a bubble repeating it is noise. The
- *  same collapse also strips the visible text, so the link takes an
- *  `aria-label` there: the tooltip describes a control, it never names one. */
-function RailTooltip({
-  collapsed,
-  label,
-  children,
-}: {
-  collapsed: boolean;
-  label: string;
-  children: ReactElement;
-}) {
-  if (!collapsed) return children;
-  return (
-    <Tooltip label={label} placement="right">
-      {children}
-    </Tooltip>
-  );
 }
 
 /** The More sheet's vertical padding; its sticky header offsets by the
@@ -202,76 +182,39 @@ export function Sidebar() {
   // desktop rail (collapsedFlag reflects the persisted rail preference) and
   // the mobile "more" sheet (always rendered expanded; onNavigate closes the
   // sheet after a link is followed, mirroring ThreadSidebar's onSelect-
-  // closes-drawer UX). `inSheet` lists only the destinations the bottom tab
-  // bar leaves out: the rest already live in the bar, and repeating them
-  // here would put the same links twice on screen at once. Ask and the
-  // command palette live in the top bar, not here.
+  // closes-drawer UX). The rail draws the destinations and Ask as a line
+  // map. `inSheet` lists only the destinations the bottom tab bar leaves
+  // out, and no Ask, which has a tab of its own there: repeating the bar's
+  // links here would put the same links twice on screen at once.
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
-    const navItems = inSheet ? MORE_SHEET_ITEMS : ITEMS;
     return (
       <>
         {/* On the phone sheet the account row leads: at the end it sat below
             the sheet's first screen. */}
         {inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
         {!collapsedFlag && (
-          <div style={{ padding: "0 22px 16px" }}>
-            <AgencyPicker />
+          <div style={{ padding: inSheet ? "0 22px 16px" : "0 14px 14px" }}>
+            {inSheet ? <AgencyPicker /> : <SidebarTicket />}
           </div>
         )}
-        {navItems.length > 0 && agencyId && (
+        {agencyId && !inSheet && <SidebarLineMap collapsed={collapsedFlag} agencyId={agencyId} screenQuery={screenQuery} />}
+        {agencyId && inSheet && (
           <nav aria-label={t("nav.destinations_label")} style={{ position: "relative", display: "flex", flexDirection: "column" }}>
             <NavIndicator axis="y" watch={pathname} />
-            {navItems.map((item) => (
-              <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
-                <PendingNavLink
-                  to={screenHref(item.to)}
-                  aria-label={collapsedFlag ? t(item.labelKey) : undefined}
-                  onMouseEnter={() => prefetchRouteChunk(item.to)}
-                  onFocus={() => prefetchRouteChunk(item.to)}
-                  onClick={() => onNavigate?.()}
-                  style={railLinkStyle(collapsedFlag)}
-                >
-                  <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
-                  {!collapsedFlag && (
-                    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span>{t(item.labelKey)}</span>
-                    </span>
-                  )}
-                </PendingNavLink>
-              </RailTooltip>
+            {MORE_SHEET_ITEMS.map((item) => (
+              <PendingNavLink
+                key={item.to}
+                to={screenHref(item.to)}
+                onMouseEnter={() => prefetchRouteChunk(item.to)}
+                onFocus={() => prefetchRouteChunk(item.to)}
+                onClick={() => onNavigate?.()}
+                style={railLinkStyle(false)}
+              >
+                <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0 }} />
+                <span>{t(item.labelKey)}</span>
+              </PendingNavLink>
             ))}
           </nav>
-        )}
-        {/* Ask sits apart from the destinations: the top bar's field
-            searches but does not take a question. Skipped on the mobile
-            sheet: Ask has its own bottom tab there. */}
-        {agencyId && !inSheet && (
-          <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
-            <PendingNavLink
-              to={screenHref("ask")}
-              aria-label={collapsedFlag ? t("nav.ask") : undefined}
-              onMouseEnter={() => prefetchRouteChunk("ask")}
-              onFocus={() => prefetchRouteChunk("ask")}
-              onClick={() => onNavigate?.()}
-              style={({ isActive }) => ({
-                margin: "8px 12px 0",
-                padding: collapsedFlag ? "10px 0" : "10px 12px",
-                borderRadius: 7,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: collapsedFlag ? "center" : "flex-start",
-                gap: 9,
-                color: isActive ? "var(--accent-strong)" : "var(--text-secondary)",
-                fontSize: "var(--text-sm)",
-                border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-subtle)"}`,
-                textDecoration: "none",
-                transition: "color var(--transition), border-color var(--transition)",
-              })}
-            >
-              <MessageCircleQuestion size={16} strokeWidth={1.5} aria-hidden="true" />
-              {!collapsedFlag && t("nav.ask")}
-            </PendingNavLink>
-          </RailTooltip>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
           {!collapsedFlag && (
@@ -602,10 +545,10 @@ export function Sidebar() {
       <aside
         className="app-sidebar-desktop"
         style={{
-          // 230, not 210 — the brand block's title ("遅延ダッシュボード") needs
-          // ~135px alongside the 32px icon + gap; 210 wrapped it to two lines.
-          // Collapsed rail is 64: 32px icon + 16px padding each side.
-          width: collapsed ? 64 : 230,
+          // The line map's badge column is centred 38px in at either width
+          // (sidebarLineMap.css), so the collapsed rail is twice that. 248
+          // fits a station's name and its chord hint beside the badge.
+          width: collapsed ? 76 : 248,
           background: "var(--bg-surface)",
           borderRight: "1px solid var(--border-soft)",
           padding: "16px 0",

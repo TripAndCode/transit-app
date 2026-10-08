@@ -16,6 +16,47 @@ export const WHY_REPORT_TYPES = ["dwell_run"] as const satisfies readonly Report
 export const COMPARE_REPORT_TYPES = ["compare_ranking"] as const satisfies readonly ReportTypeId[];
 export const SAVED_REPORT_TYPES = ["council_summary", "delay_certificate"] as const satisfies readonly ReportTypeId[];
 
+/** The report a screen hosting `reportTypes` opens: the requested one when
+ *  the screen hosts it, else `defaultReport` when it does, else the first,
+ *  so a stale link from another screen never opens a report this screen
+ *  doesn't host. */
+export function pickReport(
+  requested: string | null,
+  reportTypes: readonly string[],
+  defaultReport?: string | null,
+): string | null {
+  const fallback = defaultReport != null && reportTypes.includes(defaultReport) ? defaultReport : (reportTypes[0] ?? null);
+  return requested != null && reportTypes.includes(requested) ? requested : fallback;
+}
+
+/** Compare's two boards, picked by `by`. */
+export const COMPARE_MODES = [
+  { mode: "periods", labelKey: "compare.mode_periods" },
+  { mode: "agencies", labelKey: "compare.mode_agencies" },
+] as const;
+export type CompareMode = (typeof COMPARE_MODES)[number]["mode"];
+
+/** `by=agencies` is the agencies board; every other `by` compares periods. */
+export function compareMode(by: string | null): CompareMode {
+  return by === "agencies" ? "agencies" : "periods";
+}
+
+/** Reports' three views, and the `doc` each opens with. */
+export const REPORTS_VIEWS = [
+  { view: "summary", labelKey: "saved.view_summary", extra: {} },
+  { view: "saved", labelKey: "saved.view_saved", extra: { doc: "saved" } },
+  { view: "reports", labelKey: "saved.view_reports", extra: { doc: "council" } },
+] as const satisfies readonly { view: string; labelKey: string; extra: Record<string, string> }[];
+export type ReportsView = (typeof REPORTS_VIEWS)[number]["view"];
+
+/** An export document's `report` or `doc` opens the documents view,
+ *  `doc=saved` the saved analyses, and anything else the period summary. */
+export function reportsView(doc: string | null, report: string | null): ReportsView {
+  if ((SAVED_REPORT_TYPES as readonly string[]).includes(report ?? "")) return "reports";
+  if (doc === "council" || doc === "certificate") return "reports";
+  return doc === "saved" ? "saved" : "summary";
+}
+
 /** Where each report type lives. Reports' own documents are picked by
  *  `doc`; every other screen opens the type by `report`. */
 const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<string, string> }> = {

@@ -43,7 +43,7 @@ function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx)
   return translationT(t, "scope.routes_count", { count: routes.length });
 }
 
-function daysLabel(dow: Scope["dow"], t: LabelT): string {
+export function daysLabel(dow: Scope["dow"], t: LabelT): string {
   if (dow === "all") return translationT(t, "scope.days_all");
   if (dow === "weekday") return translationT(t, "scope.days_weekday");
   if (dow === "weekend") return translationT(t, "scope.days_weekend");
@@ -54,19 +54,20 @@ function hoursLabel([from, to]: [number, number], t: LabelT): string {
   return from === to ? translationT(t, "scope.hour_single", { h: from }) : translationT(t, "scope.hours", { from, to });
 }
 
+/** The period in words, with years only when it crosses one. */
+export function periodLabel(scope: Pick<Scope, "from" | "to">, t: LabelT): string {
+  const crossesYear = scope.from.slice(0, 4) !== scope.to.slice(0, 4);
+  return translationT(t, "scope.period", { from: dateLabel(scope.from, crossesYear), to: dateLabel(scope.to, crossesYear) });
+}
+
 export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   const { t, agencyName } = ctx;
   const tr = (key: string, opts?: Record<string, unknown>) => translationT(t, key, opts);
-  const crossesYear = scope.from.slice(0, 4) !== scope.to.slice(0, 4);
   const routes = routesLabel(scope.routes, ctx);
   const tokens: ScopeToken[] = [
     { key: "agency", label: agencyName, field: null },
     { key: "routes", label: routes, field: "routes" },
-    {
-      key: "period",
-      label: tr("scope.period", { from: dateLabel(scope.from, crossesYear), to: dateLabel(scope.to, crossesYear) }),
-      field: "from",
-    },
+    { key: "period", label: periodLabel(scope, t), field: "from" },
     { key: "days", label: daysLabel(scope.dow, t), field: "dow" },
     scope.hour
       ? { key: "time", label: hoursLabel(scope.hour, t), field: "hour" }

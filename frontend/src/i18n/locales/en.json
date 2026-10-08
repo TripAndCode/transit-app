@@ -22,7 +22,11 @@
     "compare": "Compare",
     "reports": "Reports",
     "destinations_label": "Destinations",
-    "other": "Other"
+    "other": "Other",
+    "transfer": "Transfer",
+    "ticket_agency": "Agency",
+    "ticket_period": "Period",
+    "stops_label": "{{screen}} views"
   },
   "compare": {
     "mode_periods": "Weekdays and weekends",

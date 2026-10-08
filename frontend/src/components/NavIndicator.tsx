@@ -13,15 +13,19 @@ import "./NavIndicator.css";
  *
  *  `watch` is whatever decides the current entry (the pathname, for route
  *  links), so the highlight moves when it changes; a list whose current
- *  entry is not a route link names it with the `current` selector. */
+ *  entry is not a route link names it with the `current` selector, and a
+ *  list holding links the highlight never sits on narrows `pending` to the
+ *  ones it does. */
 export function NavIndicator({
   axis,
   current = "a.active",
+  pending = 'a[aria-busy="true"]',
   watch,
   className,
 }: {
   axis: "x" | "y";
   current?: string;
+  pending?: string;
   watch?: unknown;
   className?: string;
 }) {
@@ -37,8 +41,7 @@ export function NavIndicator({
     // and a place after a resize, it takes at once.
     function place(glide: boolean) {
       if (!indicator || !box) return;
-      const target =
-        box.querySelector<HTMLElement>('a[aria-busy="true"]') ?? box.querySelector<HTMLElement>(current);
+      const target = box.querySelector<HTMLElement>(pending) ?? box.querySelector<HTMLElement>(current);
       if (!target) {
         indicator.style.opacity = "0";
         delete indicator.dataset.glide;
@@ -66,7 +69,7 @@ export function NavIndicator({
     const observer = new ResizeObserver(() => place(false));
     observer.observe(box);
     return () => observer.disconnect();
-  }, [axis, current, watch, pendingTo]);
+  }, [axis, current, pending, watch, pendingTo]);
 
   return (
     <span

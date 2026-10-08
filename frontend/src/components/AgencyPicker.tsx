@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
@@ -19,7 +19,20 @@ function filterAgencies(agencies: Agency[] | undefined, filter: string): Agency[
   return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
 }
 
-export function AgencyPicker() {
+const FIELD_TRIGGER_STYLE: CSSProperties = {
+  background: "var(--bg-surface)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: "var(--radius)",
+  padding: "6px 12px",
+  minWidth: 0,
+  width: "100%",
+  textAlign: "left",
+};
+
+/** A picker given a `className` is dressed by it in every state, and its
+ *  trigger then carries none of the field's own chrome. */
+export function AgencyPicker({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
   const navigate = useNavigate();
@@ -42,16 +55,24 @@ export function AgencyPicker() {
   const filtered = filterAgencies(agencies, filter);
 
   if (isLoading) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("common.loading_agencies")}
+      </span>
+    );
   }
 
   if (!agencies || agencies.length === 0) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("header.agency_picker_empty")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("header.agency_picker_empty")}
+      </span>
+    );
   }
 
   // Single agency: static label, no dropdown
   if (agencies.length === 1) {
-    return <strong>{agencies[0].agency_name}</strong>;
+    return <strong className={className}>{agencies[0].agency_name}</strong>;
   }
 
   function selectAgency(id: number) {
@@ -61,21 +82,12 @@ export function AgencyPicker() {
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className={className} style={{ position: "relative" }}>
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        style={{
-          background: "var(--bg-surface)",
-          color: "var(--text-primary)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
-          padding: "6px 12px",
-          minWidth: 0,
-          width: "100%",
-          textAlign: "left",
-        }}
+        style={className ? undefined : FIELD_TRIGGER_STYLE}
       >
         {current?.agency_name ?? t("header.agency_picker_placeholder")}
         <span style={{ float: "right", color: "var(--text-tertiary)" }}>▾</span>
