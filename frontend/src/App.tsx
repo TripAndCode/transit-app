@@ -1,4 +1,4 @@
-import { Suspense, ViewTransition } from "react";
+import { Suspense, useRef, ViewTransition } from "react";
 import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { AgencyDataEndProvider } from "./api/AgencyDataEndProvider";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
@@ -20,6 +20,7 @@ import { useDocumentLocale } from "./i18n/useDocumentLocale";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "./api/hooks";
 import { pageTitleKey } from "./routes/pageTitle";
+import { useRoutedPaneScroll } from "./hooks/useRoutedPaneScroll";
 
 export default function App() {
   const { t } = useTranslation();
@@ -34,13 +35,15 @@ export default function App() {
   const titleKey = pageTitleKey(pathname);
   const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyIdNum)?.agency_name;
   useDocumentLocale([titleKey ? t(titleKey) : null, agencyName]);
+  const mainRef = useRef<HTMLElement>(null);
+  useRoutedPaneScroll(mainRef);
   return (
     <AgencyDataEndProvider>
       <NavPendingProvider>
         <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
           <CommandPalette />
           <Sidebar />
-          <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+          <main ref={mainRef} className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
             {agencyIdNum != null && <TopBar />}
             {/* Scoped to the content area, not the whole app shell — these are
                 notices about the agency data being viewed, not app-wide chrome,
