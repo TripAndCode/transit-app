@@ -590,6 +590,28 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
   });
 
+  it("says when the compare list stops short of every compared route, with no longer list to offer", () => {
+    const rows = [["3", 3.4, 2.7, 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7]];
+    setup(
+      "/agencies/1/analysis/rider?report=compare_ranking",
+      { ...reportResponse("compare_ranking"), rows, rows_total: 812 } as ReportResponse,
+      ["compare_ranking"],
+    );
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(2);
+    expect(screen.getByText("Showing 2 of 812")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  it("states no count when the compare list holds every compared route", () => {
+    const rows = [["3", 3.4, 2.7, 0.7, 0.7]];
+    setup(
+      "/agencies/1/analysis/rider?report=compare_ranking",
+      { ...reportResponse("compare_ranking"), rows, rows_total: 1 } as ReportResponse,
+      ["compare_ranking"],
+    );
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
+  });
+
   it("asks for the API's longest compare list, since the bars re-rank it by period rather than by gap", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
     expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500 });

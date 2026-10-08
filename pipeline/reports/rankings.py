@@ -628,13 +628,14 @@ async def compute_compare_ranking(
     agency_id: int,
     ctx: RangeCtx,
     conn,
-    limit: int = 100,
+    limit: int | None = 100,
     ch=None,
 ) -> list[tuple]:
     """Per-route weekday-vs-weekend delay difference, sorted by absolute delta.
 
     Drops the user's ``service`` filter (same reason as compute_dow_ranking)
-    but preserves ``routes`` so route-restricted comparisons work.
+    but preserves ``routes`` so route-restricted comparisons work. ``limit=None``
+    returns every compared route, for a caller that reports the total.
     """
     if ctx.time_band != "all":
         if ch is None:
@@ -750,7 +751,7 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
     }
 
 
-async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -> list[tuple]:
+async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int | None) -> list[tuple]:
     """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
     stats = await _route_wd_we_avg_ch(agency_id, ctx, ch)
 
