@@ -21,7 +21,8 @@ export function routedPage(matches: readonly UIMatch[]): string {
  *  page the reader has already started on. */
 const RESTORE_WINDOW_MS = 3000;
 
-/** Positions kept, newest first. A browser's back/forward list holds on the
+/** Positions kept, in the order they were last filed, so the first is the
+ *  oldest and is the one dropped. A browser's back/forward list holds on the
  *  order of fifty entries, so an older position can never be stepped back to. */
 export const MAX_POSITIONS = 100;
 
