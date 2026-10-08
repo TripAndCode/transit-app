@@ -9,12 +9,11 @@ import { describe, expect, it } from "vitest";
 // reduced-motion idiom are not motion and stay allowed.
 const root = path.resolve(process.cwd(), "src");
 
-/** `file:selector-or-line` entries owned by another change still in flight. */
+/** `file:selector` literals that are deliberate, each with its reason. */
 const ALLOWED = new Set([
-  // Its height transition goes away with the hover-height rule it serves.
-  "styles/overview.css:.ov-pareto-fill",
-  // The Spinner component moves its rotation onto a token in its own change.
-  "components/Spinner.tsx",
+  // The short crossfade kept under reduced motion: the tokens are zeroed
+  // there, and the blanket rule does not reach view-transition pseudos.
+  "styles/viewTransitions.css:::view-transition-group(.page-nav)",
 ]);
 
 function walk(dir: string): string[] {

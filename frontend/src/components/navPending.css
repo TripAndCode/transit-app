@@ -21,7 +21,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .nav-progress::after {
-    animation: nav-progress-slide 1.2s var(--ease-out) infinite;
+    animation: nav-progress-slide var(--dur-4) var(--ease-out) infinite;
   }
 }
 
