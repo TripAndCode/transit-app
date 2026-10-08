@@ -40,9 +40,12 @@ export function compilerErrors(code, filename) {
   return errors;
 }
 
-function sourceFiles(root) {
-  const listed = execFileSync("git", ["ls-files", "src/**/*.ts", "src/**/*.tsx"], { cwd: root, encoding: "utf8" });
-  return listed.split("\n").filter((f) => f && !/\.test\.tsx?$|\.d\.ts$/.test(f));
+/** Every tracked non-test .ts/.tsx file under src/, filtered here rather than
+ *  by a git pathspec: `src/**` in a pathspec skips the files directly in src/,
+ *  the app's entry and root component among them. */
+export function sourceFiles(root) {
+  const listed = execFileSync("git", ["ls-files", "--", "src"], { cwd: root, encoding: "utf8" });
+  return listed.split("\n").filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$|\.d\.ts$/.test(f));
 }
 
 function main() {

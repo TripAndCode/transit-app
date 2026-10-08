@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compilerErrors } from "../../frontend/scripts/check-react-compiler.mjs";
+import { fileURLToPath } from "node:url";
+import { compilerErrors, sourceFiles } from "../../frontend/scripts/check-react-compiler.mjs";
+
+const FRONTEND = fileURLToPath(new URL("../../frontend", import.meta.url));
 
 const reasons = (code) => compilerErrors(code, "src/Fixture.tsx").map((e) => e.reason);
 
@@ -44,4 +47,12 @@ test("reports where the skipped code is", () => {
     "  async function onClick() {\n    try { await save(); } finally { setBusy(false); }\n  }\n" +
     "  return <button disabled={busy} onClick={onClick} />;\n}\n";
   assert.equal(compilerErrors(code, "src/Fixture.tsx")[0].line, 5);
+});
+
+test("scans the files directly under src as well as nested ones, and no tests", () => {
+  const files = sourceFiles(FRONTEND);
+  assert.ok(files.includes("src/App.tsx"));
+  assert.ok(files.includes("src/main.tsx"));
+  assert.ok(files.includes("src/components/ExportMenu.tsx"));
+  assert.ok(!files.some((f) => /\.test\.tsx?$|\.d\.ts$/.test(f)));
 });
