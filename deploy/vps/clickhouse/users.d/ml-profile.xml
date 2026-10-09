@@ -1,0 +1,10 @@
+<!-- One query may use most of the server cap; past these thresholds GROUP BY and ORDER BY spill to disk. -->
+<clickhouse>
+    <profiles>
+        <default>
+            <max_memory_usage>1000000000</max_memory_usage>
+            <max_bytes_before_external_group_by>400000000</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>400000000</max_bytes_before_external_sort>
+        </default>
+    </profiles>
+</clickhouse>
