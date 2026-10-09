@@ -17,8 +17,10 @@ empty examples.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -264,6 +266,61 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
     return mapping
 
 
+# rag_chunks rows written by intent-cache promotion
+# (pipeline.query.intent_promotion); their tool/args live in ask_intent_cache.
+_CACHE_CHUNK_PREFIX = "cache_"
+
+
+async def _resolve_cache_chunks(conn, agency_id: int, chunk_ids: list[str]) -> dict[str, tuple[str, dict]]:
+    """``chunk_id → (tool, args)`` for the promoted intent-cache chunks among
+    *chunk_ids*. A row that was never promoted, or is gone, resolves to
+    nothing, like a golden id no longer in golden_set.jsonl."""
+    sigs = [cid.removeprefix(_CACHE_CHUNK_PREFIX) for cid in chunk_ids if cid.startswith(_CACHE_CHUNK_PREFIX)]
+    if not sigs:
+        return {}
+    rows = await conn.fetch(
+        "SELECT signature_hash, tool, args FROM ask_intent_cache "
+        "WHERE agency_id = $1 AND signature_hash = ANY($2::text[]) AND promoted_at IS NOT NULL",
+        agency_id,
+        sigs,
+    )
+    return {
+        _CACHE_CHUNK_PREFIX + r["signature_hash"]: (
+            r["tool"],
+            json.loads(r["args"]) if isinstance(r["args"], str) else dict(r["args"]),
+        )
+        for r in rows
+    }
+
+
+# In these questions the entities a stored arg names (route codes "22171",
+# aliases "A1", counts and thresholds "TOP5"/"10分") are ASCII letters and
+# digits, after NFKC folds full-width forms.
+_ENTITY_TOKEN = re.compile(r"[0-9a-z]+")
+
+
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).lower()
+
+
+def _args_carry_over(question: str, matched: str, args: dict) -> bool:
+    """Whether the *matched* question's stored *args* also answer *question*.
+
+    Stage 2 replays them verbatim, and they name the matched question's own
+    entities: "22171の運行情報" stores route 22171, which a near-identical
+    "22172の運行情報" must not inherit. So the entity tokens must agree, and
+    so must any arg value the matched question spells out (a stop named in
+    kanji).
+    """
+    if not args:
+        return True
+    q, m = _fold(question), _fold(matched)
+    if set(_ENTITY_TOKEN.findall(q)) != set(_ENTITY_TOKEN.findall(m)):
+        return False
+    spelled_out = [v for v in (_fold(a) for a in args.values() if isinstance(a, str) and a) if v in m]
+    return all(v in q for v in spelled_out)
+
+
 def _get_embedder():
     """Indirection so tests can monkeypatch."""
     from pipeline.query.embeddings import get_embedder
@@ -271,12 +328,12 @@ def _get_embedder():
     return get_embedder()
 
 
-def _enrich(raw, golden):
-    """Join raw :class:`Match` rows to their golden_set tool/args."""
+def _enrich(raw, resolved):
+    """Join raw :class:`Match` rows to their resolved tool/args."""
     enriched = []
     for m in raw:
-        if m.chunk_id in golden:
-            tool, args = golden[m.chunk_id]
+        if m.chunk_id in resolved:
+            tool, args = resolved[m.chunk_id]
             enriched.append(replace(m, tool=tool, args=dict(args)))
     return enriched
 
@@ -319,10 +376,22 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
         _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
         return None, []
 
+    golden = _load_golden()
+    try:
+        resolved = {m.chunk_id: golden[m.chunk_id] for m in matches if m.chunk_id in golden}
+        resolved.update(await _resolve_cache_chunks(conn, agency_id, [m.chunk_id for m in matches]))
+    except Exception as exc:
+        _log.warning("Stage 2 cache resolve failed: %s — falling through to LLM", exc.__class__.__name__)
+        return None, []
+    # A row with no tool/args behind it can neither dispatch nor teach the
+    # LLM anything, so it is not a candidate at all.
+    stale = [m.chunk_id for m in matches if m.chunk_id not in resolved]
+    if stale:
+        _log.warning("rag_chunks rows with no tool/args (%s) — skipped", ", ".join(stale))
+    matches = [m for m in matches if m.chunk_id in resolved]
     if not matches:
         return None, []
 
-    golden = _load_golden()
     top = matches[0]
     within_threshold = top.distance <= _EMBED_DISPATCH_THRESHOLD
     # The margin guard only matters under genuine TOOL ambiguity — when the
@@ -331,15 +400,10 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
     # "<route>の遅延" route_stats chunks) must not be blocked by a tiny gap.
     ambiguous = False
     if within_threshold and len(matches) >= 2 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
-        top_tool = golden.get(top.chunk_id, (None, None))[0]
-        second_tool = golden.get(matches[1].chunk_id, (None, None))[0]
-        ambiguous = top_tool != second_tool
-    dispatch_ok = within_threshold and not ambiguous
-    if dispatch_ok:
-        if top.chunk_id not in golden:
-            _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
-        else:
-            tool, args = golden[top.chunk_id]
+        ambiguous = resolved[top.chunk_id][0] != resolved[matches[1].chunk_id][0]
+    if within_threshold and not ambiguous:
+        tool, args = resolved[top.chunk_id]
+        if _args_carry_over(question, top.content, args):
             decision = RouterDecision(
                 stage="embedding",
                 tool=tool,
@@ -350,7 +414,7 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
             return decision, []
 
     # Fall-through: serve top-k enriched examples for the LLM few-shot.
-    return None, _enrich(matches[:k], golden)
+    return None, _enrich(matches[:k], resolved)
 
 
 async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:

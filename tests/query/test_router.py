@@ -1,4 +1,5 @@
 import json as _json
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -316,20 +317,147 @@ async def test_margin_guard_ignores_same_tool_runnerup(monkeypatch, tmp_path):
     monkeypatch.setattr(_router, "_get_embedder", lambda: _E())
 
     async def near_same(conn, agency_id, qvec, k):
-        return [Match("a", "x", "", {}, 0.05), Match("b", "y", "", {}, 0.055)]
+        return [Match("a", "1の遅延", "", {}, 0.05), Match("b", "1の遅延状況", "", {}, 0.055)]
 
     monkeypatch.setattr("pipeline.query.rag_index.nearest", near_same)
-    dec, _ex = await _router.route_or_examples("ある質問", None, 1)
+    dec, _ex = await _router.route_or_examples("1の遅延は？", None, 1)
     assert dec is not None and dec.tool == "route_stats"  # same tool → dispatch despite 0.005 margin
 
     async def near_diff(conn, agency_id, qvec, k):
-        return [Match("a", "x", "", {}, 0.05), Match("c", "z", "", {}, 0.055)]
+        return [Match("a", "1の遅延", "", {}, 0.05), Match("c", "傾向", "", {}, 0.055)]
 
     monkeypatch.setattr("pipeline.query.rag_index.nearest", near_diff)
-    dec2, _ex2 = await _router.route_or_examples("ある質問", None, 1)
+    dec2, _ex2 = await _router.route_or_examples("1の遅延は？", None, 1)
     assert dec2 is None  # different tools within margin → ambiguous → fall through
 
     _router.set_golden_set_path(None)
+
+
+class _AnyEmbedder:
+    available = True
+
+    def embed(self, *a, **k):
+        return [0.0] * 384
+
+
+@pytest.fixture
+def stage2(monkeypatch, tmp_path):
+    """Stage 2 over a given golden set and a stubbed nearest(): returns a
+    setter taking the golden entries and the (chunk_id, content, distance)
+    rows nearest() should return."""
+    from pipeline.query import router as _router
+    from pipeline.query.rag_index import Match
+
+    monkeypatch.setattr(_router, "_get_embedder", lambda: _AnyEmbedder())
+
+    def setup(golden, rows):
+        p = tmp_path / "g.jsonl"
+        p.write_text("\n".join(_json.dumps(g) for g in golden))
+        _router.set_golden_set_path(p)
+
+        async def near(conn, agency_id, qvec, k):
+            return [Match(cid, content, "", {}, dist) for cid, content, dist in rows]
+
+        monkeypatch.setattr("pipeline.query.rag_index.nearest", near)
+
+    yield setup
+    _router.set_golden_set_path(None)
+
+
+def _entry(cid, question, tool, args):
+    return {"id": cid, "question": question, "expected_tool": tool, "expected_args": args}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "matched, args, question, dispatched",
+    [
+        ("22171の運行情報を教えて", {"route": "22171"}, "22171の運行情報を見せて", True),
+        ("22171の運行情報を教えて", {"route": "22171"}, "２２１７１の運行情報を教えて", True),
+        ("22171の運行情報を教えて", {"route": "22171"}, "22172の運行情報を教えて", False),
+        ("22171の運行情報を教えて", {"route": "22171"}, "22171と22172の運行情報", False),
+        ("A1の遅延を教えて", {"route": "1021"}, "A2の遅延を教えて", False),
+        ("5分以内の定時率を出して", {"threshold_min": 5}, "15分以内の定時率を出して", False),
+        ("中央大橋の遅延", {"stop": "中央大橋"}, "県庁前の遅延", False),
+        ("やばい系統教えて", {"metric": "avg_delay"}, "やばい系統を教えて", True),
+    ],
+)
+async def test_embedding_dispatch_replays_args_only_for_the_same_entities(stage2, matched, args, question, dispatched):
+    """Stage 2 replays the matched question's args verbatim, and those name
+    its own route, alias, threshold or stop: a near-identical question about
+    another one must reach the LLM, with the match as a few-shot example."""
+    from pipeline.query import router as _router
+
+    stage2([_entry("g", matched, "route_stats", args)], [("g", matched, 0.03)])
+    dec, examples = await _router.route_or_examples(question, None, 1)
+    if dispatched:
+        assert dec is not None and (dec.tool, dec.args) == ("route_stats", args)
+    else:
+        assert dec is None
+        assert [(e.chunk_id, e.args) for e in examples] == [("g", args)]
+
+
+@pytest_asyncio.fixture
+async def promoted_cache(apply_schema):
+    """An agency with one promoted ask_intent_cache row and one that was
+    never promoted."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        agency_id = await conn.fetchval(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"
+        )
+        now = datetime.now(timezone.utc)
+        await conn.executemany(
+            "INSERT INTO ask_intent_cache "
+            "(signature_hash, tool, args, confidence, last_question, agency_id, promoted_at) "
+            "VALUES ($1, 'route_stats', $2::jsonb, 0.9, $3, $4, $5)",
+            [
+                ("00000000000000aa", '{"route": "22171"}', "22171の遅延を教えて", agency_id, now),
+                ("00000000000000bb", '{"route": "16071"}', "16071の遅延を教えて", agency_id, None),
+            ],
+        )
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_a_promoted_cache_chunk_dispatches_its_own_tool_and_args(stage2, promoted_cache):
+    """Promotion writes `cache_<signature_hash>` rag_chunks rows, whose
+    tool/args live in ask_intent_cache, not golden_set.jsonl."""
+    from pipeline.query import router as _router
+
+    pool, agency_id = promoted_cache
+    golden = [_entry("g", "22171の遅延状況は？", "route_stats", {"route": "22171"})]
+    stage2(golden, [("cache_00000000000000aa", "22171の遅延を教えて", 0.0), ("g", "22171の遅延状況は？", 0.01)])
+    async with pool.acquire() as conn:
+        dec, _ = await _router.route_or_examples("22171の遅延を教えて", conn, agency_id)
+    assert dec is not None
+    assert (dec.tool, dec.args, dec.matched_pattern) == ("route_stats", {"route": "22171"}, "cache_00000000000000aa")
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_chunk_neither_dispatches_nor_blocks_a_golden_match(stage2, promoted_cache):
+    """A chunk with no tool/args behind it (a cache row never promoted, or
+    gone) is skipped: it is not a runner-up that makes a golden match look
+    ambiguous, and it takes no few-shot slot."""
+    from pipeline.query import router as _router
+
+    pool, agency_id = promoted_cache
+    golden = [
+        _entry("g", "22171の遅延状況は？", "route_stats", {"route": "22171"}),
+        _entry("t", "直近の傾向", "time_series", {}),
+    ]
+    stage2(golden, [("g", "22171の遅延状況は？", 0.01), ("cache_00000000000000bb", "16071の遅延を教えて", 0.015)])
+    async with pool.acquire() as conn:
+        dec, _ = await _router.route_or_examples("22171の遅延状況は", conn, agency_id)
+        assert dec is not None and dec.matched_pattern == "g"
+
+        stage2(golden, [("cache_00000000000000bb", "16071の遅延を教えて", 0.2), ("t", "直近の傾向", 0.3)])
+        dec, examples = await _router.route_or_examples("全然違う質問", conn, agency_id)
+    assert dec is None
+    assert [e.chunk_id for e in examples] == ["t"]
 
 
 @pytest.mark.parametrize(
