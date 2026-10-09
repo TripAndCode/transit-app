@@ -163,30 +163,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
-        id: python
+      - uses: ./.github/actions/setup-backend
         with:
           python-version: "3.14"
-
-      - name: Install Poetry
-        run: pip install poetry==2.5.1
-
-      - name: Restore the Poetry venv
-        if: runner.environment != 'self-hosted'
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pypoetry/virtualenvs
-          key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
-
-      - name: Install dependencies
-        run: poetry install
-
-      - name: Remove this checkout's venvs for other Python versions
-        run: |
-          active="$(poetry env info --path)"
-          active="${active##*/}"
-          test -n "$active"
-          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
 
       - name: Lint and format check
         run: |
@@ -230,41 +209,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # setup-python first: this self-hosted runner has no system `pip`, so
-      # the Poetry install below depends on the interpreter this step puts on
-      # PATH. That rules out `cache: poetry`, which needs Poetry to already be
-      # installed when setup-python runs -- the two requirements are mutually
-      # exclusive here, and a working gate matters more than the cache.
-      - uses: actions/setup-python@v7
-        id: python
+      - uses: ./.github/actions/setup-backend
         with:
           python-version: "3.14"
-
-      - name: Install Poetry
-        run: pip install poetry==2.5.1
-
-      # A hosted machine starts with no venv, and building one installs
-      # torch; the persistent runner keeps its own between runs.
-      - name: Restore the Poetry venv
-        if: runner.environment != 'self-hosted'
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pypoetry/virtualenvs
-          key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
-
-      - name: Install dependencies
-        run: poetry install
-
-      # This persistent runner keeps every venv Poetry makes for the checkout,
-      # one per Python minor version, and Poetry never removes one when the
-      # pinned version moves on. Keep only the venv this job just installed;
-      # an empty answer stops the step rather than matching every venv.
-      - name: Remove this checkout's venvs for other Python versions
-        run: |
-          active="$(poetry env info --path)"
-          active="${active##*/}"
-          test -n "$active"
-          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
 
       - name: Start Postgres from db/Dockerfile
         id: postgres
@@ -336,11 +283,23 @@ jobs:
           CI_SHARD_INDEX: ${{ matrix.shard }}
           CI_SHARD_COUNT: ${{ strategy.job-total }}
           # Coverage instruments every line the suite executes and nothing
-          # gates on the number it prints, so a pull request pays for a
-          # report no check reads. `main` still produces one, which is where
-          # the figure is worth having: it describes what landed.
-          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=term' || '' }}
+          # gates on the number, so a pull request pays for a report no check
+          # reads. On `main`, where the figure describes what landed, each
+          # shard keeps its data for the `coverage` job to combine: a shard
+          # alone measures only its share of the suite.
+          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=' || '' }}
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
         run: poetry run pytest $COV_ARGS
+
+      - name: Keep this shard's coverage data
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
 
       # A persistent self-hosted runner keeps its Docker state between runs,
       # so the container and its volume have to go even when this job fails
@@ -351,3 +310,27 @@ jobs:
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
 
+  # One coverage figure for what landed on `main`, combined from every shard.
+  # Same runner as the shards: the data records the absolute paths of the
+  # checkout it measured, and the report reads the source at those paths.
+  coverage:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-backend
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-*
+          merge-multiple: true
+
+      - name: Report the combined coverage
+        run: |
+          poetry run coverage combine .coverage.shard-*
+          poetry run coverage report

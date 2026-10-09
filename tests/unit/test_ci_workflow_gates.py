@@ -19,7 +19,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
-BACKEND_JOBS = ("backend-static", "test")
+BACKEND_JOBS = ("backend-static", "test", "coverage")
+SETUP_BACKEND = ROOT / ".github" / "actions" / "setup-backend" / "action.yml"
 BACKEND_RUNNER = "${{ fromJSON(vars.CI_BACKEND_RUNNER || '\"ubuntu-latest\"') }}"
 
 
@@ -116,9 +117,18 @@ def test_no_github_hosted_only_guard_remains() -> None:
 
 
 @pytest.mark.parametrize("job_name", BACKEND_JOBS)
-def test_poetry_is_installed_after_setup_python(job_name: str) -> None:
+def test_every_backend_job_sets_up_through_the_shared_action(job_name: str) -> None:
+    """One definition of the toolchain, so the ordering below holds for every
+    backend job rather than for whichever copy was last edited."""
+    steps = _workflow_yaml()["jobs"][job_name]["steps"]
+    assert any(step.get("uses") == "./.github/actions/setup-backend" for step in steps), (
+        f"{job_name} no longer sets up through .github/actions/setup-backend"
+    )
+
+
+def test_poetry_is_installed_after_setup_python() -> None:
     """The VPS runner supplies no system `pip`, so Poetry can only be
-    installed once setup-python has put an interpreter on PATH, and either
+    installed once setup-python has put an interpreter on PATH, and every
     backend job can be pointed at the VPS.
 
     This forecloses `cache: poetry`, which requires the opposite order —
@@ -126,8 +136,7 @@ def test_poetry_is_installed_after_setup_python(job_name: str) -> None:
     cache fails the job outright with `pip: command not found`, so the order
     is pinned here rather than left to look like an arbitrary preference.
     """
-    workflow = _workflow_yaml()
-    steps = workflow["jobs"][job_name]["steps"]
+    steps = yaml.safe_load(SETUP_BACKEND.read_text())["runs"]["steps"]
     setup_python = next(s for s in steps if s.get("uses", "").startswith("actions/setup-python"))
     setup_index = steps.index(setup_python)
     poetry_index = next(i for i, s in enumerate(steps) if "install poetry" in s.get("name", "").lower())
@@ -338,12 +347,32 @@ def test_every_shard_the_matrix_starts_keeps_its_own_share() -> None:
     assert run["env"]["CI_SHARD_COUNT"] == "${{ strategy.job-total }}"
 
 
-def test_static_checks_still_run_over_the_whole_tree() -> None:
-    """Moving ruff and mypy out of the sharded job must not drop them."""
-    steps = _workflow_yaml()["jobs"]["backend-static"]["steps"]
-    commands = " ".join(step.get("run", "") for step in steps)
+def test_static_checks_run_once_over_the_whole_tree() -> None:
+    """ruff and mypy run in `backend-static` and nowhere in the sharded job,
+    where they would run once per shard over the same tree."""
+    jobs = _workflow_yaml()["jobs"]
+    static = " ".join(step.get("run", "") for step in jobs["backend-static"]["steps"])
     for check in ("ruff check .", "ruff format --check .", "mypy"):
-        assert check in commands, f"backend-static no longer runs `{check}`"
+        assert check in static, f"backend-static no longer runs `{check}`"
+    sharded = " ".join(step.get("run", "") for step in jobs["test"]["steps"])
+    for tool in ("ruff", "mypy"):
+        assert tool not in sharded, f"the sharded test job runs {tool} again, once per shard"
+
+
+def test_main_reports_coverage_combined_from_every_shard() -> None:
+    """A shard measures only its share of the suite, so its own figure
+    understates what the suite covers. Each shard keeps its data under a name
+    of its own, and one job after all of them combines it."""
+    jobs = _workflow_yaml()["jobs"]
+    run = next(s for s in jobs["test"]["steps"] if s.get("name") == "Run tests")
+    assert run["env"]["COVERAGE_FILE"] == ".coverage.shard-${{ matrix.shard }}"
+    upload = next(s for s in jobs["test"]["steps"] if s.get("uses", "").startswith("actions/upload-artifact"))
+    assert upload["with"]["path"] == ".coverage.shard-${{ matrix.shard }}"
+    assert upload["with"]["include-hidden-files"] is True, "a dot-file is skipped by the upload without this"
+    coverage = jobs["coverage"]
+    assert coverage["needs"] == "test"
+    assert coverage["if"] == upload["if"] == "github.event_name == 'push'"
+    assert "coverage combine .coverage.shard-*" in " ".join(s.get("run", "") for s in coverage["steps"])
 
 
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
