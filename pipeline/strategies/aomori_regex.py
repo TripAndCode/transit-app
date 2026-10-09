@@ -11,7 +11,7 @@ dropped (preserving today's Aomori ingest behaviour).
 import logging
 import re
 
-from pipeline.strategies._pb import _dec, _fields, decode_feed_timestamp
+from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ def parse_feed(
     except Exception:
         return rows
     feed_timestamp = decode_feed_timestamp(pb_bytes)
+    no_seq = 0
     for ent_bytes in top.get(2, []):
         ent = _fields(ent_bytes)
         if 3 not in ent:
@@ -109,11 +110,14 @@ def parse_feed(
         route = parsed.get("route")
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
-            stop_seq = stu.get(1, [None])[0]
+            stop_seq = _uint16(stu.get(1, [None])[0])
+            if stop_seq is None:
+                no_seq += 1
+                continue
             dep_delay = None
             if 3 in stu:
                 dep = _fields(stu[3][0])
-                dep_delay = dep.get(1, [None])[0]
+                dep_delay = _int32(dep.get(1, [None])[0])
             rows.append(
                 (
                     file_name,
@@ -131,4 +135,6 @@ def parse_feed(
                     feed_timestamp,
                 )
             )
+    if no_seq:
+        _log.warning("aomori: dropped %d stop_time_updates with no usable stop_sequence", no_seq)
     return rows
