@@ -1,3 +1,5 @@
+import { serializeSvgForImage } from "../../components/exportPng";
+
 /**
  * Rasterizes an inline SVG chart to a PNG and triggers a browser download.
  * No new dependency: serialize → data-URL `<img>` → `<canvas>` → `toBlob`,
@@ -10,11 +12,12 @@ export function exportSvgAsPng(svg: SVGSVGElement, filename: string): void {
   const width = rect.width || Number(svg.getAttribute("width")) || 800;
   const height = rect.height || Number(svg.getAttribute("height")) || 400;
 
-  const xml = new XMLSerializer().serializeToString(svg);
+  const xml = serializeSvgForImage(svg);
   const svgBlob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
   const svgUrl = URL.createObjectURL(svgBlob);
 
   const img = new Image();
+  img.onerror = () => URL.revokeObjectURL(svgUrl);
   img.onload = () => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
