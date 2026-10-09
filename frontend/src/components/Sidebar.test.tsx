@@ -256,6 +256,42 @@ describe("Sidebar", () => {
     });
   });
 
+  describe("station figures", () => {
+    beforeEach(() => localStorage.clear());
+    afterEach(() => vi.restoreAllMocks());
+
+    function mockToday(routes: { route_code: string; avg_delay_sec: number; trips_observed: number; bucket: string }[]) {
+      vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: { routes } } as never);
+    }
+
+    it("describes Pulse with today's mean and Live with the routes running later than usual, keeping their names", () => {
+      mockToday([
+        { route_code: "50", avg_delay_sec: 180, trips_observed: 10, bucket: "anomaly" },
+        { route_code: "24", avg_delay_sec: 60, trips_observed: 30, bucket: "normal" },
+        { route_code: "3", avg_delay_sec: 240, trips_observed: 10, bucket: "anomaly" },
+      ]);
+      renderSidebar("/agencies/8/time");
+      expect(screen.getByRole("link", { name: "Pulse" })).toHaveAccessibleDescription("Mean 2.0 min");
+      expect(screen.getByRole("link", { name: "Live" })).toHaveAccessibleDescription("2 unusually late");
+      expect(screen.getByRole("link", { name: "Routes" })).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("shows no figure without a summary, or for no route running late", () => {
+      mockToday([{ route_code: "24", avg_delay_sec: 60, trips_observed: 0, bucket: "normal" }]);
+      renderSidebar("/agencies/8/time");
+      expect(screen.getByRole("link", { name: "Pulse" })).not.toHaveAttribute("aria-describedby");
+      expect(screen.getByRole("link", { name: "Live" })).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("drops the figures from the collapsed rail", async () => {
+      const user = userEvent.setup();
+      mockToday([{ route_code: "50", avg_delay_sec: 180, trips_observed: 10, bucket: "anomaly" }]);
+      renderSidebar("/agencies/8/time");
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.getByRole("link", { name: "Live" })).not.toHaveAttribute("aria-describedby");
+    });
+  });
+
   describe("my routes", () => {
     beforeEach(() => localStorage.clear());
     afterEach(() => {

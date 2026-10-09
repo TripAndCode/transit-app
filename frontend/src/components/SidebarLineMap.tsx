@@ -1,8 +1,10 @@
-import { Fragment } from "react";
+import { Fragment, useId } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useTodayRouteSummary } from "../api/hooks";
 import { withQuery } from "../api/screenScope";
-import { destHref } from "../routes/destinations";
+import { todayMeanMinutes, unusualRouteCount } from "../api/todayRouteFigures";
+import { destHref, type Destination } from "../routes/destinations";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { NavIndicator } from "./NavIndicator";
 import { PendingNavLink } from "./navPending";
@@ -49,6 +51,16 @@ export function SidebarLineMap({
   const endsInStops = place?.dest === SIDEBAR_NAV_ITEMS[SIDEBAR_NAV_ITEMS.length - 1].to && openStops != null;
   const askLabel = t("nav.ask");
   const askChord = chordFor("ask");
+  const figureId = useId();
+  // Today's figures share the top bar's query for the summary, so the two
+  // never fetch it twice.
+  const { data: today } = useTodayRouteSummary(Number(agencyId), { autoRefresh: false });
+  const meanMinutes = todayMeanMinutes(today?.routes);
+  const unusual = unusualRouteCount(today?.routes);
+  const figures: Partial<Record<Destination, string>> = {
+    pulse: meanMinutes == null ? undefined : t("nav.station_figure_mean", { delay: t("common.minutes_value", { value: meanMinutes.toFixed(1) }) }),
+    live: unusual > 0 ? t("nav.station_figure_unusual", { n: unusual }) : undefined,
+  };
 
   return (
     <div className="rail-line-map" data-collapsed={collapsed || undefined}>
@@ -63,13 +75,15 @@ export function SidebarLineMap({
         {SIDEBAR_NAV_ITEMS.map((item, i) => {
           const label = t(item.labelKey);
           const stops = place?.dest === item.to ? openStops : undefined;
+          const figure = collapsed ? undefined : figures[item.to];
           return (
             <Fragment key={item.to}>
               <RailTooltip collapsed={collapsed} label={label}>
                 <PendingNavLink
                   to={withQuery(`/agencies/${agencyId}/${item.to}`, screenQuery(agencyId, item.to))}
                   className="rail-station"
-                  aria-label={collapsed ? label : undefined}
+                  aria-label={collapsed || figure ? label : undefined}
+                  aria-describedby={figure ? `${figureId}-${item.to}` : undefined}
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
                   onFocus={() => prefetchRouteChunk(item.to)}
                 >
@@ -78,6 +92,13 @@ export function SidebarLineMap({
                     <span className="rail-badge-no num">{String(i + 1).padStart(2, "0")}</span>
                   </span>
                   {!collapsed && <span className="rail-name">{label}</span>}
+                  {/* The link keeps the screen's name through aria-label and
+                      reads the figure as its description. */}
+                  {figure && (
+                    <span id={`${figureId}-${item.to}`} className="rail-figure num">
+                      {figure}
+                    </span>
+                  )}
                   {!collapsed && <Chord to={item.to} />}
                 </PendingNavLink>
               </RailTooltip>

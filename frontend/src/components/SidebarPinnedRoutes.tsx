@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import { usePinnedRoutes } from "../api/pinnedRoutes";
-import type { RouteSummary } from "../api/types";
+import { todayMeanMinutes } from "../api/todayRouteFigures";
 import { routeHeadingText, routeLabel } from "../api/useRouteNames";
 import { routeHref } from "../routes/destinations";
 import { delayRampVar } from "../styles/tokens";
@@ -9,23 +9,10 @@ import { PendingNavLink } from "./navPending";
 import { RailTooltip } from "./RailTooltip";
 import "./sidebarLineMap.css";
 
-/** Today's mean delay for a route, in minutes, weighted by trips across the
- *  service types it runs as; null when it has run no observed trip today. */
-function todayMeanMinutes(routes: readonly RouteSummary[] | undefined, code: string): number | null {
-  let trips = 0;
-  let weighted = 0;
-  for (const row of routes ?? []) {
-    if (row.route_code !== code || row.trips_observed <= 0) continue;
-    trips += row.trips_observed;
-    weighted += row.avg_delay_sec * row.trips_observed;
-  }
-  return trips > 0 ? weighted / trips / 60 : null;
-}
-
 /** The routes pinned for the agency, each a link to its page with the Routes
- *  screen's remembered scope, beside today's mean delay. That figure comes
- *  from the summary the top bar already fetches; the names come from the
- *  agency's routes list, cached alongside the route pickers'. */
+ *  screen's remembered scope, beside today's mean delay. That figure shares
+ *  the top bar's query for the summary, and the names the route pickers'
+ *  query for the agency's routes list, so neither is fetched twice. */
 export function SidebarPinnedRoutes({
   collapsed,
   agencyId,

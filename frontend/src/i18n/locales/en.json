@@ -31,7 +31,9 @@
     "pinned_routes_empty": "Pin a route on its page to open it from here.",
     "pinned_route_label": "{{route}}, today's mean {{delay}}",
     "pin_route": "Pin",
-    "pin_route_full": "Up to {{max}} pinned routes"
+    "pin_route_full": "Up to {{max}} pinned routes",
+    "station_figure_mean": "Mean {{delay}}",
+    "station_figure_unusual": "{{n}} unusually late"
   },
   "compare": {
     "mode_periods": "Weekdays and weekends",

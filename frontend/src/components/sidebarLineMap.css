@@ -60,6 +60,13 @@
 .rail-station:hover::before {
   background: var(--bg-page);
 }
+/* Outranks the global `a:hover` underline: the rail's links are rows,
+   not inline text. */
+.rail-station:hover,
+.rail-stop:hover,
+.rail-pin:hover {
+  text-decoration: none;
+}
 .rail-station.active {
   color: var(--accent-strong);
 }
@@ -114,6 +121,19 @@
   font-size: var(--text-base);
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* Today's figure for a station, which gives way to the chord hint. */
+.rail-figure {
+  position: relative;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.rail-station:hover .rail-figure,
+.rail-station:focus-visible .rail-figure {
+  display: none;
 }
 
 /* The `g`-chord that jumps here, shown where a pointer or focus lands. */
