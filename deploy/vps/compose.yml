@@ -1,0 +1,56 @@
+# The ML replica: a copy of production history rebuilt from R2, never the dev
+# stores. Listeners stay on loopback; reach them over SSH.
+name: transit-ml
+
+services:
+  postgres:
+    build: ../../db
+    image: transit-ml-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: transit
+      POSTGRES_PASSWORD: ${ML_PG_PASSWORD:?set ML_PG_PASSWORD in /etc/transit-ml/env}
+      POSTGRES_DB: transit
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "work_mem=16MB", "-c", "max_connections=20"]
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - ml_pg:/var/lib/postgresql/data
+    mem_limit: 640m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transit"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: transit
+      CLICKHOUSE_PASSWORD: ${ML_CH_PASSWORD:?set ML_CH_PASSWORD in /etc/transit-ml/env}
+      CLICKHOUSE_DB: transit
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    ports:
+      - "127.0.0.1:18123:8123"
+    # Single files rather than whole directories: the image's entrypoint
+    # writes its own users.d/config.d files at start.
+    volumes:
+      - ml_ch:/var/lib/clickhouse
+      - ./clickhouse/config.d/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
+      - ./clickhouse/config.d/system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro
+      - ./clickhouse/users.d/ml-profile.xml:/etc/clickhouse-server/users.d/ml-profile.xml:ro
+    mem_limit: 1536m
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ml_pg: {}
+  ml_ch: {}
