@@ -10,9 +10,9 @@ import { RailTooltip } from "./RailTooltip";
 import "./sidebarLineMap.css";
 
 /** The routes pinned for the agency, each a link to its page with the Routes
- *  screen's remembered scope, beside today's mean delay. That figure comes
- *  from the summary the top bar already fetches; the names come from the
- *  agency's routes list, cached alongside the route pickers'. */
+ *  screen's remembered scope, beside today's mean delay. That figure shares
+ *  the top bar's query for the summary, and the names the route pickers'
+ *  query for the agency's routes list, so neither is fetched twice. */
 export function SidebarPinnedRoutes({
   collapsed,
   agencyId,

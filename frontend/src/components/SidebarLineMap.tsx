@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { withQuery } from "../api/screenScope";
 import { todayMeanMinutes, unusualRouteCount } from "../api/todayRouteFigures";
-import { destHref } from "../routes/destinations";
+import { destHref, type Destination } from "../routes/destinations";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { NavIndicator } from "./NavIndicator";
 import { PendingNavLink } from "./navPending";
@@ -52,12 +52,12 @@ export function SidebarLineMap({
   const askLabel = t("nav.ask");
   const askChord = chordFor("ask");
   const figureId = useId();
-  // Today's figures come from the summary the top bar already fetches, so
-  // the stations cost no request of their own.
+  // Today's figures share the top bar's query for the summary, so the two
+  // never fetch it twice.
   const { data: today } = useTodayRouteSummary(Number(agencyId), { autoRefresh: false });
   const meanMinutes = todayMeanMinutes(today?.routes);
   const unusual = unusualRouteCount(today?.routes);
-  const figures: Partial<Record<string, string>> = {
+  const figures: Partial<Record<Destination, string>> = {
     pulse: meanMinutes == null ? undefined : t("nav.station_figure_mean", { delay: t("common.minutes_value", { value: meanMinutes.toFixed(1) }) }),
     live: unusual > 0 ? t("nav.station_figure_unusual", { n: unusual }) : undefined,
   };
