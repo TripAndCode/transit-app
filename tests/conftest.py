@@ -84,6 +84,44 @@ def _redirect_to_test_db() -> None:
 
 _redirect_to_test_db()
 
+# The throwaway ClickHouse every fixture seeds and asserts on.
+_CH_TEST = {
+    "host": "localhost",
+    "port": os.environ.get("CLICKHOUSE_TEST_PORT", "8124"),
+    "username": "transit",
+    "password": "transit",
+    "database": "transit_test",
+}
+
+
+def _pin_clickhouse_to_test_instance() -> None:
+    """Point every client the code under test builds from ``CLICKHOUSE_*``
+    (``pipeline.clickhouse.ch_conn_kwargs``) at ``_CH_TEST``.
+
+    Code under test builds its own client: a CLI command run in-process, a
+    router, a spawned app server. With an inherited dev block in the
+    environment that client would reach the real, read-only dev store while
+    the fixtures seed and assert on the throwaway one, so a command that
+    writes (``restamp_archive --apply``'s copy and EXCHANGE TABLES) would
+    rewrite dev data before its test failed. ClickHouse has no
+    ``_test``-suffix convention to redirect by, as ``_redirect_to_test_db``
+    does for Postgres, so the values are set outright. A test that needs
+    other values sets them with ``monkeypatch``.
+    """
+    os.environ.update(
+        {
+            "CLICKHOUSE_HOST": _CH_TEST["host"],
+            "CLICKHOUSE_PORT": _CH_TEST["port"],
+            "CLICKHOUSE_USER": _CH_TEST["username"],
+            "CLICKHOUSE_PASSWORD": _CH_TEST["password"],
+            "CLICKHOUSE_DATABASE": _CH_TEST["database"],
+            "CLICKHOUSE_SECURE": "false",
+        }
+    )
+
+
+_pin_clickhouse_to_test_instance()
+
 # Origin that ASGITransport's default `base_url="http://test"` emits when tests
 # set it. csrf_guard's ALLOW_TEST_ORIGIN path trusts this exact value when
 # ALLOW_TEST_ORIGIN=1 (set by `_redirect_to_test_db` above). Use this constant
@@ -227,13 +265,7 @@ def agency_id(pg_conn):
 
 
 def _ch_test_client():
-    return clickhouse_connect.get_client(
-        host="localhost",
-        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
-        username="transit",
-        password="transit",
-        database="transit_test",
-    )
+    return clickhouse_connect.get_client(**{**_CH_TEST, "port": int(_CH_TEST["port"])})
 
 
 @pytest.fixture(scope="session")
