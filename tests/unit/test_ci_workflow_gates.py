@@ -375,6 +375,43 @@ def test_main_reports_coverage_combined_from_every_shard() -> None:
     assert "coverage combine .coverage.shard-*" in " ".join(s.get("run", "") for s in coverage["steps"])
 
 
+def _names_self_hosted(runs_on: object) -> bool:
+    """Whether a job's `runs-on` spells a self-hosted label anywhere, an
+    expression included. A maintainer's variable that may resolve to one
+    spells no label, so it passes."""
+    labels = runs_on if isinstance(runs_on, list) else [runs_on]
+    return any("self-hosted" in str(label) for label in labels)
+
+
+@pytest.mark.parametrize(
+    ("runs_on", "named"),
+    [
+        (["self-hosted", "vps"], True),
+        ("self-hosted", True),
+        (["ubuntu-latest", "self-hosted"], True),
+        ("${{ 'self-hosted' }}", True),
+        ("ubuntu-latest", False),
+        ("${{ fromJSON(vars.CI_BACKEND_RUNNER || '\"ubuntu-latest\"') }}", False),
+    ],
+)
+def test_a_self_hosted_label_is_told_from_the_variable_that_may_resolve_to_one(runs_on: object, named: bool) -> None:
+    assert _names_self_hosted(runs_on) is named
+
+
+def test_no_workflow_names_a_self_hosted_runner_outright() -> None:
+    """No runner is registered for this public repository: a self-hosted
+    runner there can be handed code from pull requests outside it. The one
+    way back is `vars.CI_BACKEND_RUNNER`, set by a maintainer after
+    registering one, so no workflow may name a self-hosted label itself."""
+    offenders = []
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+        for job_name, job in doc["jobs"].items():
+            if _names_self_hosted(job.get("runs-on", "")):
+                offenders.append(f"{workflow.name} / {job_name}: {job['runs-on']}")
+    assert not offenders, "jobs pinned to a self-hosted runner: " + "; ".join(offenders)
+
+
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
     """Both directions are failures.
 
