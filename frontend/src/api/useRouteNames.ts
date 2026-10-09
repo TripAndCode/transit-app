@@ -9,14 +9,18 @@ import { routeDisplayName, routeHeading } from "./routeDisplayName";
  *  for the name's fallback order. */ // i18n-ignore: JSDoc example
 export function routeLabel(route: Route, t: TFunction): string {
   const name = routeDisplayName(route);
+  const heading = routeHeadingText(route, t);
+  return heading ? t("common.route_label", { name, heading }) : name;
+}
+
+/** Where a route goes ("for 青森駅"), or null when its headsigns say
+ *  nothing usable. */ // i18n-ignore: JSDoc example
+export function routeHeadingText(route: Route, t: TFunction): string | null {
   const heading = routeHeading(route);
-  if (!heading) return name;
-  return t("common.route_label", {
-    name,
-    heading: heading.from
-      ? t("common.route_heading_from_to", { from: heading.from, to: heading.to })
-      : t("common.route_heading_to", { to: heading.to }),
-  });
+  if (!heading) return null;
+  return heading.from
+    ? t("common.route_heading_from_to", { from: heading.from, to: heading.to })
+    : t("common.route_heading_to", { to: heading.to });
 }
 
 /** Build a route_code → routeLabel lookup for the agency, so variants of one

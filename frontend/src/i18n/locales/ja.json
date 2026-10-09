@@ -26,7 +26,12 @@
     "transfer": "乗換",
     "ticket_agency": "事業者",
     "ticket_period": "期間",
-    "stops_label": "{{screen}}の切り替え"
+    "stops_label": "{{screen}}の切り替え",
+    "pinned_routes": "マイ系統",
+    "pinned_routes_empty": "系統のページでピン留めすると、ここからすぐ開けます。",
+    "pinned_route_label": "{{route}}、今日の平均 {{delay}}",
+    "pin_route": "ピン留め",
+    "pin_route_full": "ピン留めは{{max}}系統まで"
   },
   "compare": {
     "mode_periods": "平日と土日祝",

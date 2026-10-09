@@ -11,6 +11,8 @@ import { clearLastAgency, readLastAgency, writeLastAgency } from "../api/lastAge
 import * as auth from "../api/auth";
 import * as config from "../api/config";
 import { rememberScreenScope } from "../api/screenScope";
+import * as hooks from "../api/hooks";
+import { togglePinnedRoute } from "../api/pinnedRoutes";
 
 const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
 
@@ -251,6 +253,53 @@ describe("Sidebar", () => {
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       expect(aside.style.width).toBe("76px");
       expect(aside.style.transition).not.toMatch(/width/);
+    });
+  });
+
+  describe("my routes", () => {
+    beforeEach(() => localStorage.clear());
+    afterEach(() => {
+      localStorage.clear();
+      vi.restoreAllMocks();
+    });
+
+    it("invites a pin while the list is empty", () => {
+      renderSidebar("/agencies/8/live");
+      const mine = screen.getByRole("navigation", { name: "My routes" });
+      expect(within(mine).getByText("Pin a route on its page to open it from here.")).toBeTruthy();
+    });
+
+    it("opens a pinned route's page with the Routes screen's filters, beside today's trip-weighted mean", () => {
+      togglePinnedRoute(8, "50");
+      rememberScreenScope("8", "routes", "from=2026-06-01&to=2026-06-07");
+      vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+        data: {
+          routes: [
+            { route_code: "50", avg_delay_sec: 120, trips_observed: 10 },
+            { route_code: "50", avg_delay_sec: 240, trips_observed: 30 },
+            { route_code: "24", avg_delay_sec: 600, trips_observed: 5 },
+          ],
+        },
+      } as never);
+      renderSidebar("/agencies/8/live");
+      const mine = screen.getByRole("navigation", { name: "My routes" });
+      expect(within(mine).getByRole("link", { name: "Route 50, today's mean 3.5 min" })).toHaveAttribute(
+        "href",
+        "/agencies/8/routes/50?from=2026-06-01&to=2026-06-07",
+      );
+    });
+
+    it("names a pinned route alone when it has run no trip today", () => {
+      togglePinnedRoute(8, "50");
+      renderSidebar("/agencies/8/live");
+      expect(within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "Route 50" })).toBeTruthy();
+    });
+
+    it("leaves the collapsed rail without the list while it is empty", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/8/live");
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.queryByRole("navigation", { name: "My routes" })).toBeNull();
     });
   });
 
