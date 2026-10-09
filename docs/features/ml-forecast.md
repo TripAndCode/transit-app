@@ -36,7 +36,7 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 - The replica keeps every day it syncs, and nothing expires it. ClickHouse stores `updates` compressed at a few bytes per row, so a year of every agency comes to the order of ten gigabytes, well inside the VPS disk.
 - Postgres grows with each timetable version the collector archived.
-- Nothing else accumulates. Downloads are deleted after each sync action, ClickHouse's own logs expire after a few days, and each report replaces the last.
+- Nothing else accumulates. Downloads are deleted after each sync action, ClickHouse's own logs either expire after a few days or are turned off, and each report replaces the last.
 
 ## Trimming it
 
