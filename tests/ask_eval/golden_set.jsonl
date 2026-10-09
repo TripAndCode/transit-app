@@ -49,7 +49,7 @@
 {"id": "ontime-008", "category": "D_ontime", "question": "p95、p99の遅延はわかる？", "expected_tool": null, "expected_args": {}}
 {"id": "ontime-009", "category": "D_ontime", "question": "標準偏差はどれくらい？", "expected_tool": null, "expected_args": {}}
 {"id": "ontime-010", "category": "D_ontime", "question": "遅延のIQRを計算して", "expected_tool": null, "expected_args": {}}
-{"id": "ontime-011", "category": "D_ontime", "question": "定時率のワーストは？", "expected_tool": "on_time_rate", "expected_args": {}}
+{"id": "ontime-011", "category": "D_ontime", "question": "定時率のワーストは？", "expected_tool": "top_n", "expected_args": {"metric": "on_time_rate", "best_first": false}}
 {"id": "trend-001", "category": "E_trend", "question": "直近2週間の傾向を見せて", "expected_tool": "time_series", "expected_args": {"days_back": 14}}
 {"id": "trend-002", "category": "E_trend", "question": "ここ1週間の推移", "expected_tool": "time_series", "expected_args": {"days_back": 7}}
 {"id": "trend-003", "category": "E_trend", "question": "月別の推移を教えて", "expected_tool": null, "expected_args": {}}
