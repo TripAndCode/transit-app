@@ -29,6 +29,7 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 - View the report: `ssh -L 8000:127.0.0.1:8000 root@<vps> 'cd /var/lib/transit-ml/reports/latest && python3 -m http.server 8000 --bind 127.0.0.1'`, then open http://localhost:8000.
 - A failed sync leaves that agency's later days for the next run. The done-set holds only archives whose rows are all in, so a realtime archive stays out of it until the JST day after its UTC day has ended.
+- Sync runs ingest with `--strict`, so an ingest that skipped a file fails its action: the archive stays out of the done-set and the next run retries the skipped files. A file that can never ingest, such as a corrupt member, keeps failing there; once its log line is read, add the archive's key to the done-set by hand to move that agency past it.
 - To replay from scratch: stop the timers, remove the stack together with its volumes (`docker compose -f deploy/vps/compose.yml down --volumes`), delete the done-set, and run the bootstrap again.
 
 ## How the data grows

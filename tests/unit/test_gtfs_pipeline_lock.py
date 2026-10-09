@@ -28,7 +28,7 @@ import gtfs_pipeline
 @pytest.mark.parametrize(
     "cmd,args,target",
     [
-        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x"), "pipeline.ingest.ingest"),
+        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
         (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "pipeline.analyze.analyze"),
     ],
 )
@@ -75,7 +75,7 @@ def test_whole_fleet_cmd_exits_1_and_never_calls_the_work_when_lock_is_held(cmd,
 @pytest.mark.parametrize(
     "cmd,args,target",
     [
-        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x"), "pipeline.ingest.ingest"),
+        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
         (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=1), "pipeline.ingest.ingest_live"),
         (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "pipeline.analyze.analyze"),
     ],

@@ -31,7 +31,12 @@ def _conn():
 @pytest.mark.parametrize(
     "cmd,args,kind,target",
     [
-        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x"), "ingest", "pipeline.ingest.ingest"),
+        (
+            gtfs_pipeline.cmd_ingest,
+            Namespace(agency_id=1, folder="/tmp/x", strict=False),
+            "ingest",
+            "pipeline.ingest.ingest",
+        ),
         (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "analyze", "pipeline.analyze.analyze"),
     ],
 )
@@ -62,7 +67,7 @@ def test_the_skip_row_does_not_change_the_shell_loop_exit_code():
         patch("pipeline.ingest.ingest"),
     ):
         with pytest.raises(SystemExit) as exc_info:
-            gtfs_pipeline.cmd_ingest(Namespace(agency_id=1, folder="/tmp/x"))
+            gtfs_pipeline.cmd_ingest(Namespace(agency_id=1, folder="/tmp/x", strict=False))
     assert exc_info.value.code == gtfs_pipeline.EX_TEMPFAIL
 
 
@@ -84,7 +89,12 @@ def test_a_displaced_whole_fleet_job_is_recorded_and_still_exits_1():
 @pytest.mark.parametrize(
     "cmd,args,kind,target",
     [
-        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x"), "ingest", "pipeline.ingest.ingest"),
+        (
+            gtfs_pipeline.cmd_ingest,
+            Namespace(agency_id=1, folder="/tmp/x", strict=False),
+            "ingest",
+            "pipeline.ingest.ingest",
+        ),
         (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "analyze", "pipeline.analyze.analyze"),
         (
             gtfs_pipeline.cmd_load_static,
@@ -157,3 +167,33 @@ def test_the_weather_job_records_the_station_days_it_wrote():
     assert start.call_args.args[1] == "weather"
     assert finish.call_args.args[2] == "ok"
     assert finish.call_args.kwargs["rows"] == 5
+
+
+@pytest.mark.parametrize("strict, code", [(True, gtfs_pipeline.EX_DATAERR), (False, None)])
+def test_strict_ingest_exits_dataerr_and_records_the_partial_run(strict, code):
+    """Under --strict a partial ingest leaves an error row carrying the rows
+    it did insert, and exits EX_DATAERR, not 0."""
+    from pipeline.ingest import IngestIncomplete
+
+    def partial(*a, strict=False, **k):
+        if strict:
+            raise IngestIncomplete(n_inserted=5, n_errors=2)
+        return 5
+
+    conn = _conn()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run") as finish,
+        patch("pipeline.ingest.ingest", side_effect=partial),
+    ):
+        if code is None:
+            gtfs_pipeline.cmd_ingest(Namespace(agency_id=1, folder="/tmp/x", strict=strict))
+        else:
+            with pytest.raises(SystemExit) as exc_info:
+                gtfs_pipeline.cmd_ingest(Namespace(agency_id=1, folder="/tmp/x", strict=strict))
+            assert exc_info.value.code == code
+
+    assert (finish.call_args.args[2], finish.call_args.kwargs["rows"]) == ("ok" if code is None else "error", 5)
