@@ -45,6 +45,9 @@ class Rule:
     pattern: re.Pattern
     tool: str
     args: dict[str, Any] = field(default_factory=dict)
+    # A question that also matches `unless` asks for something this rule's
+    # args cannot express, so the rule does not fire for it.
+    unless: re.Pattern | None = None
 
 
 @dataclass
@@ -55,6 +58,15 @@ class RouterDecision:
     score: float
     matched_pattern: str | None
 
+
+# Words that turn a ranking question to the other end of its list. Each one
+# feeds both the rule that asks for that end and the `unless` of the rule that
+# cannot, so the two stay the same list. A rank word asks for a ranking by
+# itself; a trait word ("定時率が低い理由") does only beside a ranking marker.
+_LOW_ON_TIME_RANKS = r"ワースト|下位"
+_LOW_ON_TIME_TRAITS = r"低い|低め|悪い|最低"
+_LOW_ON_TIME_WORDS = rf"{_LOW_ON_TIME_RANKS}|{_LOW_ON_TIME_TRAITS}"
+_LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 
 # Compile regexes ONCE at import time. First match wins (priority = order).
 _RULES: list[Rule] = [
@@ -104,26 +116,50 @@ _RULES: list[Rule] = [
         args={"kind": "sample_counts"},
     ),
     # ---- top_n ----
-    # NOTE: more-specific ranking rules MUST precede the generic
-    # `ranking-worst` rule (first-match-wins) — otherwise e.g.
-    # "5分以上の遅れが多い系統TOP10" would be eaten by `ranking-worst`.
+    # More-specific rules precede `ranking-worst` (first match wins), so e.g.
+    # "5分以上の遅れが多い系統TOP10" reaches `ranking-worst-5min`. A ranking's
+    # default order is one end of its list; a low/few phrasing asks for the
+    # other, which the `-low`/`-least` rules supply. The default-order rules
+    # skip such a question, so one no rule can place falls through instead.
     Rule(
         name="ranking-worst-5min",
         pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
+        # worst_5min has no fewest-first order.
+        unless=re.compile(_LITTLE_DELAY_WORDS),
+    ),
+    Rule(
+        name="ranking-on-time-low",
+        # The count follows the rank word: "ワースト5", "低い路線TOP5".
+        pattern=re.compile(
+            rf"定時率.*?(?:(?:{_LOW_ON_TIME_RANKS})\s*(\d+)?"
+            rf"|(?:{_LOW_ON_TIME_TRAITS}).*?(?:TOP|ランキング|一覧|順|{_LOW_ON_TIME_RANKS})\s*(\d+)?)"
+        ),
+        tool="top_n",
+        args={"metric": "on_time_rate", "n": 10, "best_first": False},
     ),
     Rule(
         name="ranking-on-time",
         pattern=re.compile(r"定時率.*?(TOP|ランキング|高い)"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10},
+        unless=re.compile(_LOW_ON_TIME_WORDS),
+    ),
+    Rule(
+        name="ranking-least-delay",
+        pattern=re.compile(rf"(遅延|遅れ).*?({_LITTLE_DELAY_WORDS}).*?(ワースト|TOP|ランキング)\s*(\d+)?"),
+        tool="top_n",
+        args={"metric": "avg_delay", "n": 10, "best_first": True},
+        # Fewest >5min incidents is a different metric from least mean delay.
+        unless=re.compile(r"5分"),
     ),
     Rule(
         name="ranking-worst",
         pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
+        unless=re.compile(_LITTLE_DELAY_WORDS),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
@@ -199,7 +235,7 @@ def _match_rules(question: str) -> RouterDecision | None:
     text = question.strip()
     for rule in _RULES:
         m = rule.pattern.search(text)
-        if m:
+        if m and not (rule.unless and rule.unless.search(text)):
             args = dict(rule.args)
             # Honor a captured count: if the rule carries an "n" arg and the
             # match captured an all-digit group, override the hardcoded n.
