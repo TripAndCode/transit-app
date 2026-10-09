@@ -153,6 +153,9 @@ jobs:
             exit 1
           fi
 
+      # A hosted machine discards the container anyway; every caller of the
+      # action still tears its own down, so the action stays safe to call
+      # from a persistent runner (test_every_caller_removes_its_container).
       - name: Stop and remove the Postgres container
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
