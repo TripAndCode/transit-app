@@ -197,6 +197,47 @@ def test_rule_default_n_when_no_digit():
     assert d.args["n"] == 10
 
 
+@pytest.mark.parametrize(
+    "question, metric, best_first, n",
+    [
+        ("定時率が低い路線ランキング", "on_time_rate", False, 10),
+        ("定時率ワーストランキング", "on_time_rate", False, 10),
+        ("定時率のワーストは？", "on_time_rate", False, 10),
+        ("定時率が悪い路線TOP5", "on_time_rate", False, 5),
+        ("定時率ワースト5", "on_time_rate", False, 5),
+        ("定時率下位3", "on_time_rate", False, 3),
+        ("定時率TOP10", "on_time_rate", None, 10),
+        ("遅延が少ない路線TOP5", "avg_delay", True, 5),
+        ("遅れが最も少ない路線ワースト", "avg_delay", True, 10),
+        ("遅延ワースト3", "avg_delay", None, 3),
+    ],
+)
+def test_ranking_rules_follow_the_asked_direction(question, metric, best_first, n):
+    """A low/few phrasing asks for the other end of the ranking; best_first
+    stays unset (the tool's own default) only for the default direction."""
+    d = _match_rules(question)
+    assert d is not None and d.tool == "top_n"
+    assert (d.args["metric"], d.args.get("best_first"), d.args["n"]) == (metric, best_first, n)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "5分以上の遅れが少ない路線TOP10",
+        "5分以上の遅れが短い系統TOP10",
+        "少ない遅延のTOP",
+        "低い定時率のランキング",
+        "A系統の定時率が低い理由は？",
+        "定時率が最低になった原因を教えて",
+    ],
+)
+def test_ranking_rules_leave_an_order_they_cannot_express_to_the_llm(question):
+    """worst_5min only ranks most-first, a few/low word ahead of the metric
+    fits no inverse rule, and a low trait with no ranking marker is not a
+    ranking request: no rule may answer these."""
+    assert _match_rules(question) is None
+
+
 def test_rule_decision_records_pattern_name():
     decision = _match_rules("どんな路線がある？")
     assert decision is not None
