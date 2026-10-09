@@ -400,10 +400,10 @@ type ReportEnvelope<T extends ReportType, Row> = {
   rows: Row[];
   ctx?: ResponseCtx;
   definition: DefinitionMeta;
-  /** How many groups qualified before `limit` cut the list (ranking,
-   *  ranking_best and compare_ranking), and, for ranking/ranking_best only,
-   *  the observation count below which a group's average is too thin to
-   *  trust. */
+  /** How many groups (delay_certificate: trips) qualified before `limit` cut
+   *  the list (ranking, ranking_best, compare_ranking and delay_certificate),
+   *  and, for ranking/ranking_best only, the observation count below which a
+   *  group's average is too thin to trust. */
   rows_total?: number | null;
   reliable_min_samples?: number | null;
 };
