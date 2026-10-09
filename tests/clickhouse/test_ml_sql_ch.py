@@ -94,3 +94,13 @@ def test_a_feed_without_scheduled_sec_takes_the_hour_from_its_schedule_string(ch
     ]
     ch_client.insert("updates", rows, column_names=COLUMNS)
     assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 8, 1, 3.0)]
+
+
+def test_a_stop_with_no_schedule_stays_out_of_its_runs_mean(ch_client):
+    # A non-timepoint stop carries a realtime delay but no schedule of its own.
+    rows = [
+        (8, _utc(2026, 5, 31, 23, 0), "d/1.pb", "M1", "weekday", "08:05", "R1", 1, 60, EIGHT_O_FIVE),
+        (8, _utc(2026, 5, 31, 23, 10), "d/2.pb", "M1", "weekday", None, "R1", 2, 600, None),
+    ]
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 8) == [Cell("R1", date(2026, 6, 1), 8, 1, 1.0)]

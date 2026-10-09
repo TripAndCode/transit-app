@@ -18,7 +18,8 @@ def runs_sql() -> str:
     scheduled departure. The hour comes from scheduled_sec, so a run after
     midnight on its service day keeps an hour of 24 or more. A strategy that
     stores only the "HH:MM" schedule string gets that string's hour instead,
-    as the app's own reports read it; a run with neither has no hour and no row."""
+    as the app's own reports read it. A stop with neither field (a non-timepoint
+    stop) stays out of its run's mean, and a run left with no hour has no row."""
     dedup = build_dedup_ch_sql(include_scheduled_sec=True, extra_where=_DATE_RANGE)
     return f"""
 SELECT
@@ -31,7 +32,7 @@ SELECT
     ) AS hour,
     avg(dep_delay) / 60 AS mean_delay_min
 FROM ({dedup})
-WHERE route_code IS NOT NULL
+WHERE route_code IS NOT NULL AND (scheduled_sec IS NOT NULL OR scheduled_time IS NOT NULL)
 GROUP BY route_code, trip_id, date
 HAVING hour IS NOT NULL
 """
