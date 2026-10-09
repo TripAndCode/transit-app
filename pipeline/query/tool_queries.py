@@ -128,7 +128,7 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
         "FROM static_routes sr "
         "JOIN static_trips st ON st.route_id = sr.route_id AND st.agency_id=$1 "
         "JOIN static_stop_times sst ON sst.trip_id = st.trip_id AND sst.agency_id=$1 "
-        "WHERE sr.agency_id=$1 AND sr.route_id LIKE '%(' || $2 || ')' "
+        "WHERE sr.agency_id=$1 AND regexp_replace(sr.route_id, '.*\\((\\d+)\\)$', '\\1') = $2 "
         "GROUP BY sr.route_id, sr.route_short_name",
         agency_id,
         str(route),
