@@ -128,7 +128,8 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="ranking-on-time-low",
-        pattern=re.compile(rf"定時率.*?({_LOW_ON_TIME_WORDS})(?:.*?(?:TOP|ワースト|下位)\s*(\d+))?"),
+        # The count sits right after the word ("ワースト5") or after a later one ("低い路線TOP5").
+        pattern=re.compile(rf"定時率.*?(?:{_LOW_ON_TIME_WORDS})(?:\s*(\d+)|.*?(?:TOP|ワースト|下位)\s*(\d+))?"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10, "best_first": False},
     ),

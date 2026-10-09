@@ -203,6 +203,8 @@ def test_rule_default_n_when_no_digit():
         ("定時率ワーストランキング", "on_time_rate", False, 10),
         ("定時率のワーストは？", "on_time_rate", False, 10),
         ("定時率が悪い路線TOP5", "on_time_rate", False, 5),
+        ("定時率ワースト5", "on_time_rate", False, 5),
+        ("定時率下位3", "on_time_rate", False, 3),
         ("定時率TOP10", "on_time_rate", None, 10),
         ("遅延が少ない路線TOP5", "avg_delay", True, 5),
         ("遅れが最も少ない路線ワースト", "avg_delay", True, 10),
