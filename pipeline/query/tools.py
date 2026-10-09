@@ -134,6 +134,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_no_data", "en"): "Not enough data to compute on-time rate.",
     ("on_time_summary", "ja"): "定時率 (遅延 {threshold_min} 分以内) 上位{count}路線",
     ("on_time_summary", "en"): "On-time rate (within {threshold_min} min) — top {count} routes",
+    ("on_time_summary_worst", "ja"): "定時率 (遅延 {threshold_min} 分以内) 下位{count}路線",
+    ("on_time_summary_worst", "en"): "On-time rate (within {threshold_min} min) — bottom {count} routes",
     ("route_meta_not_found", "ja"): "路線{route} の路線情報が見つかりません。",
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
     ("route_meta_summary", "ja"): "路線{route} 路線情報",
@@ -493,12 +495,10 @@ TOOLS: list[dict] = [
             "name": "on_time_rate",
             "description": (
                 "On-time percentage per route and service type over the request window and UI "
-                "filters, highest first (n rows, default 20); route-service groups with 20 or fewer "
-                "samples are left out. A departure counts as on time when it is at most "
-                "threshold_min minutes late (default 1 = 60 seconds); early departures always count "
-                "as on time. Set threshold_min=5 for '5分以内定時率'. It cannot list the lowest first: "
-                "for the least punctual routes use top_n(metric='on_time_rate', best_first=false), "
-                "which is fixed at the 60-second threshold."
+                "filters, highest first unless best_first=false (n rows, default 20); route-service "
+                "groups with 20 or fewer samples are left out. A departure counts as on time when it "
+                "is at most threshold_min minutes late (default 1 = 60 seconds); early departures "
+                "always count as on time. Set threshold_min=5 for '5分以内定時率'."
             ),
             "parameters": {
                 "type": "object",
@@ -516,6 +516,12 @@ TOOLS: list[dict] = [
                         "description": (
                             "Rows to return (default 20). There is no offset: for a 'show more' "
                             "follow-up, re-call with a larger n."
+                        ),
+                    },
+                    "best_first": {
+                        "type": "boolean",
+                        "description": (
+                            "Default true: highest on-time % first. false lists the least punctual routes first."
                         ),
                     },
                     **_DATE_OVERRIDE_PROPS,
@@ -686,7 +692,8 @@ SYSTEM_PROMPT = """\
   (dimension=dow: 暦の月〜金 vs 土日。route 省略で全路線の差ランキング /
    dimension=service_type: 1路線の運行種別(平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
-- on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
+- on_time_rate(threshold_min?, n?, best_first?, days_back?, from?, to?): 定時率ランキング
+  (best_first=false で定時率の低い順)
 - route_meta(route): 路線の路線情報
 - segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット
   (遅延が最も大きい停留所 上位5件。上流からの持ち越しを含む)
@@ -1132,7 +1139,16 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     threshold_sec = max(0, threshold_min) * 60
     # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
     n = int(args.get("k", args.get("n", 20)))
-    rows = await compute_on_time(agency_id, ctx, conn, ch=ch, threshold_sec=threshold_sec, limit=n)
+    best_first = bool(args.get("best_first", True))
+    rows = await compute_on_time(
+        agency_id,
+        ctx,
+        conn,
+        ch=ch,
+        threshold_sec=threshold_sec,
+        limit=n,
+        sort_order="desc" if best_first else "asc",
+    )
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
     # Display-only annotation (pipeline/stats.py) — does not change
@@ -1141,7 +1157,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     return ToolResult(
         kind="table",
         summary=_summary(
-            "on_time_summary",
+            "on_time_summary" if best_first else "on_time_summary_worst",
             lang=locale,
             threshold_min=threshold_min,
             count=len(rows),
