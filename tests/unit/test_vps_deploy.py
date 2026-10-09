@@ -179,3 +179,10 @@ def test_the_sync_unit_runs_the_cli_through_the_ping_wrapper():
 
 def test_the_bootstrap_script_parses():
     assert subprocess.run(["bash", "-n", str(VPS / "bootstrap.sh")]).returncode == 0
+
+
+def test_the_backtest_runs_weekly_in_jst_through_the_ping_wrapper():
+    calendar = re.search(r"^OnCalendar=(.+)$", _unit("transit-ml-backtest.timer"), re.MULTILINE)[1]
+    assert calendar.startswith("Sun") and calendar.endswith("Asia/Tokyo")
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
+    assert "deploy/vps/run-with-ping.sh BACKTEST" in exec_start
