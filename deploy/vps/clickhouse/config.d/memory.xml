@@ -1,6 +1,6 @@
-<!-- Below the container's 1536m limit, so ClickHouse refuses a query before the kernel kills the server.
+<!-- Below the container's limit, so ClickHouse refuses a query before the kernel kills the server.
      The mark cache's default is sized for a large host and would take most of that cap. -->
 <clickhouse>
-    <max_server_memory_usage>1288490188</max_server_memory_usage>
+    <max_server_memory_usage>1717986918</max_server_memory_usage>
     <mark_cache_size>268435456</mark_cache_size>
 </clickhouse>
