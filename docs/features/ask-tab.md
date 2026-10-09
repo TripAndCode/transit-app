@@ -102,11 +102,15 @@ sentinel:
    384-dim) and look up nearest neighbors in `rag_chunks` via
    `pipeline/query/rag_index.py: nearest()` (pgvector cosine distance). A
    top match within threshold (`_EMBED_DISPATCH_THRESHOLD = 0.12`, margin
-   `0.02` over the runner-up) dispatches via that golden example's stored
-   tool/args (source: `tests/ask_eval/golden_set.jsonl`).
-4. **Stage 3 — RAG + LLM**: neither stage decided → top-3 golden examples
-   are few-shot-injected and `pipeline/query/chat.py: chat_with_tools(...)`
-   calls the provider ladder (`pipeline/query/llm_client.py`) with the
+   `0.02` over the runner-up) dispatches via that example's stored tool/args:
+   `tests/ask_eval/golden_set.jsonl` for a golden id, `ask_intent_cache` for a
+   promoted `cache_<signature>` chunk. The args are replayed only when the
+   question names the same entities (ASCII route codes, aliases and numbers,
+   plus any arg value the example spells out); otherwise it reaches Stage 3
+   with the example as a few-shot.
+4. **Stage 3 — RAG + LLM**: neither stage decided → the top-3 examples
+   (golden or promoted cache) are few-shot-injected and
+   `pipeline/query/chat.py: chat_with_tools(...)` calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
    list, `.env.example` ships `gemini,openai`; the code's own back-compat
