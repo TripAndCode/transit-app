@@ -18,7 +18,9 @@ services:
       - ml_pg:/var/lib/postgresql/data
     mem_limit: 640m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U transit"]
+      # Over TCP: initdb's temporary server answers only on the socket, and
+      # bootstrap connects over TCP next (see the root compose.yml).
+      test: ["CMD-SHELL", "pg_isready -h localhost -U transit -d transit"]
       interval: 10s
       timeout: 5s
       retries: 10

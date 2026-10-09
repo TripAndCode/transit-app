@@ -4,18 +4,33 @@ and nothing it owns can be mistaken for the dev stores the guard hook protects."
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
+import shlex
 import subprocess
 import xml.etree.ElementTree as ET
+from itertools import pairwise
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 VPS = ROOT / "deploy" / "vps"
-DEV_VOLUMES = ("transit_pgdata", "transit_chdata")
-DEV_PORTS = ("5433", "5543", "8123")
+
+
+def _guard_dev_ports() -> tuple[str, ...]:
+    spec = importlib.util.spec_from_file_location("guard_dev_db", ROOT / ".claude" / "hooks" / "guard_dev_db.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.DEV_PORTS)
+
+
+# Read from their canonical homes, the guard hook and the dev stack, so a
+# port or volume added there is held off the replica too.
+DEV_PORTS = _guard_dev_ports()
+DEV_VOLUMES = tuple(yaml.safe_load((ROOT / "compose.yml").read_text())["volumes"])
 # Every system log ClickHouse 26.8 writes on its own. The others (backup_log,
 # s3queue_log, query_views_log, …) fill only from features the replica never uses.
 SYSTEM_LOGS = (
@@ -42,6 +57,14 @@ def test_every_published_port_binds_loopback_and_avoids_dev_ports():
             host, published, _container = str(port).split(":")
             assert host == "127.0.0.1", f"{name} publishes {port} beyond loopback"
             assert published not in DEV_PORTS, f"{name} takes dev port {published}"
+
+
+def test_postgres_is_healthy_only_once_it_listens_on_tcp():
+    # The image's first run serves initdb from a socket-only server; a socket
+    # check passes then, and bootstrap's migrate over TCP is refused.
+    check = shlex.split(_compose()["services"]["postgres"]["healthcheck"]["test"][1])
+    assert check[0] == "pg_isready"
+    assert ("-h", "localhost") in pairwise(check)
 
 
 def test_both_services_carry_a_memory_limit():
