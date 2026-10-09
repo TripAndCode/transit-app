@@ -269,6 +269,39 @@ async def get_message(
     return d
 
 
+def _anon_message(message: Any) -> dict[str, Any] | None:
+    """``append_message``'s arguments for one localStorage message, or None
+    for one the messages table cannot hold.
+
+    The payload is the browser's own copy, so every field is checked rather
+    than trusted: a wrong-typed field is dropped, and a value the column would
+    reject (a role outside the CHECK, a signature longer than CHAR(16)) must
+    not fail the whole migration.
+    """
+    if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
+        return None
+
+    def text(key: str) -> str | None:
+        value = message.get(key)
+        return value if isinstance(value, str) else None
+
+    def obj(key: str) -> dict[str, Any] | None:
+        value = message.get(key)
+        return value if isinstance(value, dict) else None
+
+    signature = text("signature_hash")
+    return {
+        "role": message["role"],
+        "chip_id": text("chip_id"),
+        "tool": text("tool"),
+        "args": obj("args"),
+        "signature_hash": signature if signature is not None and len(signature) == 16 else None,
+        "result": obj("result"),
+        "rendered_summary": text("rendered_summary"),
+        "conditions": obj("conditions"),
+    }
+
+
 async def migrate_anon_threads(
     conn: asyncpg.Connection,
     *,
@@ -276,10 +309,13 @@ async def migrate_anon_threads(
     agency_id: int,
     threads: list[dict[str, Any]],
 ) -> int:
-    """Upload anonymous (localStorage) threads into the DB on first sign-in.
+    """Upload anonymous (localStorage) threads, with their messages, into the
+    DB on first sign-in.
 
     Idempotent via ``client_id`` (stashed in filter_ctx._client_id). If a thread
-    with the same (user_id, _client_id) already exists, skip it.
+    with the same (user_id, _client_id) already exists, skip it. Each thread
+    and its messages land in one transaction, so a thread is never stored
+    without the messages the browser is about to discard.
     """
     if not threads:
         return 0
@@ -304,14 +340,19 @@ async def migrate_anon_threads(
             thread_agency = int(t.get("agency_id"))  # type: ignore[arg-type]
         except (TypeError, ValueError):
             thread_agency = agency_id
-        await conn.execute(
-            "INSERT INTO ask_conversations (user_id, agency_id, title, filter_ctx, pinned) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5)",
-            user_id,
-            thread_agency,
-            str(t.get("title", "(no title)"))[:_MAX_TITLE],
-            json.dumps(fc),
-            bool(t.get("pinned", False)),
-        )
+        async with conn.transaction():
+            conversation_id = await conn.fetchval(
+                "INSERT INTO ask_conversations (user_id, agency_id, title, filter_ctx, pinned) "
+                "VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING conversation_id",
+                user_id,
+                thread_agency,
+                str(t.get("title", "(no title)"))[:_MAX_TITLE],
+                json.dumps(fc),
+                bool(t.get("pinned", False)),
+            )
+            for raw in t.get("messages") or []:
+                message = _anon_message(raw)
+                if message is not None:
+                    await append_message(conn, conversation_id, **message)
         inserted += 1
     return inserted

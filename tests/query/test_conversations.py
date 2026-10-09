@@ -331,6 +331,51 @@ async def test_migrate_anon_threads_idempotent(pool_with_users):
 
 
 @pytest.mark.asyncio
+async def test_migrate_anon_threads_keeps_each_threads_messages(pool_with_users):
+    """The browser discards its copy once the migration answers, so the
+    messages must land with their thread, in order. A message the table
+    cannot hold is dropped on its own rather than failing the migration."""
+    pool, agency, u1, _ = pool_with_users
+    answer = {"kind": "table", "summary": "2 routes", "rows": [["22171", 4.2]], "columns": ["route", "min"]}
+    payload = [
+        {
+            "client_id": "anon-with-messages",
+            "title": "Anon C",
+            "filter_ctx": {},
+            "pinned": False,
+            "created_at": "2026-05-29T10:00:00",
+            "updated_at": "2026-05-29T10:00:00",
+            "messages": [
+                {"message_id": 1, "role": "user", "rendered_summary": "遅延ランキング", "tool": None},
+                {
+                    "message_id": 2,
+                    "role": "assistant",
+                    "tool": "top_n",
+                    "args": {"metric": "avg_delay"},
+                    "signature_hash": "0123456789abcdef",
+                    "result": answer,
+                    "rendered_summary": "2 routes",
+                    "conditions": {"dow": "all", "time_band": "all", "service": "all"},
+                },
+                {"role": "system", "rendered_summary": "not a role the table allows"},
+                {"role": "assistant", "signature_hash": "longer-than-sixteen-chars", "args": "not an object"},
+            ],
+        },
+    ]
+    async with pool.acquire() as c:
+        assert await migrate_anon_threads(c, user_id=u1, agency_id=agency, threads=payload) == 1
+        [conv] = await list_conversations(c, user_id=u1, agency_id=agency, limit=10)
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert [(m["role"], m["tool"], m["rendered_summary"]) for m in msgs] == [
+        ("user", None, "遅延ランキング"),
+        ("assistant", "top_n", "2 routes"),
+        ("assistant", None, None),
+    ]
+    assert msgs[1]["result"] == answer and msgs[1]["signature_hash"] == "0123456789abcdef"
+    assert (msgs[2]["signature_hash"], msgs[2]["args"]) == (None, None)
+
+
+@pytest.mark.asyncio
 async def test_migrate_homes_each_thread_to_its_own_agency(pool_with_users):
     """Each anon thread carries its own agency_id; migration must home it there,
     not dump every thread under the URL agency the user happened to be viewing."""
