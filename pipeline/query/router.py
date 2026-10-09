@@ -59,6 +59,12 @@ class RouterDecision:
     matched_pattern: str | None
 
 
+# Words that turn a ranking question to the other end of its list. Each one
+# feeds both the rule that asks for that end and the `unless` of the rule that
+# cannot, so the two stay the same list.
+_LOW_ON_TIME_WORDS = r"低い|低め|悪い|ワースト|下位|最低"
+_LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
+
 # Compile regexes ONCE at import time. First match wins (priority = order).
 _RULES: list[Rule] = [
     # ---- describe_data meta-tool fan-out ----
@@ -107,15 +113,11 @@ _RULES: list[Rule] = [
         args={"kind": "sample_counts"},
     ),
     # ---- top_n ----
-    # NOTE: more-specific ranking rules MUST precede the generic
-    # `ranking-worst` rule (first-match-wins) — otherwise e.g.
-    # "5分以上の遅れが多い系統TOP10" would be eaten by `ranking-worst`.
-    #
-    # Each ranking's default order is one end of the list (most >5min
-    # incidents, highest on-time rate, longest delay). A low/few phrasing asks
-    # for the other end: the `-low`/`-least` rules set best_first for it, and
-    # the default-order rules skip any question carrying such a word, so one
-    # they cannot place falls through rather than answering the opposite.
+    # More-specific rules precede `ranking-worst` (first match wins), so e.g.
+    # "5分以上の遅れが多い系統TOP10" reaches `ranking-worst-5min`. A ranking's
+    # default order is one end of its list; a low/few phrasing asks for the
+    # other, which the `-low`/`-least` rules supply. The default-order rules
+    # skip such a question, so one no rule can place falls through instead.
     Rule(
         name="ranking-worst-5min",
         pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
@@ -126,7 +128,7 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="ranking-on-time-low",
-        pattern=re.compile(r"定時率.*?(低い|低め|悪い|ワースト|下位|最低)(?:.*?(?:TOP|ワースト|下位)\s*(\d+))?"),
+        pattern=re.compile(rf"定時率.*?({_LOW_ON_TIME_WORDS})(?:.*?(?:TOP|ワースト|下位)\s*(\d+))?"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10, "best_first": False},
     ),
@@ -135,11 +137,11 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"定時率.*?(TOP|ランキング|高い)"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10},
-        unless=re.compile(r"低い|低め|悪い|ワースト|下位|最低"),
+        unless=re.compile(_LOW_ON_TIME_WORDS),
     ),
     Rule(
         name="ranking-least-delay",
-        pattern=re.compile(r"(遅延|遅れ).*?(少な|短い|小さい|低い).*?(ワースト|TOP|ランキング)\s*(\d+)?"),
+        pattern=re.compile(rf"(遅延|遅れ).*?({_LITTLE_DELAY_WORDS}).*?(ワースト|TOP|ランキング)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10, "best_first": True},
         # Fewest >5min incidents is a different metric from least mean delay.
@@ -150,7 +152,7 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
-        unless=re.compile(r"少な|短い|小さい|低い"),
+        unless=re.compile(_LITTLE_DELAY_WORDS),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
