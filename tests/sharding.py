@@ -12,9 +12,13 @@ from collections.abc import Mapping
 def assign_shards(tests_per_file: Mapping[str, int], count: int) -> dict[str, int]:
     """The shard each file runs in: largest file first, each to the shard
     holding the fewest tests so far. Ties break on the file path and then the
-    lowest shard, so every job computes the same assignment."""
+    lowest shard, so every job computes the same assignment. More shards than
+    files is refused: a shard left without files collects nothing, and pytest
+    fails it for that rather than for anything in the suite."""
     if count < 1:
         raise ValueError(f"shard count must be at least 1, got {count}")
+    if count > len(tests_per_file):
+        raise ValueError(f"{count} shards for {len(tests_per_file)} test files would leave a shard with none")
     loads = [0] * count
     owner: dict[str, int] = {}
     for path, tests in sorted(tests_per_file.items(), key=lambda entry: (-entry[1], entry[0])):

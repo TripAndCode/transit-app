@@ -47,3 +47,8 @@ def test_a_split_run_without_a_valid_index_is_refused(environ):
 def test_a_shard_count_below_one_is_refused():
     with pytest.raises(ValueError):
         assign_shards({"tests/a.py": 1}, 0)
+
+
+def test_more_shards_than_files_is_refused():
+    with pytest.raises(ValueError, match="leave a shard with none"):
+        assign_shards({"tests/a.py": 4, "tests/b.py": 2}, 3)
