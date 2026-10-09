@@ -87,6 +87,12 @@ def test_numbered_list_markers_are_not_claims():
     assert verify_numeric_claims(answer, GROUNDING) is True
 
 
+def test_a_marker_shape_that_numbers_no_list_is_still_a_claim():
+    # A lone marker, or markers not counting 1, 2, 3 ..., order nothing.
+    assert verify_numeric_claims("99) Route 12 is badly delayed.", GROUNDING) is False
+    assert verify_numeric_claims("1. Route 12 averages 14.2 min.\n7. It is up 56.1%.", GROUNDING) is False
+
+
 def test_a_number_starting_a_line_without_a_list_marker_is_still_a_claim():
     assert verify_numeric_claims("22.9 minutes late on route 12.", GROUNDING) is False
     assert verify_numeric_claims("1.5 minutes late on route 12.", GROUNDING) is False
