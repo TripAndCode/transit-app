@@ -152,9 +152,9 @@ jobs:
 
   # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
   # while it is unset: standard hosted runners cost nothing for a public
-  # repository. The day hosted minutes start counting, set it to
-  # `["self-hosted","vps"]`, and `vars.CI_TEST_SHARDS` to `[0]`, since the
-  # VPS has a single runner and would only run the shards one after another.
+  # repository. The day hosted minutes start counting, register a runner on
+  # the VPS, set this to `["self-hosted","vps"]`, and set `vars.CI_TEST_SHARDS`
+  # to `[0]`, since one runner would only run the shards one after another.
   #
   # Whole-tree static checks, beside the test shards rather than ahead of them.
   backend-static:

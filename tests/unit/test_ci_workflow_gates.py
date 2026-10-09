@@ -375,6 +375,22 @@ def test_main_reports_coverage_combined_from_every_shard() -> None:
     assert "coverage combine .coverage.shard-*" in " ".join(s.get("run", "") for s in coverage["steps"])
 
 
+def test_no_workflow_names_a_self_hosted_runner_outright() -> None:
+    """No runner is registered for this public repository: a self-hosted
+    runner there can be handed code from pull requests outside it. The one
+    way back is `vars.CI_BACKEND_RUNNER`, set by a maintainer after
+    registering one, so no workflow may name a self-hosted label itself."""
+    offenders = []
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+        for job_name, job in doc["jobs"].items():
+            runs_on = job.get("runs-on", "")
+            labels = runs_on if isinstance(runs_on, list) else [runs_on]
+            if any("self-hosted" in str(label) and not str(label).startswith("${{") for label in labels):
+                offenders.append(f"{workflow.name} / {job_name}: {runs_on}")
+    assert not offenders, "jobs pinned to a self-hosted runner: " + "; ".join(offenders)
+
+
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
     """Both directions are failures.
 
