@@ -82,6 +82,15 @@ def test_fmt_worst_5min_row_shape():
     assert "3159件" in result, f"expected '3159件' in {result!r}"
 
 
+def test_fmt_worst_5min_says_over_in_english_too():
+    """late5_count counts departures strictly over 300 s, so the English text
+    says "over", as the Japanese 5分超 does."""
+    rows = [("14022", "平日", 759, 3.4, 3159)]
+    result = format_result("worst_5min", rows, {}, locale="en")
+    assert "over 5 min" in result, result
+    assert "5+" not in result, result
+
+
 def test_fmt_compare_ranking_signs_direction():
     """Sign of the delta determines the Japanese direction label."""
     # signed > 0 → 土日祝>平日
@@ -94,13 +103,13 @@ def test_fmt_compare_ranking_signs_direction():
 
 def test_fmt_ranking_no_service_uses_p50_p90_labels():
     """compute_ranking returns (route, service, avg, p50, p90, samples).
-    The no-service path was previously mis-labelling p50 as 平日 and p90 as
-    土日祝 — pin the corrected label set so a regression is immediate."""
+    The no-service path must label its p50/p90 columns as percentiles,
+    never as a 平日/土日祝 service split."""
     rows = [("16101", "平日", 7.9, 4.8, 22.8, 152)]
     result = format_result("ranking", rows, {"limit": 100})
     assert "p50=4.8" in result
     assert "p90=22.8" in result
-    # The mis-label was "平日{p50}分・土日祝{p90}分" — verify it's gone.
+    # Not the service-split shape "平日{p50}分・土日祝{p90}分".
     assert "土日祝22.8" not in result
 
 

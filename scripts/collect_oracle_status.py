@@ -11,8 +11,7 @@ with a token that lives only on Oracle and is unrelated to any SSH key.
 
 This module is the VPS-side other half of that channel: it reads the latest
 such line back out via the VPS's own, already-configured `gh` authentication
-(the same one `/vps-loop-run` uses for its PR work -- nothing new is granted
-here), validates it against the operations-status contract, and enforces
+(nothing new is granted here), validates it against the operations-status contract, and enforces
 replay resistance with a small persisted watermark: a document whose
 `observed_at` is not strictly newer than the last one this collector accepted
 is rejected outright, so replaying an old, captured dispatch call can at best
@@ -68,9 +67,8 @@ class OracleStatusReplayed(Exception):
 def default_log_fetcher(repo: str) -> str:
     """Fetch `WORKFLOW_FILE`'s most recent run's combined log via `gh`.
 
-    Two separate `gh` calls (list then view) rather than one, matching
-    vps-heartbeat-watchdog.yml's own established pattern for reading this
-    kind of heartbeat back out.
+    Two separate `gh` calls (list then view) rather than one: `gh run list`
+    finds the run, `gh run view --log` reads the payload line back out.
     """
     try:
         list_proc = subprocess.run(
@@ -99,8 +97,7 @@ def default_log_fetcher(repo: str) -> str:
 
     run_id = (list_proc.stdout or "").strip()
     # An empty result list makes the `-q` filter resolve to the literal
-    # string "null", matching vps-heartbeat-watchdog.yml's own handling of
-    # the identical `gh`/`jq` behavior.
+    # string "null" (a `gh`/`jq` quirk), not an empty string.
     if list_proc.returncode != 0 or not run_id or run_id == "null":
         raise OracleStatusUnavailable(
             f"no {WORKFLOW_FILE} run found, or `gh run list` failed (exit {list_proc.returncode}): "

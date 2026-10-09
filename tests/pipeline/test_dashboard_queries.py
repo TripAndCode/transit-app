@@ -49,11 +49,11 @@ def _exact_sum_delay_sec(avg_min, samples):
 
 
 async def _seed_trend(pool, agency_id, rows):
-    """rows: (date_iso, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
+    """rows: (date or ISO date string, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
     expanded = []
     for d, rc, st, av, n, *rest in rows:
         sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
-        expanded.append((d, rc, st, av, n, sds))
+        expanded.append((date.fromisoformat(d) if isinstance(d, str) else d, rc, st, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
@@ -108,6 +108,32 @@ async def test_movers_reads_agg_daily_trend(movers_pool):
     assert by["R1"]["samples"] == 100
 
 
+async def test_movers_windows_ignore_a_wider_requested_range(movers_pool):
+    """A range wider than ``window_days`` must not widen either compared
+    window, and the two must share no day. The 2026-03-20 row falls inside
+    both halves of an overlapping shifted-range definition and inside neither
+    of the correct adjacent windows, so it can only leak into the result if
+    the windows are derived from the request range instead of its end date."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-14", "R1", "平日", 10.0, 100),
+            ("2026-04-05", "R1", "平日", 2.0, 100),
+            ("2026-03-20", "R1", "平日", 100.0, 100),
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 3, 16), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] == 10.0
+    assert by["R1"]["previous_avg"] == 2.0
+    assert by["R1"]["delta"] == 8.0
+    assert by["R1"]["samples"] == 100
+
+
 async def test_movers_routes_filter_fast_path(movers_pool):
     """routes filter on the agg path: only the requested route appears."""
     pool, agency_id = movers_pool
@@ -159,6 +185,29 @@ async def test_movers_returns_delta(movers_pool):
     deltas = [abs(r["delta"]) for r in result.rows]
     assert deltas == sorted(deltas, reverse=True)
     assert result.rows[0]["route_code"] == "R1"  # |+6| is largest
+
+
+async def test_movers_labels_filtered_to_returned_routes(movers_pool):
+    """Route-label lookup is filtered to the routes `top` actually keeps, not
+    every route static_routes has for the agency -- a query-shape change
+    only, so the label for a returned route must still resolve correctly
+    (mirrors the same filter in the `_build_heatmap` sibling above)."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100),  # delta +6, kept by top=1
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-10", "R2", "平日", 2.0, 100),  # delta 0, dropped by top=1
+            ("2026-04-03", "R2", "平日", 2.0, 100),
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        result = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=1)
+    assert [r["route_code"] for r in result.rows] == ["R1"]
+    assert result.rows[0]["label"] == "R1"
 
 
 async def test_anomalies_reads_agg_daily_trend(movers_pool):
@@ -252,7 +301,7 @@ async def test_delay_heatmap_cache_hit(movers_pool):
 
 
 async def test_heatmap_dow_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
-    """Both seeded Mondays share the same (wrong) avg_min=5.0, so the old
+    """Both seeded Mondays share the same (wrong) avg_min=5.0, so a
     SUM(avg_min*samples)/SUM(samples) reweighting would also report 5.0 --
     but sum_delay_sec backs true per-row averages of 6.0 and 2.0, so the
     exact pooled mean must be 3.0, proving the grid reads sum_delay_sec."""
@@ -334,8 +383,8 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     """A date whose only row has samples but a NULL sum_delay_sec (not yet
     re-analyzed since migration 0028) must render avg_delay=None for that
     date, and must be excluded from the mean/std/z-score population --
-    previously it was coerced to 0.0, which biased the network mean down
-    and could flag the missing day as a false anomaly.
+    coercing it to 0.0 would bias the network mean down and could flag the
+    missing day as a false anomaly.
     """
     pool, agency_id = movers_pool
     await _seed_trend(
@@ -355,8 +404,8 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     assert by_date["2026-04-04"] is None
     # With the NULL day correctly excluded, all 3 real days are identical
     # (avg 3.0 each), so std is exactly 0 and there are no anomalies at all
-    # -- not even the NULL day, which the old 0.0-coercion would have
-    # flagged as a >1.5-sigma outlier next to three 3.0-min days.
+    # -- not even the NULL day, which coercing NULL to 0.0 would flag as a
+    # >1.5-sigma outlier next to three 3.0-min days.
     assert res.std == 0.0
     assert res.mean == 3.0
     assert res.anomalies == []
@@ -382,3 +431,8 @@ async def test_movers_current_window_null_reports_none_not_zero(movers_pool):
     assert by["R1"]["current_avg"] is None
     assert by["R1"]["delta"] is None
     assert by["R1"]["delta_pct"] is None
+    # The count is the evidence behind current_avg, and there is none: the only
+    # current-window row carries samples with no delay sum behind it. Reporting
+    # its 100 would claim a hundred observations support an average that does
+    # not exist.
+    assert by["R1"]["samples"] == 0

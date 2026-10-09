@@ -1,5 +1,5 @@
-// frontend/src/components/InlineSparkline.tsx
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
+import { useDrawOn } from "./charts/ChartEnter";
 
 type Props = {
   points: number[];
@@ -9,10 +9,28 @@ type Props = {
   /** When true, always render in `accent`; skip the auto green-on-improvement. */
   forceAccent?: boolean;
   showEndDot?: boolean;
-  showLabels?: boolean;
   style?: CSSProperties;
+  /** Draws a dashed horizontal reference line at this value, in the series'
+   *  own units. The y-scale spans the series min..max, which on its own says
+   *  nothing about how large the swing actually is -- a reference the reader
+   *  already understands (the period mean, a target, zero) is what turns the
+   *  shape back into a reading. */
+  baseline?: number;
+  /** Passed straight to the `<svg>`. Set to `"none"` when the element is
+   *  stretched via CSS (e.g. `position: absolute; inset: 0`) to fill a box
+   *  whose aspect ratio doesn't match `width`/`height` -- a full-bleed
+   *  background sparkline -- so it fills edge-to-edge instead of
+   *  letterboxing under the default `xMidYMid meet`. */
+  preserveAspectRatio?: string;
+  /** Draw the line on when its data first arrives. Pass false inside a
+   *  RevealSection, whose own transform is the entrance. */
+  drawOn?: boolean;
 };
 
+/** A trend line too small for an axis. It draws no SVG text: callers stretch
+ *  it (`preserveAspectRatio="none"`, or a fixed box), which would distort a
+ *  glyph or take it below the 12px floor, so any figure it needs belongs in
+ *  the caller's own HTML. */
 export function InlineSparkline({
   points,
   width = 160,
@@ -20,9 +38,16 @@ export function InlineSparkline({
   accent = "var(--trend-bad)",
   forceAccent = false,
   showEndDot = true,
-  showLabels = true,
   style,
+  baseline,
+  preserveAspectRatio,
+  drawOn = true,
 }: Props) {
+  // Called unconditionally, ahead of the early return below -- hooks can't
+  // themselves be conditional on `points.length`.
+  const lineRef = useRef<SVGPolylineElement | null>(null);
+  useDrawOn(lineRef, drawOn && !!points && points.length >= 2);
+
   if (!points || points.length < 2) {
     return null;
   }
@@ -36,7 +61,7 @@ export function InlineSparkline({
   const span = y_max - y_min || 1;
 
   const stepX = width / (points.length - 1);
-  const top_pad = showLabels ? 12 : 2;
+  const top_pad = 2;
   const bottom_pad = 2;
   const usable_h = height - top_pad - bottom_pad;
   const toY = (v: number) =>
@@ -65,17 +90,33 @@ export function InlineSparkline({
       .join(" ") +
     ` L ${lastX.toFixed(1)},${height} L 0,${height} Z`;
 
+  const baselineY = baseline == null ? null : toY(baseline);
+
   return (
     <svg
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={preserveAspectRatio}
       style={{ display: "inline-block", verticalAlign: "-2px", ...style }}
       role="img"
       aria-hidden
     >
       <path d={area_path} style={{ fill: stroke, fillOpacity: 0.12 }} stroke="none" />
+      {baselineY != null && (
+        <line
+          data-testid="sparkline-baseline"
+          x1={0}
+          x2={width}
+          y1={baselineY}
+          y2={baselineY}
+          strokeWidth="1"
+          strokeDasharray="3 3"
+          style={{ stroke: "var(--text-tertiary)", opacity: 0.6 }}
+        />
+      )}
       <polyline
+        ref={lineRef}
         fill="none"
         style={{ stroke }}
         strokeWidth="1.5"
@@ -84,28 +125,6 @@ export function InlineSparkline({
         points={coords.join(" ")}
       />
       {showEndDot && <circle cx={lastX} cy={lastY} r="2.5" style={{ fill: stroke }} />}
-      {showLabels && (
-        <>
-          <text
-            x={2}
-            y={10}
-            fontSize="10"
-            style={{ fill: "var(--text-secondary)" }}
-            textAnchor="start"
-          >
-            {first.toFixed(1)}
-          </text>
-          <text
-            x={width - 2}
-            y={10}
-            fontSize="10"
-            style={{ fill: "var(--text-secondary)" }}
-            textAnchor="end"
-          >
-            {last_v.toFixed(1)}
-          </text>
-        </>
-      )}
     </svg>
   );
 }

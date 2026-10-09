@@ -6,7 +6,9 @@
  * click, Escape, or option selection. Used by service, granularity, and metric
  * parameter kinds in {@link ParamStrip}.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
+import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 
 /** A single option entry for {@link SegmentedPill}. */
 type SegmentedOption = { value: string; label: string };
@@ -27,26 +29,12 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value) ?? options[0];
 
-  function close() {
+  function close(refocus = true) {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
@@ -63,24 +51,24 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
           (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
         }}
         style={{
-          background: "var(--bg-soft, rgba(0,0,0,0.04))",
+          background: "var(--bg-soft)",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 6,
           padding: "3px 8px",
           fontSize: 12,
-          color: "var(--text-primary, #1a1a1a)",
+          color: "var(--text-primary)",
           cursor: disabled ? "not-allowed" : "pointer",
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
-          transition: "background 120ms ease",
+          transition: "background var(--transition)",
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span style={{ color: "var(--text-secondary, #666)" }}>{label}:</span>
         <b>{current.label}</b>
-        <span style={{ color: "var(--text-tertiary, #999)", fontSize: 10 }}>▾</span>
+        <span style={{ color: "var(--text-tertiary, #999)", fontSize: "var(--text-xs)" }}>▾</span>
       </button>
       {open && (
         <div
@@ -93,8 +81,8 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
             border: "1px solid var(--border-soft, rgba(0,0,0,0.12))",
             borderRadius: 8,
             padding: 4,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 10,
+            boxShadow: "var(--el-2)",
+            zIndex: Z_INDEX.dropdown,
             minWidth: 120,
           }}
         >
@@ -112,7 +100,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
                 display: "block",
                 width: "100%",
                 background: opt.value === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                color: opt.value === value ? "var(--accent, #5b6cad)" : "var(--text-primary, #1a1a1a)",
+                color: opt.value === value ? "var(--accent-strong)" : "var(--text-primary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "5px 10px",

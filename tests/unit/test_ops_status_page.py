@@ -1,4 +1,4 @@
-"""Tests for scripts/ops_status_page.py: the aggregator that combines the four
+"""Tests for scripts/ops_status_page.py: the aggregator that combines the three
 independent operations-status collectors into one combined document, and
 renders it as compact text / HTML / (via `build_document`'s own dict) JSON.
 """
@@ -14,7 +14,6 @@ import pytest
 from scripts import ops_status_page
 from scripts.collect_oracle_status import OracleStatusReplayed, OracleStatusUnavailable
 from scripts.collect_r2_status import R2StatusReplayed, R2StatusUnavailable
-from scripts.collect_vps_status import VpsStatusUnavailable
 from scripts.ops_status import build_status, to_json_dict
 
 T0 = datetime(2026, 9, 12, 12, 0, 0, tzinfo=timezone.utc)
@@ -41,12 +40,7 @@ def make_component(
 # ── collect_all: per-collector isolation ──────────────────────────────────
 
 
-def test_collect_all_returns_all_four_components_on_success(monkeypatch):
-    monkeypatch.setattr(
-        ops_status_page,
-        "collect_vps_loop_status",
-        lambda **kw: build_status(**_status_kwargs("vps_loop")),
-    )
+def test_collect_all_returns_all_three_components_on_success(monkeypatch):
     monkeypatch.setattr(
         ops_status_page,
         "collect_github_status",
@@ -65,7 +59,7 @@ def test_collect_all_returns_all_four_components_on_success(monkeypatch):
 
     documents = ops_status_page.collect_all(now=T0)
 
-    assert [d["component"] for d in documents] == ["vps_loop", "github", "oracle_crawler", "r2"]
+    assert [d["component"] for d in documents] == ["github", "oracle_crawler", "r2"]
     assert all(d["state"] == "healthy" for d in documents)
 
 
@@ -83,10 +77,9 @@ def _status_kwargs(component: str) -> dict:
 
 def test_collect_all_isolates_one_collectors_failure(monkeypatch):
     def boom(**kw):
-        raise RuntimeError("systemctl not found")
+        raise RuntimeError("gh not found")
 
-    monkeypatch.setattr(ops_status_page, "collect_vps_loop_status", boom)
-    monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
+    monkeypatch.setattr(ops_status_page, "collect_github_status", boom)
     monkeypatch.setattr(
         ops_status_page, "collect_oracle_status", lambda **kw: build_status(**_status_kwargs("oracle_crawler"))
     )
@@ -95,28 +88,10 @@ def test_collect_all_isolates_one_collectors_failure(monkeypatch):
     documents = ops_status_page.collect_all(now=T0)
     by_component = {d["component"]: d for d in documents}
 
-    assert by_component["vps_loop"]["state"] == "unknown"
-    assert "systemctl not found" in by_component["vps_loop"]["details"]["collector_error"]
-    assert by_component["github"]["state"] == "healthy"
+    assert by_component["github"]["state"] == "unknown"
+    assert "gh not found" in by_component["github"]["details"]["collector_error"]
     assert by_component["oracle_crawler"]["state"] == "healthy"
     assert by_component["r2"]["state"] == "healthy"
-
-
-def test_collect_all_vps_loop_unavailable_degrades_to_unknown(monkeypatch):
-    def boom(**kw):
-        raise VpsStatusUnavailable("NEXT_TASK.md does not exist")
-
-    monkeypatch.setattr(ops_status_page, "collect_vps_loop_status", boom)
-    monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
-    monkeypatch.setattr(
-        ops_status_page, "collect_oracle_status", lambda **kw: build_status(**_status_kwargs("oracle_crawler"))
-    )
-    monkeypatch.setattr(ops_status_page, "collect_r2_status", lambda **kw: build_status(**_status_kwargs("r2")))
-
-    documents = ops_status_page.collect_all(now=T0)
-    by_component = {d["component"]: d for d in documents}
-    assert by_component["vps_loop"]["state"] == "unknown"
-    assert "NEXT_TASK.md" in by_component["vps_loop"]["details"]["collector_error"]
 
 
 def test_collect_all_oracle_replayed_uses_carried_status_not_unknown(monkeypatch):
@@ -125,9 +100,6 @@ def test_collect_all_oracle_replayed_uses_carried_status_not_unknown(monkeypatch
     def replayed(**kw):
         raise OracleStatusReplayed("not newer than watermark", replayed_status)
 
-    monkeypatch.setattr(
-        ops_status_page, "collect_vps_loop_status", lambda **kw: build_status(**_status_kwargs("vps_loop"))
-    )
     monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
     monkeypatch.setattr(ops_status_page, "collect_oracle_status", replayed)
     monkeypatch.setattr(ops_status_page, "collect_r2_status", lambda **kw: build_status(**_status_kwargs("r2")))
@@ -142,9 +114,6 @@ def test_collect_all_oracle_unavailable_degrades_to_unknown(monkeypatch):
     def boom(**kw):
         raise OracleStatusUnavailable("no gh run found")
 
-    monkeypatch.setattr(
-        ops_status_page, "collect_vps_loop_status", lambda **kw: build_status(**_status_kwargs("vps_loop"))
-    )
     monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
     monkeypatch.setattr(ops_status_page, "collect_oracle_status", boom)
     monkeypatch.setattr(ops_status_page, "collect_r2_status", lambda **kw: build_status(**_status_kwargs("r2")))
@@ -161,9 +130,6 @@ def test_collect_all_r2_replayed_uses_carried_status(monkeypatch):
     def replayed(**kw):
         raise R2StatusReplayed("not newer than watermark", replayed_status)
 
-    monkeypatch.setattr(
-        ops_status_page, "collect_vps_loop_status", lambda **kw: build_status(**_status_kwargs("vps_loop"))
-    )
     monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
     monkeypatch.setattr(
         ops_status_page, "collect_oracle_status", lambda **kw: build_status(**_status_kwargs("oracle_crawler"))
@@ -180,9 +146,6 @@ def test_collect_all_r2_unavailable_degrades_to_unknown(monkeypatch):
     def boom(**kw):
         raise R2StatusUnavailable("no gh run found")
 
-    monkeypatch.setattr(
-        ops_status_page, "collect_vps_loop_status", lambda **kw: build_status(**_status_kwargs("vps_loop"))
-    )
     monkeypatch.setattr(ops_status_page, "collect_github_status", lambda **kw: build_status(**_status_kwargs("github")))
     monkeypatch.setattr(
         ops_status_page, "collect_oracle_status", lambda **kw: build_status(**_status_kwargs("oracle_crawler"))
@@ -238,7 +201,6 @@ def test_overall_state_takes_the_worst(states, expected):
 def test_build_document_shape_and_ordering():
     docs = [
         make_component("r2"),
-        make_component("vps_loop"),
         make_component("oracle_crawler"),
         make_component("github"),
     ]
@@ -247,17 +209,17 @@ def test_build_document_shape_and_ordering():
     assert document["schema_version"] == ops_status_page.DOCUMENT_SCHEMA_VERSION
     assert document["generated_at"] == "2026-09-12T12:00:00Z"
     assert document["overall_state"] == "healthy"
-    assert [c["component"] for c in document["components"]] == ["vps_loop", "github", "oracle_crawler", "r2"]
+    assert [c["component"] for c in document["components"]] == ["github", "oracle_crawler", "r2"]
     assert document["reasons"] == {}
 
 
 def test_build_document_populates_reasons_for_non_healthy_only():
-    healthy = make_component("vps_loop")
+    healthy = make_component("oracle_crawler")
     failed = make_component("github", state_kwargs={"reported_failure": True})
     docs = [healthy, failed]
     document = ops_status_page.build_document(docs, now=T0)
 
-    assert "vps_loop" not in document["reasons"]
+    assert "oracle_crawler" not in document["reasons"]
     assert "github" in document["reasons"]
     assert document["overall_state"] == "failed"
 
@@ -266,7 +228,7 @@ def test_build_document_populates_reasons_for_non_healthy_only():
 
 
 def test_reason_for_healthy_is_none():
-    doc = make_component("vps_loop")
+    doc = make_component("oracle_crawler")
     assert ops_status_page.reason_for(doc) is None
 
 
@@ -276,30 +238,6 @@ def test_reason_for_collector_error_takes_priority():
     assert reason is not None
     assert "collector could not run" in reason
     assert "gh not found" in reason
-
-
-def test_reason_for_vps_loop_restarting():
-    doc = make_component(
-        "vps_loop",
-        state_kwargs={"reported_failure": True, "details": {"loop_activity": "restarting", "blocker_class": "db-lock"}},
-    )
-    assert ops_status_page.reason_for(doc) == "repeatedly blocked on db-lock without making progress"
-
-
-def test_reason_for_vps_loop_paused():
-    doc = make_component(
-        "vps_loop",
-        state_kwargs={"reported_failure": True, "details": {"loop_activity": "paused", "blocker_class": "review-gate"}},
-    )
-    assert ops_status_page.reason_for(doc) == "circuit-breaker paused (blocked on review-gate)"
-
-
-def test_reason_for_vps_loop_systemd_failed_falls_back_when_no_activity_reason():
-    doc = make_component(
-        "vps_loop",
-        state_kwargs={"reported_failure": True, "details": {"loop_activity": "idle", "systemd_active_state": "failed"}},
-    )
-    assert ops_status_page.reason_for(doc) == "claude-loop.service reported a failed run"
 
 
 def test_reason_for_github_summarizes_prs():
@@ -395,11 +333,6 @@ def test_reason_for_generic_unknown_never_succeeded():
 # ── highlight_for ────────────────────────────────────────────────────────────
 
 
-def test_highlight_for_vps_loop():
-    doc = make_component("vps_loop", state_kwargs={"details": {"current_item": 123, "loop_activity": "idle"}})
-    assert ops_status_page.highlight_for(doc) == "current_item=123 activity=idle"
-
-
 def test_highlight_for_r2_shows_placeholder_when_metrics_are_null():
     # r2_configured=false (or a `df` read failure) leaves these keys present but null,
     # not absent -- a plain `.get(key, '?')` would render the literal string "None".
@@ -434,7 +367,7 @@ def test_reason_for_r2_shows_placeholder_when_disk_used_pct_is_null():
 
 
 def test_highlight_for_unrecognized_component_is_empty():
-    doc = make_component("vps_loop")
+    doc = make_component("github")
     doc["component"] = "not_a_real_component"
     assert ops_status_page.highlight_for(doc) == ""
 

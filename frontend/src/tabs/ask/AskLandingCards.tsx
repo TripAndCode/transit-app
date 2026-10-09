@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 import { defaultsFor, needsRoute, type CardTemplate } from "../../components/askCardTemplates";
+import { CardTemplateIcon } from "../../components/CardTemplateIcon";
 
 type Props = {
   templates: CardTemplate[];
@@ -46,7 +47,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
         <>
           <div
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               fontWeight: 600,
               letterSpacing: "0.04em",
               textTransform: "uppercase",
@@ -75,12 +76,12 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                 }}
               >
                 <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>
-                  {tpl.emoji} {tpl.buildSummary(defaultsFor(tpl), t)}
+                  <CardTemplateIcon icon={tpl.icon} /> {tpl.buildSummary(defaultsFor(tpl), t)}
                 </div>
                 {tpl.example_answer_key && (
                   <div
                     style={{
-                      fontSize: 11.5,
+                      fontSize: "var(--text-xs)",
                       color: "var(--text-tertiary)",
                       marginTop: 6,
                       paddingLeft: 20,
@@ -99,7 +100,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
         <>
           <div
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               fontWeight: 600,
               letterSpacing: "0.04em",
               textTransform: "uppercase",
@@ -128,7 +129,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                   opacity: busy ? 0.6 : 1,
                 }}
               >
-                {tpl.emoji} {t(tpl.title_key)}
+                <CardTemplateIcon icon={tpl.icon} /> {t(tpl.title_key)}
               </button>
             ))}
           </div>

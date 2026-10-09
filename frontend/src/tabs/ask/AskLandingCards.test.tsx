@@ -8,10 +8,10 @@ import { buildCardTemplates, needsRoute } from "../../components/askCardTemplate
 
 const templates = buildCardTemplates();
 
-// buildSummary() output can contain regex metacharacters (e.g. the literal
-// parens in "Top 5 routes (All)"), so escape before feeding it to RegExp —
-// otherwise `(All)` is parsed as a capture group and silently stops matching
-// the literal parens in the rendered text.
+// buildSummary() output can contain regex metacharacters (e.g. the "?" that
+// ends a question card's summary), so escape before feeding it to RegExp —
+// otherwise it is parsed as a quantifier and silently stops matching the
+// literal text.
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -101,15 +101,45 @@ describe("AskLandingCards", () => {
     expect(document.querySelector("svg")).toBeInTheDocument();
   });
 
+  it("describes the feature in user language, not internal pipeline terms", () => {
+    setup();
+    const copy = `${i18n.t("ask.landing.header_title")} ${i18n.t("ask.landing.header_subtitle")}`;
+    expect(copy).not.toMatch(/rule|embedding|RAG|pipeline|stage/i);
+    expect(copy).not.toMatch(/ルール|埋め込み|段階/);
+  });
+
   it("shows an example-answer line under instant cards that have one, none for pills", () => {
     setup();
     expect(screen.getByText(i18n.t("ask.card.top_delay.example_answer"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("ask.card.ontime_rank.example_answer"))).toBeInTheDocument();
-    // Pills render only emoji + summary text (no example-answer line ever) —
-    // assert none of their buttons carries an extra child element.
+    // Pills render only an icon + summary text (no example-answer line ever) —
+    // assert none of their buttons carries a child element besides the icon.
     const pillsWrap = screen.getByText(i18n.t("ask.landing.pills_title")).nextElementSibling!;
     const pillButtons = pillsWrap.querySelectorAll("button");
     expect(pillButtons.length).toBeGreaterThan(0);
-    pillButtons.forEach((btn) => expect(btn.children).toHaveLength(0));
+    pillButtons.forEach((btn) => expect(btn.querySelectorAll(":scope > :not(svg)")).toHaveLength(0));
+  });
+
+  it("marks each card and pill with a line icon, not an emoji", () => {
+    setup();
+    const buttons = screen.getAllByRole("button");
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.querySelector("svg")).not.toBeNull();
+      expect(button.textContent).not.toMatch(/\p{Extended_Pictographic}|▥/u);
+    }
+  });
+
+  it("tells the two ranking cards apart by what they rank", () => {
+    setup();
+    expect(screen.getByText(/most delayed routes$/)).toBeInTheDocument();
+    expect(screen.getByText(/least on-time routes$/)).toBeInTheDocument();
+  });
+
+  it("cites no route codes in its examples, since they may not exist in this agency", () => {
+    for (const key of ["ask.card.top_delay.example_answer", "ask.card.ontime_rank.example_answer"]) {
+      expect(i18n.t(key)).not.toMatch(/[A-Z]\d{2}/);
+      expect(i18n.getFixedT("ja")(key)).not.toMatch(/[A-Z]\d{2}/);
+    }
   });
 });

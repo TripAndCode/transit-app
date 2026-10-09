@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
@@ -8,13 +8,18 @@ import { LandingPage } from "./LandingPage";
 
 void i18n.changeLanguage("en");
 
+const mockUseSession = vi.fn<() => { data: unknown; isLoading: boolean }>(() => ({ data: null, isLoading: false }));
+vi.mock("../api/auth", () => ({ useSession: () => mockUseSession() }));
+
 function renderLanding() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
         <MemoryRouter initialEntries={["/welcome"]}>
-          <LandingPage />
+          <Routes>
+            <Route path="/welcome" element={<LandingPage />} />
+          </Routes>
         </MemoryRouter>
       </I18nextProvider>
     </QueryClientProvider>,
@@ -22,6 +27,8 @@ function renderLanding() {
 }
 
 describe("LandingPage", () => {
+  beforeEach(() => mockUseSession.mockReturnValue({ data: null, isLoading: false }));
+
   it("renders the hero headline, subtitle, and a sign-in CTA linking to /login", () => {
     renderLanding();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -36,20 +43,35 @@ describe("LandingPage", () => {
     expect(cta).toHaveAttribute("href", "/login");
   });
 
-  it("renders a secondary guest link to the real guest-accessible dashboard", () => {
+  it("offers sign-in as the only way into the app", () => {
     renderLanding();
-    const guestLink = screen.getByRole("link", { name: "Continue as a guest" });
-    expect(guestLink).toHaveAttribute("href", "/");
-    // Still exactly one primary sign-in CTA -- the guest link is additive,
-    // not a replacement or a competing same-weight button.
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.queryByRole("link", { name: "Continue as a guest" })).toBeNull();
   });
 
-  it("renders the dashboard-preview shell below the hero", () => {
+  it("links to the terms of service and privacy policy", () => {
     renderLanding();
-    expect(screen.getByRole("heading", { name: "See what's inside" })).toBeTruthy();
-    // The sidebar's real nav set, not a top-nav bar -- see DashboardPreview.test.tsx
-    // for the full structural/interaction assertions.
-    expect(screen.getByRole("button", { name: /Overview/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+  });
+
+  it("stays open to a signed-in visitor and offers the dashboard in place of sign-in", () => {
+    mockUseSession.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
+    renderLanding();
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open the dashboard" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+  });
+
+  it("renders the scroll narrative's real chart sections below the hero, not the retired DashboardPreview mock", () => {
+    renderLanding();
+    // The three narrative section headings.
+    expect(screen.getByRole("heading", { name: "Delay builds along a route" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Every day, compared" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Ask, get evidence" })).toBeTruthy();
+    // Real components, not a mocked shell -- see ScrollNarrative.test.tsx for
+    // the full per-section assertions.
+    expect(screen.getByRole("group", { name: "Delay by stop" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Daily average delay chart" })).toBeTruthy();
   });
 });

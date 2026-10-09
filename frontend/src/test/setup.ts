@@ -1,11 +1,27 @@
 import "@testing-library/jest-dom/vitest";
-import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { afterEach, beforeAll } from "vitest";
+import { cleanup, configure } from "@testing-library/react";
+import i18n, { i18nReady, SUPPORTED_LOCALES } from "../i18n";
+import { ASYNC_UTIL_TIMEOUT_MS } from "./timeouts";
+
+configure({ asyncUtilTimeout: ASYNC_UTIL_TIMEOUT_MS });
 
 // Ensure React Testing Library unmounts components and clears the DOM between
 // tests so state never leaks across cases.
 afterEach(() => {
   cleanup();
+});
+
+// The app fetches one language's strings at a time. Tests load every locale
+// up front so a test can switch language and assert on the next line.
+//
+// LanguageDetector reads navigator.language at init, so the starting locale
+// would depend on the environment. Every test file starts in English; one
+// exercising Japanese opts in with its own `i18n.changeLanguage("ja")`.
+beforeAll(async () => {
+  await i18nReady;
+  await i18n.loadLanguages([...SUPPORTED_LOCALES]);
+  await i18n.changeLanguage("en");
 });
 
 // jsdom doesn't implement window.matchMedia. Components (e.g. ThreadSidebar's
@@ -25,4 +41,65 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     removeEventListener: () => {},
     dispatchEvent: () => false,
   }) as unknown as MediaQueryList;
+}
+
+// jsdom doesn't implement Element.scrollTo (used by components that keep a
+// scroll container pinned to the top on new content, e.g. AskTab's message
+// list) — without a stub, mounting such a component throws "scrollTo is not
+// a function" for every test, not just ones about scroll position.
+if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}
+
+// jsdom implements neither IntersectionObserver nor ResizeObserver. These
+// defaults are inert (they never call back) so a component that observes an
+// element without checking for the class first mounts without throwing
+// instead of leaving the observed state permanently at its initial value. A
+// test that needs the observer to actually fire installs its own driveable
+// stub with `vi.stubGlobal` (see RevealSection.test.tsx, useInView.test.ts),
+// which overrides this default for that test and is restored by
+// `vi.unstubAllGlobals()` afterward. A test that specifically depends on
+// `IntersectionObserver`/`ResizeObserver` being absent (the real jsdom
+// default) forces that with `vi.stubGlobal(name, undefined)` instead of
+// relying on the ambient environment. Pure-logic test files that opt into
+// the cheaper `node` environment (no `window` at all) skip this, same as
+// the matchMedia/scrollTo stubs above.
+if (typeof window !== "undefined" && typeof IntersectionObserver === "undefined") {
+  class NoopIntersectionObserver {
+    root: Element | Document | null = null;
+    rootMargin = "";
+    thresholds: ReadonlyArray<number> = [];
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+  }
+  window.IntersectionObserver = NoopIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+if (typeof window !== "undefined" && typeof ResizeObserver === "undefined") {
+  class NoopResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  window.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
+}
+
+// vitest's jsdom environment wraps URL.createObjectURL to copy a jsdom Blob
+// into a Node Blob, reaching the bytes through an own Symbol property of the
+// jsdom wrapper. jsdom now keeps that implementation in a private class field,
+// so the wrapper throws for every jsdom Blob: CSV downloads, and maplibre-gl,
+// which registers its worker bundle when the module is imported. No test reads
+// an object URL's contents back, so an opaque unique URL stands in whenever the
+// probe throws. Once the environment can convert jsdom Blobs again, the probe
+// passes and the real implementation stays in place.
+if (typeof window !== "undefined") {
+  try {
+    URL.revokeObjectURL(URL.createObjectURL(new Blob()));
+  } catch {
+    let nextObjectUrl = 0;
+    URL.createObjectURL = () => `blob:${location.origin}/${++nextObjectUrl}`;
+  }
 }

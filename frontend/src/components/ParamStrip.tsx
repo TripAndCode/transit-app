@@ -14,6 +14,7 @@ import { SegmentedPill } from "./paramPills/SegmentedPill";
 import { LimitPill } from "./paramPills/LimitPill";
 import { RoutePickerPill } from "./paramPills/RoutePickerPill";
 import { Spinner } from "./Spinner";
+import { CardTemplateIcon } from "./CardTemplateIcon";
 
 type ParamStripProps = {
   template: CardTemplate;
@@ -50,8 +51,8 @@ export function ParamStrip({
         marginBottom: 8,
       }}
     >
-      <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary, #1a1a1a)" }}>
-        {template.emoji} {t(template.title_key)}
+      <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
+        <CardTemplateIcon icon={template.icon} /> {t(template.title_key)}
       </span>
 
       {template.params.map((spec) => {
@@ -80,8 +81,8 @@ export function ParamStrip({
           // Keep the accent background while busy so the spinner stays
           // readable; only fade to bg-soft when blocked by missing params.
           background:
-            busy || canRun ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.06))",
-          color: busy || canRun ? "white" : "var(--text-tertiary, #999)",
+            busy || canRun ? "var(--accent)" : "var(--bg-soft)",
+          color: busy || canRun ? "var(--on-accent)" : "var(--text-tertiary, #999)",
           border: "none",
           borderRadius: 999,
           padding: "5px 16px",

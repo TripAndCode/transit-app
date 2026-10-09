@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
+import { CardTemplateIcon } from "./CardTemplateIcon";
 
 type QuestionDockProps = {
   agencyId: number;
@@ -45,7 +46,7 @@ export function QuestionDock({
   const { t } = useTranslation();
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
-  // directly on every render — no useMemo (see CLAUDE.md).
+  // directly on every render — no useMemo (see AGENTS.md).
   const templates = buildCardTemplates();
 
   const composing = templates.find((tpl) => tpl.id === composingId) ?? null;
@@ -86,8 +87,8 @@ export function QuestionDock({
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 12,
           padding: "10px 12px",
-          boxShadow: composing ? "0 2px 10px rgba(0,0,0,0.04)" : "none",
-          transition: "box-shadow 120ms ease",
+          boxShadow: composing ? "var(--el-1)" : "none",
+          transition: "box-shadow var(--transition)",
         }}
       >
         {composing && (
@@ -119,29 +120,29 @@ export function QuestionDock({
                   aria-disabled={busy && !active}
                   aria-pressed={active}
                   style={{
-                    background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
-                    color: active ? "var(--on-accent)" : "var(--text-primary, #1a1a1a)",
+                    background: active ? "var(--accent)" : "var(--bg-soft)",
+                    color: active ? "var(--on-accent)" : "var(--text-primary)",
                     border: "1px solid",
                     borderColor: active
-                      ? "var(--accent, #5b6cad)"
+                      ? "var(--accent)"
                       : "var(--border-soft, rgba(0,0,0,0.08))",
                     borderRadius: 999,
                     padding: "5px 14px",
                     fontSize: 13,
                     cursor: busy && !active ? "not-allowed" : "pointer",
                     opacity: busy && !active ? 0.6 : 1,
-                    transition: "background 120ms ease, color 120ms ease",
+                    transition: "background var(--transition), color var(--transition)",
                   }}
                   title={t(tpl.title_key)}
                 >
-                  {tpl.emoji} {t(tpl.title_key)}
+                  <CardTemplateIcon icon={tpl.icon} /> {t(tpl.title_key)}
                 </button>
               );
             })}
             {!composing && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary, #999)",
                   marginLeft: 6,
                 }}

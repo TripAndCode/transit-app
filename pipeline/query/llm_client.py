@@ -20,7 +20,15 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from openai import Timeout
+
 _log = logging.getLogger(__name__)
+
+# Bounds every provider call, on the shared ladder and the BYOK path alike. A
+# rung that hangs has to give up while the caller is still waiting, or the
+# ladder never reaches the next provider; the SDK's own default read timeout is
+# far longer than any Ask/Copilot/follow-up caller waits.
+REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
 # Built-in defaults for each provider we support. Operator overrides
 # any field via env (e.g. GEMINI_BASE_URL=...). The "key_env" is the
@@ -122,6 +130,50 @@ def _build_create_kwargs(
     return create_kwargs
 
 
+def log_usage(provider: str, model: str, response: Any) -> None:
+    """Record one call's token counts, the app's only per-call cost signal.
+
+    Logs names and counts only -- never the key or any message content.
+    ``cached_tokens`` is the provider-reported prompt-prefix cache hit, ``None``
+    when the provider doesn't report it.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    details = getattr(usage, "prompt_tokens_details", None)
+    _log.info(
+        "llm usage provider=%s model=%s prompt_tokens=%s cached_tokens=%s completion_tokens=%s",
+        provider,
+        model,
+        getattr(usage, "prompt_tokens", None),
+        getattr(details, "cached_tokens", None),
+        getattr(usage, "completion_tokens", None),
+    )
+
+
+def describe_provider_failure(exc: BaseException) -> str:
+    """Safe-to-log description of a failed provider call.
+
+    Deliberately omits the exception's message. These calls carry an API key —
+    the user's own on the BYOK paths, the operator's on the shared ladder — and
+    a provider's error body routinely echoes part of it back ("Incorrect API
+    key provided: sk-..."), so the message is the one field that must never be
+    logged. The exception type, the HTTP status and the provider's request id
+    identify the failure well enough to act on and carry no secret.
+
+    Every handler that logs a provider failure goes through here, so a new call
+    site inherits that guarantee rather than having to remember it.
+    """
+    parts = [type(exc).__name__]
+    status = getattr(exc, "status_code", None)
+    if status:
+        parts.append(f"status={status}")
+    request_id = getattr(exc, "request_id", None)
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    return ", ".join(parts)
+
+
 class LLMClient:
     """Tries each configured provider in order until one succeeds.
 
@@ -145,7 +197,6 @@ class LLMClient:
         tools: list[dict] | None = None,
         tool_choice: str = "auto",
         temperature: float = 0.0,
-        model_override: str | None = None,
         response_format: dict | None = None,
         allowed_providers: set[str] | None = None,
     ) -> tuple[Any | None, str | None]:
@@ -166,8 +217,8 @@ class LLMClient:
         Per provider: retries ONCE on a refused/reset socket
         (``APIConnectionError``, no backoff — it fails instantly), and
         descends the ladder immediately on a timeout (``APITimeoutError``,
-        which already waited the full deadline), on rate-limit (429), and on
-        an unrecoverable ``BadRequestError``.
+        which already waited the full :data:`REQUEST_TIMEOUT`), on rate-limit
+        (429), and on an unrecoverable ``BadRequestError``.
 
         The client is built once per provider (reusing one connection pool
         across the retry) with ``max_retries=0`` — the SDK's own retry would
@@ -192,11 +243,11 @@ class LLMClient:
         seen_rate_limit = False
         last_kind: str | None = None
         for cfg in ladder:
-            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
+            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0, timeout=REQUEST_TIMEOUT)
             for attempt in (1, 2):
                 try:
                     create_kwargs = _build_create_kwargs(
-                        model=model_override or cfg.model,
+                        model=cfg.model,
                         messages=messages,
                         temperature=temperature,
                         tools=tools,
@@ -204,6 +255,7 @@ class LLMClient:
                         response_format=response_format,
                     )
                     resp = client.chat.completions.create(**create_kwargs)
+                    log_usage(cfg.name, cfg.model, resp)
                     return resp.choices[0].message, None
                 except APITimeoutError:
                     # The request already waited the full timeout; retrying would
@@ -228,11 +280,11 @@ class LLMClient:
                     break  # 429 won't clear in 1s — go to next provider
                 except BadRequestError as exc:
                     last_kind = "bad_request"
-                    _log.warning("provider %s BadRequestError %r; next in ladder", cfg.name, exc)
+                    _log.warning("provider %s failed (%s); next in ladder", cfg.name, describe_provider_failure(exc))
                     break
                 except Exception as exc:
                     last_kind = "unexpected"
-                    _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
+                    _log.warning("provider %s failed (%s); next in ladder", cfg.name, describe_provider_failure(exc))
                     break
 
         # Prefer the quota signal: if any provider was rate-limited, surface that

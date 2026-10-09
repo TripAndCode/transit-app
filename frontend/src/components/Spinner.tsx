@@ -5,10 +5,12 @@
  * inherits font size, gentle rotation. Use inline in busy buttons or near
  * inline text where a Skeleton placeholder would be too much.
  *
- * Respects `prefers-reduced-motion` — when the user has motion reduced, the
- * arc shows static and a dotted ring fades softly instead of spinning.
+ * Spinning is a stylesheet concern: `.ui-spinner svg` rotates inside the
+ * motion-allowed block of `ui.css`, so a reduced-motion viewer sees the
+ * static arc — the same rule every other loop in the app follows.
  */
 import type { CSSProperties } from "react";
+import "./ui/ui.css";
 
 type SpinnerProps = {
   /** Pixel size; defaults to 14 (matches a 13px button label height). */
@@ -33,11 +35,12 @@ export function Spinner({
   return (
     <span
       data-spinner
+      className="ui-spinner"
       role={label ? "status" : undefined}
       aria-label={label || undefined}
       aria-hidden={label ? undefined : true}
       style={{
-        display: inline ? "inline-flex" : "inline-block",
+        display: inline ? "inline-flex" : undefined,
         alignItems: inline ? "center" : undefined,
         verticalAlign: inline ? "middle" : "baseline",
         marginRight: inline ? 6 : 0,
@@ -46,17 +49,7 @@ export function Spinner({
         ...style,
       }}
     >
-      <svg
-        viewBox="0 0 24 24"
-        width={size}
-        height={size}
-        fill="none"
-        style={{
-          animation: "spinner-rotate 0.9s linear infinite",
-          transformBox: "fill-box",
-          transformOrigin: "50% 50%",
-        }}
-      >
+      <svg viewBox="0 0 24 24" width={size} height={size} fill="none">
         <circle
           cx="12"
           cy="12"
@@ -74,16 +67,6 @@ export function Spinner({
           fill="none"
         />
       </svg>
-      <style>{`
-        @keyframes spinner-rotate {
-          to { transform: rotate(360deg); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          [data-spinner] svg {
-            animation-duration: 2.4s !important;
-          }
-        }
-      `}</style>
     </span>
   );
 }

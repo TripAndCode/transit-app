@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ThreadSidebar } from "./ThreadSidebar";
 import * as hooks from "../api/hooks";
@@ -20,6 +21,10 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 function mockConversations(data: Conversation[], isLoading = false) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({
+    data: [{ route_id: "HL(39061)", route_short_name: "", route_long_name: "Harbor Loop", route_code: "39061", trip_headsigns: [] }],
+    isLoading: false,
+  } as never);
   vi.spyOn(hooks, "useConversations").mockReturnValue({ data, isLoading } as never);
   vi.spyOn(hooks, "useUpdateConversation").mockReturnValue({ mutate: vi.fn() } as never);
   vi.spyOn(hooks, "useDeleteConversation").mockReturnValue({ mutate: vi.fn() } as never);
@@ -48,10 +53,19 @@ describe("ThreadSidebar", () => {
     fireEvent.change(search, { target: { value: "" } });
     expect(screen.getByText("Evening service")).toBeInTheDocument();
   });
+  it("summarises a conversation's day filter with the shared day label", () => {
+    mockConversations([
+      conv({ title: "Weekend delays", filter_ctx: { dow: "weekend" } }),
+      conv({ conversation_id: "c2", title: "Weekday delays", filter_ctx: { dow: "weekday" } }),
+    ]);
+    render();
+    expect(screen.getByText(/Weekend\/Holiday/)).toBeInTheDocument();
+    expect(screen.getByText(/Weekday$/)).toBeInTheDocument();
+  });
   it("shows the empty state when there are no conversations", () => {
     mockConversations([]);
     render();
-    expect(screen.getAllByText("No conversations yet").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No investigations yet").length).toBeGreaterThan(0);
   });
 
   it("shows the loading state", () => {
@@ -90,6 +104,188 @@ describe("ThreadSidebar", () => {
   it("renders a single embedded copy of the sidebar content, with no viewport-specific chrome", () => {
     mockConversations([]);
     render();
-    expect(screen.getByText("New conversation")).toBeInTheDocument();
+    expect(screen.getByText("New investigation")).toBeInTheDocument();
+  });
+
+  describe("row semantics", () => {
+    it("exposes the main row action as a real, independently reachable button, not a role=button wrapper around the kebab", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      expect(rowButton.tagName.toLowerCase()).toBe("button");
+      const kebab = screen.getByRole("button", { name: "More options" });
+      // The kebab must be a sibling, not a descendant of the row button --
+      // a real <button> cannot validly contain another interactive control.
+      expect(rowButton.contains(kebab)).toBe(false);
+    });
+
+    it("selects the conversation when the row button is activated by keyboard", async () => {
+      const onSelect = vi.fn();
+      mockConversations([conv({ title: "Morning delays" })]);
+      renderWithProviders(
+        <ThreadSidebar agencyId={9} activeId={null} onSelect={onSelect} onNewThread={vi.fn()} />,
+      );
+      await userEvent.tab(); // New-thread button
+      await userEvent.tab(); // search input
+      await userEvent.tab(); // row button
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      expect(rowButton).toHaveFocus();
+      await userEvent.keyboard("{Enter}");
+      expect(onSelect).toHaveBeenCalledWith("c1");
+    });
+
+    it("still opens the context menu on right-click of the row container", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      fireEvent.contextMenu(rowButton);
+      expect(screen.getByText("Rename")).toBeInTheDocument();
+    });
+  });
+
+  describe("context menu", () => {
+    it("is a menu of menuitems and takes focus when it opens", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const menu = screen.getByRole("menu");
+      const items = within(menu).getAllByRole("menuitem");
+      expect(items.map((i) => i.textContent)).toEqual(["Rename", "Pin", "Delete"]);
+      expect(items[0]).toHaveFocus();
+    });
+
+    it("walks its items with the arrow keys, wrapping at both ends", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+
+      fireEvent.keyDown(items[0], { key: "ArrowDown" });
+      expect(items[1]).toHaveFocus();
+      fireEvent.keyDown(items[1], { key: "ArrowUp" });
+      expect(items[0]).toHaveFocus();
+      fireEvent.keyDown(items[0], { key: "ArrowUp" });
+      expect(items[2]).toHaveFocus();
+      fireEvent.keyDown(items[2], { key: "ArrowDown" });
+      expect(items[0]).toHaveFocus();
+    });
+
+    it("returns focus to the control that opened it when Escape closes it", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      fireEvent.click(kebab);
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(kebab).toHaveFocus();
+    });
+
+    it("closes when its kebab is pressed again", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      await user.click(kebab);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(kebab);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
+    it("closes on a press outside without pulling focus back to the kebab", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      await user.click(screen.getByRole("button", { name: "More options" }));
+      await user.click(screen.getByRole("searchbox"));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+    });
+
+    it("returns focus to the control that opened it when an item is chosen", () => {
+      // Choosing an item unmounts the menuitem that had focus. Escape is not
+      // the only exit that has to put the operator back on the kebab.
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      fireEvent.click(kebab);
+      const pin = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .find((item) => /pin/i.test(item.textContent ?? ""))!;
+
+      fireEvent.click(pin);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(kebab).toHaveFocus();
+    });
+
+    it("styles its items by class rather than by mutating inline style on hover", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const item = within(screen.getByRole("menu")).getAllByRole("menuitem")[0];
+      expect(item).toHaveClass("context-menu__item");
+      fireEvent.mouseEnter(item);
+      expect(item.style.background).toBe("");
+    });
+
+    it("closes on Escape", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.contextMenu(screen.getByRole("button", { name: /Morning delays/ }));
+      expect(screen.getByText("Rename")).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByText("Rename")).not.toBeInTheDocument();
+    });
+
+    it("clamps its position so it never renders past the right/bottom viewport edge", () => {
+      const originalInnerWidth = window.innerWidth;
+      const originalInnerHeight = window.innerHeight;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 400 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 300 });
+      const offsetWidthSpy = vi
+        .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+        .mockReturnValue(200);
+      const offsetHeightSpy = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(150);
+
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      vi.spyOn(kebab, "getBoundingClientRect").mockReturnValue({
+        right: 395,
+        top: 290,
+        left: 350,
+        bottom: 300,
+        width: 24,
+        height: 24,
+        x: 350,
+        y: 290,
+        toJSON() {},
+      } as DOMRect);
+      fireEvent.click(kebab);
+
+      const menu = screen.getByText("Rename").closest("div") as HTMLElement;
+      expect(parseFloat(menu.style.left)).toBeLessThanOrEqual(400 - 200 - 1);
+      expect(parseFloat(menu.style.top)).toBeLessThanOrEqual(300 - 150 - 1);
+
+      offsetWidthSpy.mockRestore();
+      offsetHeightSpy.mockRestore();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+    });
+  });
+
+  it("calls the new-item button an investigation, like the list it adds to", () => {
+    mockConversations([]);
+    render();
+    expect(screen.getByRole("button", { name: /New investigation/ })).toBeInTheDocument();
+  });
+
+  it("names an investigation's routes by their label, not their GTFS code", () => {
+    mockConversations([conv({ title: "Morning delays", filter_ctx: { routes: ["39061"] } })]);
+    render();
+    const item = screen.getByText("Morning delays").closest("button")!;
+    expect(within(item).getByText(/Harbor Loop/)).toBeInTheDocument();
+    expect(within(item).queryByText(/39061/)).not.toBeInTheDocument();
   });
 });

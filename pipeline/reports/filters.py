@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, build_agg_daily_trend_filter, build_updates_filter_ch, dow_clause
+from api.range import (
+    TIME_BAND_RANGES,
+    RangeCtx,
+    build_agg_daily_trend_filter,
+    build_updates_filter_ch,
+)
+from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
@@ -23,7 +29,11 @@ def _round2(x: float) -> Decimal:
 
 
 def _dedup_cte_ch(
-    ctx: RangeCtx, *, include_arr_delay: bool = False, include_scheduled_sec: bool = False
+    ctx: RangeCtx,
+    *,
+    include_arr_delay: bool = False,
+    include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
 ) -> tuple[str, dict]:
     """ClickHouse-dialect dedup CTE builder.
 
@@ -57,6 +67,7 @@ def _dedup_cte_ch(
         include_captured_at=False,
         include_arr_delay=include_arr_delay,
         include_scheduled_sec=include_scheduled_sec,
+        table=table,
     )
     cte_sql = f"deduped AS ({body})"
     return cte_sql, params
@@ -73,18 +84,18 @@ def _ch_rows(result) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in result.result_rows]
 
 
-def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """WHERE fragment for ``agg_daily_trend`` covering date + DOW + service + routes.
+def _dated_agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """WHERE fragment for a per-day aggregate keyed by (agency_id, date, route, service).
 
-    Wraps :func:`api.range.build_agg_daily_trend_filter` (which only emits date
-    + DOW) and tacks on optional ``service_type`` + ``route_code`` predicates
-    so every Overview helper that reads ``agg_daily_trend`` shares the same
-    filter shape.
+    Date and DOW come from :func:`api.range.build_agg_daily_trend_filter`
+    (which keeps the DATE column bare so the primary-key prefix serves the
+    range scan); optional ``service_type`` and ``route_code`` predicates are
+    added here so every reader of ``agg_daily_trend`` and
+    ``agg_route_daily_dist`` shares one filter shape.
 
-    The ``time_band`` filter is silently dropped — the agg tables roll up to
-    (date, route, service) granularity and have no hour-of-day column. When
-    ``ctx.time_band != 'all'`` callers must fall back to the live-updates path
-    so the filter actually applies.
+    ``time_band`` is silently dropped — these tables roll up to (date, route,
+    service) and have no hour-of-day column. When ``ctx.time_band != 'all'``
+    callers must fall back to the live-updates path so the filter applies.
     """
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param)
     parts: list[str] = [frag] if frag else []
@@ -99,47 +110,14 @@ def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     return " AND ".join(parts), params, n
 
 
+def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """:func:`_dated_agg_filter` for ``agg_daily_trend``."""
+    return _dated_agg_filter(ctx, next_param)
+
+
 def _dist_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """WHERE fragment for ``agg_route_daily_dist`` (date + DOW + service + routes).
-
-    Like :func:`_agg_filter` but the date predicate is kept **sargable on the
-    real DATE column** — ``date >= $a AND date <= $b`` with the cast on the
-    *parameter* side, not the column. ``agg_daily_trend`` stores ISO date
-    *text* (forcing a ``date::date`` cast), but this table's ``date`` is a true
-    DATE, so leaving the column uncast lets the ``(agency_id, date)`` PK prefix
-    serve the range scan. ``time_band`` is unrepresentable here — callers fall
-    back to the live path when ``ctx.time_band != 'all'``.
-    """
-    parts: list[str] = [f"date >= (${next_param}::text)::date AND date <= (${next_param + 1}::text)::date"]
-    params: list = [str(ctx.from_date), str(ctx.to_date)]
-    n = next_param + 2
-
-    frag, p, n = dow_clause("date", ctx, n)
-    if frag != "TRUE":
-        parts.append(frag)
-        params.extend(p)
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
-    if ctx.routes:
-        parts.append(f"route_code = ANY(${n}::text[])")
-        params.append(list(ctx.routes))
-        n += 1
-    return " AND ".join(parts), params, n
-
-
-# Mirrors api/range._TIME_BAND_RANGES. Duplicated locally so this module
-# doesn't reach into a private name in another package.
-_TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
-    "morning": ("05:00", "09:00"),
-    "forenoon": ("09:00", "12:00"),
-    "noon": ("12:00", "14:00"),
-    "afternoon": ("14:00", "17:00"),
-    "evening": ("17:00", "20:00"),
-    "night": ("20:00", "24:00"),
-    "late_night": ("00:00", "05:00"),
-}
+    """:func:`_dated_agg_filter` for ``agg_route_daily_dist``."""
+    return _dated_agg_filter(ctx, next_param)
 
 
 def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str, list, int]:
@@ -150,11 +128,16 @@ def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str
     unknown band name. Matches the asyncpg ``::text)::time`` cast pattern
     used elsewhere in this module (e.g. :func:`_agg_filter`'s siblings) for
     Postgres TIME columns.
+
+    Unlike the ClickHouse builder (:func:`api.range.time_band_clause_ch`),
+    the hour needs no modulo-24 wrap: the columns filtered here are Postgres
+    TIME, and GTFS's extended hours (>= 24, a trip continuing past midnight)
+    are resolved to NULL at ingest — see
+    :func:`pipeline.strategies._time.parse_departure_time` — so a value
+    outside ``00:00``–``23:59`` can never reach this predicate.
     """
-    if time_band == "all":
+    if time_band not in TIME_BAND_RANGES:
         return "", [], next_param
-    if time_band not in _TIME_BAND_RANGES:
-        return "", [], next_param
-    start, end = _TIME_BAND_RANGES[time_band]
+    start, end = TIME_BAND_RANGES[time_band]
     frag = f"{column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time"
     return frag, [start, end], next_param + 2

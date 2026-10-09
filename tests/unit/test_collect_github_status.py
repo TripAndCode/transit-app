@@ -35,7 +35,7 @@ class FakeCompletedProcess:
 
 def runner_from(responses: dict[str, FakeCompletedProcess]):
     """Build a fake `Runner` keyed by ` `-joined argv prefix, raising an assertion error
-    if an unexpected command is issued -- see collect_vps_status.py's identical helper."""
+    if an unexpected command is issued."""
 
     def runner(cmd):
         key = " ".join(cmd)
@@ -280,7 +280,7 @@ BRANCHES_FIXTURE = json.dumps(
         {"name": "main", "commit": {"sha": "abc123"}, "protected": False},
         {"name": "production", "commit": {"sha": "def456"}, "protected": False},
         {"name": "fix/dark-mode-ui-pass", "commit": {"sha": "111111"}, "protected": False},
-        {"name": "vps-loop/item-129", "commit": {"sha": "222222"}, "protected": True},
+        {"name": "fix/item-129", "commit": {"sha": "222222"}, "protected": True},
     ]
 )
 
@@ -295,7 +295,7 @@ def test_fetch_branch_protection_parses_fixture():
         "main": False,
         "production": False,
         "fix/dark-mode-ui-pass": False,
-        "vps-loop/item-129": True,
+        "fix/item-129": True,
     }
     assert truncated is False
 
@@ -378,8 +378,8 @@ FOR_EACH_REF_FIXTURE = "\n".join(
         "origin/main\t2026-09-11T12:00:00+00:00",
         "origin/production\t2026-08-01T00:00:00+00:00",
         "origin/fix/dark-mode-ui-pass\t2026-09-10T12:00:00+00:00",
-        "origin/vps-loop/item-1\t2026-06-01T00:00:00+00:00",
-        "origin/vps-loop/item-2\t2026-07-01T00:00:00+00:00",
+        "origin/fix/item-1\t2026-06-01T00:00:00+00:00",
+        "origin/fix/item-2\t2026-07-01T00:00:00+00:00",
     ]
 )
 
@@ -397,8 +397,8 @@ def test_gather_stale_branches_filters_protected_and_recent():
     )
 
     # "main"/"production" excluded as always-protected; "fix/dark-mode-ui-pass" is
-    # only ~1 day old (not stale); the two vps-loop branches are both >30 days old.
-    assert stale == ("vps-loop/item-1", "vps-loop/item-2")
+    # only ~1 day old (not stale); the two fix branches are both >30 days old.
+    assert stale == ("fix/item-1", "fix/item-2")
     assert truncated is False
 
 
@@ -429,18 +429,18 @@ def test_gather_stale_branches_respects_remote_protection_flag():
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
-        remote_protection={"vps-loop/item-1": True},
+        remote_protection={"fix/item-1": True},
         stale_days=30.0,
         max_branches=10,
         git_runner=runner,
     )
 
-    assert stale == ("vps-loop/item-2",)
+    assert stale == ("fix/item-2",)
     assert truncated is False
 
 
 def test_gather_stale_branches_excludes_branches_missing_from_truncated_protection_page():
-    # "vps-loop/item-2" is absent from `remote_protection` (it fell past the truncated
+    # "fix/item-2" is absent from `remote_protection` (it fell past the truncated
     # page), so its protection status is unknown -- it must not be assumed unprotected
     # and included in the stale list, unlike the untruncated case above.
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
@@ -448,7 +448,7 @@ def test_gather_stale_branches_excludes_branches_missing_from_truncated_protecti
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
-        remote_protection={"vps-loop/item-1": True},
+        remote_protection={"fix/item-1": True},
         remote_protection_truncated=True,
         stale_days=30.0,
         max_branches=10,
@@ -608,7 +608,7 @@ def test_build_status_fresh_success_falls_back_to_cached_stale_branches_when_loc
             "open_pr_count": 1,
             "branch_protection_known": True,
             "stale_branches_known": True,
-            "stale_unprotected_branches": ["vps-loop/item-9"],
+            "stale_unprotected_branches": ["fix/item-9"],
         }
     )
     cached_document = collector.ops_status.to_json_dict(cached_status)
@@ -624,7 +624,7 @@ def test_build_status_fresh_success_falls_back_to_cached_stale_branches_when_loc
     assert status.details["open_pr_count"] == 5  # this tick's own fresh PR data, not the cache's
     assert status.details["branch_protection_known"] is False  # this tick's own reality, not the cache's
     assert status.details["stale_branches_known"] is False
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-9"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-9"]
 
 
 def test_build_status_fresh_success_uses_fresh_stale_branches_over_cache_when_available():
@@ -641,7 +641,7 @@ def test_build_status_fresh_success_uses_fresh_stale_branches_over_cache_when_av
     facts = make_facts(
         prs=prs,
         branch_protection_known=True,
-        stale_branches=("vps-loop/item-11",),
+        stale_branches=("fix/item-11",),
         cached_document=cached_document,
     )
 
@@ -649,7 +649,7 @@ def test_build_status_fresh_success_uses_fresh_stale_branches_over_cache_when_av
 
     assert status.details["branch_protection_known"] is True
     assert status.details["stale_branches_known"] is True
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-11"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-11"]
 
 
 def test_build_status_unknown_when_no_success_and_no_cache():
@@ -705,7 +705,7 @@ def test_build_status_cache_fallback_uses_this_runs_fresh_stale_branch_data():
         prs=None,
         pr_error_kind="network_error",
         branch_protection_known=True,
-        stale_branches=("vps-loop/item-5",),
+        stale_branches=("fix/item-5",),
         cached_document=cached_document,
     )
 
@@ -714,7 +714,7 @@ def test_build_status_cache_fallback_uses_this_runs_fresh_stale_branch_data():
     assert status.details["open_pr_count"] == 3  # only the PR data actually came from cache
     assert status.details["branch_protection_known"] is True
     assert status.details["stale_branches_known"] is True
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-5"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-5"]
     assert status.details["last_error_kind"] == "network_error"
 
 
@@ -724,7 +724,7 @@ def test_build_status_cache_fallback_falls_back_to_cache_when_local_scan_also_fa
             "open_pr_count": 3,
             "branch_protection_known": True,
             "stale_branches_known": True,
-            "stale_unprotected_branches": ["vps-loop/item-1"],
+            "stale_unprotected_branches": ["fix/item-1"],
         }
     )
     cached_document = collector.ops_status.to_json_dict(cached_status)
@@ -742,7 +742,7 @@ def test_build_status_cache_fallback_falls_back_to_cache_when_local_scan_also_fa
     # the cache to overlay -- the cached list is preserved rather than wiped to empty.
     assert status.details["branch_protection_known"] is False
     assert status.details["stale_branches_known"] is False
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-1"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-1"]
 
 
 def test_build_status_no_cache_includes_fresh_stale_branch_data():
@@ -751,7 +751,7 @@ def test_build_status_no_cache_includes_fresh_stale_branch_data():
         pr_error_kind="network_error",
         cached_document=None,
         branch_protection_known=True,
-        stale_branches=("vps-loop/item-7",),
+        stale_branches=("fix/item-7",),
     )
 
     status = collector.build_github_status(facts, **HEALTHY_KWARGS)
@@ -759,7 +759,7 @@ def test_build_status_no_cache_includes_fresh_stale_branch_data():
     assert status.state == "unknown"
     assert status.details["branch_protection_known"] is True
     assert status.details["stale_branches_known"] is True
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-7"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-7"]
     assert status.details["last_error_kind"] == "network_error"
 
 
@@ -890,7 +890,7 @@ def test_collect_github_status_reports_fresh_stale_branches_when_only_pr_fetch_f
     assert status.details["last_error_kind"] == "auth_error"
     assert status.details["branch_protection_known"] is True
     assert status.details["stale_branches_known"] is True
-    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-1", "vps-loop/item-2"]
+    assert status.details["stale_unprotected_branches"] == ["fix/item-1", "fix/item-2"]
     # A cache-fallback result never overwrites the cache, even though this run gathered
     # fresher stale-branch data than what's on disk.
     assert json.loads(cache_path.read_text())["details"]["stale_unprotected_branches"] == []

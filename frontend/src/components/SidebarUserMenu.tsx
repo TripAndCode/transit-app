@@ -1,12 +1,23 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useId, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useSession } from "../api/auth";
+import { useLogout, useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
-import { SUPPORTED_LOCALES, type Locale } from "../i18n";
+import type { Theme } from "../styles/theme";
+import { LOCALE_NAMES, SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { useLocaleSwitch } from "../i18n/useLocaleSwitch";
+import { Z_INDEX } from "../styles/zIndex";
+import { Spinner } from "./Spinner";
+import { useToast } from "./ui/toastContext";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
-const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
+const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
+const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
+  system: "common.theme_system",
+  light: "common.theme_light",
+  dark: "common.theme_dark",
+};
 
 const popItemStyle: CSSProperties = {
   display: "flex",
@@ -25,6 +36,23 @@ const popItemStyle: CSSProperties = {
   textAlign: "left",
 };
 
+/** The chosen appearance reads as chosen, not just as aria-checked: a tinted
+ *  row is the only cue a sighted user gets that "system" is active when it
+ *  currently resolves to the same theme they could pick explicitly. */
+const selectedItemStyle: CSSProperties = {
+  ...popItemStyle,
+  color: "var(--accent-strong)",
+  background: "var(--accent-soft)",
+};
+
+/** A visible heading over a set of choices in the menu, which also names
+ *  the set for assistive tech. */
+const groupLabelStyle: CSSProperties = {
+  padding: "6px 9px 2px",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-tertiary)",
+};
+
 /** Sidebar footer control: collapses what used to be five separate header
  *  controls (Live/sign-in/language/theme/settings) into one avatar-trigger
  *  popover, following the standard "user menu" pattern instead of a row of
@@ -34,33 +62,24 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const { data: config, isLoading: configLoading } = useConfig();
   const { data: session, isLoading: sessionLoading } = useSession();
   const [theme, setTheme] = useTheme();
+  const toast = useToast();
+  const logout = useLogout();
+  const languageLabelId = useId();
+  const [switchTarget, setSwitchTarget] = useState<Locale | null>(null);
+  const appearanceLabelId = useId();
   const [open, setOpen] = useState(false);
+  const { pending: switchingLocale, switchTo } = useLocaleSwitch(() => toast.show(t("common.language_switch_error")));
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => {
+    setOpen(false);
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   if (sessionLoading || configLoading) return null;
 
   const current = (i18n.resolvedLanguage ?? "ja") as Locale;
-  const other = SUPPORTED_LOCALES.find((l) => l !== current) ?? current;
   const displayName = session ? session.name || session.email : t("common.guest");
   const initial = displayName.slice(0, 1).toUpperCase();
 
@@ -77,9 +96,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 6,
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
           }}
         >
           {config?.auth_enabled &&
@@ -92,26 +111,57 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                 <span>{t("common.login")}</span>
               </Link>
             ))}
-          {config?.auth_enabled && session?.role === "admin" && (
-            <Link role="menuitem" to="/admin" onClick={() => setOpen(false)} style={popItemStyle}>
-              <span>{t("account.admin_link")}</span>
-            </Link>
-          )}
-          <Link role="menuitem" to="/help" onClick={() => setOpen(false)} style={popItemStyle}>
-            <span>{t("nav.help")}</span>
-          </Link>
-          <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
-            <span>{t("common.language_aria")}</span>
-            <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{LOCALE_LABELS[current]}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            style={popItemStyle}
-          >
-            <span>{theme === "dark" ? t("common.theme_toggle_to_light") : t("common.theme_toggle_to_dark")}</span>
-          </button>
+          <div role="group" aria-labelledby={languageLabelId}>
+            <div id={languageLabelId} style={groupLabelStyle}>
+              {t("common.language_aria")}
+            </div>
+            {SUPPORTED_LOCALES.map((lng) => {
+              const loading = switchingLocale && lng === switchTarget;
+              return (
+                // aria-disabled rather than disabled: disabling the focused
+                // button would drop keyboard focus out of the open menu.
+                <button
+                  key={lng}
+                  type="button"
+                  role="menuitemradio"
+                  lang={lng}
+                  aria-checked={lng === current}
+                  aria-busy={loading}
+                  aria-disabled={loading}
+                  onClick={() => {
+                    if (lng === current || switchingLocale) return;
+                    setSwitchTarget(lng);
+                    void switchTo(lng);
+                  }}
+                  style={lng === current ? selectedItemStyle : loading ? { ...popItemStyle, cursor: "default" } : popItemStyle}
+                >
+                  <span>{LOCALE_NAMES[lng]}</span>
+                  {loading && <Spinner size={12} inline />}
+                </button>
+              );
+            })}
+          </div>
+          {/* Three states, not a two-way toggle: "system" has to be reachable
+              and distinguishable from whichever theme it currently resolves
+              to. menuitemradio (not radio) because these live inside a menu,
+              where radio is not a permitted child role. */}
+          <div role="group" aria-labelledby={appearanceLabelId}>
+            <div id={appearanceLabelId} style={groupLabelStyle}>
+              {t("common.theme_aria")}
+            </div>
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === option}
+                onClick={() => setTheme(option)}
+                style={theme === option ? selectedItemStyle : popItemStyle}
+              >
+                <span>{t(THEME_OPTION_LABEL_KEYS[option])}</span>
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             role="menuitem"
@@ -123,6 +173,30 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           >
             <span>{t("header.settings_aria")}</span>
           </button>
+          {config?.auth_enabled && session && (
+            <>
+              <div role="separator" style={{ height: 1, margin: "6px 0", background: "var(--border-soft)" }} />
+              <button
+                type="button"
+                role="menuitem"
+                aria-busy={logout.isPending}
+                aria-disabled={logout.isPending}
+                onClick={() => {
+                  if (logout.isPending) return;
+                  logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") });
+                }}
+                style={logout.isPending ? { ...popItemStyle, cursor: "default" } : popItemStyle}
+              >
+                <span>{t("account.logout")}</span>
+                {logout.isPending && <Spinner size={12} inline />}
+              </button>
+              {logout.isError && (
+                <p role="alert" style={{ margin: "4px 9px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                  {t("account.logout_error")}
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
       <button
@@ -154,11 +228,11 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             borderRadius: "50%",
             flexShrink: 0,
             background: "var(--accent-soft)",
-            color: "var(--accent)",
+            color: "var(--accent-strong)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 700,
           }}
         >
@@ -168,15 +242,15 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {displayName}
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{LOCALE_NAMES[current]}</div>
         </span>
         <span
           aria-hidden
           style={{
             color: "var(--text-tertiary)",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 160ms ease",
+            transition: "transform var(--transition)",
           }}
         >
           &#9662;

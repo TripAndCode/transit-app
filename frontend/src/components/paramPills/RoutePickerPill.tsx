@@ -13,9 +13,12 @@
  * which is docked at the bottom of the viewport) — otherwise the popover
  * renders mostly or entirely off-screen with no way to scroll to it.
  */
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
+import { routeLabel } from "../../api/useRouteNames";
 import { delayColor } from "../../styles/tokens";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import "./RoutePickerPill.css";
 
 /** Popover's own rendered height (search input + max-height list + padding/border),
@@ -57,12 +60,13 @@ export function RoutePickerPill({
   const [openUp, setOpenUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { t } = useTranslation();
   const { data: routes = [], isLoading } = useRoutes(agencyId);
 
-  function close() {
+  function close(refocus = true) {
     setQ("");
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
   // Decide open direction once, right when the popover mounts — measuring the
@@ -75,21 +79,7 @@ export function RoutePickerPill({
     setOpenUp(spaceBelow < POPOVER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   const ql = q.trim().toLowerCase();
   const filteredList = (ql
@@ -103,10 +93,8 @@ export function RoutePickerPill({
   ).filter((r) => r.route_code != null);
   const filtered = filteredList.slice(0, 50);
 
-  // Prefer a human name (short_name is the line name, e.g. "L21 中央大橋線") over
-  // the internal route_code; fall through to the code only as a last resort.
   const selected = value ? routes.find((r) => r.route_code === value) : undefined;
-  const display = value ? selected?.route_short_name || selected?.route_long_name || value : placeholder;
+  const display = value ? (selected ? routeLabel(selected, t) : value) : placeholder;
 
   return (
     <div ref={ref} className="rp">
@@ -149,7 +137,7 @@ export function RoutePickerPill({
             {!isLoading && filtered.length === 0 && <div className="rp-msg">—</div>}
             {filtered.map((r) => {
               const code = r.route_code;
-              const name = r.route_short_name || r.route_long_name || code;
+              const name = routeLabel(r, t);
               const delay = code != null ? delays?.[code] : null;
               return (
                 <button
@@ -164,7 +152,8 @@ export function RoutePickerPill({
                   }}
                 >
                   <span className="rp-opt-name">{name}</span>
-                  {code && name !== code ? <span className="rp-opt-code">{code}</span> : <span />}
+                  {/* An unnamed route is labelled by its route_id, which embeds the code. */}
+                  {code && !name.includes(code) ? <span className="rp-opt-code">{code}</span> : <span />}
                   {delay != null ? (
                     <span className="rp-opt-delay">
                       <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />

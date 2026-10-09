@@ -131,13 +131,13 @@ async def test_edit_action_rejects_bad_action(ask_endpoints_client):
 
 
 @pytest.mark.asyncio
-async def test_suggest_empty_q_returns_list(ask_endpoints_client):
-    """Smoke test: empty q returns 200 with a list (may be empty if no chunks seeded)."""
+async def test_suggest_empty_q_returns_an_envelope(ask_endpoints_client):
+    """Smoke test: empty q returns 200 with a `rows` envelope (rows may be
+    empty if no chunks are seeded)."""
     client, agency_id, _pool = ask_endpoints_client
     r = await client.get(f"/api/{agency_id}/ask/suggest?q=")
     assert r.status_code == 200
-    body = r.json()
-    assert isinstance(body, list)
+    assert isinstance(r.json()["rows"], list)
 
 
 @pytest.mark.asyncio
@@ -153,7 +153,7 @@ async def test_suggest_clamps_limit(ask_endpoints_client, monkeypatch):
 
     r = await client.get(f"/api/{agency_id}/ask/suggest?q=foo&limit=999")
     assert r.status_code == 200
-    assert len(r.json()) <= 12
+    assert len(r.json()["rows"]) <= 12
 
 
 @pytest.mark.asyncio

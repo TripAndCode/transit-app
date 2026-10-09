@@ -21,6 +21,9 @@ describe("react compiler manual-memoization bans actually fire", () => {
 
   function ruleIds(code: string): string[] {
     const messages = linter.verify(code, config, { filename: "src/__fixture__.tsx" });
+    // A fixture that fails to parse reports only a fatal message with no rule
+    // id, which would make every "is not flagged" assertion pass vacuously.
+    expect(messages.filter((m) => m.fatal)).toEqual([]);
     return messages.map((m) => m.ruleId).filter((id): id is string => id !== null);
   }
 
@@ -48,6 +51,53 @@ describe("react compiler manual-memoization bans actually fire", () => {
     // in no-restricted-imports' importNames list -- isolates member-expression
     // coverage to no-restricted-properties, not an incidental double-flag.
     expect(ids).not.toContain("no-restricted-imports");
+  });
+
+  test("a component the compiler would skip over a try/finally is flagged (react-hooks/todo)", () => {
+    const code =
+      'import { useState } from "react";\n' +
+      "export function Saver({ save }: { save: () => Promise<void> }) {\n" +
+      "  const [busy, setBusy] = useState(false);\n" +
+      "  async function onClick() {\n" +
+      "    setBusy(true);\n" +
+      "    try {\n" +
+      "      await save();\n" +
+      "    } finally {\n" +
+      "      setBusy(false);\n" +
+      "    }\n" +
+      "  }\n" +
+      "  return <button disabled={busy} onClick={onClick} />;\n" +
+      "}\n";
+    expect(ruleIds(code)).toContain("react-hooks/todo");
+  });
+
+  test("a component's try/catch with no finally, which the compiler can lower, is not flagged", () => {
+    const code =
+      'import { useState } from "react";\n' +
+      "export function Saver({ save }: { save: () => Promise<void> }) {\n" +
+      "  const [failed, setFailed] = useState(false);\n" +
+      "  async function onClick() {\n" +
+      "    try {\n" +
+      "      await save();\n" +
+      "    } catch {\n" +
+      "      setFailed(true);\n" +
+      "    }\n" +
+      "  }\n" +
+      "  return <button data-failed={failed} onClick={onClick} />;\n" +
+      "}\n";
+    expect(ruleIds(code)).not.toContain("react-hooks/todo");
+  });
+
+  test("a try/finally outside any component or hook is not flagged", () => {
+    const code =
+      "export async function saveAll(save: () => Promise<void>, done: () => void) {\n" +
+      "  try {\n" +
+      "    await save();\n" +
+      "  } finally {\n" +
+      "    done();\n" +
+      "  }\n" +
+      "}\n";
+    expect(ruleIds(code)).not.toContain("react-hooks/todo");
   });
 
   test("ordinary code with no manual memoization is clean", () => {

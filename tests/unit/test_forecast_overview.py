@@ -91,19 +91,19 @@ def test_hourly_cells_to_dow_band_pools_by_derived_dow():
 
 def test_pooled_sums_totals_not_reweighted_averages():
     """_pooled's contract is (TOTAL minutes, samples) pairs -> exact pooled
-    mean, not (per-bucket avg, samples) pairs to be weighted here -- the fix
-    for compounding rounding across the grid pool. Reproduces the two-row
+    mean, not (per-bucket avg, samples) pairs to be weighted here, so
+    rounding does not compound across the grid pool. Reproduces the two-row
     example from this module's own docstring: sum_delay_sec=1000/samples=21
     and sum_delay_sec=50/samples=21 have a true combined mean of
     1050/42/60, which pooling their own already-rounded per-row averages
     (0.79, 0.04) would instead land on 0.415 -- a real, if small, divergence
-    this function's new contract avoids by never re-deriving a per-row
+    this function's contract avoids by never re-deriving a per-row
     average in the first place.
     """
     mean, n = _pooled([(1000 / 60, 21), (50 / 60, 21)])
     assert n == 42
     assert mean == pytest.approx(1050 / 42 / 60, abs=1e-9)
-    assert mean != pytest.approx(0.415, abs=1e-9)  # the old, imprecise pooled-of-rounded result
+    assert mean != pytest.approx(0.415, abs=1e-9)  # pooling the rounded per-row averages
 
 
 def test_pooled_empty_returns_none_mean_zero_samples():
@@ -134,7 +134,7 @@ def test_summarize_agency_overview_grid_prefers_exact_sum_delay_sec():
 
 def test_summarize_agency_overview_grid_falls_back_when_sum_delay_sec_absent():
     """A caller with no sum_delay_sec at all (e.g. an older row shape) must
-    keep working exactly as before the fix: fall back to avg_min * samples."""
+    still get a grid: it falls back to avg_min * samples."""
     rows = [
         {"dow": 1, "hour": 9, "avg_min": 2.0, "samples": 10},
         {"dow": 1, "hour": 12, "avg_min": 8.0, "samples": 40},

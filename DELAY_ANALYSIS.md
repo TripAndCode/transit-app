@@ -1,7 +1,7 @@
 # How delay analysis works
 
 An overview of what this app actually does with transit delays. For the architecture
-details see `README.md`; for AI-assist conventions see `CLAUDE.md`.
+details see `README.md`; for AI-assist conventions see `AGENTS.md`.
 
 ## The raw data
 

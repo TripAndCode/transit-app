@@ -3,12 +3,15 @@ import { BusFront, ChevronRight, MapPin, Radio, Route as RouteIcon, TrendingDown
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
 import { relativeTime } from "../../utils/relativeTime";
 import { signedMin } from "../live/signedMin";
+import { hhmm } from "./format";
 
 export type DirectionOption = { key: string; label: string; trips: LiveTrip[] };
 export type ActiveRouteOption = { code: string; label: string; trips: number; directions: number; maxDelay: number };
 
 type Props = {
   routeName: string;
+  /** Whether any trip is reporting at all, routed or not. */
+  reporting: boolean;
   activeRoutes: ActiveRouteOption[];
   directions: DirectionOption[];
   selectedDirection: string | null;
@@ -21,10 +24,6 @@ type Props = {
   onSelectTrip: (trip: LiveTrip) => void;
   t: TFunction;
 };
-
-function departure(trip: LiveTrip): string {
-  return trip.scheduled_time?.slice(0, 5) ?? "--:--";
-}
 
 function largestChange(stops: LiveTripProgressResponse["stops"]) {
   let growth: { stop: string; seconds: number } | null = null;
@@ -77,6 +76,7 @@ function DelayChart({ progress, t }: { progress: LiveTripProgressResponse; t: TF
 
 export function OperationsTripPanel({
   routeName,
+  reporting,
   activeRoutes,
   directions,
   selectedDirection,
@@ -139,7 +139,7 @@ export function OperationsTripPanel({
         <section className="ops-selected-trip">
           <div className="ops-selected-trip__summary">
             <BusFront size={20} aria-hidden="true" />
-            <div><strong>{t("operations.trip_panel.departure", { time: departure(selected) })}</strong><span>{selected.headsign ?? t("operations.trip_panel.unknown_direction")}</span></div>
+            <div><strong>{t("operations.trip_panel.departure", { time: hhmm(selected) })}</strong><span>{selected.headsign ?? t("operations.trip_panel.unknown_direction")}</span></div>
             <b>{signedMin(selected.dep_delay, t)}</b>
           </div>
           <div className="ops-selected-trip__reported">
@@ -169,7 +169,9 @@ export function OperationsTripPanel({
           )}
         </section>
       ) : (
-        <div className="ops-trip-panel__empty">{t("operations.trip_panel.select_route")}</div>
+        <div className="ops-trip-panel__empty">
+          {t(reporting ? "operations.trip_panel.select_route" : "operations.trip_panel.none_reporting")}
+        </div>
       )}
 
       {trips.length > 1 && (
@@ -178,7 +180,7 @@ export function OperationsTripPanel({
           {trips.filter((trip) => trip.trip_id !== selectedTripId).map((trip) => (
             <button key={trip.trip_id} type="button" onClick={() => onSelectTrip(trip)}>
               <BusFront size={16} />
-              <span><strong>{t("operations.trip_panel.departure", { time: departure(trip) })}</strong><small>{trip.stop_name ?? trip.headsign ?? "-"}</small></span>
+              <span><strong>{t("operations.trip_panel.departure", { time: hhmm(trip) })}</strong><small>{trip.stop_name ?? trip.headsign ?? "-"}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
               <ChevronRight size={15} />
             </button>

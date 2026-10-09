@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { routeDisplayName } from "../api/routeDisplayName";
 import type { Route } from "../api/types";
 
@@ -11,11 +11,6 @@ type RouteGroup = {
   variants: RouteVariant[];
   shared_long_name: string | null;
 };
-
-function useAgencyId(): number | null {
-  const { agencyId } = useParams();
-  return agencyId ? Number(agencyId) : null;
-}
 
 function variantLabel(v: RouteVariant): string {
   const long = v.long_name?.trim();
@@ -55,12 +50,33 @@ function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+type RouteDelay = { avg_min: number; samples: number };
+
+/** The samples-weighted mean delay of a group's variants that have data. */
+function groupMean(variants: RouteVariant[], delays: ReadonlyMap<string, RouteDelay> | undefined): number | null {
+  if (!delays) return null;
+  let samples = 0;
+  let weighted = 0;
+  for (const v of variants) {
+    const d = delays.get(v.code);
+    if (!d) continue;
+    samples += d.samples;
+    weighted += d.avg_min * d.samples;
+  }
+  return samples > 0 ? weighted / samples : null;
+}
+
 export function RoutesPicker({
   selected,
   onChange,
+  delays,
+  renderDelay,
 }: {
   selected: string[];
   onChange: (v: string[]) => void;
+  /** Mean delay per route code; each line shows its own beside its name. */
+  delays?: ReadonlyMap<string, RouteDelay>;
+  renderDelay?: (minutes: number) => ReactNode;
 }) {
   const { t } = useTranslation();
   const id = useAgencyId();
@@ -125,6 +141,7 @@ export function RoutesPicker({
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
+        aria-label={t("filters.routes.search_label")}
         placeholder={t("filters.routes.search_placeholder")}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
@@ -142,6 +159,7 @@ export function RoutesPicker({
           const someOn = !allOn && codes.some((c) => selected.includes(c));
           const isOpen = expanded.has(g.name);
           const multi = g.variants.length > 1;
+          const mean = renderDelay ? groupMean(g.variants, delays) : null;
           const topSuffix = !multi
             ? g.variants[0].long_name?.trim() || ""
             : g.shared_long_name?.trim() || "";
@@ -159,6 +177,7 @@ export function RoutesPicker({
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
+                  minHeight: 36,
                 }}
               >
                 <input
@@ -192,6 +211,7 @@ export function RoutesPicker({
                     <span style={{ color: "var(--text-tertiary)" }}> {t("filters.routes.variant_count", { count: g.variants.length })}</span>
                   )}
                 </button>
+                {mean != null && renderDelay?.(mean)}
                 {multi && (
                   <button
                     type="button"
@@ -201,6 +221,8 @@ export function RoutesPicker({
                       background: "transparent",
                       border: "none",
                       padding: "2px 6px",
+                      minWidth: 32,
+                      minHeight: 32,
                       cursor: "pointer",
                       color: "var(--text-tertiary)",
                       fontSize: 12,
@@ -225,6 +247,7 @@ export function RoutesPicker({
                           display: "flex",
                           alignItems: "center",
                           gap: 6,
+                          minHeight: 32,
                           borderTop: "1px dashed var(--border-soft)",
                         }}
                       >
@@ -233,8 +256,8 @@ export function RoutesPicker({
                         <span
                           style={{
                             color: "var(--text-tertiary)",
-                            fontFamily: "ui-monospace, monospace",
-                            fontSize: 11,
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--text-xs)",
                           }}
                         >
                           {v.code}

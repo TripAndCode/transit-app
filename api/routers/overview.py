@@ -5,15 +5,54 @@ Returns the full magazine payload in a single locale-aware round-trip.
 
 from __future__ import annotations
 
+import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
+from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.reports import compute_overview_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
+
+_SUMMARY_SCOPE = scope_applied(*ALL_SIX)
+# The breakdown takes its own hour/dow integers over an all-time aggregate.
+_BREAKDOWN_SCOPE = scope_applied()
+
+# Minimum observations behind a route's peak-hour figure before it is shown.
+_PEAK_HOUR_MIN_SAMPLES = 3
+
+
+def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
+    """Top-20 routes by pooled average delay for one hour of ``agg_route_hour_dow``.
+
+    ``avg_min`` is always re-derived from ``sum_delay_sec``/``samples`` over the
+    grouped rows, never read from the stored per-row ``avg_min``, so the
+    single-DOW and the all-DOW answer are the same statistic computed the same
+    way. The sample floor is applied to the group total alone: a route whose
+    observations are spread thinly across the rows being pooled is still
+    well-evidenced once pooled, and dropping its rows first would both hide it
+    and bias the average that remains.
+
+    ``by_dow`` selects the parameter shape: ``$1`` agency, ``$2`` hour, and
+    ``$3`` day-of-week only when scoping to one DOW.
+    """
+    dow_clause = "AND dow = $3 " if by_dow else ""
+    return f"""
+        SELECT route_code, service_type,
+               (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                   / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
+               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples
+        FROM agg_route_hour_dow
+        WHERE agency_id = $1 AND hour = $2 {dow_clause}
+        GROUP BY route_code, service_type
+        HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
+        ORDER BY avg_min DESC NULLS LAST
+        LIMIT 20
+    """
 
 
 class Headline(BaseModel):
@@ -84,12 +123,13 @@ class TopDelayedRoute(BaseModel):
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay + a count of routes at/above the
-    2.0-min "not ok" threshold, both over the same window the headline
-    covers."""
+    """Top-5 routes by absolute avg delay + a count of routes averaging at
+    least ``delayed_threshold_min`` late, both over the same window the
+    headline covers."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
+    delayed_threshold_min: float
 
 
 class PeakHour(BaseModel):
@@ -126,6 +166,7 @@ class OverviewSummary(BaseModel):
     service_split: dict[str, float]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
+    scope_applied: dict[str, bool]
 
 
 class RouteHourEntry(BaseModel):
@@ -139,54 +180,30 @@ class PeakHourBreakdown(BaseModel):
     hour: int
     dow: int | None
     routes: list[RouteHourEntry]
+    scope_applied: dict[str, bool]
 
 
 @router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def peak_hour_breakdown(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     hour: int = Query(ge=0, le=23),
     dow: int | None = Query(default=None, ge=1, le=7),
 ) -> PeakHourBreakdown:
     """Top routes by average delay for a given hour (and optionally day-of-week).
 
     Reads from ``agg_route_hour_dow``. When ``dow`` is omitted, pools all DOWs
-    for the requested hour. Routes with fewer than 3 samples are excluded to
-    suppress noise from infrequent service patterns. Returns at most 20 routes
-    ordered worst-first.
+    for the requested hour; either way the average is pooled from the summed
+    delay and sample columns. A route whose pooled observations for the hour
+    number fewer than ``_PEAK_HOUR_MIN_SAMPLES`` is excluded to suppress noise
+    from infrequent service patterns. Returns at most 20 routes worst-first.
     """
+    params: list[object] = [agency_id, hour]
     if dow is not None:
-        rows = await conn.fetch(
-            """
-            SELECT route_code, service_type, avg_min, samples
-            FROM agg_route_hour_dow
-            WHERE agency_id = $1 AND dow = $2 AND hour = $3 AND samples >= 3
-            ORDER BY avg_min DESC
-            LIMIT 20
-            """,
-            agency_id,
-            dow,
-            hour,
-        )
-    else:
-        rows = await conn.fetch(
-            """
-            SELECT route_code, service_type,
-                   (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
-                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-                   SUM(samples) AS samples
-            FROM agg_route_hour_dow
-            WHERE agency_id = $1 AND hour = $2 AND samples >= 3
-            GROUP BY route_code, service_type
-            HAVING SUM(samples) >= 3
-            ORDER BY avg_min DESC NULLS LAST
-            LIMIT 20
-            """,
-            agency_id,
-            hour,
-        )
+        params.append(dow)
+    rows = await conn.fetch(_peak_hour_breakdown_sql(by_dow=dow is not None), *params)
     return PeakHourBreakdown(
         hour=hour,
         dow=dow,
@@ -200,16 +217,17 @@ async def peak_hour_breakdown(
             for r in rows
             if r["avg_min"] is not None
         ],
+        scope_applied=_BREAKDOWN_SCOPE,
     )
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> OverviewSummary:
@@ -220,4 +238,4 @@ async def overview_summary(
     qualitative labels). See spec section "Architecture".
     """
     payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool, ch=ch)
-    return OverviewSummary(**payload)
+    return OverviewSummary(**payload, scope_applied=_SUMMARY_SCOPE)

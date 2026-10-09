@@ -1,15 +1,21 @@
 """Cross-agency network summary endpoint (not scoped to a single agency)."""
 
+import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_ch, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
+from api.scope_applied import scope_applied
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
 from pipeline.reports.network import compute_network_summary
 
 router = APIRouter(prefix="/api/network", tags=["network"])
+
+# The board compares whole agencies over a date range only.
+_NETWORK_SCOPE = scope_applied("from", "to")
 
 
 class NetworkAgencyRow(BaseModel):
@@ -44,7 +50,7 @@ class NetworkAgencyRow(BaseModel):
     # CURRENTLY loaded static-feed version's schedule definition (not a
     # date-range total). planned_vehicle_km and vehicle_km_delivered_pct are
     # None together whenever vehicle-km isn't computable (no shapes.txt) or
-    # item 92's executed/planned ratio isn't available for this agency —
+    # the executed/planned trip ratio isn't available for this agency —
     # never a misleading 100%; the UI falls back to planned_trip_count alone.
     static_version_id: str | None
     planned_trip_count: int | None
@@ -63,16 +69,17 @@ class NetworkSummary(BaseModel):
     # comparing this board against a per-agency report's on_time export can
     # see both are using the same definition. See pipeline.reports.definition.
     definition: DefinitionMeta
+    scope_applied: dict[str, bool]
 
 
 @router.get("/summary", response_model=NetworkSummary)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def network_summary(
     request: Request,
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> NetworkSummary:
     """Per-agency network health board over [from, to], ranked worst-avg-delay first.
 
     Honors the date range only; service/time_band/dow/routes are not applied
@@ -84,4 +91,5 @@ async def network_summary(
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
         definition=resolve_definition_meta("on_time", None, None),
+        scope_applied=_NETWORK_SCOPE,
     )

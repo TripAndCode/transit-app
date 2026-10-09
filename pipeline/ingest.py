@@ -10,16 +10,25 @@ import pathlib
 import re
 import tarfile
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 from clickhouse_connect.driver.exceptions import DataError
 
-from pipeline.clickhouse import distinct_file_names, insert_updates, recent_file_name_exists
+from pipeline.clickhouse import (
+    LIVE_TABLE,
+    days_with_source,
+    distinct_file_names,
+    insert_updates,
+    jst_date,
+    recent_file_name_exists,
+)
 from pipeline.strategies import get_ingest_strategy
 
-# ── Re-exports for back-compat (existing tests import these) ──────────────────
-from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
+# archive_captured_at is used below; the private helpers are back-compat
+# re-exports that existing tests import from here.
+from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts, archive_captured_at  # noqa: F401
 from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
@@ -27,6 +36,8 @@ from pipeline.strategies.aomori_regex import (
 from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 # Flush a ClickHouse insert after accumulating this many rows across files —
 # large enough that per-insert's fixed overhead is amortized across
@@ -44,6 +55,49 @@ _DATE_DIR_RE = re.compile(r"\d{8}")
 def _date_dir(name: str) -> str:
     """Return *name* if it is a YYYYMMDD token, otherwise ``""``."""
     return name if _DATE_DIR_RE.fullmatch(name) else ""
+
+
+def _jst_day(stamp: str) -> date:
+    """The JST day a captured_at ISO stamp falls on: the day its rows will
+    occupy in `updates`."""
+    return datetime.fromisoformat(stamp).astimezone(_JST).date()
+
+
+def _archive_since(tarballs: list[pathlib.Path], pb_loose: list[pathlib.Path]) -> date | None:
+    """The earliest JST calendar day *any* file in this folder can be stamped
+    with, or ``None`` when that cannot be established for every one of them.
+
+    Bounds the already-ingested skip-list (`distinct_file_names`) to the span
+    the folder actually covers, instead of reading the agency's whole history
+    to answer a question about a few days. A file whose rows fall before the
+    bound would read as new and be ingested twice, so anything that cannot be
+    placed from the names alone collapses the answer to ``None``: a tarball
+    with no date in its stem (its members fall back to their own inner
+    directories, unreadable without opening the archive), a loose ``.pb``
+    with no date directory (its captured_at falls back to ``now()``), or a
+    token that is eight digits but not a date.
+
+    A tarball member's own YYYYMMDD directory still overrides its tarball's
+    stem, so a member can be stamped earlier than this bound — :func:`ingest`
+    watches for that and drops the bound rather than trusting it.
+    """
+    tokens = []
+    for tgz in tarballs:
+        m = _DATE_DIR_RE.search(tgz.stem)
+        if m is None:
+            return None
+        tokens.append(m.group(0))
+    for path in pb_loose:
+        token = _date_dir(path.parent.name)
+        if not token:
+            return None
+        tokens.append(token)
+    if not tokens:
+        return None
+    try:
+        return min(datetime.strptime(t, "%Y%m%d").date() for t in tokens)
+    except ValueError:
+        return None
 
 
 @contextmanager
@@ -68,7 +122,7 @@ def _savepoint(cur, name: str) -> Iterator[None]:
     run of *successful* items in one commit window (each successful
     SAVEPOINT still holds a slot until the next top-level commit). This
     pipeline's read endpoints serve from precomputed ``agg_*`` tables, not
-    live scans of ``updates`` (see CLAUDE.md), so the resulting
+    live scans of ``updates`` (see AGENTS.md), so the resulting
     pg_subtrans-lookup overhead on concurrent readers is low-impact here;
     lowering the commit cadence below 64 items would close that specific
     gap but cost more frequent fsyncs, so it's accepted as-is rather than
@@ -175,20 +229,33 @@ def parse_pb(
     return rows
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
+def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
     actually written to ClickHouse (post intra-batch dedup; a failed batch
     contributes 0).
+
+    Writes closed JST days only, as of *now*. A collector names and tars its
+    archives by UTC day, so one archive runs to 09:00 JST the next day and
+    its last members can land on a day that has not ended yet; those are
+    left unmarked for a later run, which reads them once their day closes.
     """
     root = pathlib.Path(folder)
     n_errors = 0
     n_inserted = 0
 
-    done = distinct_file_names(ch_client, agency_id)
+    tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
+    pb_loose = sorted(root.rglob("*.pb"))
 
-    # `done` is only updated by _flush() (every _BATCH_ROWS rows, Task 8.9),
+    # The skip-list only has to cover the span this folder can be stamped
+    # with; unbounded it reads the agency's whole history to do it. See
+    # _archive_since for when a bound may be claimed at all, and
+    # _widen_skip_list for the one case that revokes it after the fact.
+    since = _archive_since(tarballs, pb_loose)
+    done = distinct_file_names(ch_client, agency_id, since=since)
+
+    # `done` is only updated by _flush() (every _BATCH_ROWS rows),
     # so a file buffered but not yet flushed is invisible to any dedup check
     # against `done` alone. `seen` closes that gap: every file key is added
     # to it the instant it's buffered (added to pending_files), not once it's
@@ -208,13 +275,56 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # the batch with them.
     seen = set(done)
 
+    def _widen_skip_list() -> None:
+        """Re-read the skip-list unbounded, because a file turned up that the
+        bound cannot place.
+
+        `_archive_since` reads tarball stems, but a member's own YYYYMMDD
+        directory wins over its tarball's stem, so a member can be stamped
+        before the bound — and for that member a bounded skip-list proves
+        nothing, while treating it as new would duplicate its rows. One
+        unbounded re-read restores the full list; both sets only ever gain
+        names that really are already ingested, so widening can never cause a
+        file to be skipped that should have been read.
+        """
+        nonlocal since
+        if since is None:
+            return
+        since = None
+        logger.info("  archive member predates the folder's date range; re-reading the full skip-list")
+        full = distinct_file_names(ch_client, agency_id)
+        done.update(full)
+        seen.update(full)
+
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
+
+    today = jst_date(now or datetime.now(timezone.utc))
+    unclosed: set[date] = set()
+    promoted: dict[date, bool] = {}
+
+    # A member is refused, and left unmarked, when its rows would land on a
+    # JST day that has not closed, or on a day already holding rows promoted
+    # from the live path: a day in `updates` has one source, so it is not
+    # stored a second time under the archive's file names. Promotion refuses
+    # the mirror case.
+    def _refused(stamp: str) -> bool:
+        day = _jst_day(stamp)
+        if day >= today:
+            if day not in unclosed:
+                unclosed.add(day)
+                logger.info(f"  {day} has not closed yet; its archive files wait for a later run")
+            return True
+        if day not in promoted:
+            promoted[day] = bool(days_with_source(ch_client, agency_id, {day}, live_sourced=True))
+            if promoted[day]:
+                logger.warning(f"  {day} already holds promoted live rows; its archive files are skipped")
+        return promoted[day]
 
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
     # ClickHouse in one INSERT per _BATCH_ROWS-sized batch instead of one
-    # per source file (Task 8.9 — see _BATCH_ROWS docstring above for why).
+    # per source file (see _BATCH_ROWS docstring above for why).
     #
     # Crash-safety invariant, preserved from the old per-file code just at
     # batch grain: a file's rows are only ever marked `done` in the exact
@@ -321,8 +431,6 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
             pending_files.clear()
             pending_counts.clear()
 
-    tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
-    pb_loose = sorted(root.rglob("*.pb"))
     logger.info(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb (strategy={strategy_name})")
 
     with conn.cursor() as cur:
@@ -340,6 +448,11 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         inner_dir = pathlib.Path(m.name).parent.name
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
+                    # Checked before `seen` is consulted, not after: a member
+                    # stamped before the bound is exactly the one a bounded
+                    # skip-list cannot speak for.
+                    if since is not None and any(d < since.strftime("%Y%m%d") for _, _, d in members):
+                        _widen_skip_list()
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in seen]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
@@ -357,15 +470,17 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         # SAVEPOINT protects nothing for that step. The parsed
                         # rows are buffered into pending_rows/pending_files and
                         # only actually inserted (and marked `done`) by _flush(),
-                        # in batches, per Task 8.9 — see _flush()'s docstring
+                        # in batches — see _flush()'s docstring
                         # above for the crash-safety invariant this preserves.
                         try:
                             with _savepoint(cur, "tar_member"):
-                                ts = _ts(d, pb_name)
                                 fobj = tf.extractfile(member)
                                 if fobj is None:  # non-file member (dir/special)
                                     continue
                                 raw = fobj.read()
+                                ts = archive_captured_at(raw, d, pb_name)
+                                if _refused(ts):
+                                    continue
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
@@ -395,7 +510,6 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
             logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
-                ts = _ts(d, path.name)
                 # _savepoint isolates one bad file's Postgres-side work from
                 # every good file already inserted since the last commit
                 # boundary in this batch (see _savepoint's docstring for why
@@ -403,10 +517,15 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 # savepoint (see the tarball loop above for why); rows are
                 # buffered into pending_rows/pending_files and only actually
                 # inserted (and marked `done`) by _flush(), in batches shared
-                # with the tarball loop above (Task 8.9).
+                # with the tarball loop above, so `done` only advances once a
+                # batch is actually persisted.
                 try:
                     with _savepoint(cur, "pb_file"):
-                        rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
+                        raw = path.read_bytes()
+                        ts = archive_captured_at(raw, d, path.name)
+                        if _refused(ts):
+                            continue
+                        rows = strategy.parse_feed(raw, ts, f"{d}/{path.name}", agency_id, conn)
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
@@ -472,6 +591,10 @@ def ingest_live_payload(
 ) -> int:
     """Decode and store one already-fetched GTFS-RT payload.
 
+    Writes `updates_live`: every realtime path (collector push, `ingest_live`,
+    `/delays/refresh`) lands here and nowhere else, and `updates` receives the
+    day from promotion once it closes.
+
     This common path is used by direct-feed pulls and the Oracle collector
     push path. ``file_name`` is the collector's durable source identity, so a
     retry after a network timeout is idempotent within a short lookup window.
@@ -483,12 +606,12 @@ def ingest_live_payload(
         strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
-    if recent_file_name_exists(ch_client, agency_id, file_name, since):
+    if recent_file_name_exists(ch_client, agency_id, file_name, since, table=LIVE_TABLE):
         logger.info("Skipping duplicate live payload: %s", file_name)
         return 0
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    n_inserted = insert_updates(ch_client, agency_id, rows)
+    n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()
     logger.info("Done: %s rows inserted (live payload)", n_inserted)
     return n_inserted

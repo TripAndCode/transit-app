@@ -1,10 +1,8 @@
-// frontend/src/components/PeakHourModal.tsx
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { PeakHourBreakdown } from "../api/types";
 import { Spinner } from "./Spinner";
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+import { Modal } from "./Modal";
+import { WEEK } from "../utils/week";
 
 export function PeakHourModal({
   data,
@@ -16,14 +14,6 @@ export function PeakHourModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const maxAvg =
     data?.routes.length
@@ -38,36 +28,19 @@ export function PeakHourModal({
         : t("peakHourModal.title_all", { hour: data.hour });
 
   return (
-    <>
-      <div
-        data-testid="peak-hour-modal-backdrop"
-        onClick={onClose}
-        aria-hidden="true"
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.35)",
-          zIndex: 80,
-        }}
-      />
-      <div
-        role="dialog"
-        aria-label={title}
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "min(480px, 92vw)",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-soft)",
-          borderRadius: 10,
-          padding: 24,
-          zIndex: 81,
-          maxHeight: "80vh",
-          overflowY: "auto",
-        }}
-      >
+    <Modal
+      open
+      onClose={onClose}
+      ariaLabel={title}
+      style={{
+        width: "min(480px, 92vw)",
+        border: "1px solid var(--border-soft)",
+        borderRadius: 10,
+        padding: 24,
+        maxHeight: "80vh",
+        overflowY: "auto",
+      }}
+    >
         <div
           style={{ display: "flex", alignItems: "center", marginBottom: 16 }}
         >
@@ -117,7 +90,7 @@ export function PeakHourModal({
               </span>
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary)",
                   minWidth: 40,
                 }}
@@ -167,7 +140,7 @@ export function PeakHourModal({
         {data?.routes.length ? (
           <p
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--text-tertiary)",
               marginTop: 10,
             }}
@@ -175,7 +148,6 @@ export function PeakHourModal({
             {t("peakHourModal.routeCount", { count: data.routes.length })}
           </p>
         ) : null}
-      </div>
-    </>
+    </Modal>
   );
 }

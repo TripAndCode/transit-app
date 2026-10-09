@@ -218,17 +218,19 @@ async def route_hour_dow_pattern(
     limited to top_n.
     """
     rows = await conn.fetch(
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
-        # same row population — see api/routers/reports.py's forecast_heatmap
-        # identical rationale.
+        # sum_delay_sec is nullable (unlike samples), so the numerator, the
+        # denominator and the reported count all FILTER to the same row
+        # population — a row with a sample count but no delay sum behind it is
+        # not evidence for the average. Mirrors _POOLED_DELAY_PROJECTION_SQL in
+        # api/routers/reports.py.
         "SELECT dow, hour, "
         "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
         "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
-        "SUM(samples)::int AS samples "
+        "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour "
-        "HAVING SUM(samples) > 5 "
+        "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5 "
         "ORDER BY avg_min DESC NULLS LAST "
         "LIMIT $3",
         agency_id,

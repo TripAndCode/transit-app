@@ -10,8 +10,8 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { use, useState, useRef, useEffect, useEffectEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   useConversation,
@@ -24,8 +24,9 @@ import {
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import { DataEndContext, isoDaysBefore, useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
@@ -34,17 +35,19 @@ import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
+import { PageHeader } from "../components/ui/PageHeader";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
+import type { NextStepAction } from "./ask/nextStepChips";
 import { useInvestigationLocation } from "./ask/useInvestigationLocation";
 
 export function AskTab() {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
-  const [rangeCtx] = useRangeContext();
+  const id = useAgencyId();
+  const navigate = useNavigate();
+  const [rangeCtx] = useScope();
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
@@ -62,7 +65,7 @@ export function AskTab() {
   const [followupDraft, setFollowupDraft] = useState("");
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
-  // directly on every render — no useMemo (see CLAUDE.md).
+  // directly on every render — no useMemo (see AGENTS.md).
   const templates = buildCardTemplates();
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
@@ -74,12 +77,15 @@ export function AskTab() {
   // Anon → authed migration: fire once when an authenticated user actually has
   // local threads to import. Gating on the local count (not just a ref) means a
   // remount on agency switch can't re-fire it once localStorage has been cleared.
-  useEffect(() => {
-    if (authed && !migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
+  const migrateIfNeeded = useEffectEvent(() => {
+    if (!migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
       migratedRef.current = true;
       migrateAnon.mutate();
     }
-  }, [authed, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (authed && id != null) migrateIfNeeded();
+  }, [authed, id]);
 
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);
@@ -100,11 +106,12 @@ export function AskTab() {
   //   3. the URL range context (no active thread / conversation still loading).
   const [filterEdit, setFilterEdit] = useState<{ key: string | null; fc: FilterCtx } | null>(null);
   const storedFc = convQuery.data?.conversation?.filter_ctx;
+  const dataEnd = use(DataEndContext);
   const filterCtx: FilterCtx =
     filterEdit && filterEdit.key === activeId
       ? filterEdit.fc
       : activeId && storedFc
-        ? resolvedFilterCtx(storedFc)
+        ? resolvedFilterCtx(storedFc, dataEnd)
         : rangeCtxToFilterCtx(rangeCtx);
 
   // User-initiated filter edit. When an active thread exists, persist the new
@@ -213,6 +220,33 @@ export function AskTab() {
     setValues({});
   }
 
+  // Executes an evidence card's next-step chip (see RichResult/
+  // nextStepChips). `export_png` is handled locally inside RichResult
+  // (it needs the rendered chart node) and never reaches here.
+  function handleNextStep(action: NextStepAction) {
+    if (action.kind === "filter") {
+      handleFilterChange({ ...filterCtx, ...action.patch });
+      return;
+    }
+    if (action.kind === "map") {
+      if (id != null) navigate(`/agencies/${id}/live?routes=${encodeURIComponent(action.route)}`);
+      return;
+    }
+    if (action.kind === "compare_previous") {
+      // "先々週と比べる" -- re-run the same tool with the window shifted back
+      // two weeks, as its own new step in the thread (never mutates the
+      // original answer, so both remain in the history).
+      const fromDate = action.args.from_date;
+      const toDate = action.args.to_date;
+      if (typeof fromDate !== "string" || typeof toDate !== "string") return;
+      handleCardSubmit({
+        tool: action.tool,
+        args: { ...action.args, from_date: isoDaysBefore(fromDate, 14), to_date: isoDaysBefore(toDate, 14) },
+        user_summary: t("ask.evidence.chip.compare_previous"),
+      });
+    }
+  }
+
   function handleInstantSubmit(tpl: CardTemplate) {
     if (busy) return;
     const args = { ...tpl.fixed_args, ...defaultsFor(tpl) };
@@ -225,6 +259,30 @@ export function AskTab() {
   const hasMessages = messages.length > 0;
   const unavailable = activeId !== null && !convQuery.isPending && (convQuery.isError || !convQuery.data);
 
+  // The question composer: pinned at the bottom, after the conversation, once
+  // a thread has messages (the familiar chat layout); moved to the TOP of the
+  // page on a fresh visit (no messages yet), so a first-time user sees the
+  // question input before anything else instead of scrolling past example
+  // cards to find it.
+  const dock = (
+    <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
+      <summary>{t(hasMessages ? "ask.workspace.new_analysis" : "ask.workspace.new_analysis_first")}</summary>
+      {id != null && !unavailable && !(activeId && convQuery.isPending) && (
+        <QuestionDock
+          agencyId={id}
+          busy={busy}
+          onSubmit={handleCardSubmit}
+          composingId={composingId}
+          values={values}
+          onChipTap={handleChipTap}
+          onValueChange={handleValueChange}
+          showToolbar={hasMessages}
+          onRunComplete={handleRunComplete}
+        />
+      )}
+    </details>
+  );
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -236,8 +294,8 @@ export function AskTab() {
         minHeight: 0,
       }}
     >
+      <PageHeader title={t("nav.ask")} className="ask-page-header" />
       <header className="ask-workspace-bar">
-        <span>{t("nav.ask")}</span>
       {id != null && (
         <details ref={historyRef} className="ask-thread-menu">
           <summary>{t("ask.workspace.investigations")}</summary>
@@ -271,6 +329,8 @@ export function AskTab() {
             pending={appendMsg.isPending || createConv.isPending}
           />
         </div>
+
+        {!hasMessages && dock}
 
         {/* ── Scrollable thread area ─────────────────────────────────────── */}
         <div
@@ -306,6 +366,7 @@ export function AskTab() {
               messages={messages}
               formatRoute={routeNames.format}
               onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}
+              onChip={handleNextStep}
             >
               {({ messages: contextMessages, focus }) => <>
               {(appendMsg.isPending || followup.isPending) && (
@@ -355,32 +416,19 @@ export function AskTab() {
               </>}
             </InvestigationCanvas>
           ) : (
-            <AskLandingCards
-              templates={templates}
-              onInstantSubmit={handleInstantSubmit}
-              onOpenChip={handleChipTap}
-              busy={busy}
-            />
+            <>
+              {activeId !== null && <p className="ask-no-questions">{t("ask.workspace.no_questions")}</p>}
+              <AskLandingCards
+                templates={templates}
+                onInstantSubmit={handleInstantSubmit}
+                onOpenChip={handleChipTap}
+                busy={busy}
+              />
+            </>
           )}
         </div>
 
-        {/* Bottom dock */}
-        <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
-          <summary>{t("ask.workspace.new_analysis")}</summary>
-        {id != null && !unavailable && !(activeId && convQuery.isPending) && (
-          <QuestionDock
-            agencyId={id}
-            busy={busy}
-            onSubmit={handleCardSubmit}
-            composingId={composingId}
-            values={values}
-            onChipTap={handleChipTap}
-            onValueChange={handleValueChange}
-            showToolbar={hasMessages}
-            onRunComplete={handleRunComplete}
-          />
-        )}
-        </details>
+        {hasMessages && dock}
       </div>
     </div>
   );

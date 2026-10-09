@@ -1,17 +1,32 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import {
-  AdminAgency,
   useAdminAgencies,
+  useAgenciesHealth,
   useCreateAgencyAdmin,
   useDeleteAgency,
   usePatchAgency,
   useRestoreAgency,
+  type AdminAgency,
+  type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
+import { Modal } from "../../components/Modal";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { Drawer } from "../../components/admin/Drawer";
+import { AgencyDiagnosticsDrawer } from "./AgencyDiagnosticsDrawer";
+import { ClampSparkline } from "./ClampSparkline";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
+
+/** URL search param backing the saved-view chips, so a view survives a reload
+ *  and can be linked to. */
+const VIEW_PARAM = "view";
+const DEFAULT_VIEW = "all";
 
 // ── Agency form modal ────────────────────────────────────────────────────
 
@@ -58,29 +73,26 @@ function AgencyFormModal({
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(initial);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   function set(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   return (
-    <div
-      role="presentation"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open
+      onClose={onClose}
+      labelledBy="agency-form-title"
+      initialFocusRef={nameInputRef}
       style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
-        zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--bg-surface)", padding: 24, borderRadius: "var(--radius-lg)",
+        width: 520, maxWidth: "90vw",
       }}
     >
       <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agency-form-title"
         onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}
-        style={{
-          background: "var(--bg-surface)", padding: 24, borderRadius: "var(--radius-lg)",
-          width: 520, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 14,
-        }}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         <h3 id="agency-form-title" style={{ margin: 0, fontSize: 18 }}>
           {isEdit ? t("admin.agencies.form_title_edit") : t("admin.agencies.form_title_add")}
@@ -88,8 +100,7 @@ function AgencyFormModal({
         <Field label={t("admin.agencies.form_name")} htmlFor="af-name">
           <input
             id="af-name"
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
+            ref={nameInputRef}
             required
             value={form.agency_name}
             onChange={(e) => set("agency_name", e.target.value)}
@@ -106,7 +117,7 @@ function AgencyFormModal({
             style={{ width: "100%" }}
           />
           {form.feed_url && !form.feed_url.startsWith("http://") && !form.feed_url.startsWith("https://") && (
-            <div style={{ color: "var(--color-warning)", fontSize: 12, marginTop: 2 }}>
+            <div style={{ color: "var(--color-warning-text)", fontSize: 12, marginTop: 2 }}>
               {t("admin.agencies.form_error_feed_url")}
             </div>
           )}
@@ -142,7 +153,7 @@ function AgencyFormModal({
           />
         </Field>
         {!!error && (
-          <div style={{ color: "var(--color-warning)", fontSize: 13 }}>
+          <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>
             {formatApiError(error)}
           </div>
         )}
@@ -159,7 +170,7 @@ function AgencyFormModal({
           </AdminButton>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
@@ -172,23 +183,145 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor: string; c
   );
 }
 
+// ── Health cells ─────────────────────────────────────────────────────────
+
+function FreshnessCell({ health }: { health?: AgencyHealthRow }) {
+  const { t } = useTranslation();
+  if (!health) return <span style={{ color: "var(--text-tertiary)" }}>{EM_DASH}</span>;
+  const tone = health.freshness === "fresh" ? "good" : health.freshness === "stale" ? "warn" : "neutral";
+  return <StatusChip tone={tone}>{t(`admin.agencies.freshness_${health.freshness}`)}</StatusChip>;
+}
+
+/** A whole-registry summary rather than a per-field list: the row has to stay
+ *  scannable, and the field-by-field verdicts are one click away in the drawer. */
+function RtCoverageCell({ health }: { health?: AgencyHealthRow }) {
+  const { t } = useTranslation();
+  if (!health) return <span style={{ color: "var(--text-tertiary)" }}>{EM_DASH}</span>;
+  if (!health.rt_coverage.probed) {
+    return <StatusChip tone="neutral">{t("admin.agencies.rt_unprobed")}</StatusChip>;
+  }
+  return (
+    <StatusChip tone={health.rt_coverage.complete ? "good" : "warn"}>
+      {t("admin.agencies.rt_summary", {
+        present: health.rt_coverage.present_count,
+        total: health.rt_coverage.field_count,
+      })}
+    </StatusChip>
+  );
+}
+
+
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export function AdminAgenciesPage() {
   const { t } = useTranslation();
   const { data: agencies, isLoading, error } = useAdminAgencies();
+  const { data: health, error: healthError } = useAgenciesHealth();
   const create = useCreateAgencyAdmin();
   const patch = usePatchAgency();
   const del = useDeleteAgency();
   const restore = useRestoreAgency();
 
   const [search, setSearch] = useState("");
-  const filtered = agencies?.filter((a) =>
-    a.agency_name.toLowerCase().includes(search.trim().toLowerCase())
-  );
+  const view = useSearchParams()[0].get(VIEW_PARAM) ?? DEFAULT_VIEW;
+  const [openedId, setOpenedId] = useState<number | null>(null);
 
   // null = closed; undefined = new; AdminAgency = editing
   const [editing, setEditing] = useState<AdminAgency | undefined | null>(null);
+
+  const healthById = new Map((health ?? []).map((h) => [h.agency_id, h]));
+
+  const filtered = (agencies ?? []).filter((a) => {
+    if (!a.agency_name.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    const h = healthById.get(a.agency_id);
+    if (view === "stale") return h?.freshness === "stale";
+    if (view === "rt_incomplete") return h != null && (!h.rt_coverage.probed || !h.rt_coverage.complete);
+    return true;
+  });
+
+  const staleCount = (health ?? []).filter((h) => h.freshness === "stale").length;
+  const rtGapCount = (health ?? []).filter((h) => !h.rt_coverage.probed || !h.rt_coverage.complete).length;
+
+  // Derived from the list rather than held as its own copy of the row: an
+  // agency that leaves the list (filtered out, or disabled) must not leave a
+  // drawer describing it open.
+  const opened = filtered.find((a) => a.agency_id === openedId) ?? null;
+
+  const columns: DataTableColumn<AdminAgency>[] = [
+    {
+      key: "name",
+      header: t("admin.agencies.col_name"),
+      render: (a) => (
+        <span style={{ fontWeight: 500, opacity: a.deleted_at ? 0.55 : 1 }}>
+          {a.agency_name}
+          {a.deleted_at && (
+            <span style={{ marginLeft: 8 }}>
+              <StatusChip tone="neutral">{t("admin.agencies.status_deleted")}</StatusChip>
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: "freshness",
+      header: t("admin.agencies.col_freshness"),
+      render: (a) => <FreshnessCell health={healthById.get(a.agency_id)} />,
+    },
+    {
+      key: "last_capture",
+      header: t("admin.agencies.col_last_capture"),
+      render: (a) => (
+        <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
+          {formatDateTime(healthById.get(a.agency_id)?.last_capture_at ?? "")}
+        </span>
+      ),
+    },
+    {
+      key: "rt",
+      header: t("admin.agencies.col_rt_coverage"),
+      render: (a) => <RtCoverageCell health={healthById.get(a.agency_id)} />,
+    },
+    {
+      key: "clamp",
+      header: t("admin.agencies.col_clamp"),
+      render: (a) => {
+        const h = healthById.get(a.agency_id);
+        return h ? (
+          <ClampSparkline days={h.clamp_history} label={t("admin.agencies.col_clamp")} />
+        ) : (
+          <span style={{ color: "var(--text-tertiary)" }}>{EM_DASH}</span>
+        );
+      },
+    },
+    {
+      key: "static",
+      header: t("admin.agencies.col_static_version"),
+      render: (a) => (
+        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+          {healthById.get(a.agency_id)?.static_version?.version ?? EM_DASH}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (a) => (
+        <span style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} role="presentation">
+          <AdminButton
+            variant="secondary"
+            onClick={() => {
+              create.reset();
+              patch.reset();
+              setEditing(a);
+            }}
+          >
+            {t("admin.agencies.action_edit")}
+          </AdminButton>
+        </span>
+      ),
+    },
+  ];
 
   async function handleSubmit(form: FormState) {
     const body = {
@@ -211,10 +344,13 @@ export function AdminAgenciesPage() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.agencies.title")}</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    // `position: relative` and a floor on the height are what the drawer
+    // anchors to: it is absolutely positioned inside this box so the list
+    // behind it keeps its place and its scroll position.
+    <div style={{ padding: 24, position: "relative", minHeight: 520 }}>
+      <PageHeader
+        title={t("admin.agencies.title")}
+        actions={<>
           <AdminSearchInput
             placeholder={t("admin.agencies.search_placeholder")}
             value={search}
@@ -230,89 +366,53 @@ export function AdminAgenciesPage() {
           >
             {t("admin.agencies.add_button")}
           </AdminButton>
-        </div>
-      </div>
+        </>}
+      />
 
       {error && <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{formatApiError(error)}</div>}
+      {!!healthError && (
+        <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{t("admin.agencies.health_error")}</div>
+      )}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
 
-      <table className="admin-table">
-        <thead>
-          <tr>
-            <th>{t("admin.agencies.col_name")}</th>
-            <th>{t("admin.agencies.col_feed_url")}</th>
-            <th>{t("admin.agencies.col_strategy")}</th>
-            <th>{t("admin.agencies.col_status")}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {filtered && filtered.length === 0 && (
-            <tr>
-              <td colSpan={5} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
-                {t("admin.agencies.empty")}
-              </td>
-            </tr>
-          )}
-          {filtered?.map((a) => (
-            <tr key={a.agency_id} style={{ opacity: a.deleted_at ? 0.5 : 1 }}>
-              <td style={{ fontWeight: 500 }}>{a.agency_name}</td>
-              <td style={{ fontSize: 12, color: "var(--text-tertiary)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {a.feed_url}
-              </td>
-              <td>
-                {a.ingest_strategy ? (
-                  <StatusChip tone="neutral">{a.ingest_strategy}</StatusChip>
-                ) : (
-                  <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
-                )}
-              </td>
-              <td>
-                <StatusChip tone={a.deleted_at ? "neutral" : "good"}>
-                  {a.deleted_at ? t("admin.agencies.status_deleted") : t("admin.agencies.status_active")}
-                </StatusChip>
-              </td>
-              <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                {!a.deleted_at && (
-                  <>
-                    <AdminButton
-                      variant="secondary"
-                      onClick={() => {
-                        create.reset();
-                        patch.reset();
-                        setEditing(a);
-                      }}
-                      style={{ marginRight: 8 }}
-                    >
-                      {t("admin.agencies.action_edit")}
-                    </AdminButton>
-                    <AdminButton
-                      variant="danger"
-                      disabled={del.isPending && del.variables === a.agency_id}
-                      onClick={() => {
-                        if (confirm(t("admin.agencies.confirm_delete", { name: a.agency_name }))) {
-                          del.mutate(a.agency_id);
-                        }
-                      }}
-                    >
-                      {t("admin.agencies.action_delete")}
-                    </AdminButton>
-                  </>
-                )}
-                {a.deleted_at && (
-                  <AdminButton
-                    variant="secondary"
-                    disabled={restore.isPending && restore.variables === a.agency_id}
-                    onClick={() => restore.mutate(a.agency_id)}
-                  >
-                    {t("admin.agencies.action_restore")}
-                  </AdminButton>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        rowKey={(a) => String(a.agency_id)}
+        rowLabel={(a) => a.agency_name}
+        caption={t("admin.agencies.table_label")}
+        emptyLabel={t("admin.agencies.empty")}
+        onOpen={(a) => setOpenedId(a.agency_id)}
+        activeRowKey={openedId == null ? null : String(openedId)}
+        savedViews={[
+          { id: DEFAULT_VIEW, label: t("admin.agencies.view_all") },
+          { id: "stale", label: t("admin.agencies.view_stale"), count: staleCount },
+          { id: "rt_incomplete", label: t("admin.agencies.view_rt_incomplete"), count: rtGapCount },
+        ]}
+        savedViewParam={VIEW_PARAM}
+      />
+
+      <Drawer
+        open={opened != null}
+        onClose={() => setOpenedId(null)}
+        label={t("admin.agency_diag.drawer_label")}
+      >
+        {opened && (
+          <AgencyDiagnosticsDrawer
+            agency={opened}
+            onClose={() => setOpenedId(null)}
+            disablePending={del.isPending && del.variables === opened.agency_id}
+            onDisable={(id) => {
+              del.mutate(id);
+              setOpenedId(null);
+            }}
+            onRestore={(id) => {
+              restore.mutate(id);
+              setOpenedId(null);
+            }}
+          />
+        )}
+      </Drawer>
 
       {editing !== null && (
         <AgencyFormModal

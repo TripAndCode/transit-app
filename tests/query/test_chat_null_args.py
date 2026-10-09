@@ -2,9 +2,9 @@
 
 Some LLMs occasionally emit ``arguments`` as a non-object JSON value —
 ``null``, a bare string like ``'"foo"'``, or an array like ``'[]'`` —
-rather than the documented JSON object. Until the chat normaliser was
-hardened, any of those crashed the downstream ``args.get(...)`` call in
-the tool handler and surfaced a 500. This test pins the orchestrator's
+rather than the documented JSON object. Unless the chat normaliser coerces
+them, any of those crashes the downstream ``args.get(...)`` call in the
+tool handler and surfaces a 500. This test pins the orchestrator's
 real behaviour end-to-end by monkeypatching the LLM adapter so we
 control the exact ``arguments`` string the model returns.
 """
@@ -111,9 +111,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -128,9 +126,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
         Match(chunk_id="g-2", content="国道線の傾向", tool="time_series", args={}, distance=0.10),
     ]
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools(
-        "もっと変な質問", ctx, conn=None, agency_id=1, model=None, locale="ja", rag_examples=examples
-    )
+    await chat.chat_with_tools("もっと変な質問", ctx, conn=None, agency_id=1, locale="ja", rag_examples=examples)
 
     system = captured["messages"][0]["content"]
     assert "中央大橋線の遅延" in system
@@ -149,9 +145,7 @@ async def test_panel_ctx_tab_appended_to_system_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -167,7 +161,6 @@ async def test_panel_ctx_tab_appended_to_system_prompt(monkeypatch):
         ctx,
         conn=None,
         agency_id=1,
-        model=None,
         locale="ja",
         panel_ctx={"tab": "overview"},
     )
@@ -187,9 +180,7 @@ async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -200,7 +191,7 @@ async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
     from api.range import RangeCtx
 
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools("遅延はどう？", ctx, conn=None, agency_id=1, model=None, locale="ja")
+    await chat.chat_with_tools("遅延はどう？", ctx, conn=None, agency_id=1, locale="ja")
 
     system = captured["messages"][0]["content"]
     assert "currently viewing" not in system
@@ -216,9 +207,7 @@ async def test_history_injected_into_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -239,13 +228,13 @@ async def test_history_injected_into_prompt(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_force_tool_call_sets_tool_choice_required(monkeypatch):
-    """item 8 fix: a recognized pagination follow-up must force a tool call.
+    """A recognized pagination follow-up must force a tool call.
 
-    Live-observed bug: turn 2 of a two-turn conversation ("停留所はいくつ？"
-    then "次の50件" with turn-1 in history) came back with ``tool_call:
-    None`` — ``tool_choice="auto"`` let the model decline to call
-    ``describe_data`` again even though the system prompt documents that
-    exact rewrite. ``api/routers/ask.py`` now passes
+    Turn 2 of a two-turn conversation ("停留所はいくつ？" then "次の50件"
+    with turn 1 in history) has to call ``describe_data`` again, but
+    ``tool_choice="auto"`` lets the model decline and return ``tool_call:
+    None`` even though the system prompt documents that exact rewrite.
+    ``api/routers/ask.py`` passes
     ``force_tool_call=is_follow_up(question)`` through to here; this pins
     that ``force_tool_call=True`` maps to ``tool_choice="required"`` (and
     that the default stays ``"auto"`` so every other question shape is
@@ -258,9 +247,7 @@ async def test_force_tool_call_sets_tool_choice_required(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["tool_choice"] = tool_choice
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -406,27 +393,25 @@ async def test_degradation_message_not_approved(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
-    """item 16 fix: the history block must tell the model not to answer an
-    unrelated question from stale prior-turn data.
+    """The history block must tell the model not to answer an unrelated
+    question from stale prior-turn data.
 
-    Live-observed bug (2026-08-28): with history from an unrelated ranking
-    turn attached, a plain "停留所はいくつ？" ("how many stops?") — on-topic
-    but with no follow-up phrasing, so ``route_or_examples()`` still ran and
-    found no confident match — came back as "the table doesn't show stop
-    counts" instead of dispatching ``describe_data(kind=stops)``. The model
-    answered from the attached history text rather than recognizing it
-    should call a tool. Pin that the history block now carries an explicit
-    "only use this if the current question references it" guard, in both
-    locales, so this instruction can't silently regress out of the prompt.
+    With history from an unrelated ranking turn attached, a plain
+    "停留所はいくつ？" ("how many stops?") — on-topic but with no follow-up
+    phrasing, so ``route_or_examples()`` still runs and finds no confident
+    match — must dispatch ``describe_data(kind=stops)``. Without an explicit
+    instruction the model can answer from the attached history text instead
+    ("the table doesn't show stop counts"). Pin that the history block
+    carries an explicit "only use this if the current question references
+    it" guard, in both locales, so this instruction can't silently regress
+    out of the prompt.
     """
     from pipeline.query import chat
 
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -448,11 +433,11 @@ async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unrelated_question_with_unrelated_history_dispatches_tool(conn_with_minimal_seed, monkeypatch):
-    """item 16 repro, end to end: an unrelated in-scope question with no
-    follow-up phrasing must still be able to dispatch a fresh tool call even
-    though unrelated history from a prior ranking turn is attached.
+    """End to end: an unrelated in-scope question with no follow-up
+    phrasing must still be able to dispatch a fresh tool call even though
+    unrelated history from a prior ranking turn is attached.
 
-    Mirrors the live repro: history carries a ``top_n`` ranking turn, the
+    The scenario: history carries a ``top_n`` ranking turn, the
     current question ("停留所はいくつ？") has no follow-up phrasing (so
     ``force_tool_call`` is False — this is not a recognized continuation,
     see ``api/routers/ask.py``), and the fake LLM plays the role of a

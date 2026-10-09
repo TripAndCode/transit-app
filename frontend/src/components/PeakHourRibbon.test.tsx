@@ -16,14 +16,41 @@ const PAD_BOTTOM = 22;
 const CELL_W = (W - 32) / 24;
 
 describe("PeakHourRibbon", () => {
+  it("draws its labels as HTML over the stretched chart, never as SVG text", () => {
+    const by_hour: (number | null)[] = Array.from({ length: 24 }, (_, h) => (h === 8 ? 6 : 2));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    expect(container.querySelectorAll("text")).toHaveLength(0);
+    const ticks = container.querySelectorAll(".ov-peak-label--tick");
+    expect(ticks).toHaveLength(4);
+    expect(Array.from(ticks, (n) => n.textContent)).toEqual(["0", "6", "12", "18"]);
+    expect(container.querySelector(".ov-peak-label--max")).not.toBeNull();
+  });
+
+  it("hangs the hour ticks just below the axis line, not across it", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 8 ? 6 : 1));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    const tick = container.querySelector<HTMLElement>(".ov-peak-label--tick")!;
+    expect(Number.parseFloat(tick.style.top)).toBeCloseTo(((140 - 22 + 2) / 140) * 100, 1);
+  });
+
+  it("puts a late peak's label on the left of its callout, so it stays on the card", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 22 ? 6 : 1));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 22, peak_avg_min: 6 }} />);
+    expect(container.querySelector(".ov-peak-label--max")).toHaveClass("ov-peak-label--flip");
+    // The callout's stub points the same way, toward its label.
+    const stub = [...container.querySelectorAll("line")].find((l) => l.getAttribute("y1") === l.getAttribute("y2") && l.getAttribute("stroke-dasharray") == null && l.getAttribute("style")?.includes("trend-bad"))!;
+    expect(Number(stub.getAttribute("x2"))).toBeLessThan(Number(stub.getAttribute("x1")));
+    const early = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    expect(early.container.querySelector(".ov-peak-label--max")).not.toHaveClass("ov-peak-label--flip");
+    expect(container.querySelector(".ov-peak-label--avg")).not.toBeNull();
+    for (const label of container.querySelectorAll(".ov-peak-label")) expect(label).toHaveClass("num");
+  });
+
   it("keeps every bar within the chart's viewBox when the scale itself (peak_avg_min) is negative", () => {
     // All hours are early-running (negative avg delay). peak_avg_min is the
     // *least* negative value (hour 5, -1min) — denom in toY() — but hour 10
-    // is far more negative (-10min). Before clamping y/bar_h to the plot
-    // band, this ratio (v/denom = -10/-1 = 10) pushed the hour-10 bar's y
-    // far above the chart (and its height far beyond the chart's own
-    // height), rendering outside the SVG's visible area since the <svg> is
-    // styled overflow: visible.
+    // is far more negative (-10min), a ratio of 10. Every bar still stays
+    // inside the plot band, however extreme value/denom gets.
     const by_hour: (number | null)[] = new Array(24).fill(null);
     by_hour[5] = -1;
     by_hour[10] = -10;
@@ -45,9 +72,9 @@ describe("PeakHourRibbon", () => {
   });
 
   it("keeps the hover tooltip within the chart's plot band for the same negative-scale dataset", () => {
-    // Same dataset/root cause as the bar test above: hovering over hour 10
-    // (far more negative than the peak/denom at hour 5) used to compute a
-    // tooltip y far outside the chart via the same unclamped toY().
+    // Same dataset as the bar test above: hovering over hour 10 (far more
+    // negative than the peak/denom at hour 5) would compute a tooltip y far
+    // outside the chart through an unclamped toY().
     const by_hour: (number | null)[] = new Array(24).fill(null);
     by_hour[5] = -1;
     by_hour[10] = -10;
@@ -74,5 +101,12 @@ describe("PeakHourRibbon", () => {
     const top = parseFloat(tooltip!.style.top);
     expect(top).toBeGreaterThanOrEqual(PAD_TOP);
     expect(top).toBeLessThanOrEqual(H - PAD_BOTTOM);
+  });
+
+  it("names the peak as a clock range with its average, and says what the shading marks", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 17 ? 3.3 : h >= 7 && h <= 9 ? 2.8 : 1.0));
+    const { getByText } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 17, peak_avg_min: 3.3 }} />);
+    expect(getByText("Peak 17:00–18:00 (3.3 min average)")).toBeTruthy();
+    expect(getByText("Shaded: hours above the day's average")).toBeTruthy();
   });
 });

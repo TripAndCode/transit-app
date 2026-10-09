@@ -19,14 +19,20 @@ body:has(.login-shell),
   overflow: hidden;
 }
 
-/* Faint Vercel/Linear-style grid. Stays at low opacity so it doesn't compete. */
+/* Faint Vercel/Linear-style grid. Stays at low opacity so it doesn't compete.
+   Drawn in the theme's own ink so it stays faint on the dark page too; the
+   plain --border-soft line first is the fallback for an engine without
+   color-mix(), which would otherwise drop the whole declaration. */
 .login-shell__grid {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, rgba(15, 23, 42, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, var(--border-soft) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-soft) 1px, transparent 1px);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
           mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
@@ -41,13 +47,11 @@ body:has(.login-shell),
   transform: translate(-50%, -50%);
   width: calc(100vw - 48px);
   max-width: 380px;
-  padding: 36px 32px 28px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 12px 32px -16px rgba(15, 23, 42, 0.12);
+  /* Room above the brand for the language switch in the top-right corner. */
+  padding: 48px 32px 28px;
+  /* Surface, border and elevation come from the shared `ui-card` class this
+     element also carries; only the card's own size and centring live here. */
+  border-radius: var(--radius-xl);
 }
 
 .login-card__brand {
@@ -59,21 +63,26 @@ body:has(.login-shell),
 }
 .login-card__brand-title {
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 18px;
+  font-weight: 700;
+  font-size: var(--text-lg);
   letter-spacing: 0.01em;
   color: var(--text-primary);
+  text-decoration: none;
+}
+.login-card__brand-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .login-card__brand-tag {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
 }
 
 .login-card__h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-xl);
   font-weight: 600;
   letter-spacing: 0.005em;
   text-align: center;
@@ -81,7 +90,7 @@ body:has(.login-shell),
 }
 .login-card__sub {
   margin: 6px 0 0;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   text-align: center;
   color: var(--text-secondary);
 }
@@ -92,11 +101,11 @@ body:has(.login-shell),
   align-items: flex-start;
   gap: 8px;
   padding: 10px 12px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
-  border-radius: 8px;
-  font-size: 13px;
+  background: var(--error-bg);
+  border: 1px solid color-mix(in srgb, var(--error-fg) 35%, transparent);
+  color: var(--error-fg);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -113,47 +122,51 @@ body:has(.login-shell),
   justify-content: center;
   gap: 10px;
   height: 44px;
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
   font-weight: 500;
   transition: box-shadow var(--transition), background var(--transition), border-color var(--transition);
   cursor: pointer;
   user-select: none;
 }
 .login-card__btn[aria-disabled="true"] { pointer-events: none; opacity: 0.7; }
-.login-card__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.login-card__btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .login-card__btn--google {
-  background: #ffffff;
-  color: #1f2937;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
 }
 .login-card__btn--google:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  border-color: var(--text-tertiary);
+  box-shadow: var(--el-2);
 }
 
+/* Inverted from the page: the ink colour as the fill, the surface as the
+   text, so it stays the high-contrast button in either theme. */
 .login-card__btn--github {
-  background: #111827;
-  color: #ffffff;
-  border: 1px solid #111827;
+  background: var(--text-primary);
+  color: var(--bg-surface);
+  border: 1px solid var(--text-primary);
 }
 .login-card__btn--github:hover {
-  background: #0b1220;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
+  opacity: .92;
+  box-shadow: var(--el-2);
 }
 .login-card__btn--github:focus-visible {
-  outline-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(91, 108, 173, 0.55);
+  outline-color: var(--bg-surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 55%, transparent);
 }
 
 .login-card__spinner {
   width: 18px;
   height: 18px;
-  animation: login-spin 0.8s linear infinite;
 }
-@keyframes login-spin {
-  to { transform: rotate(360deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .login-card__spinner { animation: login-spin calc(var(--dur-4) * 0.75) linear infinite; }
+  @keyframes login-spin {
+    to { transform: rotate(360deg); }
+  }
 }
 
 .login-card__divider {
@@ -161,7 +174,7 @@ body:has(.login-shell),
   align-items: center;
   gap: 10px;
   margin: 18px 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 .login-card__divider::before,
@@ -177,6 +190,14 @@ body:has(.login-shell),
   flex-direction: column;
   gap: 10px;
 }
+.login-card__sub + .login-card__local-form {
+  margin-top: 16px;
+}
+.login-card .language-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
 
 .login-card__field {
   display: flex;
@@ -184,17 +205,17 @@ body:has(.login-shell),
   gap: 4px;
 }
 .login-card__field label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 .login-card__field input {
   height: 40px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .login-card__field input:focus-visible {
   outline: 2px solid var(--accent);
@@ -203,7 +224,7 @@ body:has(.login-shell),
 
 .login-card__btn--local {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   border: 1px solid var(--accent);
   margin-top: 4px;
 }
@@ -211,7 +232,7 @@ body:has(.login-shell),
 
 .login-card__footer {
   margin: 20px 0 0;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   text-align: center;
   color: var(--text-tertiary);

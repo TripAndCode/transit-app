@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable, Iterator
 
-from api.range import RangeCtx
+from api.range import RangeCtx, dow_isodays
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
@@ -71,6 +71,13 @@ _log = logging.getLogger(__name__)
 # worst case, not a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
+
+# How many pooled connections one overview request may hold at once on its
+# pool-gather path. Eleven stages fan out per request; unbounded, two
+# concurrent cold requests alone would exhaust the pool and queue every other
+# endpoint behind them. The bound trades some of one request's overlap for
+# room for several requests at once.
+OVERVIEW_FANOUT_LIMIT = 4
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +132,8 @@ def _dow_matches(d: date, dow: str) -> bool:
     column IS that same ``toDate(captured_at, 'Asia/Tokyo')`` expression, so
     ``date.isoweekday()`` (also 1=Monday..7=Sunday) reproduces it exactly.
     """
-    if dow == "all":
-        return True
-    iso = d.isoweekday()
-    if dow == "weekday":
-        return 1 <= iso <= 5
-    return iso in (6, 7)
+    days = dow_isodays(dow)
+    return days is None or d.isoweekday() in days
 
 
 def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
@@ -330,7 +333,7 @@ async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain:
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
-        sql = f"SELECT MAX(date::date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
+        sql = f"SELECT MAX(date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
         row = await conn.fetchrow(sql, agency_id, *params)
         return row["d"] if row and row["d"] else None
 
@@ -352,15 +355,16 @@ async def _headline_stats(
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
         sql = (
-            # sum_delay_sec is nullable (unlike samples); FILTER both sides of
-            # avg_min's division to the same row population — see
-            # _route_weekly_history's identical rationale. The returned
-            # `samples` column below stays the TRUE total (unfiltered) count.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts the rows that average covers and FILTERs with it. The
+            # ClickHouse path below returns an exact count of its own average's
+            # rows, so only the filtered figure is the same statistic whichever
+            # path answered.
             "SELECT CASE WHEN SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             "            THEN ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "                / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
-            "       COALESCE(SUM(samples), 0)::int AS samples\n"
+            "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}"
         )
@@ -393,19 +397,21 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            # See _route_weekly_history's identical FILTER rationale: match
-            # avg_min's numerator/denominator to the same sum_delay_sec
-            # IS NOT NULL row population. The returned `samples` column below
-            # stays the TRUE total (unfiltered) sample count — a distinct,
-            # legitimate "how much data backs this route" figure independent
-            # of whether sum_delay_sec has been backfilled yet.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts that average's rows and FILTERs with it. Two reasons it
+            # cannot be the unfiltered total here: the slow path below sums a
+            # ClickHouse row count where every row carries a dep_delay, so an
+            # unfiltered fast path would answer differently for the same
+            # route; and _movers gates MIN_SAMPLES on this number, which would
+            # otherwise admit a route whose average rests on far fewer rows
+            # than the floor implies.
             "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
-            "       SUM(samples)::int AS samples\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -697,12 +703,17 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
     }
 
 
+#: A route averaging at least this late (minutes) over the current window
+#: counts as delayed in the headline's count. The count carries it, so the UI
+#: states the threshold it was counted against instead of keeping its own copy.
+DELAYED_ROUTE_MIN = 2.0
+
+
 async def _top_delayed_routes(
     agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
-    (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
+    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -752,9 +763,9 @@ async def _top_delayed_routes(
         ]
 
     if not rows:
-        return {"routes": [], "delayed_count": 0}
+        return {"routes": [], "delayed_count": 0, "delayed_threshold_min": DELAYED_ROUTE_MIN}
 
-    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= 2.0)
+    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
     top_n = rows[:limit]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
@@ -768,6 +779,7 @@ async def _top_delayed_routes(
             for r in top_n
         ],
         "delayed_count": delayed_count,
+        "delayed_threshold_min": DELAYED_ROUTE_MIN,
     }
 
 
@@ -997,8 +1009,7 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         ]
     by_date: dict[str, dict[str, float | None]] = {}
     for r in rows:
-        d_raw = r["date"]
-        d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
+        d = r["date"].isoformat()
         st = r["service_type"]
         # 2dp, half-up — matches the sibling _service_split's rounding so the
         # two report the same precision for the same underlying metric.
@@ -1152,9 +1163,9 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
     """Daily avg_min points (oldest first) over ``ctx``.
 
-    Returns the FULL daily series. The frontend hero card slices the
-    trailing 7 days for the inline sparkline; the modal variant uses the
-    full series (typically 30+ points for a 30-day default range).
+    Returns the FULL daily series (typically 30+ points for a 30-day
+    default range) and leaves any windowing to the caller, so a consumer
+    that wants a shorter tail can take one without a second query.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
     a sample-weighted average per date. Slow path reads the shared grain
@@ -1214,11 +1225,11 @@ async def compute_overview_summary(
     service_split / sparkline still aggregate over the full ctx to surface
     broader patterns.
 
-    When ``pool`` is supplied (non-None), the ten stage queries are
-    dispatched as concurrent asyncio tasks, each acquiring its own
-    connection from the pool so they can truly run in parallel.  The two
-    ``_peak_hour_by_dow`` calls — identified as 96 % of cold-load time in
-    the baseline measurement — are the primary beneficiaries.  When
+    When ``pool`` is supplied (non-None), the stage queries are dispatched
+    as concurrent asyncio tasks, each acquiring its own pooled connection,
+    with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time.  The two
+    ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
+    and the rest share the remaining slots.  When
     ``pool`` is None (the default) the existing sequential path with
     per-stage timed_blocks is used unchanged, preserving behaviour for
     tests and ad-hoc callers.
@@ -1317,9 +1328,11 @@ async def compute_overview_summary(
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
-        # so all ten queries can run concurrently. A single asyncpg
+        # so the queries can run concurrently. A single asyncpg
         # connection cannot multiplex queries; pool.acquire() queues when
-        # saturated, so concurrency is naturally bounded by pool size. `ch`
+        # saturated, so a per-request `asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)`
+        # caps how many of the stages hold a connection at once, so two
+        # concurrent overview requests cannot drain the pool between them. `ch`
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
@@ -1329,37 +1342,41 @@ async def compute_overview_summary(
         # `_route_short_names`, and every fast-path helper's `agg_*` read (plus
         # `_route_weekly_history`'s live scan, in the narrow-`ctx` case where
         # the grain can't cover its span).
+        fanout = asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)
+
         async def _own_conn(fn, *args):
-            """Acquire a pool connection, call ``fn(*args, conn, ch=ch, grain=grain)``, release."""
-            async with pool.acquire() as c:
+            """Under the fan-out bound, acquire a connection and call ``fn(*args, conn, ch=ch, grain=grain)``."""
+            async with fanout, pool.acquire() as c:
                 return await fn(*args, c, ch=ch, grain=grain)
 
         async def _peak_dow(group: str) -> dict | None:
-            """Acquire a pool connection and run ``_peak_hour_by_dow`` for ``group``."""
-            async with pool.acquire() as c:
+            """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
+            async with fanout, pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
+        # Stages take fan-out slots in argument order, so the slowest pair
+        # goes first rather than queueing behind stages that finish quickly.
         (
+            peak_weekday,
+            peak_weekend,
             (avg_min, samples),
             (baseline_avg, _),
             movers,
             concentration,
             top_delayed,
             peak,
-            peak_weekday,
-            peak_weekend,
             service_split,
             service_split_daily,
             sparkline_points,
         ) = await asyncio.gather(
+            _peak_dow("weekday"),
+            _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _own_conn(_headline_stats, agency_id, base_ctx),
             _own_conn(_movers, agency_id, cur_ctx, base_ctx),
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
-            _peak_dow("weekday"),
-            _peak_dow("weekend"),
             _own_conn(_service_split, agency_id, ctx),
             _own_conn(_service_split_daily, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),

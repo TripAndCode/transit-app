@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { useMatch, useNavigate, useParams } from "react-router-dom";
+import { useRef, useState, type CSSProperties } from "react";
+import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
+import { Z_INDEX } from "../styles/zIndex";
+import { agencySwitchHref } from "../routes/destinations";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
@@ -15,65 +19,75 @@ function filterAgencies(agencies: Agency[] | undefined, filter: string): Agency[
   return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
 }
 
-export function AgencyPicker() {
+const FIELD_TRIGGER_STYLE: CSSProperties = {
+  background: "var(--bg-surface)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: "var(--radius)",
+  padding: "6px 12px",
+  minWidth: 0,
+  width: "100%",
+  textAlign: "left",
+};
+
+/** A picker given a `className` is dressed by it in every state, and its
+ *  trigger then carries none of the field's own chrome. */
+export function AgencyPicker({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
-  const { agencyId } = useParams();
   const navigate = useNavigate();
-  const tabMatch = useMatch("/agencies/:agencyId/:tab/*");
+  const location = useLocation();
+  const tabMatch = useMatch("/agencies/:agencyId/*");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  const currentId = agencyId ? Number(agencyId) : null;
+  const currentId = useAgencyId();
   const current = agencies?.find((a) => a.agency_id === currentId);
 
-  // close on outside click
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
+  usePopoverDismiss(open, ref, (reason) => {
+    setOpen(false);
+    setFilter("");
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   const filtered = filterAgencies(agencies, filter);
 
   if (isLoading) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("common.loading_agencies")}
+      </span>
+    );
   }
 
   if (!agencies || agencies.length === 0) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("header.agency_picker_empty")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("header.agency_picker_empty")}
+      </span>
+    );
   }
 
   // Single agency: static label, no dropdown
   if (agencies.length === 1) {
-    return <strong>{agencies[0].agency_name}</strong>;
+    return <strong className={className}>{agencies[0].agency_name}</strong>;
   }
 
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    const tab = tabMatch?.params.tab ?? "map";
-    navigate(`/agencies/${id}/${tab}`);
+    navigate(agencySwitchHref(id, tabMatch?.params["*"], location.search));
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className={className} style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        style={{
-          background: "var(--bg-surface)",
-          color: "var(--text-primary)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
-          padding: "6px 12px",
-          minWidth: 0,
-          width: "100%",
-          textAlign: "left",
-        }}
+        style={className ? undefined : FIELD_TRIGGER_STYLE}
       >
         {current?.agency_name ?? t("header.agency_picker_placeholder")}
         <span style={{ float: "right", color: "var(--text-tertiary)" }}>▾</span>
@@ -88,8 +102,8 @@ export function AgencyPicker() {
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 20,
+            boxShadow: "var(--el-2)",
+            zIndex: Z_INDEX.dropdown,
             overflow: "hidden",
           }}
         >

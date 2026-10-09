@@ -1,9 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { act, cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow } from "./OverviewHeroRow";
+import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
-import type { OverviewHeadline } from "../api/types";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
+import { formatDateRange } from "../utils/format";
 
 function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
   return {
@@ -17,6 +19,13 @@ function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
     ...partial,
   };
 }
+
+const peakHour: OverviewPeakHour = { by_hour: [], peak_hour: 17, peak_avg_min: 4.8 };
+const concentration: OverviewConcentration = {
+  top_routes: [{ route_code: "42", route_short_name: null, share_pct: 60 }],
+  rest_share_pct: 40,
+};
+const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
 
 function mockHooks(routeCount: number, feedAgeHours: number | null) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
@@ -37,87 +46,281 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
   } as never);
 }
 
+// The feed's latest report at an exact instant, for a test that pins the
+// clock rather than offsetting from the real one.
+function mockFeedSummary(capturedAt: string | null) {
+  mockHooks(38, null);
+  vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+    data: { latest_captured_at: capturedAt, date: null, routes: [], raw_samples: 0, clamp_count: 0 },
+    isPending: false,
+  } as never);
+}
+
+function renderHero(overrides: {
+  headline?: OverviewHeadline;
+  delayedCount?: number;
+  sparklinePoints?: number[];
+  peakHour?: OverviewPeakHour | null;
+  concentration?: OverviewConcentration;
+} = {}) {
+  return renderWithProviders(
+    <OverviewHeroRow
+      headline={overrides.headline ?? headline()}
+      delayedCount={overrides.delayedCount ?? 3}
+      delayedThresholdMin={2}
+      agencyId={1}
+      sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
+      peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
+      concentration={overrides.concentration ?? concentration}
+    />,
+  );
+}
+
 describe("OverviewHeroRow", () => {
-  it("renders the network avg delay with a positive delta", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("labels the primary figure with the dates it averages", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
-    expect(screen.getByText("Network avg delay")).toBeInTheDocument();
+    renderHero();
+    expect(screen.getByText(`Average delay · ${formatDateRange("2026-06-03", "2026-06-09", { year: false })}`)).toBeInTheDocument();
     expect(screen.getByText(/3\.3/)).toBeInTheDocument();
-    expect(screen.getByText(/\+0\.5 min vs\. last week/)).toBeInTheDocument();
   });
 
-  it("renders the delayed-route count over the total from useRoutes", () => {
+  it("states the delayed-route count, out of the total, with the threshold it was counted against", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
-    expect(screen.getByText("3 / 38 routes")).toBeInTheDocument();
+    renderHero();
+    expect(screen.getByText("3 of 38 routes")).toBeInTheDocument();
+    expect(screen.getByText("averaged 2 min or more late")).toBeInTheDocument();
   });
 
-  it("renders a negative delta with a minus sign, not indistinguishable from a positive one", () => {
+  it("renders the behind-schedule story sentence with the delta, peak hour, and concentration share", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow
-        headline={headline({ baseline_avg_min: 3.8, delta_min: -0.5, delta_pct: -13.2 })}
-        delayedCount={3}
-        agencyId={1}
-        sparklinePoints={[2.1, 2.8, 3.3]}
-      />,
-    );
-    expect(screen.getByText(/-0\.5 min vs\. last week/)).toBeInTheDocument();
-    expect(screen.queryByText(/\+0\.5 min vs\. last week/)).not.toBeInTheDocument();
+    renderHero({ headline: headline({ delta_min: 0.9 }) });
+    expect(
+      screen.getByText(
+        /Delays are 0\.9 min longer than in the 7-day period before; 17:00–18:00 is the heaviest hour\. 60% of delay sits in the top route\./,
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("shows 'no comparison data' when baseline_avg_min is null", () => {
+  // One dominant route is a real case, not an edge one: a small agency may
+  // only have a single observed route. Both halves of the plural go through
+  // i18next here, where the fake `t` in storySentence.test.ts cannot see them.
+  it("pluralises the concentration clause on the number of top routes", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow
-        headline={headline({ baseline_avg_min: null, delta_min: null, delta_pct: null })}
-        delayedCount={3}
-        agencyId={1}
-        sparklinePoints={[2.1, 2.8, 3.3]}
-      />,
-    );
+    renderHero({
+      headline: headline({ delta_min: 0.9 }),
+      concentration: {
+        top_routes: [
+          { route_code: "42", route_short_name: null, share_pct: 30 },
+          { route_code: "27", route_short_name: null, share_pct: 20 },
+          { route_code: "15", route_short_name: null, share_pct: 10 },
+        ],
+        rest_share_pct: 40,
+        rest_route_count: 5,
+      },
+    });
+    expect(screen.getByText(/60% of delay sits in the top 3 routes\./)).toBeInTheDocument();
+  });
+
+  it("renders the ahead-of-schedule story sentence for a negative delta", () => {
+    mockHooks(38, 0.1);
+    renderHero({
+      headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }),
+    });
+    expect(screen.getByText(/Delays are 1\.2 min shorter than in the 7-day period before/)).toBeInTheDocument();
+  });
+
+  it("falls back to the short story template when peak-hour data is missing", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ delta_min: 0.9 }), peakHour: null });
+    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+  });
+
+  it("falls back to the short story template when concentration has no top routes", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ delta_min: 0.9 }), concentration: emptyConcentration });
+    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+  });
+
+  it("shows 'no comparison data' instead of a story sentence when baseline_avg_min is null", () => {
+    mockHooks(38, 0.1);
+    renderHero({
+      headline: headline({ baseline_avg_min: null, delta_min: null, delta_pct: null }),
+    });
     expect(screen.getByText("No comparison data")).toBeInTheDocument();
   });
 
-  it("shows the feed's last-updated age", () => {
+  it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
     mockHooks(38, 2);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
-    expect(screen.getByText(/Last updated/)).toBeInTheDocument();
+    renderHero();
+    expect(screen.getByText("Feed quiet for 2 h")).toBeInTheDocument();
+    expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
-  it("renders an inline info hint next to the baseline comparison", () => {
+  it("renders an inline info hint next to the story sentence", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
 
-  it("shows a stale-feed label instead of 'Running normally' when the feed is stale", () => {
-    mockHooks(38, 30 * 24); // 30 days old — well past the 24h threshold
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
-    expect(screen.getByText("Data delayed")).toBeInTheDocument();
-    expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
+  it("counts a long-quiet feed in days", () => {
+    mockHooks(38, 30 * 24);
+    renderHero();
+    expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
+    // A quiet feed keeps the dot but not the live green.
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
   });
 
-  it("keeps 'Running normally' when the feed is fresh", () => {
-    mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
-    expect(screen.getByText("Running normally")).toBeInTheDocument();
-    expect(screen.queryByText("Data delayed")).not.toBeInTheDocument();
+  it("says the feed is reporting live while its newest report is minutes old", () => {
+    mockHooks(38, 0.05);
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(screen.queryByText(/Feed quiet/)).toBeNull();
   });
 
-  it("renders a trend sparkline when there are at least 2 points", () => {
+  it("claims nothing about reports when the feed status could not be read", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />,
-    );
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, error: new Error("500") } as never);
+    renderHero();
+    expect(screen.queryByText("No reports yet")).toBeNull();
+    expect(screen.queryByText("Reporting live")).toBeNull();
+  });
+
+  it("claims nothing about a report whose time can't be read", () => {
+    mockHooks(38, 0.1);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: { latest_captured_at: "not-a-time", date: null, routes: [], raw_samples: 0, clamp_count: 0 },
+    } as never);
+    renderHero();
+    expect(screen.queryByText("No reports yet")).toBeNull();
+    expect(screen.queryByText(/Last report/)).toBeNull();
+  });
+
+  it("says so before any report has arrived", () => {
+    mockHooks(38, null);
+    renderHero();
+    expect(screen.getByText("No reports yet")).toBeInTheDocument();
+  });
+
+  it("renders a full-bleed trend sparkline when there are at least 2 points", () => {
+    mockHooks(38, 0.1);
+    renderHero();
     expect(screen.getByRole("img", { hidden: true })).toBeInTheDocument();
   });
 
   it("renders no sparkline when there are fewer than 2 points", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[3.3]} />,
-    );
+    renderHero({ sparklinePoints: [3.3] });
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
+  });
+
+  it("prints the hero figure in the text colour, whatever its size", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ headline: headline({ avg_min: 7.4 }) });
+    expect((container.querySelector(".ov-kpi-value") as HTMLElement).style.color).toBe("");
+  });
+
+  it("sets the hero delay value and the delayed-route count in the numeral face", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero();
+    const value = container.querySelector(".ov-kpi-value");
+    expect(value).not.toBeNull();
+    expect(value).toHaveClass("num");
+    expect(container.querySelector(".ov-hero-sub-value")).toHaveClass("num");
+  });
+
+  it("anchors the sparkline on the period mean, labelled in words", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ sparklinePoints: [2, 4, 6] });
+    // Without a reference the reader cannot tell a half-minute wobble from a
+    // ten-minute climb: the shape is auto-scaled to the window's own extremes.
+    expect(container.querySelector('[data-testid="sparkline-baseline"]')).not.toBeNull();
+    expect(screen.getByText("Selected period's average 4.0 min")).toBeInTheDocument();
+  });
+
+  it("drops the reference line when there is no series to average", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ sparklinePoints: [] });
+    expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
+    expect(screen.queryByText(/Selected period's average/)).toBeNull();
+  });
+
+  it("draws the day-pulse ribbon behind the hero from peak_hour.by_hour", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
+    // First child: the two columns after it are positioned, so they paint
+    // over it by DOM order.
+    expect(document.querySelector(".ov-hero > .ov-pulse-ribbon:first-child")).not.toBeNull();
+    expect(document.querySelector(".ov-hero > .ov-hero-text")).not.toBeNull();
+  });
+
+  it("draws no ribbon without an hourly profile", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: null });
+    expect(document.querySelector(".ov-pulse-ribbon")).toBeNull();
+  });
+
+  it("breathes only while the latest report is under two minutes old", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    cleanup();
+    mockFeedSummary("2026-10-03T07:55:00Z");
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot")).not.toBeNull();
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
+    expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
+  });
+
+  it("claims no live green for a feed that has never reported, and no dot at all before the status is read", () => {
+    mockFeedSummary(null);
+    renderHero();
+    expect(screen.getByText("No reports yet")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    cleanup();
+    mockHooks(38, null);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot")).toBeNull();
+  });
+
+  it("drops the live green when the live window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:55:00Z");
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000 + 1_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    expect(screen.queryByText("Reporting live")).toBeNull();
+  });
+
+  it("prints the delayed-route count in the numeric face", () => {
+    mockHooks(38, 0.1);
+    renderHero();
+    expect(screen.getByText("3 of 38 routes")).toHaveClass("num");
+  });
+
+  it("stops breathing when the two-minute window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
   });
 });

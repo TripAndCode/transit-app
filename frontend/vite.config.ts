@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+import { localeChunkMap } from "./scripts/localeChunkMap.mjs";
 
 export default defineConfig(({ mode }) => {
   // loadEnv (not process.env) so a per-checkout .env.local can set this —
@@ -13,7 +15,7 @@ export default defineConfig(({ mode }) => {
     // React.memo are banned as a hard ESLint error (see eslint.config.js) — a
     // compiler bailout should be fixed at the source, not worked around with
     // manual memoization.
-    plugins: [react({ babel: { plugins: ["babel-plugin-react-compiler"] } })],
+    plugins: [react(), babel({ presets: [reactCompilerPreset()] }), localeChunkMap()],
     server: {
       port: 5173,
       // Backend lives under /api/* and /health. Anything else is owned by
@@ -32,7 +34,7 @@ export default defineConfig(({ mode }) => {
       sourcemap: false,
       // Emitted to dist/.vite/manifest.json — scripts/check-entry-chunk.mjs
       // reads it to confirm the entry chunk's static import graph never
-      // pulls in maplibre-gl (CLAUDE.md: "keep MapLibre out of the entry
+      // pulls in maplibre-gl (AGENTS.md: "keep MapLibre out of the entry
       // chunk").
       manifest: true,
     },

@@ -1,19 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { InsightPanel } from "./InsightPanel";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 
 function renderPanel(agencyId = "1") {
-  return renderWithProviders(
-    <MemoryRouter initialEntries={[`/agencies/${agencyId}/analysis/trend`]}>
-      <Routes>
-        <Route path="/agencies/:agencyId/analysis/:reportType" element={<InsightPanel />} />
-      </Routes>
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [{ path: "/agencies/:agencyId/*", element: <InsightPanel /> }],
+    { initialEntries: [`/agencies/${agencyId}/time?report=trend`] },
   );
+  const result = renderWithProviders(<RouterProvider router={router} />);
+  return Object.assign(result, { router });
 }
 
 describe("InsightPanel", () => {
@@ -97,7 +96,7 @@ describe("InsightPanel", () => {
     } as never);
     renderPanel();
     expect(screen.getByText("Route R1 is anomalous")).toBeTruthy();
-    fireEvent.click(screen.getByText("View"));
+    fireEvent.click(screen.getByRole("button", { name: "Open route detail" }));
     // sessionStorage now records this pathway as shown, per the dedup design.
     // Keyed per-agency (agencyId=1 here) -- see seenStorageKey in InsightPanel.tsx.
     expect(sessionStorage.getItem("transit.insightPanelSeen.1")).toContain("trend:R1");
@@ -105,6 +104,32 @@ describe("InsightPanel", () => {
     // (not just get written to sessionStorage), otherwise the next poll
     // would re-suggest the just-shown route.
     expect(spy).toHaveBeenLastCalledWith(1, ["trend:R1"]);
+  });
+
+  it("opens the suggested route's page over the two weeks ending on the suggestion's last day", () => {
+    // A one-day window (today's anomaly) would leave every chart there a
+    // single point, so the page opens on a fortnight that ends on that day.
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "dwell_run", route_code: "R1", reason_text: "Route R1 dwell grew", severity: "notable", from_date: "2026-08-20", to_date: "2026-08-20" },
+      isPending: false,
+      error: null,
+    } as never);
+    const { router } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open route detail" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/routes/R1");
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.has("report")).toBe(false);
+    expect(params.has("routes")).toBe(false);
+    expect(params.get("from")).toBe("2026-08-07");
+    expect(params.get("to")).toBe("2026-08-20");
+  });
+
+  it("holds the suggestion's place while it loads, instead of a header over nothing", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: undefined, isPending: true, error: null } as never);
+    const { container } = renderPanel();
+    expect(container.querySelector(".skeleton")).not.toBeNull();
   });
 
   it("shows the calm no-signal message when the endpoint returns null", () => {
@@ -157,6 +182,31 @@ describe("InsightPanel", () => {
     // an agency switch) must not inherit agency 1's seen set.
     renderPanel("2");
     expect(spy).toHaveBeenCalledWith(2, []);
+  });
+
+  it("keeps the enabled flag fixed at mount instead of re-reading localStorage on every render", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: {
+        report_type: "trend",
+        route_code: "R1",
+        reason_text: "Route R1 is anomalous",
+        severity: "notable",
+        from_date: "2026-08-15",
+        to_date: "2026-08-15",
+      },
+      isPending: false,
+      error: null,
+    } as never);
+    renderPanel();
+    // Flip the stored preference off after mount -- a per-render readEnabled()
+    // call would hide the panel on the very next re-render triggered below.
+    localStorage.setItem("transit.insightPanelEnabled", "0");
+    fireEvent.click(screen.getByLabelText("Collapse insight panel"));
+    // Still mounted (the `enabled` flag was frozen at mount via
+    // useState(readEnabled)), just collapsed -- not vanished, as it would be
+    // if `enabled` were re-derived on every render.
+    expect(screen.getByLabelText("Expand insight panel")).toBeTruthy();
   });
 
   it("collapses on click and persists the preference", () => {

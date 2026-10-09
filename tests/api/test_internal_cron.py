@@ -43,6 +43,12 @@ def two_agencies(apply_schema):
         yield active_id, deleted_id
     finally:
         with conn.cursor() as cur:
+            # The run rows first: `pipeline_runs.agency_id` references
+            # `agencies`, and the tests below drive the real sweep, which
+            # records one row per agency it touches. Leaving them behind
+            # would make this DELETE fail and strand both agencies, so the
+            # next run of this file collides on `feed_url`.
+            cur.execute("DELETE FROM pipeline_runs WHERE agency_id IN (%s, %s)", (active_id, deleted_id))
             cur.execute("DELETE FROM agencies WHERE agency_id IN (%s, %s)", (active_id, deleted_id))
         conn.commit()
         conn.close()
@@ -103,6 +109,7 @@ def test_run_ingest_and_analyze_skips_deleted_agency(two_agencies, monkeypatch):
         patch("pipeline.analyze.analyze") as fake_analyze,
         patch("pipeline.freshness.check_agg_freshness", return_value=[]),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.promote.promote_closed_days", return_value=0) as fake_promote,
     ):
         _run_ingest_and_analyze()
 
@@ -112,6 +119,7 @@ def test_run_ingest_and_analyze_skips_deleted_agency(two_agencies, monkeypatch):
     assert deleted_id not in ingested_ids
     assert active_id in analyzed_ids
     assert deleted_id not in analyzed_ids
+    assert deleted_id not in [c.args[0] for c in fake_promote.call_args_list]
 
 
 def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeypatch):

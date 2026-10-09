@@ -1,13 +1,8 @@
-import {
-  DEFAULT_RANGE_DAYS,
-  isoDaysAgo,
-  todayISO,
-  type RangeCtx,
-} from "../../api/rangeContext";
+import { defaultPeriod, type Scope } from "../../api/scope";
 import type { FilterCtx } from "../../api/types";
 
-/** Convert URL-based RangeCtx to FilterCtx for new thread seeding. */
-export function rangeCtxToFilterCtx(ctx: RangeCtx): FilterCtx {
+/** Convert URL-based Scope to FilterCtx for new thread seeding. */
+export function rangeCtxToFilterCtx(ctx: Scope): FilterCtx {
   return {
     from_date: ctx.from,
     to_date: ctx.to,
@@ -18,13 +13,13 @@ export function rangeCtxToFilterCtx(ctx: RangeCtx): FilterCtx {
   };
 }
 
-/** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults. */
-export function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
-  const today = todayISO();
-  const fromDefault = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
+/** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults.
+ *  `dataEnd` is the agency's latest data day (DataEndContext). */
+export function resolvedFilterCtx(fc: FilterCtx | undefined | null, dataEnd: string | null): FilterCtx {
+  const period = defaultPeriod(dataEnd);
   return {
-    from_date: fc?.from_date ?? fromDefault,
-    to_date: fc?.to_date ?? today,
+    from_date: fc?.from_date ?? period.from,
+    to_date: fc?.to_date ?? period.to,
     dow: fc?.dow ?? "all",
     time_band: fc?.time_band ?? "all",
     service: fc?.service ?? "all",

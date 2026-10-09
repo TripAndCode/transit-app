@@ -1,6 +1,6 @@
 /**
- * Fourth metric panel shown alongside the `on_time` report (item 130):
- * observed rain-vs-dry average delay from `useWeatherDelay` (item 129).
+ * Why's rain panel, shown beside the `dwell_run` report: observed
+ * rain-vs-dry average delay from `useWeatherDelay`.
  * `available: false` is an expected, common configuration -- most agencies
  * have no representative weather station mapped yet -- so it renders one
  * calm line, never `ErrorBanner`/red styling. The server's own
@@ -10,11 +10,13 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useWeatherDelay } from "../api/hooks";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { delayColor } from "../styles/tokens";
+import { SHARED_TABLE, th, td } from "./tableStyles";
+import { formatNumber } from "../utils/format";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
@@ -26,7 +28,7 @@ function fmtDeltaSec(v: number | null, t: TFunction): string {
   return t("common.unit_sec_signed", { sign: v < 0 ? "-" : "+", value: Math.abs(v).toFixed(1) });
 }
 
-export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useWeatherDelay(aid, ctx, true);
 
@@ -50,46 +52,34 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
               {t("reports.weather_delay.station_label", { name: data.station?.station_name ?? "" })}
             </span>
             {data.low_confidence && (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: "var(--text-secondary)",
-                  background: "var(--bg-soft)",
-                  border: "1px solid var(--border-soft)",
-                  borderRadius: 999,
-                  padding: "2px 8px",
-                }}
-              >
-                {t("reports.weather_delay.low_confidence_badge")}
-              </span>
+              <span className="caveat-badge">{t("reports.weather_delay.low_confidence_badge")}</span>
             )}
           </div>
           {data.station?.note && (
             <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>{data.station.note}</p>
           )}
           <div style={{ width: "100%", overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={SHARED_TABLE}>
               <thead>
                 <tr style={{ background: "var(--bg-soft)" }}>
-                  <th style={th("left")}>{t("reports.weather_delay.col.condition")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.avg_delay")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.days")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.samples")}</th>
+                  <th style={th({ align: "left" })}>{t("reports.weather_delay.col.condition")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.avg_delay")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.days")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.samples")}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.wet")}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.samples.toLocaleString()}</td>
+                  <td style={td({ align: "right" })}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.wet.days)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.wet.samples)}</td>
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.dry")}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.samples.toLocaleString()}</td>
+                  <td style={td({ align: "right" })}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.dry.days)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.dry.samples)}</td>
                 </tr>
               </tbody>
             </table>
@@ -102,27 +92,16 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
           {data.buckets != null && data.buckets.length > 0 && (
             <WeatherBucketChart buckets={data.buckets} />
           )}
-          <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--text-tertiary)", fontStyle: "italic" }}>
+          <p style={{ margin: "12px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontStyle: "italic" }}>
             {data.disclaimer}
           </p>
-          <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--text-tertiary)" }}>{data.attribution}</p>
+          <p style={{ margin: "4px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{data.attribution}</p>
         </div>
       )}
     </div>
   );
 }
 
-const th = (align: "left" | "right"): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: align,
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});
 
 // Column height of the bar track, in px -- fixed rather than a CSS percentage
 // so each bar's own height is a plain JS computation against it, matching
@@ -164,7 +143,7 @@ function WeatherBucketChart({ buckets }: { buckets: WeatherDelayBucket[] }) {
               key={b.label}
               style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}
             >
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>{valueLabel}</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>{valueLabel}</span>
               <div
                 style={{
                   width: "100%",
@@ -193,8 +172,8 @@ function WeatherBucketChart({ buckets }: { buckets: WeatherDelayBucket[] }) {
                   }}
                 />
               </div>
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 6 }}>{b.label}</span>
-              <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", marginTop: 6 }}>{b.label}</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
                 {t("reports.weather_delay.buckets.sample_count", { count: b.samples })}
               </span>
             </div>

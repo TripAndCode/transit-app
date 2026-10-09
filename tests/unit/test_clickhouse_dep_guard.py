@@ -1,4 +1,4 @@
-"""Tests for api.deps.get_ch's degrade-to-503 behavior (Fix A).
+"""Tests for api.deps.get_ch's degrade-to-503 behavior.
 
 api.main's lifespan sets ``app.state.ch_client = None`` (rather than letting
 a ClickHouse connection failure kill the whole app) when ClickHouse is

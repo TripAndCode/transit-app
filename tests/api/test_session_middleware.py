@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from api.security import token_hash
+
 
 async def _make_session(conn, *, role="user", suspended=False, expires_in=timedelta(days=30)):
     uid = (
@@ -16,8 +18,8 @@ async def _make_session(conn, *, role="user", suspended=False, expires_in=timede
     )["user_id"]
     sid = "test-sid-" + str(uid)
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + expires_in,
     )

@@ -2,8 +2,8 @@ name: CI
 
 # `pull_request` is what the merge gate reads, and it already covers every
 # branch headed anywhere. Listening on `push` for all branches as well meant
-# every push to an open PR ran the whole suite twice over the same tree — on
-# a single self-hosted runner that is double the queue for no extra signal.
+# every push to an open PR ran the whole suite twice over the same tree, for
+# no extra signal.
 # `push` stays for `main` alone, so a commit landing there outside a PR is
 # still checked. Mirrors `secrets-scan.yml`.
 on:
@@ -12,26 +12,32 @@ on:
   pull_request:
 
 # One in-flight run per pull request: a new push supersedes the previous run
-# instead of queueing behind it, which on one runner is the difference
-# between the current head being tested now and being tested after every
-# head before it. Pull requests only — a `main` run records what that commit
+# instead of queueing behind it, so the current head is tested now rather
+# than after every head before it. Pull requests only — a `main` run records what that commit
 # did rather than previewing it, so nothing should cancel it.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
+  # Always GitHub-hosted. Nothing here needs Docker, a database or
+  # ClickHouse; the one native dependency is the `python3` that
+  # lint:i18n-strings shells out to, which every hosted image carries.
   frontend:
-    runs-on: [self-hosted, vps]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -47,13 +53,28 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Key-parity gate: every visible string's t() key must exist in both
+      # frontend/src/i18n/locales/ja.json and en.json.
+      - name: i18n key parity
+        run: npm run lint:i18n
+
+      # Exact-string gate for server-rendered strings the frontend can't see
+      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`.
+      # The only native dependency in this job, and the reason it is worth
+      # naming — it is what decides whether this job can stay hosted.
+      - name: i18n exact-string check
+        run: npm run lint:i18n-strings
+
       # Knip dead-code check: exits non-zero on any unused file/export, which
       # now gates the build to keep the tree free of dead code.
       - name: Dead-code check
         run: npm run deadcode
 
-      - name: Unit tests
-        run: npm run test
+      # The coverage run is the unit-test run, not a second pass over the
+      # suite: it fails on a failing test and on coverage below the thresholds
+      # in vitest.config.ts alike, which nothing else enforces.
+      - name: Unit tests + coverage thresholds
+        run: npm run test:coverage
 
       # Fixture-based positive/negative controls for check-entry-chunk.mjs
       # itself — doesn't need a real build, just proves the detection logic
@@ -62,20 +83,113 @@ jobs:
       - name: Entry-chunk checker unit tests
         run: npm run test:check-entry-chunk
 
+      # Fixture-based positive/negative controls for check-css-tokens.mjs
+      # itself, mirroring the entry-chunk checker's own tests above.
+      - name: CSS tokens checker unit tests
+        run: npm run test:check-css-tokens
+
+      # Static scan (no build needed): every var(--x) reference resolves
+      # (or has a fallback) and every z-index uses the shared ladder.
+      - name: CSS tokens check
+        run: npm run check:css-tokens
+
+      - name: React Compiler checker unit tests
+        run: npm run test:check-react-compiler
+
+      - name: React Compiler compiles every component
+        run: npm run check:react-compiler
+
       # Typecheck already ran above (tsc -b), so this build step skips it
-      # (build:bundle = vite build only) and just enforces CLAUDE.md's
+      # (build:bundle = vite build only) and just enforces AGENTS.md's
       # "keep MapLibre out of the entry chunk" rule against the real bundle.
       - name: Build + entry-chunk check
         run: |
           npm run build:bundle
           npm run check:entry-chunk
 
+  # Builds the root Dockerfile, which is what Railway deploys. `frontend` and
+  # `test` install dependencies their own way, so a change that breaks only the
+  # image (a base-image bump, npm config the Docker stage cannot see, a
+  # lockfile only one install path accepts, an app import of a dependency
+  # outside Poetry's `main` group) passes both and fails at deploy time.
+  # Not path-filtered: what the image reads is nearly the whole tree, so a
+  # filter could only ever be a stale subset of it. Hosted, like `frontend`,
+  # so it runs alongside `test` instead of queueing on the one VPS runner.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # `context: .` builds the checked-out tree; the action's default is to
+      # fetch its own Git context instead. The gha cache authenticates with
+      # the runner's cache token, not the `permissions` above. `mode=max`
+      # also caches the frontend stage, whose layers the final image does
+      # not contain, and `ignore-error` keeps a refused or throttled cache
+      # write from failing a build that succeeded.
+      - name: Build the production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: transit-app:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      # No network and no environment: importing the app needs neither,
+      # because env validation and the database connections live in the
+      # lifespan, not at import. What the import does prove is that the
+      # `main` dependency group alone is enough to load every router.
+      - name: Smoke-test the image
+        run: |
+          docker run --rm --network none transit-app:ci python -c "import api.main"
+          docker run --rm --network none transit-app:ci test -f api/static/index.html
+
+  # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
+  # while it is unset: standard hosted runners cost nothing for a public
+  # repository. The day hosted minutes start counting, register a runner on
+  # the VPS, set this to `["self-hosted","vps"]`, and set `vars.CI_TEST_SHARDS`
+  # to `[0]`, since one runner would only run the shards one after another.
+  #
+  # Whole-tree static checks, beside the test shards rather than ahead of them.
+  backend-static:
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-backend
+        with:
+          python-version: "3.14"
+
+      - name: Lint and format check
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+
+      - name: Type check
+        run: poetry run mypy
+
+  # The suite in shards that run at once, each on its own machine with its
+  # own Postgres and ClickHouse; tests/sharding.py decides which files each
+  # one keeps. fail-fast stays off so one shard's failure still reports the
+  # others'.
   test:
-    runs-on: [self-hosted, vps]
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(vars.CI_TEST_SHARDS || '[0, 1, 2]') }}
 
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:26.3
+        image: clickhouse/clickhouse-server:26.8
         env:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
@@ -93,33 +207,14 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      # Only meaningful on GitHub-hosted VMs, whose shared root filesystem
-      # comes pre-loaded with tooling this job never uses (Android SDK,
-      # .NET, GHC, etc.) and has tipped into intermittent `DiskFull` mid-run.
-      # A persistent self-hosted runner doesn't carry that preinstalled
-      # bulk and the cleanup commands need sudo, which this runner's user
-      # intentionally does not have.
-      - name: Free disk space on the runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
-
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-backend
         with:
-          python-version: "3.12"
-
-      - name: Install Poetry
-        run: pip install poetry==1.8.5
-
-      - name: Install dependencies
-        run: poetry install
+          python-version: "3.14"
 
       - name: Start Postgres from db/Dockerfile
+        id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
           container-name: transit-ci-db
@@ -127,7 +222,7 @@ jobs:
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
 
       # Equivalent of `make ch-bootstrap`. The service container above isn't
       # started via docker compose/the Makefile, so this creates the
@@ -142,14 +237,6 @@ jobs:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
-
-      - name: Lint and format check
-        run: |
-          poetry run ruff check .
-          poetry run ruff format --check .
-
-      - name: Type check
-        run: poetry run mypy
 
       # tests/unit/test_gitleaks_fixtures.py shells out to the real, pinned
       # gitleaks binary to prove the control fixtures are actually detected
@@ -179,7 +266,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
           # tests/conftest.py's ch_client/ch_async_client fixtures (and a
@@ -193,10 +280,57 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
+          CI_SHARD_INDEX: ${{ matrix.shard }}
+          CI_SHARD_COUNT: ${{ strategy.job-total }}
           # Coverage instruments every line the suite executes and nothing
-          # gates on the number it prints, so a pull request pays for a
-          # report no check reads. `main` still produces one, which is where
-          # the figure is worth having: it describes what landed.
-          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=term' || '' }}
+          # gates on the number, so a pull request pays for a report no check
+          # reads. On `main`, where the figure describes what landed, each
+          # shard keeps its data for the `coverage` job to combine: a shard
+          # alone measures only its share of the suite.
+          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=' || '' }}
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
         run: poetry run pytest $COV_ARGS
 
+      - name: Keep this shard's coverage data
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      # A persistent self-hosted runner keeps its Docker state between runs,
+      # so the container and its volume have to go even when this job fails
+      # or is cancelled. The name is resolved by the action, not the literal
+      # passed in above: it carries the run id so concurrent jobs do not
+      # collide, and removing the prefix would remove nothing.
+      - name: Stop and remove the Postgres container
+        if: always()
+        run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
+
+  # One coverage figure for what landed on `main`, combined from every shard.
+  # Same runner as the shards: the data records the absolute paths of the
+  # checkout it measured, and the report reads the source at those paths.
+  coverage:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-backend
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-*
+          merge-multiple: true
+
+      - name: Report the combined coverage
+        run: |
+          poetry run coverage combine .coverage.shard-*
+          poetry run coverage report

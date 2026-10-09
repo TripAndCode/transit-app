@@ -1,0 +1,192 @@
+/* Self-sufficient styling for CommandPalette.tsx (mounted once, eagerly, in
+   App.tsx) — imported directly here rather than relying on another chunk
+   having loaded first, the same reasoning OverviewModal's own import of
+   overview.css documents. */
+
+/* Layout only: OverlayBase owns the scrim's colour, its full-bleed box and
+   its rung on the stacking ladder. This positions the panel inside it --
+   near the top of the viewport, where the eye already is when ⌘K is hit. */
+.cmdp-overlay {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+}
+
+.cmdp-palette {
+  width: min(600px, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--el-3);
+  overflow: hidden;
+}
+
+.cmdp-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.cmdp-input-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.cmdp-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 14px 0;
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+.cmdp-input:focus {
+  outline: none;
+}
+
+.cmdp-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.cmdp-group-label {
+  padding: 8px 10px 4px;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.cmdp-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.cmdp-item[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.cmdp-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cmdp-item-label {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmdp-item-sublabel {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmdp-item-keys {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cmdp-kbd {
+  font-size: var(--text-xs);
+  border: 1px solid var(--border-subtle);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0 6px;
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  font-family: inherit;
+}
+
+.cmdp-empty {
+  padding: 22px 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.cmdp-footer {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.cmdp-sheet {
+  width: min(480px, 100%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--el-3);
+  padding: 20px 22px;
+}
+
+.cmdp-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cmdp-sheet-title {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+.cmdp-sheet-close {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+}
+
+.cmdp-sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmdp-sheet-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}

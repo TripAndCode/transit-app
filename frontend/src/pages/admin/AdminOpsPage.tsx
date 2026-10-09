@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useAdminOps, type AgencyFreshnessItem } from "../../api/admin";
 import { StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 function formatAge(t: ReturnType<typeof useTranslation>["t"], ageHours: number | null): string {
   if (ageHours === null) return t("admin.ops.unknown");
@@ -71,14 +72,14 @@ export function AdminOpsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ops.title")}</h1>
+      <PageHeader title={t("admin.ops.title")} />
 
       {error && (
         <p
           role="alert"
           style={{
-            marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-md)",
-            background: "var(--surface-1)", color: "var(--color-warning, #C99A2E)", fontSize: 14,
+            marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-lg)",
+            background: "var(--surface-1)", color: "var(--color-warning-text, #89691F)", fontSize: 14,
           }}
         >
           {t("admin.ops.load_error")}
@@ -89,7 +90,7 @@ export function AdminOpsPage() {
       <div
         style={{
           display: "flex", alignItems: "center", gap: 20, marginBottom: 24, padding: "12px 16px",
-          background: "var(--surface-1)", borderRadius: "var(--radius-md)",
+          background: "var(--surface-1)", borderRadius: "var(--radius-lg)",
           fontSize: 14,
         }}
       >

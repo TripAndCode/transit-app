@@ -39,16 +39,23 @@ import clickhouse_connect
 from fastapi import HTTPException
 
 from api.range import RangeCtx
+from pipeline.flags import flag
 from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, get_client
+from pipeline.query.llm_client import (
+    _PROVIDER_DEFAULTS,
+    REQUEST_TIMEOUT,
+    _build_create_kwargs,
+    describe_provider_failure,
+    get_client,
+    log_usage,
+)
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
-    LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
     TOOLS,
     ToolResult,
@@ -63,7 +70,7 @@ _log = logging.getLogger(__name__)
 
 def _cache_enabled() -> bool:
     """Return True when the intent-cache feature flag is on."""
-    return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("ask_intent_cache_enabled", False)
 
 
 def _allowed_providers() -> set[str] | None:
@@ -201,7 +208,6 @@ def _completion_with_key(
     tools: list[dict] | None = None,
     tool_choice: str = "auto",
     temperature: float = 0.0,
-    model_override: str | None = None,
     response_format: dict | None = None,
 ) -> Any:
     """Make one completion call against a signed-in user's own stored BYOK key.
@@ -230,9 +236,9 @@ def _completion_with_key(
     upper = provider.upper()
     base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
-    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
+    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=REQUEST_TIMEOUT)
     create_kwargs = _build_create_kwargs(
-        model=model_override or model,
+        model=model,
         messages=messages,
         temperature=temperature,
         tools=tools,
@@ -240,6 +246,7 @@ def _completion_with_key(
         response_format=response_format,
     )
     resp = one_off.chat.completions.create(**create_kwargs)
+    log_usage(provider, model, resp)
     return resp.choices[0].message
 
 
@@ -260,6 +267,33 @@ def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[st
     if verify_numeric_claims(answer, grounding):
         return answer, False
     return _summary("numeric_guard_fallback", lang=locale), True
+
+
+def _text_reply(body: str, locale: str) -> dict:
+    """Response for an LLM-authored plain-text answer, where no tool ran.
+
+    With no dispatched data there is nothing to trace a number back to, so
+    ``_numeric_guard`` passes the reply through. The guard covers the paths
+    where an answer can actually be checked; constraining this one means
+    constraining what the model may return here, not verifying it afterwards.
+    """
+    guarded_body, triggered = _numeric_guard(body, {}, locale)
+    return {
+        "answer": guarded_body,
+        "tool_call": None,
+        "result": None,
+        "success": True,
+        "numeric_guard_triggered": triggered,
+    }
+
+
+def _names_a_tool(tool: object) -> bool:
+    """Whether a JSON-mode signature's ``tool`` field names a tool at all.
+
+    ``null``, an empty string, and the strings "none"/"null" all mean the
+    model chose to answer without one.
+    """
+    return tool is not None and str(tool).strip().lower() not in {"", "none", "null"}
 
 
 async def _dispatch_and_respond(
@@ -347,7 +381,6 @@ async def chat_with_tools(
     ctx: RangeCtx,
     conn,
     agency_id: int,
-    model: str | None = None,
     locale: str = "ja",
     rag_examples: list | None = None,
     history: list | None = None,
@@ -429,14 +462,10 @@ async def chat_with_tools(
     tables) when present. ``locale`` ∈ {``"ja"``, ``"en"``} chooses the
     user-facing language across the entire flow.
 
-    Model selection
-    ---------------
-    The ``model`` parameter is forwarded to the LLM adapter as a
-    per-call override. When ``model=None`` (the default), the adapter
-    uses each provider's own configured default (``{PROVIDER}_MODEL``
-    env var, e.g. ``GEMINI_MODEL`` / ``OPENAI_MODEL``). Passing a
-    vendor-specific model name only works if every provider in the
-    fallback ladder accepts it.
+    Each provider runs its own configured model (``{PROVIDER}_MODEL``, e.g.
+    ``GEMINI_MODEL`` / ``OPENAI_MODEL``). There is no per-request model
+    choice: no single model name is valid on every provider in the fallback
+    ladder, so one would leave every other rung unable to answer.
     """
     client = _get_client()
     # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
@@ -485,11 +514,11 @@ async def chat_with_tools(
             return None, "rate_limit"
         except BadRequestError:
             return None, "bad_request"
-        except Exception:
+        except Exception as exc:
+            _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
             return None, "unexpected"
 
-    language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
-    locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    locale_addendum = _chat_str("locale_instruction", locale)
     # Normalize once so leading/trailing whitespace doesn't cause cache misses
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
@@ -551,8 +580,8 @@ async def chat_with_tools(
                 # An agg_* table missing (migration/analyze behind) must propagate
                 # to FastAPI's registered aggregate_not_ready_handler so the
                 # frontend gets the machine-readable {"code": "aggregate_not_ready"}
-                # 503 it reacts to — not a generic 200 tool_error that masks it
-                # (mirrors api/routers/ask.py's Fix-8f convention).
+                # 503 it reacts to — not a generic 200 tool_error that masks it,
+                # the same carve-out _dispatch_and_respond makes.
                 raise
             except Exception:
                 _log.exception("Build-mode dispatch failed for %s", build_tool)
@@ -703,7 +732,6 @@ async def chat_with_tools(
             return _call_llm(
                 messages=messages,
                 temperature=0.0,
-                model_override=model,
                 response_format={"type": "json_object"},
             )
         return _call_llm(
@@ -711,7 +739,6 @@ async def chat_with_tools(
             tools=TOOLS,
             tool_choice="required" if force_tool_call else "auto",
             temperature=0.0,
-            model_override=model,
         )
 
     # -----------------------------------------------------------------------
@@ -783,65 +810,55 @@ async def chat_with_tools(
 
         # Try to parse JSON signature from content.
         sig: IntentSignature | None = None
+        text_reply: str | None = None
         content = (getattr(msg, "content", None) or "").strip()
         if content:
             try:
                 payload = json.loads(content)
-                if isinstance(payload, dict) and "tool" in payload:
+                if isinstance(payload, dict) and _names_a_tool(payload.get("tool")):
                     sig = IntentSignature(
                         tool=str(payload["tool"]),
                         args=payload.get("args") or {},
                         confidence=float(payload.get("confidence") or 0.0),
                         rationale=str(payload.get("rationale") or ""),
                     )
+                elif isinstance(payload, dict):
+                    reply = payload.get("reply")
+                    if isinstance(reply, str) and reply.strip():
+                        text_reply = reply.strip()
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                _log.warning("JSON-mode parse failed; falling back to tool_calls path: %s", exc)
+                _log.warning("JSON-mode signature parse failed: %s", exc)
+
+        # A signature naming no tool carries SYSTEM_PROMPT rule 3's plain-text
+        # answer. It is served as-is: nothing to dispatch, and no intent to
+        # cache. A recognized continuation must resolve to a tool call (see
+        # JSON_MODE_FORCE_TOOL_ADDENDUM), so there a reply is not an answer.
+        if text_reply is not None and not force_tool_call:
+            return {
+                **_text_reply(text_reply, locale),
+                "signature_hash": None,
+                "confidence": None,
+                "canonical_args": None,
+                "cache_outcome": None,
+            }
 
         if sig is None:
-            # Graceful degradation: malformed JSON — fall through to Phase-①
-            # tool_calls path below.
-            _log.info("Cache path: falling back to Phase-① tool_calls dispatch")
-            tool_calls = getattr(msg, "tool_calls", None)
-            if not tool_calls:
-                # Do NOT surface raw LLM content as the answer in JSON-mode.
-                # The LLM is constrained to emit JSON, so any non-tool-call
-                # content (e.g. it echoed ``{"type":"json_object"}`` on an
-                # adversarial prompt) is structurally invalid output. Show the
-                # generic refusal instead — never leak raw model text.
-                return {
-                    "answer": _chat_str("refusal_fallback", locale),
-                    "tool_call": None,
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": None,
-                    "confidence": None,
-                    "canonical_args": None,
-                    "cache_outcome": None,
-                }
-            call = tool_calls[0]
-            name = call.function.name
-            try:
-                args = json.loads(call.function.arguments or "{}")
-            except (json.JSONDecodeError, TypeError):
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
-            return await _dispatch_and_respond(
-                name,
-                args,
-                ctx,
-                conn,
-                agency_id,
-                locale,
-                ch,
-                extra={
-                    "signature_hash": None,
-                    "confidence": None,
-                    "canonical_args": None,
-                    "cache_outcome": None,
-                },
-            )
+            # Neither a tool signature nor a servable reply. The request sent
+            # no tools, so there is no tool call to fall back on, and raw
+            # content is never surfaced: the model was constrained to emit
+            # JSON, so anything else (e.g. an echoed ``{"type":"json_object"}``
+            # on an adversarial prompt) is structurally invalid output.
+            return {
+                "answer": _chat_str("refusal_fallback", locale),
+                "tool_call": None,
+                "result": None,
+                "success": False,
+                "numeric_guard_triggered": None,
+                "signature_hash": None,
+                "confidence": None,
+                "canonical_args": None,
+                "cache_outcome": None,
+            }
 
         # We have a valid IntentSignature — canonicalize and compute hash.
         ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
@@ -867,9 +884,8 @@ async def chat_with_tools(
         # Skip writes for build-mode synthetic questions so machine-generated
         # strings never appear as last_question in the cache.
         # Also skip when the LLM hallucinated a tool name we don't dispatch —
-        # otherwise an out-of-scope refusal (sig.tool='none', etc.) gets
-        # cached and every future similar question collapses to the same
-        # garbage hash, locking out the LLM permanently.
+        # otherwise that name gets cached and every future similar question
+        # collapses to the same garbage hash, locking out the LLM permanently.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
@@ -922,22 +938,9 @@ async def chat_with_tools(
         # deliberate, helpful refusal/suggestion (the system worked → True).
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
-        # This is the one LLM-authored-free-text site in this function — no
-        # tool was dispatched, so there is no data to trace a number back to
-        # and _numeric_guard passes the reply through. The guard covers the
-        # paths where an answer can actually be checked; constraining this one
-        # means constraining what the model may return here, not verifying it
-        # afterwards.
         body = (msg.content or "").strip()
         if body:
-            guarded_body, triggered = _numeric_guard(body, {}, locale)
-            return {
-                "answer": guarded_body,
-                "tool_call": None,
-                "result": None,
-                "success": True,
-                "numeric_guard_triggered": triggered,
-            }
+            return _text_reply(body, locale)
         return {
             "answer": _chat_str("refusal_fallback", locale),
             "tool_call": None,

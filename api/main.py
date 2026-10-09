@@ -7,14 +7,16 @@ at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
 """
 
+import asyncio
 import logging
 import os
 import os.path
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -22,16 +24,21 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
+from api import activity, retention
 from api.aggregate_errors import aggregate_not_ready_handler
 from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
+from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
+from api.routers.admin_agencies import router as admin_agencies_router
+from api.routers.admin_ask import router as admin_ask_router
+from api.routers.admin_flags import router as admin_flags_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.ask_dashboard import router as ask_dashboard_router
@@ -47,9 +54,14 @@ from api.routers.me import router as me_router
 from api.routers.network import router as network_router
 from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
+from api.routers.scope_summary import router as scope_summary_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from api.sso import SSO_ENV as _AUTH_ENV
+from api.sso import sso_status as auth_status
+from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
+from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
@@ -82,22 +94,6 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.execute("SET statement_timeout = '30s'")
 
 
-_AUTH_ENV = (
-    "SESSION_SIGNING_KEY",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "GITHUB_CLIENT_ID",
-    "GITHUB_CLIENT_SECRET",
-)
-
-
-def auth_status() -> tuple[bool, list[str]]:
-    """Read env every call so test monkeypatching + runtime config-flip both
-    take effect without re-importing the app. Enabled iff all five vars set."""
-    missing = [k for k in _AUTH_ENV if not os.environ.get(k)]
-    return (not missing, missing)
-
-
 def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
     """Reject the spec-incompatible CORS combo: ``*`` + ``Allow-Credentials``.
 
@@ -112,6 +108,13 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
         )
 
 
+def _warn_if_login_gate_inactive(sso_enabled: bool) -> None:
+    """A deployment that asks for sign-in but has no SSO configured is open to
+    everyone; say so at boot rather than let it pass silently."""
+    if not sso_enabled and flag("login_required", True):
+        _log.warning("login_required is on but SSO is not configured: the API is open to signed-out callers")
+
+
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
     """Refuse to boot an auth-enabled deployment that still uses the dev signing
     key — every session/OAuth cookie would be forgeable. No-op when auth is off
@@ -121,6 +124,37 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
             "SESSION_SIGNING_KEY is the dev default in an auth-enabled deployment. "
             "Set a real secret (e.g. `openssl rand -hex 32`)."
         )
+
+
+def _openapi_docs_enabled() -> bool:
+    """Whether ``/docs``, ``/redoc`` and ``/openapi.json`` should be exposed.
+
+    Off unless ``OPENAPI_DOCS_ENABLED`` says otherwise, matching
+    ``PERF_DEBUG_ENABLED``: a deployment that configures nothing publishes no
+    schema. The HTTPS signal behind ``cookie_secure()`` cannot stand in for
+    "is this production" here, because ``PUBLIC_BASE_URL`` is only set when
+    SSO is configured — a live HTTPS deployment without SSO leaves it at its
+    localhost default, which would read as local dev and expose the schema.
+
+    Local dev gets the docs from ``.env.example``, which turns them on and is
+    only ever copied into a developer's own ``.env``.
+    """
+    return os.environ.get("OPENAPI_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _require_docs_enabled() -> None:
+    """404 the docs surface when disabled, matching ``debug._require_enabled``'s
+    disabled-looks-nonexistent convention (never a 403 that would confirm the
+    route exists).
+
+    Checked as a per-route dependency rather than at app construction: unlike
+    ``docs_url``/``redoc_url``/``openapi_url`` (fixed for the process's whole
+    lifetime once passed to ``FastAPI(...)``), this runs on every request, so
+    a ``feature_flags`` override on ``openapi_docs_enabled`` -- or an env
+    change -- takes effect without a restart.
+    """
+    if not flag("openapi_docs_enabled", _openapi_docs_enabled()):
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
@@ -138,6 +172,24 @@ def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
         )
 
 
+async def _close_startup_resources(app: FastAPI) -> None:
+    """Close the ClickHouse client and the connection pool, tolerating either
+    being absent or already failed. Shared by the startup-failure path and
+    the normal shutdown so the two cannot drift."""
+    client = getattr(app.state, "ch_client", None)
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            _log.warning("ClickHouse client failed to close cleanly", exc_info=True)
+    pool = getattr(app.state, "pool", None)
+    if pool is not None:
+        try:
+            await pool.close()
+        except Exception:
+            _log.warning("Connection pool failed to close cleanly", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -147,6 +199,7 @@ async def lifespan(app: FastAPI):
     partial set is rejected as a misconfiguration since a half-wired OAuth
     flow would leak state cookies without ever completing.
     """
+    from pipeline.flags import warm as warm_flags
     from pipeline.query.llm_client import _load_providers
 
     _validate_llm_providers(_load_providers())
@@ -156,58 +209,98 @@ async def lifespan(app: FastAPI):
             f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
         )
     _validate_session_signing_key(enabled, os.environ.get("SESSION_SIGNING_KEY"))
-    # max_size=20 (asyncpg default 10): the overview pool-gather path fans
-    # out to ~10 concurrent per-task connections while the request's own
-    # get_conn dependency still holds a slot — default sizing left the
-    # fan-out one slot short and serialized a stage on every cold request.
+    # max_size=20 (asyncpg default 10): an overview request on the pool-gather
+    # path holds its own get_conn slot plus up to OVERVIEW_FANOUT_LIMIT more,
+    # so the pool fills only once 20 / (OVERVIEW_FANOUT_LIMIT + 1) cold
+    # overview requests overlap.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
-    # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
-    # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
-    # heatmap, any time_band="all" report path reading agg_* tables) have
-    # nothing to do with ClickHouse and must keep working even if it's down
-    # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
-    # client that raises a clean 503 lazily, only if something actually
-    # tries to use it.
+    # Everything below reuses app.state.pool, so any failure here must close
+    # it before re-raising — this generator's own cleanup after `yield` never
+    # runs unless `yield` is actually reached, otherwise the pool leaks.
     try:
-        app.state.ch_client = await get_ch_client()
-    except KeyError as exc:
-        _log.warning(
-            "ClickHouse client not started — missing required env var %s. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc,
-        )
-        app.state.ch_client = None
+        # Resolve the flags once here, off the request path. Every later
+        # refresh happens on a background thread, so this is the one read
+        # that would otherwise land on the event loop -- inside whichever
+        # request happened to touch a flag first.
+        await asyncio.to_thread(warm_flags)
+        _warn_if_login_gate_inactive(enabled)
+        # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
+        # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+        # heatmap, any time_band="all" report path reading agg_* tables) have
+        # nothing to do with ClickHouse and must keep working even if it's down
+        # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
+        # client that raises a clean 503 lazily, only if something actually
+        # tries to use it.
+        try:
+            app.state.ch_client = await get_ch_client()
+        except KeyError as exc:
+            _log.warning(
+                "ClickHouse client not started — missing required env var %s. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc,
+            )
+            app.state.ch_client = None
+        except Exception:
+            _log.warning(
+                "ClickHouse client not started — connection failed. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc_info=True,
+            )
+            app.state.ch_client = None
+
+        # Close any run row left `running` by a process that died mid-job:
+        # this process is the first thing up after such a death, and a bar
+        # with no end is indistinguishable from work still in flight. Runs
+        # off the event loop and never raises -- a tidy-up must not be able
+        # to stop the API from booting.
+        reaped = await asyncio.to_thread(reap_abandoned_runs_best_effort, DATABASE_URL)
+        if reaped:
+            _log.warning("Closed %d pipeline run(s) abandoned by a previous process", reaped)
+
+        # Break-glass local-admin account (independent of the OAuth env block
+        # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
+        # are both set. See api.routers.auth.seed_local_admin.
+        await seed_local_admin(app.state.pool)
+
+        from pipeline.query.embeddings import get_embedder
+
+        embedder = get_embedder()
+        if not embedder.available:
+            _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        activity.start(app)
+        retention.start(app)
     except Exception:
-        _log.warning(
-            "ClickHouse client not started — connection failed. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc_info=True,
-        )
-        app.state.ch_client = None
-
-    # Break-glass local-admin account (independent of the OAuth env block
-    # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
-    # are both set. See api.routers.auth.seed_local_admin.
-    await seed_local_admin(app.state.pool)
-
-    from pipeline.query.embeddings import get_embedder
-
-    embedder = get_embedder()
-    if not embedder.available:
-        _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        # Close what startup already opened, in the same order the shutdown
+        # path below uses. The ClickHouse client is opened inside this same
+        # try, so a failure after it leaks its HTTP session otherwise.
+        # Cleanup failures are logged, never raised: the startup error is the
+        # one worth reporting, and letting a close() failure replace it would
+        # hide the actual cause.
+        await _close_startup_resources(app)
+        raise
 
     yield
-    if app.state.ch_client is not None:
-        await app.state.ch_client.close()
-    await app.state.pool.close()
+    await retention.stop(app)
+    await activity.stop(app)
+    await _close_startup_resources(app)
 
 
 _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 configure_logging()
 
-app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+# FastAPI's own docs_url/redoc_url/openapi_url are fixed at construction --
+# no per-request hook to gate them dynamically. Disable the built-ins and
+# register equivalent routes below (after the routers), each behind
+# Depends(_require_docs_enabled), so the flag/env check happens per request.
+app = FastAPI(
+    title="Transit Delay API",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.
@@ -220,6 +313,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 #   StarletteSessionMiddleware  (Authlib needs request.session)
 #   SessionMiddleware           (loads request.state.user from sid cookie)
 #   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
+#   LoginRequiredMiddleware     (401s a signed-out caller while sign-in is required)
 #   LocaleMiddleware            (parses Accept-Language → request.state.locale)
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want. LocaleMiddleware is innermost (cheap,
@@ -230,6 +324,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # design — see api/middleware/cancel_on_disconnect.py.
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
+app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
@@ -252,7 +347,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 # Outermost on the request side — sees the final status after every
@@ -261,6 +356,9 @@ app.add_middleware(
 app.add_middleware(RequestLogMiddleware)
 
 app.include_router(admin_router)
+app.include_router(admin_agencies_router)
+app.include_router(admin_ask_router)
+app.include_router(admin_flags_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
@@ -273,9 +371,25 @@ app.include_router(me_router)
 app.include_router(network_router)
 app.include_router(overview_router)
 app.include_router(reports_router)
+app.include_router(scope_summary_router)
 app.include_router(static_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
+
+
+@app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _openapi_schema() -> JSONResponse:
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _swagger_ui():
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
+
+
+@app.get("/redoc", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _redoc_ui():
+    return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} - ReDoc")
 
 
 class HealthStatus(BaseModel):
@@ -285,6 +399,7 @@ class HealthStatus(BaseModel):
 class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
+    login_required: bool
 
 
 @app.get("/health", response_model=HealthStatus)
@@ -296,9 +411,14 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    and separately show/hide the break-glass local-admin password form."""
+    show/hide the break-glass local-admin password form, and send signed-out
+    visitors to sign in while ``login_required`` says the API refuses them."""
     enabled, _ = auth_status()
-    return {"auth_enabled": enabled, "local_admin_enabled": local_admin_enabled()}
+    return {
+        "auth_enabled": enabled,
+        "local_admin_enabled": local_admin_enabled(),
+        "login_required": await enforcement_active(),
+    }
 
 
 def _maybe_mount_static(app: FastAPI) -> None:

@@ -18,9 +18,13 @@ rgba
 # --- Product / brand proper nouns rendered by the SPA ---
 google
 github
+# The map library's own link in the map's attribution control.
+maplibre
 
 # --- Common UI tokens that are intentionally in English (e.g. the locale switcher) ---
 english
+# Shortcut hints print the key cap's label; off Apple platforms that is Ctrl.
+ctrl
 
 # --- Statistical / transit abbreviations shown in column headers ---
 # p50 / p90 are alphanumeric (< 4 chars), exempt by regex — no entry needed.

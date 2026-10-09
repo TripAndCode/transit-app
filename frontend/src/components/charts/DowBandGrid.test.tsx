@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { BandGrid, Legend } from "./DowBandGrid";
 import { BAND_ORDER, type ForecastOverviewGridCell } from "../../api/types";
+import { DELAY_THRESHOLDS } from "../../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []): ForecastOverviewGridCell[] {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -22,13 +23,28 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
 }
 
 describe("BandGrid", () => {
+  it("sizes its weekday column to the labels, so none breaks mid-word", () => {
+    const { container } = render(
+      <BandGrid
+        grid={fullGrid([])}
+        bandLabel={(b) => b}
+        dayLabel={() => "Wed"}
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    const grid = container.querySelector<HTMLElement>("[style*='grid-template-columns']")!;
+    expect(grid.style.gridTemplateColumns.startsWith("auto ")).toBe(true);
+    expect(screen.getAllByText("Wed")[0]).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
   it("renders all 35 cells", () => {
     render(
       <BandGrid
         grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -43,7 +59,6 @@ describe("BandGrid", () => {
         grid={fullGrid([{ dow: 2, band: "evening", v: 9.0, n: 5 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#abc"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -52,7 +67,50 @@ describe("BandGrid", () => {
     const cells = screen.getAllByTestId("ov-band-cell");
     const populated = cells.find((c) => (c as HTMLElement).style.background === "rgb(170, 187, 204)");
     expect(populated).toBeTruthy();
-    expect((populated as HTMLElement).style.opacity).toBe("0.5");
+    // The target opacity a low-confidence cell fades in *to* is carried as a
+    // CSS custom property (--cell-opacity), consumed by the .chart-cell-enter
+    // stylesheet rule -- not a plain inline `opacity`, which would always
+    // outrank that rule and leave nothing for the entrance fade to animate.
+    expect((populated as HTMLElement).style.getPropertyValue("--cell-opacity")).toBe("0.5");
+  });
+
+  it("starts its staggered fade on the first frame after real data, not on an empty mount", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    const props = {
+      bandLabel: (b: string) => b,
+      dayLabel: (d: number) => String(d),
+      colorFor: () => "#000",
+      onTip: vi.fn(),
+      onLeave: vi.fn(),
+    };
+    const { rerender } = render(<BandGrid grid={[]} {...props} />);
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(false);
+
+    rerender(<BandGrid grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])} {...props} />);
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it("marks every cell with the staggered-fade entrance class", () => {
+    render(
+      <BandGrid
+        grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => String(d)}
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    for (const cell of screen.getAllByTestId("ov-band-cell")) {
+      expect(cell.classList.contains("chart-cell-enter")).toBe(true);
+    }
   });
 });
 
@@ -63,5 +121,27 @@ describe("Legend", () => {
     expect(screen.getByText("3.3")).toBeTruthy();
     expect(screen.getByText("min")).toBeTruthy();
     expect(container.querySelectorAll("span[style*='width: 14px']")).toHaveLength(5);
+  });
+});
+
+describe("BandGrid severity outline", () => {
+  it("outlines a cell at or above the severe threshold instead of recolouring it", () => {
+    render(
+      <BandGrid
+        grid={fullGrid([
+          { dow: 1, band: "midday", v: DELAY_THRESHOLDS.severe + 1 },
+          { dow: 2, band: "midday", v: 1.0 },
+        ])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => String(d)}
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    const outlined = screen
+      .getAllByTestId("ov-band-cell")
+      .filter((c) => (c as HTMLElement).style.boxShadow.includes("--delay-severe"));
+    expect(outlined).toHaveLength(1);
   });
 });

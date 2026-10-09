@@ -58,6 +58,7 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
 }
 
 function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "") {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: heatmap(), isPending: false, error: null, refetch: vi.fn() } as never);
   const initialEntries = [`/agencies/1/analysis/route_forecast${initialRoute ? `?routes=${initialRoute}` : ""}`];
@@ -74,8 +75,9 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
     expect(screen.getByText(/When to watch out/i)).toBeInTheDocument();
     expect(screen.getAllByTestId("ov-band-cell").length).toBe(35);
-    expect(screen.getByText("Main Line")).toBeInTheDocument();
-    expect(screen.getByText("Side Line")).toBeInTheDocument();
+    const ranked = within(screen.getByTestId("fc-overview-routes"));
+    expect(ranked.getByText("Main Line")).toBeInTheDocument();
+    expect(ranked.getByText("Side Line")).toBeInTheDocument();
     expect(screen.getAllByTestId("ranked-route").length).toBe(2);
     expect(screen.getByText("test disclaimer")).toBeInTheDocument();
   });
@@ -109,17 +111,100 @@ describe("RouteForecastSection", () => {
     expect(screen.getByText(/No measurements yet/i)).toBeInTheDocument();
   });
 
+  it("titles a chosen route's grid for that route, and the agency's for all routes", () => {
+    renderSection(overview(), "100");
+    expect(within(screen.getByTestId("fc-detail-bandgrid")).getByText("Day × time of day (this route)")).toBeInTheDocument();
+    expect(screen.queryByText("Day × time of day (all routes)")).toBeNull();
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
     expect(screen.getByTestId("fc-detail-bandgrid")).toBeInTheDocument();
-    // no in-view "back" button — clearing the route is done via the shared Filters bar, not tested here
     expect(screen.queryByText(/Back to overview/i)).not.toBeInTheDocument();
+  });
+
+  it("says how late the worst window runs in words, not as a signed figure", () => {
+    renderSection();
+    const headline = screen.getByTestId("worst-headline");
+    expect(headline).toHaveTextContent("avg 6.8 min late");
+    expect(headline).not.toHaveTextContent("+");
+  });
+
+  it("says an early-running worst window is early, not late", () => {
+    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250 } }));
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("avg 0.4 min early");
+  });
+
+  it("says how late a route's worst window runs in words too", () => {
+    renderSection(overview(), "100");
+    expect(screen.getByTestId("detail-worst")).toHaveTextContent(/avg 12\.0 min late/);
+    expect(screen.getByTestId("detail-worst")).not.toHaveTextContent("+");
+  });
+
+  it("tells same-named route variants apart by their code", () => {
+    renderSection(
+      overview({
+        routes: [
+          { route_code: "C12a", route_name: "Loop Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
+          { route_code: "C12b", route_name: "Loop Line", expected_avg_min: 5.1, samples: 250, low_confidence: false },
+        ],
+      }),
+    );
+    const [first, second] = screen.getAllByTestId("ranked-route");
+    expect(within(first).getByText("C12a")).toHaveClass("route-label__code");
+    expect(within(second).getByText("C12b")).toHaveClass("route-label__code");
+  });
+
+  it("keeps a route's code beside a name that merely contains its digits", () => {
+    renderSection(
+      overview({
+        routes: [{ route_code: "1", route_name: "Line 10", expected_avg_min: 6.8, samples: 250, low_confidence: false }],
+      }),
+    );
+    const [row] = screen.getAllByTestId("ranked-route");
+    expect(within(row).getByText("1")).toHaveClass("route-label__code");
+  });
+
+  it("says what the small line beside each route shows", () => {
+    renderSection();
+    expect(within(screen.getByTestId("fc-overview-routes")).getByText(/daily average over its last 7 days of data/)).toBeInTheDocument();
+  });
+
+  it("picks a route from its own control, and goes back to all routes the same way", () => {
+    renderSection();
+    const picker = screen.getByRole("combobox", { name: "Route" });
+    expect(picker).toHaveValue("");
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual(["All routes", "Main Line", "Side Line"]);
+    fireEvent.change(picker, { target: { value: "100" } });
+    expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Route" }), { target: { value: "" } });
+    expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
+  });
+
+  it("names a shared route name's code in the picker, and keeps a focused route without a forecast", () => {
+    renderSection(
+      overview({
+        routes: [
+          { route_code: "C12a", route_name: "Loop Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
+          { route_code: "C12b", route_name: "Loop Line", expected_avg_min: 5.1, samples: 250, low_confidence: false },
+        ],
+      }),
+      "900",
+    );
+    const picker = screen.getByRole("combobox", { name: "Route" });
+    expect(picker).toHaveValue("900");
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "All routes",
+      "Loop Line (C12a)",
+      "Loop Line (C12b)",
+      "900",
+    ]);
   });
 
   it("drilling into a route from the ranked list updates the URL's routes param (shared range-context)", () => {
     renderSection();
-    fireEvent.click(screen.getByText("Main Line"));
+    fireEvent.click(within(screen.getByTestId("fc-overview-routes")).getByText("Main Line"));
     // RouteForecastSection reads focusedRoute from the same URL-backed context
     // it just wrote to — re-rendering should now show the per-route detail.
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
@@ -160,4 +245,85 @@ describe("RouteForecastSection", () => {
     const visible = lowConfBadges.filter((el) => !el.hasAttribute("hidden"));
     expect(visible.length).toBeGreaterThan(0);
   });
+
+  it("names a heatmap cell once, through the tooltip that opens on focus", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const cell = screen.getAllByTestId("hm-cell")[0];
+
+    // Native title= tooltips were replaced by the shared, keyboard-reachable Tooltip.
+    expect(cell).not.toHaveAttribute("title");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    // fireEvent.focusIn/focusOut, not .focus()/.blur() or fireEvent.focus/blur:
+    // React's onFocus/onBlur are implemented on the bubbling focusin/focusout
+    // events, which a bare non-bubbling native "focus" event never fires.
+    fireEvent.focusIn(cell);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent(cell.getAttribute("aria-label") ?? "");
+    // One channel, not three: the cell's name is the tooltip's text, and no
+    // live region repeats it behind them.
+    expect(screen.queryByTestId("hm-readout")).toBeNull();
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(0);
+
+    fireEvent.focusOut(cell);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("folds the low-sample warning into the cell's own name instead of a nested tooltip", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const badge = screen.queryAllByTestId("hm-cell-lowconf")[0];
+    if (!badge) return;
+
+    // A tooltip nested inside the cell's own would open alongside it, because
+    // focus events bubble; the glyph is decoration and its text lives in the
+    // cell's label.
+    expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect(badge).not.toHaveAttribute("tabindex");
+    const cell = badge.closest('[role="gridcell"]');
+    expect(cell?.getAttribute("aria-label")).toMatch(/·.*·/);
+  });
+
+  it("is one tab stop per grid, with the arrow keys moving inside it", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length > 24)!;
+    const cells = [...grid.querySelectorAll('[role="gridcell"]')];
+
+    // 7x24 cells, exactly one of them reachable by Tab.
+    expect(cells).toHaveLength(168);
+    expect(cells.filter((c) => c.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(cells[0]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "ArrowRight" });
+    expect(cells[1]).toHaveAttribute("tabindex", "0");
+    expect(cells[0]).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    expect(cells[25]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "Home" });
+    expect(cells[24]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "End" });
+    expect(cells[47]).toHaveAttribute("tabindex", "0");
+
+    // The row edges hold rather than wrapping onto a neighbouring day.
+    fireEvent.keyDown(grid, { key: "ArrowRight" });
+    expect(cells[47]).toHaveAttribute("tabindex", "0");
+  });
+
+  it("gives the margin bars one tab stop too", () => {
+    renderSection(overview(), "100");
+    const bars = screen.getAllByTestId("dow-bar");
+
+    expect(bars.filter((b) => b.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(bars[0]).not.toHaveAttribute("title");
+
+    fireEvent.focusIn(bars[0]);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(bars[0].getAttribute("aria-label") ?? "");
+    expect(screen.queryByTestId("dow-bar-readout")).toBeNull();
+  });
+
 });

@@ -173,9 +173,8 @@ def build_diff(
 
 
 def _is_process_doc_path(path: str) -> bool:
-    """CLAUDE.md and everything under .claude/** are executable process docs,
-    not ordinary prose -- see CLAUDE.md's own "Git and pull requests" section."""
-    return path == "CLAUDE.md" or path.startswith(".claude/")
+    """Recognize agent instructions and configuration as process docs."""
+    return path in ("AGENTS.md", "CLAUDE.md") or path.startswith((".claude/", ".agents/", ".codex/"))
 
 
 def suggested_tier(paths: list[str]) -> str:
@@ -191,7 +190,7 @@ def suggested_tier(paths: list[str]) -> str:
         return "trivial"
     # A non-Markdown process-doc path (e.g. .claude/settings.json) mixed with
     # an ordinary Markdown doc falls through to here rather than process-doc:
-    # that mix isn't "only .claude/**/CLAUDE.md" per this tier's own
+    # that mix isn't "only agent process docs" per this tier's own
     # definition, and "standard" dispatches strictly more review than
     # process-doc, so this never under-reviews -- deliberate, not a gap.
     return "standard"
@@ -210,22 +209,18 @@ def is_test_path(path: str) -> bool:
 # own basename marks it as a `check-*`/`check_*` gate (a repo-wide naming
 # convention, not just top-level scripts/ — e.g. frontend/scripts/check-
 # entry-chunk.mjs and its test), plus specific non-`check-`-named
-# deletion-safety scripts, the autonomous loop's own chained-tick wrapper and
-# systemd unit (`deploy/vps/claude-loop.sh`/`claude-loop.service`) and the
-# decision logic behind them (`scripts/vps_loop_chain_state.py` — a diff
-# quietly loosening its bounded-backoff/stale-lock handling could let the
-# loop merge PRs unattended more aggressively than intended — and
-# `scripts/vps_loop_health.py`, whose `compute_last_tick_outcome` is the sole
-# classifier feeding that continue/stop decision), and this
-# review script itself (a diff that quietly weakens this very list is
-# exactly the class of change enforcement review exists to catch), along
-# with each of those scripts' own tests, since a weakened test is just as
+# deletion-safety scripts and this review script itself (a diff that
+# quietly weakens this very list is exactly the class of change enforcement
+# review exists to catch), along with each of those scripts' own tests, since a weakened test is just as
 # dangerous as a weakened script. `is_excluded`'s path-or-basename fnmatch
 # already does exactly the matching this needs, so it's reused rather than
 # duplicated here.
 ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     ".claude/hooks/*",
     ".claude/settings.json",
+    ".codex/hooks/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
     ".github/workflows/*",
     ".pre-commit-config.yaml",
     "scripts/setup_git_hooks.sh",
@@ -237,16 +232,10 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     "scripts/cleanup_git_state.py",
     "scripts/daily_git_hygiene.py",
     "scripts/prepare_review.py",
-    "deploy/vps/claude-loop.sh",
-    "deploy/systemd/claude-loop.service",
-    "scripts/vps_loop_chain_state.py",
-    "scripts/vps_loop_health.py",
     "tests/unit/test_prepare_review.py",
     "tests/unit/test_cleanup_git_state.py",
     "tests/unit/test_daily_git_hygiene.py",
     "tests/unit/test_setup_git_hooks.py",
-    "tests/unit/test_vps_loop_chain_state.py",
-    "tests/unit/test_vps_loop_health.py",
     ".gitleaks.toml",
     "tests/unit/test_gitleaks_allowlist_scope.py",
     "tests/unit/test_gitleaks_version_pin.py",

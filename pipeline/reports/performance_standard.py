@@ -1,6 +1,6 @@
-"""Per-route "minimum performance standard" bonus/malus simulation (item
-104, depends on item 94's Excess Waiting Time and item 98's vehicle-km
-delivered rate).
+"""Per-route "minimum performance standard" bonus/malus simulation, comparing
+each configured threshold against the Excess Waiting Time or vehicle-km
+delivered rate.
 
 ``route_performance_standards`` (migration 0041) is a small, manually
 populated policy-input table -- the same convention as ``ridership_weights``
@@ -52,8 +52,6 @@ from api.range import RangeCtx
 from pipeline.reports.headway_quality import compute_headway_quality
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from pipeline.reports.supply import compute_supply_metrics_by_agency
-
-MetricType = Literal["ewt_sec", "vehicle_km_delivered_pct"]
 
 # Metrics for which a SMALLER actual value is better performance. Any
 # metric_type not listed here is treated as higher-is-better.

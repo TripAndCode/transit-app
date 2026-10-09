@@ -6,10 +6,11 @@ import { useArchitectureDoc, useArchitectureDocs } from "../../api/admin";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { mermaidMarkdownComponents } from "../../components/MarkdownMermaid";
 import { SidebarNavList } from "../../components/SidebarNavList";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 // Rendered as a Mermaid flowchart rather than prose so it matches the
 // approved mockup's data-flow box. This is a MANUAL-SYNC reminder, not an
-// enforced one: CLAUDE.md's own "Architecture pointers" section is
+// enforced one: AGENTS.md's own "Architecture pointers" section is
 // agent-facing prose, not a frontend asset, so there is no way to derive
 // this diagram from it at build or run time. If that section's data path,
 // DB split, or Ask-routing stages change, update the flowchart below by
@@ -31,7 +32,7 @@ flowchart LR
 `;
 
 /** Developer/internal-only page at \`/admin/architecture\`: a Mermaid
- * rendering of CLAUDE.md's "Architecture pointers" (part A), plus a
+ * rendering of AGENTS.md's "Architecture pointers" (part A), plus a
  * sidebar-navigable index of \`docs/features/*.md\` (part B). Reuses the
  * existing \`RequireAdmin\` + \`AdminLayout\` gate exactly like
  * \`/admin/agencies\`, \`/admin/users\`, and \`/admin/ops\` -- reusing
@@ -48,7 +49,7 @@ export function AdminArchitecturePage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.architecture.title")}</h1>
+      <PageHeader title={t("admin.architecture.title")} />
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 16, marginBottom: 12 }}>{t("admin.architecture.diagram_title")}</h2>

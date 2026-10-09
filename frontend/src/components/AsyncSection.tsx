@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { classifyError, isTransientErrorClass } from "../api/errorClass";
 import { ErrorBanner } from "./ErrorBanner";
 import { Skeleton } from "./Skeleton";
+import { useAutoRetry } from "./useAutoRetry";
 
 type Props<T> = {
   /** True while there is nothing to render yet. Which react-query flag feeds
@@ -41,7 +43,17 @@ export function AsyncSection<T>({
   skeleton,
   children,
 }: Props<T>) {
-  if (error != null) return <ErrorBanner error={error} onRetry={onRetry} />;
+  const transient = error != null && isTransientErrorClass(classifyError(error));
+  // A transient network/timeout blip gets two quiet retries behind the
+  // section's normal loading chrome before it ever surfaces as an alarming
+  // banner — see useAutoRetry. Every other error class (a standing
+  // condition, or a real failure worth a manual decision) skips straight to
+  // the banner, unchanged from before.
+  const { retrying } = useAutoRetry(error != null, transient, onRetry);
+  if (error != null) {
+    if (retrying) return <>{skeleton ?? <Skeleton height={320} />}</>;
+    return <ErrorBanner error={error} onRetry={onRetry} />;
+  }
   if (loading) return <>{skeleton ?? <Skeleton height={320} />}</>;
   if (data === undefined) return null;
   if (hasContent && !hasContent(data)) return <>{empty}</>;
