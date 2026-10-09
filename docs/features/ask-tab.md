@@ -108,9 +108,9 @@ sentinel:
    question names the same entities (ASCII route codes, aliases and numbers,
    plus any arg value the example spells out); otherwise it reaches Stage 3
    with the example as a few-shot.
-4. **Stage 3 — RAG + LLM**: neither stage decided → top-3 golden examples
-   are few-shot-injected and `pipeline/query/chat.py: chat_with_tools(...)`
-   calls the provider ladder (`pipeline/query/llm_client.py`) with the
+4. **Stage 3 — RAG + LLM**: neither stage decided → the top-3 examples
+   (golden or promoted cache) are few-shot-injected and
+   `pipeline/query/chat.py: chat_with_tools(...)` calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
    list, `.env.example` ships `gemini,openai`; the code's own back-compat

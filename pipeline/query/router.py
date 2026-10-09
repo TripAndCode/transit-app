@@ -274,8 +274,6 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
     global _golden_cache
     if _golden_cache is not None:
         return _golden_cache
-    import json as _json
-
     mapping: dict[str, tuple[str, dict]] = {}
     if not _golden_path.exists():
         _log.warning("golden_set.jsonl not found at %s — Stage 2 will produce empty examples", _golden_path)
@@ -287,7 +285,7 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
             if not line:
                 continue
             try:
-                entry = _json.loads(line)
+                entry = json.loads(line)
             except ValueError as exc:
                 # A malformed line must not break the "always degrade"
                 # contract — log and skip so routing still works.
@@ -321,10 +319,8 @@ async def _resolve_cache_chunks(conn, agency_id: int, chunk_ids: list[str]) -> d
         sigs,
     )
     return {
-        _CACHE_CHUNK_PREFIX + r["signature_hash"]: (
-            r["tool"],
-            json.loads(r["args"]) if isinstance(r["args"], str) else dict(r["args"]),
-        )
+        # asyncpg returns jsonb as str (no codec is registered).
+        _CACHE_CHUNK_PREFIX + r["signature_hash"]: (r["tool"], json.loads(r["args"]))
         for r in rows
     }
 
