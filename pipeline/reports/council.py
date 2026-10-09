@@ -244,7 +244,7 @@ async def compute_delay_certificate(
     ch,
     threshold_sec: int = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
     limit: int = 100,
-) -> list[tuple]:
+) -> tuple[list[tuple], int]:
     """Every physical trip-run in ``ctx``'s range whose departure delay
     STRICTLY EXCEEDS ``threshold_sec`` (``dep_delay > threshold_sec`` -- a
     trip exactly AT the threshold is excluded, matching the "exceeds"
@@ -259,13 +259,15 @@ async def compute_delay_certificate(
     export. The grouping key is ``(trip_id, date)``, not `trip_id` alone,
     because the same `trip_id` recurs across many service days.
 
-    Returns rows shaped ``(agency_name, route_code, service_type, date,
-    scheduled_time, actual_time, dep_delay)``. ``actual_time`` is
-    ``scheduled_time`` shifted by ``dep_delay`` seconds (see
-    :func:`shift_time_str`). Ordered by ``(date, route_code,
-    scheduled_time)`` and capped at ``limit`` rows, same "sane and
+    Returns ``(rows, total)``. Rows are shaped ``(agency_name, route_code,
+    service_type, date, scheduled_time, actual_time, dep_delay)``.
+    ``actual_time`` is ``scheduled_time`` shifted by ``dep_delay`` seconds
+    (see :func:`shift_time_str`). They are ordered by ``(date, route_code,
+    scheduled_time)`` and capped at ``limit``, the same "sane and
     reproducible cap" convention as every other report in this package's
-    ``limit`` query param.
+    ``limit`` query param. ``total`` counts every qualifying trip-run before
+    that cap, from the same scan, so a caller can tell a capped list from a
+    complete one.
 
     Always a live ClickHouse scan (see module docstring) -- ``ch`` must be a
     real client.
@@ -295,7 +297,7 @@ async def compute_delay_certificate(
         "    FROM filtered\n"
         "    GROUP BY trip_id, date\n"
         ")\n"
-        "SELECT route_code, service_type, date, scheduled_time, dep_delay\n"
+        "SELECT route_code, service_type, date, scheduled_time, dep_delay, count() OVER () AS total\n"
         "FROM per_trip\n"
         "WHERE dep_delay > {dc_threshold:Int32}\n"
         "ORDER BY date, route_code, scheduled_time\n"
@@ -307,8 +309,9 @@ async def compute_delay_certificate(
             **ch_params,
         },
     )
+    total = int(result.result_rows[0][5]) if result.result_rows else 0
     rows: list[tuple] = []
-    for route_code, service_type, d, scheduled_time, dep_delay in result.result_rows:
+    for route_code, service_type, d, scheduled_time, dep_delay, _total in result.result_rows:
         actual_time = shift_time_str(scheduled_time, int(dep_delay))
         rows.append(
             (
@@ -321,4 +324,4 @@ async def compute_delay_certificate(
                 int(dep_delay),
             )
         )
-    return rows
+    return rows, total

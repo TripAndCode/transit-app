@@ -1812,6 +1812,43 @@ async def test_delay_certificate_csv_export_includes_threshold_footnote(reports_
 
 
 @pytest.mark.asyncio
+async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_client, ch_client, ch_async_client):
+    """`limit` caps the rows, never the count: rows_total, the summary text
+    and the CSV footnotes all give how many trips qualified, and say only the
+    first ones are listed."""
+    import csv
+    import io
+
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-24"
+    await _seed_route(pool, agency_id, "RCAP", "平日", day, [400, 500, 600])
+    mirror_updates_to_ch(ch_client, agency_id)
+    url = f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300"
+
+    capped = (await client.get(f"{url}&limit=2")).json()
+    assert len(capped["rows"]) == 2
+    assert capped["rows_total"] == 3
+    assert capped["text"] == "遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）"
+
+    whole = (await client.get(url)).json()
+    assert len(whole["rows"]) == 3
+    assert whole["rows_total"] == 3
+    assert whole["text"] == "遅延300秒超の便: 3件"
+
+    resp = await client.get(f"{url}&limit=2&format=csv")
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    assert "該当3件のうち、日付順の先頭2件のみを掲載しています。残りは期間を絞って出力してください。" in [
+        r[0] for r in rows[1:header_idx]
+    ]
+    assert len(rows[header_idx + 1 :]) == 2
+
+
+@pytest.mark.asyncio
 async def test_delay_certificate_uses_origin_stop_delay_per_trip(reports_client, ch_client, ch_async_client):
     """A single trip_id spans many stop events; compute_delay_certificate
     must collapse them to ONE row per (trip_id, date) using the origin
