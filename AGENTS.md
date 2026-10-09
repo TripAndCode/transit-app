@@ -29,6 +29,8 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
 - **Tests and any writes go to throwaway databases only:** Postgres
   `:5544/transit_test` and ClickHouse `:8124`, or the isolated pair that
   `scripts/run_full_ci.sh` starts for each run.
+- **The VPS ML replica is neither a dev store nor production.** `deploy/vps/compose.yml`
+  rebuilds it from R2 and it takes writes; `docs/features/ml-forecast.md` covers it.
 - **Never push to `main`, and never rewrite history another session may hold.**
   Several agents can share this clone. Don't force-push a branch you didn't create,
   and don't touch another session's worktree. Never `git stash pop`/`drop`/`clear`:
