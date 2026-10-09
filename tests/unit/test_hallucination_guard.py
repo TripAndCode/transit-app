@@ -80,3 +80,13 @@ def test_grounded_path_still_checks_every_number():
     exists, an unexplained number is still a fabrication."""
     assert verify_numeric_claims("Route 99999 is the worst.", {"route_code": "22171"}) is False
     assert verify_numeric_claims("Route 22171 is the worst.", {"route_code": "22171"}) is True
+
+
+def test_numbered_list_markers_are_not_claims():
+    answer = "1. Route 12 averages 14.2 min.\n2) It is up 56.1%.\n3．6 routes are delayed."
+    assert verify_numeric_claims(answer, GROUNDING) is True
+
+
+def test_a_number_starting_a_line_without_a_list_marker_is_still_a_claim():
+    assert verify_numeric_claims("22.9 minutes late on route 12.", GROUNDING) is False
+    assert verify_numeric_claims("1.5 minutes late on route 12.", GROUNDING) is False
