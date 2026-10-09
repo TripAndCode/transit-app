@@ -12,6 +12,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from itertools import pairwise
 from pathlib import Path
+from types import ModuleType
 
 import yaml
 
@@ -19,17 +20,18 @@ ROOT = Path(__file__).resolve().parents[2]
 VPS = ROOT / "deploy" / "vps"
 
 
-def _guard_dev_ports() -> tuple[str, ...]:
+def _load_guard() -> ModuleType:
     spec = importlib.util.spec_from_file_location("guard_dev_db", ROOT / ".claude" / "hooks" / "guard_dev_db.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return tuple(module.DEV_PORTS)
+    return module
 
 
+GUARD = _load_guard()
 # Read from their canonical homes, the guard hook and the dev stack, so a
 # port or volume added there is held off the replica too.
-DEV_PORTS = _guard_dev_ports()
+DEV_PORTS = tuple(GUARD.DEV_PORTS)
 DEV_VOLUMES = tuple(yaml.safe_load((ROOT / "compose.yml").read_text())["volumes"])
 # Every system log ClickHouse 26.8 writes on its own. The others (backup_log,
 # s3queue_log, query_views_log, …) fill only from features the replica never uses.
@@ -62,15 +64,27 @@ def test_every_published_port_binds_loopback_and_avoids_dev_ports():
 def test_postgres_is_healthy_only_once_it_listens_on_tcp():
     # The image's first run serves initdb from a socket-only server; a socket
     # check passes then, and bootstrap's migrate over TCP is refused.
-    check = shlex.split(_compose()["services"]["postgres"]["healthcheck"]["test"][1])
+    check = shlex.split(_compose()["services"]["ml-pg"]["healthcheck"]["test"][1])
     assert check[0] == "pg_isready"
     assert ("-h", "localhost") in pairwise(check)
 
 
+def test_the_guard_hook_lets_writes_reach_the_replica():
+    # The hook knows dev targets by service and container name; a replica
+    # service sharing one would be refused as if it were the dev store.
+    write = "clickhouse-client --query 'INSERT INTO t VALUES (1)'"
+    for service in _compose()["services"]:
+        for cmd in (
+            f"docker compose -f deploy/vps/compose.yml exec {service} {write}",
+            f"docker exec transit-ml-{service}-1 {write}",
+        ):
+            assert not GUARD.should_block(cmd), cmd
+
+
 def test_both_services_carry_a_memory_limit():
     services = _compose()["services"]
-    assert services["clickhouse"]["mem_limit"] == "1536m"
-    assert services["postgres"]["mem_limit"] == "640m"
+    assert services["ml-ch"]["mem_limit"] == "1536m"
+    assert services["ml-pg"]["mem_limit"] == "640m"
 
 
 def test_volumes_cannot_be_mistaken_for_dev_stores():
@@ -82,7 +96,7 @@ def test_volumes_cannot_be_mistaken_for_dev_stores():
 def test_clickhouse_image_matches_ci():
     ci = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
     ci_image = ci["jobs"]["test"]["services"]["clickhouse"]["image"]
-    assert _compose()["services"]["clickhouse"]["image"] == ci_image
+    assert _compose()["services"]["ml-ch"]["image"] == ci_image
 
 
 def test_clickhouse_server_memory_is_capped_below_the_container_limit():

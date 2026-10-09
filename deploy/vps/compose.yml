@@ -3,7 +3,9 @@
 name: transit-ml
 
 services:
-  postgres:
+  # Not `db`/`clickhouse`: the dev-DB guard hook knows the dev stores by those
+  # names and would refuse the replica's writes as theirs.
+  ml-pg:
     build: ../../db
     image: transit-ml-postgres
     restart: unless-stopped
@@ -25,7 +27,7 @@ services:
       timeout: 5s
       retries: 10
 
-  clickhouse:
+  ml-ch:
     image: clickhouse/clickhouse-server:26.8
     restart: unless-stopped
     environment:
