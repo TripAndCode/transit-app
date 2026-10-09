@@ -59,6 +59,8 @@ def choose_origins(dates: Iterable[date], count: int, horizon: int = 7) -> list[
 def evaluate_agency(
     agency_id: int, cells: Sequence[Cell], *, origin_count: int = 28, window_days: int = WINDOW_DAYS
 ) -> AgencyResult:
+    if not cells:
+        raise ValueError(f"agency {agency_id} has no cells to evaluate")
     history = History(cells)
     by_date: dict[date, list[Cell]] = defaultdict(list)
     for cell in cells:

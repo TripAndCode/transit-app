@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from ml.cells import Cell
-from ml.data import agencies_with_data, fetch_cells
+from ml.data import agencies_with_data, date_span, fetch_cells
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
@@ -73,6 +73,11 @@ def test_fetching_in_chunks_returns_the_same_cells(loaded):
 
 def test_an_agency_without_rows_has_no_cells(loaded):
     assert fetch_cells(loaded, 99) == []
+
+
+def test_an_agencys_span_runs_from_its_first_to_its_last_jst_day(loaded):
+    assert date_span(loaded, 8) == (date(2026, 6, 1), date(2026, 6, 2))
+    assert date_span(loaded, 99) is None
 
 
 def test_agencies_are_listed_from_the_data(loaded):

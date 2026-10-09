@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import pytest
+
 from ml.backtest import SPARSE_RUNS, choose_origins, evaluate_agency, results_from_json, results_to_json
 from ml.cells import Cell
 
@@ -73,3 +75,8 @@ def test_an_agency_with_less_than_window_plus_a_week_is_flagged_and_still_runs()
 def test_results_survive_a_json_round_trip():
     result = evaluate_agency(8, _daily(40), origin_count=3)
     assert results_from_json(results_to_json([result])) == [result]
+
+
+def test_an_agency_without_cells_is_refused_by_name():
+    with pytest.raises(ValueError, match="agency 8"):
+        evaluate_agency(8, [])

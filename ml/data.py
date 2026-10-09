@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Literal
 
 from clickhouse_connect.driver.client import Client
 
 from ml.cells import Cell
 from ml.sql import cells_sql
 
-_SPAN_SQL = (
-    "SELECT count(), min(toDate(captured_at, 'Asia/Tokyo')), max(toDate(captured_at, 'Asia/Tokyo')) "
-    "FROM updates WHERE agency_id = {agency_id:UInt16}"
-)
+
+def _edge_day(client: Client, agency_id: int, order: Literal["ASC", "DESC"]) -> date | None:
+    rows = client.query(
+        "SELECT toDate(captured_at, 'Asia/Tokyo') FROM updates WHERE agency_id = {agency_id:UInt16} "
+        f"ORDER BY captured_at {order} LIMIT 1",
+        parameters={"agency_id": agency_id},
+    ).result_rows
+    return rows[0][0] if rows else None
 
 
 def date_span(client: Client, agency_id: int) -> tuple[date, date] | None:
-    count, first, last = client.query(_SPAN_SQL, parameters={"agency_id": agency_id}).result_rows[0]
-    return (first, last) if count else None
+    """Each end via ORDER BY … LIMIT 1, not min()/max(): captured_at follows
+    agency_id in updates' sort key, so the index serves it, where an aggregate
+    would read every row the agency has."""
+    first = _edge_day(client, agency_id, "ASC")
+    last = _edge_day(client, agency_id, "DESC")
+    return (first, last) if first is not None and last is not None else None
 
 
 def fetch_cells(client: Client, agency_id: int, *, chunk_days: int = 7) -> list[Cell]:
