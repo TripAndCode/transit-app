@@ -376,10 +376,11 @@ def test_main_reports_coverage_combined_from_every_shard() -> None:
 
 
 def _names_self_hosted(runs_on: object) -> bool:
-    """Whether a job's `runs-on` names a self-hosted label itself, rather
-    than through an `${{ }}` expression a maintainer's variable resolves."""
+    """Whether a job's `runs-on` spells a self-hosted label anywhere, an
+    expression included. A maintainer's variable that may resolve to one
+    spells no label, so it passes."""
     labels = runs_on if isinstance(runs_on, list) else [runs_on]
-    return any("self-hosted" in str(label) and not str(label).startswith("${{") for label in labels)
+    return any("self-hosted" in str(label) for label in labels)
 
 
 @pytest.mark.parametrize(
@@ -388,6 +389,7 @@ def _names_self_hosted(runs_on: object) -> bool:
         (["self-hosted", "vps"], True),
         ("self-hosted", True),
         (["ubuntu-latest", "self-hosted"], True),
+        ("${{ 'self-hosted' }}", True),
         ("ubuntu-latest", False),
         ("${{ fromJSON(vars.CI_BACKEND_RUNNER || '\"ubuntu-latest\"') }}", False),
     ],
