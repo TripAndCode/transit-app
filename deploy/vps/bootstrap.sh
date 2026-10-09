@@ -8,7 +8,18 @@ set -a
 . /etc/transit-ml/env
 set +a
 
-command -v aws >/dev/null || snap install aws-cli --classic
+if ! command -v aws >/dev/null; then
+  # AWS's own bundle rather than the snap: a server image need not run snapd.
+  command -v unzip >/dev/null || { apt-get update -q && apt-get install -y -q unzip; }
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$tmp/awscli.zip"
+  unzip -q "$tmp/awscli.zip" -d "$tmp"
+  # With no `aws` on PATH, an install directory is a run cut short: start clean.
+  rm -rf /usr/local/aws-cli
+  "$tmp/aws/install"
+  aws --version
+fi
 docker compose -f deploy/vps/compose.yml --env-file /etc/transit-ml/env up -d --build --wait
 
 # The environment variable rather than `poetry config --local`, which would
