@@ -1,4 +1,4 @@
-"""Rolling-origin evaluation (spec §8). A forecast made on day T sees data
+"""Rolling-origin evaluation. A forecast made on day T sees data
 through T−1 and is scored on T+1..T+7. Every method is scored on the cells it
 predicts; its skill against B0 only on the cells both predict, so a method
 that abstains on hard cells cannot look better for it."""
