@@ -45,6 +45,35 @@ BLOCKED = [
     pytest.param('docker exec transit-app-db-1 psql -U transit -c "DROP TABLE updates"', id="derived-container"),
     pytest.param('docker exec transit-pg psql -U transit -c "DROP TABLE updates"', id="legacy-container"),
     pytest.param("make migrate-down CONFIRM=1", id="migrate-down-inherits-dev-default"),
+    # The CLI's own spelling of a down migration, aimed at either dev port.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit poetry run python gtfs_pipeline.py "
+        "migrate down",
+        id="cli-migrate-down-dev-port",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5543/transit python gtfs_pipeline.py migrate down "
+        "--target 0001",
+        id="cli-migrate-down-target-alt-dev-port",
+    ),
+    pytest.param("poetry run python gtfs_pipeline.py migrate down", id="cli-migrate-down-shell-database-url"),
+    pytest.param("poetry run python ./gtfs_pipeline.py prune_query_log --days 1", id="cli-prune-shell-database-url"),
+    # Make targets that write through .env's dev defaults, and name nothing.
+    pytest.param("make prune-personal-data", id="make-prune-personal-data"),
+    pytest.param("make prune-query-log", id="make-prune-query-log"),
+    pytest.param("make -C . prune-admin-audit", id="make-dir-flag-prune-admin-audit"),
+    pytest.param("make ch-bootstrap", id="make-ch-bootstrap"),
+    pytest.param("CLICKHOUSE_PORT=8123 make ch-bootstrap", id="make-ch-bootstrap-dev-port"),
+    pytest.param("make migrate", id="make-migrate"),
+    pytest.param("make db", id="make-db"),
+    pytest.param("make analyze-all", id="make-analyze-all"),
+    pytest.param("make seed-agencies", id="make-seed-agencies"),
+    pytest.param("make lint && make build-rag-index", id="make-second-command-build-rag-index"),
+    # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
+        id="make-ingest-postgres-redirected-only",
+    ),
     # Postgres CLIs that mutate without ever spelling a SQL keyword.
     pytest.param("dropdb -h transit-pg transit", id="dropdb"),
     pytest.param("createdb -h transit-pg transit_extra", id="createdb"),
@@ -163,6 +192,21 @@ ALLOWED = [
         id="migrate-down-pointed-at-test-db",
     ),
     pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run python gtfs_pipeline.py "
+        "migrate down",
+        id="cli-migrate-down-pointed-at-test-db",
+    ),
+    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-pointed-at-test-ch"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
+        "make ingest FOLDER=raw",
+        id="ingest-pointed-at-both-test-stores",
+    ),
+    pytest.param("make check-aggs", id="make-read-only-target"),
+    pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
+    pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
+    pytest.param('git commit -m "make the ingest faster"', id="quoted-prose-naming-a-target"),
+    pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
         id="copy-to-reads-data-out",
     ),
@@ -213,13 +257,67 @@ def test_unreadable_input_is_refused(payload):
 
 def test_every_destructive_target_is_a_makefile_target():
     """The guard must not advertise a target it cannot gate."""
+    assert set(_guard_module().DESTRUCTIVE_TARGETS) <= set(_make_recipes())
+
+
+def _guard_module():
     import importlib.util
-    import re
 
     spec = importlib.util.spec_from_file_location("guard_dev_db", HOOK.with_name("guard_dev_db.py"))
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
-    makefile = (HOOK.parents[2] / "Makefile").read_text()
-    for target in module.DESTRUCTIVE_TARGETS:
-        assert re.search(rf"^{re.escape(target)}:", makefile, re.MULTILINE), target
+    return module
+
+
+def _make_recipes() -> dict[str, str]:
+    import re
+
+    recipes: dict[str, list[str]] = {}
+    current = None
+    for line in (HOOK.parents[2] / "Makefile").read_text().splitlines():
+        if match := re.match(r"^([A-Za-z0-9_.-]+):", line):
+            current = match[1]
+            recipes[current] = []
+        elif current and line.startswith("\t"):
+            recipes[current].append(line)
+        elif line and not line.startswith("#"):
+            current = None
+    return {target: "\n".join(body) for target, body in recipes.items()}
+
+
+# Targets and subcommands that reach a dev store without writing it, each
+# checked by hand.
+READ_ONLY_TARGETS = {
+    "ask-eval",
+    "check-aggs",
+    "check-hash-token-cleanup",
+    "check-migrations",
+    "digest",
+    "doctor",
+    "serve",
+}
+READ_ONLY_SUBCOMMANDS = {"check_aggs", "check_migrations", "digest"}
+
+
+def test_every_make_target_reaching_a_store_is_classified():
+    """A new target that runs against $(db_url) or the ClickHouse client must be
+    gated or deliberately named read-only; unlisted, the guard waves it through."""
+    gated = set(_guard_module().DESTRUCTIVE_TARGETS)
+    reaching = {
+        target
+        for target, recipe in _make_recipes().items()
+        if "$(db_url)" in recipe or "get_client" in recipe or "ch-bootstrap" in recipe
+    }
+    assert reaching - gated - READ_ONLY_TARGETS == set()
+
+
+def test_every_cli_subcommand_is_classified():
+    """The same for `gtfs_pipeline.py`'s subcommands, which a bare CLI call runs
+    against the shell's DATABASE_URL."""
+    import re
+
+    source = (HOOK.parents[2] / "gtfs_pipeline.py").read_text()
+    subcommands = set(re.findall(r"sub\.add_parser\(\s*\"([^\"]+)\"", source))
+    assert subcommands, "no subcommands found; the pattern no longer matches gtfs_pipeline.py"
+    assert subcommands - set(_guard_module().DESTRUCTIVE_SUBCOMMANDS) - READ_ONLY_SUBCOMMANDS == set()
