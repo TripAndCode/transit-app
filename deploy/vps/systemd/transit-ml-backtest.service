@@ -1,0 +1,10 @@
+[Unit]
+Description=Score the delay baselines and render the report
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/transit-app
+EnvironmentFile=/etc/transit-ml/env
+ExecStart=/root/transit-app/deploy/vps/run-with-ping.sh BACKTEST /bin/sh -c '/root/transit-app/.venv/bin/python -m ml.cli backtest --out /var/lib/transit-ml/backtests/latest.json && /root/transit-app/.venv/bin/python -m ml.cli report --in /var/lib/transit-ml/backtests/latest.json --out /var/lib/transit-ml/reports/latest/index.html'
+Nice=10
