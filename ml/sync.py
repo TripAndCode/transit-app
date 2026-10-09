@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -101,3 +103,64 @@ def save_done(path: Path, done: AbstractSet[str]) -> None:
     partial = path.with_suffix(path.suffix + ".partial")
     partial.write_text(json.dumps({"done": sorted(done)}))
     os.replace(partial, path)
+
+
+Runner = Callable[[Sequence[str]], None]
+
+
+def list_keys(bucket: str, endpoint: str, capture: Callable[[Sequence[str]], str]) -> list[str]:
+    keys: list[str] = []
+    for prefix in ("rt/", "static/"):
+        output = capture(["aws", "s3", "ls", f"s3://{bucket}/{prefix}", "--recursive", "--endpoint-url", endpoint])
+        keys.extend(line.split(None, 3)[3] for line in output.splitlines() if len(line.split(None, 3)) == 4)
+    return keys
+
+
+def _download(archive: Archive, dest_dir: Path, *, bucket: str, endpoint: str, run: Runner) -> Path:
+    dest = dest_dir / Path(archive.key).name
+    run(
+        ["aws", "s3", "cp", f"s3://{bucket}/{archive.key}", str(dest), "--endpoint-url", endpoint, "--only-show-errors"]
+    )
+    return dest
+
+
+def execute(
+    actions: Sequence[Action],
+    *,
+    bucket: str,
+    endpoint: str,
+    work_dir: Path,
+    state_path: Path,
+    done: set[str],
+    today_jst: date,
+    run: Runner,
+    python: str,
+) -> list[str]:
+    """Run the plan in order, saving the done-set after every action. A
+    failure stops that agency's timeline, since a later day may need what
+    failed, and leaves the other agencies running."""
+    failures: list[str] = []
+    stopped: set[int] = set()
+    for action in actions:
+        agency_id = action.archive.agency_id if isinstance(action, LoadStatic) else action.agency_id
+        if agency_id in stopped:
+            continue
+        scratch = work_dir / str(agency_id)
+        scratch.mkdir(parents=True, exist_ok=True)
+        try:
+            if isinstance(action, LoadStatic):
+                path = _download(action.archive, scratch, bucket=bucket, endpoint=endpoint, run=run)
+                run([python, "gtfs_pipeline.py", "load_static", str(path), "--agency-id", str(agency_id)])
+                done.add(action.archive.key)
+            else:
+                for archive in action.archives:
+                    _download(archive, scratch, bucket=bucket, endpoint=endpoint, run=run)
+                run([python, "gtfs_pipeline.py", "ingest", str(scratch), "--agency-id", str(agency_id)])
+                done.update(a.key for a in action.archives if is_final(a, today_jst))
+            save_done(state_path, done)
+        except subprocess.CalledProcessError as error:
+            failures.append(f"agency {agency_id}: {' '.join(map(str, error.cmd[:3]))} exited {error.returncode}")
+            stopped.add(agency_id)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+    return failures

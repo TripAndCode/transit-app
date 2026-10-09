@@ -4,7 +4,9 @@ and nothing it owns can be mistaken for the dev stores the guard hook protects."
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -81,3 +83,62 @@ def test_env_example_names_every_variable_and_holds_no_value_for_secrets():
         assert values[secret] == "", f"env.example carries a value for {secret}"
     assert values["CLICKHOUSE_PORT"] == "18123"
     assert "127.0.0.1:15432" in values["DATABASE_URL"]
+
+
+def _fake_curl(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / "pings"}\n')
+    curl.chmod(0o755)
+    return bin_dir
+
+
+def _ping_run(tmp_path, job, url):
+    env = {**os.environ, "PATH": f"{_fake_curl(tmp_path)}:{os.environ['PATH']}"}
+    if url:
+        env["HC_PING_URL_SYNC"] = url
+    result = subprocess.run(
+        ["bash", str(VPS / "run-with-ping.sh"), "SYNC", "sh", "-c", job], env=env, capture_output=True, text=True
+    )
+    pings = (tmp_path / "pings").read_text().splitlines() if (tmp_path / "pings").exists() else []
+    return result.returncode, pings
+
+
+def test_a_succeeding_job_pings_start_then_success(tmp_path):
+    status, pings = _ping_run(tmp_path, "echo ok", "https://hc.example/abc")
+    assert status == 0
+    assert pings[0].endswith("https://hc.example/abc/start")
+    assert pings[-1].endswith("https://hc.example/abc")
+
+
+def test_a_failing_job_keeps_its_status_and_pings_fail(tmp_path):
+    status, pings = _ping_run(tmp_path, "echo boom; exit 3", "https://hc.example/abc")
+    assert status == 3
+    assert pings[-1].endswith("https://hc.example/abc/fail")
+
+
+def test_without_a_ping_url_the_job_runs_unreported(tmp_path):
+    status, pings = _ping_run(tmp_path, "exit 0", None)
+    assert status == 0 and pings == []
+
+
+def _unit(name: str) -> str:
+    return (VPS / "systemd" / name).read_text()
+
+
+def test_the_sync_runs_in_jst_after_the_collector_has_verified_r2():
+    calendar = re.search(r"^OnCalendar=(.+)$", _unit("transit-ml-sync.timer"), re.MULTILINE)[1]
+    assert calendar.endswith("Asia/Tokyo")
+    hour, minute = map(int, re.search(r"(\d{2}):(\d{2})", calendar).groups())
+    assert (hour, minute) > (9, 15)
+
+
+def test_the_sync_unit_runs_the_cli_through_the_ping_wrapper():
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-sync.service"), re.MULTILINE)[1]
+    assert "deploy/vps/run-with-ping.sh SYNC" in exec_start
+    assert "-m ml.cli sync" in exec_start
+
+
+def test_the_bootstrap_script_parses():
+    assert subprocess.run(["bash", "-n", str(VPS / "bootstrap.sh")]).returncode == 0

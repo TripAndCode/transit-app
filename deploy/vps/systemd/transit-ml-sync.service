@@ -1,0 +1,11 @@
+[Unit]
+Description=Mirror R2's archives into the ML replica
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/transit-app
+EnvironmentFile=/etc/transit-ml/env
+ExecStart=/root/transit-app/deploy/vps/run-with-ping.sh SYNC /root/transit-app/.venv/bin/python -m ml.cli sync --state /var/lib/transit-ml/sync-state.json --work /var/lib/transit-ml/work
+Nice=10
