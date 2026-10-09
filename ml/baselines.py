@@ -1,4 +1,4 @@
-"""The three baselines a model has to beat (spec §6). B0 is the app's own
+"""The three baselines a model has to beat. B0 is the app's own
 "expected delay": the same route×weekday×hour, pooled by runs, over the 28
 days before the origin."""
 
