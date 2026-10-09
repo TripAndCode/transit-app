@@ -17,8 +17,10 @@ empty examples.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -45,6 +47,9 @@ class Rule:
     pattern: re.Pattern
     tool: str
     args: dict[str, Any] = field(default_factory=dict)
+    # A question that also matches `unless` asks for something this rule's
+    # args cannot express, so the rule does not fire for it.
+    unless: re.Pattern | None = None
 
 
 @dataclass
@@ -55,6 +60,15 @@ class RouterDecision:
     score: float
     matched_pattern: str | None
 
+
+# Words that turn a ranking question to the other end of its list. Each one
+# feeds both the rule that asks for that end and the `unless` of the rule that
+# cannot, so the two stay the same list. A rank word asks for a ranking by
+# itself; a trait word ("定時率が低い理由") does only beside a ranking marker.
+_LOW_ON_TIME_RANKS = r"ワースト|下位"
+_LOW_ON_TIME_TRAITS = r"低い|低め|悪い|最低"
+_LOW_ON_TIME_WORDS = rf"{_LOW_ON_TIME_RANKS}|{_LOW_ON_TIME_TRAITS}"
+_LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 
 # Compile regexes ONCE at import time. First match wins (priority = order).
 _RULES: list[Rule] = [
@@ -104,26 +118,50 @@ _RULES: list[Rule] = [
         args={"kind": "sample_counts"},
     ),
     # ---- top_n ----
-    # NOTE: more-specific ranking rules MUST precede the generic
-    # `ranking-worst` rule (first-match-wins) — otherwise e.g.
-    # "5分以上の遅れが多い系統TOP10" would be eaten by `ranking-worst`.
+    # More-specific rules precede `ranking-worst` (first match wins), so e.g.
+    # "5分以上の遅れが多い系統TOP10" reaches `ranking-worst-5min`. A ranking's
+    # default order is one end of its list; a low/few phrasing asks for the
+    # other, which the `-low`/`-least` rules supply. The default-order rules
+    # skip such a question, so one no rule can place falls through instead.
     Rule(
         name="ranking-worst-5min",
         pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
+        # worst_5min has no fewest-first order.
+        unless=re.compile(_LITTLE_DELAY_WORDS),
+    ),
+    Rule(
+        name="ranking-on-time-low",
+        # The count follows the rank word: "ワースト5", "低い路線TOP5".
+        pattern=re.compile(
+            rf"定時率.*?(?:(?:{_LOW_ON_TIME_RANKS})\s*(\d+)?"
+            rf"|(?:{_LOW_ON_TIME_TRAITS}).*?(?:TOP|ランキング|一覧|順|{_LOW_ON_TIME_RANKS})\s*(\d+)?)"
+        ),
+        tool="top_n",
+        args={"metric": "on_time_rate", "n": 10, "best_first": False},
     ),
     Rule(
         name="ranking-on-time",
         pattern=re.compile(r"定時率.*?(TOP|ランキング|高い)"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10},
+        unless=re.compile(_LOW_ON_TIME_WORDS),
+    ),
+    Rule(
+        name="ranking-least-delay",
+        pattern=re.compile(rf"(遅延|遅れ).*?({_LITTLE_DELAY_WORDS}).*?(ワースト|TOP|ランキング)\s*(\d+)?"),
+        tool="top_n",
+        args={"metric": "avg_delay", "n": 10, "best_first": True},
+        # Fewest >5min incidents is a different metric from least mean delay.
+        unless=re.compile(r"5分"),
     ),
     Rule(
         name="ranking-worst",
         pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
+        unless=re.compile(_LITTLE_DELAY_WORDS),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
@@ -199,7 +237,7 @@ def _match_rules(question: str) -> RouterDecision | None:
     text = question.strip()
     for rule in _RULES:
         m = rule.pattern.search(text)
-        if m:
+        if m and not (rule.unless and rule.unless.search(text)):
             args = dict(rule.args)
             # Honor a captured count: if the rule carries an "n" arg and the
             # match captured an all-digit group, override the hardcoded n.
@@ -236,8 +274,6 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
     global _golden_cache
     if _golden_cache is not None:
         return _golden_cache
-    import json as _json
-
     mapping: dict[str, tuple[str, dict]] = {}
     if not _golden_path.exists():
         _log.warning("golden_set.jsonl not found at %s — Stage 2 will produce empty examples", _golden_path)
@@ -249,7 +285,7 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
             if not line:
                 continue
             try:
-                entry = _json.loads(line)
+                entry = json.loads(line)
             except ValueError as exc:
                 # A malformed line must not break the "always degrade"
                 # contract — log and skip so routing still works.
@@ -264,6 +300,59 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
     return mapping
 
 
+# rag_chunks rows written by intent-cache promotion
+# (pipeline.query.intent_promotion); their tool/args live in ask_intent_cache.
+_CACHE_CHUNK_PREFIX = "cache_"
+
+
+async def _resolve_cache_chunks(conn, agency_id: int, chunk_ids: list[str]) -> dict[str, tuple[str, dict]]:
+    """``chunk_id → (tool, args)`` for the promoted intent-cache chunks among
+    *chunk_ids*. A row that was never promoted, or is gone, resolves to
+    nothing, like a golden id no longer in golden_set.jsonl."""
+    sigs = [cid.removeprefix(_CACHE_CHUNK_PREFIX) for cid in chunk_ids if cid.startswith(_CACHE_CHUNK_PREFIX)]
+    if not sigs:
+        return {}
+    rows = await conn.fetch(
+        "SELECT signature_hash, tool, args FROM ask_intent_cache "
+        "WHERE agency_id = $1 AND signature_hash = ANY($2::text[]) AND promoted_at IS NOT NULL",
+        agency_id,
+        sigs,
+    )
+    return {
+        # asyncpg returns jsonb as str (no codec is registered).
+        _CACHE_CHUNK_PREFIX + r["signature_hash"]: (r["tool"], json.loads(r["args"]))
+        for r in rows
+    }
+
+
+# In these questions the entities a stored arg names (route codes "22171",
+# aliases "A1", counts and thresholds "TOP5"/"10分") are ASCII letters and
+# digits, after NFKC folds full-width forms.
+_ENTITY_TOKEN = re.compile(r"[0-9a-z]+")
+
+
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).lower()
+
+
+def _args_carry_over(question: str, matched: str, args: dict) -> bool:
+    """Whether the *matched* question's stored *args* also answer *question*.
+
+    Stage 2 replays them verbatim, and they name the matched question's own
+    entities: "22171の運行情報" stores route 22171, which a near-identical
+    "22172の運行情報" must not inherit. So the entity tokens must agree, and
+    so must any arg value the matched question spells out (a stop named in
+    kanji).
+    """
+    if not args:
+        return True
+    q, m = _fold(question), _fold(matched)
+    if set(_ENTITY_TOKEN.findall(q)) != set(_ENTITY_TOKEN.findall(m)):
+        return False
+    spelled_out = [v for v in (_fold(a) for a in args.values() if isinstance(a, str) and a) if v in m]
+    return all(v in q for v in spelled_out)
+
+
 def _get_embedder():
     """Indirection so tests can monkeypatch."""
     from pipeline.query.embeddings import get_embedder
@@ -271,12 +360,12 @@ def _get_embedder():
     return get_embedder()
 
 
-def _enrich(raw, golden):
-    """Join raw :class:`Match` rows to their golden_set tool/args."""
+def _enrich(raw, resolved):
+    """Join raw :class:`Match` rows to their resolved tool/args."""
     enriched = []
     for m in raw:
-        if m.chunk_id in golden:
-            tool, args = golden[m.chunk_id]
+        if m.chunk_id in resolved:
+            tool, args = resolved[m.chunk_id]
             enriched.append(replace(m, tool=tool, args=dict(args)))
     return enriched
 
@@ -319,10 +408,22 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
         _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
         return None, []
 
+    golden = _load_golden()
+    try:
+        resolved = {m.chunk_id: golden[m.chunk_id] for m in matches if m.chunk_id in golden}
+        resolved.update(await _resolve_cache_chunks(conn, agency_id, [m.chunk_id for m in matches]))
+    except Exception as exc:
+        _log.warning("Stage 2 cache resolve failed: %s — falling through to LLM", exc.__class__.__name__)
+        return None, []
+    # A row with no tool/args behind it can neither dispatch nor teach the
+    # LLM anything, so it is not a candidate at all.
+    stale = [m.chunk_id for m in matches if m.chunk_id not in resolved]
+    if stale:
+        _log.warning("rag_chunks rows with no tool/args (%s) — skipped", ", ".join(stale))
+    matches = [m for m in matches if m.chunk_id in resolved]
     if not matches:
         return None, []
 
-    golden = _load_golden()
     top = matches[0]
     within_threshold = top.distance <= _EMBED_DISPATCH_THRESHOLD
     # The margin guard only matters under genuine TOOL ambiguity — when the
@@ -331,15 +432,10 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
     # "<route>の遅延" route_stats chunks) must not be blocked by a tiny gap.
     ambiguous = False
     if within_threshold and len(matches) >= 2 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
-        top_tool = golden.get(top.chunk_id, (None, None))[0]
-        second_tool = golden.get(matches[1].chunk_id, (None, None))[0]
-        ambiguous = top_tool != second_tool
-    dispatch_ok = within_threshold and not ambiguous
-    if dispatch_ok:
-        if top.chunk_id not in golden:
-            _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
-        else:
-            tool, args = golden[top.chunk_id]
+        ambiguous = resolved[top.chunk_id][0] != resolved[matches[1].chunk_id][0]
+    if within_threshold and not ambiguous:
+        tool, args = resolved[top.chunk_id]
+        if _args_carry_over(question, top.content, args):
             decision = RouterDecision(
                 stage="embedding",
                 tool=tool,
@@ -350,7 +446,7 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
             return decision, []
 
     # Fall-through: serve top-k enriched examples for the LLM few-shot.
-    return None, _enrich(matches[:k], golden)
+    return None, _enrich(matches[:k], resolved)
 
 
 async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:
