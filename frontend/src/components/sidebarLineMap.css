@@ -357,3 +357,94 @@
   line-height: 18px;
   white-space: nowrap;
 }
+
+/* My routes: the pinned routes below the line, their codes in the badge
+   column. */
+.rail-pins {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+}
+.rail-pins-title {
+  margin-bottom: 4px;
+  padding: 0 22px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+.rail-pins-empty {
+  margin: 0;
+  padding: 0 22px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+.rail-pin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0 8px;
+  padding: 0 10px 0 11px;
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: background var(--transition);
+}
+.rail-pin:hover {
+  background: var(--bg-page);
+}
+.rail-pin.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.rail-pin-code {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 38px;
+  max-width: 64px;
+  height: 22px;
+  padding: 0 5px;
+  overflow: hidden;
+  border: 1.5px solid var(--text-secondary);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 19px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-pin.active .rail-pin-code {
+  border-color: var(--accent);
+}
+.rail-pin-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-pin-delay {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.rail-pin-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.rail-pins[data-collapsed] .rail-pin {
+  justify-content: center;
+  padding: 0;
+}
+.rail-pins[data-collapsed] .rail-pin-code {
+  max-width: 56px;
+}

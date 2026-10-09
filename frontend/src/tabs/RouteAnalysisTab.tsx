@@ -8,6 +8,7 @@ import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import { PinRouteButton } from "../components/PinRouteButton";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
@@ -158,6 +159,7 @@ export function RouteAnalysisTab() {
       )}
       {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
     </div><div className="focus-actions">
+      {route && <PinRouteButton agencyId={id} code={route} />}
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],

@@ -29,6 +29,7 @@ import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
 import { RailTooltip } from "./RailTooltip";
 import { SidebarLineMap } from "./SidebarLineMap";
+import { SidebarPinnedRoutes } from "./SidebarPinnedRoutes";
 import { SidebarTicket } from "./SidebarTicket";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
@@ -197,7 +198,12 @@ export function Sidebar() {
             {inSheet ? <AgencyPicker /> : <SidebarTicket />}
           </div>
         )}
-        {agencyId && !inSheet && <SidebarLineMap collapsed={collapsedFlag} agencyId={agencyId} screenQuery={screenQuery} />}
+        {agencyId && !inSheet && (
+          <>
+            <SidebarLineMap collapsed={collapsedFlag} agencyId={agencyId} screenQuery={screenQuery} />
+            <SidebarPinnedRoutes collapsed={collapsedFlag} agencyId={agencyId} screenQuery={screenQuery} />
+          </>
+        )}
         {agencyId && inSheet && (
           <nav aria-label={t("nav.destinations_label")} style={{ position: "relative", display: "flex", flexDirection: "column" }}>
             <NavIndicator axis="y" watch={pathname} />
