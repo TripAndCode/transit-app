@@ -4,8 +4,9 @@ The trip_id in these feeds is an opaque UUID; route_code, service_type, and
 scheduled_time are derived by JOINing to static_trips and static_stop_times
 on (agency_id, trip_id, stop_sequence).
 
-Rows where the JOIN misses get NULLs in service_type / scheduled_time;
-route_code is taken straight from the RT trip.route_id and is always non-null.
+Rows where the JOIN misses get NULLs in service_type / scheduled_time.
+route_code is the RT trip.route_id, which GTFS-RT makes optional, or else the
+trip's static_trips.route_id; it is NULL only when neither names one.
 
 An agency's RT-sourced optional fields (``RT_COVERAGE_FIELDS``: stop_id,
 arr_delay, schedule_relationship_trip, schedule_relationship_stop) are
@@ -30,7 +31,7 @@ import logging
 
 from psycopg2 import sql
 
-from pipeline.strategies._pb import _dec, _fields, decode_feed_timestamp
+from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import parse_departure_time
 
 _log = logging.getLogger(__name__)
@@ -247,6 +248,10 @@ def _decode_rows(pb_bytes: bytes):
     Hiroshima-style feeds (this strategy's agencies); confirmed absent from
     Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
     decoding for it is needed here.
+
+    stop_sequence is None when the update has none that fits its column (see
+    ``_uint16``); ``field_coverage`` still counts such updates, and
+    ``parse_feed`` drops them.
     """
     try:
         top = _fields(pb_bytes)
@@ -270,16 +275,16 @@ def _decode_rows(pb_bytes: bytes):
             continue
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
-            stop_seq = stu.get(1, [None])[0]
+            stop_seq = _uint16(stu.get(1, [None])[0])
             stop_id = _dec(stu[4][0]) if 4 in stu else None
             arr_delay = None
             if 2 in stu:
                 arr = _fields(stu[2][0])
-                arr_delay = arr.get(1, [None])[0]
+                arr_delay = _int32(arr.get(1, [None])[0])
             dep_delay = None
             if 3 in stu:
                 dep = _fields(stu[3][0])
-                dep_delay = dep.get(1, [None])[0]
+                dep_delay = _int32(dep.get(1, [None])[0])
             sched_rel_stop = stu.get(5, [None])[0]
             yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
 
@@ -342,15 +347,19 @@ def parse_feed(
                 schedule_relationship_trip, schedule_relationship_stop,
                 feed_timestamp, scheduled_sec, static_version_id).
     """
-    raw_rows = list(_decode_rows(pb_bytes))
+    decoded = list(_decode_rows(pb_bytes))
+    raw_rows = [r for r in decoded if r[2] is not None]
+    if len(raw_rows) < len(decoded):
+        _log.warning(
+            f"[static_join] agency={agency_id} {len(decoded) - len(raw_rows)} stop_time_updates "
+            "had no usable stop_sequence (dropped)"
+        )
     if not raw_rows:
         return []
 
     feed_timestamp = decode_feed_timestamp(pb_bytes)
 
-    keys = list({(r[0], r[2]) for r in raw_rows if r[2] is not None})
-    if not keys:
-        return []
+    keys = list({(r[0], r[2]) for r in raw_rows})
 
     trip_ids = [k[0] for k in keys]
     stop_seqs = [k[1] for k in keys]
@@ -398,15 +407,29 @@ def parse_feed(
             (trip_ids, stop_seqs),
         )
         joined = {(tid, seq): (svc, dep, ver) for (tid, seq, svc, dep, ver) in cur.fetchall()}
+        # Per trip, not per stop: a stop the schedule JOIN misses is still on
+        # its trip's route.
+        routeless_trips = list({r[0] for r in raw_rows if not r[1]})
+        static_routes: dict[str, str | None] = {}
+        if routeless_trips:
+            cur.execute(
+                "SELECT trip_id, route_id FROM static_trips WHERE agency_id = %s AND trip_id = ANY(%s)",
+                (agency_id, routeless_trips),
+            )
+            static_routes = dict(cur.fetchall())
 
     rows = []
     miss = 0
+    no_route = 0
     extended = 0
     bad_sched = 0
     for trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop in raw_rows:
         svc, sched, static_version_id = joined.get((trip_id, stop_seq), (None, None, None))
         if svc is None and sched is None:
             miss += 1
+        route_code = rt_route_id or static_routes.get(trip_id)
+        if route_code is None:
+            no_route += 1
         # Single parse drives the extended-hour handling, the zero-pad, AND
         # the raw scheduled_sec value (see pipeline/strategies/_time.py's
         # module docstring for why: two independent parses of the same
@@ -444,7 +467,7 @@ def parse_feed(
                 trip_id,
                 svc,
                 sched,
-                rt_route_id,
+                route_code,
                 stop_seq,
                 dep_delay,
                 stop_id,
@@ -459,6 +482,10 @@ def parse_feed(
 
     if miss:
         _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows)} rows missed JOIN (logged)")
+    if no_route:
+        _log.info(
+            f"[static_join] agency={agency_id} {no_route}/{len(rows)} rows have no route_id in the feed or static_trips"
+        )
     if extended:
         _log.info(
             f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time "

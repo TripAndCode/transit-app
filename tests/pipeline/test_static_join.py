@@ -6,52 +6,15 @@ import pytest
 
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
+from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def _hex_pb_with_one_trip(trip_id: str, route_id: str = "R1") -> bytes:
-    """Hand-craft a minimal GTFS-RT FeedMessage with one TripUpdate
-    referencing trip_id + route_id and one stop_time_update with stop_sequence=1.
-
-    This avoids needing a real fixture for this regression test.
-    """
-
-    # Use the existing varint helpers — but we need to encode, so do it inline.
-    def varint(n):
-        out = bytearray()
-        while n > 0x7F:
-            out.append((n & 0x7F) | 0x80)
-            n >>= 7
-        out.append(n & 0x7F)
-        return bytes(out)
-
-    def field_string(field_num, value):
-        v = value.encode("utf-8")
-        return varint((field_num << 3) | 2) + varint(len(v)) + v
-
-    def field_uint(field_num, value):
-        return varint((field_num << 3) | 0) + varint(value)
-
-    def field_submsg(field_num, body):
-        return varint((field_num << 3) | 2) + varint(len(body)) + body
-
-    # TripDescriptor: field 1 = trip_id (str), field 5 = route_id (str)
-    trip = field_string(1, trip_id) + field_string(5, route_id)
-
-    # StopTimeUpdate: field 1 = stop_sequence (uint), field 3 = StopTimeEvent {1: delay}
-    dep = field_uint(1, 0)  # delay = 0
-    stu = field_uint(1, 1) + field_submsg(3, dep)
-
-    # TripUpdate: field 1 = trip (TripDescriptor), field 2 = stop_time_update (repeated)
-    tu = field_submsg(1, trip) + field_submsg(2, stu)
-
-    # FeedEntity: field 3 = trip_update
-    ent = field_submsg(3, tu)
-
-    # FeedMessage: field 1 = header (skipped), field 2 = entity (repeated)
-    msg = field_submsg(2, ent)
-    return msg
+    """A FeedMessage with one TripUpdate for trip_id + route_id and one
+    stop_time_update at stop_sequence=1 with a zero departure delay."""
+    return trip_update_feed(trip_update(trip_id, stop_time_update(1, departure_delay=0), route_id=route_id))
 
 
 def test_static_join_handles_repeated_calls_same_transaction(pg_conn):
@@ -355,6 +318,73 @@ def test_static_join_nulls_scheduled_time_on_empty_departure_time(pg_conn):
 
     assert len(rows) == 1
     assert rows[0][4] is None
+
+
+def _static_join_agency_with_trips(conn, name: str, trips: list[tuple[str, str]]) -> int:
+    """A static_join agency whose static schedule has each (trip_id, route_id)
+    stopping once, at stop_sequence 1."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            (name, f"http://{name}.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+        for trip_id, route_id in trips:
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, '平日')",
+                (aid, trip_id, route_id),
+            )
+            cur.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                "VALUES (%s, %s, 1, 'S1', '07:05:00')",
+                (aid, trip_id),
+            )
+    conn.commit()
+    return aid
+
+
+def test_static_join_takes_route_from_static_trips_when_the_feed_omits_it(pg_conn):
+    """TripDescriptor.route_id is optional in GTFS-RT, and static_trips names
+    the trip's route. A stop the schedule JOIN misses still belongs to the
+    trip, so it gets the route too; a route_id the feed does send wins."""
+    aid = _static_join_agency_with_trips(
+        pg_conn, "static_join_route_fallback_test", [("uuid-A", "R1"), ("uuid-B", "R2"), ("uuid-C", "R3")]
+    )
+    pb = trip_update_feed(
+        trip_update("uuid-A", stop_time_update(1, departure_delay=0), stop_time_update(9, departure_delay=0)),
+        trip_update("uuid-B", stop_time_update(1, departure_delay=0), route_id="RT-B"),
+        trip_update("uuid-C", stop_time_update(1, departure_delay=0), route_id=""),
+        trip_update("uuid-unknown", stop_time_update(1, departure_delay=0)),
+    )
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert [(r[2], r[6], r[5]) for r in rows] == [
+        ("uuid-A", 1, "R1"),
+        ("uuid-A", 9, "R1"),
+        ("uuid-B", 1, "RT-B"),
+        ("uuid-C", 1, "R3"),
+        ("uuid-unknown", 1, None),
+    ]
+
+
+def test_static_join_drops_only_the_stop_time_updates_without_a_stop_sequence(pg_conn):
+    """A StopTimeUpdate may name only its stop_id, but stop_sequence is a
+    non-Nullable UInt16 column: such an update, or one past UInt16, costs its
+    own row instead of failing the insert for the whole poll."""
+    aid = _static_join_agency_with_trips(pg_conn, "static_join_no_stop_sequence_test", [("uuid-A", "R1")])
+    pb = trip_update_feed(
+        trip_update(
+            "uuid-A",
+            stop_time_update(stop_id="S0", departure_delay=60),
+            stop_time_update(1, departure_delay=-30),
+            stop_time_update(70000, departure_delay=60),
+            route_id="R1",
+        )
+    )
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert [(r[6], r[7], r[4]) for r in rows] == [(1, -30, "07:05:00")]
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pipeline.ingest import ingest_live
+from pipeline.ingest import ingest_live, ingest_live_payload
+from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
 
 
 def test_ingest_live_raises_when_no_feed_url():
@@ -120,10 +122,6 @@ def _counts(ch_client, agency_id):
 
 
 def test_a_live_payload_lands_in_updates_live_only(pg_conn, ch_client, agency_id):
-    from datetime import datetime, timezone
-
-    from pipeline.ingest import ingest_live_payload
-
     captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     row = ("oracle/20261002/TripUpdate_031500.pb", captured, "平日_12時00分_系統1", "平日", "12:00", "1", 1, 30)
     with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[row]):
@@ -131,3 +129,52 @@ def test_a_live_payload_lands_in_updates_live_only(pg_conn, ch_client, agency_id
         # A retry is recognised against the table the first copy went to.
         assert ingest_live_payload(agency_id, b"raw", captured, row[0], pg_conn, ch_client) == 0
     assert _counts(ch_client, agency_id) == (1, 0)
+
+
+def _stored(ch_client, agency_id):
+    return ch_client.query(
+        "SELECT stop_sequence, dep_delay, arr_delay FROM updates_live WHERE agency_id = {a:UInt16} "
+        "ORDER BY stop_sequence",
+        parameters={"a": agency_id},
+    ).result_rows
+
+
+def test_a_live_poll_with_early_stops_and_a_sequenceless_stop_is_stored(pg_conn, ch_client, agency_id):
+    """A negative int32 delay and a StopTimeUpdate with no stop_sequence are
+    both legal GTFS-RT. Neither may fail the insert, which would lose every
+    other stop in the poll."""
+    pb = trip_update_feed(
+        trip_update(
+            "平日_12時00分_系統1",
+            stop_time_update(1, departure_delay=-30),
+            stop_time_update(departure_delay=60),
+            stop_time_update(2, departure_delay=45),
+        )
+    )
+    captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    assert ingest_live_payload(agency_id, pb, captured, "oracle/20261002/TripUpdate_031500.pb", pg_conn, ch_client) == 2
+    assert _stored(ch_client, agency_id) == [(1, -30, None), (2, 45, None)]
+
+
+def test_a_static_join_live_poll_with_early_stops_and_a_sequenceless_stop_is_stored(pg_conn, ch_client):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES ('static_join_signed_delay_test', 'http://signed-delay.example.com/feed.pb', 'static_join') "
+            "RETURNING agency_id"
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+
+    pb = trip_update_feed(
+        trip_update(
+            "uuid-A",
+            stop_time_update(1, departure_delay=-30, arrival_delay=-45),
+            stop_time_update(stop_id="S2", departure_delay=60),
+            stop_time_update(3, departure_delay=0),
+            route_id="R1",
+        )
+    )
+    captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    assert ingest_live_payload(aid, pb, captured, "oracle/20261002/TripUpdate_031500.pb", pg_conn, ch_client) == 2
+    assert _stored(ch_client, aid) == [(1, -30, -45), (3, 0, None)]

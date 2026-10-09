@@ -1,9 +1,4 @@
-"""Shared protobuf + utility helpers for ingest strategies.
-
-Lifted verbatim (with one path-aware change to _ts) from pipeline/ingest.py
-so the byte-identical Aomori behaviour is preserved when ingest.py becomes
-a router.
-"""
+"""Shared protobuf + utility helpers for ingest strategies."""
 
 import re
 import struct
@@ -79,6 +74,35 @@ def _fields(data):
 def _dec(b):
     """Decode bytes to str, passing through non-bytes values unchanged."""
     return b.decode("utf-8") if isinstance(b, bytes) else b
+
+
+# A decoded value the `updates` columns cannot hold fails clickhouse-connect's
+# client-side serialization for the whole insert, so one bad stop_time_update
+# would lose every other row of its poll. These coerce wire values into their
+# column types; anything that cannot fit reads as absent.
+
+
+def _int32(v):
+    """The signed value of a protobuf int32 field (StopTimeEvent.delay).
+
+    A negative int32 goes on the wire sign-extended to 64 bits, so
+    _read_varint returns -30 as 2**64 - 30. Protobuf's own decoders keep the
+    low 32 bits as two's complement, which is also what fits Int32.
+    """
+    if not isinstance(v, int):
+        return None
+    v &= 0xFFFF_FFFF
+    return v - (1 << 32) if v >= 1 << 31 else v
+
+
+def _uint16(v):
+    """v when it fits stop_sequence's UInt16 column, else None.
+
+    stop_sequence is optional on the wire (a StopTimeUpdate may name only its
+    stop_id) and a uint32 there, but it is the non-Nullable key of every
+    `updates` row, so a strategy drops the update when this returns None.
+    """
+    return v if isinstance(v, int) and 0 <= v <= 0xFFFF else None
 
 
 def decode_feed_timestamp(pb_bytes: bytes):
