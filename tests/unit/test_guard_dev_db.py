@@ -69,6 +69,16 @@ BLOCKED = [
     pytest.param("make analyze-all", id="make-analyze-all"),
     pytest.param("make seed-agencies", id="make-seed-agencies"),
     pytest.param("make lint && make build-rag-index", id="make-second-command-build-rag-index"),
+    # A quoted script, a renamed make, and the CLI run as a module.
+    pytest.param('bash -c "make prune-query-log"', id="make-target-inside-bash-c"),
+    pytest.param("gmake prune-query-log", id="gmake-prune-query-log"),
+    pytest.param("poetry run python -m gtfs_pipeline migrate down", id="cli-as-module-migrate-down"),
+    # A throwaway port named outside the command's own assignments exempts nothing.
+    pytest.param("make prune-query-log # :5544", id="throwaway-port-only-in-a-comment"),
+    pytest.param(
+        "make prune-query-log && psql postgresql://transit:transit@localhost:5544/transit_test -c 'SELECT 1'",
+        id="throwaway-port-only-in-another-command",
+    ),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
@@ -205,7 +215,11 @@ ALLOWED = [
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
-    pytest.param('git commit -m "make the ingest faster"', id="quoted-prose-naming-a-target"),
+    pytest.param('git commit -m "make it faster"', id="quoted-prose-naming-no-target"),
+    pytest.param(
+        "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="test-db-as-a-make-variable",
+    ),
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
         id="copy-to-reads-data-out",

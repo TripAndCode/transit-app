@@ -45,9 +45,12 @@ DEV_SERVICES = {"db", "clickhouse"}
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
+# Matched against the lowercased NAME=value assignments of the same simple
+# command -- the env prefix or a make variable -- so a throwaway port named
+# anywhere else (another command, a comment) points nothing at it.
 THROWAWAY = {
-    "pg": re.compile(r":5544\b"),
-    "ch": re.compile(r":8124\b|\bCLICKHOUSE_PORT=8124\b"),
+    "pg": re.compile(r"database_url=\S*:5544\b"),
+    "ch": re.compile(r"clickhouse_port=8124\b"),
 }
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
 # overrides nothing -- the Makefile's own defaults from .env, the shell's for
@@ -222,22 +225,60 @@ def runs_a_sql_script(lowered: list[str]) -> bool:
     return "psql" in lowered and ("-f" in lowered or "--file" in lowered)
 
 
-def runs_destructive_command(tokens: list[str], cmd: str) -> bool:
-    """A destructive Make target or `gtfs_pipeline.py` subcommand that writes a
-    store the command does not point at its throwaway stack."""
+def runs_destructive_command(tokens: list[str]) -> bool:
+    """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
+    command, that writes a store its own assignments do not point at the
+    throwaway stack.
+
+    A token holding whitespace is a quoted script (`bash -c "..."`, `ssh host
+    "..."`) and is read as a command line of its own. Quoted prose naming a
+    destructive target is read the same way and blocked, the cheap direction.
+    """
     lowered = [t.lower() for t in tokens]
-    writes: set[str] = set()
-    for i, tok in enumerate(lowered):
-        name = tok.rsplit("/", 1)[-1]
-        if name == "make":
-            for target in make_targets(lowered[i + 1 :]):
-                writes |= DESTRUCTIVE_TARGETS.get(target, set())
-        elif name == "gtfs_pipeline.py" and i + 1 < len(lowered):
-            writes |= DESTRUCTIVE_SUBCOMMANDS.get(lowered[i + 1], set())
-    return any(not THROWAWAY[store].search(cmd) for store in writes)
+    for segment in _simple_commands(lowered):
+        if _segment_writes_dev(segment):
+            return True
+        for tok in segment:
+            if any(c.isspace() for c in tok):
+                try:
+                    inner = shlex.split(tok)
+                except ValueError:
+                    inner = tok.split()
+                if runs_destructive_command(inner):
+                    return True
+    return False
 
 
 _SHELL_SEPARATORS = {"&&", "||", ";", "|", "&"}
+_ASSIGNMENT = re.compile(r"^[a-z_][a-z0-9_]*=")
+_MAKE_NAMES = {"make", "gmake"}
+# `python gtfs_pipeline.py ...` and `python -m gtfs_pipeline ...`.
+_CLI_NAMES = {"gtfs_pipeline.py", "gtfs_pipeline"}
+
+
+def _simple_commands(lowered: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = [[]]
+    for tok in lowered:
+        if tok in _SHELL_SEPARATORS:
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    return [segment for segment in segments if segment]
+
+
+def _segment_writes_dev(segment: list[str]) -> bool:
+    writes: set[str] = set()
+    for i, tok in enumerate(segment):
+        name = tok.rsplit("/", 1)[-1]
+        if name in _MAKE_NAMES:
+            for target in make_targets(segment[i + 1 :]):
+                writes |= DESTRUCTIVE_TARGETS.get(target, set())
+        elif name in _CLI_NAMES and i + 1 < len(segment):
+            writes |= DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set())
+    assignments = [tok for tok in segment if _ASSIGNMENT.match(tok)]
+    return any(not any(THROWAWAY[store].match(a) for a in assignments) for store in writes)
+
+
 # `make` options whose value is the next argument, not a target.
 _MAKE_VALUE_FLAGS = {"-c", "-f", "-o", "--directory", "--file", "--makefile"}
 
@@ -291,7 +332,7 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    if destroys_dev_volume(cmd) or runs_destructive_command(tokens, cmd):
+    if destroys_dev_volume(cmd) or runs_destructive_command(tokens):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
