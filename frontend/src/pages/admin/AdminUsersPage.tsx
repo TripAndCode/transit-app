@@ -43,6 +43,15 @@ const BULK_INVERSE: Record<BulkAction, UserPatchBody> = {
   promote: { role: "user" },
   demote: { role: "admin" },
 };
+/** Whether `user` already holds what `action` sets. Such a row is left out of
+ *  the action and so out of its undo, whose fixed inverse would otherwise
+ *  undo a state the user had before the action. */
+const BULK_ALREADY: Record<BulkAction, (user: AdminUser) => boolean> = {
+  approve: (user) => user.llm_approved,
+  suspend: (user) => user.suspended_at != null,
+  promote: (user) => user.role === "admin",
+  demote: (user) => user.role === "user",
+};
 const BULK_TOAST_KEY: Record<BulkAction, string> = {
   approve: "approved",
   suspend: "suspended",
@@ -229,7 +238,10 @@ export function AdminUsersPage() {
   }
 
   function runBulkAction(action: BulkAction, ids: number[]) {
-    const targets = ids.filter(isSelectable);
+    const targets = ids.filter((uid) => {
+      const user = rows.find((u) => u.user_id === uid);
+      return isSelectable(uid) && user != null && !BULK_ALREADY[action](user);
+    });
     if (targets.length === 0) return;
     bulkPatch.mutate(
       { ids: targets, patch: BULK_PATCH[action] },
