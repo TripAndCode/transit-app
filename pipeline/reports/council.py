@@ -309,7 +309,7 @@ async def compute_delay_certificate(
             **ch_params,
         },
     )
-    total = int(result.result_rows[0][5]) if result.result_rows else 0
+    total = int(result.first_item["total"]) if result.result_rows else 0
     rows: list[tuple] = []
     for route_code, service_type, d, scheduled_time, dep_delay, _total in result.result_rows:
         actual_time = shift_time_str(scheduled_time, int(dep_delay))
