@@ -295,6 +295,16 @@ describe("Sidebar", () => {
       expect(within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "Route 50" })).toBeTruthy();
     });
 
+    it("says where a pinned route goes beside its badge, and names it in full", () => {
+      togglePinnedRoute(8, "50");
+      vi.spyOn(hooks, "useRoutes").mockReturnValue({
+        data: [{ route_id: "r50", route_short_name: "50", route_long_name: null, route_code: "50", trip_headsigns: ["Nakasuji"] }],
+      } as never);
+      renderSidebar("/agencies/8/live");
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "50 · for Nakasuji" });
+      expect(within(link).getByText("for Nakasuji")).toBeTruthy();
+    });
+
     it("leaves the collapsed rail without the list while it is empty", async () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/8/live");

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import { usePinnedRoutes } from "../api/pinnedRoutes";
 import type { RouteSummary } from "../api/types";
-import { routeHeadingText, useRouteNames } from "../api/useRouteNames";
+import { routeHeadingText, routeLabel } from "../api/useRouteNames";
 import { routeHref } from "../routes/destinations";
 import { delayRampVar } from "../styles/tokens";
 import { PendingNavLink } from "./navPending";
@@ -23,9 +23,9 @@ function todayMeanMinutes(routes: readonly RouteSummary[] | undefined, code: str
 }
 
 /** The routes pinned for the agency, each a link to its page with the Routes
- *  screen's remembered scope, beside today's mean delay. The figure comes
- *  from the summary the top bar already fetches, so the list costs no
- *  request of its own. */
+ *  screen's remembered scope, beside today's mean delay. That figure comes
+ *  from the summary the top bar already fetches; the names come from the
+ *  agency's routes list, cached alongside the route pickers'. */
 export function SidebarPinnedRoutes({
   collapsed,
   agencyId,
@@ -38,7 +38,6 @@ export function SidebarPinnedRoutes({
   const { t } = useTranslation();
   const pins = usePinnedRoutes(agencyId);
   const id = pins.length > 0 ? Number(agencyId) : null;
-  const names = useRouteNames(id);
   const { data: routes } = useRoutes(id);
   const { data: today } = useTodayRouteSummary(id, { autoRefresh: false });
   if (collapsed && pins.length === 0) return null;
@@ -48,8 +47,8 @@ export function SidebarPinnedRoutes({
       {!collapsed && <div className="rail-pins-title">{title}</div>}
       {pins.length === 0 && <p className="rail-pins-empty">{t("nav.pinned_routes_empty")}</p>}
       {pins.map((code) => {
-        const name = names.format(code);
         const route = routes?.find((r) => r.route_code === code);
+        const name = route ? routeLabel(route, t) : t("common.route_code_fallback", { code });
         // The badge already shows the code, so the line beside it says
         // where the route goes, falling back to its full label.
         const beside = route ? (routeHeadingText(route, t) ?? name) : "";
