@@ -5,7 +5,7 @@ checkout resolve `poetry.lock` the same way.
 A pin that is not `==`, or a `pip`/`pipx` install with no pin at all, fails
 here rather than being skipped: either one lets a runner pick up whatever
 Poetry is newest that day. Only executed command text in tracked files is
-scanned: workflow `run:` scripts, every Dockerfile's `RUN`, Makefile recipes
+scanned: workflow and composite-action `run:` scripts, every Dockerfile's `RUN`, Makefile recipes
 and every shell script, each with backslash continuations joined first. Step
 names and comments that mention Poetry cannot trip it.
 """
@@ -55,6 +55,13 @@ def _workflow_commands(text: str) -> list[str]:
     ]
 
 
+def _action_commands(text: str) -> list[str]:
+    action = yaml.safe_load(text) or {}
+    return [
+        line for step in (action.get("runs") or {}).get("steps", []) for line in _logical_lines(step.get("run", ""))
+    ]
+
+
 def _tracked(*pathspecs: str) -> list[PurePosixPath]:
     listed = subprocess.run(
         ["git", "ls-files", "-z", "--", *pathspecs], cwd=ROOT, capture_output=True, text=True, check=True
@@ -64,10 +71,19 @@ def _tracked(*pathspecs: str) -> list[PurePosixPath]:
 
 def _commands() -> dict[str, list[str]]:
     sites: dict[str, list[str]] = {}
-    for path in _tracked(".github/workflows/*.yml", ".github/workflows/*.yaml", "*Dockerfile*", "*Makefile", "*.sh"):
+    for path in _tracked(
+        ".github/workflows/*.yml",
+        ".github/workflows/*.yaml",
+        ".github/actions/*/action.yml",
+        "*Dockerfile*",
+        "*Makefile",
+        "*.sh",
+    ):
         text = (ROOT / path).read_text()
         if path.parent == PurePosixPath(".github/workflows"):
             sites[str(path)] = _workflow_commands(text)
+        elif path.name == "action.yml":
+            sites[str(path)] = _action_commands(text)
         elif path.name.startswith("Dockerfile"):
             sites[str(path)] = [line for line in _logical_lines(text) if line.lstrip().upper().startswith("RUN ")]
         elif path.name == "Makefile":

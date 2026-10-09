@@ -14,10 +14,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
+BACKEND_JOBS = ("backend-static", "test", "coverage")
+SETUP_BACKEND = ROOT / ".github" / "actions" / "setup-backend" / "action.yml"
+BACKEND_RUNNER = "${{ fromJSON(vars.CI_BACKEND_RUNNER || '\"ubuntu-latest\"') }}"
 
 
 def _workflow_text() -> str:
@@ -112,23 +116,33 @@ def test_no_github_hosted_only_guard_remains() -> None:
     assert "github-hosted" not in text
 
 
+@pytest.mark.parametrize("job_name", BACKEND_JOBS)
+def test_every_backend_job_sets_up_through_the_shared_action(job_name: str) -> None:
+    """One definition of the toolchain, so the ordering below holds for every
+    backend job rather than for whichever copy was last edited."""
+    steps = _workflow_yaml()["jobs"][job_name]["steps"]
+    assert any(step.get("uses") == "./.github/actions/setup-backend" for step in steps), (
+        f"{job_name} no longer sets up through .github/actions/setup-backend"
+    )
+
+
 def test_poetry_is_installed_after_setup_python() -> None:
-    """The runner supplies no system `pip`, so Poetry can only be installed
-    once setup-python has put an interpreter on PATH.
+    """The VPS runner supplies no system `pip`, so Poetry can only be
+    installed once setup-python has put an interpreter on PATH, and every
+    backend job can be pointed at the VPS.
 
     This forecloses `cache: poetry`, which requires the opposite order —
     Poetry present before setup-python runs. Inverting the steps to gain the
     cache fails the job outright with `pip: command not found`, so the order
     is pinned here rather than left to look like an arbitrary preference.
     """
-    workflow = _workflow_yaml()
-    steps = workflow["jobs"]["test"]["steps"]
+    steps = yaml.safe_load(SETUP_BACKEND.read_text())["runs"]["steps"]
     setup_python = next(s for s in steps if s.get("uses", "").startswith("actions/setup-python"))
     setup_index = steps.index(setup_python)
     poetry_index = next(i for i, s in enumerate(steps) if "install poetry" in s.get("name", "").lower())
     assert setup_index < poetry_index, "setup-python must run first; without it there is no pip to install Poetry with"
     assert setup_python.get("with", {}).get("cache") != "poetry", (
-        "cache: poetry needs Poetry installed before this step, which this runner cannot do"
+        "cache: poetry needs Poetry installed before this step, which the VPS runner cannot do"
     )
 
 
@@ -296,20 +310,69 @@ def test_every_container_removal_takes_its_volume_with_it() -> None:
 def test_frontend_job_stays_off_the_self_hosted_runner() -> None:
     """It has no reason to be there and one strong reason not to be.
 
-    The job needs no Docker, database or ClickHouse, so pinning it to the VPS
-    only queues it behind `test` on the single runner — and the box has
-    3.8 GiB of RAM, which two concurrent jobs do not fit into. Hosted, the
-    two run at once on separate machines.
+    The job needs no Docker, database or ClickHouse, so it stays hosted even
+    when the backend jobs are pointed at the VPS: there it would only queue
+    behind them on the single runner, on a box whose 3.8 GiB of RAM does not
+    fit two jobs at once.
     """
     jobs = _workflow_yaml()["jobs"]
     assert jobs["frontend"]["runs-on"] == "ubuntu-latest"
-    assert "self-hosted" in jobs["test"]["runs-on"], "the test job does need the VPS's Docker"
 
     frontend_text = yaml.safe_dump(jobs["frontend"])
     for needs_the_vps in ("docker", "localhost", "services"):
         assert needs_the_vps not in frontend_text, (
             f"the frontend job now references {needs_the_vps!r}; re-check whether it can still be hosted"
         )
+
+
+def test_backend_jobs_run_hosted_unless_one_variable_points_both_at_the_vps() -> None:
+    """Hosted while `vars.CI_BACKEND_RUNNER` is unset, since standard hosted
+    runners cost nothing for a public repository. One variable moves both
+    backend jobs, so the static checks and the suite never land on different
+    machines by accident."""
+    jobs = _workflow_yaml()["jobs"]
+    for job_name in BACKEND_JOBS:
+        assert jobs[job_name]["runs-on"] == BACKEND_RUNNER, f"{job_name} no longer follows vars.CI_BACKEND_RUNNER"
+
+
+def test_every_shard_the_matrix_starts_keeps_its_own_share() -> None:
+    """Each shard keeps the files tests/sharding.py assigns to
+    `CI_SHARD_INDEX` of `CI_SHARD_COUNT`. The count has to be the matrix's
+    own size: a smaller one leaves shards out of range, and a larger one
+    leaves shares that no job runs, which would read as a pass."""
+    test = _workflow_yaml()["jobs"]["test"]
+    assert test["strategy"]["fail-fast"] is False, "one shard's failure must not cancel the others' report"
+    run = next(s for s in test["steps"] if s.get("name") == "Run tests")
+    assert run["env"]["CI_SHARD_INDEX"] == "${{ matrix.shard }}"
+    assert run["env"]["CI_SHARD_COUNT"] == "${{ strategy.job-total }}"
+
+
+def test_static_checks_run_once_over_the_whole_tree() -> None:
+    """ruff and mypy run in `backend-static` and nowhere in the sharded job,
+    where they would run once per shard over the same tree."""
+    jobs = _workflow_yaml()["jobs"]
+    static = " ".join(step.get("run", "") for step in jobs["backend-static"]["steps"])
+    for check in ("ruff check .", "ruff format --check .", "mypy"):
+        assert check in static, f"backend-static no longer runs `{check}`"
+    sharded = " ".join(step.get("run", "") for step in jobs["test"]["steps"])
+    for tool in ("ruff", "mypy"):
+        assert tool not in sharded, f"the sharded test job runs {tool} again, once per shard"
+
+
+def test_main_reports_coverage_combined_from_every_shard() -> None:
+    """A shard measures only its share of the suite, so its own figure
+    understates what the suite covers. Each shard keeps its data under a name
+    of its own, and one job after all of them combines it."""
+    jobs = _workflow_yaml()["jobs"]
+    run = next(s for s in jobs["test"]["steps"] if s.get("name") == "Run tests")
+    assert run["env"]["COVERAGE_FILE"] == ".coverage.shard-${{ matrix.shard }}"
+    upload = next(s for s in jobs["test"]["steps"] if s.get("uses", "").startswith("actions/upload-artifact"))
+    assert upload["with"]["path"] == ".coverage.shard-${{ matrix.shard }}"
+    assert upload["with"]["include-hidden-files"] is True, "a dot-file is skipped by the upload without this"
+    coverage = jobs["coverage"]
+    assert coverage["needs"] == "test"
+    assert coverage["if"] == upload["if"] == "github.event_name == 'push'"
+    assert "coverage combine .coverage.shard-*" in " ".join(s.get("run", "") for s in coverage["steps"])
 
 
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:

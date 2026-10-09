@@ -8,6 +8,7 @@ import pytest
 from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
+from tests.sharding import assign_shards, shard_from_env
 
 
 def _redirect_to_test_db() -> None:
@@ -461,3 +462,21 @@ async def client(apply_schema):
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     await pool.close()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """Keep only this CI job's share of the suite when CI splits it (see
+    tests/sharding.py). Last, so every other collection check has seen the
+    whole suite first."""
+    shard = shard_from_env(os.environ)
+    if shard is None:
+        return
+    index, count = shard
+    files: dict[str, list[pytest.Item]] = {}
+    for item in items:
+        files.setdefault(item.nodeid.split("::", 1)[0], []).append(item)
+    owner = assign_shards({path: len(tests) for path, tests in files.items()}, count)
+    kept = [item for item in items if owner[item.nodeid.split("::", 1)[0]] == index]
+    config.hook.pytest_deselected(items=[item for item in items if owner[item.nodeid.split("::", 1)[0]] != index])
+    items[:] = kept

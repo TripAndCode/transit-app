@@ -58,8 +58,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` mirrors only the backend `test` job and does not measure pytest
-  coverage by default, matching `ci.yml`, which measures backend coverage on `main`
+- `run_full_ci.sh` mirrors only the backend jobs (`backend-static`, and the `test`
+  shards run as one unsharded suite) and does not measure pytest coverage by default, matching `ci.yml`, which measures backend coverage on `main`
   pushes only since nothing gates on that number. Pass `COVERAGE=1` when the number
   itself is what you want. The instrumentation adds minutes per run, and this gate is
   often paid more than once per branch. Frontend coverage does gate: CI's `frontend`

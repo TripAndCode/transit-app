@@ -1,0 +1,53 @@
+name: Set up the backend toolchain
+description: >-
+  Python, Poetry and the project's dependencies for a backend job, on a
+  GitHub-hosted machine or the persistent VPS runner alike.
+
+inputs:
+  python-version:
+    description: The Python version setup-python installs.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # setup-python first: the VPS runner has no system `pip`, so the Poetry
+    # install below depends on the interpreter this step puts on PATH. That
+    # rules out `cache: poetry`, which needs Poetry to already be installed
+    # when setup-python runs -- the two requirements are mutually exclusive
+    # there, and a working gate matters more than that cache.
+    - uses: actions/setup-python@v7
+      id: python
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Poetry
+      shell: bash
+      run: pip install poetry==2.5.1
+
+    # A hosted machine starts with no venv, and restoring one skips resolving
+    # and installing every dependency again. The persistent runner keeps its
+    # own between runs. Keyed on the exact Python version as well as the
+    # lock: a venv points at the interpreter that built it.
+    - name: Restore the Poetry venv
+      if: runner.environment != 'self-hosted'
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/pypoetry/virtualenvs
+        key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+
+    - name: Install dependencies
+      shell: bash
+      run: poetry install
+
+    # The persistent runner keeps every venv Poetry makes for the checkout,
+    # one per Python minor version, and Poetry never removes one when the
+    # pinned version moves on. Keep only the venv just installed; an empty
+    # answer stops the step rather than matching every venv.
+    - name: Remove this checkout's venvs for other Python versions
+      shell: bash
+      run: |
+        active="$(poetry env info --path)"
+        active="${active##*/}"
+        test -n "$active"
+        poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
