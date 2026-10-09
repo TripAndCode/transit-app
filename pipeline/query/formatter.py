@@ -106,8 +106,21 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
     ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
     ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_summary_capped", "ja"): (
+        "遅延{threshold}秒超の便: {count}件（日付順の先頭{shown}件を表示。残りは期間を絞って確認できます）"
+    ),
+    ("delay_certificate_summary_capped", "en"): (
+        "{count} trip(s) exceeded the {threshold}s delay threshold; the earliest {shown} are listed. "
+        "Narrow the date range to see the rest."
+    ),
     ("delay_certificate_threshold_footnote", "ja"): "遅延{threshold}秒超の便のみを掲載しています。",
     ("delay_certificate_threshold_footnote", "en"): "Only trips exceeding the {threshold}s delay threshold are listed.",
+    ("delay_certificate_capped_footnote", "ja"): (
+        "該当{count}件のうち、日付順の先頭{shown}件のみを掲載しています。残りは期間を絞って出力してください。"
+    ),
+    ("delay_certificate_capped_footnote", "en"): (
+        "Only the earliest {shown} of {count} matching trips are listed. Narrow the date range to export the rest."
+    ),
 }
 
 
@@ -417,20 +430,26 @@ def format_council_summary_text(
     return f"{header}\n{body}\n{footnotes}"
 
 
-def format_delay_certificate_footnotes(threshold_sec: int, locale: str = "ja") -> list[str]:
-    """Single footnote line stating the exceeds-threshold used, mirroring
-    :func:`format_council_summary_footnotes`'s pattern -- the CSV export's
-    only caveat readers need before trusting which trips were excluded.
+def format_delay_certificate_footnotes(threshold_sec: int, shown: int, total: int, locale: str = "ja") -> list[str]:
+    """The CSV export's caveats, mirroring :func:`format_council_summary_footnotes`'s
+    pattern: the exceeds-threshold used, and, when the row cap cut the list
+    (*shown* of *total* qualifying trips), that the file is not the whole set.
     """
-    return [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
+    lines = [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
+    if total > shown:
+        lines.append(_t("delay_certificate_capped_footnote", locale, count=total, shown=shown))
+    return lines
 
 
-def format_delay_certificate_text(rows: list, threshold_sec: int, locale: str = "ja") -> str:
+def format_delay_certificate_text(rows: list, threshold_sec: int, total: int, locale: str = "ja") -> str:
     """Locale-aware summary line for the delay-certificate export -- a short
     count + threshold statement, not a per-row transcript (this export can
     run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
-    not this text body).
+    not this text body). The count is *total*, every qualifying trip, which
+    the row cap can leave larger than ``len(rows)``.
     """
     if not rows:
         return _t("delay_certificate_empty", locale, threshold=threshold_sec)
-    return _t("delay_certificate_summary", locale, count=len(rows), threshold=threshold_sec)
+    if total > len(rows):
+        return _t("delay_certificate_summary_capped", locale, count=total, shown=len(rows), threshold=threshold_sec)
+    return _t("delay_certificate_summary", locale, count=total, threshold=threshold_sec)

@@ -178,10 +178,10 @@ class ReportResponse(BaseModel):
     # instead of assuming it does.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
-    # How many groups qualified before `limit` cut the list (ranking,
-    # ranking_best and compare_ranking; None elsewhere), and, for
-    # ranking/ranking_best only, the observation count below which a group's
-    # average is too thin to trust.
+    # How many groups (delay_certificate: trips) qualified before `limit` cut
+    # the list (ranking, ranking_best, compare_ranking and delay_certificate;
+    # None elsewhere), and, for ranking/ranking_best only, the observation
+    # count below which a group's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
 
@@ -969,12 +969,12 @@ async def get_report(
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
-        rows = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
-        text = format_delay_certificate_text(rows, threshold, locale=locale)
+        rows, rows_total = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
+        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale)
         if format == "csv":
             # Japanese-only preamble, matching council_summary's CSV branch
             # and format_definition_csv_line's existing convention.
-            footnotes = format_delay_certificate_footnotes(threshold, locale="ja")
+            footnotes = format_delay_certificate_footnotes(threshold, len(rows), rows_total, locale="ja")
             return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
         return ReportResponse(
             report_type=report_type,
@@ -984,6 +984,7 @@ async def get_report(
             ctx=_report_ctx(ctx),
             definition=definition,
             scope_applied=report_scope_applied(report_type),
+            rows_total=rows_total,
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")
