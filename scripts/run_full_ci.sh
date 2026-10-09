@@ -3,7 +3,8 @@
 # backend suite runs through it): builds and starts a
 # dedicated, uniquely-named/-ported Postgres + ClickHouse pair, applies
 # schema, runs the same lint/type/test gate as
-# .github/workflows/ci.yml's `test` job, then always tears both
+# .github/workflows/ci.yml's `backend-static` and `test` jobs, the suite
+# unsharded, then always tears both
 # containers down again -- success or failure.
 #
 # Why this exists: transit-app-gotchas's documented manual recipe

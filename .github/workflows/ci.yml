@@ -2,8 +2,8 @@ name: CI
 
 # `pull_request` is what the merge gate reads, and it already covers every
 # branch headed anywhere. Listening on `push` for all branches as well meant
-# every push to an open PR ran the whole suite twice over the same tree — on
-# a single self-hosted runner that is double the queue for no extra signal.
+# every push to an open PR ran the whole suite twice over the same tree, for
+# no extra signal.
 # `push` stays for `main` alone, so a commit landing there outside a PR is
 # still checked. Mirrors `secrets-scan.yml`.
 on:
@@ -12,9 +12,8 @@ on:
   pull_request:
 
 # One in-flight run per pull request: a new push supersedes the previous run
-# instead of queueing behind it, which on one runner is the difference
-# between the current head being tested now and being tested after every
-# head before it. Pull requests only — a `main` run records what that commit
+# instead of queueing behind it, so the current head is tested now rather
+# than after every head before it. Pull requests only — a `main` run records what that commit
 # did rather than previewing it, so nothing should cancel it.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -24,13 +23,9 @@ permissions:
   contents: read
 
 jobs:
-  # GitHub-hosted, unlike the `test` job below. Nothing here needs the VPS:
-  # no Docker, no database, no ClickHouse — the one native dependency is the
-  # `python3` that lint:i18n-strings shells out to, which every hosted image
-  # carries. Running it here buys real parallelism with `test` instead of
-  # queueing behind it on the single self-hosted runner, and takes the larger
-  # of the two jobs off a box with 3.8 GiB of RAM, where two concurrent jobs
-  # would not have fit.
+  # Always GitHub-hosted. Nothing here needs Docker, a database or
+  # ClickHouse; the one native dependency is the `python3` that
+  # lint:i18n-strings shells out to, which every hosted image carries.
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -155,9 +150,63 @@ jobs:
           docker run --rm --network none transit-app:ci python -c "import api.main"
           docker run --rm --network none transit-app:ci test -f api/static/index.html
 
+  # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
+  # while it is unset: standard hosted runners cost nothing for a public
+  # repository. The day hosted minutes start counting, set it to
+  # `["self-hosted","vps"]`, and `vars.CI_TEST_SHARDS` to `[0]`, since the
+  # VPS has a single runner and would only run the shards one after another.
+  #
+  # Whole-tree static checks, beside the test shards rather than ahead of them.
+  backend-static:
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: "3.14"
+
+      - name: Install Poetry
+        run: pip install poetry==2.5.1
+
+      - name: Restore the Poetry venv
+        if: runner.environment != 'self-hosted'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Remove this checkout's venvs for other Python versions
+        run: |
+          active="$(poetry env info --path)"
+          active="${active##*/}"
+          test -n "$active"
+          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
+
+      - name: Lint and format check
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+
+      - name: Type check
+        run: poetry run mypy
+
+  # The suite in shards that run at once, each on its own machine with its
+  # own Postgres and ClickHouse; tests/sharding.py decides which files each
+  # one keeps. fail-fast stays off so one shard's failure still reports the
+  # others'.
   test:
-    runs-on: [self-hosted, vps]
+    runs-on: ${{ fromJSON(vars.CI_BACKEND_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(vars.CI_TEST_SHARDS || '[0, 1, 2]') }}
 
     services:
       clickhouse:
@@ -187,11 +236,21 @@ jobs:
       # installed when setup-python runs -- the two requirements are mutually
       # exclusive here, and a working gate matters more than the cache.
       - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: "3.14"
 
       - name: Install Poetry
         run: pip install poetry==2.5.1
+
+      # A hosted machine starts with no venv, and building one installs
+      # torch; the persistent runner keeps its own between runs.
+      - name: Restore the Poetry venv
+        if: runner.environment != 'self-hosted'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
 
       - name: Install dependencies
         run: poetry install
@@ -231,14 +290,6 @@ jobs:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
-
-      - name: Lint and format check
-        run: |
-          poetry run ruff check .
-          poetry run ruff format --check .
-
-      - name: Type check
-        run: poetry run mypy
 
       # tests/unit/test_gitleaks_fixtures.py shells out to the real, pinned
       # gitleaks binary to prove the control fixtures are actually detected
@@ -282,6 +333,8 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
+          CI_SHARD_INDEX: ${{ matrix.shard }}
+          CI_SHARD_COUNT: ${{ strategy.job-total }}
           # Coverage instruments every line the suite executes and nothing
           # gates on the number it prints, so a pull request pays for a
           # report no check reads. `main` still produces one, which is where
