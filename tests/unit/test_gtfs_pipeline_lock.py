@@ -5,12 +5,11 @@ lock api/routers/internal.py's cron fallback endpoint takes, so a scheduled
 CLI run and a cron poke can't collide either.
 
 Two-tier degrade on a miss:
-- ingest/analyze (single-agency; scripts/fetch_and_ingest.sh and
-  docs/deploy-railway.md's Railway sketch both invoke these inside a
-  per-agency `for` loop) exit EX_TEMPFAIL (75) -- distinct from a genuine
+- ingest/analyze (single-agency; scripts/fetch_and_ingest.sh invokes these
+  inside a per-agency `for` loop) exit EX_TEMPFAIL (75) -- distinct from a genuine
   failure's exit(1), so the shell loop can skip just this agency this run
   instead of aborting everything after it under `set -euo pipefail`.
-- analyze_all/ingest_live (whole-fleet; nothing shell-loops over these) exit
+- analyze_all/ingest_live/ingest_r2 (whole-fleet; nothing shell-loops over these) exit
   1: a whole-fleet run that silently did nothing would read as a clean run.
 
 DB-free: psycopg2 connection is mocked; try_lock_ingest_analyze itself is
@@ -54,6 +53,11 @@ def test_single_agency_cmd_exits_tempfail_and_never_calls_the_work_when_lock_is_
         (gtfs_pipeline.cmd_analyze_all, Namespace(), "pipeline.analyze.analyze"),
         (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=1), "pipeline.ingest.ingest_live"),
         (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=None), "pipeline.ingest.ingest_live"),
+        (
+            gtfs_pipeline.cmd_ingest_r2,
+            Namespace(agency_id=None, since=None, until=None),
+            "pipeline.archive_store.ingest_from_store",
+        ),
     ],
 )
 def test_whole_fleet_cmd_exits_1_and_never_calls_the_work_when_lock_is_held(cmd, args, target):
@@ -62,6 +66,7 @@ def test_whole_fleet_cmd_exits_1_and_never_calls_the_work_when_lock_is_held(cmd,
         patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
         patch("pipeline.locks.try_lock_ingest_analyze", return_value=False),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.archive_store.ObjectStore.from_env", return_value=MagicMock()),
         patch(target) as fake_work,
     ):
         with pytest.raises(SystemExit) as exc_info:

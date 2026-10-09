@@ -14,6 +14,7 @@ through its own helpers.
 
 from argparse import Namespace
 from contextlib import ExitStack
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -169,15 +170,23 @@ def test_ingest_r2_records_one_row_per_agency_and_keeps_going_past_a_failure():
         patch("pipeline.archive_store.ObjectStore.from_env", return_value=MagicMock()),
         patch("pipeline.runs.start_run", return_value=11),
         patch("pipeline.runs.finish_run") as finish,
-        patch("pipeline.archive_store.ingest_from_store", side_effect=[RuntimeError("one"), 7]) as ingest,
+        patch(
+            "pipeline.archive_store.ingest_from_store",
+            side_effect=[_days_then_failure((3, 4)), iter([(date(2026, 6, 1), 7)])],
+        ) as ingest,
     ):
         with pytest.raises(SystemExit) as exc:
             gtfs_pipeline.cmd_ingest_r2(Namespace(agency_id=None, since=None, until=None))
 
     assert exc.value.code == 1
     assert [call.args[1] for call in ingest.call_args_list] == [1, 2]
-    assert [call.args[2] for call in finish.call_args_list] == ["error", "ok"]
-    assert finish.call_args.kwargs["rows"] == 7
+    assert [(call.args[2], call.kwargs["rows"]) for call in finish.call_args_list] == [("error", 7), ("ok", 7)]
+
+
+def _days_then_failure(rows):
+    for n, written in enumerate(rows, start=1):
+        yield date(2026, 6, n), written
+    raise RuntimeError("download failed")
 
 
 def test_a_displaced_ingest_r2_is_recorded_as_skipped_and_fails_loudly():

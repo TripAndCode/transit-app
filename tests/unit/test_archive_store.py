@@ -4,7 +4,7 @@ from urllib.error import URLError
 
 import pytest
 
-from pipeline.archive_store import ObjectStore, archive_keys, sign_request
+from pipeline.archive_store import ObjectStore, archive_keys, sign_request, static_versions, version_for
 
 # AWS's published Signature Version 4 examples for S3 ("Signature Calculations
 # for the Authorization Header: Transferring Payload in a Single Chunk"). The
@@ -165,3 +165,41 @@ def test_archive_keys_keeps_the_agencys_daily_tarballs_within_the_range_in_day_o
         (date(2026, 6, 3), "rt/8/20260603.tar.gz"),
     ]
     assert archive_keys(keys, 8, since=None, until=date(2026, 6, 1)) == [(date(2026, 6, 1), "rt/8/20260601.tar.gz")]
+
+
+def test_list_keys_asks_the_server_to_skip_keys_up_to_start_after():
+    seen = []
+
+    def opener(request, timeout):
+        seen.append(request.full_url)
+        return _Response(_listing([], None))
+
+    _store(opener).list_keys("rt/8/", start_after="rt/8/20260601")
+
+    assert seen == [
+        "https://account.r2.cloudflarestorage.com/transit-archives"
+        "?list-type=2&prefix=rt%2F8%2F&start-after=rt%2F8%2F20260601"
+    ]
+
+
+def test_static_versions_are_the_agencys_dated_zips_oldest_first():
+    keys = [
+        "static/8/gtfs_static_20260801.zip",
+        "static/8/gtfs_static_20260606.zip",
+        "static/8/readme.txt",
+        "static/80/gtfs_static_20260701.zip",
+    ]
+
+    assert static_versions(keys, 8) == [
+        (date(2026, 6, 6), "static/8/gtfs_static_20260606.zip"),
+        (date(2026, 8, 1), "static/8/gtfs_static_20260801.zip"),
+    ]
+
+
+def test_a_day_runs_on_the_latest_version_named_on_or_before_it_or_else_the_earliest():
+    versions = [(date(2026, 6, 6), "june"), (date(2026, 8, 1), "august")]
+
+    assert version_for(versions, date(2026, 7, 31)) == (date(2026, 6, 6), "june")
+    assert version_for(versions, date(2026, 8, 1)) == (date(2026, 8, 1), "august")
+    assert version_for(versions, date(2026, 5, 1)) == (date(2026, 6, 6), "june")
+    assert version_for([], date(2026, 5, 1)) is None

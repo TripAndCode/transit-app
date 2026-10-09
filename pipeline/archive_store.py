@@ -1,12 +1,19 @@
 """Archive ingest straight from the object store the collector syncs to.
 
 The collector uploads one tarball per agency per UTC day to an S3-compatible
-bucket (Cloudflare R2) as `rt/<agency_id>/YYYYMMDD.tar.gz`. `ingest_from_store`
-downloads each day in a range and hands it to `pipeline.ingest.ingest` one day
-at a time, so a run needs disk for one tarball and every guarantee of archive
-ingest holds unchanged: a file already in `updates` is skipped, so a rerun
-writes nothing twice, and a day that has not closed or already holds promoted
-live rows is refused.
+bucket (Cloudflare R2) as `rt/<agency_id>/YYYYMMDD.tar.gz`, and each new static
+GTFS version as `static/<agency_id>/gtfs_static_YYYYMMDD.zip`.
+`ingest_from_store` downloads each day in a range and hands it to
+`pipeline.ingest.ingest` one day at a time, so a run needs disk for one tarball
+and every guarantee of archive ingest holds unchanged: a file already in
+`updates` is skipped, so a rerun writes nothing twice, and a day that has not
+closed or already holds promoted live rows is refused.
+
+The static_join ingest strategy stamps each row with the static version loaded
+when it is read, so before a day is read the agency's static moves forward to
+the latest version named on or before that day. Static only moves forward,
+never back to an older version: a backfill meant to match every day against
+the timetable it ran on starts from empty static tables.
 
 The client is read-only (ListObjectsV2 and GetObject) and signs with Signature
 Version 4 from the standard library, so the deploy image needs no S3 SDK.
@@ -25,7 +32,7 @@ import tempfile
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -34,6 +41,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlsplit
 
 from pipeline.ingest import ingest
+from pipeline.static_loader import load_static
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +156,14 @@ class ObjectStore:
         )
         return self.opener(urllib.request.Request(url, headers=headers), timeout=_TIMEOUT_SEC)
 
-    def list_keys(self, prefix: str) -> list[str]:
+    def list_keys(self, prefix: str, *, start_after: str | None = None) -> list[str]:
+        """Every key under *prefix*, or only those sorting after *start_after*."""
         keys: list[str] = []
         token = None
         while True:
             url = f"{self._base}?list-type=2&prefix={_encode(prefix)}"
+            if start_after:
+                url += f"&start-after={_encode(start_after)}"
             if token:
                 url += f"&continuation-token={_encode(token)}"
             with self._open(url) as response:
@@ -183,25 +194,57 @@ class ObjectStore:
                 time.sleep(retry_wait * attempt)
 
 
+def _dated(keys: Iterable[str], pattern: str) -> list[tuple[date, str]]:
+    dated = []
+    for key in keys:
+        match = re.fullmatch(pattern, key)
+        if not match:
+            continue
+        try:
+            dated.append((datetime.strptime(match.group(1), "%Y%m%d").date(), key))
+        except ValueError:
+            continue
+    return sorted(dated)
+
+
 def archive_keys(
     keys: Iterable[str], agency_id: int, *, since: date | None, until: date | None
 ) -> list[tuple[date, str]]:
     """The agency's daily tarballs among *keys* whose name day falls in
     [since, until], in day order. The name day is the collector's UTC day."""
-    pattern = re.compile(rf"rt/{agency_id}/(\d{{8}})\.tar\.gz")
-    days = []
-    for key in keys:
-        match = pattern.fullmatch(key)
-        if not match:
-            continue
-        try:
-            day = datetime.strptime(match.group(1), "%Y%m%d").date()
-        except ValueError:
-            continue
-        if (since and day < since) or (until and day > until):
-            continue
-        days.append((day, key))
-    return sorted(days)
+    return [
+        (day, key)
+        for day, key in _dated(keys, rf"rt/{agency_id}/(\d{{8}})\.tar\.gz")
+        if not (since and day < since) and not (until and day > until)
+    ]
+
+
+def static_versions(keys: Iterable[str], agency_id: int) -> list[tuple[date, str]]:
+    """The agency's static GTFS zips among *keys*, oldest name day first."""
+    return _dated(keys, rf"static/{agency_id}/gtfs_static_(\d{{8}})\.zip")
+
+
+def version_for(versions: list[tuple[date, str]], day: date) -> tuple[date, str] | None:
+    """The latest version named on or before *day*, or the earliest one for a
+    day before them all, since that is the closest timetable there is."""
+    earlier = [version for version in versions if version[0] <= day]
+    return earlier[-1] if earlier else (versions[0] if versions else None)
+
+
+def _loaded_static_day(conn, agency_id: int) -> date | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT static_version_id FROM static_trips WHERE agency_id = %s LIMIT 1", (agency_id,))
+        row = cur.fetchone()
+    dated = _dated([row[0]] if row and row[0] else [], r"gtfs_static_(\d{8})")
+    return dated[0][0] if dated else None
+
+
+def _load_static_version(store: ObjectStore, key: str, agency_id: int, conn) -> None:
+    with tempfile.TemporaryDirectory(prefix="ingest_r2_") as folder:
+        path = Path(folder) / Path(key).name
+        store.download(key, path)
+        load_static(str(path), agency_id, conn)
+    logger.info("agency %s: static GTFS is now %s", agency_id, path.stem)
 
 
 def ingest_from_store(
@@ -212,16 +255,23 @@ def ingest_from_store(
     *,
     since: date | None = None,
     until: date | None = None,
-) -> int:
-    """Ingest every archived day of *agency_id* in [since, until]; return the
-    rows written."""
-    days = archive_keys(store.list_keys(f"rt/{agency_id}/"), agency_id, since=since, until=until)
+) -> Iterator[tuple[date, int]]:
+    """Ingest every archived day of *agency_id* in [since, until], yielding
+    each day and the rows it wrote as soon as that day is done."""
+    start_after = f"rt/{agency_id}/{since:%Y%m%d}" if since else None
+    days = archive_keys(
+        store.list_keys(f"rt/{agency_id}/", start_after=start_after), agency_id, since=since, until=until
+    )
+    versions = static_versions(store.list_keys(f"static/{agency_id}/"), agency_id)
+    loaded = _loaded_static_day(conn, agency_id)
     logger.info("agency %s: %d archived day(s) to read", agency_id, len(days))
-    rows = 0
     for day, key in days:
+        version = version_for(versions, day)
+        if version and (loaded is None or version[0] > loaded):
+            _load_static_version(store, version[1], agency_id, conn)
+            loaded = version[0]
         with tempfile.TemporaryDirectory(prefix="ingest_r2_") as folder:
             store.download(key, Path(folder) / Path(key).name)
             written = ingest(folder, agency_id, conn, ch_client)
         logger.info("agency %s %s: %d row(s)", agency_id, day, written)
-        rows += written
-    return rows
+        yield day, written

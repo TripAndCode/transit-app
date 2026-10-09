@@ -105,7 +105,7 @@ become Nullable.
   `CLICKHOUSE_PORT` to match (e.g. 8443) since an explicit port defeats
   clickhouse-connect's own port-based TLS inference.
 - `api/routers/internal.py`'s cron ingest+analyze job and `gtfs_pipeline.py`'s
-  CLI ingest/ingest_live/analyze/analyze_all commands all take the same
+  CLI ingest/ingest_live/ingest_r2/analyze/analyze_all commands all take the same
   shared Postgres advisory lock (`pipeline.locks.INGEST_ANALYZE_LOCK_KEY`),
   narrowing (not closing) the window for a double poke, or a poke
   overlapping a scheduled CLI run, to double-`ingest_live` every agency

@@ -184,12 +184,11 @@ def _lock_or_skip_agency(conn, cmd: str, kind: str, agency_id: int | None = None
 def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     """Exit(1) if another ingest/analyze process holds the lock.
 
-    For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
-    shell script loops over (docs/deploy-railway.md calls each exactly once,
-    after -- not inside -- the per-agency `ingest` loop), so the abort-risk
-    that justifies skipping in _lock_or_skip_agency doesn't apply here. Both
-    fail loudly instead: a whole-fleet run that silently did nothing would
-    read as a clean run.
+    For `analyze_all`, `ingest_live` and `ingest_r2` -- the whole-fleet
+    commands that no shell script loops over (docs/deploy-railway.md calls
+    each exactly once per run), so the abort-risk that justifies skipping in
+    _lock_or_skip_agency doesn't apply here. They fail loudly instead: a
+    whole-fleet run that silently did nothing would read as a clean run.
     """
     got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
     if got:
@@ -369,7 +368,9 @@ def cmd_ingest_r2(args):
     for aid in agency_ids:
         try:
             with pipeline_runs.record_run(conn, "ingest", agency_id=aid) as run:
-                run.rows = ingest_from_store(store, aid, conn, ch_client, since=args.since, until=args.until)
+                run.rows = 0
+                for _day, written in ingest_from_store(store, aid, conn, ch_client, since=args.since, until=args.until):
+                    run.rows += written
         except Exception:
             logger.exception(f"ingest_r2 failed for agency {aid}")
             failed.append(aid)

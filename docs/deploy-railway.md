@@ -276,7 +276,7 @@ railway run --service app sh -c "pip install --no-cache-dir sentence-transformer
 > read-once-a-day, cross-provider (Railway pulls from the bucket) — so the cost
 > that matters is *egress*, and R2 charges **zero egress** (every daily pull and
 > backup restore is free; S3 would bill ~$0.09/GB each pull). It's S3-compatible,
-> so the `aws s3` commands below work unchanged against its endpoint; storage is
+> so `ingest_r2` and the `aws s3` backup commands work against its endpoint; storage is
 > ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
 > **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
 > retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
