@@ -93,16 +93,10 @@ def _horizon_chart(results: Sequence[AgencyResult]) -> str:
 _HEAD = "<tr><th>method</th><th>MAE</th><th>RMSE</th><th>coverage</th><th>skill vs B0</th></tr>"
 
 
-def _table(
-    results: Sequence[AgencyResult],
-    *,
-    peak: bool | None = None,
-    sparse: bool | None = None,
-    agency_id: int | None = None,
-) -> str:
+def _table(results: Sequence[AgencyResult], *, peak: bool | None = None, sparse: bool | None = None) -> str:
     rows = []
     for method in METHODS:
-        s = summarize(results, method, peak=peak, sparse=sparse, agency_id=agency_id)
+        s = summarize(results, method, peak=peak, sparse=sparse)
         rows.append(
             f"<tr><th>{method}</th><td>{_num(s.mae)}</td><td>{_num(s.rmse)}</td>"
             f"<td>{_pct(s.coverage)}</td><td>{_pct(s.skill_vs_b0)}</td></tr>"
@@ -110,13 +104,13 @@ def _table(
     return f"<table>{_HEAD}{''.join(rows)}</table>"
 
 
-def _agency(results: Sequence[AgencyResult], result: AgencyResult) -> str:
+def _agency(result: AgencyResult) -> str:
     note = " — short history: fewer origins than the window allows" if result.short_history else ""
     span = f"{escape(str(result.first_day))} – {escape(str(result.last_day))}"
     return (
         f"<h3>Agency {result.agency_id}</h3>"
         f"<p class='muted'>{span}, {result.days_of_data} days, {len(result.origins)} origins{note}</p>"
-        f"{_table(results, agency_id=result.agency_id)}"
+        f"{_table([result])}"
     )
 
 
@@ -150,7 +144,7 @@ _INTRO = (
 
 
 def render(results: Sequence[AgencyResult], generated: date) -> str:
-    agencies = "".join(_agency(results, r) for r in results)
+    agencies = "".join(_agency(r) for r in results)
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"

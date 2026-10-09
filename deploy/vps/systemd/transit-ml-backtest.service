@@ -1,6 +1,7 @@
 [Unit]
 Description=Score the delay baselines and render the report
-After=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
