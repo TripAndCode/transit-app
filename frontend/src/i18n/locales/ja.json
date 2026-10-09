@@ -31,7 +31,9 @@
     "pinned_routes_empty": "系統のページでピン留めすると、ここからすぐ開けます。",
     "pinned_route_label": "{{route}}、今日の平均 {{delay}}",
     "pin_route": "ピン留め",
-    "pin_route_full": "ピン留めは{{max}}系統まで"
+    "pin_route_full": "ピン留めは{{max}}系統まで",
+    "station_figure_mean": "平均 {{delay}}",
+    "station_figure_unusual": "要注意 {{n}}"
   },
   "compare": {
     "mode_periods": "平日と土日祝",
