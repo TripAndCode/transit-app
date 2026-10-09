@@ -219,10 +219,21 @@ def test_ranking_rules_follow_the_asked_direction(question, metric, best_first, 
     assert (d.args["metric"], d.args.get("best_first"), d.args["n"]) == (metric, best_first, n)
 
 
-@pytest.mark.parametrize("question", ["5分以上の遅れが少ない路線TOP10", "少ない遅延のTOP", "低い定時率のランキング"])
+@pytest.mark.parametrize(
+    "question",
+    [
+        "5分以上の遅れが少ない路線TOP10",
+        "5分以上の遅れが短い系統TOP10",
+        "少ない遅延のTOP",
+        "低い定時率のランキング",
+        "A系統の定時率が低い理由は？",
+        "定時率が最低になった原因を教えて",
+    ],
+)
 def test_ranking_rules_leave_an_order_they_cannot_express_to_the_llm(question):
-    """worst_5min only ranks most-first, and a few/low word ahead of the
-    metric fits no inverse rule: no most-first rule may answer these."""
+    """worst_5min only ranks most-first, a few/low word ahead of the metric
+    fits no inverse rule, and a low trait with no ranking marker is not a
+    ranking request: no rule may answer these."""
     assert _match_rules(question) is None
 
 

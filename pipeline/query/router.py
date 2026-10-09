@@ -61,8 +61,11 @@ class RouterDecision:
 
 # Words that turn a ranking question to the other end of its list. Each one
 # feeds both the rule that asks for that end and the `unless` of the rule that
-# cannot, so the two stay the same list.
-_LOW_ON_TIME_WORDS = r"低い|低め|悪い|ワースト|下位|最低"
+# cannot, so the two stay the same list. A rank word asks for a ranking by
+# itself; a trait word ("定時率が低い理由") does only beside a ranking marker.
+_LOW_ON_TIME_RANKS = r"ワースト|下位"
+_LOW_ON_TIME_TRAITS = r"低い|低め|悪い|最低"
+_LOW_ON_TIME_WORDS = rf"{_LOW_ON_TIME_RANKS}|{_LOW_ON_TIME_TRAITS}"
 _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 
 # Compile regexes ONCE at import time. First match wins (priority = order).
@@ -124,12 +127,15 @@ _RULES: list[Rule] = [
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
         # worst_5min has no fewest-first order.
-        unless=re.compile(r"少な"),
+        unless=re.compile(_LITTLE_DELAY_WORDS),
     ),
     Rule(
         name="ranking-on-time-low",
-        # The count sits right after the word ("ワースト5") or after a later one ("低い路線TOP5").
-        pattern=re.compile(rf"定時率.*?(?:{_LOW_ON_TIME_WORDS})(?:\s*(\d+)|.*?(?:TOP|ワースト|下位)\s*(\d+))?"),
+        # The count follows the rank word: "ワースト5", "低い路線TOP5".
+        pattern=re.compile(
+            rf"定時率.*?(?:(?:{_LOW_ON_TIME_RANKS})\s*(\d+)?"
+            rf"|(?:{_LOW_ON_TIME_TRAITS}).*?(?:TOP|ランキング|一覧|順|{_LOW_ON_TIME_RANKS})\s*(\d+)?)"
+        ),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10, "best_first": False},
     ),
