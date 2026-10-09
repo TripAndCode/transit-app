@@ -157,3 +157,41 @@ def test_the_weather_job_records_the_station_days_it_wrote():
     assert start.call_args.args[1] == "weather"
     assert finish.call_args.args[2] == "ok"
     assert finish.call_args.kwargs["rows"] == 5
+
+
+def test_ingest_r2_records_one_row_per_agency_and_keeps_going_past_a_failure():
+    conn = _conn()
+    conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(1,), (2,)]
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.archive_store.ObjectStore.from_env", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run") as finish,
+        patch("pipeline.archive_store.ingest_from_store", side_effect=[RuntimeError("one"), 7]) as ingest,
+    ):
+        with pytest.raises(SystemExit) as exc:
+            gtfs_pipeline.cmd_ingest_r2(Namespace(agency_id=None, since=None, until=None))
+
+    assert exc.value.code == 1
+    assert [call.args[1] for call in ingest.call_args_list] == [1, 2]
+    assert [call.args[2] for call in finish.call_args_list] == ["error", "ok"]
+    assert finish.call_args.kwargs["rows"] == 7
+
+
+def test_a_displaced_ingest_r2_is_recorded_as_skipped_and_fails_loudly():
+    conn = _conn()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=False),
+        patch("pipeline.archive_store.ObjectStore.from_env", return_value=MagicMock()),
+        patch("pipeline.runs.start_run") as start,
+        patch("pipeline.archive_store.ingest_from_store") as ingest,
+    ):
+        with pytest.raises(SystemExit) as exc:
+            gtfs_pipeline.cmd_ingest_r2(Namespace(agency_id=None, since=None, until=None))
+
+    assert exc.value.code == 1
+    assert start.call_args.kwargs["status"] == "skipped"
+    ingest.assert_not_called()

@@ -5,6 +5,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import date
 from urllib.parse import urlsplit
 
 import psycopg2
@@ -346,6 +347,36 @@ def cmd_ingest(args):
     with pipeline_runs.record_run(conn, "ingest", agency_id=agency_id) as run:
         run.rows = ingest(args.folder, agency_id, conn, ch_client)
     conn.close()
+
+
+def cmd_ingest_r2(args):
+    """Ingest archived days from the object store for one agency, or every
+    agency; report all failures and exit nonzero if any failed."""
+    from pipeline.archive_store import ObjectStore, ingest_from_store
+    from pipeline.clickhouse import get_client
+
+    store = ObjectStore.from_env()
+    conn = _get_conn()
+    _lock_or_exit(conn, "ingest_r2", "ingest")
+    if args.agency_id:
+        agency_ids = [int(args.agency_id)]
+    else:
+        with conn.cursor() as cur:
+            cur.execute(ACTIVE_AGENCY_IDS_SQL)
+            agency_ids = [r[0] for r in cur.fetchall()]
+    ch_client = get_client()
+    failed = []
+    for aid in agency_ids:
+        try:
+            with pipeline_runs.record_run(conn, "ingest", agency_id=aid) as run:
+                run.rows = ingest_from_store(store, aid, conn, ch_client, since=args.since, until=args.until)
+        except Exception:
+            logger.exception(f"ingest_r2 failed for agency {aid}")
+            failed.append(aid)
+    conn.close()
+    if failed:
+        logger.error(f"ingest_r2: {len(failed)} of {len(agency_ids)} agencies failed: {failed}")
+        sys.exit(1)
 
 
 def cmd_load_static(args):
@@ -826,6 +857,13 @@ def main():
     p_ingest.add_argument("folder")
     p_ingest.add_argument("--agency-id", default=None)
 
+    p_r2 = sub.add_parser(
+        "ingest_r2", help="Ingest archived days from the object store (OBJECT_STORE_*) for one agency or every agency"
+    )
+    p_r2.add_argument("--agency-id", default=None)
+    p_r2.add_argument("--since", type=date.fromisoformat, default=None, help="First archive day, YYYY-MM-DD (UTC)")
+    p_r2.add_argument("--until", type=date.fromisoformat, default=None, help="Last archive day, YYYY-MM-DD (UTC)")
+
     p_static = sub.add_parser("load_static")
     p_static.add_argument("path")
     p_static.add_argument("--agency-id", default=None)
@@ -908,6 +946,8 @@ def main():
         cmd_seed_agencies(args)
     elif args.command == "ingest":
         cmd_ingest(args)
+    elif args.command == "ingest_r2":
+        cmd_ingest_r2(args)
     elif args.command == "load_static":
         cmd_load_static(args)
     elif args.command == "analyze":

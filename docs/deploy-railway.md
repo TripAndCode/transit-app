@@ -225,12 +225,17 @@ but only for days the live path never promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
 exposed and Oracle never accepts inbound connections.
 
-To kick the first load by hand (the same command the daily job runs), from
-your Mac through the app service so it executes on the private network:
+To backfill by hand (the first load, or any days the live path never
+promoted), run `ingest_r2`, the command the daily job runs, inside the app
+service, where `db` and `clickhouse` are reachable. It needs the
+`OBJECT_STORE_*` variables (step 4.6), reads one archived day at a time, and
+skips every file already ingested, so an interrupted run is simply started
+again. A long backfill is safer inside `railway ssh --session`, which
+survives a dropped connection:
 
 ```bash
-railway run --service app python gtfs_pipeline.py ingest <zips-dir> --agency-id <id>
-railway run --service app python gtfs_pipeline.py analyze_all
+railway ssh --service app "python gtfs_pipeline.py ingest_r2 --since <YYYY-MM-DD>"
+railway ssh --service app "python gtfs_pipeline.py analyze_all"
 ```
 
 Or just let the daily job (next step) do the first tick.
@@ -288,17 +293,11 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 3. `ingest` → **Settings → Build**: Dockerfile builder (same image as `app`).
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
-5. `ingest` → **Settings → Deploy → Start Command** — pull the day's zips from
-   object storage, then ingest/analyze/prune. Sketch (adjust to your bucket
-   client; the image needs an S3 client + `postgresql-client` added to the
-   Dockerfile for this service):
+5. `ingest` → **Settings → Deploy → Start Command** — ingest the last few
+   archived days of every agency from object storage, then analyze/prune.
+   `ingest_r2` reads the bucket itself, so the image needs no S3 client:
    ```bash
-   for day in "$(date -u -d '2 days ago' +%F)" "$(date -u -d yesterday +%F)"; do
-     aws s3 sync "s3://$OBJECT_STORE_BUCKET/$day" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
-   done
-   for id in $AGENCY_IDS; do
-     python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
-   done
+   python gtfs_pipeline.py ingest_r2 --since "$(date -u -d '3 days ago' +%F)"
    python gtfs_pipeline.py analyze_all
    # retention: aggregates are materialized, so old raw rows can go. analyze
    # full-rebuilds, so history == this window (reports max range is 365d).
@@ -312,44 +311,26 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
-   creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+   creds, and `RETENTION_DAYS` (see `.env.example`).
 
 > **This job writes closed JST days only, and never a day the live path
 > already promoted.** An archive is named for a UTC day, so it runs to 09:00
 > JST the next day. `ingest` skips any file whose rows would land on a JST
 > day that has not ended yet, and reads it on a later run once that day has
-> closed. An archive reaches the bucket only after its UTC day ends, so pull
-> the last two archived days, not just the newest one. A day in
+> closed. An archive reaches the bucket only after its UTC day ends, so read
+> the last few archived days, not just the newest one. A day in
 > `updates` also has one source: once the live-table promotion cron (below)
 > has copied a day's rows into `updates`, this job skips that day's archive
 > files rather than store them under a second source. Disable this job for
 > any range where the live path is the agency's history source.
 
-> **Lock contention in the sketch above is not free to ignore.** `ingest`
-> exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
-> `pipeline.locks`' advisory lock (e.g. this job overlapping a manual
-> `POST /internal/cron/ingest` poke) — the sketch has no `set -e`, so a
-> failed iteration is swallowed and the loop moves to the next `$id`
-> automatically, same effect as `scripts/fetch_and_ingest.sh`'s explicit
-> `continue` on exit 75. But unlike that script's local replay, this job's
-> `/tmp/zips` is on **ephemeral** compute and the bucket pull is
-> **date-partitioned** (`$(date -u +%F)`) — a skipped agency isn't
-> retried tomorrow, because tomorrow's sync only pulls tomorrow's prefix.
-> That day's archive for that agency is gone. Given a lock collision is
-> the one failure mode in this loop that's known to be transient, add a
-> short bounded retry around each `ingest` call (the zips are still local
-> for the rest of this job's run) rather than relying on "next scheduled
-> run" to recover it, e.g.:
-> ```bash
-> for id in $AGENCY_IDS; do
->   for attempt in 1 2 3; do
->     python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id" && break
->     code=$?
->     [ "$code" -eq 75 ] || { exit "$code"; }
->     sleep 60
->   done
-> done
-> ```
+> **Lock contention.** `ingest_r2` refuses to start, exiting 1, if another
+> ingest/analyze process holds `pipeline.locks`' advisory lock (e.g. this job
+> overlapping a `POST /internal/cron/ingest` poke), and records the displaced
+> run. Nothing is lost while the window covers it: every run reads the whole
+> `--since` window and skips the files already ingested, so the next run picks
+> up what this one missed. Keep the window wider than the number of
+> consecutive runs you are prepared to lose.
 
 > **Required: the live-table promotion cron.** `updates_live` (today's and
 > future observations) is never copied into `updates` (history, `agg_*`'s

@@ -243,7 +243,7 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   reads, when it differs from their built-in default path. Unset
   on a host where that path doesn't exist and every collector tile on the
   board reads `unknown` rather than a real status.
-- `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+- `OBJECT_STORE_*`, `RETENTION_DAYS`: scheduled archive ingest (`ingest_r2`).
 
 ### Feature kill switches
 
