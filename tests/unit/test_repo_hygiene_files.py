@@ -54,7 +54,8 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
 
     for entry in updates:
         ecosystem = entry["package-ecosystem"]
-        assert entry["directory"].startswith("/"), ecosystem
+        directories = entry["directories"] if "directories" in entry else [entry["directory"]]
+        assert all(d.startswith("/") for d in directories), ecosystem
         assert entry["schedule"]["interval"] == "weekly", ecosystem
         # Every group must actually select something; an empty group is
         # accepted by the parser and silently does nothing.
@@ -69,6 +70,20 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
     assert docker_dirs == {"/", "/db", "/tools/geosql"}, (
         "docker ecosystem should cover every directory with a Dockerfile/compose file"
     )
+
+
+def test_dependabot_github_actions_scans_the_composite_actions():
+    """`directory: /` reads only the workflows. Each composite action pins its
+    own `uses:` versions, so its directory has to be matched by a listed glob
+    or those pins drift from the workflows' unnoticed."""
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    entry = next(e for e in config["updates"] if e["package-ecosystem"] == "github-actions")
+    globs = entry["directories"]
+    actions = sorted((REPO_ROOT / ".github" / "actions").glob("*/action.y*ml"))
+    assert actions, "no composite actions found; the scan no longer guards anything"
+    for action in actions:
+        directory = "/" + action.parent.relative_to(REPO_ROOT).as_posix()
+        assert any(fnmatch(directory, pattern) for pattern in globs), f"{directory} is not scanned"
 
 
 def test_dependabot_cannot_swamp_the_single_ci_runner():
