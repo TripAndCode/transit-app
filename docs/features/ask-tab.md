@@ -269,7 +269,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   kill-switch behavior).
 - End-to-end eval: `tests/ask_eval/test_ask_eval.py` is the CI gate — it
   shells out to `scripts/ask_eval.py`, which reads
-  `tests/ask_eval/gold_questions.jsonl` (chip + builder coverage must be
+  `tests/ask_eval/gold_questions.jsonl` (builder coverage must be
   100%). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
   `RUN_LLM_EVAL=1` + a real `GEMINI_API_KEY`, hits a running dev API) replays
   `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
