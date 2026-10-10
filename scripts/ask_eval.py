@@ -1,4 +1,10 @@
-"""Run the gold-set eval; exit nonzero if builder coverage < 100%.
+"""Check that every gold entry's expected args survive canonicalization unchanged.
+
+Each ``builder`` entry's ``expected_args_canonical`` is hashed as written and
+again after ``canonicalize``; a mismatch means canonicalization is not
+idempotent on that entry. The entry's ``question`` text is never read and no
+router or card builder runs, so this does NOT measure routing or argument
+building -- ``tests/ask_eval/test_baseline.py`` is the routing eval.
 
 Usage:
     poetry run python scripts/ask_eval.py

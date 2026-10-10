@@ -1,4 +1,8 @@
-"""CI gate: ensures the gold-set eval passes (chip + builder coverage = 100%)."""
+"""CI gate: every gold entry's expected args are a canonicalization fixed point.
+
+This checks ``canonicalize`` idempotence over ``gold_questions.jsonl``; the
+question text is never read, so it is not routing coverage.
+"""
 
 import os
 import subprocess
@@ -6,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-def test_ask_eval_passes():
+def test_gold_expected_args_are_canonicalization_fixed_points():
     # The interpreter already running this suite, not `poetry run`, which
     # resolves its venv by cwd and so picks an unprovisioned one in a worktree.
     project_root = Path(__file__).parent.parent.parent

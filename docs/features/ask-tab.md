@@ -267,10 +267,11 @@ so it is a separate mechanism to build, not a knob to turn on.
   `tests/api/test_ask_endpoints.py`, `tests/api/test_ask_dashboard.py`,
   `tests/api/test_conversations.py` (includes follow-up endpoint +
   kill-switch behavior).
-- End-to-end eval: `tests/ask_eval/test_ask_eval.py` is the CI gate — it
-  shells out to `scripts/ask_eval.py`, which reads
-  `tests/ask_eval/gold_questions.jsonl` (chip + builder coverage must be
-  100%). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
+- Gold-set canonicalization gate: `tests/ask_eval/test_ask_eval.py` shells
+  out to `scripts/ask_eval.py`, which reads
+  `tests/ask_eval/gold_questions.jsonl` and checks that each entry's
+  expected args are unchanged by `canonicalize` (it never reads the
+  `question` text, so it is not routing coverage). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
   `RUN_LLM_EVAL=1` + a real `GEMINI_API_KEY`, hits a running dev API) replays
   `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
   scores tool-selection accuracy — `golden_set.jsonl` is also the file
