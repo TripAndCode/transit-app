@@ -21,7 +21,7 @@ import { useNow } from "../../hooks/useNow";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
 
-// A minute of axis on the day's timeline; finer would move nothing visible.
+// One pixel of the day's timeline is a few minutes; this tick keeps the marker within a pixel of the real time.
 const NOW_TICK_MS = 30_000;
 
 /** One hue for the whole heatmap: the aggregated days differ only in
