@@ -84,6 +84,10 @@ def run_backtest(
             model_shared, b0_shared = ErrorStats(), ErrorStats()
             for agency_id, index in frame.groupby("agency_id").indices.items():
                 sub, sub_preds = frame.iloc[index], take(preds, index)
+                # Unlike add_cells below, not gated by on_model: this tracks the model's own
+                # interval calibration wherever it was fit, independent of which agencies are
+                # currently shown it, since the adoption gate judges the model itself, not the
+                # current display routing.
                 add_intervals(intervals[MODEL][str(agency_id)], intervals["B0"][str(agency_id)], sub, sub_preds)
                 m, b = add_cells(rows[int(agency_id)], cell_frame(sub, sub_preds), use_model=int(agency_id) in on_model)
                 model_shared.merge(m)
