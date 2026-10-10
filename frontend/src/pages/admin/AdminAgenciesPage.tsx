@@ -12,6 +12,7 @@ import {
   type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
@@ -373,6 +374,10 @@ export function AdminAgenciesPage() {
       {!!healthError && (
         <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{t("admin.agencies.health_error")}</div>
       )}
+      {/* The drawer closes as soon as disable/restore is confirmed, so a
+          failed mutation has to surface here or it is never seen. */}
+      {del.error != null && <ErrorBanner error={del.error} />}
+      {restore.error != null && <ErrorBanner error={restore.error} />}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
 
       <DataTable

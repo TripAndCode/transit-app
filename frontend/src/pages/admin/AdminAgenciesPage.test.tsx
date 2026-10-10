@@ -68,8 +68,14 @@ const DIAGNOSTICS = {
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
 };
 
-let delState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
-let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
+let delState: { isPending: boolean; variables: number | undefined; error?: Error } = {
+  isPending: false,
+  variables: undefined,
+};
+let restoreState: { isPending: boolean; variables: number | undefined; error?: Error } = {
+  isPending: false,
+  variables: undefined,
+};
 
 // Mock the admin API module
 vi.mock("../../api/admin", () => ({
@@ -99,8 +105,8 @@ vi.mock("../../api/admin", () => ({
   }),
   useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
-  useDeleteAgency: () => ({ mutate: delMutate, ...delState }),
-  useRestoreAgency: () => ({ mutate: restoreMutate, ...restoreState }),
+  useDeleteAgency: () => ({ mutate: delMutate, error: null, ...delState }),
+  useRestoreAgency: () => ({ mutate: restoreMutate, error: null, ...restoreState }),
   useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
   useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
   useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
@@ -216,6 +222,18 @@ describe("AdminAgenciesPage", () => {
     expect(drawer.queryByLabelText(/type the agency name to confirm/i)).toBeNull();
     await user.click(drawer.getByRole("button", { name: /^Restore$/ }));
     expect(restoreMutate).toHaveBeenCalledWith(2);
+  });
+
+  it("shows a failed disable on the page after its drawer has closed", () => {
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+  });
+
+  it("shows a failed restore on the page after its drawer has closed", () => {
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
   });
 
   it("narrows the list to behind-schedule agencies via the saved view", async () => {
