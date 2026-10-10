@@ -63,9 +63,11 @@ _COUNTS = ["slot_runs", "slot_days", "trip_runs", "agency_days"]
 
 
 def route_ids(runs: pd.DataFrame) -> pd.DataFrame:
-    """A stable integer per (agency, route), the categorical code the models split
-    on. A route's identity is known in advance, so the vocabulary may span the
-    whole table without leaking anything."""
+    """A deterministic integer per (agency, route) in this table's vocabulary, the
+    categorical code the models split on. A route's identity is known in advance,
+    so the vocabulary may span the whole table without leaking anything — but the
+    same vocabulary table must be reused at inference time rather than rebuilt
+    from a different `runs` snapshot, or a route's id shifts with the sort order."""
     keys = runs[ROUTE].drop_duplicates().sort_values(ROUTE).reset_index(drop=True)
     return keys.assign(route_id=np.arange(len(keys), dtype="int32"))
 
@@ -74,10 +76,30 @@ def with_route_ids(runs: pd.DataFrame, ids: pd.DataFrame) -> pd.DataFrame:
     return runs.merge(ids, on=ROUTE, how="left", validate="many_to_one")
 
 
-def build_frame(runs: pd.DataFrame, origin: date, *, window_days: int = 28, horizon_days: int = 7) -> pd.DataFrame:
+def weekend_days(runs: pd.DataFrame) -> pd.DataFrame:
+    """Each service's distinct days, deduplicated once, with a weekend flag. A
+    caller that builds many origins from the same `runs` (training_frame) passes
+    this into `build_frame` so the dedup — unlike the window-bounded slot/route/
+    trip stats, it would otherwise scan all of `runs` on every origin — runs once
+    rather than once per origin."""
+    days = runs[["agency_id", "service", "service_date"]].drop_duplicates()
+    return days.assign(weekend=(days["service_date"].dt.dayofweek >= 5).astype("float64"))
+
+
+def build_frame(
+    runs: pd.DataFrame,
+    origin: date,
+    *,
+    window_days: int = 28,
+    horizon_days: int = 7,
+    precomputed_weekend_days: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """One row per run on origin+1..origin+horizon_days, with its features as of
     origin−1 and its actual delay. The origin day itself is neither history nor
-    target. `runs` must carry `route_id` (with_route_ids)."""
+    target. `runs` must carry `route_id` (with_route_ids). `precomputed_weekend_days`,
+    when given, must come from `weekend_days()` on a superset of `runs`; it is
+    filtered to origin−1 here either way, so passing it changes performance, not
+    the result."""
     t = pd.Timestamp(origin)
     last = t - pd.Timedelta(days=1)
     past = runs[runs["service_date"] <= last]
@@ -106,7 +128,8 @@ def build_frame(runs: pd.DataFrame, origin: date, *, window_days: int = 28, hori
     if past.empty:
         frame["service_weekend_share"] = np.nan
     else:
-        frame = frame.join(_weekend_share(past), on=["agency_id", "service"])
+        days = precomputed_weekend_days if precomputed_weekend_days is not None else weekend_days(past)
+        frame = frame.join(_weekend_share(days[days["service_date"] <= last]), on=["agency_id", "service"])
 
     frame[_COUNTS] = frame[_COUNTS].fillna(0)
     numeric = [column for column in [*FEATURES, "slot_p10", "slot_p90"] if column not in CATEGORICAL]
@@ -116,15 +139,16 @@ def build_frame(runs: pd.DataFrame, origin: date, *, window_days: int = 28, hori
 
 def _slot_stats(hist: pd.DataFrame) -> pd.DataFrame:
     """B0 (the slot's runs-weighted mean), B1 (its latest day) and the slot's
-    spread over the window. p10/p90 are B0's own interval."""
+    spread over the window. p10/p90 are B0's own empirical interval, carried for
+    a later model's short-history fallback to it."""
     grouped = hist.groupby(SLOT)["delay_min"]
     stats = grouped.agg(slot_mean="mean", slot_runs="size", slot_std="std")
-    stats["slot_days"] = hist.groupby(SLOT)["service_date"].nunique()
     bounds = grouped.quantile([0.1, 0.9]).unstack()
     stats["slot_p10"] = bounds[0.1]
     stats["slot_p90"] = bounds[0.9]
     daily = hist.groupby([*SLOT, "service_date"])["delay_min"].mean().reset_index()
-    stats["slot_last"] = daily.sort_values("service_date").groupby(SLOT)["delay_min"].last()
+    stats["slot_days"] = daily.groupby(SLOT).size()
+    stats["slot_last"] = daily.groupby(SLOT)["delay_min"].last()
     return stats
 
 
@@ -146,9 +170,8 @@ def _trip_stats(hist: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _weekend_share(past: pd.DataFrame) -> pd.Series:
+def _weekend_share(days: pd.DataFrame) -> pd.Series:
     """The share of the days a service has run that fell on a Saturday or Sunday.
-    A weekend service on a weekday is a holiday timetable."""
-    days = past[["agency_id", "service", "service_date"]].drop_duplicates()
-    weekend = (days["service_date"].dt.dayofweek >= 5).astype("float64")
-    return weekend.groupby([days["agency_id"], days["service"]]).mean().rename("service_weekend_share")
+    A weekend service on a weekday is a holiday timetable. `days` is a
+    weekend_days() table already filtered to the origin's history cutoff."""
+    return days.groupby(["agency_id", "service"])["weekend"].mean().rename("service_weekend_share")

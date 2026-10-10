@@ -22,7 +22,9 @@ def runs_sql() -> str:
     stop) stays out of its run's mean, and a run left with no hour has no row.
     It also carries the run's service (a timetable service id, or the feed's
     own weekday/holiday label), its count of observed stops, and its scheduled
-    span in minutes. The models read these as history only."""
+    span in minutes. Stops and span are read only as history; a row's own
+    service doubles as a lookup key fixed by the timetable in advance, the same
+    as its route and trip."""
     dedup = build_dedup_ch_sql(include_scheduled_sec=True, extra_where=_DATE_RANGE)
     return f"""
 SELECT

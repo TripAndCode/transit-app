@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from ml.features import build_frame
+from ml.features import build_frame, weekend_days
 
 HORIZON_DAYS = 7
 
@@ -35,16 +35,30 @@ def training_frame(
     runs: pd.DataFrame, cutoff: date, *, window_days: int, half_life_days: float, seed: int = 7
 ) -> pd.DataFrame:
     """One forecast row per run up to the cutoff, each from its drawn origin,
-    weighted so a target's weight halves every half_life_days back from the cutoff."""
+    weighted so a target's weight halves every half_life_days back from the
+    cutoff. Each agency's own history floors its own targets: in a multi-agency
+    `runs`, a later-starting agency does not borrow an earlier agency's floor."""
     if runs.empty:
         return pd.DataFrame()
-    first_day = runs["service_date"].min().date()
+    targets_by_origin: dict[date, dict[int, list[date]]] = {}
+    for agency_id, agency_runs in runs.groupby("agency_id"):
+        first_day = agency_runs["service_date"].min().date()
+        for origin, days in training_targets(first_day, cutoff, seed=seed).items():
+            targets_by_origin.setdefault(origin, {})[agency_id] = days
+
+    days_table = weekend_days(runs)
     frames = []
-    for origin, days in training_targets(first_day, cutoff, seed=seed).items():
-        frame = build_frame(runs, origin, window_days=window_days, horizon_days=HORIZON_DAYS)
-        frame = frame[frame["service_date"].isin(pd.to_datetime(days))]
-        if not frame.empty:
-            frames.append(frame)
+    for origin, by_agency in sorted(targets_by_origin.items()):
+        frame = build_frame(
+            runs, origin, window_days=window_days, horizon_days=HORIZON_DAYS, precomputed_weekend_days=days_table
+        )
+        parts = [
+            frame[(frame["agency_id"] == agency_id) & frame["service_date"].isin(pd.to_datetime(days))]
+            for agency_id, days in by_agency.items()
+        ]
+        kept = pd.concat(parts, ignore_index=True)
+        if not kept.empty:
+            frames.append(kept)
     if not frames:
         return pd.DataFrame()
     frame = pd.concat(frames, ignore_index=True)

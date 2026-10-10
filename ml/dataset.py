@@ -44,6 +44,9 @@ def fetch_runs(client: Client, agency_id: int, *, chunk_days: int = 7) -> pd.Dat
 
 
 def load_runs(client: Client, agency_ids: Iterable[int]) -> pd.DataFrame:
+    agency_ids = list(agency_ids)
+    if not agency_ids:
+        return _typed(pd.DataFrame({column: [] for column in RUN_COLUMNS}))
     return pd.concat([fetch_runs(client, agency_id) for agency_id in agency_ids], ignore_index=True)
 
 

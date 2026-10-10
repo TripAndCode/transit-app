@@ -71,3 +71,37 @@ def test_a_gap_day_has_no_training_rows():
     frame = training_frame(_runs(80, skip=(50,)), cutoff, window_days=28, half_life_days=14)
     assert pd.Timestamp(gap) not in set(frame["service_date"])
     assert pd.Timestamp(gap + timedelta(days=1)) in set(frame["service_date"])
+
+
+def _agency_rows(agency_id, offsets):
+    frame = pd.DataFrame(
+        [
+            {
+                "agency_id": agency_id,
+                "route_code": "R1",
+                "trip_id": "T1",
+                "service_date": pd.Timestamp(START + timedelta(days=d)),
+                "hour": 8,
+                "service": "wk",
+                "delay_min": 2.0,
+                "stops": 10,
+                "span_min": 30.0,
+            }
+            for d in offsets
+        ]
+    )
+    return frame.astype(
+        {"agency_id": "int16", "route_code": "string", "trip_id": "string", "hour": "int16", "service": "string"}
+    )
+
+
+def test_a_later_starting_agency_gets_its_own_history_floor_not_an_earlier_agencys():
+    raw = pd.concat([_agency_rows(8, range(80)), _agency_rows(9, range(30, 80))], ignore_index=True)
+    runs = with_route_ids(raw, route_ids(raw))
+    cutoff = START + timedelta(days=60)
+
+    frame = training_frame(runs, cutoff, window_days=28, half_life_days=14)
+    late = frame[frame["agency_id"] == 9]
+
+    assert late["agency_days"].min() >= 7
+    assert not late["route_mean"].isna().any()
