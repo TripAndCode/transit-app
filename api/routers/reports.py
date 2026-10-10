@@ -1,8 +1,10 @@
-"""Reports endpoints (v2): live queries scoped to the user's RangeCtx.
+"""Reports endpoints: queries scoped to the user's RangeCtx.
 
-Each report is computed on demand from ``updates`` so the global time-range
-/ DOW / time-band filter changes the numbers. ``rendered_at`` reflects the
-moment the request was served. The ``snapshots`` table from v1 is gone.
+Each report is computed per request so the global time-range / DOW /
+time-band filter changes the numbers. Most reports read precomputed ``agg_*``
+tables and fall back to scanning ClickHouse ``updates`` only for a narrowed
+time band; others (dwell/run, forecast, headway, performance) read aggregates
+only. ``rendered_at`` reflects the moment the request was served.
 """
 
 import csv
@@ -246,7 +248,7 @@ async def get_headway_quality(
     Not part of the generic ``/reports/{report_type}`` dispatcher above
     (no CSV/definition-metadata concept applies to a route subset filtered
     server-side by classification, not by a ranking/threshold the caller
-    chose) — a dedicated endpoint, like ``/forecast/overview`` above.
+    chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
     return HeadwayQualityResponse(
