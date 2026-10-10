@@ -3,12 +3,11 @@
 Covers dev Postgres and dev ClickHouse. Both hold real production data and are
 read-only for agents; the throwaway pair on :5544/:8124 is where writes belong.
 
-Two Postgres ports, not one. `compose.yml` publishes :5433, but the container
-actually holding the dev dataset can be published elsewhere -- :5543 today --
-and the guard has to name every port the data is reachable on, not the one the
-compose file happens to declare. A port listed here that turns out to hold
-someone else's database is harmless: refusing to write to it is right either
-way. A port left out is the dataset.
+DEV_PORTS must list every port a dev store is published on, not only the one
+`compose.yml` declares: the container holding the dev dataset can be published
+elsewhere. A port listed here that holds someone else's database is harmless,
+since refusing to write to it is right either way. A port left out is the
+dataset.
 
 Reads the tool input JSON on stdin; exit 2 = block the tool call (also when the
 payload cannot be parsed), 0 = allow.
@@ -39,9 +38,7 @@ import sys
 
 DEV_PORTS = ("5433", "5543", "8123")
 DEV_SERVICES = {"db", "clickhouse"}
-# Container names compose did not derive: the pinned names from before
-# compose.yml dropped `container_name`, and the dev Postgres recreated by hand
-# on a newer major.
+# Container names compose does not derive, which a dev store can still run under.
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
