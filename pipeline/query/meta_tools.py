@@ -180,14 +180,45 @@ async def describe_data(
                 limit,
                 offset,
             )
-        else:
-            rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops "
-                "WHERE agency_id = $1 ORDER BY stop_name, stop_id LIMIT $2 OFFSET $3",
+            # A total scoped only by agency_id would overcount a filtered
+            # page, so the COUNT uses the same WHERE the row query does.
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%'",
                 agency_id,
-                limit,
-                offset,
+                substring,
             )
+            if total == 0:
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary("mt_stops_filter_no_match", locale, substring=substring),
+                )
+            if offset > 0 and rows:
+                summary = _summary(
+                    "mt_stops_filter_page",
+                    locale,
+                    substring=substring,
+                    total=total,
+                    shown_from=offset + 1,
+                    shown_to=offset + len(rows),
+                    limit=limit,
+                )
+            else:
+                summary = _summary("mt_stops_filter_first", locale, substring=substring, total=total, shown=len(rows))
+            return ToolResult(
+                kind="table",
+                summary=summary,
+                rows=[[r["stop_id"], r["stop_name"]] for r in rows],
+                columns=["stop_id", "stop_name"],
+            )
+        # The filtered branch above always returns, so this path is reached
+        # only when substring is falsy.
+        rows = await conn.fetch(
+            "SELECT stop_id, stop_name FROM static_stops "
+            "WHERE agency_id = $1 ORDER BY stop_name, stop_id LIMIT $2 OFFSET $3",
+            agency_id,
+            limit,
+            offset,
+        )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         if total == 0:
             return ToolResult(
@@ -264,7 +295,14 @@ async def describe_data(
         ]
         return ToolResult(
             kind="kv",
-            summary=_summary("mt_date_range_summary", locale, first_date=first_obs.date(), last_date=last_obs.date()),
+            # JST days, as every date in this app is: a 06:00 JST capture is
+            # still the previous UTC day.
+            summary=_summary(
+                "mt_date_range_summary",
+                locale,
+                first_date=first_obs.astimezone(_JST).date(),
+                last_date=last_obs.astimezone(_JST).date(),
+            ),
             pairs=pairs,
         )
 
