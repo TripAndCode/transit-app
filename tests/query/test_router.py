@@ -164,6 +164,26 @@ def test_rule_no_match(question):
     assert _match_rules(question) is None
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "22171はいつから遅れ始めた?",
+        "いつも混む時間帯から教えて",
+        "最新のデータで22171の遅延は?",
+        "何分遅れている路線がある?",
+        "系統ごとの遅延一覧",
+        "路線22171の停留所一覧",
+        "停留所ごとの遅延一覧",
+        "22171の遅延が多い停留所TOP5",
+        "停留所別の定時率ワースト5",
+    ],
+)
+def test_analytic_questions_are_not_answered_by_a_meta_or_route_ranking_rule(question):
+    """These ask about delays on a route or stop, not what the dataset holds
+    or the agency-wide route ranking, so no Stage-1 rule may answer them."""
+    assert _match_rules(question) is None
+
+
 def test_oos_guard_routes_to_capabilities():
     for q in ["今日の天気は？", "運賃はいくら？", "事故情報を教えて"]:
         d = _match_rules(q)
