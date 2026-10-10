@@ -11,10 +11,15 @@ file through `CLAUDE.md`; local Codex reads it directly. Claude's hooks live in
 trusted. Agents in sessions without active hooks must apply the same rules by hand.
 
 Longer reference notes live in `.claude/skills/*/SKILL.md`; `.agents/skills/` links
-to the same files for Codex discovery. They are plain Markdown any agent can read:
+the three below to the same files for Codex discovery. They are plain Markdown any
+agent can read:
 - `transit-app-gotchas`: test databases, i18n parity, worktrees, CI trailer mechanics;
 - `postgres-perf`: query and aggregate performance traps;
 - `maplibre-map`: Map tab conventions.
+
+`.agents/skills/review-branch/SKILL.md` is the one Codex-specific entry, not a link.
+It carries only the Codex steps and defers to `.claude/commands/review-branch.md` for
+tier routing, the high-risk overlay and the fix cap.
 
 ## Hard rules
 
