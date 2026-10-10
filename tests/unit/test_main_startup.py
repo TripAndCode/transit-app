@@ -200,6 +200,30 @@ async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(mo
             pass
 
 
+async def test_lifespan_opens_the_pool_with_its_session_settings_as_startup_parameters(monkeypatch):
+    """A SET in a connection init is undone by the RESET ALL the pool runs on
+    every release; a startup parameter is what RESET ALL returns to. A failing
+    seed_local_admin ends startup right after the pool opens."""
+    for var in api.main._AUTH_ENV:
+        monkeypatch.delenv(var, raising=False)
+    create_pool = AsyncMock(return_value=AsyncMock())
+    monkeypatch.setattr(api.main.asyncpg, "create_pool", create_pool)
+    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("stop")))
+    monkeypatch.setattr(
+        "pipeline.query.llm_client._load_providers",
+        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
+    )
+
+    with pytest.raises(RuntimeError, match="stop"):
+        async with api.main.lifespan(SimpleNamespace(state=SimpleNamespace())):
+            pass
+
+    kwargs = create_pool.await_args.kwargs
+    assert kwargs["server_settings"] == api.main.PG_SESSION_SETTINGS
+    assert "init" not in kwargs
+
+
 def test_the_forwarded_client_address_is_set_outside_every_other_middleware():
     """The access log, the rate limiter and every audit row read
     request.client, so the forwarded address must be in place before any of

@@ -30,6 +30,7 @@ from api.deps import get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.range import jst_today
 from api.security import User, csrf_guard, require_admin
+from pipeline.reports.network import invalidate_network_summary
 
 router = APIRouter(prefix="/api/admin/agencies", tags=["admin"])
 
@@ -435,6 +436,7 @@ async def patch_weights(
             after=after,
             ip=request.client.host if request.client else None,
         )
+    invalidate_network_summary()
     return [WeightRow(**r) for r in after]
 
 
