@@ -135,6 +135,18 @@ describe("AdminAgenciesPage", () => {
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
   });
 
+  it("disables Edit on a disabled agency, whose PATCH would 404, and keeps it on an active one", () => {
+    wrap(<AdminAgenciesPage />);
+    const editFor = (name: string) => {
+      const row = screen.getByText(name).closest("tr") as HTMLElement;
+      return within(row).getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    };
+    expect(editFor("Aomori Bus").disabled).toBe(false);
+    const deletedEdit = editFor("Deleted Bus");
+    expect(deletedEdit.disabled).toBe(true);
+    expect(deletedEdit.title).toMatch(/restore/i);
+  });
+
   it("shows Add agency button", () => {
     wrap(<AdminAgenciesPage />);
     expect(screen.getByRole("button", { name: /add agency/i })).toBeTruthy();
