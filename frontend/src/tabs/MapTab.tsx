@@ -156,8 +156,8 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   // `route_focus_agency` guards against a stale `route_focus` value matching
-  // a different agency's route code after an agency switch, the same way
-  // the old `RouteSelection.agencyId` field did.
+  // a different agency's route code after an agency switch; it is carried as
+  // `RouteSelection.agencyId` and compared with the current agency below.
   const [routeFocusAgencyParam] = useUrlState<string>("route_focus_agency", "");
   const [routeFocusParam] = useUrlState<string>("route_focus", "");
   const patchUrl = useUrlPatch();
@@ -352,9 +352,9 @@ export function MapTab() {
     );
     if (!created.map) return created.cleanup;
     const map: MLMap = created.map;
-    // top-right, not the default top-left: the legend now occupies top-left
-    // (see .ops-map-legend) and the two used to be squeezed into the same
-    // corner, forcing the legend to offset itself around the zoom buttons.
+    // top-right, not the default top-left: top-left holds the filter dock
+    // (.ops-dock) and the reference chip (.ops-map-ref), which would otherwise
+    // have to offset themselves around the zoom buttons.
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
