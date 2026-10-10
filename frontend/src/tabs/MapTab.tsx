@@ -41,7 +41,7 @@ import {
   LIVE_TRIPS_LAYER,
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
-import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { meanRouteDelaySec } from "./map/selectedRouteDelay";
 import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
@@ -271,7 +271,6 @@ export function MapTab() {
     { header: "captured_at", value: (r) => r.captured_at },
   ];
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
-  const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
   // effectiveRoute only highlights matching markers and loads that route's shape.
   // It's independent of ctx.routes, which already scoped liveRows (and so every
@@ -280,7 +279,6 @@ export function MapTab() {
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;
-  const selectedSummary = activeSummaries.find((route) => route.route_code === effectiveRoute);
   const routeTrips = effectiveRoute
     ? liveRows.filter((trip) => trip.route_code === effectiveRoute)
     : [];
@@ -453,7 +451,7 @@ export function MapTab() {
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
     shapeQuery.data,
     effectiveRoute,
-    selectedSummary?.avg_delay_sec ?? 0,
+    meanRouteDelaySec(liveRows, effectiveRoute),
     id,
     styleEpoch,
     effectiveTrip?.trip_id ?? null,
