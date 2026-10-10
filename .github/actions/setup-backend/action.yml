@@ -7,6 +7,10 @@ inputs:
   python-version:
     description: The Python version setup-python installs.
     required: true
+  groups:
+    description: Optional Poetry groups to install as well, space-separated.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -27,18 +31,24 @@ runs:
 
     # A hosted machine starts with no venv, and restoring one skips resolving
     # and installing every dependency again. The persistent runner keeps its
-    # own between runs. Keyed on the exact Python version as well as the
-    # lock: a venv points at the interpreter that built it.
+    # own between runs. Keyed on the exact Python version and groups as well
+    # as the lock: a venv points at the interpreter that built it, and a job
+    # that adds a group must never restore one saved by a job that omitted
+    # it -- that would skip installing the group this job actually needs.
     - name: Restore the Poetry venv
       if: runner.environment != 'self-hosted'
       uses: actions/cache@v6
       with:
         path: ~/.cache/pypoetry/virtualenvs
-        key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+        key: poetry-venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ inputs.groups }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
 
+    # Through the environment rather than spliced into the command: an input is
+    # data, never shell text.
     - name: Install dependencies
       shell: bash
-      run: poetry install
+      env:
+        POETRY_EXTRA_GROUPS: ${{ inputs.groups }}
+      run: poetry install ${POETRY_EXTRA_GROUPS:+--with "${POETRY_EXTRA_GROUPS// /,}"}
 
     # The persistent runner keeps every venv Poetry makes for the checkout,
     # one per Python minor version, and Poetry never removes one when the
