@@ -100,15 +100,22 @@ def predict(models: ModelSet, frame: pd.DataFrame) -> Predictions:
 
 
 def split_calibration(frame: pd.DataFrame, cutoff: date) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The last CALIBRATION_DAYS of targets before the cutoff calibrate the
+    """The last CALIBRATION_DAYS of targets through the cutoff calibrate the
     interval; the rest train the models."""
+    if frame.empty:
+        return frame, frame
     start = pd.Timestamp(cutoff) - pd.Timedelta(days=CALIBRATION_DAYS)
     held = frame["service_date"] > start
     return frame[~held], frame[held]
 
 
 def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> ModelSet:
+    """A short-history agency can have every target row fall within the
+    calibration window, leaving nothing to train on; train on the whole frame
+    uncalibrated (interval_shift stays 0.0) rather than treat that as no data."""
     train, calib = split_calibration(frame, cutoff)
+    if train.empty:
+        return fit(frame, params)
     models = fit(train, params)
     if not calib.empty:
         preds = predict(models, calib)

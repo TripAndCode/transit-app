@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import pytest
+
 from tests.unit.ml.ml_group import require
 
 pd = require("pandas")
@@ -108,3 +110,21 @@ def test_a_wider_coverage_never_shrinks_the_interval():
 def test_an_interval_already_too_wide_is_narrowed():
     y = np.zeros(100)
     assert conformity_shift(np.full(100, -5.0), np.full(100, 5.0), y, coverage=0.8) < 0
+
+
+def test_fit_calibrated_trains_on_everything_when_all_rows_are_held_for_calibration():
+    runs = _runs(days=20)
+    cutoff = START + timedelta(days=14)
+    frame = training_frame(runs, cutoff, window_days=28, half_life_days=28)
+    train, calib = split_calibration(frame, cutoff)
+    assert train.empty and not calib.empty  # the scenario this guards: a short-history agency
+
+    models = fit_calibrated(frame, FAST, cutoff)
+    assert models.interval_shift == 0.0
+    preds = predict(models, frame)
+    assert len(preds.mean) == len(frame)
+
+
+def test_fit_calibrated_raises_a_clear_error_for_a_genuinely_empty_frame():
+    with pytest.raises(ValueError, match="no training rows"):
+        fit_calibrated(pd.DataFrame(), FAST, START)

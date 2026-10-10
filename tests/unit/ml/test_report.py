@@ -4,7 +4,8 @@ import pytest
 
 from ml.backtest import evaluate_agency
 from ml.cells import Cell
-from ml.report import render, summarize
+from ml.report import render
+from ml.summary import summarize
 
 START = date(2026, 6, 1)
 

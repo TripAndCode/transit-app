@@ -11,6 +11,8 @@ from typing import Any
 
 from ml.backtest import AgencyResult, results_from_json, results_to_json
 
+MODEL = "LGBM"
+
 
 @dataclass
 class IntervalStats:

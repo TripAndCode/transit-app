@@ -6,7 +6,7 @@ pd = require("pandas")
 np = require("numpy")
 require("lightgbm")
 
-from ml.model_metrics import add_cells, add_intervals, cell_frame  # noqa: E402
+from ml.model_metrics import add_cells, add_intervals, cell_frame, take  # noqa: E402
 from ml.model_result import IntervalStats  # noqa: E402
 from ml.models import Predictions  # noqa: E402
 
@@ -57,6 +57,11 @@ def test_an_agency_kept_on_b0_scores_b0_wherever_b0_forecasts():
     assert model_err.abs_err == b0_err.abs_err
     predicted = {m: sum(r.predicted_runs for key, r in rows.items() if key[0] == m) for m in ("LGBM", "B0")}
     assert predicted == {"LGBM": 3, "B0": 2}
+
+
+def test_take_selects_the_same_rows_across_every_field():
+    sliced = take(_preds(), np.array([2, 0]))
+    assert list(sliced.mean) == [1.5, 1.0] and list(sliced.q10) == [0.0, 0.0] and list(sliced.q90) == [2.0, 3.0]
 
 
 def test_intervals_count_coverage_and_pinball_per_run():

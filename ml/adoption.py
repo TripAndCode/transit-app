@@ -6,12 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ml.model_result import ModelBacktestResult, merged_intervals
+from ml.model_result import MODEL, ModelBacktestResult, merged_intervals
 from ml.summary import summarize
 
 MIN_SKILL = 0.05
 COVERAGE_RANGE = (0.75, 0.85)
-MODEL = "LGBM"
 
 
 @dataclass(frozen=True)

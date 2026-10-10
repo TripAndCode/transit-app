@@ -9,10 +9,9 @@ import pandas as pd
 
 from ml.backtest import PEAK_HOURS, SPARSE_RUNS, SliceRow
 from ml.metrics import ErrorStats
-from ml.model_result import IntervalStats
+from ml.model_result import MODEL, IntervalStats
 from ml.models import Predictions
 
-MODEL = "LGBM"
 CELL = ["agency_id", "route_code", "service_date", "hour", "h"]
 
 
