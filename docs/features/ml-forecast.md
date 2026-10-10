@@ -45,3 +45,14 @@ R2 keeps everything, so old history can leave the replica whenever the disk need
 ## Baselines
 
 B0 is the app's "expected delay": the same route×weekday×hour, pooled by runs, over the 28 days before the forecast day. B1 is the latest such cell, and B2 is the route's 28-day mean. The report scores each on T+1..T+7 from data through T−1. It measures skill against B0 only where both predict, and shows coverage beside every error.
+
+## Models
+
+The weekly job also backtests LightGBM forecasters of each trip run's mean delay: one model for the mean and one each for the 10th, 50th and 90th percentiles. They are trained on runs from every agency (`python -m ml.cli train-eval`, which needs the optional `ml` Poetry group the bootstrap installs).
+
+- **Features** come from runs on or before the day before the forecast is made: the route×weekday×hour slot's mean (B0), count, spread and latest day (B1); the route's means over the window, the last week, the last three days and the day before; the trip's own mean, typical stop count and scheduled span; and how many days the agency was observed. The run's own timetable facts are added: hour, weekday, days ahead, and how often its service runs at weekends, which marks holiday timetables.
+- **Training** makes every past run a target once, forecast from an origin 1–7 days earlier with the lead drawn at random, so the lead never stands in for the weekday. Older targets weigh less.
+- **Intervals**: the quantile models are trained without the last week before the cutoff, and that week calibrates the 10th–90th percentile interval to hold 80% of runs (conformalized quantile regression).
+- **Evaluation** reuses the baselines' 28 origins, retraining once per week of origins on data before it. Point error is compared with B0 on the cells both predict. Intervals are scored per run, against B0's own slot 10th–90th percentile.
+- **Short history**: an agency with fewer than 56 days of history before a cutoff keeps B0, because a model trained mostly on other agencies forecasts it worse. It moves to the model on its own once it has the history, and the report names the agencies kept on B0.
+- **Adoption** requires at least 5% better error than B0 overall, no agency worse than B0, and an interval that holds 75–85% of runs. The report states the verdict and the reasons it fails.
