@@ -129,12 +129,15 @@ export function AdminAuditPage() {
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportedCount, setExportedCount] = useState<number | null>(null);
 
   async function handleExport() {
     setExporting(true);
     setExportError(null);
+    setExportedCount(null);
     try {
-      const items = await fetchAllAdminAudit(filters);
+      const { items, truncated } = await fetchAllAdminAudit(filters);
+      if (truncated) setExportedCount(items.length);
       downloadCsv("admin-audit", [
         [
           t("admin.audit.col.at"),
@@ -196,6 +199,11 @@ export function AdminAuditPage() {
       {exportError && (
         <div role="alert" style={{ marginBottom: 12, color: "var(--text-tertiary)" }}>
           {exportError}
+        </div>
+      )}
+      {exportedCount != null && (
+        <div role="status" style={{ marginBottom: 12, color: "var(--text-secondary)", fontSize: 13 }}>
+          {t("admin.audit.export.truncated", { count: exportedCount })}
         </div>
       )}
       <AuditTimeline key={filterKey} filters={filters} />

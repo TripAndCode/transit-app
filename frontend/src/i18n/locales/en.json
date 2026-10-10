@@ -1492,7 +1492,8 @@
       },
       "export": {
         "csv": "Export CSV",
-        "loading": "Exporting…"
+        "loading": "Exporting…",
+        "truncated": "The export holds only the newest {{count}} entries; older matches were left out. Narrow the date range to export them."
       }
     },
     "flags": {
