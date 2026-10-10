@@ -138,6 +138,51 @@ async def test_describe_data_stops(conn_with_observations):
 
 
 @pytest.mark.asyncio
+async def test_describe_data_stops_filter_counts_only_the_matching_stops(conn_with_observations):
+    """The total and the pages describe the filtered set, not every stop."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) "
+            "VALUES ($1, 'X1', '駅前', 40.0, 140.0)",
+            agency_id,
+        )
+        first = await describe_data(
+            {"kind": "stops", "filter_substring": "停留所", "limit": 2}, _ctx(), conn, agency_id, locale="ja"
+        )
+        page = await describe_data(
+            {"kind": "stops", "filter_substring": "停留所", "limit": 2, "offset": 2},
+            _ctx(),
+            conn,
+            agency_id,
+            locale="en",
+        )
+    assert first.summary == "「停留所」に一致する停留所: 5 件（先頭 2 件を表示）"
+    assert page.summary == "stops matching '停留所' 3–4 of 5 (next: 'next 2')"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_stops_filter_no_match_is_empty(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "stops", "filter_substring": "存在しない停留所XYZ"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "empty"
+    assert result.summary == "「存在しない停留所XYZ」に該当する停留所がありません。"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_date_range_summary_names_jst_days(conn_with_observations_ch):
+    """The fixture's captures are 08:00 JST, the previous day in UTC."""
+    pool, agency_id, ch = conn_with_observations_ch
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch)
+    assert "2026-05-01" in result.summary and "2026-05-26" in result.summary
+    assert "2026-04-30" not in result.summary
+
+
+@pytest.mark.asyncio
 async def test_describe_data_date_range(conn_with_observations_ch):
     pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:

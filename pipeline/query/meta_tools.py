@@ -180,6 +180,36 @@ async def describe_data(
                 limit,
                 offset,
             )
+            # Counted under the same filter, like the routes branch: a total of
+            # every stop beside a filtered page would misstate both.
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%'",
+                agency_id,
+                substring,
+            )
+            if total == 0:
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary("mt_stops_filter_no_match", locale, substring=substring),
+                )
+            if offset > 0 and rows:
+                summary = _summary(
+                    "mt_stops_filter_page",
+                    locale,
+                    substring=substring,
+                    total=total,
+                    shown_from=offset + 1,
+                    shown_to=offset + len(rows),
+                    limit=limit,
+                )
+            else:
+                summary = _summary("mt_stops_filter_first", locale, substring=substring, total=total, shown=len(rows))
+            return ToolResult(
+                kind="table",
+                summary=summary,
+                rows=[[r["stop_id"], r["stop_name"]] for r in rows],
+                columns=["stop_id", "stop_name"],
+            )
         else:
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
@@ -264,7 +294,14 @@ async def describe_data(
         ]
         return ToolResult(
             kind="kv",
-            summary=_summary("mt_date_range_summary", locale, first_date=first_obs.date(), last_date=last_obs.date()),
+            # JST days, as every date in this app is: a 06:00 JST capture is
+            # still the previous UTC day.
+            summary=_summary(
+                "mt_date_range_summary",
+                locale,
+                first_date=first_obs.astimezone(_JST).date(),
+                last_date=last_obs.astimezone(_JST).date(),
+            ),
             pairs=pairs,
         )
 
