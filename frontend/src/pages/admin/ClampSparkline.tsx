@@ -1,6 +1,6 @@
 import type { AgencyClampDay } from "../../api/admin";
 
-/** Clamp-rate trend for the recent window, as a bare polyline.
+/** Clamp-rate trend for the recent window, as a bare sparkline.
  *
  *  A day with no observations is a gap in the line, not a point at zero:
  *  "nothing was observed" and "nothing was implausible" are different
