@@ -147,6 +147,13 @@ export function AdminBoardPage() {
   const alerts = data?.alerts ?? [];
   const runs = data?.runs ?? [];
   const dayCount = freshness[0]?.days.length ?? 0;
+  // A failed first load has no data; each section then says so instead of
+  // falling through to an empty state, which would assert an all-clear the
+  // page never received.
+  const unavailable = data == null && error != null;
+  const unavailableNote = (
+    <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{t("admin.board.section_unavailable")}</p>
+  );
 
   // Why the control is unavailable, or null when it is usable. Kept as the
   // single source for both the visual state and the spoken reason so the two
@@ -326,6 +333,8 @@ export function AdminBoardPage() {
         </div>
         {isPending ? (
           <SkeletonTable rows={3} rowHeight={16} />
+        ) : unavailable ? (
+          unavailableNote
         ) : freshness.length === 0 ? (
           <EmptyState title={t("admin.board.freshness_empty")} />
         ) : (
@@ -399,6 +408,8 @@ export function AdminBoardPage() {
         </div>
         {isPending ? (
           <SkeletonChart height={120} />
+        ) : unavailable ? (
+          unavailableNote
         ) : (
           <RunTimeline runs={runs} dayStart={dayStart} now={now} />
         )}
@@ -416,6 +427,8 @@ export function AdminBoardPage() {
         <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: "0 0 6px" }}>{t("admin.board.alerts_title")}</h2>
         {isPending ? (
           <SkeletonTable rows={2} rowHeight={20} />
+        ) : unavailable ? (
+          unavailableNote
         ) : alerts.length === 0 ? (
           <EmptyState title={t("admin.board.alerts_none")} />
         ) : (

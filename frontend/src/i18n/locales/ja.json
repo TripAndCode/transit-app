@@ -1607,6 +1607,7 @@
       "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
       "alerts_title": "アラート",
       "alerts_none": "対応が必要な項目はありません。",
+      "section_unavailable": "このセクションを読み込めませんでした。",
       "alert_open": "開く",
       "alert": {
         "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",

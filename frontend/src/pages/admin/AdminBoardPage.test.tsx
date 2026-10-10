@@ -360,6 +360,15 @@ describe("AdminBoardPage", () => {
     expect(screen.getByRole("heading", { name: i18n.t("admin.board.title") })).toBeInTheDocument();
   });
 
+  it("does not state an all-clear for any section when the first fetch failed", () => {
+    mockQuery = { data: undefined, error: new Error("boom"), isPending: false, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    expect(screen.queryByText(i18n.t("admin.board.freshness_empty"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("admin.board.alerts_none"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("admin.board.runs_empty"))).not.toBeInTheDocument();
+    expect(screen.getAllByText(i18n.t("admin.board.section_unavailable"))).toHaveLength(3);
+  });
+
   it("does not claim an empty heatmap while the first fetch is still in flight", () => {
     mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
