@@ -20,4 +20,3 @@ async def test_a_test_that_closes_its_own_connection_leaves_a_row(aconn):
 async def test_the_next_test_starts_without_that_row(aconn):
     leaked = await aconn.fetchval("SELECT count(*) FROM agencies WHERE agency_name = $1", _AGENCY_NAME)
     assert leaked == 0
-
