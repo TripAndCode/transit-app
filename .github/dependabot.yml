@@ -60,8 +60,12 @@ updates:
           - "minor"
           - "patch"
 
+  # `/` covers .github/workflows; the composite actions under .github/actions/
+  # carry their own `uses:` pins and are scanned only when listed.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
       day: "saturday"

@@ -303,8 +303,7 @@ async def _trend_shift_this_week(agency_id, conn, ch, week_ctx, baseline_ctx, ex
         "report_type": "trend",
         "route_code": route_code,
         "reason_text": _summary(
-            # delta_min is second-half minus first-half, so a positive shift is a worsening.
-            "suggest_reason_trend_worsened" if delta_min > 0 else "suggest_reason_trend_improved",
+            "suggest_reason_trend_shift",
             lang=locale,
             route=await _route_name(agency_id, conn, route_code, locale),
             delta_min=f"{delta_min:+.1f}",
