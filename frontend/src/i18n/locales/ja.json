@@ -396,6 +396,7 @@
     "unit_sec_signed": "{{sign}}{{value}}秒",
     "range_separator": "〜",
     "list_separator": "・",
+    "label_value": "{{label}}：{{value}}",
     "language_aria": "言語",
     "language_switch_error": "言語を切り替えられませんでした。接続を確認して再度お試しください。",
     "theme_aria": "外観",

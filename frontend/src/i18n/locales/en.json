@@ -396,6 +396,7 @@
     "unit_sec_signed": "{{sign}}{{value}} s",
     "range_separator": "–",
     "list_separator": ", ",
+    "label_value": "{{label}}: {{value}}",
     "language_aria": "Language",
     "language_switch_error": "Couldn't switch the language. Please check your connection and try again.",
     "theme_aria": "Appearance",
