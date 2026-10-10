@@ -19,9 +19,10 @@ written for, so `-h localhost -p 5433`, an inserted `docker compose
 --project-name x exec db`, or `compose run` in place of `compose exec` all reach
 the dev database untouched while looking like they are covered.
 
-A command is blocked when it pairs a dev target with a mutation, or when it
-tears down a dev volume, which needs no SQL keyword; a payload the hook cannot
-read is refused. A command that merely names a dev store next to a write keyword
+A command is blocked when it pairs a dev target with a mutation, when it tears
+down a dev volume, or when it runs a destructive Make target or CLI subcommand
+not pointed at the throwaway stack -- the last two need no SQL keyword. A
+payload the hook cannot read is refused. A command that merely names a dev store next to a write keyword
 is blocked even when it is only searching text. That direction is deliberate — a false block
 costs a rephrase, a missed write costs the dataset. The case that actually
 bites is prose *about* this guard: a heredoc commit message naming a dev
@@ -42,13 +43,62 @@ DEV_SERVICES = {"db", "clickhouse"}
 # compose.yml dropped `container_name`, and the dev Postgres recreated by hand
 # on a newer major.
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
-# Throwaway stacks. Naming one exempts a destructive Make target, which names
-# no host of its own; it exempts nothing else.
-TEST_PORTS = (":5544", ":8124")
-# Make targets that take the Makefile's own DATABASE_URL default -- the real
-# dev database -- when the caller overrides nothing. They name no host, port or
-# container, so nothing else here can recognise what they are aimed at.
-DESTRUCTIVE_TARGETS = {"migrate-down"}
+# Throwaway stacks, per store. Naming one exempts a destructive command, which
+# names no host of its own, from that store; it exempts nothing else.
+# Per store, the variable that points it and the throwaway value of it. Read
+# from the NAME=value assignments of the same simple command -- the env prefix
+# or a make variable -- so a throwaway port named anywhere else (another
+# command, a comment) points nothing at it.
+THROWAWAY = {
+    # The port of the URL's host, not a ":5544" anywhere in it (a password).
+    "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
+    "ch": ("clickhouse_port", re.compile(r"8124$")),
+}
+# Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
+# overrides nothing -- the Makefile's own defaults from .env, the shell's for
+# the CLI -- which are the real dev stores. They name no host, port or
+# container, so nothing else here can recognise what they are aimed at, and
+# running one is the write: no SQL keyword shows on the command line. Each maps
+# to the stores it writes; it runs only when the command points every one of
+# them at the throwaway stack.
+DESTRUCTIVE_TARGETS = {
+    "analyze": {"pg"},
+    "bootstrap": {"pg", "ch"},
+    "analyze-all": {"pg"},
+    "build-rag-index": {"pg"},
+    "ch-bootstrap": {"ch"},
+    "db": {"pg", "ch"},
+    "fetch-ingest": {"pg", "ch"},
+    "ingest": {"pg", "ch"},
+    "ingest-weather": {"pg"},
+    "load_static": {"pg"},
+    "migrate": {"pg"},
+    "migrate-down": {"pg"},
+    "promote-intent-cache": {"pg"},
+    "prune-admin-audit": {"pg"},
+    "prune-personal-data": {"pg"},
+    "prune-pipeline-runs": {"pg"},
+    "prune-query-log": {"pg"},
+    "seed-agencies": {"pg"},
+}
+DESTRUCTIVE_SUBCOMMANDS = {
+    "add_agency": {"pg"},
+    "analyze": {"pg"},
+    "analyze_all": {"pg"},
+    "build_rag_index": {"pg"},
+    "ingest": {"pg", "ch"},
+    "ingest_live": {"pg", "ch"},
+    "ingest_weather": {"pg"},
+    "load_static": {"pg"},
+    "migrate": {"pg"},
+    "prune-admin-audit": {"pg"},
+    "prune-personal-data": {"pg"},
+    "prune-pipeline-runs": {"pg"},
+    "prune_query_log": {"pg"},
+    "refresh-static": {"pg"},
+    "restamp_archive": {"pg", "ch"},
+    "seed_agencies": {"pg"},
+}
 
 # A mutation neither dev store must take. Matched over the raw command: this
 # asks "does this text contain a mutating statement", which needs no shell
@@ -63,7 +113,7 @@ WRITE = re.compile(
     r"|\b(dropdb|createdb|pg_restore)\b"
     r"|\bVACUUM\s+FULL\b"
     r"|\\copy\b[^|;&]*\bfrom\b"
-    r"|migrate[^ ]*down|downgrade",
+    r"|migrate[\s_-]*down|downgrade",
     re.IGNORECASE,
 )
 
@@ -178,14 +228,100 @@ def runs_a_sql_script(lowered: list[str]) -> bool:
     return "psql" in lowered and ("-f" in lowered or "--file" in lowered)
 
 
+def runs_destructive_command(cmd: str) -> bool:
+    """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
+    command, that writes a store its own assignments do not point at the
+    throwaway stack.
+
+    A token holding whitespace is a quoted script (`bash -c "..."`, `ssh host
+    "..."`) and is read as a command line of its own. Quoted prose naming a
+    destructive target is read the same way and blocked, the cheap direction.
+    """
+    for segment in _simple_commands(_shell_tokens(cmd.lower())):
+        if _segment_writes_dev(segment):
+            return True
+        if any(runs_destructive_command(tok) for tok in segment if any(c.isspace() for c in tok)):
+            return True
+    return False
+
+
+def _shell_tokens(text: str) -> list[str]:
+    """shlex tokens with each run of shell operator characters (`;`, `&&`,
+    `|`, `>` ...) a token of its own, also where it is glued to a word:
+    `shlex.split("make a;ls")` keeps `a;ls` as one token."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return text.split()
+
+
+_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _is_separator(tok: str) -> bool:
+    return bool(tok) and set(tok) <= _OPERATOR_CHARS
+
+
+_ASSIGNMENT = re.compile(r"^[a-z_][a-z0-9_]*=")
+_MAKE_NAMES = {"make", "gmake"}
+# `python gtfs_pipeline.py ...` and `python -m gtfs_pipeline ...`.
+_CLI_NAMES = {"gtfs_pipeline.py", "gtfs_pipeline"}
+
+
+def _simple_commands(lowered: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = [[]]
+    for tok in lowered:
+        if _is_separator(tok):
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    return [segment for segment in segments if segment]
+
+
+def _segment_writes_dev(segment: list[str]) -> bool:
+    writes: set[str] = set()
+    for i, tok in enumerate(segment):
+        name = tok.rsplit("/", 1)[-1]
+        if name in _MAKE_NAMES:
+            for target in make_targets(segment[i + 1 :]):
+                writes |= DESTRUCTIVE_TARGETS.get(target, set())
+        elif name in _CLI_NAMES and i + 1 < len(segment):
+            writes |= DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set())
+    # Later assignments win, as they do for the shell's env prefix and for
+    # make's own command-line variables, which also override the prefix.
+    assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
+    for store in writes:
+        name, throwaway = THROWAWAY[store]
+        if not throwaway.match(assigned.get(name, "")):
+            return True
+    return False
+
+
+# `make` options whose value is the next argument, not a target.
+_MAKE_VALUE_FLAGS = {"-c", "-f", "-o", "--directory", "--file", "--makefile"}
+
+
+def make_targets(args: list[str]) -> list[str]:
+    """The targets in `make`'s own arguments: up to the next shell separator,
+    past its flags and VAR=value assignments."""
+    targets: list[str] = []
+    skip = False
+    for arg in args:
+        if _is_separator(arg):
+            break
+        if skip:
+            skip = False
+        elif arg.startswith("-"):
+            skip = arg in _MAKE_VALUE_FLAGS
+        elif "=" not in arg:
+            targets.append(arg)
+    return targets
+
+
 def targets_dev_db(tokens: list[str], cmd: str) -> bool:
     lowered = [t.lower() for t in tokens]
-
-    # A destructive Make target inherits the dev database unless the caller
-    # pointed it somewhere throwaway in the same command.
-    if "make" in lowered and DESTRUCTIVE_TARGETS & set(lowered):
-        if not any(port in cmd for port in TEST_PORTS):
-            return True
 
     if DATABASE_URL_REF.search(cmd):
         return True
@@ -216,7 +352,7 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    if destroys_dev_volume(cmd):
+    if destroys_dev_volume(cmd) or runs_destructive_command(cmd):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
@@ -244,7 +380,9 @@ def main() -> int:
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
-            "so run it as its own call. See AGENTS.md.\n"
+            "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "
+            "DATABASE_URL=...:5544/... and/or CLICKHOUSE_PORT=8124 assigned on that same command, for each store "
+            "it writes. See AGENTS.md.\n"
         )
         return 2
     return 0
