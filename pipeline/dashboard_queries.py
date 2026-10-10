@@ -1,7 +1,7 @@
 """SQL aggregations backing the 3 dashboard cards on the Ask tab's empty-thread state.
 
 - delay_heatmap: top-N routes × dimension (DOW or hour-band) avg-delay grid
-- anomaly_timeline: 30-day daily avg + std-deviation outliers
+- anomaly_timeline: per-day avg + std-deviation outliers over the ctx range
 - movers: top-N routes by |Δ avg-delay| current-window vs prior-window
 
 All three are all-time/all-service overview cards served entirely from the
