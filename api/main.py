@@ -81,17 +81,17 @@ _DEV_SIGNING_KEY = "dev-only-not-secret"
 _API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json", "internal/")
 
 
-async def _init_connection(conn: asyncpg.Connection) -> None:
-    """Per-connection setup. Pin the session to Asia/Tokyo so ``captured_at::date``
-    casts honor the operator's local calendar instead of UTC (Aomori observations
-    span midnight JST and would otherwise straddle two UTC dates).
-
-    Also caps any single query at 30s — all read endpoints serve from small
-    precomputed agg_* tables (sub-second), so this only ever fires on a
-    pathological live-fallback scan, as a safety net against a hung request.
-    (analyze/ingest run on their own psycopg2 connections, not this pool.)"""
-    await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
-    await conn.execute("SET statement_timeout = '30s'")
+# Session defaults for every API connection. They travel as connection
+# startup parameters, not SET: the pool runs RESET ALL each time it takes a
+# connection back, which undoes a SET but returns to a startup parameter.
+#   timezone: ``captured_at::date`` and every other date cast follow the
+#     operator's JST calendar instead of UTC (Aomori observations span
+#     midnight JST and would otherwise straddle two UTC dates).
+#   statement_timeout: every read endpoint serves from small precomputed
+#     agg_* tables, so this only fires on a pathological live-fallback scan,
+#     as a safety net against a hung request. (analyze/ingest run on their
+#     own psycopg2 connections, not this pool.)
+PG_SESSION_SETTINGS = {"timezone": "Asia/Tokyo", "statement_timeout": "30s"}
 
 
 def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
@@ -213,7 +213,9 @@ async def lifespan(app: FastAPI):
     # path holds its own get_conn slot plus up to OVERVIEW_FANOUT_LIMIT more,
     # so the pool fills only once 20 / (OVERVIEW_FANOUT_LIMIT + 1) cold
     # overview requests overlap.
-    app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
+    app.state.pool = await asyncpg.create_pool(
+        DATABASE_URL, server_settings=PG_SESSION_SETTINGS, min_size=10, max_size=20
+    )
 
     # Everything below reuses app.state.pool, so any failure here must close
     # it before re-raising — this generator's own cleanup after `yield` never

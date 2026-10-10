@@ -16,7 +16,7 @@ from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, checked_table
 
 async def get_ch_client():
     """Caps any single query at 30s execution time and 200k result rows —
-    the ClickHouse-side counterpart to api.main._init_connection's Postgres
+    the ClickHouse-side counterpart to api.main.PG_SESSION_SETTINGS' Postgres
     `statement_timeout`. All read endpoints serve from small precomputed
     agg_* tables (sub-second); ClickHouse only backs the pathological
     live-fallback scans over `updates` (see api.main.lifespan), so these

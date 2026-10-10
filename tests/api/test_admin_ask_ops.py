@@ -233,9 +233,9 @@ async def test_both_date_bounds_are_jst_days_whatever_the_process_zone(ask_ops_c
     """A row at 03:00 JST on 1 October falls inside from=to=2026-10-01 even
     when the API process runs in UTC, as a container does."""
     c, sid, _uid, agency_id, _pool = ask_ops_client
-    from api.main import _init_connection, app
+    from api.main import PG_SESSION_SETTINGS, app
 
-    app.state.pool = jst_pool = await _test_pool(init=_init_connection)
+    app.state.pool = jst_pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
     monkeypatch.setenv("TZ", "UTC")
     time.tzset()
     try:
@@ -435,3 +435,20 @@ async def test_eval_returns_latest_artifact_when_present(ask_ops_client, monkeyp
     resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
     assert resp.status_code == 200
     assert resp.json()["score"] == 0.87
+
+
+@pytest.mark.asyncio
+async def test_the_api_session_settings_survive_a_connection_going_back_to_the_pool(apply_schema):
+    """The pool runs RESET ALL whenever it takes a connection back, which
+    undoes a SET. Every later request on that connection still has to see
+    the JST calendar and the statement cap."""
+    from api.main import PG_SESSION_SETTINGS
+
+    pool = await _test_pool(max_size=1, server_settings=PG_SESSION_SETTINGS)
+    try:
+        for _ in range(2):
+            async with pool.acquire() as conn:
+                assert await conn.fetchval("SHOW TIME ZONE") == "Asia/Tokyo"
+                assert await conn.fetchval("SHOW statement_timeout") == "30s"
+    finally:
+        await pool.close()

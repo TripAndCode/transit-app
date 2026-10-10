@@ -236,7 +236,7 @@ def _clear_compute_caches():
 @pytest.fixture
 def pg_conn(apply_schema, reset_sql):
     conn = psycopg2.connect(_database_url())
-    # Mirror api/main.py _init_connection (and the aconn fixture) so
+    # Mirror api/main.py's PG_SESSION_SETTINGS (and the aconn fixture) so
     # `captured_at::date` casts in psycopg2-path tests use the same JST
     # civil calendar as production. Without this, tests that depend on
     # JST date boundaries flake near 15:00 UTC (00:00 JST).
@@ -394,7 +394,7 @@ async def aconn(apply_schema, reset_sql):
     import asyncpg
 
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
-    # Mirror api/main.py _init_connection so `captured_at::date` casts in
+    # Mirror api/main.py's PG_SESSION_SETTINGS so `captured_at::date` casts in
     # tests use the same JST civil calendar as production.
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
     yield conn
