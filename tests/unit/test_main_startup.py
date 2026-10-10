@@ -8,6 +8,7 @@ import pytest
 
 import api.main
 from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
+from api.middleware.forwarded import ForwardedClientMiddleware
 from pipeline.query.llm_client import ProviderConfig
 
 
@@ -129,14 +130,14 @@ def test_require_docs_enabled_allows_when_flag_on(monkeypatch):
     api.main._require_docs_enabled()  # must not raise
 
 
-def test_dockerfile_cmd_trusts_railway_proxy_headers():
-    """The production image must run uvicorn with --proxy-headers so the anon
-    rate-limiter and audit logs see the real client IP (not Railway's edge),
-    and --forwarded-allow-ips so those forwarded headers are trusted."""
-    dockerfile = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
-    cmd = dockerfile.read_text()
-    assert "--proxy-headers" in cmd
-    assert "--forwarded-allow-ips" in cmd
+def test_dockerfile_reads_the_client_address_from_its_one_edge_proxy():
+    """The production image reads the client address from the X-Forwarded-For
+    entry Railway's edge appended, and keeps uvicorn's own handling off: told
+    to trust every peer, that reads the leftmost entry, which a client writes."""
+    dockerfile = (pathlib.Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    assert "ENV FORWARDED_HOPS=1" in dockerfile
+    assert "--no-proxy-headers" in dockerfile
+    assert "--forwarded-allow-ips" not in dockerfile
 
 
 async def test_lifespan_closes_pool_when_post_pool_setup_fails(monkeypatch):
@@ -197,3 +198,10 @@ async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(mo
     with pytest.raises(RuntimeError, match="boom"):
         async with api.main.lifespan(fake_app):
             pass
+
+
+def test_the_forwarded_client_address_is_set_outside_every_other_middleware():
+    """The access log, the rate limiter and every audit row read
+    request.client, so the forwarded address must be in place before any of
+    them runs. add_middleware puts the latest addition first."""
+    assert api.main.app.user_middleware[0].cls is ForwardedClientMiddleware
