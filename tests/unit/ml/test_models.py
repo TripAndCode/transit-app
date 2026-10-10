@@ -35,7 +35,14 @@ def _runs(days=70, seed=3):
                     }
                 )
     frame = pd.DataFrame(rows).astype(
-        {"agency_id": "int16", "route_code": "string", "trip_id": "string", "hour": "int16", "service": "string", "delay_min": "float32"}
+        {
+            "agency_id": "int16",
+            "route_code": "string",
+            "trip_id": "string",
+            "hour": "int16",
+            "service": "string",
+            "delay_min": "float32",
+        }
     )
     return with_route_ids(frame, route_ids(frame))
 
@@ -64,7 +71,9 @@ def test_crossing_quantiles_are_put_in_order():
 
 
 def test_a_narrowing_shift_never_lifts_q10_above_the_median():
-    models = ModelSet(mean=_Const(0.0), quantiles={0.1: _Const(1.0), 0.5: _Const(3.0), 0.9: _Const(5.0)}, interval_shift=-10.0)
+    models = ModelSet(
+        mean=_Const(0.0), quantiles={0.1: _Const(1.0), 0.5: _Const(3.0), 0.9: _Const(5.0)}, interval_shift=-10.0
+    )
     preds = predict(models, pd.DataFrame({name: [0.0] for name in FEATURES}))
     assert preds.q10[0] == preds.q50[0] == preds.q90[0] == 3.0
 
