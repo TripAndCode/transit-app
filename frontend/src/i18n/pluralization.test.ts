@@ -43,4 +43,15 @@ describe("English pluralization", () => {
       "Feed health: 2 implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
     );
   });
+
+  it("marey trip counts use the singular noun for count=1", () => {
+    expect(i18n.t("mareyTripCount", { ns: "design", count: 1 })).toBe("1 trip");
+    expect(i18n.t("mareyTripCount", { ns: "design", count: 2 })).toBe("2 trips");
+    expect(i18n.t("mareyChartLabel", { ns: "design", count: 1, from: "07:00", to: "09:00" })).toBe(
+      "Trips over time: 1 trip from 07:00 to 09:00. The table below lists the same trips.",
+    );
+    expect(i18n.t("mareyChartLabel", { ns: "design", count: 2, from: "07:00", to: "09:00" })).toBe(
+      "Trips over time: 2 trips from 07:00 to 09:00. The table below lists the same trips.",
+    );
+  });
 });
