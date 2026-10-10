@@ -45,6 +45,15 @@ describe("BandGrid keyboard and screen-reader access", () => {
     expect(screen.getByRole("gridcell", { name: "Day2 midday · —" })).toBeInTheDocument();
   });
 
+  it("declares the same row and column counts as the rows and headers it renders", () => {
+    renderGrid();
+    const grid = screen.getByRole("grid");
+    expect(Number(grid.getAttribute("aria-rowcount"))).toBe(screen.getAllByRole("row").length);
+    expect(Number(grid.getAttribute("aria-colcount"))).toBe(
+      screen.getAllByRole("columnheader").length + screen.getAllByRole("rowheader").length / 7,
+    );
+  });
+
   it("is one tab stop, with arrow keys moving between cells", () => {
     renderGrid();
     const cells = screen.getAllByRole("gridcell");

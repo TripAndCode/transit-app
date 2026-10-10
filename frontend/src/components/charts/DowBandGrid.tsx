@@ -69,8 +69,9 @@ export function BandGrid({
       // The roving cell owns the tab stop; the container is focusable only
       // programmatically, which is what the composite pattern asks for.
       tabIndex={-1}
-      aria-rowcount={7}
-      aria-colcount={BAND_ORDER.length}
+      // The counts include the header row and the weekday-label column.
+      aria-rowcount={7 + 1}
+      aria-colcount={BAND_ORDER.length + 1}
       onKeyDown={onKeyDown}
       onMouseLeave={onLeave}
     >
