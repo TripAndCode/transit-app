@@ -57,6 +57,9 @@ async def test_takes_the_scheme_the_edge_set():
     assert (await _seen(1, [(b"x-forwarded-proto", b"https")]))["scheme"] == "https"
     assert (await _seen(1, [(b"x-forwarded-proto", b"https")], kind="websocket"))["scheme"] == "wss"
     assert (await _seen(1, [(b"x-forwarded-proto", b"gopher")]))["scheme"] == "http"
+    # The same trust rule as the address: the entry the outermost proxy wrote.
+    assert (await _seen(2, [(b"x-forwarded-proto", b"http, https")]))["scheme"] == "http"
+    assert (await _seen(2, [(b"x-forwarded-proto", b"https")]))["scheme"] == "http"
 
 
 @pytest.mark.parametrize("raw", [None, "", " "])

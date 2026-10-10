@@ -38,14 +38,18 @@ class ForwardedClientMiddleware:
         self.app = app
         self.hops = hops
 
+    def _trusted(self, scope: Scope, name: bytes) -> str | None:
+        entries = _entries(scope, name)
+        # Fewer entries than proxies: the request did not come through all of
+        # them, so no entry is known to be one a trusted proxy wrote.
+        return entries[-self.hops] if len(entries) >= self.hops else None
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.hops and scope["type"] in ("http", "websocket"):
-            forwarded_for = _entries(scope, b"x-forwarded-for")
-            # Fewer entries than proxies: the request did not come through all
-            # of them, so no entry is known to be trustworthy.
-            if len(forwarded_for) >= self.hops:
-                scope["client"] = (forwarded_for[-self.hops], 0)
-            proto = _entries(scope, b"x-forwarded-proto")
-            if proto and proto[-1] in ("http", "https"):
-                scope["scheme"] = proto[-1] if scope["type"] == "http" else proto[-1].replace("http", "ws")
+            client = self._trusted(scope, b"x-forwarded-for")
+            if client is not None:
+                scope["client"] = (client, 0)
+            proto = self._trusted(scope, b"x-forwarded-proto")
+            if proto in ("http", "https"):
+                scope["scheme"] = proto if scope["type"] == "http" else proto.replace("http", "ws")
         await self.app(scope, receive, send)
