@@ -1375,6 +1375,7 @@
       "col_name": "事業者名",
       "status_deleted": "削除済",
       "action_edit": "編集",
+      "action_edit_disabled_hint": "編集するには、先に事業者を復元してください。",
       "form_title_add": "事業者を追加",
       "form_title_edit": "事業者を編集",
       "form_name": "事業者名",

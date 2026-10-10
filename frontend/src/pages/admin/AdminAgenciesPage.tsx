@@ -310,6 +310,8 @@ export function AdminAgenciesPage() {
         <span style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} role="presentation">
           <AdminButton
             variant="secondary"
+            disabled={a.deleted_at != null}
+            title={a.deleted_at == null ? undefined : t("admin.agencies.action_edit_disabled_hint")}
             onClick={() => {
               create.reset();
               patch.reset();
