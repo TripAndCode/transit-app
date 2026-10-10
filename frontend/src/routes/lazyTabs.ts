@@ -50,9 +50,11 @@ export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unkn
   routes: () => Promise.all([loadRoutesIndex(), loadAnalysisTab()]),
   time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
   why: () => Promise.all([loadWhyTab(), loadAnalysisTab()]),
-  compare: () => Promise.all([loadCompareTab(), loadAnalysisTab()]),
+  // Compare hosts either board: the agencies one renders NetworkTab.
+  compare: () => Promise.all([loadCompareTab(), loadAnalysisTab(), loadNetworkTab()]),
   live: loadMapTab,
-  reports: loadSavedExportTab,
+  // The Reports host lazy-loads its default view, so warm both.
+  reports: () => Promise.all([loadSavedExportTab(), loadReportsHomeTab()]),
   ask: loadAskTab,
 };
 
