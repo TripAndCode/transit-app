@@ -2,10 +2,12 @@
 
 Mirrors the existing oracle_cloud/poller_static.sh: GET the opendata index
 page, find the first `gtfs-aomoricitybus*.zip` href, resolve it relative to
-the site root, download, sha256, persist as gtfs_static_YYYYMMDD.zip.
+the site root, download, sha256, persist as gtfs_static_YYYYMMDD.zip -- unless
+the bytes match the last zip that loaded, which is no change.
 """
 
 import hashlib
+import json
 import logging
 import pathlib
 import re
@@ -19,15 +21,6 @@ from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
 logger = logging.getLogger(__name__)
 
 _HREF_RE = re.compile(r'href="([^"]*gtfs-aomoricitybus[^"]*\.zip)"')
-
-
-def _sha256(path: pathlib.Path) -> str:
-    """Return the hex SHA-256 digest of the file at path."""
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _resolve(href: str, index_url: str) -> str:
@@ -48,7 +41,8 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for Aomori.
 
-    Returns the path of the zip ready for load_static, or None on failure.
+    Returns the path of the zip ready for load_static, or None on failure
+    or when the download is byte-identical to the last zip that loaded.
     Idempotent same-day overwrite (matches existing shell behaviour).
     """
     agency_dir = dest_dir / str(agency_id)
@@ -90,8 +84,18 @@ def fetch(
         logger.warning("[aomori_index_scrape] downloaded file is not a ZIP (missing PK header)")
         return None
 
+    # Reloading identical bytes would rewrite every static table and mint a
+    # new static_version_id for unchanged content.
+    sha = hashlib.sha256(data).hexdigest()
+    if sha == _loaded_sha(agency_dir):
+        logger.info(f"[aomori_index_scrape] agency={agency_id} no change (sha256={sha[:12]})")
+        return None
+
+    # Staged now, while the sha is already in hand from the check above, so
+    # record_loaded() has nothing left to do but promote it -- no second read
+    # or hash of a file that was just downloaded into memory.
+    _pending_path(agency_dir).write_text(json.dumps({"sha256": sha}))
     final.write_bytes(data)
-    sha = _sha256(final)
     history_path = agency_dir / "fetch_history.csv"
     if not history_path.exists():
         history_path.write_text("timestamp,zip_url,sha256,bytes,file_path\n")
@@ -104,3 +108,40 @@ def fetch(
 
     logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final
+
+
+def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None:
+    """Promote the manifest fetch() already staged for *zip_path*, now that it loaded.
+
+    The rename is atomic (direct_url.record_loaded does the same): a process
+    killed mid-write leaves the still-valid old manifest or nothing at all,
+    never a truncated one. _loaded_sha treats any other way a manifest can
+    go bad the same as no prior load, so the agency recovers on its own
+    rather than being stuck until someone deletes the file by hand.
+    """
+    _pending_path(dest_dir / str(agency_id)).replace(_manifest_path(dest_dir / str(agency_id)))
+
+
+def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.json"
+
+
+def _pending_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.pending.json"
+
+
+def _loaded_sha(agency_dir: pathlib.Path) -> str | None:
+    path = _manifest_path(agency_dir)
+    if not path.exists():
+        return None
+    try:
+        parsed = json.loads(path.read_text())
+        return parsed.get("sha256") if isinstance(parsed, dict) else None
+    except (ValueError, OSError):
+        # ValueError covers both a decode failure (json.JSONDecodeError) and
+        # a read stopping mid multi-byte character (UnicodeDecodeError). A
+        # manifest that is unreadable, not valid JSON, or valid JSON that
+        # isn't an object (e.g. a prior write that never got this far) is the
+        # same as no prior load: the zip is fetched and loaded again rather
+        # than leaving the agency stuck.
+        return None

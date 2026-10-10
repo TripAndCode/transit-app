@@ -36,6 +36,15 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
         return None
 
     load_static(str(zip_path), agency_id, conn)
+    # load_static already committed, so the load itself succeeded; losing the
+    # dedup marker only costs one harmless extra reload next run, which is
+    # strictly better than this call raising and reporting a genuinely
+    # successful load as a failure (and rolling back a connection that has
+    # nothing left to roll back).
+    try:
+        strategy.record_loaded(agency_id, dest_dir, zip_path)
+    except Exception:
+        logger.warning(f"[static_fetcher] agency={agency_id} loaded but could not record it", exc_info=True)
     logger.info(f"[static_fetcher] agency={agency_id} loaded {zip_path.name}")
     return zip_path
 
