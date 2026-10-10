@@ -220,10 +220,8 @@ jobs:
         with:
           container-name: transit-ci-db
 
-      - name: Apply schema
-        run: poetry run python gtfs_pipeline.py migrate up
-        env:
-          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
+      # No schema step: tests/conftest.py redirects DATABASE_URL to the
+      # `<db>_test` sibling, creates it and migrates it in a session fixture.
 
       # Equivalent of `make ch-bootstrap`. The service container above isn't
       # started via docker compose/the Makefile, so this creates the
