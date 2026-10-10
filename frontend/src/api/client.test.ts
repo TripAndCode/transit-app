@@ -82,6 +82,35 @@ describe("request timeout", () => {
     expect(classifyError(err)).toBe("timeout");
   });
 
+  it("classifies a stall during the response body as timeout, not invalid JSON", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    // Headers arrive; the body then stalls until the signal aborts.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => ({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      })),
+    );
+    vi.stubGlobal("localStorage", { getItem: () => null });
+
+    const settled = apiGet("/api/slow-body").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    deadline.abort(new DOMException("The operation timed out.", "TimeoutError"));
+
+    const err = await settled;
+    expect((err as Error).name).toBe("TimeoutError");
+    expect(classifyError(err)).toBe("timeout");
+  });
+
   it("still lets the caller abort a request before the timeout", async () => {
     vi.stubGlobal("fetch", hangingFetch());
     vi.stubGlobal("localStorage", { getItem: () => null });

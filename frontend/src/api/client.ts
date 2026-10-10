@@ -136,17 +136,25 @@ export function formatApiError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Parse a response body as JSON. A timeout or caller abort that lands while
+ *  the body is still streaming is rethrown as-is: folding it into "not valid
+ *  JSON" would hide a stall behind a generic error class. */
+async function parseJsonBody<T>(r: Response): Promise<T> {
+  try {
+    return (await r.json()) as T;
+  } catch (e) {
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
+    throw new ApiError(r.status, "Response was not valid JSON");
+  }
+}
+
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   const r = await rawFetch(path, init);
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new ApiError(r.status, text);
   }
-  try {
-    return (await r.json()) as T;
-  } catch {
-    throw new ApiError(r.status, "Response was not valid JSON");
-  }
+  return parseJsonBody<T>(r);
 }
 
 async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T | undefined> {
@@ -156,11 +164,7 @@ async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T 
     throw new ApiError(r.status, text);
   }
   if (r.status === 204) return undefined;
-  try {
-    return (await r.json()) as T;
-  } catch {
-    throw new ApiError(r.status, "Response was not valid JSON");
-  }
+  return parseJsonBody<T>(r);
 }
 
 /** Upper bound on one request, headers and body together. A hung backend then
