@@ -304,6 +304,7 @@ def test_registry_covers_every_known_gated_env_var():
     PATCH against it would 404/never apply)."""
     expected = {
         "ASK_ROUTER_ENABLED",
+        "ASK_LLM_ENABLED",
         "ASK_FOLLOWUP_ENABLED",
         "COPILOT_INSIGHT_ENABLED",
         "ASK_HISTORY_ENABLED",
@@ -329,6 +330,7 @@ def test_registry_env_defaults_match_prior_hardcoded_defaults():
     set the env var and never touched the admin UI."""
     expected_defaults = {
         "ask_router_enabled": True,
+        "ask_llm_enabled": True,
         "ask_followup_enabled": False,
         "copilot_insight_enabled": False,
         "ask_history_enabled": True,

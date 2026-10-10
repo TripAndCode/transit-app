@@ -409,3 +409,75 @@ async def test_named_tool_is_dispatched_even_with_a_reply(pool_with_agency, monk
     assert result["tool_call"]["name"] == "capabilities"
     assert result["answer"] != payload["reply"]
     assert cached == 1
+
+
+async def _seed_cache_row(pool, agency_id, question, tool, args):
+    from pipeline.query import intent_cache as ic
+    from pipeline.query.intent import IntentSignature, canonicalize
+    from pipeline.query.intent import signature_hash as _sig_hash
+
+    ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
+    can_args = canonicalize(tool, args, ctx_dict)
+    async with pool.acquire() as conn:
+        await ic.upsert(
+            conn,
+            _sig_hash(tool, can_args),
+            IntentSignature(tool=tool, args=args, confidence=0.9),
+            can_args,
+            agency_id,
+            question=question,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_cached_answer_pinned_to_dates_is_not_replayed_for_its_text(pool_with_agency, monkeypatch):
+    """ "昨日の遅延ランキング" resolved to a fixed day the first time it was
+    asked; the next day the same text means a different day, so the LLM
+    resolves it again rather than the text replaying that first day."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    fake = _FakeClient(_sig_message(tool="capabilities", args={}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+    dated = {"metric": "avg_delay", "from": "2026-05-20", "to": "2026-05-20"}
+    await _seed_cache_row(pool, agency_id, "昨日の遅延ランキング", "top_n", dated)
+
+    async with pool.acquire() as conn:
+        await chat_with_tools("昨日の遅延ランキング", _ctx(), conn, agency_id, locale="ja")
+
+    assert fake.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_switching_the_ask_llm_off_degrades_only_the_llm_stage(pool_with_agency, monkeypatch):
+    """With the kill switch off no provider is called, the answer says so,
+    and what needs no LLM (the text pre-hit) still answers."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_LLM_ENABLED", "false")
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    fake = _FakeClient(_sig_message(tool="capabilities", args={}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+    await _seed_cache_row(pool, agency_id, "路線一覧", "capabilities", {})
+
+    async with pool.acquire() as conn:
+        uncached = await chat_with_tools("新しい質問", _ctx(), conn, agency_id, locale="en")
+        cached = await chat_with_tools("路線一覧", _ctx(), conn, agency_id, locale="en")
+
+    assert fake.calls == 0
+    assert uncached["success"] is False
+    assert uncached["answer"].startswith("AI answers are switched off right now.")
+    assert cached["cache_outcome"] == "hit"
+
+
+@pytest.mark.asyncio
+async def test_switching_the_ask_llm_off_also_stops_the_cacheless_path(pool_with_agency, monkeypatch):
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_LLM_ENABLED", "false")
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "false")
+    fake = _FakeClient(_sig_message(tool="capabilities", args={}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        out = await chat_with_tools("新しい質問", _ctx(), conn, agency_id, locale="ja")
+
+    assert fake.calls == 0
+    assert out["answer"].startswith("AIによる回答は現在停止しています。")

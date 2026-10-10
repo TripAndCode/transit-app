@@ -1516,6 +1516,7 @@
       "clear_error": "Couldn't clear the override.",
       "save_error": "The change was not saved. Your reason is kept here; try again.",
       "labels": {
+        "askLlmEnabled": "Ask: AI answers (LLM)",
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",
         "copilotInsightEnabled": "Copilot: proactive insight",

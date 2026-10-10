@@ -73,7 +73,7 @@ async def test_live_delays_empty(map_client_ch):
     resp = await client.get(f"/api/{agency_id}/delays/live")
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload == {"latest_captured_at": None, "rows": []}
+    assert payload == {"latest_captured_at": None, "rows": [], "truncated": False}
 
 
 @pytest.mark.asyncio
@@ -136,6 +136,28 @@ async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_
     assert row["dep_delay"] == 60
     assert row["scheduled_time"] == "10:05:00"
     assert row["route_code"] == "R_TIE"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_says_when_more_trips_reported_than_it_returns(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "SELECT $1, 'T' || n, 'R', 1, 60 * n, NOW(), 'one.pb', 'weekday', '10:00:00' FROM generate_series(1, 3) n",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id, table=LIVE_TABLE)
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        capped = (await client.get(f"/api/{agency_id}/delays/live", params={"limit": 2})).json()
+        whole = (await client.get(f"/api/{agency_id}/delays/live", params={"limit": 3})).json()
+    assert [r["trip_id"] for r in capped["rows"]] == ["T1", "T2"]
+    assert capped["truncated"] is True
+    assert len(whole["rows"]) == 3
+    assert whole["truncated"] is False
 
 
 @pytest.mark.asyncio

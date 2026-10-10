@@ -223,6 +223,16 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_routes_page", "en"): "routes {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
     ("mt_routes_first", "ja"): "このエージェンシーには {total} 路線あります（先頭 {shown} 件を表示）",
     ("mt_routes_first", "en"): "This agency has {total} routes (showing first {shown})",
+    ("mt_stops_filter_no_match", "ja"): "「{substring}」に該当する停留所がありません。",
+    ("mt_stops_filter_no_match", "en"): "no matching stops for '{substring}'.",
+    ("mt_stops_filter_page", "ja"): (
+        "「{substring}」に一致する全{total}停留所中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）"
+    ),
+    ("mt_stops_filter_page", "en"): (
+        "stops matching '{substring}' {shown_from}–{shown_to} of {total} (next: 'next {limit}')"
+    ),
+    ("mt_stops_filter_first", "ja"): "「{substring}」に一致する停留所: {total} 件（先頭 {shown} 件を表示）",
+    ("mt_stops_filter_first", "en"): "stops matching '{substring}': {total} (showing first {shown})",
     ("mt_stops_none", "ja"): "このエージェンシーには停留所が登録されていません。",
     ("mt_stops_none", "en"): "no stops registered for this agency.",
     ("mt_stops_page", "ja"): "全{total}停留所中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
