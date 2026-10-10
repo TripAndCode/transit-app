@@ -105,7 +105,7 @@ def _table(results: Sequence[AgencyResult], *, peak: bool | None = None, sparse:
 
 
 def _agency(result: AgencyResult) -> str:
-    note = " — short history: fewer origins than the window allows" if result.short_history else ""
+    note = " — short history: early origins have less than a full window" if result.short_history else ""
     span = f"{escape(str(result.first_day))} – {escape(str(result.last_day))}"
     return (
         f"<h3>Agency {result.agency_id}</h3>"

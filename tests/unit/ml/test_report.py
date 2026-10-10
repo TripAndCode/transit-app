@@ -47,3 +47,4 @@ def test_the_report_shows_every_method_every_slice_and_flags_short_history():
     for text in ("B0", "B1", "B2", "<svg", "Peak", "Off-peak", "≤ 2 runs", "Agency 11"):
         assert text in html
     assert html.count("short history") == 1
+    assert "early origins have less than a full window" in html
