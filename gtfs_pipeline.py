@@ -33,6 +33,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 # aborting the whole remaining loop under `set -euo pipefail`.
 EX_TEMPFAIL = 75
 
+# sysexits.h EX_DATAERR -- `ingest --strict` finished but skipped files, so
+# its caller must not count the input as done.
+EX_DATAERR = 65
+
 # Shared by every all-agencies loop below (analyze-all, check-aggs, ingest-live)
 # so a test can assert against the query as actually executed, not a hand-typed
 # copy that would stay green if the real filter were ever reverted.
@@ -335,16 +339,28 @@ def cmd_seed_agencies(args):
 
 
 def cmd_ingest(args):
-    """Run the archive ingest pipeline for one agency."""
+    """Run the archive ingest pipeline for one agency.
+
+    A skipped file is logged and the run still exits 0, which a per-agency
+    shell loop relies on; ``--strict`` exits EX_DATAERR instead.
+    """
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest
+    from pipeline.ingest import IngestIncomplete, ingest
 
     conn = _get_conn()
     _lock_or_skip_agency(conn, "ingest", "ingest", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
-    with pipeline_runs.record_run(conn, "ingest", agency_id=agency_id) as run:
-        run.rows = ingest(args.folder, agency_id, conn, ch_client)
+    try:
+        with pipeline_runs.record_run(conn, "ingest", agency_id=agency_id) as run:
+            try:
+                run.rows = ingest(args.folder, agency_id, conn, ch_client, strict=args.strict)
+            except IngestIncomplete as exc:
+                run.rows = exc.n_inserted
+                raise
+    except IngestIncomplete:
+        conn.close()
+        sys.exit(EX_DATAERR)
     conn.close()
 
 
@@ -825,6 +841,7 @@ def main():
     p_ingest = sub.add_parser("ingest")
     p_ingest.add_argument("folder")
     p_ingest.add_argument("--agency-id", default=None)
+    p_ingest.add_argument("--strict", action="store_true", help=f"exit {EX_DATAERR} if any file was skipped, not 0")
 
     p_static = sub.add_parser("load_static")
     p_static.add_argument("path")

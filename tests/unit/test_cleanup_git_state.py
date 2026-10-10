@@ -309,6 +309,62 @@ def test_build_and_apply_plan_remove_only_clean_recoverable_state(
     assert git(repository, "branch", "--list", "unique-work")
 
 
+def test_a_worktree_holding_ignored_work_is_kept_but_regenerable_files_are_not(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`git worktree remove` erases ignored files without asking. A plan under
+    an ignored path exists nowhere else, so its worktree stays even at the base
+    tip; caches and an installed node_modules alone hold no worktree back."""
+
+    (repository / ".gitignore").write_text(
+        "docs/superpowers/\n.env*\n__pycache__/\n.ruff_cache/\nfrontend/node_modules\n", encoding="utf-8"
+    )
+    git(repository, "add", ".gitignore")
+    git(repository, "commit", "-m", "ignore")
+    git(repository, "push", "origin", "main")
+    planned, env_only, cached = tmp_path / "planned", tmp_path / "env-only", tmp_path / "cached"
+    for branch, path in (("planned", planned), ("env-only", env_only), ("cached", cached)):
+        git(repository, "worktree", "add", "-q", "-b", branch, str(path), "main")
+    (planned / "docs" / "superpowers").mkdir(parents=True)
+    (planned / "docs" / "superpowers" / "plan.md").write_text("plan\n", encoding="utf-8")
+    (env_only / ".env").write_text("KEY=1\n", encoding="utf-8")
+    for cache in ("__pycache__", ".ruff_cache", "pkg/__pycache__"):
+        (cached / cache).mkdir(parents=True)
+        (cached / cache / "x.pyc").write_bytes(b"")
+    (cached / "frontend").mkdir()
+    (cached / "frontend" / "node_modules").symlink_to(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    actions = {decision.branch: decision.action for decision in plan}
+
+    assert (actions["planned"], actions["env-only"], actions["cached"]) == ("keep", "keep", "delete")
+    cleanup.apply_plan(repository, plan)
+    assert (planned / "docs" / "superpowers" / "plan.md").exists()
+    assert not cached.exists()
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("pipeline/__pycache__/", True),
+        (".ruff_cache/0.16.9/", True),
+        ("frontend/node_modules", True),
+        ("frontend/tsconfig.tsbuildinfo", True),
+        ("api/static/", True),
+        ("frontend/coverage/", True),
+        ("frontend/.vite/", True),
+        ("transit_delay_app.egg-info/", True),
+        ("docs/superpowers/", False),
+        (".env", False),
+        (".claude/settings.local.json", False),
+        ("docs/static/", False),
+    ],
+)
+def test_only_caches_installs_and_build_output_count_as_regenerable(path: str, expected: bool):
+    assert cleanup.is_regenerable(path) is expected
+
+
 def commit_on(repo: Path, message: str) -> str:
     """Commit a change to tracked.txt and return the new commit's OID."""
 

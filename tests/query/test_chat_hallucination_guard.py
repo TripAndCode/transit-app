@@ -1,18 +1,14 @@
-"""Wiring test for the numeric-claim verifier
-(:func:`pipeline.query.hallucination_guard.verify_numeric_claims`) into
-``chat_with_tools``'s LLM-authored-free-text return sites.
+"""Which ``chat_with_tools`` return sites carry a numeric-guard verdict.
 
-Every tool-call result in ``chat_with_tools`` is rendered by
-``render_tool_result`` from the dispatched :class:`~pipeline.query.results.ToolResult`
-— deterministic formatting of already-grounded data, never LLM-authored
-prose — so those return sites are correctly excluded from the guard. The one
-return site where ``answer`` really is raw LLM free text is the out-of-scope
-refusal/suggestion path (``tool_calls`` empty, non-empty ``msg.content``) —
-and that site has no dispatched tool result to ground against, so
-:func:`chat._numeric_guard` is called there with ``grounding={}`` and passes
-the reply through: with nothing dispatched there is nothing to trace a number
-back to. Direct accept/reject/skip coverage of the helper is tested here in
-addition to the one live call site.
+Every tool-call result is rendered by ``render_tool_result`` from the
+dispatched :class:`~pipeline.query.results.ToolResult`, deterministic
+formatting of already-grounded data, so the guard has nothing to check there.
+The one site where ``answer`` is raw LLM free text, the out-of-scope
+refusal/suggestion path (``tool_calls`` empty, non-empty ``msg.content``),
+dispatched nothing to ground a number against. Every site therefore reports
+``numeric_guard_triggered`` as None, "no verdict", which ``ask_query_log``
+keeps distinct from FALSE, "checked and clean". The guard itself runs on the
+grounded follow-up (tests/unit/test_followup_numeric_guard.py).
 """
 
 import os
@@ -54,71 +50,21 @@ class _FakeClient:
         return self._message, None
 
 
-# ─── chat._numeric_guard — direct accept/reject behaviour ────────────────────
-
-
-def test_numeric_guard_replaces_fabricated_number():
-    grounding = {"route": "12", "avg_delay_min": 14.2}
-    answer, triggered = chat._numeric_guard("Route 12 is averaging 999.9 minutes late.", grounding, "en")
-    assert triggered is True
-    assert answer is not None
-    assert "999.9" not in answer
-    assert answer == chat._summary("numeric_guard_fallback", lang="en")
-
-
-def test_numeric_guard_passes_grounded_number():
-    grounding = {"route": "12", "avg_delay_min": 14.2}
-    original = "Route 12 is averaging 14.2 minutes late."
-    answer, triggered = chat._numeric_guard(original, grounding, "en")
-    assert triggered is False
-    assert answer == original
-
-
-def test_numeric_guard_passes_no_numbers_trivially():
-    grounding = {"route": "12", "avg_delay_min": 14.2}
-    original = "Delays look typical right now."
-    answer, triggered = chat._numeric_guard(original, grounding, "en")
-    assert triggered is False
-    assert answer == original
-
-
-def test_numeric_guard_passes_through_when_no_data_grounded():
-    """grounding={} carries no data to verify against, so the guard abstains
-    rather than replacing an answer it cannot assess."""
-    original = "It's about 999 minutes late."
-    answer, triggered = chat._numeric_guard(original, {}, "en")
-    assert triggered is False
-    assert answer == original
-
-
-def test_numeric_guard_passes_through_empty_answer():
-    answer, triggered = chat._numeric_guard("", {"x": 1}, "en")
-    assert triggered is False
-    assert answer == ""
-
-
-def test_numeric_guard_uses_localized_fallback_for_japanese():
-    grounding = {"avg_delay_min": 14.2}
-    answer, triggered = chat._numeric_guard("999.9分遅れています。", grounding, "ja")
-    assert triggered is True
-    assert answer == chat._summary("numeric_guard_fallback", lang="ja")
-
-
 # ─── Wired into chat_with_tools's actual return sites ────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_out_of_scope_reply_with_number_passes_through(monkeypatch):
     """The out-of-scope free-text path dispatches no tool, so the guard has no
-    grounding and abstains. Rejecting on digits there replaced the reply
-    SYSTEM_PROMPT asks for — a refusal naming concrete route_codes and periods
-    — with a message about numbers."""
+    grounding and gives no verdict. Rejecting on digits there would replace
+    the reply SYSTEM_PROMPT asks for, a refusal naming concrete route_codes
+    and periods, with a message about numbers."""
     reply = "Buses run about every 999 minutes off-peak."
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message(reply)))
     out = await chat.chat_with_tools("weather today?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is True
     assert out["answer"] == reply
-    assert out["numeric_guard_triggered"] is False
+    assert out["numeric_guard_triggered"] is None
 
 
 @pytest.mark.asyncio
@@ -133,7 +79,7 @@ async def test_out_of_scope_reply_without_number_passes_through(monkeypatch):
     out = await chat.chat_with_tools("weather today?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is True
     assert out["answer"] == "I can only help with transit questions for this agency."
-    assert out["numeric_guard_triggered"] is False
+    assert out["numeric_guard_triggered"] is None
 
 
 @pytest.mark.asyncio
@@ -200,4 +146,4 @@ async def test_out_of_scope_reply_naming_a_route_code_passes_through(monkeypatch
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message(reply)))
     out = await chat.chat_with_tools("雨天時の比較", _ctx(), conn=None, agency_id=1, locale="ja")
     assert out["answer"] == reply
-    assert out["numeric_guard_triggered"] is False
+    assert out["numeric_guard_triggered"] is None

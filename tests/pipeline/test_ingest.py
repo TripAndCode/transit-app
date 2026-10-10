@@ -7,7 +7,7 @@ import pytest
 from clickhouse_connect.driver.exceptions import DataError, OperationalError
 
 from pipeline.clickhouse import insert_updates
-from pipeline.ingest import ingest, parse_trip_id
+from pipeline.ingest import IngestIncomplete, ingest, parse_trip_id
 from tests.fixtures.gtfs_rt import header_only_feed
 
 _FAKE_ROW = (
@@ -336,6 +336,31 @@ def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_member
         ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
     assert _ch_route_codes(ch_client, agency_id) == ["44372"]  # a_ok.pb's row survives z_bad.pb's extractfile failure
+
+
+def test_strict_ingest_raises_after_landing_every_good_file(pg_conn, ch_client, agency_id, tmp_path):
+    """A skipped file still costs only itself under strict; the good one lands
+    first, and the raise carries both counts so the caller can tell a partial
+    ingest from a complete one."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name in ("20260401/a_ok.pb", "20260401/z_bad.pb"):
+            info = tarfile.TarInfo(name=name)
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"\x00"))
+    (tmp_path / "20260401.tar.gz").write_bytes(buf.getvalue())
+
+    def parse(raw, ts, file_name, *a):
+        if file_name.endswith("z_bad.pb"):
+            raise ValueError("undecodable")
+        return [_FAKE_ROW]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=parse):
+        with pytest.raises(IngestIncomplete) as exc_info:
+            ingest(str(tmp_path), agency_id, pg_conn, ch_client, strict=True)
+
+    assert (exc_info.value.n_inserted, exc_info.value.n_errors) == (1, 1)
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]
 
 
 def test_ingest_dedup_skips_seen_files(pg_conn, ch_client, agency_id, tmp_path):
