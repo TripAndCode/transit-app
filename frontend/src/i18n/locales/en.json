@@ -1060,6 +1060,13 @@
       "brush_aria": "Daily chart period brush. Arrow keys move the cursor, Shift+arrows extend the selection, Enter applies it.",
       "brush_range": "{{from}} to {{to}}",
       "severe_band_label": "Severe ({{min}} min and over)",
+      "svg_aria_week": "Weekly average delay chart",
+      "svg_aria_month": "Monthly average delay chart",
+      "worst_day_label_week": "Worst week",
+      "worst_day_label_month": "Worst month",
+      "bucket_date": "{{date}}",
+      "bucket_date_week": "Week of {{date}}",
+      "bucket_date_month": "Month of {{date}}",
       "worst_day_label": "Worst day"
     },
     "dwell_run": {
