@@ -25,7 +25,7 @@ export function ClampSparkline({ days, label }: { days: AgencyClampDay[]; label:
   const max = Math.max(...observed, 0.5);
   const step = values.length > 1 ? width / (values.length - 1) : 0;
 
-  // One <polyline> per unbroken run of observed days, so a gap stays a gap.
+  // One run per unbroken stretch of observed days, so a gap stays a gap.
   const segments: string[][] = [];
   let run: string[] = [];
   values.forEach((v, i) => {
@@ -42,16 +42,23 @@ export function ClampSparkline({ days, label }: { days: AgencyClampDay[]; label:
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       <svg width={width} height={height} role="img" aria-label={label} style={{ display: "block" }}>
-        {segments.map((points) => (
-          <polyline
-            key={points[0]}
-            points={points.join(" ")}
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth={1.5}
-            strokeLinejoin="round"
-          />
-        ))}
+        {segments.map((points) => {
+          if (points.length > 1) {
+            return (
+              <polyline
+                key={points[0]}
+                points={points.join(" ")}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+              />
+            );
+          }
+          // A one-point polyline renders nothing, so a lone observed day is a dot.
+          const [cx, cy] = points[0].split(",");
+          return <circle key={points[0]} cx={cx} cy={cy} r={1.5} fill="var(--accent)" />;
+        })}
       </svg>
       <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
         {latest.toFixed(2)}%
