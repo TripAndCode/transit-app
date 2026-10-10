@@ -8,9 +8,19 @@ from tests.unit.ml.ml_group import require
 
 
 def test_require_raises_when_the_flag_is_set_and_the_module_is_missing(monkeypatch):
+    # Not `pytest.raises(ModuleNotFoundError)`: pytest.skip.Exception isn't a
+    # ModuleNotFoundError, so `raises` would let it propagate uncaught rather
+    # than fail the assertion -- and pytest marks an uncaught skip SKIPPED,
+    # not FAILED, which would hide the exact regression this test exists for.
     monkeypatch.setenv("ML_DEPS_REQUIRED", "1")
-    with pytest.raises(ModuleNotFoundError):
+    try:
         require("not_a_real_module_xyz")
+    except pytest.skip.Exception:
+        pytest.fail("require() skipped despite ML_DEPS_REQUIRED=1")
+    except ModuleNotFoundError:
+        pass
+    else:
+        pytest.fail("require() did not raise for a missing module")
 
 
 def test_require_skips_when_the_flag_is_unset_and_the_module_is_missing(monkeypatch):
