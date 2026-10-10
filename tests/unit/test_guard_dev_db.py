@@ -209,6 +209,14 @@ BLOCKED = [
         "docker compose exec clickhouse clickhouse-client -q 'RENAME TABLE updates TO updates_old'",
         id="ch-rename-table",
     ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY \\"Stops\\" FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-escaped-quoted-table",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME updates TO updates_old'",
+        id="ch-rename-without-table-keyword",
+    ),
     pytest.param("docker compose exec clickhouse clickhouse-client -q 'DETACH TABLE updates'", id="ch-detach-table"),
     pytest.param("docker compose exec clickhouse clickhouse-client -q 'ATTACH TABLE updates'", id="ch-attach-table"),
     pytest.param(
