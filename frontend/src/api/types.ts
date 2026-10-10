@@ -107,6 +107,8 @@ export type DelayTimelineResponse = {
 export type LiveTripsResponse = {
   latest_captured_at: string | null;
   rows: LiveTrip[];
+  /** More trips were reporting than `rows` holds. */
+  truncated: boolean;
 };
 
 export type RouteShapeStop = {

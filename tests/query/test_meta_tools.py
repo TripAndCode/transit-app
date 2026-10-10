@@ -138,6 +138,75 @@ async def test_describe_data_stops(conn_with_observations):
 
 
 @pytest.mark.asyncio
+async def test_describe_data_stops_filter_counts_only_the_matching_stops(conn_with_observations):
+    """The total and the pages describe the filtered set, not every stop."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) "
+            "VALUES ($1, 'X1', '駅前', 40.0, 140.0)",
+            agency_id,
+        )
+        first = await describe_data(
+            {"kind": "stops", "filter_substring": "停留所", "limit": 2}, _ctx(), conn, agency_id, locale="ja"
+        )
+        page = await describe_data(
+            {"kind": "stops", "filter_substring": "停留所", "limit": 2, "offset": 2},
+            _ctx(),
+            conn,
+            agency_id,
+            locale="en",
+        )
+    assert first.summary == "「停留所」に一致する停留所: 5 件（先頭 2 件を表示）"
+    assert page.summary == "stops matching '停留所' 3–4 of 5 (next: 'next 2')"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_stops_filter_no_match_is_empty(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "stops", "filter_substring": "存在しない停留所XYZ"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "empty"
+    assert result.summary == "「存在しない停留所XYZ」に該当する停留所がありません。"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_date_range_summary_names_jst_days(conn_with_seed, ch_client, ch_async_client):
+    """08:00 JST is 23:00 the PREVIOUS day in UTC -- the day .date() on a bare
+    UTC datetime would report. Seeded with an explicit JST tzinfo, not a
+    naive datetime passed to asyncpg: asyncpg encodes a naive value via
+    Python's astimezone(), which reads the *host process's* local timezone
+    (not the session's SET TIME ZONE), so a naive seed's stored instant --
+    and whether this test can tell the bug from the fix at all -- would
+    depend on the machine running it rather than on the code under test."""
+    from zoneinfo import ZoneInfo
+
+    pool, agency_id = conn_with_seed
+    jst = ZoneInfo("Asia/Tokyo")
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, '1021', 1, $4, '08:00'::time, '平日', 60)",
+            [
+                (agency_id, "pb_first", "T_first", datetime(2026, 5, 1, 8, 0, 0, tzinfo=jst)),
+                (agency_id, "pb_last", "T_last", datetime(2026, 5, 26, 8, 0, 0, tzinfo=jst)),
+            ],
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert "2026-05-01" in result.summary and "2026-05-26" in result.summary
+    assert "2026-04-30" not in result.summary and "2026-05-25" not in result.summary
+
+
+@pytest.mark.asyncio
 async def test_describe_data_date_range(conn_with_observations_ch):
     pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:

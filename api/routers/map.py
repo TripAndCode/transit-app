@@ -263,17 +263,24 @@ async def live_delays(
     ch: AsyncClient = Depends(get_ch),
     limit: int = Query(default=500, ge=1, le=500),
 ) -> dict[str, Any]:
-    """Latest reported stop and delay for trips in the current feed window."""
+    """Latest reported stop and delay for trips in the current feed window.
+
+    At most ``limit`` trips, in trip_id order; ``truncated`` says the window
+    held more. The order stays trip_id rather than worst-first because the
+    page's counts and on-time rate are computed over exactly these rows, and
+    a worst-first cut would skew them.
+    """
     latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE)
     if latest_ts is None:
-        return {"latest_captured_at": None, "rows": []}
+        return {"latest_captured_at": None, "rows": [], "truncated": False}
 
     rows_result = await ch.query(
         _LIVE_DELAYS_DEDUP_SQL,
-        parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
+        parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit + 1},
     )
+    truncated = len(rows_result.result_rows) > limit
     out_rows = []
-    for r in rows_result.result_rows:
+    for r in rows_result.result_rows[:limit]:
         row = dict(zip(rows_result.column_names, r, strict=True))
         row["captured_at"] = _as_utc(row["captured_at"])
         # scheduled_time's wire format used to be uniform (Postgres TIME ->
@@ -346,6 +353,7 @@ async def live_delays(
     return {
         "latest_captured_at": latest_ts.isoformat(),
         "rows": out_rows,
+        "truncated": truncated,
     }
 
 
