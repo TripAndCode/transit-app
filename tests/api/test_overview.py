@@ -1364,11 +1364,11 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
-    # Use _init_connection (SET TIME ZONE 'Asia/Tokyo') so pooled conns
+    # Use the production session settings (Asia/Tokyo) so pooled conns
     # mirror production setup exactly.
-    from api.main import _init_connection
+    from api.main import PG_SESSION_SETTINGS
 
-    pool = await _test_pool(init=_init_connection)
+    pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
     finally:
@@ -1982,13 +1982,13 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
 
     mirror_updates_to_ch(ch_client, aagency_id)
 
-    from api.main import _init_connection
+    from api.main import PG_SESSION_SETTINGS
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
 
-    pool = await _test_pool(init=_init_connection)
+    pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool, ch=ch_async_client)
     finally:

@@ -71,10 +71,13 @@ class AskQueryLogPage(BaseModel):
 
 
 def _date_filter_sql(args: list[Any], column: str, from_date: date | None, to_date: date | None) -> list[str]:
+    # Both bounds are cast to dates server-side, so each becomes midnight in
+    # the session's Asia/Tokyo. A date bound straight to a timestamptz
+    # parameter would be midnight in the API process's own zone instead.
     where: list[str] = []
     if from_date is not None:
         args.append(from_date)
-        where.append(f"{column} >= ${len(args)}")
+        where.append(f"{column} >= ${len(args)}::date")
     if to_date is not None:
         args.append(to_date)
         where.append(f"{column} < ${len(args)}::date + INTERVAL '1 day'")

@@ -5,6 +5,7 @@ promote-to-intent-cache, and eval-result endpoints.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -228,6 +229,42 @@ async def test_funnel_defaults_to_the_last_30_days_excluding_older_rows(ask_ops_
 
 
 @pytest.mark.asyncio
+async def test_both_date_bounds_are_jst_days_whatever_the_process_zone(ask_ops_client, monkeypatch):
+    """A row at 03:00 JST on 1 October falls inside from=to=2026-10-01 even
+    when the API process runs in UTC, as a container does."""
+    c, sid, _uid, agency_id, _pool = ask_ops_client
+    from api.main import PG_SESSION_SETTINGS, app
+
+    app.state.pool = jst_pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    try:
+        async with jst_pool.acquire() as conn:
+            jst = timezone(timedelta(hours=9))
+            for at in (
+                datetime(2026, 10, 1, 3, 0, tzinfo=jst),
+                datetime(2026, 10, 1, 23, 30, tzinfo=jst),
+                datetime(2026, 9, 30, 23, 30, tzinfo=jst),
+                datetime(2026, 10, 2, 0, 30, tzinfo=jst),
+            ):
+                await conn.execute(
+                    "INSERT INTO ask_query_log (agency_id, question, router_stage, success, created_at)"
+                    " VALUES ($1, 'q', 'rules', true, $2)",
+                    agency_id,
+                    at,
+                )
+        day = {"from": "2026-10-01", "to": "2026-10-01"}
+        funnel = await c.get("/api/admin/ask/funnel", params=day, cookies={"sid": sid})
+        assert funnel.json()["total"] == 2
+        log = await c.get("/api/admin/ask/queries", params=day, cookies={"sid": sid})
+        assert len(log.json()["rows"]) == 2
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+        await jst_pool.close()
+
+
+@pytest.mark.asyncio
 async def test_promote_requires_admin(ask_ops_client):
     c, *_ = ask_ops_client
     resp = await c.post("/api/admin/ask/promote", json={"query_log_id": 1})
@@ -398,3 +435,20 @@ async def test_eval_returns_latest_artifact_when_present(ask_ops_client, monkeyp
     resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
     assert resp.status_code == 200
     assert resp.json()["score"] == 0.87
+
+
+@pytest.mark.asyncio
+async def test_the_api_session_settings_survive_a_connection_going_back_to_the_pool(apply_schema):
+    """The pool runs RESET ALL whenever it takes a connection back, which
+    undoes a SET. Every later request on that connection still has to see
+    the JST calendar and the statement cap."""
+    from api.main import PG_SESSION_SETTINGS
+
+    pool = await _test_pool(max_size=1, server_settings=PG_SESSION_SETTINGS)
+    try:
+        for _ in range(2):
+            async with pool.acquire() as conn:
+                assert await conn.fetchval("SHOW TIME ZONE") == "Asia/Tokyo"
+                assert await conn.fetchval("SHOW statement_timeout") == "30s"
+    finally:
+        await pool.close()
