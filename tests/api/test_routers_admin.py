@@ -439,3 +439,73 @@ async def test_user_activity_is_admin_only_and_bounded(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     r = await admin_client.get(f"/api/admin/users/{uid}/activity?days=366", cookies={"sid": sid_admin})
     assert r.status_code == 422
+
+
+_ORIGINAL_SUSPENSION = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+async def _seed_suspended_long_ago(aconn):
+    _, uid, _ = await _seed(aconn)
+    await aconn.execute("UPDATE users SET suspended_at = $2 WHERE user_id=$1", uid, _ORIGINAL_SUSPENSION)
+    return uid
+
+
+@pytest.mark.asyncio
+async def test_single_patch_of_other_field_keeps_original_suspended_at(admin_client, aconn):
+    """suspended_at records when the suspension began; a patch that leaves the
+    suspended state alone must not re-stamp it."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    uid = await _seed_suspended_long_ago(aconn)
+    for body in ({"llm_approved": True}, {"suspended": True}):
+        r = await admin_client.patch(
+            f"/api/admin/users/{uid}",
+            json=body,
+            cookies={"sid": sid_admin},
+            headers={"Origin": "http://test"},
+        )
+        assert r.status_code == 200
+        assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) == _ORIGINAL_SUSPENSION
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_keeps_original_suspended_at_for_already_suspended_ids(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    uid = await _seed_suspended_long_ago(aconn)
+    for patch in ({"suspended": True}, {"llm_approved": True}):
+        r = await admin_client.patch(
+            "/api/admin/users/bulk",
+            json={"ids": [uid], "patch": patch},
+            cookies={"sid": sid_admin},
+            headers={"Origin": "http://test"},
+        )
+        assert r.status_code == 200
+        assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) == _ORIGINAL_SUSPENSION
+
+
+@pytest.mark.asyncio
+async def test_suspension_transitions_still_stamp_and_clear_suspended_at(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn)
+    headers = {"Origin": "http://test"}
+    r = await admin_client.patch(
+        f"/api/admin/users/{uid}", json={"suspended": True}, cookies={"sid": sid_admin}, headers=headers
+    )
+    assert r.status_code == 200
+    stamped = await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid)
+    assert stamped is not None and stamped > _ORIGINAL_SUSPENSION
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid], "patch": {"suspended": False}},
+        cookies={"sid": sid_admin},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) is None
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) > _ORIGINAL_SUSPENSION
