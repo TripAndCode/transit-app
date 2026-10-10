@@ -62,4 +62,25 @@ describe("FilterContextBar", () => {
     expect(inputs.length).toBe(2);
     inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
   });
+
+  describe("editor accessibility", () => {
+    it("labels the two date inputs from and to", () => {
+      renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "all", time_band: "all", routes: [] });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByLabelText("From")).toHaveValue("2026-06-01");
+      expect(screen.getByLabelText("To")).toHaveValue("2026-07-15");
+    });
+
+    it("reports which day-of-week and time-band pills are selected", () => {
+      renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "weekday", time_band: "morning", routes: [] });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const pressed = screen.getAllByRole("button", { pressed: true }).map((b) => b.textContent);
+      expect(pressed).toContain("Weekdays only");
+      expect(pressed).toContain(i18n.t("filters.time_band.morning"));
+      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: false })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Weekends/holidays only" }));
+      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: true })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Weekdays only", pressed: false })).toBeInTheDocument();
+    });
+  });
 });
