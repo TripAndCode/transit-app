@@ -479,7 +479,14 @@ fi
 PY_PATHSPEC=('*.py')
 FE_PATHSPEC=(
   'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs'
+  'frontend/*.cjs' 'frontend/*.mts' 'frontend/*.py'
   'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs'
+)
+# Paths that are not Python but carry backend pytest coverage (migration drift,
+# Makefile and compose safety, the hooks' own tests), so changing one runs the
+# backend checks.
+BACKEND_PATHSPEC=(
+  '*.sql' '*.sh' '*Makefile' '*compose*.yml' '.claude/hooks/*' '.codex/*'
 )
 
 PY_FILES=()
@@ -512,6 +519,11 @@ if branch_changes "${DEPS_PATHSPEC[@]}"; then
   PY_DEPS_CHANGED=1
 fi
 
+BACKEND_PATHS_CHANGED=0
+if [ "$SCOPE_OK" -eq 1 ] && branch_changes "${BACKEND_PATHSPEC[@]}"; then
+  BACKEND_PATHS_CHANGED=1
+fi
+
 # "Nothing changed here" is the shape a misdirected gate takes, so it cannot
 # be accepted on the word of a directory we only guessed at. When the push
 # names a branch that does carry changes, this directory is the wrong one and
@@ -527,7 +539,7 @@ fi
 # would otherwise read as a deletion and switch this whole check off.
 IS_DELETE=0
 [ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
-if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ] && [ "$PY_DEPS_CHANGED" -eq 0 ]; then
+if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ] && [ "$PY_DEPS_CHANGED" -eq 0 ] && [ "$BACKEND_PATHS_CHANGED" -eq 0 ]; then
   # A literal `HEAD` (`git push origin HEAD`) or a completely bare
   # `git push` (relying on the branch's own upstream tracking) cannot be
   # checked by this safety net: both mean "whatever branch GATE_DIR is
@@ -548,11 +560,10 @@ if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
     # Filtered to the same pathspecs the scoped checks use (and with the
     # same --diff-filter=ACMR as PY_FILES/FE_FILES above): a branch whose
-    # only Python/frontend change is a deletion, or one that changes only
-    # shell/SQL/Markdown, legitimately produces no files here, and
-    # comparing against its unfiltered diff would refuse both pushes for
-    # a directory that was never actually wrong.
-    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" "${DEPS_PATHSPEC[@]}" 2>/dev/null)" ]; then
+    # only change is a deletion, or only Markdown, legitimately produces no
+    # files here, and comparing against its unfiltered diff would refuse
+    # both pushes for a directory that was never actually wrong.
+    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" "${DEPS_PATHSPEC[@]}" "${BACKEND_PATHSPEC[@]}" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
       echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
       echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
@@ -578,7 +589,7 @@ if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
 fi
 
 RUN_BACKEND=0
-if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ] || [ "$PY_DEPS_CHANGED" -eq 1 ]; then
+if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ] || [ "$PY_DEPS_CHANGED" -eq 1 ] || [ "$BACKEND_PATHS_CHANGED" -eq 1 ]; then
   RUN_BACKEND=1
 fi
 

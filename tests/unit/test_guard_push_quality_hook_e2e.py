@@ -186,3 +186,35 @@ def test_deletion_only_branch_from_the_correct_worktree_is_not_blocked(fake_repo
         claude_project_dir=fake_repo,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        "db/migrations/0050_x.up.sql",
+        "scripts/tool.sh",
+        "Makefile",
+        "deploy/vps/compose.yml",
+        ".claude/hooks/guard-dev-db.sh",
+        "frontend/scripts/ts6-for-eslint.cjs",
+        "frontend/scripts/lint-i18n-strings.py",
+        "frontend/src/localeChunkMap.d.mts",
+    ],
+)
+def test_a_branch_changing_only_a_checked_non_python_path_is_not_waved_through(fake_repo, changed):
+    """Each path has test coverage that the gate must run. A branch touching
+    only such a path used to count as "nothing to check", so the safety net
+    passed a misdirected gate and nothing was verified; the net now sees the
+    change and refuses the misdirected push."""
+    _git("branch", "feature", cwd=fake_repo)
+    worktree = fake_repo.parent / "feature-worktree"
+    _git("worktree", "add", "-q", str(worktree), "feature", cwd=fake_repo)
+    target = worktree / changed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x\n")
+    _git("add", changed, cwd=worktree)
+    _git("commit", "-q", "-m", "change", cwd=worktree)
+
+    result = _run_hook(f"git -C {fake_repo} push origin feature", claude_project_dir=fake_repo)
+    assert result.returncode == 2, result.stderr
+    assert "nothing differs from" in result.stderr
