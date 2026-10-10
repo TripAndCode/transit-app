@@ -175,6 +175,13 @@ describe("AdminAskOpsPage", () => {
     queriesReturn = { data: undefined, isLoading: false, error: new Error("boom") };
     wrap(<AdminAskOpsPage />);
     expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.queryByText(i18n.t("admin.ask_ops.empty"))).toBeNull();
+  });
+
+  it("does not claim the query log is empty while it is loading", () => {
+    queriesReturn = { data: undefined, isLoading: true, error: null };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(i18n.t("admin.ask_ops.empty"))).toBeNull();
   });
 
   it("shows neither a zero funnel nor 'not run' while those queries are loading", () => {

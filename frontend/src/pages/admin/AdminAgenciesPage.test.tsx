@@ -27,13 +27,7 @@ const HEALTH = [
     latest_data_date: "2026-09-19",
     last_analyzed_at: "2026-09-20T01:00:00+00:00",
     last_capture_at: "2026-09-20T02:30:00+00:00",
-    rt_coverage: {
-      complete: true,
-      present_count: 4,
-      field_count: 4,
-      probed: true,
-      last_probed_at: null,
-    },
+    rt_coverage: { complete: true, present_count: 4, field_count: 4, probed: true, last_probed_at: null },
     clamp_history: [{ date: "2026-09-19", clamp_pct: 0.4 }],
     static_version: { version: "v2026-09-01", loaded_at: null },
   },
@@ -47,13 +41,7 @@ const HEALTH = [
     latest_data_date: "2026-09-01",
     last_analyzed_at: null,
     last_capture_at: null,
-    rt_coverage: {
-      complete: false,
-      present_count: 0,
-      field_count: 4,
-      probed: false,
-      last_probed_at: null,
-    },
+    rt_coverage: { complete: false, present_count: 0, field_count: 4, probed: false, last_probed_at: null },
     clamp_history: [{ date: "2026-09-19", clamp_pct: null }],
     static_version: null,
   },
@@ -80,91 +68,49 @@ const DIAGNOSTICS = {
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
 };
 
-/** Overrides what the agencies list query returns; `null` keeps the fixture. */
-let agenciesOverride: {
-  data: undefined;
-  isLoading: boolean;
-  error: Error | null;
-} | null = null;
+/** Overrides fields of the agencies list query result; `null` keeps the fixture. */
+let agenciesOverride: { data?: undefined; isLoading?: boolean; error?: Error | null } | null = null;
 
-let delState: { isPending: boolean; variables: number | undefined } = {
-  isPending: false,
-  variables: undefined,
-};
-let restoreState: { isPending: boolean; variables: number | undefined } = {
-  isPending: false,
-  variables: undefined,
-};
+let delState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
+let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
 
 // Mock the admin API module
 vi.mock("../../api/admin", () => ({
-  useAdminAgencies: () =>
-    agenciesOverride ?? {
-      data: [
-        {
-          agency_id: 1,
-          agency_name: "Aomori Bus",
-          feed_url: "http://feed.example.com",
-          static_url: null,
-          ingest_strategy: "aomori_regex",
-          trip_id_pattern: null,
-          deleted_at: null,
-        },
-        {
-          agency_id: 2,
-          agency_name: "Deleted Bus",
-          feed_url: "http://del.example.com",
-          static_url: null,
-          ingest_strategy: null,
-          trip_id_pattern: null,
-          deleted_at: "2026-06-01T00:00:00Z",
-        },
-      ],
-      isLoading: false,
-      error: null,
-    },
-  useCreateAgencyAdmin: () => ({
-    mutateAsync: createMutateAsync,
-    isPending: false,
+  useAdminAgencies: () => ({
+    data: [
+      {
+        agency_id: 1,
+        agency_name: "Aomori Bus",
+        feed_url: "http://feed.example.com",
+        static_url: null,
+        ingest_strategy: "aomori_regex",
+        trip_id_pattern: null,
+        deleted_at: null,
+      },
+      {
+        agency_id: 2,
+        agency_name: "Deleted Bus",
+        feed_url: "http://del.example.com",
+        static_url: null,
+        ingest_strategy: null,
+        trip_id_pattern: null,
+        deleted_at: "2026-06-01T00:00:00Z",
+      },
+    ],
+    isLoading: false,
     error: null,
-    reset: createReset,
+    ...agenciesOverride,
   }),
-  usePatchAgency: () => ({
-    mutateAsync: patchMutateAsync,
-    isPending: false,
-    error: null,
-    reset: patchReset,
-  }),
+  useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
+  usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
   useDeleteAgency: () => ({ mutate: delMutate, ...delState }),
   useRestoreAgency: () => ({ mutate: restoreMutate, ...restoreState }),
   useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
-  useAgencyDiagnostics: () => ({
-    data: DIAGNOSTICS,
-    isLoading: false,
-    error: null,
-  }),
-  useProbeAgencyFeed: () => ({
-    mutate: probeMutate,
-    isPending: false,
-    error: null,
-    data: undefined,
-  }),
-  useReanalyzeAgency: () => ({
-    mutate: reanalyzeMutate,
-    isPending: false,
-    error: null,
-    data: undefined,
-  }),
-  usePatchAgencyStandards: () => ({
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  }),
-  usePatchAgencyWeights: () => ({
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  }),
+  useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
+  useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
+  useReanalyzeAgency: () => ({ mutate: reanalyzeMutate, isPending: false, error: null, data: undefined }),
+  usePatchAgencyStandards: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
+  usePatchAgencyWeights: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
 }));
 
 function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
@@ -174,7 +120,7 @@ function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
       </QueryClientProvider>
-    </I18nextProvider>,
+    </I18nextProvider>
   );
 }
 
@@ -226,10 +172,7 @@ describe("AdminAgenciesPage", () => {
     await user.click(screen.getByRole("button", { name: /add agency/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText(/agency name/i), "New Co");
-    await user.type(
-      within(dialog).getByLabelText(/feed url/i),
-      "http://new.example.com",
-    );
+    await user.type(within(dialog).getByLabelText(/feed url/i), "http://new.example.com");
     await user.click(within(dialog).getByRole("button", { name: /^add$/i }));
     expect(createMutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -238,7 +181,7 @@ describe("AdminAgenciesPage", () => {
         static_url: null,
         ingest_strategy: null,
         trip_id_pattern: null,
-      }),
+      })
     );
   });
 
@@ -265,10 +208,7 @@ describe("AdminAgenciesPage", () => {
     const drawer = within(screen.getByLabelText("Agency details"));
     const confirmButton = drawer.getByRole("button", { name: /^Disable$/ });
     expect(confirmButton).toHaveProperty("disabled", true);
-    await user.type(
-      drawer.getByLabelText(/type the agency name to confirm/i),
-      "Aomori Bus",
-    );
+    await user.type(drawer.getByLabelText(/type the agency name to confirm/i), "Aomori Bus");
     await user.click(confirmButton);
     expect(delMutate).toHaveBeenCalledWith(1);
   });
@@ -278,9 +218,7 @@ describe("AdminAgenciesPage", () => {
     wrap(<AdminAgenciesPage />);
     await user.click(screen.getByText("Deleted Bus"));
     const drawer = within(screen.getByLabelText("Agency details"));
-    expect(
-      drawer.queryByLabelText(/type the agency name to confirm/i),
-    ).toBeNull();
+    expect(drawer.queryByLabelText(/type the agency name to confirm/i)).toBeNull();
     await user.click(drawer.getByRole("button", { name: /^Restore$/ }));
     expect(restoreMutate).toHaveBeenCalledWith(2);
   });
@@ -295,10 +233,7 @@ describe("AdminAgenciesPage", () => {
 
   it("shows every agency under a pressed All chip for a ?view= it does not offer", () => {
     wrap(<AdminAgenciesPage />, ["/admin/agencies?view=retired"]);
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Aomori Bus")).toBeTruthy();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
   });
@@ -316,11 +251,7 @@ describe("AdminAgenciesPage", () => {
     const { unmount } = wrap(<AdminAgenciesPage />);
     expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
     unmount();
-    agenciesOverride = {
-      data: undefined,
-      isLoading: false,
-      error: new Error("boom"),
-    };
+    agenciesOverride = { data: undefined, isLoading: false, error: new Error("boom") };
     wrap(<AdminAgenciesPage />);
     expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
   });
@@ -328,10 +259,7 @@ describe("AdminAgenciesPage", () => {
   it("shows an empty-state row when the search matches nothing", async () => {
     const user = userEvent.setup();
     wrap(<AdminAgenciesPage />);
-    await user.type(
-      screen.getByPlaceholderText("Search by name"),
-      "nonexistent-agency",
-    );
+    await user.type(screen.getByPlaceholderText("Search by name"), "nonexistent-agency");
     expect(screen.getByText("No agencies found.")).toBeTruthy();
   });
 });

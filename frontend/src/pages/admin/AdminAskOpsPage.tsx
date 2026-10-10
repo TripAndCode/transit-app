@@ -182,6 +182,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
         columns={columns}
         rowKey={(row) => String(row.id)}
         emptyLabel={t("admin.ask_ops.empty")}
+        settled={data != null}
         pending={isPlaceholderData}
       />
       <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
