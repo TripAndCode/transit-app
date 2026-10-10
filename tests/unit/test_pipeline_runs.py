@@ -192,10 +192,17 @@ def test_the_reaper_spares_the_locked_kinds_while_the_lock_is_held():
     reap_abandoned_runs(conn, now=_NOW)
     sql, params = conn.statements[0]
     assert "FROM pg_locks" in sql
-    assert params[2:] == (["ingest", "promote", "analyze"], 0, INGEST_ANALYZE_LOCK_KEY)
+    assert params[2:] == (
+        ["ingest", "promote", "analyze"],
+        INGEST_ANALYZE_LOCK_KEY >> 32,
+        INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
+    )
 
 
-def test_the_reaper_defaults_to_a_two_hour_grace_so_a_long_sweep_is_left_alone():
+def test_the_reaper_passes_the_default_two_hour_cutoff():
+    """The two-hour default itself; sparing a still-running locked kind past
+    it is a separate mechanism, covered by the lock-presence tests below and
+    in tests/pipeline/test_locks.py."""
     conn = _Conn()
     reap_abandoned_runs(conn, now=_NOW)
     _, params = conn.statements[0]

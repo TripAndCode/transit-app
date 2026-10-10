@@ -260,8 +260,11 @@ def test_the_reaper_spares_a_locked_kind_while_the_lock_is_held(pg_conn):
         reap_abandoned_runs(pg_conn)
         assert _status(pg_conn, analyze_run) == ("running", None)
         assert _status(pg_conn, weather_run) == ("error", "abandoned")
+        # Explicit unlock, not connection teardown: close()'s release is async
+        # (see the release-on-close test above), so asserting the freed-lock
+        # case right after close() would race it.
+        _unlock_global(holder)
     finally:
         holder.close()
-    # The lock died with its session: nothing is left to finish the row.
     reap_abandoned_runs(pg_conn)
     assert _status(pg_conn, analyze_run) == ("error", "abandoned")

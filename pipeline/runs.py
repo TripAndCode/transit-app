@@ -95,8 +95,11 @@ _REAP_ABANDONED_SQL = """
 #: How long a ``running`` row is left alone before it is treated as
 #: abandoned, since reaping a run that is still working would replace a true
 #: bar with a false error. A full rebuild can hold the lock for hours, which
-#: is why a locked kind is also spared for as long as the lock is held; this
-#: age only bounds how long a dead process's row stays open.
+#: is why a locked kind is also spared past this age for as long as the lock
+#: is held -- that spare is keyed on the lock, not on the row's own process,
+#: so it closes at the first reap that lands while the lock is next free, not
+#: within this age. For an unlocked kind, this age is the one bound: the row
+#: closes at the first reap once it is older than this.
 DEFAULT_REAP_AGE = timedelta(hours=2)
 
 
