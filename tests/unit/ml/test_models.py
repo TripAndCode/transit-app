@@ -15,6 +15,7 @@ from ml.training import training_frame  # noqa: E402
 
 START = date(2026, 6, 1)
 FAST = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=5, half_life_days=28)
+PRODUCTION_SCALE = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=100, half_life_days=28)
 
 
 def _runs(days=70, seed=3):
@@ -139,6 +140,22 @@ def test_fit_calibrated_falls_back_when_training_rows_are_too_few_to_split():
     assert 0 < len(train) < 2 * FAST.min_data_in_leaf  # too few rows to split even one leaf
 
     models = fit_calibrated(frame, FAST, cutoff)
+    preds = predict(models, frame)
+    by_route = frame.assign(pred=preds.mean).groupby("route_code")["pred"].mean()
+    assert abs(by_route["LATE"] - by_route["EARLY"]) > 1.0  # not collapsed to one constant
+
+
+def test_fit_calibrated_falls_back_at_production_scale_even_above_twice_min_data_in_leaf():
+    """bagging_fraction (0.8 by default) samples only a share of train per round,
+    so 2*min_data_in_leaf rows is not actually enough to split a leaf once
+    bagging is in play; the guard must account for it, not just min_data_in_leaf."""
+    runs = _runs(days=60)
+    cutoff = START + timedelta(days=50)
+    frame = training_frame(runs, cutoff, window_days=28, half_life_days=28)
+    train, _ = split_calibration(frame, cutoff)
+    assert 2 * PRODUCTION_SCALE.min_data_in_leaf <= len(train) < 230  # the gap the old guard missed
+
+    models = fit_calibrated(frame, PRODUCTION_SCALE, cutoff)
     preds = predict(models, frame)
     by_route = frame.assign(pred=preds.mean).groupby("route_code")["pred"].mean()
     assert abs(by_route["LATE"] - by_route["EARLY"]) > 1.0  # not collapsed to one constant

@@ -4,6 +4,7 @@ conformalized quantile regression. Needs the optional `ml` dependency group."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Protocol
@@ -109,15 +110,26 @@ def split_calibration(frame: pd.DataFrame, cutoff: date) -> tuple[pd.DataFrame, 
     return frame[~held], frame[held]
 
 
+def _min_rows_to_split(params: ModelParams) -> int:
+    """The fewest rows that can still form two min_data_in_leaf-sized leaves.
+    Each boosting round samples only bagging_fraction of the rows before
+    looking for a split (when bagging_freq > 0), so the real floor is twice
+    min_data_in_leaf scaled up by how much of the data a round actually sees
+    — not min_data_in_leaf alone."""
+    floor = 2 * params.min_data_in_leaf
+    if params.bagging_freq > 0:
+        floor = math.ceil(floor / params.bagging_fraction)
+    return floor
+
+
 def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> ModelSet:
     """A short-history agency can have too few rows outside the calibration
-    window to split even one leaf — LightGBM needs at least min_data_in_leaf
-    rows per leaf, so a thin, non-empty train set still trains, but collapses
-    to one constant prediction with no signal. Train on the whole frame
-    uncalibrated (interval_shift stays 0.0) below twice that floor, the same
+    window to split even one leaf; such a train set still trains, but
+    collapses to one constant prediction with no signal. Train on the whole
+    frame uncalibrated (interval_shift stays 0.0) below that floor, the same
     as when the split leaves nothing to train on at all."""
     train, calib = split_calibration(frame, cutoff)
-    if len(train) < 2 * params.min_data_in_leaf:
+    if len(train) < _min_rows_to_split(params):
         return fit(frame, params)
     models = fit(train, params)
     if not calib.empty:
