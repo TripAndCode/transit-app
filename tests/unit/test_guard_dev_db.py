@@ -196,6 +196,36 @@ BLOCKED = [
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
     ),
+    # Statements that mutate a store without any of the common write verbs.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY stops FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-stdin",
+    ),
+    pytest.param(
+        "psql postgresql://transit:transit@localhost:5433/transit -c \"COPY stops (stop_id) FROM '/tmp/s.csv'\"",
+        id="sql-copy-columns-from-file",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME TABLE updates TO updates_old'",
+        id="ch-rename-table",
+    ),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'DETACH TABLE updates'", id="ch-detach-table"),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'ATTACH TABLE updates'", id="ch-attach-table"),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'EXCHANGE TABLES a AND b'", id="ch-exchange-tables"
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates FINAL DEDUPLICATE'",
+        id="ch-optimize-deduplicate",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "REFRESH MATERIALIZED VIEW mv_x"',
+        id="pg-refresh-materialized-view",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "SELECT * INTO stops_copy FROM stops"',
+        id="pg-select-into-new-table",
+    ),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -229,6 +259,17 @@ ALLOWED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY (SELECT * FROM stops) TO STDOUT"',
+        id="sql-copy-to-reads-data-out",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q \"SELECT * FROM updates INTO OUTFILE '/tmp/u.csv'\"",
+        id="ch-select-into-outfile",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates'", id="ch-optimize-merges-only"
     ),
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
