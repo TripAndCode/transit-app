@@ -147,9 +147,9 @@ async def test_happy_path_calls_ingest_once(client):
     ],
 )
 async def test_only_a_failure_on_this_side_asks_the_collector_to_retry(client, caplog, raised, status):
-    """The collector's curl --retry resends on a 5xx only. A disabled agency or
-    bytes that cannot be decoded fail the same way every time, so they are a
-    4xx, logged as a warning without a traceback."""
+    """The collector's curl --retry resends on a 5xx (or a 408/429). A disabled
+    agency or bytes that cannot be decoded fail the same way every time, so
+    they are a 404 or 422, logged as a warning without a traceback."""
     with patch("api.routers.internal._ingest_collector_payload", side_effect=raised):
         async with client as ac:
             r = await ac.post("/internal/collector/updates/1", headers=VALID_HEADERS, content=b"protobuf-bytes")

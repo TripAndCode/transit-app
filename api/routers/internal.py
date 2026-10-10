@@ -155,9 +155,9 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             captured.astimezone(timezone.utc).isoformat(),
             file_name,
         )
-    # A 4xx tells the collector that resending the same request cannot help;
-    # its curl --retry resends only on a 5xx. Neither of these is this
-    # service failing, so neither logs a traceback.
+    # 404 and 422 tell the collector that resending the same request cannot
+    # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
+    # of these. Neither is this service failing, so neither logs a traceback.
     except UnknownAgency as exc:
         _log.warning("collector push for unknown or disabled agency %s", agency_id)
         raise HTTPException(status_code=404, detail="Unknown or disabled agency") from exc
