@@ -581,6 +581,9 @@ export function MapTab() {
             <StatTile label={td("delayedLabel")} value={delayedRows.length} flagged={delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
+          {liveQuery.data?.truncated && (
+            <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveQuery.data.rows.length })}</p>
+          )}
           {/* Directly under the tiles, because the CSV is exactly the rows
               they count -- and above the delay list, so a long list can't
               push the export below the panel's scroll. */}

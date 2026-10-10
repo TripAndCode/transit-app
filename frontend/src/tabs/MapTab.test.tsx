@@ -18,8 +18,8 @@ import { MockMap } from "../test/maplibreMock";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
-function liveTrips(rows: LiveTripsResponse["rows"] = []): LiveTripsResponse {
-  return { latest_captured_at: rows.length ? "2026-06-01T00:00:00Z" : null, rows };
+function liveTrips(rows: LiveTripsResponse["rows"] = [], truncated = false): LiveTripsResponse {
+  return { latest_captured_at: rows.length ? "2026-06-01T00:00:00Z" : null, rows, truncated };
 }
 
 function todaySummary(): RouteSummaryResponse {
@@ -107,6 +107,38 @@ describe("MapTab", () => {
     expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Download CSV/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Fit all trips in view/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("live-truncated")).not.toBeInTheDocument();
+  });
+
+  it("says the counts cover only the trips shown when more were reporting", () => {
+    mockCommonHooks();
+    const capturedAt = new Date().toISOString();
+    const row: LiveTrip = {
+      trip_id: "t1",
+      route_code: "R1",
+      service_type: null,
+      scheduled_time: "08:00:00",
+      dep_delay: 30,
+      captured_at: capturedAt,
+      stop_id: "s1",
+      stop_sequence: 1,
+      stop_name: "Stop 1",
+      stop_lat: 40.8,
+      stop_lon: 140.7,
+      headsign: "Downtown",
+    };
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([row], true),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap();
+    expect(screen.getByTestId("live-truncated")).toHaveTextContent(
+      "Too many trips to show at once: showing 1, and the counts cover only these",
+    );
   });
 });
 
