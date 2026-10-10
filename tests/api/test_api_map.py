@@ -1594,6 +1594,48 @@ async def test_route_stop_profile_reads_today_from_updates_live(map_app_ch, ch_c
 
 
 @pytest.mark.asyncio
+async def test_route_shape_counts_each_trip_day_once(map_app_ch, ch_client):
+    """A GTFS trip_id recurs on every service day, so a multi-day range holds
+    one observation per trip-day: the trip run on two days gives the stop
+    two samples, and its average is over both days, not the latest one."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW() - INTERVAL '1 day', 'd1.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 1, 120, NOW() - INTERVAL '2 days', 'd2.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    [stop] = resp.json()["stops"]
+    assert (stop["samples"], stop["avg_min"]) == (2, 1.5)
+
+
+@pytest.mark.asyncio
 async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_ch, ch_client):
     """If trips have a shape_id but static_shapes has no matching row,
     geometry is null and stops are still populated."""

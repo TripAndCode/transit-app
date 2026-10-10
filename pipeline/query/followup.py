@@ -2,7 +2,8 @@
 
 The follow-up answers a free-text question using ONLY the data in a prior
 assistant message's result. It never invokes a tool — the table is the
-sole context.
+sole context, and an answer quoting a number that context does not hold is
+replaced by the numeric-guard fallback (:mod:`pipeline.query.hallucination_guard`).
 
 Feature flag: ``ASK_FOLLOWUP_ENABLED`` (off by default per the LLM-feature
 kill-switch policy: define an objective stop criterion + a graceful disable
@@ -17,7 +18,9 @@ import logging
 import os
 
 from pipeline.flags import aflag, flag
+from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.llm_client import get_client
+from pipeline.query.tools import _summary
 
 _log = logging.getLogger(__name__)
 
@@ -150,8 +153,13 @@ async def answer_followup(
     )
     if err is not None or msg is None:
         return "", err or "unexpected"
-    content = getattr(msg, "content", None) or ""
-    return content.strip(), None
+    answer = (getattr(msg, "content", None) or "").strip()
+    # Grounded on exactly what the model was shown: the serialized context and
+    # the question, whose own numbers it may repeat.
+    if not verify_numeric_claims(answer, {"context": context_block, "question": q}):
+        _log.info("follow-up answer quoted a number its context does not hold; replaced")
+        return _summary("numeric_guard_fallback", lang=locale), None
+    return answer, None
 
 
 __all__ = ["MAX_QUESTION_CHARS", "answer_followup", "is_enabled"]
