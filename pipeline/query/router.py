@@ -90,8 +90,9 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="meta-date-range",
-        # "いつ" must be followed directly by から/まで: "いつも…から" is a habit, not a date.
-        pattern=re.compile(r"(いつ(から|まで))|((最新|最古).*?(データ|観測))|(何件.*?(観測|データ))"),
+        # "いつ" must be followed directly (or by 頃/ごろ) by から/まで:
+        # "いつも…から" is a habit, not a date.
+        pattern=re.compile(r"(いつ(頃|ごろ)?(から|まで))|((最新|最古).*?(データ|観測))|(何件.*?(観測|データ))"),
         tool="describe_data",
         args={"kind": "date_range"},
         unless=re.compile(_ANALYTIC_WORDS),
