@@ -424,9 +424,9 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
   );
 }
 
-/** Titled surface built on the shared `Card`; `onOpen` makes the whole card a
- *  keyboard-operable control (see `clickable`), matching the Overview card
- *  pattern this was migrated from. */
+/** Titled surface built on the shared `Card`; `onOpen` adds an explicit Expand
+ *  button (keyboard and assistive-tech entry point) and makes a pointer click
+ *  anywhere on the card open it too. */
 function SectionCard({ title, sublabel, testid, onOpen, children }: {
   title: string;
   sublabel: string;
