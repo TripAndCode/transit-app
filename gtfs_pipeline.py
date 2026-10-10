@@ -399,13 +399,16 @@ def cmd_refresh_static(args):
 
 
 def cmd_analyze(args):
-    """Run the analysis pass for one agency."""
-    from pipeline.analyze import analyze
+    """Run the analysis pass for one agency. ``--full`` rebuilds every date
+    instead of only the ones the ledger sees changed."""
+    from pipeline.analyze import analyze, mark_for_full_rebuild
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
     _lock_or_skip_agency(conn, "analyze", "analyze", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
+    if args.full:
+        mark_for_full_rebuild(conn, [agency_id])
     ch_client = get_client()
     with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
         analyze(agency_id, conn, ch_client)
@@ -416,10 +419,11 @@ def cmd_analyze_all(args):
     """Analyze every agency; report all failures and exit nonzero if any failed.
 
     Run-all-then-report: one agency raising does not abort the others, so a
-    single run surfaces every failure at once. Replaces the silent per-agency
-    loop as the canonical full rebuild.
+    single run surfaces every failure at once. Each agency is analyzed
+    incrementally, rebuilding only the dates its ledger sees changed;
+    ``--full`` rebuilds every date of every agency instead.
     """
-    from pipeline.analyze import analyze
+    from pipeline.analyze import analyze, mark_for_full_rebuild
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
@@ -432,6 +436,8 @@ def cmd_analyze_all(args):
         logger.info("No agencies found.")
         conn.close()
         return
+    if args.full:
+        mark_for_full_rebuild(conn, agency_ids)
     failed = []
     for aid in agency_ids:
         try:
@@ -854,10 +860,13 @@ def main():
     p_refresh.add_argument("--agency-id", default=None, help="Specific agency (default: all configured)")
     p_refresh.add_argument("--dest", default="raw_archives_static", help="Local destination directory for fetched zips")
 
+    full_help = "Rebuild every date, not only the ones whose row counts changed"
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)
+    p_analyze.add_argument("--full", action="store_true", help=full_help)
 
-    sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
+    p_analyze_all = sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
+    p_analyze_all.add_argument("--full", action="store_true", help=full_help)
     sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
     p_restamp = sub.add_parser(
         "restamp_archive", help="Restamp archive-ingested updates rows with the time archive ingest assigns today"

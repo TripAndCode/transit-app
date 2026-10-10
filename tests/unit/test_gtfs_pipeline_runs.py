@@ -37,7 +37,7 @@ def _conn():
             "ingest",
             "pipeline.ingest.ingest",
         ),
-        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "analyze", "pipeline.analyze.analyze"),
+        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1, full=False), "analyze", "pipeline.analyze.analyze"),
     ],
 )
 def test_a_displaced_single_agency_job_is_recorded_as_skipped(cmd, args, kind, target):
@@ -81,7 +81,7 @@ def test_a_displaced_whole_fleet_job_is_recorded_and_still_exits_1():
         patch("pipeline.analyze.analyze"),
     ):
         with pytest.raises(SystemExit) as exc_info:
-            gtfs_pipeline.cmd_analyze_all(Namespace())
+            gtfs_pipeline.cmd_analyze_all(Namespace(full=False))
     assert exc_info.value.code == 1
     assert start.call_args.kwargs["status"] == "skipped"
 
@@ -95,7 +95,7 @@ def test_a_displaced_whole_fleet_job_is_recorded_and_still_exits_1():
             "ingest",
             "pipeline.ingest.ingest",
         ),
-        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "analyze", "pipeline.analyze.analyze"),
+        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1, full=False), "analyze", "pipeline.analyze.analyze"),
         (
             gtfs_pipeline.cmd_load_static,
             Namespace(agency_id=1, path="/tmp/x.zip"),
@@ -131,7 +131,7 @@ def test_a_failing_job_closes_its_row_as_an_error_and_still_raises():
         patch("pipeline.analyze.analyze", side_effect=RuntimeError("bad day")),
     ):
         with pytest.raises(RuntimeError):
-            gtfs_pipeline.cmd_analyze(Namespace(agency_id=1))
+            gtfs_pipeline.cmd_analyze(Namespace(agency_id=1, full=False))
 
     assert finish.call_args.args[2] == "error"
     assert "bad day" in finish.call_args.kwargs["error"]
@@ -149,7 +149,7 @@ def test_analyze_all_records_one_row_per_agency_and_keeps_going_past_a_failure()
         patch("pipeline.analyze.analyze", side_effect=[RuntimeError("one"), None]),
     ):
         with pytest.raises(SystemExit):
-            gtfs_pipeline.cmd_analyze_all(Namespace())
+            gtfs_pipeline.cmd_analyze_all(Namespace(full=False))
 
     assert [call.args[2] for call in finish.call_args_list] == ["error", "ok"]
 
@@ -197,3 +197,45 @@ def test_strict_ingest_exits_dataerr_and_records_the_partial_run(strict, code):
             assert exc_info.value.code == code
 
     assert (finish.call_args.args[2], finish.call_args.kwargs["rows"]) == ("ok" if code is None else "error", 5)
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_analyze_full_marks_the_agency_for_a_full_rebuild_before_analyzing(full):
+    """The ledger compares per-date counts, so a date whose rows were replaced
+    by as many others reads as unchanged; --full is the one way to rebuild it."""
+    conn = _conn()
+    order = MagicMock()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run"),
+        patch("pipeline.analyze.mark_for_full_rebuild", order.mark),
+        patch("pipeline.analyze.analyze", order.analyze),
+    ):
+        gtfs_pipeline.cmd_analyze(Namespace(agency_id=1, full=full))
+
+    names = [call[0] for call in order.mock_calls]
+    assert names == (["mark", "analyze"] if full else ["analyze"])
+    if full:
+        assert order.mark.call_args.args[1] == [1]
+
+
+def test_analyze_all_full_marks_every_agency_before_analyzing_any():
+    conn = _conn()
+    conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(1,), (2,)]
+    order = MagicMock()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run"),
+        patch("pipeline.analyze.mark_for_full_rebuild", order.mark),
+        patch("pipeline.analyze.analyze", order.analyze),
+    ):
+        gtfs_pipeline.cmd_analyze_all(Namespace(full=True))
+
+    assert [call[0] for call in order.mock_calls] == ["mark", "analyze", "analyze"]
+    assert order.mark.call_args.args[1] == [1, 2]

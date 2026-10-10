@@ -29,7 +29,7 @@ import gtfs_pipeline
     "cmd,args,target",
     [
         (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
-        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "pipeline.analyze.analyze"),
+        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1, full=False), "pipeline.analyze.analyze"),
     ],
 )
 def test_single_agency_cmd_exits_tempfail_and_never_calls_the_work_when_lock_is_held(cmd, args, target):
@@ -77,7 +77,7 @@ def test_whole_fleet_cmd_exits_1_and_never_calls_the_work_when_lock_is_held(cmd,
     [
         (gtfs_pipeline.cmd_ingest, Namespace(agency_id=1, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
         (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=1), "pipeline.ingest.ingest_live"),
-        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1), "pipeline.analyze.analyze"),
+        (gtfs_pipeline.cmd_analyze, Namespace(agency_id=1, full=False), "pipeline.analyze.analyze"),
     ],
 )
 def test_cmd_proceeds_when_lock_is_free(cmd, args, target):
@@ -103,6 +103,6 @@ def test_cmd_analyze_all_proceeds_when_lock_is_free():
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
         patch("pipeline.analyze.analyze") as fake_analyze,
     ):
-        gtfs_pipeline.cmd_analyze_all(Namespace())
+        gtfs_pipeline.cmd_analyze_all(Namespace(full=False))
 
     assert fake_analyze.call_count == 2

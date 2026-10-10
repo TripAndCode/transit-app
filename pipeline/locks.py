@@ -75,6 +75,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from psycopg2.extensions import TRANSACTION_STATUS_INERROR
+
 # Arbitrary, fixed -- only needs to be distinct from any other advisory
 # lock this codebase takes, and there are none as of this writing. Reused as
 # the first argument of the two-argument per-agency key so both domains stay
@@ -162,5 +164,12 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     try:
         yield
     finally:
+        # A statement that failed inside the block leaves the transaction
+        # aborted, and an aborted transaction refuses every statement, the
+        # unlock included: that failure would replace the block's own error
+        # and keep the lock until the connection closes. The block has already
+        # lost its transaction, so rolling it back costs nothing.
+        if conn.get_transaction_status() == TRANSACTION_STATUS_INERROR:
+            conn.rollback()
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))
