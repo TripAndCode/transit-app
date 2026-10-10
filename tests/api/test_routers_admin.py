@@ -156,6 +156,21 @@ async def test_last_admin_guard_survives_concurrent_demotes(admin_client, aconn)
 
 
 @pytest.mark.asyncio
+async def test_admin_user_sessions_omit_expired_sessions(admin_client, aconn):
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    _sid, uid, _ = await _seed(aconn)
+    await aconn.execute(
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(f"expired-{uid}"),
+        uid,
+        datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+    r = await admin_client.get(f"/api/admin/users/{uid}/sessions", cookies={"sid": admin_sid})
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+
+
+@pytest.mark.asyncio
 async def test_suspend_kills_sessions(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     sid_target, uid_target, _ = await _seed(aconn)
