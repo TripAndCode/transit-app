@@ -5,7 +5,7 @@ from tests.unit.ml.ml_group import require
 pd = require("pandas")
 np = require("numpy")
 
-from ml.features import FEATURES, build_frame, route_ids, with_route_ids  # noqa: E402
+from ml.features import FEATURES, build_frame, route_ids, weekend_days, with_route_ids  # noqa: E402
 
 ORIGIN = date(2026, 9, 8)  # a Tuesday
 
@@ -99,3 +99,28 @@ def test_a_gap_day_is_missing_from_every_window_not_zero():
     runs = _runs([(-d, "R1", "T1", 8, 4.0, "wk") for d in range(2, 30)] + [(1, "R1", "T1", 8, 0.0, "wk")])
     row = build_frame(runs, ORIGIN).iloc[0]
     assert row.route_mean == 4.0 and np.isnan(row.route_prev)
+
+
+def test_a_precomputed_weekend_table_on_the_same_runs_gives_the_same_frame():
+    runs = _runs(
+        [
+            (-3, "R1", "S", 9, 1.0, "holiday-svc"),
+            (-10, "R1", "S", 9, 1.0, "holiday-svc"),
+            (-1, "R1", "W", 8, 1.0, "weekday-svc"),
+            (6, "R1", "S", 9, 0.0, "holiday-svc"),
+            (6, "R1", "W", 8, 0.0, "weekday-svc"),
+        ]
+    )
+    direct = build_frame(runs, ORIGIN)
+    precomputed = build_frame(runs, ORIGIN, precomputed_weekend_days=weekend_days(runs))
+    pd.testing.assert_frame_equal(direct[FEATURES], precomputed[FEATURES])
+
+
+def test_weekend_share_does_not_see_rows_on_or_after_the_origin():
+    history = [(-3 - 7 * k, "R1", "S", 9, 1.0, "holiday-svc") for k in range(2)]  # weekend-only so far
+    leaked_future = [(d, "R1", "LEAK", 9, 1.0, "holiday-svc") for d in range(0, 5)]  # weekday, same service
+    target = [(6, "R1", "S", 9, 0.0, "holiday-svc")]
+    runs = _runs(history + leaked_future + target)
+    table = weekend_days(runs)  # built over rows that include origin day and later
+    frame = build_frame(runs, ORIGIN, precomputed_weekend_days=table)
+    assert frame.set_index("trip_id").loc["S"].service_weekend_share == 1.0

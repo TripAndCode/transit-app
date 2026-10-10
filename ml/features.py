@@ -97,13 +97,11 @@ def build_frame(
     """One row per run on origin+1..origin+horizon_days, with its features as of
     origin−1 and its actual delay. The origin day itself is neither history nor
     target. `runs` must carry `route_id` (with_route_ids). `precomputed_weekend_days`,
-    when given, must come from `weekend_days()` on a superset of `runs`; it is
-    filtered to origin−1 here either way, so passing it changes performance, not
-    the result."""
+    when given, must come from `weekend_days()` on this same `runs`; it is filtered
+    to origin−1 here either way, so passing it changes performance, not the result."""
     t = pd.Timestamp(origin)
     last = t - pd.Timedelta(days=1)
-    past = runs[runs["service_date"] <= last]
-    hist = past[past["service_date"] >= t - pd.Timedelta(days=window_days)]
+    hist = runs[(runs["service_date"] <= last) & (runs["service_date"] >= t - pd.Timedelta(days=window_days))]
     hist = hist.assign(weekday=hist["service_date"].dt.dayofweek.astype("int16"))
     upcoming = (runs["service_date"] > t) & (runs["service_date"] <= t + pd.Timedelta(days=horizon_days))
     frame = runs[upcoming].copy()
@@ -125,11 +123,12 @@ def build_frame(
             .join(_trip_stats(hist), on=TRIP)
             .join(agency_days, on="agency_id")
         )
-    if past.empty:
+    all_days = precomputed_weekend_days if precomputed_weekend_days is not None else weekend_days(runs)
+    days = all_days[all_days["service_date"] <= last]
+    if days.empty:
         frame["service_weekend_share"] = np.nan
     else:
-        days = precomputed_weekend_days if precomputed_weekend_days is not None else weekend_days(past)
-        frame = frame.join(_weekend_share(days[days["service_date"] <= last]), on=["agency_id", "service"])
+        frame = frame.join(_weekend_share(days), on=["agency_id", "service"])
 
     frame[_COUNTS] = frame[_COUNTS].fillna(0)
     numeric = [column for column in [*FEATURES, "slot_p10", "slot_p90"] if column not in CATEGORICAL]
@@ -139,8 +138,9 @@ def build_frame(
 
 def _slot_stats(hist: pd.DataFrame) -> pd.DataFrame:
     """B0 (the slot's runs-weighted mean), B1 (its latest day) and the slot's
-    spread over the window. p10/p90 are B0's own empirical interval, carried for
-    a later model's short-history fallback to it."""
+    spread over the window. p10/p90 are B0's own empirical interval; computed
+    and typed alongside the other features but left out of FEATURES, available
+    to a caller that wants a per-slot interval directly from this frame."""
     grouped = hist.groupby(SLOT)["delay_min"]
     stats = grouped.agg(slot_mean="mean", slot_runs="size", slot_std="std")
     bounds = grouped.quantile([0.1, 0.9]).unstack()
