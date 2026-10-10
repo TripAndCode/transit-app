@@ -79,6 +79,14 @@ BLOCKED = [
         "make prune-query-log && psql postgresql://transit:transit@localhost:5544/transit_test -c 'SELECT 1'",
         id="throwaway-port-only-in-another-command",
     ),
+    # The last of two assignments is the one the command sees.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit make prune-query-log",
+        id="later-assignment-points-back-at-dev",
+    ),
+    # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
+    pytest.param("make bootstrap", id="make-bootstrap"),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
@@ -314,16 +322,31 @@ READ_ONLY_TARGETS = {
 READ_ONLY_SUBCOMMANDS = {"check_aggs", "check_migrations", "digest"}
 
 
-def test_every_make_target_reaching_a_store_is_classified():
-    """A new target that runs against $(db_url) or the ClickHouse client must be
-    gated or deliberately named read-only; unlisted, the guard waves it through."""
-    gated = set(_guard_module().DESTRUCTIVE_TARGETS)
+def _targets_reaching_a_store() -> set[str]:
+    """Targets whose recipe runs against $(db_url) or the ClickHouse client,
+    directly or through a `$(MAKE) <target>` it calls."""
+    import re
+
+    recipes = _make_recipes()
+    calls = {target: set(re.findall(r"\$\(MAKE\)\s+([A-Za-z0-9_.-]+)", recipe)) for target, recipe in recipes.items()}
     reaching = {
         target
-        for target, recipe in _make_recipes().items()
+        for target, recipe in recipes.items()
         if "$(db_url)" in recipe or "get_client" in recipe or "ch-bootstrap" in recipe
     }
-    assert reaching - gated - READ_ONLY_TARGETS == set()
+    while True:
+        grown = reaching | {target for target, called in calls.items() if called & reaching}
+        if grown == reaching:
+            return reaching
+        reaching = grown
+
+
+def test_every_make_target_reaching_a_store_is_classified():
+    """A new target that runs against $(db_url) or the ClickHouse client, itself
+    or through a target it calls, must be gated or deliberately named
+    read-only; unlisted, the guard waves it through."""
+    gated = set(_guard_module().DESTRUCTIVE_TARGETS)
+    assert _targets_reaching_a_store() - gated - READ_ONLY_TARGETS == set()
 
 
 def test_every_cli_subcommand_is_classified():

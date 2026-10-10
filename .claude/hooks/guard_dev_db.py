@@ -45,12 +45,13 @@ DEV_SERVICES = {"db", "clickhouse"}
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
-# Matched against the lowercased NAME=value assignments of the same simple
-# command -- the env prefix or a make variable -- so a throwaway port named
-# anywhere else (another command, a comment) points nothing at it.
+# Per store, the variable that points it and the throwaway value of it. Read
+# from the NAME=value assignments of the same simple command -- the env prefix
+# or a make variable -- so a throwaway port named anywhere else (another
+# command, a comment) points nothing at it.
 THROWAWAY = {
-    "pg": re.compile(r"database_url=\S*:5544\b"),
-    "ch": re.compile(r"clickhouse_port=8124\b"),
+    "pg": ("database_url", re.compile(r"\S*:5544\b")),
+    "ch": ("clickhouse_port", re.compile(r"8124$")),
 }
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
 # overrides nothing -- the Makefile's own defaults from .env, the shell's for
@@ -61,6 +62,7 @@ THROWAWAY = {
 # them at the throwaway stack.
 DESTRUCTIVE_TARGETS = {
     "analyze": {"pg"},
+    "bootstrap": {"pg", "ch"},
     "analyze-all": {"pg"},
     "build-rag-index": {"pg"},
     "ch-bootstrap": {"ch"},
@@ -275,8 +277,14 @@ def _segment_writes_dev(segment: list[str]) -> bool:
                 writes |= DESTRUCTIVE_TARGETS.get(target, set())
         elif name in _CLI_NAMES and i + 1 < len(segment):
             writes |= DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set())
-    assignments = [tok for tok in segment if _ASSIGNMENT.match(tok)]
-    return any(not any(THROWAWAY[store].match(a) for a in assignments) for store in writes)
+    # Later assignments win, as they do for the shell's env prefix and for
+    # make's own command-line variables, which also override the prefix.
+    assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
+    for store in writes:
+        name, throwaway = THROWAWAY[store]
+        if not throwaway.match(assigned.get(name, "")):
+            return True
+    return False
 
 
 # `make` options whose value is the next argument, not a target.
