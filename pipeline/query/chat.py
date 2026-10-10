@@ -483,9 +483,11 @@ async def chat_with_tools(
     client = _get_client()
     # The operator's kill switch, checked inside _call_llm before any provider
     # or BYOK key is touched. The rules/embedding routing stages (resolved by
-    # the caller before this function runs), the intent-cache pre-hit, and the
-    # build sentinel never call _call_llm, so they keep answering while it is
-    # off.
+    # the caller before this function runs), the intent-cache pre-hit's
+    # undated rows, and the build sentinel never call _call_llm, so they keep
+    # answering while it is off. A dated pre-hit row is nulled out by the
+    # _carries_dates check below regardless of this flag, so it falls through
+    # to _call_llm and surfaces "disabled" like any other question would.
     llm_enabled = await aflag("ask_llm_enabled")
     # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
     # caller isn't approved: _call_llm below rejects them unconditionally
