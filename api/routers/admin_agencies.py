@@ -231,23 +231,23 @@ async def agency_diagnostics(
     agency_id: int,
     request: Request,
     _admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> AgencyDiagnostics:
     """Everything the agency drawer renders, in one round of queries.
 
     The seven reads below have no dependency on each other, so they run
     concurrently, each on its own connection acquired from the pool: a
     single asyncpg connection cannot multiplex queries, so awaiting them one
-    at a time on the request's shared ``conn`` would serialize seven round
-    trips for no reason. Only the header lookup uses the request-scoped
-    ``conn`` -- it has to run first anyway, to 404 before spending pool
-    connections on an agency that doesn't exist.
+    at a time would serialize seven round trips for no reason. The header
+    lookup runs first, to 404 before spending pool connections on an agency
+    that doesn't exist, and gives its connection back before the others are
+    taken: a request holding one while it waits for seven more is how enough
+    concurrent requests drain the pool and wait on each other forever.
     """
-    header = await _load_agency(conn, agency_id)
+    pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        header = await _load_agency(conn, agency_id)
     today = jst_today()
     window_start = today - timedelta(days=ad.CLAMP_HISTORY_DAYS - 1)
-
-    pool = request.app.state.pool
 
     async def _fetch(sql: str, *args: Any) -> list[asyncpg.Record]:
         async with pool.acquire() as c:
