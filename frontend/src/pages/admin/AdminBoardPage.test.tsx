@@ -285,6 +285,16 @@ describe("AdminBoardPage", () => {
     expect(screen.getByText(i18n.t("admin.board.runs_now"))).toBeInTheDocument();
   });
 
+  it("moves the now marker while the board stays open, with or without new data", () => {
+    wrap(<AdminBoardPage />);
+    const markerX = () => Number(screen.getByTestId("run-now-marker").querySelector("line")?.getAttribute("x1"));
+    const before = markerX();
+    act(() => {
+      vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+    });
+    expect(markerX()).toBeGreaterThan(before);
+  });
+
   it("says so when nothing has run today instead of drawing an empty chart", () => {
     mockQuery = { data: { ...BOARD, runs: [] }, error: null, isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
