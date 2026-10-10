@@ -179,6 +179,7 @@
     "band_night": "夜",
     "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
+    "detail_hide_grid": "曜日×時間帯の詳細を閉じる",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
     "no_data": "この路線の計測記録がまだありません。",
