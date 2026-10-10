@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
@@ -94,5 +94,53 @@ describe("HourlyHeatmap hour labels", () => {
       return Number(label!.getAttribute("y"));
     });
     for (let h = 1; h < 24; h++) expect(ys[h] - ys[h - 1]).toBeGreaterThanOrEqual(12);
+  });
+});
+
+function LocationProbe() {
+  return <output data-testid="loc">{useLocation().search}</output>;
+}
+
+describe("HourlyHeatmap keyboard access", () => {
+  function renderWithProbe() {
+    return renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={ONE_CELL} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+  }
+
+  it("reaches the hour filter from the keyboard", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe();
+    const hour = screen.getByRole("button", { name: "Filter to 8:00" });
+    expect(hour).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(hour, { key: "Enter" });
+    expect(screen.getByTestId("loc").textContent).toContain("time_band=morning");
+  });
+
+  it("reaches the day filter from the keyboard", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe();
+    const date = screen.getByRole("button", { name: "Filter to Jun 1, 2026" });
+    fireEvent.keyDown(date, { key: " " });
+    expect(screen.getByTestId("loc").textContent).toContain("from=2026-06-01");
+  });
+
+  it("is a group, not an image, so its buttons stay exposed", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe();
+    expect(screen.queryByRole("img", { name: "Time-band delay heatmap" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Time-band delay heatmap" })).toBeInTheDocument();
+  });
+
+  it("tells assistive tech whether the legend is open", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe();
+    const toggle = screen.getByRole("button", { name: "Show legend" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 });

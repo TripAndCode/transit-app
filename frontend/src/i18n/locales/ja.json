@@ -1023,6 +1023,8 @@
       "delay_label": "遅延:",
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
+      "hour_filter_aria": "{{hour}}時で絞り込む",
+      "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
       "ramp_max": "{{min}}分以上",

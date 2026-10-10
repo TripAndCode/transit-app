@@ -1023,6 +1023,8 @@
       "delay_label": "Delay:",
       "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
+      "hour_filter_aria": "Filter to {{hour}}:00",
+      "date_filter_aria": "Filter to {{date}}",
       "tooltip_hour": "{{hour}}:00 · avg",
       "tooltip_metrics": "{{min}} · {{count}} obs.",
       "ramp_max": "{{min}} min and over",
