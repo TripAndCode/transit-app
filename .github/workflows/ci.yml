@@ -212,6 +212,7 @@ jobs:
       - uses: ./.github/actions/setup-backend
         with:
           python-version: "3.14"
+          groups: ml
 
       - name: Start Postgres from db/Dockerfile
         id: postgres
@@ -280,6 +281,7 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
+          ML_DEPS_REQUIRED: 1
           CI_SHARD_INDEX: ${{ matrix.shard }}
           CI_SHARD_COUNT: ${{ strategy.job-total }}
           # Coverage instruments every line the suite executes and nothing

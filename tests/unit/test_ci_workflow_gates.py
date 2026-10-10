@@ -469,3 +469,24 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
                     "cannot fail the step"
                 )
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
+
+
+def test_the_test_job_installs_the_ml_group_and_requires_its_tests() -> None:
+    """The model tests skip where the optional `ml` group is absent. In CI's test
+    job a missing group must fail them, or they would pass by never running."""
+    steps = _workflow_yaml()["jobs"]["test"]["steps"]
+    setup = next(step for step in steps if step.get("uses") == "./.github/actions/setup-backend")
+    assert "ml" in str(setup["with"].get("groups", "")).split()
+    run_tests = next(step for step in steps if step.get("name") == "Run tests")
+    assert str(run_tests["env"].get("ML_DEPS_REQUIRED")) == "1"
+
+
+def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart() -> None:
+    action = yaml.safe_load(SETUP_BACKEND.read_text())
+    assert action["inputs"]["groups"]["default"] == ""
+    steps = action["runs"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install dependencies")
+    assert install["env"]["POETRY_EXTRA_GROUPS"] == "${{ inputs.groups }}"
+    assert "--with" in install["run"]
+    cache = next(step for step in steps if step.get("name") == "Restore the Poetry venv")
+    assert "inputs.groups" in cache["with"]["key"]

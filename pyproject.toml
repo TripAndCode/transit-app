@@ -60,6 +60,16 @@ torch = [
     {version = "^2.14", markers = "sys_platform != 'linux'"},
 ]
 
+[tool.poetry.group.ml]
+optional = true
+
+[tool.poetry.group.ml.dependencies]
+# The delay-forecast models. The VPS workbench and CI's test job install this
+# group; the deploy image installs `--only main` and nothing in the app imports it.
+numpy = ">=2.2"
+pandas = "^3"
+lightgbm = "^4.6"
+
 [[tool.poetry.source]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
