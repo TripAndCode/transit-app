@@ -187,6 +187,28 @@ async def test_movers_returns_delta(movers_pool):
     assert result.rows[0]["route_code"] == "R1"  # |+6| is largest
 
 
+async def test_a_route_with_no_prior_window_has_no_delta_and_ranks_last(movers_pool):
+    """A route new to the current window has nothing to compare against: its
+    delta is not its whole average measured from 0 min, and it must not
+    outrank a route that genuinely moved."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "NEW", "平日", 4.0, 100),
+            ("2026-04-10", "R1", "平日", 3.5, 100),  # delta +1
+            ("2026-04-03", "R1", "平日", 2.5, 100),
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        result = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    assert [r["route_code"] for r in result.rows] == ["R1", "NEW"]
+    new = result.rows[1]
+    assert (new["current_avg"], new["previous_avg"], new["delta"], new["delta_pct"]) == (4.0, None, None, None)
+
+
 async def test_movers_labels_filtered_to_returned_routes(movers_pool):
     """Route-label lookup is filtered to the routes `top` actually keeps, not
     every route static_routes has for the agency -- a query-shape change
@@ -224,7 +246,7 @@ async def test_anomalies_reads_agg_daily_trend(movers_pool):
     )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 4))
     async with pool.acquire() as c:
-        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, sigma=1.5)
     assert isinstance(res, AnomalyTimeline)
     assert [s["date"] for s in res.series] == ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04"]
     assert res.series[0]["avg_delay"] == 3.0
@@ -354,7 +376,7 @@ async def test_anomalies_pools_exact_sum_delay_sec_not_reweighted_avg(movers_poo
     )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 1))
     async with pool.acquire() as c:
-        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, sigma=1.5)
     assert res.series[0]["avg_delay"] == 3.0
 
 
@@ -399,7 +421,7 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 4))
     async with pool.acquire() as c:
-        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, sigma=1.5)
     by_date = {s["date"]: s["avg_delay"] for s in res.series}
     assert by_date["2026-04-04"] is None
     # With the NULL day correctly excluded, all 3 real days are identical
