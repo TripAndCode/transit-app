@@ -163,6 +163,13 @@ async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T 
   }
 }
 
+/** Upper bound on one request, headers and body together. A hung backend then
+ *  surfaces as a `TimeoutError` (classified `timeout`) instead of a section
+ *  that stays on its skeleton until the browser gives up. It sits above the
+ *  server's own limits (30s statement timeout, 30s per LLM call) so a request
+ *  the server would still answer is not cut off. */
+export const REQUEST_TIMEOUT_MS = 90_000;
+
 // credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
 // cookie. Same-origin requests (single-origin prod / make serve) are
 // unaffected — browsers always send same-origin cookies.
@@ -179,5 +186,7 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
     "Accept-Language": lang,
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
-  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include", signal });
 }

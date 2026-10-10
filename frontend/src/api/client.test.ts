@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ApiError, apiPatch, isAggregateNotReady } from "./client";
+import { ApiError, REQUEST_TIMEOUT_MS, apiGet, apiPatch, isAggregateNotReady } from "./client";
+import { classifyError } from "./errorClass";
 
 describe("isAggregateNotReady", () => {
   it("is true for a 503 with the aggregate_not_ready code", () => {
@@ -37,9 +38,63 @@ describe("apiPatch", () => {
 
     await apiPatch("/api/admin/users/1", { role: "admin" }, { signal: controller.signal });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/admin/users/1"),
-      expect.objectContaining({ signal: controller.signal }),
+    // The request signal is the caller's combined with the client's timeout,
+    // so it is not the same object; aborting the caller's must abort it.
+    const sent = fetchMock.mock.calls[0]?.[1]?.signal as AbortSignal;
+    expect(sent.aborted).toBe(false);
+    controller.abort();
+    expect(sent.aborted).toBe(true);
+  });
+});
+
+describe("request timeout", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A fetch that never answers and rejects the way fetch does on abort. */
+  function hangingFetch() {
+    return vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      });
+    });
+  }
+
+  it("fails a stalled request with a TimeoutError that classifies as timeout", async () => {
+    // AbortSignal.timeout runs on the runtime's own timer, which fake timers
+    // do not drive, so the test owns the signal it hands out.
+    const deadline = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    vi.stubGlobal("fetch", hangingFetch());
+    vi.stubGlobal("localStorage", { getItem: () => null });
+
+    const settled = apiGet("/api/slow").then(
+      () => null,
+      (e: unknown) => e,
     );
+    deadline.abort(new DOMException("The operation timed out.", "TimeoutError"));
+
+    const err = await settled;
+    expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    expect((err as Error).name).toBe("TimeoutError");
+    expect(classifyError(err)).toBe("timeout");
+  });
+
+  it("still lets the caller abort a request before the timeout", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    const controller = new AbortController();
+
+    const settled = apiGet("/api/slow", { signal: controller.signal }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    controller.abort();
+
+    const err = await settled;
+    expect((err as Error).name).toBe("AbortError");
+    expect(classifyError(err)).not.toBe("timeout");
   });
 });
