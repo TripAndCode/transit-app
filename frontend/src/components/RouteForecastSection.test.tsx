@@ -117,6 +117,16 @@ describe("RouteForecastSection", () => {
     expect(screen.queryByText("Day × time of day (all routes)")).toBeNull();
   });
 
+  it("flips the full-grid toggle to a hide label with aria-expanded once the grid is open", () => {
+    renderSection(overview(), "100");
+    const toggle = screen.getByRole("button", { name: "Show day × hour detail" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    const open = screen.getByRole("button", { name: "Hide day × hour detail" });
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("fc-detail-fullgrid")).toBeInTheDocument();
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();

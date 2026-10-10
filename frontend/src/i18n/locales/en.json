@@ -179,6 +179,7 @@
     "band_night": "Night",
     "detail_worst_phrase": "Worst on {{day}} {{band}} ({{avg}})",
     "detail_show_grid": "Show day × hour detail",
+    "detail_hide_grid": "Hide day × hour detail",
     "low_confidence_note": "Few measurements — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
     "no_data": "No delay measurements for this route yet.",
