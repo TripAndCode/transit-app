@@ -68,9 +68,10 @@ function LlmKeySection() {
     },
     onError: (err) => {
       setApiKey("");
-      // Only a 4xx the server raised about the key itself says "rejected";
-      // a 5xx, rate limit or dropped connection says nothing about the key.
-      const rejected = err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+      // Only the 400 the server raises about the key itself says "rejected";
+      // a 401/403 (session or CSRF), rate limit, 5xx or dropped connection
+      // says nothing about the key.
+      const rejected = err instanceof ApiError && err.status === 400;
       setSaveError(t(rejected ? "account.llm_key.rejected" : "account.llm_key.save_error"));
     },
   });

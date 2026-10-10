@@ -131,6 +131,19 @@ describe("AccountPage BYOK section", () => {
     expect(alert).toHaveTextContent(/couldn't save|保存できませんでした/i);
   });
 
+  it("does not call an expired session or CSRF refusal (403) on save a rejected key", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) =>
+      path === "/api/me/llm-key" ? { configured: false } : [],
+    );
+    vi.spyOn(client, "apiPut").mockRejectedValue(new client.ApiError(403, JSON.stringify({ detail: "csrf" })));
+    renderPage();
+    await userEvent.type(await screen.findByLabelText(/api key|apiキー/i), "maybe-good");
+    await userEvent.click(screen.getByText(/^save$|^保存$/i));
+    const alert = await screen.findByRole("alert");
+    expect(alert).not.toHaveTextContent(/key rejected|キーが拒否/i);
+    expect(alert).toHaveTextContent(/couldn't save|保存できませんでした/i);
+  });
+
   it("shows an error, not a blank section, when the sessions fetch failed", async () => {
     vi.spyOn(client, "apiGet").mockImplementation(async (path: string) => {
       if (path === "/api/me/sessions") throw new client.ApiError(500, "boom");
