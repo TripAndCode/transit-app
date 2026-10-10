@@ -363,19 +363,41 @@ def parse_feed(
     stop_seqs = [k[1] for k in keys]
 
     with conn.cursor() as cur:
-        # One primary-key probe per (trip_id, stop_sequence) the feed reported,
-        # into both tables' PKs. A collector push parses each poll on a fresh
-        # connection, so anything built once per connection (a copy of the
-        # whole schedule) would be rebuilt for every poll.
+        # Two probes, not one three-way join: a single join over a poll with
+        # enough distinct keys gives Postgres's planner the choice of
+        # scanning most of the agency's static_trips instead of walking a PK
+        # per key, reintroducing close to the whole-schedule cost this
+        # replaces the temp table to avoid. Resolving static_stop_times first
+        # bounds the static_trips lookup by the poll's own distinct trip
+        # count, never by the agency's trip table size, regardless of how
+        # many keys the poll carries. A collector push parses each poll on a
+        # fresh connection, so anything built once per connection (a copy of
+        # the whole schedule) would be rebuilt for every poll.
         cur.execute(
-            "SELECT k.trip_id, k.stop_sequence, t.service_id, st.departure_time, t.static_version_id "
+            "SELECT k.trip_id, k.stop_sequence, st.departure_time "
             "FROM unnest(%s::text[], %s::int[]) AS k(trip_id, stop_sequence) "
             "JOIN static_stop_times st "
-            "  ON st.agency_id = %s AND st.trip_id = k.trip_id AND st.stop_sequence = k.stop_sequence "
-            "JOIN static_trips t ON t.agency_id = %s AND t.trip_id = k.trip_id",
-            (trip_ids, stop_seqs, agency_id, agency_id),
+            "  ON st.agency_id = %s AND st.trip_id = k.trip_id AND st.stop_sequence = k.stop_sequence",
+            (trip_ids, stop_seqs, agency_id),
         )
-        joined = {(tid, seq): (svc, dep, ver) for (tid, seq, svc, dep, ver) in cur.fetchall()}
+        stop_rows = cur.fetchall()
+        matched_trip_ids = list({tid for tid, _seq, _dep in stop_rows})
+        trips: dict[str, tuple[str, str]] = {}
+        if matched_trip_ids:
+            cur.execute(
+                "SELECT trip_id, service_id, static_version_id FROM static_trips "
+                "WHERE agency_id = %s AND trip_id = ANY(%s)",
+                (agency_id, matched_trip_ids),
+            )
+            trips = {tid: (svc, ver) for tid, svc, ver in cur.fetchall()}
+        # static_stop_times has no FK to static_trips, so a stop_sequence
+        # row's trip_id matching here but not there is possible (a malformed
+        # feed, or a partial load) -- the two-query split must still count
+        # that the same way the original single INNER JOIN on both tables
+        # did: as no match at all, not a half match.
+        joined: dict[tuple[str, int], tuple[str | None, str, str | None]] = {
+            (tid, seq): (trips[tid][0], dep, trips[tid][1]) for tid, seq, dep in stop_rows if tid in trips
+        }
         # Per trip, not per stop: a stop the schedule JOIN misses is still on
         # its trip's route.
         routeless_trips = list({r[0] for r in raw_rows if not r[1]})

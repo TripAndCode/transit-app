@@ -44,7 +44,7 @@ def test_static_join_handles_repeated_calls_same_transaction(pg_conn):
     assert rows1[0][5] == "R1"  # route_code from RT
 
 
-def test_static_join_reuses_schedule_table_across_two_different_trips(pg_conn):
+def test_static_join_resolves_two_different_trips_on_one_connection(pg_conn):
     """Two parse_feed calls on the same connection must each resolve their
     own trip -- not just avoid raising (the repeated-calls test above), but
     return correct, distinct JOIN results, never the first call's."""
@@ -78,7 +78,7 @@ def test_static_join_reuses_schedule_table_across_two_different_trips(pg_conn):
     assert rows_b[0][3] == "土日祝" and rows_b[0][4] == "08:10:00"
 
 
-def test_static_join_isolates_schedule_tables_across_agencies_sharing_one_connection(pg_conn):
+def test_static_join_isolates_results_across_agencies_sharing_one_connection(pg_conn):
     """Two different agencies' parse_feed calls on the SAME connection must
     each join their own schedule. cmd_ingest_live's all-agencies branch
     (gtfs_pipeline.py) and the production cron path (api/routers/internal.py)
@@ -152,7 +152,13 @@ def test_static_join_reads_the_schedule_as_it_stands_at_each_poll(pg_conn):
     assert (first[0][3], first[0][4]) == ("WKDY", "08:00:00")
     assert second[0][4] == "08:05:00"
     with pg_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM pg_class WHERE relpersistence = 't' AND relname LIKE '_sj_schedule%%'")
+        # Scoped to this backend's own temp schema, not every relname in
+        # pg_class matching the pattern -- the shared test Postgres can have
+        # other backends' unrelated temp tables live at the same time.
+        cur.execute(
+            "SELECT count(*) FROM pg_class "
+            "WHERE relpersistence = 't' AND relnamespace = pg_my_temp_schema() AND relname LIKE '_sj_schedule%%'"
+        )
         assert cur.fetchone()[0] == 0
 
 

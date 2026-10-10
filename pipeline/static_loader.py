@@ -188,15 +188,14 @@ def load_static(path: str, agency_id: int, conn) -> None:
     # gated only on static_stops, would treat as a complete load).
     conn.commit()
 
-    # static_join.parse_feed's keyed JOIN reads static_stop_times and
-    # static_trips immediately after this call, on the same connection, inside
-    # the same ingest run. A freshly inserted agency_id is exactly the case
-    # Postgres's planner statistics are stalest for (autovacuum's autoanalyze
-    # is asynchronous and has a row-count threshold before it fires), and a
-    # stale/absent per-agency estimate can steer the planner off the
-    # primary-key probes that JOIN is meant to be. ANALYZE is a bounded
-    # sample, not a full-table pass, so this stays cheap regardless of how
-    # large the two tables have grown across all agencies.
+    # static_join.parse_feed's keyed lookups depend on per-agency planner
+    # statistics for static_stop_times and static_trips. A freshly inserted
+    # agency_id is exactly the case those statistics are stalest for
+    # (autovacuum's autoanalyze is asynchronous and has a row-count threshold
+    # before it fires), and a stale/absent per-agency estimate can steer the
+    # planner off the primary-key probes those lookups are meant to be.
+    # ANALYZE is a bounded sample, not a full-table pass, so this stays cheap
+    # regardless of how large the two tables have grown across all agencies.
     with conn.cursor() as cur:
         cur.execute("ANALYZE static_trips")
         cur.execute("ANALYZE static_stop_times")
