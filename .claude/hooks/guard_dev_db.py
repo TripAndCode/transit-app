@@ -221,30 +221,43 @@ def destroys_dev_volume(cmd: str) -> bool:
 
 _SQL_CLIENTS = {"psql", "clickhouse-client", "clickhouse"}
 _SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
-# psql's `\i`/`\ir` include, which sits inside the quoted `-c` argument.
-_INCLUDE_META = re.compile(r"\\ir?\s")
+# psql's `\i`/`\ir`/`\include` include, which sits inside the quoted `-c` argument.
+_INCLUDE_META = re.compile(r"\\(?:ir?|include(?:_relative)?)\s")
+# A curl short-option cluster that ends in `-T` (upload file) or carries `-d@file`.
+_CURL_FILE_CLUSTER = re.compile(r"-[a-z]*(?:t|d@.*)")
 
 
 def _feeds_a_client_stdin(shell: list[str]) -> bool:
-    """An unquoted input redirect or here-doc (bar `< /dev/null`), or a pipe
-    into a SQL client.
+    """An unquoted input redirect or here-doc (bar `< /dev/null`) in the same
+    simple command as a SQL client, or a pipe into a client.
 
     Read from operator tokens, not the raw text: a `<` inside a quoted SQL
-    argument (`<>`, `<=`, pgvector's `<->`) is a comparison, not a redirect, and
-    a glued `cat x.sql|psql` is still a pipe."""
-    for i, tok in enumerate(shell):
-        if not _is_separator(tok):
-            continue
-        if "<" in tok and not (tok == "<" and shell[i + 1 : i + 2] == ["/dev/null"]):
+    argument (`<>`, `<=`, pgvector's `<->`) is a comparison, not a redirect, a
+    glued `cat x.sql|psql` is still a pipe, and a redirect that belongs to
+    another command (`psql ... > out && wc -l < out`) does not feed the client."""
+    piped = False
+    segment: list[str] = []
+
+    def feeds(seg: list[str], was_piped: bool) -> bool:
+        if not _SQL_CLIENTS & {tok.rsplit("/", 1)[-1] for tok in seg}:
+            return False
+        if was_piped:
             return True
-        if tok in ("|", "|&"):
-            piped = []
-            for nxt in shell[i + 1 :]:
-                if _is_separator(nxt):
-                    break
-                piped.append(nxt.rsplit("/", 1)[-1])
-            if _SQL_CLIENTS & set(piped):
-                return True
+        for i, tok in enumerate(seg):
+            if "<" in tok and _is_separator(tok) and not tok.startswith("<("):
+                if not (tok == "<" and seg[i + 1 : i + 2] == ["/dev/null"]):
+                    return True
+        return False
+
+    for tok in [*shell, ";"]:
+        if _is_separator(tok) and "<" not in tok and ">" not in tok:
+            if segment:
+                if feeds(segment, piped):
+                    return True
+                segment, piped = [], False
+            piped = piped or ("|" in tok and tok != "||")
+        else:
+            segment.append(tok)
     return False
 
 
@@ -264,7 +277,7 @@ def runs_a_sql_script(cmd: str) -> bool:
         if _feeds_a_client_stdin(shell) or _INCLUDE_META.search(cmd.lower()):
             return True
     if "curl" in names:
-        return any(tok.startswith(("@", "-d@")) or tok in ("-t", "--upload-file") for tok in shell)
+        return any(tok.startswith("@") or tok == "--upload-file" or _CURL_FILE_CLUSTER.fullmatch(tok) for tok in shell)
     return False
 
 
@@ -289,12 +302,19 @@ def _shell_tokens(text: str) -> list[str]:
     """shlex tokens with each run of shell operator characters (`;`, `&&`,
     `|`, `>` ...) a token of its own, also where it is glued to a word:
     `shlex.split("make a;ls")` keeps `a;ls` as one token."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return text.split()
+    # A `#` starts a comment only at the start of a word, which shlex's default
+    # (any `#`) gets wrong: `pa#ss@host ... -f x.sql` would lose its flag. The
+    # comment-aware lexer is the fallback for a trailing comment holding an
+    # unbalanced quote, which the comment-free one cannot lex.
+    for commenters in ("", "#"):
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = commenters
+        try:
+            return list(lexer)
+        except ValueError:
+            continue
+    return text.split()
 
 
 _OPERATOR_CHARS = frozenset("();<>|&")

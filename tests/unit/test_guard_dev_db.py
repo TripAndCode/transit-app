@@ -208,6 +208,12 @@ BLOCKED = [
         "docker compose exec -T clickhouse clickhouse-client --queries-file x.sql", id="clickhouse-queries-file"
     ),
     pytest.param("cat x.sql|psql -h localhost -p 5433 -U transit transit", id="psql-glued-pipe"),
+    pytest.param("cat x.sql | (psql -h localhost -p 5433 -U transit transit)", id="psql-pipe-into-subshell"),
+    pytest.param("psql -h localhost -p 5433 -U transit -c '\\include fix.sql'", id="psql-include-long-alias"),
+    pytest.param(
+        "psql postgresql://transit:pa#ss@localhost:5433/transit -f fix.sql", id="hash-inside-password-then-file"
+    ),
+    pytest.param("curl -sT x.sql http://localhost:8123/", id="ch-http-upload-short-cluster"),
     pytest.param("psql -h localhost -p 5433 -U transit -c '\\i fix.sql'", id="psql-include-meta-command"),
     pytest.param("psql -h localhost -p 5433 -U transit <<'SQL'\nSELECT 1\nSQL", id="psql-heredoc"),
     pytest.param("curl -s http://localhost:8123/ --data-binary @x.sql", id="ch-http-body-from-file"),
@@ -247,6 +253,10 @@ ALLOWED = [
         id="ingest-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' > out.txt && wc -l < out.txt",
+        id="dev-read-redirect-belongs-to-another-command",
+    ),
     pytest.param(
         "psql -h localhost -p 5433 -U transit -c 'SELECT 1 FROM t WHERE a <> 1 AND b <= 2'",
         id="dev-read-sql-comparison",
