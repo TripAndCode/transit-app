@@ -94,3 +94,4 @@ def test_long_refs_are_truncated_but_still_distinguish_branches():
 def test_prefix_is_required():
     result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True)
     assert result.returncode != 0
+    assert "usage: container-name.sh" in result.stderr, result.stderr
