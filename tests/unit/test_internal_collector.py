@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport
 from starlette.requests import Request as StarletteRequest
 
-from api.routers.internal import _MAX_COLLECTOR_PAYLOAD, collector_router
+from api.routers.internal import _MAX_COLLECTOR_PAYLOAD, UnknownAgency, collector_router
+from pipeline.ingest import PayloadDecodeError
 
 VALID_HEADERS = {
     "X-Collector-Secret": "shh",
@@ -135,6 +136,26 @@ async def test_happy_path_calls_ingest_once(client):
     assert args[0] == 1
     assert args[1] == b"protobuf-bytes"
     assert args[3] == "oracle/20260919/TripUpdate_120000.pb"
+
+
+@pytest.mark.parametrize(
+    ("raised", "status"),
+    [
+        (UnknownAgency("Unknown or deleted agency_id=1"), 404),
+        (PayloadDecodeError("oracle/x: IndexError: index out of range"), 422),
+        (RuntimeError("clickhouse unavailable"), 502),
+    ],
+)
+async def test_only_a_failure_on_this_side_asks_the_collector_to_retry(client, caplog, raised, status):
+    """The collector's curl --retry resends on a 5xx only. A disabled agency or
+    bytes that cannot be decoded fail the same way every time, so they are a
+    4xx, logged as a warning without a traceback."""
+    with patch("api.routers.internal._ingest_collector_payload", side_effect=raised):
+        async with client as ac:
+            r = await ac.post("/internal/collector/updates/1", headers=VALID_HEADERS, content=b"protobuf-bytes")
+    assert r.status_code == status
+    [record] = [rec for rec in caplog.records if rec.name == "api.routers.internal"]
+    assert (record.levelname, record.exc_info is not None) == (("ERROR", True) if status == 502 else ("WARNING", False))
 
 
 async def _raw_asgi_post(headers: dict[str, str], body_chunks: list[bytes]) -> int:
