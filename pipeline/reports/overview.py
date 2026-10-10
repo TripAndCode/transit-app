@@ -1227,7 +1227,10 @@ async def compute_overview_summary(
 
     When ``pool`` is supplied (non-None), the stage queries are dispatched
     as concurrent asyncio tasks, each acquiring its own pooled connection,
-    with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time.  The two
+    with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time. ``conn`` is
+    then unused and may be None: no task waits for a connection while one is
+    held for it, so concurrent requests cannot starve each other of the
+    pool and deadlock.  The two
     ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
     and the rest share the remaining slots.  When
     ``pool`` is None (the default) the existing sequential path with
@@ -1258,7 +1261,11 @@ async def compute_overview_summary(
             grain = await _fetch_grain(agency_id, ctx, ch)
 
     async with perf.timed_block("overview.latest_date"):
-        latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
+        if pool is None:
+            latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
+        else:
+            async with pool.acquire() as c:
+                latest = await _latest_data_date(agency_id, ctx, c, ch=ch, grain=grain)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
