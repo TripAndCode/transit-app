@@ -17,8 +17,12 @@ import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { alertText } from "./alertText";
+import { useNow } from "../../hooks/useNow";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
+
+// One pixel of the day's timeline is a few minutes; this tick keeps the marker within a pixel of the real time.
+const NOW_TICK_MS = 30_000;
 
 /** One hue for the whole heatmap: the aggregated days differ only in
  *  saturation, stale days pick up the shared warning amber, and a missing day
@@ -133,10 +137,9 @@ export function AdminBoardPage() {
   const [confirming, setConfirming] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
-  // Read once per render rather than held in state: the board re-renders on
-  // every poll, so the marker and any open run's bar advance on their own
-  // without a timer of this page's making.
-  const now = new Date();
+  // The marker, an open run's bar and the day boundary all follow this clock,
+  // so it advances on its own rather than only when a poll lands.
+  const now = useNow(NOW_TICK_MS);
   const dayStart = jstDayStart(now);
 
   const collectors = data?.collectors ?? [];

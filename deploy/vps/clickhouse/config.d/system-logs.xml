@@ -1,14 +1,17 @@
 <!-- ClickHouse's own logs grow without bound and outweigh the data on a small disk. A TTL set
-     here survives the tables being recreated on an upgrade; an ALTER TABLE TTL would not. -->
+     here survives the tables being recreated on an upgrade; an ALTER TABLE TTL would not.
+     The logs turned off carry a column per metric or event, or a row per thread sample: merging
+     them needs more memory than the server cap leaves a running query, and nothing here reads
+     them. query_log and part_log stay, since they are what explain a slow or failed query. -->
 <clickhouse>
     <query_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_log>
     <part_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></part_log>
     <error_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></error_log>
-    <query_metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_metric_log>
-    <trace_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
-    <text_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></text_log>
-    <metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></metric_log>
     <asynchronous_metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></asynchronous_metric_log>
-    <processors_profile_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></processors_profile_log>
     <background_schedule_pool_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></background_schedule_pool_log>
+    <metric_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <processors_profile_log remove="1"/>
 </clickhouse>

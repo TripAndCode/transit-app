@@ -229,12 +229,26 @@ def parse_pb(
     return rows
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None) -> int:
+class IngestIncomplete(Exception):
+    """An archive ingest that skipped files. Their rows are not in ClickHouse,
+    and the next run retries them: the skip-list holds only files whose rows
+    landed."""
+
+    def __init__(self, n_inserted: int, n_errors: int):
+        super().__init__(f"{n_errors} files skipped due to parse or insert errors ({n_inserted} rows inserted)")
+        self.n_inserted = n_inserted
+        self.n_errors = n_errors
+
+
+def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None, strict: bool = False) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
     actually written to ClickHouse (post intra-batch dedup; a failed batch
-    contributes 0).
+    contributes 0). A file that fails to parse or insert is logged, skipped
+    and counted; with *strict*, any such skip raises :class:`IngestIncomplete`
+    once every other file is in, for a caller that must not count a partial
+    ingest as done.
 
     Writes closed JST days only, as of *now*. A collector names and tars its
     archives by UTC day, so one archive runs to 09:00 JST the next day and
@@ -544,6 +558,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     if n_errors:
         logger.warning(f"Skipped {n_errors} files due to parse or insert errors — see log above for detail")
     logger.info(f"\nDone: {n_inserted} new rows inserted")
+    if strict and n_errors:
+        raise IngestIncomplete(n_inserted, n_errors)
     return n_inserted
 
 

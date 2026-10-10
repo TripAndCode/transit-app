@@ -252,9 +252,14 @@ export function MapTab() {
     schedule();
     return () => window.clearTimeout(timer);
   }, [liveQuery.data]);
+  // Every fetch re-arms that tick, so on a quiet feed it may never fire, and
+  // a poll's rows are captured after the last tick: against `now` alone they
+  // read as future-dated and drop out of the live window. The fetch's own time
+  // is one the clock has certainly reached.
+  const clock = Math.max(now, liveQuery.dataUpdatedAt);
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
-  const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
+  const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], clock, ctx.routes);
   const liveCsvColumns: CsvColumn<LiveTrip>[] = [
     { header: "agency_id", value: () => id },
     { header: "route_code", value: (r) => r.route_code },
@@ -299,7 +304,7 @@ export function MapTab() {
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   const latestReport = liveQuery.data?.latest_captured_at ?? null;
-  const freshness = freshnessFor(latestReport, now);
+  const freshness = freshnessFor(latestReport, clock);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
@@ -634,8 +639,8 @@ export function MapTab() {
           {!latestReport
             ? t("operations.no_update")
             : freshness === "stale"
-              ? t("operations.feed_quiet", { duration: quietFor(now - Date.parse(latestReport), t), time: formatReportTime(latestReport) })
-              : t("operations.last_updated", { when: relativeTime(latestReport, now) })}
+              ? t("operations.feed_quiet", { duration: quietFor(clock - Date.parse(latestReport), t), time: formatReportTime(latestReport) })
+              : t("operations.last_updated", { when: relativeTime(latestReport, clock) })}
         </div>
         <button
           type="button"
