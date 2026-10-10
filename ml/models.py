@@ -111,11 +111,17 @@ def split_calibration(frame: pd.DataFrame, cutoff: date) -> tuple[pd.DataFrame, 
 
 
 def _min_rows_to_split(params: ModelParams) -> int:
-    """The fewest rows that can still form two min_data_in_leaf-sized leaves.
-    Each boosting round samples only bagging_fraction of the rows before
-    looking for a split (when bagging_freq > 0), so the real floor is twice
-    min_data_in_leaf scaled up by how much of the data a round actually sees
-    — not min_data_in_leaf alone."""
+    """A heuristic floor, not a derived guarantee: below it, a train set is
+    certain to collapse to one constant prediction (confirmed empirically,
+    not just by this formula — see test_models.py), because each boosting
+    round samples only bagging_fraction of the rows before looking for a
+    split (when bagging_freq > 0), on top of needing min_data_in_leaf twice
+    over for two leaves. Above it, LightGBM usually can split, though not
+    always at the smaller end of the range. Calling code that needs a
+    guarantee of a non-degenerate model — not just a fit that avoids this
+    specific collapse — must check its own history requirement; whether an
+    agency has enough of its own history is the backtest orchestrator's job
+    (MIN_MODEL_DAYS, routed to B0), not this function's."""
     floor = 2 * params.min_data_in_leaf
     if params.bagging_freq > 0:
         floor = math.ceil(floor / params.bagging_fraction)
@@ -123,11 +129,12 @@ def _min_rows_to_split(params: ModelParams) -> int:
 
 
 def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> ModelSet:
-    """A short-history agency can have too few rows outside the calibration
-    window to split even one leaf; such a train set still trains, but
-    collapses to one constant prediction with no signal. Train on the whole
-    frame uncalibrated (interval_shift stays 0.0) below that floor, the same
-    as when the split leaves nothing to train on at all."""
+    """Training on a thin split collapses to one constant prediction with no
+    signal; train on the whole frame uncalibrated (interval_shift stays 0.0)
+    below _min_rows_to_split instead, the same as when the split leaves
+    nothing to train on at all. This widens the data the fit sees but does
+    not guarantee a non-degenerate result — a frame that is itself too small
+    collapses either way; see _min_rows_to_split."""
     train, calib = split_calibration(frame, cutoff)
     if len(train) < _min_rows_to_split(params):
         return fit(frame, params)
