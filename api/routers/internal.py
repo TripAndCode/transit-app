@@ -20,6 +20,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
@@ -33,6 +34,17 @@ collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], in
 _log = logging.getLogger(__name__)
 _SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
 _MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
+
+
+class UnknownAgency(ValueError):
+    """A push for an agency that does not exist or is disabled."""
+
+
+class SweepOutcome(NamedTuple):
+    """What an operator's umbrella run row records about the sweep under it."""
+
+    status: str
+    error: str | None = None
 
 
 def _check_secret(request: Request) -> None:
@@ -75,7 +87,7 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
                 (agency_id,),
             )
             if cur.fetchone() is None:
-                raise ValueError(f"Unknown or deleted agency_id={agency_id}")
+                raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
         # No advisory lock: a push writes updates_live, which analyze never
         # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
         # over the last 10 minutes of captured_at absorbs a sequential
@@ -132,6 +144,8 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     raw = bytes(chunks)
     if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
+    from pipeline.ingest import PayloadDecodeError
+
     file_name = f"oracle/{source_file}"
     try:
         inserted = await asyncio.to_thread(
@@ -141,6 +155,15 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             captured.astimezone(timezone.utc).isoformat(),
             file_name,
         )
+    # 404 and 422 tell the collector that resending the same request cannot
+    # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
+    # of these. Neither is this service failing, so neither logs a traceback.
+    except UnknownAgency as exc:
+        _log.warning("collector push for unknown or disabled agency %s", agency_id)
+        raise HTTPException(status_code=404, detail="Unknown or disabled agency") from exc
+    except PayloadDecodeError as exc:
+        _log.warning("collector push for agency %s could not be decoded: %s", agency_id, exc)
+        raise HTTPException(status_code=422, detail="Collector payload is not a decodable GTFS-RT feed") from exc
     except Exception as exc:
         _log.exception("collector ingest failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc
@@ -195,7 +218,7 @@ def _run_ingest_and_analyze(
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
     try:
-        status = _ingest_and_analyze_sweep(
+        outcome = _ingest_and_analyze_sweep(
             db_url,
             kind=kind,
             agency_ids=agency_ids,
@@ -210,7 +233,7 @@ def _run_ingest_and_analyze(
         # operator with the board open.
         _finish_manual_run(db_url, run_id, "error", error=redact_urls_in_text(f"{type(exc).__name__}: {exc}"))
         return
-    _finish_manual_run(db_url, run_id, status)
+    _finish_manual_run(db_url, run_id, outcome.status, error=outcome.error)
 
 
 def _ingest_and_analyze_sweep(
@@ -221,7 +244,7 @@ def _ingest_and_analyze_sweep(
     requested_by: int | None = None,
     run_weather: bool = True,
     run_id: int | None = None,
-) -> str:
+) -> SweepOutcome:
     """Pull live GTFS-RT for every agency, promote closed days, then refresh
     aggregations.
 
@@ -232,7 +255,8 @@ def _ingest_and_analyze_sweep(
     `pipeline_runs` row. Failures inside the loop are logged but don't abort
     the whole run, so one broken agency or stage doesn't starve the others.
     Returns the outcome the umbrella row should record: ``skipped`` when the
-    advisory lock turned this sweep away, ``ok`` otherwise.
+    advisory lock turned this sweep away or no active agency was in scope,
+    ``error`` naming every stage that failed, ``ok`` otherwise.
 
     ``kind="analyze"`` re-aggregates what is already stored without fetching —
     the one case where skipping the feed pull and the weather pass is what was
@@ -275,6 +299,7 @@ def _ingest_and_analyze_sweep(
     # closes whichever of the two was actually created, instead of leaking
     # a ClickHouse client + HTTP pool (or a Postgres session) per failed
     # poke inside this long-lived API process.
+    failed: list[str] = []
     ch_client = None
     conn = None
     try:
@@ -309,7 +334,7 @@ def _ingest_and_analyze_sweep(
                 pipeline_runs.start_run(
                     conn, kind, status="skipped", lock_wait_ms=lock_wait_ms, requested_by=requested_by
                 )
-            return "skipped"
+            return SweepOutcome("skipped")
         with conn.cursor() as cur:
             if requested_agency_ids is None:
                 cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
@@ -322,7 +347,7 @@ def _ingest_and_analyze_sweep(
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
             _log.warning("cron: no agencies to ingest (scope=%s)", requested_agency_ids or "all")
-            return "ok"
+            return SweepOutcome("skipped", "no active agency in scope")
 
         for aid in agency_ids:
             if kind == "ingest":
@@ -331,16 +356,19 @@ def _ingest_and_analyze_sweep(
                         run.rows = ingest_live(aid, conn, ch_client)
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
+                    failed.append(f"ingest agency {aid}")
                 try:
                     with pipeline_runs.record_run(conn, "promote", agency_id=aid, requested_by=requested_by) as run:
                         run.rows = promote_closed_days(aid, conn, ch_client)
                 except Exception:
                     _log.exception("cron: promotion failed for agency %s", aid)
+                    failed.append(f"promote agency {aid}")
             try:
                 with pipeline_runs.record_run(conn, "analyze", agency_id=aid, requested_by=requested_by):
                     analyze(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
+                failed.append(f"analyze agency {aid}")
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
@@ -399,7 +427,9 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
-    return "ok"
+    if failed:
+        return SweepOutcome("error", "failed: " + ", ".join(failed))
+    return SweepOutcome("ok")
 
 
 def _run_weather_ingest(db_url: str) -> None:

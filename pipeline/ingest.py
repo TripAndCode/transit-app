@@ -8,6 +8,7 @@ derivation, dedup against the updates table, and bulk INSERT.
 import logging
 import pathlib
 import re
+import struct
 import tarfile
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -227,6 +228,11 @@ def parse_pb(
                 )
             )
     return rows
+
+
+class PayloadDecodeError(ValueError):
+    """The payload's own bytes could not be decoded as GTFS-RT. A fault of
+    whoever sent it, which retrying the same bytes cannot cure."""
 
 
 class IngestIncomplete(Exception):
@@ -626,7 +632,10 @@ def ingest_live_payload(
         logger.info("Skipping duplicate live payload: %s", file_name)
         return 0
 
-    rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
+    try:
+        rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
+    except (IndexError, ValueError, struct.error, UnicodeDecodeError) as exc:
+        raise PayloadDecodeError(f"{file_name}: {type(exc).__name__}: {exc}") from exc
     n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()
     logger.info("Done: %s rows inserted (live payload)", n_inserted)
