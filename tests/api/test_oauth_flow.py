@@ -101,13 +101,14 @@ async def test_callback_unverified_email_redirects(auth_client, aconn, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch):
+@pytest.mark.parametrize("reported", ["yo@x", "Yo@X"])
+async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch, reported):
     from api.routers import auth as auth_mod
 
     async def fake_userinfo(client, token, provider):
         return {
             "sub": "google-sub-1",
-            "email": "yo@x",
+            "email": reported,
             "email_verified": True,
             "name": "Yo",
             "avatar_url": "http://a/x.png",
@@ -246,8 +247,10 @@ async def test_admin_email_promotes(auth_client, aconn, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch):
-    """User exists from Google login; same verified email via GitHub auto-links."""
+@pytest.mark.parametrize("reported", ["shared@x", "Shared@X"])
+async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch, reported):
+    """User exists from Google login; same verified email via GitHub auto-links,
+    in whatever case the second provider reports it."""
     uid = (await aconn.fetchrow("INSERT INTO users (email, name) VALUES ('shared@x', 'A') RETURNING user_id"))[
         "user_id"
     ]
@@ -260,7 +263,7 @@ async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch
     from api.routers import auth as auth_mod
 
     async def fake_userinfo(client, token, provider):
-        return {"sub": "gh-sub", "email": "shared@x", "email_verified": True, "name": "A", "avatar_url": None}
+        return {"sub": "gh-sub", "email": reported, "email_verified": True, "name": "A", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
     payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "github"})
@@ -282,7 +285,8 @@ async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_oauth_login_refuses_to_take_over_a_local_password_account(auth_client, aconn, monkeypatch):
+@pytest.mark.parametrize("reported", ["root@local", "Root@Local"])
+async def test_oauth_login_refuses_to_take_over_a_local_password_account(auth_client, aconn, monkeypatch, reported):
     """A break-glass/local-password account (password_hash set, no linked
     OAuth identity) must not be silently claimed by an OAuth login whose
     verified email happens to match — that would hand whoever controls the
@@ -298,7 +302,7 @@ async def test_oauth_login_refuses_to_take_over_a_local_password_account(auth_cl
     from api.routers import auth as auth_mod
 
     async def fake_userinfo(client, token, provider):
-        return {"sub": "g-sub", "email": "root@local", "email_verified": True, "name": "Someone", "avatar_url": None}
+        return {"sub": "g-sub", "email": reported, "email_verified": True, "name": "Someone", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
     payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})

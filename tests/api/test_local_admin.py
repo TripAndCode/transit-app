@@ -113,6 +113,19 @@ async def test_seed_audits_promoting_a_pre_existing_non_oauth_account(local_clie
 
 
 @pytest.mark.asyncio
+async def test_the_break_glass_account_is_one_identity_whatever_its_case(local_client, aconn, monkeypatch):
+    monkeypatch.setenv("DEFAULT_ADMIN_USERNAME", "Root@Local")
+    await _seed(local_client)
+    assert [r["email"] for r in await aconn.fetch("SELECT email FROM users")] == ["root@local"]
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "ROOT@local", "password": "correct-horse-battery-staple"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_login_with_correct_credentials_sets_session_cookie(local_client, aconn):
     await _seed(local_client)
     resp = await local_client.post(
