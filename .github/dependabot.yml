@@ -92,7 +92,7 @@ updates:
           - "patch"
 
   # db/Dockerfile (the postgres base) -- kept separate from "/" above so a
-  # bump here doesn't get grouped with the app image/compose bumps, which
+  # bump here doesn't get grouped with the app image bumps, which
   # have an unrelated release cadence.
   - package-ecosystem: "docker"
     directory: "/db"
