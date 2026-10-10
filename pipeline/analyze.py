@@ -206,10 +206,17 @@ _ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route
 # dep_delay alike.
 _KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
 
+# Aggregates built from the static schedule alone. Every column they read is
+# in _STATIC_DEPENDENCY_COLUMNS, so a run with no changed date, which also
+# means the fingerprint matched, would rebuild them to what already stands.
+_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
+
 # What a run with no changed date may leave standing: a date-scoped table with
-# no date to rebuild, or an all-time or keyset table whose whole input is
-# unchanged.
-_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES | _KEYSET_AGG_TABLES
+# no date to rebuild, or an all-time, keyset or static-only table whose whole
+# input is unchanged.
+_NOOP_SKIPPABLE_AGG_TABLES = (
+    _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES | _KEYSET_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
+)
 
 
 # ── Step timing ──────────────────────────────────────────────────────────
@@ -367,9 +374,9 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebu
 #   static_routes      only route_id, which is where agg_route_headway's
 #     route_code comes from; route_short_name has no reader here.
 #
-# Reached transitively: agg_route_headway itself is rebuilt in full every run,
-# but agg_route_headway_daily is not, and it reads that median back to
-# threshold its long gaps — so the median's inputs have to be covered.
+# agg_route_headway is skipped on a run with no changed date on the strength
+# of these columns alone, and agg_route_headway_daily reads its median back to
+# threshold its long gaps, so the median's inputs have to be covered for both.
 _STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
     "static_stop_times": ("trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"),
     "static_trips": ("trip_id", "route_id", "service_id"),
@@ -407,9 +414,11 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool, ingest_strategy:
 
     One blind spot survives all of this: the ledger compares per-date row
     COUNTS, so a date whose rows were replaced by exactly as many different
-    rows reads as unchanged and keeps its stale aggregates. Only a deliberate
-    full rebuild (``make analyze-all``, with ``make check-aggs``) recovers
-    from that.
+    rows reads as unchanged and keeps its stale aggregates, and
+    ``check_aggs``, which compares only each agency's newest day, cannot see
+    it either. Only a deliberate full rebuild recovers from that:
+    ``gtfs_pipeline.py analyze --full`` / ``analyze_all --full`` (``make
+    analyze-all FULL=1``), which calls :func:`mark_for_full_rebuild` first.
 
     An order-independent sum of per-row hashes plus a row count, not an ordered
     digest: the sum is one sequential scan of tables holding at most a few
@@ -1492,6 +1501,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ],
                 p,
                 conn,
+                rebuild_dates,
             )
 
         # ── agg_service_delivered_daily (per-day non-executed trip count) ──
@@ -1917,23 +1927,29 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # planned_trips): this table describes the schedule DEFINITION
         # itself, comparable across versions independent of any date range.
         # vehicle_km sums each trip's shape length (via PostGIS geography,
-        # so units are correct on a sphere, not planar degrees) once per
-        # trip; a trip whose shape_id doesn't resolve in static_shapes is
-        # excluded from the SUM (undercounts rather than aborting), and the
-        # whole figure is NULL (not 0) when this agency has no shapes loaded
-        # for any trip at all — see the migration's own docstring.
+        # so units are correct on a sphere, not planar degrees); the length is
+        # computed once per shape and joined to every trip that runs it, since
+        # a schedule has far more trips than shapes. A trip whose shape_id
+        # doesn't resolve in static_shapes is excluded from the SUM
+        # (undercounts rather than aborting), and the whole figure is NULL
+        # (not 0) when this agency has no shapes loaded for any trip at all —
+        # see the migration's own docstring.
         if has_static:
             with conn.cursor() as cur:
                 cur.execute(
                     """
+                    WITH shape_m AS MATERIALIZED (
+                        SELECT shape_id, ST_Length(geom::geography) AS m
+                        FROM static_shapes
+                        WHERE agency_id = %(agency_id)s AND geom IS NOT NULL
+                    )
                     SELECT
                         MAX(t.static_version_id) AS static_version_id,
                         COUNT(*) AS trip_count,
-                        COUNT(s.geom) AS trips_with_shape,
-                        SUM(CASE WHEN s.geom IS NOT NULL THEN ST_Length(s.geom::geography) END) / 1000.0 AS vehicle_km
+                        COUNT(s.m) AS trips_with_shape,
+                        SUM(s.m) / 1000.0 AS vehicle_km
                     FROM static_trips t
-                    LEFT JOIN static_shapes s
-                      ON s.agency_id = t.agency_id AND s.shape_id = t.shape_id
+                    LEFT JOIN shape_m s ON s.shape_id = t.shape_id
                     WHERE t.agency_id = %(agency_id)s
                     """,
                     p,
