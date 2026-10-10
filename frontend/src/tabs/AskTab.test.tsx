@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { AskTab } from "./AskTab";
@@ -175,5 +176,49 @@ describe("AskTab investigations", () => {
       },
     ]);
     expect(container.querySelector(".ask-tool-menu summary")).toHaveTextContent(/^Start another analysis$/);
+  });
+});
+
+describe("AskTab dispatch failures", () => {
+  beforeEach(() => {
+    mockAllHooks();
+    Element.prototype.scrollTo = vi.fn();
+  });
+
+  function firstInstantCard() {
+    const landing = screen.getByText("Ask about a delay").parentElement!.parentElement!;
+    const card = landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
+    expect(card).toBeDefined();
+    return card;
+  }
+
+  it("shows a banner with a retry when creating the thread fails, instead of vanishing silently", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new Error("boom"));
+    vi.spyOn(hooks, "useCreateConversation").mockReturnValue(mutationStub({ mutateAsync }));
+    renderAskTab();
+    await userEvent.click(firstInstantCard());
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a banner when appending the question to the thread fails", async () => {
+    const mutate = vi.fn();
+    const createMutateAsync = vi.fn().mockResolvedValue({ conversation_id: "t9" });
+    vi.spyOn(hooks, "useCreateConversation").mockReturnValue(mutationStub({ mutateAsync: createMutateAsync }));
+    vi.spyOn(hooks, "useAppendMessage").mockReturnValue(mutationStub({ mutate }));
+    renderAskTab();
+    await userEvent.click(firstInstantCard());
+    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => mutate.mock.calls[0][1].onError(new Error("503")));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    // The thread already exists: retrying adds the question to it rather than
+    // creating a second thread.
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(2));
+    expect(mutate.mock.calls[1][0].conversationId).toBe("t9");
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
   });
 });

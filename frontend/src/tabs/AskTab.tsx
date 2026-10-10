@@ -33,6 +33,7 @@ import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
+import { ErrorBanner } from "../components/ErrorBanner";
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -42,6 +43,20 @@ import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
 import type { NextStepAction } from "./ask/nextStepChips";
 import { useInvestigationLocation } from "./ask/useInvestigationLocation";
+
+type Submission = { tool: string; args: Record<string, unknown>; user_summary: string };
+
+/** Runs `run` and reports a rejection through `onError` instead of letting it
+ *  escape as an unhandled rejection. It sits outside the component because the
+ *  React Compiler skips a component whose `try` holds a conditional
+ *  expression. */
+async function settle(run: () => Promise<void>, onError: (error: unknown) => void): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    onError(error);
+  }
+}
 
 export function AskTab() {
   const { t } = useTranslation();
@@ -63,6 +78,14 @@ export function AskTab() {
   // unmount while a follow-up request is in flight (row is hidden during
   // followup.isPending below).
   const [followupDraft, setFollowupDraft] = useState("");
+  // The last failed attempt to create a thread, save its filter, or add a
+  // question to it. `retry` is null when there is nothing to re-run;
+  // otherwise it holds the submission to run again and the thread it already
+  // has, if any.
+  const [dispatchFailure, setDispatchFailure] = useState<{
+    error: unknown;
+    retry: { submission: Submission; convId: string | null } | null;
+  } | null>(null);
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
   // directly on every render — no useMemo (see AGENTS.md).
@@ -119,15 +142,24 @@ export function AskTab() {
   // visible filter. The save promise is tracked so handleCardSubmit can await
   // it — without that, an edit followed by an immediate 実行 raced the PATCH
   // and the backend answered with the previous (stale) filter scope.
-  const pendingFilterSave = useRef<Promise<unknown> | null>(null);
+  // Resolves to whether the save landed; it never rejects, so a failed save
+  // is reported once (as a failure banner) rather than as an unhandled
+  // rejection.
+  const pendingFilterSave = useRef<Promise<boolean> | null>(null);
   function handleFilterChange(next: FilterCtx) {
     setFilterEdit({ key: activeId, fc: next });
     if (activeId) {
-      pendingFilterSave.current = updateConv
-        .mutateAsync({ id: activeId, patch: { filter_ctx: next } })
-        .finally(() => {
+      pendingFilterSave.current = updateConv.mutateAsync({ id: activeId, patch: { filter_ctx: next } }).then(
+        () => {
           pendingFilterSave.current = null;
-        });
+          return true;
+        },
+        (error: unknown) => {
+          pendingFilterSave.current = null;
+          setDispatchFailure({ error, retry: null });
+          return false;
+        },
+      );
     }
   }
 
@@ -144,6 +176,7 @@ export function AskTab() {
     setFilterEdit(null);
     setFollowupDraft("");
     followup.reset();
+    setDispatchFailure(null);
     // A template left composing (chip tapped, ParamStrip open, never run)
     // must not survive a thread switch -- otherwise QuestionDock keeps
     // rendering it over the new thread's own landing-state picker,
@@ -158,44 +191,52 @@ export function AskTab() {
     setFilterEdit(null);
     setFollowupDraft("");
     followup.reset();
+    setDispatchFailure(null);
     setComposingId(null);
     setValues({});
   }
 
-  async function handleCardSubmit({
-    tool,
-    args,
-    user_summary,
-  }: {
-    tool: string;
-    args: Record<string, unknown>;
-    user_summary: string;
-  }) {
+  // `createdConvId` is set only by a retry after the thread was created and
+  // adding the question to it failed: the retry must append to that thread,
+  // not create a second one.
+  async function handleCardSubmit(submission: Submission, createdConvId: string | null = null) {
     if (id == null) return;
+    const { tool, user_summary } = submission;
+    let { args } = submission;
+    setDispatchFailure(null);
+    const failWith = (convId: string | null) => (error: unknown) =>
+      setDispatchFailure({ error, retry: { submission, convId } });
 
     // Coerce best_first string "true"/"false" → boolean
     if (typeof args.best_first === "string") {
       args = { ...args, best_first: args.best_first === "true" };
     }
 
-    // An in-flight filter save must land before dispatch — the authed path's
-    // backend reads the *persisted* conversation.filter_ctx.
-    if (pendingFilterSave.current) await pendingFilterSave.current;
+    await settle(async () => {
+      // An in-flight filter save must land before dispatch — the authed path's
+      // backend reads the *persisted* conversation.filter_ctx. A failed save
+      // has already been reported, and dispatching would answer under the
+      // previous filter scope.
+      if (pendingFilterSave.current && !(await pendingFilterSave.current)) return;
 
-    let convId = activeId;
-    if (convId === null) {
-      const created = await createConv.mutateAsync({
-        title: user_summary.slice(0, 60),
-        filter_ctx: filterCtx,
-      });
-      convId = created.conversation_id;
-      setActiveId(convId);
-      // The new conversation was created with the visible filter; drop any
-      // no-thread edit so the derived ctx now reads from the conversation.
-      setFilterEdit(null);
-    }
+      let convId = createdConvId ?? activeId;
+      if (convId === null) {
+        const created = await createConv.mutateAsync({
+          title: user_summary.slice(0, 60),
+          filter_ctx: filterCtx,
+        });
+        convId = created.conversation_id;
+        setActiveId(convId);
+        // The new conversation was created with the visible filter; drop any
+        // no-thread edit so the derived ctx now reads from the conversation.
+        setFilterEdit(null);
+      }
 
-    appendMsg.mutate({ conversationId: convId, tool, args, user_summary, filter_ctx: filterCtx });
+      appendMsg.mutate(
+        { conversationId: convId, tool, args, user_summary, filter_ctx: filterCtx },
+        { onError: failWith(convId) },
+      );
+    }, failWith(createdConvId));
   }
 
   const busy = appendMsg.isPending || createConv.isPending;
@@ -329,6 +370,19 @@ export function AskTab() {
             pending={appendMsg.isPending || createConv.isPending}
           />
         </div>
+
+        {dispatchFailure && (
+          <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
+            <ErrorBanner
+              error={dispatchFailure.error}
+              onRetry={
+                dispatchFailure.retry
+                  ? () => void handleCardSubmit(dispatchFailure.retry!.submission, dispatchFailure.retry!.convId)
+                  : undefined
+              }
+            />
+          </div>
+        )}
 
         {!hasMessages && dock}
 
