@@ -591,7 +591,7 @@ async def list_user_sessions(
 ) -> list[SessionOut]:
     rows = await conn.fetch(
         "SELECT sid_hash, created_at, last_seen_at, expires_at, user_agent, ip::text AS ip "
-        "FROM sessions WHERE user_id=$1 ORDER BY created_at DESC",
+        "FROM sessions WHERE user_id=$1 AND expires_at > now() ORDER BY created_at DESC",
         uid,
     )
     return [

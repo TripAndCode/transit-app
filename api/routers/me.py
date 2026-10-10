@@ -93,7 +93,7 @@ async def list_sessions(
     current_hash = token_hash(sid) if sid else None
     rows = await conn.fetch(
         "SELECT sid_hash, user_agent, ip::text AS ip, created_at, last_seen_at "
-        "FROM sessions WHERE user_id=$1 ORDER BY last_seen_at DESC",
+        "FROM sessions WHERE user_id=$1 AND expires_at > now() ORDER BY last_seen_at DESC",
         user.user_id,
     )
     return [
