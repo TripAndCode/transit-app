@@ -99,7 +99,7 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 1
+ANALYZE_LOGIC_VERSION = 2
 
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
@@ -1421,12 +1421,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # unlike `updates.scheduled_time` (normalized at ingest time by
             # pipeline.strategies._time.normalize_departure_time and capped
             # to same-day hours), static_stop_times stores it completely
-            # unvalidated, so this filters to the strict numeric "H+:MM:SS"
-            # shape before splitting on ':' and summing to seconds-of-day
+            # unvalidated, so it is parsed with the shared hms_to_sec_sql
             # (deliberately NOT capped at 24h -- GTFS's
             # post-midnight-continuation hours like "25:30:00" are valid
-            # schedule data and must not raise or misparse; only a
-            # non-numeric/malformed shape is excluded).
+            # schedule data and must not raise or misparse; a malformed shape
+            # parses to NULL and is excluded, exactly as in every other reader
+            # of static times).
             hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
             sql = f"""
                 WITH route_map AS (
@@ -1451,21 +1451,19 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ),
                 scheduled_departures AS (
                     SELECT twr.route_code, sst.stop_id,
-                        (split_part(sst.departure_time, ':', 1))::int * 3600
-                      + (split_part(sst.departure_time, ':', 2))::int * 60
-                      + (split_part(sst.departure_time, ':', 3))::int AS dep_sec
+                        {hms_to_sec_sql("sst.departure_time")} AS dep_sec
                     FROM trips_with_route twr
                     JOIN dominant_service ds
                       ON ds.route_code = twr.route_code AND ds.service_id = twr.service_id
                     JOIN static_stop_times sst
                       ON sst.agency_id = %(agency_id)s AND sst.trip_id = twr.trip_id
-                    WHERE sst.departure_time ~ '^[0-9]+:[0-5][0-9]:[0-5][0-9]$'
                 ),
                 gaps AS (
                     SELECT route_code,
                            dep_sec - LAG(dep_sec) OVER (PARTITION BY route_code, stop_id ORDER BY dep_sec)
                                AS headway_sec
                     FROM scheduled_departures
+                    WHERE dep_sec IS NOT NULL
                 ),
                 medians AS (
                     SELECT route_code,
