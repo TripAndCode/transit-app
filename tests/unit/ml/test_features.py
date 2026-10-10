@@ -118,7 +118,7 @@ def test_a_precomputed_weekend_table_on_the_same_runs_gives_the_same_frame():
 
 def test_weekend_share_does_not_see_rows_on_or_after_the_origin():
     history = [(-3 - 7 * k, "R1", "S", 9, 1.0, "holiday-svc") for k in range(2)]  # weekend-only so far
-    leaked_future = [(d, "R1", "LEAK", 9, 1.0, "holiday-svc") for d in range(0, 5)]  # weekday, same service
+    leaked_future = [(d, "R1", "LEAK", 9, 1.0, "holiday-svc") for d in range(0, 5)]  # same service, on/after origin
     target = [(6, "R1", "S", 9, 0.0, "holiday-svc")]
     runs = _runs(history + leaked_future + target)
     table = weekend_days(runs)  # built over rows that include origin day and later
