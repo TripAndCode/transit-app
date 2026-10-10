@@ -66,7 +66,8 @@ async def get_ch_client():
 async def max_captured_at(ch, agency_id: int, *, table: str = UPDATES_TABLE) -> datetime | None:
     """Async counterpart of `pipeline.clickhouse.max_captured_at`.
 
-    Absolute latest `captured_at` for the agency (today included) — see that
+    Latest `captured_at` for the agency in `table` (default `updates`, which
+    holds closed days only; pass the live table to include today) — see that
     function's docstring for why the index-served `ORDER BY captured_at DESC
     LIMIT 1` form beats `maxOrNull`. Agency-scoped only (no route/date
     filter), so it stays servable off the sort key's leading `agency_id`
