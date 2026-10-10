@@ -30,6 +30,7 @@ from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
+from api.middleware.forwarded import ForwardedClientMiddleware, forwarded_hops
 from api.middleware.locale import LocaleMiddleware
 from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
@@ -350,10 +351,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
-# Outermost on the request side — sees the final status after every
-# inner middleware ran. Assigns request_id, times the request, emits
-# one INFO log to 'api.access' per request.
+# Sees the final status after every inner middleware ran. Assigns
+# request_id, times the request, emits one INFO log to 'api.access' per
+# request.
 app.add_middleware(RequestLogMiddleware)
+# Outside even the access log, so the log, the rate limiter and every audit
+# row read the caller's address rather than the edge proxy's.
+app.add_middleware(ForwardedClientMiddleware, hops=forwarded_hops())
 
 app.include_router(admin_router)
 app.include_router(admin_agencies_router)

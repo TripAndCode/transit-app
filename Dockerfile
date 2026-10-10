@@ -57,20 +57,11 @@ import os, sys, urllib.request; \
 port = os.environ.get('PORT', '8000'); \
 sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=4).status == 200 else 1)"
 
-# --proxy-headers + --forwarded-allow-ips='*': trust X-Forwarded-For so the
-# anon rate-limiter and audit/access logs see the real client IP, not Railway's
-# edge. '*' is safe here because Railway's edge is the only network path to the
-# container — clients can't connect directly to spoof the header. (Single-quoted
-# so the shell doesn't glob the '*'.)
-#
-# CAVEAT (unverified as of 2026-07): this only holds if Railway's edge fully
-# *replaces* any client-supplied X-Forwarded-For rather than appending to it —
-# uvicorn's ProxyHeadersMiddleware with '*' trusts the leftmost entry
-# unconditionally, so an appended (not replaced) header would let an external
-# client set an arbitrary/rotating leftmost IP and defeat both the per-IP rate
-# limit and the sessions.ip/login_events.ip audit trail. Railway's own support
-# forum has contradictory answers on which it does (an employee says it strips
-# client-supplied XFF; a separate empirical report suggests otherwise) — verify
-# against the actual deployment (or Railway support) before treating this as
-# settled, especially before relying on it for anything security-load-bearing.
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --proxy-headers --forwarded-allow-ips='*'"]
+# Railway's edge is the only network path to the container and the one proxy
+# in front of it, so the client address is the X-Forwarded-For entry that edge
+# appended: the rightmost (api/middleware/forwarded.py). A deployment behind
+# more proxies sets FORWARDED_HOPS to their count. uvicorn's own proxy-header
+# handling stays off, since trusting every peer makes it read the leftmost
+# entry, which a client can write.
+ENV FORWARDED_HOPS=1
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --no-proxy-headers"]

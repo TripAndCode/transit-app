@@ -1,9 +1,9 @@
 """ASGI middleware that assigns each request an ID, times it, and emits
 one access-log line.
 
-Sits OUTERMOST on the request side (added LAST in api/main.py's
-middleware list so Starlette wraps it last -> it enters first) so it
-sees the final response status after every inner middleware ran.
+Sits outside every middleware but ForwardedClientMiddleware (see the
+order in api/main.py), so it sees the final response status after every
+inner middleware ran, and the caller's address that one set.
 
 The request ID is either:
 - the client's `X-Request-Id` header value, if it matches
