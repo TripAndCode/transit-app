@@ -124,6 +124,21 @@ export function apiErrorDetail(err: unknown): string | null {
   }
 }
 
+/** The `msg` fields of a FastAPI validation error (`detail` is a list of
+ * `{msg, ...}` objects), joined; `null` when the body is not that shape. */
+function validationMessages(err: ApiError): string | null {
+  try {
+    const parsed = JSON.parse(err.body);
+    if (!Array.isArray(parsed?.detail)) return null;
+    const msgs = parsed.detail
+      .map((d: unknown) => (d && typeof d === "object" ? (d as { msg?: unknown }).msg : undefined))
+      .filter((m: unknown): m is string => typeof m === "string" && m !== "");
+    return msgs.length > 0 ? msgs.join("; ") : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Extract a human-readable message from an unknown error, preferring an
  * `ApiError`'s parsed `detail` field. Mirrors the previous per-caller
  * `Error(detail.detail ?? detail)` shape so existing UI text stays intact. */
@@ -131,7 +146,16 @@ export function formatApiError(e: unknown): string {
   if (e instanceof ApiError) {
     const detail = apiErrorDetail(e);
     if (detail != null) return detail;
-    return e.body || e.message;
+    const validation = validationMessages(e);
+    if (validation != null) return validation;
+    // The body is not a `{detail: string}` the server wrote for people: it may
+    // be a proxy's HTML page or a machine-readable payload, so it is never
+    // shown. A 2xx/3xx ApiError carries the client's own message instead.
+    if (e.status < 400) return e.body || e.message;
+    if (e.status === 429) return i18n.t("errors.rate_limited");
+    if (e.status === 404) return i18n.t("errors.not_found");
+    if (e.status >= 500) return i18n.t("errors.server_5xx");
+    return i18n.t("errors.generic_status", { status: e.status });
   }
   return e instanceof Error ? e.message : String(e);
 }

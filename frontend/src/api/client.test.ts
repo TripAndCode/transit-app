@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ApiError, apiPatch, isAggregateNotReady } from "./client";
+import i18n from "../i18n";
+import { ApiError, apiPatch, formatApiError, isAggregateNotReady } from "./client";
 
 describe("isAggregateNotReady", () => {
   it("is true for a 503 with the aggregate_not_ready code", () => {
@@ -41,5 +42,38 @@ describe("apiPatch", () => {
       expect.stringContaining("/api/admin/users/1"),
       expect.objectContaining({ signal: controller.signal }),
     );
+  });
+});
+
+describe("formatApiError", () => {
+  it("returns a string detail as is", () => {
+    expect(formatApiError(new ApiError(409, JSON.stringify({ detail: "agency name taken" })))).toBe("agency name taken");
+  });
+
+  it("joins the msg fields of a FastAPI 422 validation list instead of printing the JSON", () => {
+    const body = JSON.stringify({
+      detail: [
+        { type: "int_parsing", loc: ["query", "actor"], msg: "Input should be a valid integer", input: "abc" },
+        { type: "missing", loc: ["query", "from"], msg: "Field required" },
+      ],
+    });
+    expect(formatApiError(new ApiError(422, body))).toBe("Input should be a valid integer; Field required");
+  });
+
+  it("never returns an HTML proxy page as the message", () => {
+    const html = "<html><body><h1>502 Bad Gateway</h1></body></html>";
+    const msg = formatApiError(new ApiError(502, html));
+    expect(msg).not.toContain("<");
+    expect(msg).toBe(i18n.t("errors.server_5xx"));
+  });
+
+  it("falls back to a localized message by status when the body carries no usable detail", () => {
+    expect(formatApiError(new ApiError(429, ""))).toBe(i18n.t("errors.rate_limited"));
+    expect(formatApiError(new ApiError(404, "{}"))).toBe(i18n.t("errors.not_found"));
+    expect(formatApiError(new ApiError(400, '{"detail":{"a":1}}'))).toBe(i18n.t("errors.generic_status", { status: 400 }));
+  });
+
+  it("keeps a non-API error's own message", () => {
+    expect(formatApiError(new Error("boom"))).toBe("boom");
   });
 });
