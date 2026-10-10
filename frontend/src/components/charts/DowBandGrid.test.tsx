@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { BandGrid, Legend } from "./DowBandGrid";
 import { BAND_ORDER, type ForecastOverviewGridCell } from "../../api/types";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
@@ -22,10 +22,47 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
   return grid;
 }
 
+describe("BandGrid keyboard and screen-reader access", () => {
+  function renderGrid() {
+    return render(
+      <BandGrid
+        ariaLabel="Grid"
+        grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => `Day${d}`}
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+  }
+
+  it("exposes each cell's value as its accessible name, not only a hover tooltip", () => {
+    renderGrid();
+    expect(screen.getByRole("grid")).toBeInTheDocument();
+    expect(screen.getAllByRole("gridcell")).toHaveLength(35);
+    expect(screen.getByRole("gridcell", { name: /^Day1 midday · 6\.8/ })).toBeInTheDocument();
+    expect(screen.getByRole("gridcell", { name: "Day2 midday · —" })).toBeInTheDocument();
+  });
+
+  it("is one tab stop, with arrow keys moving between cells", () => {
+    renderGrid();
+    const cells = screen.getAllByRole("gridcell");
+    expect(cells.filter((c) => c.getAttribute("tabindex") === "0")).toHaveLength(1);
+    const first = cells[0];
+    first.focus();
+    fireEvent.keyDown(screen.getByRole("grid"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(cells[1]);
+    fireEvent.keyDown(screen.getByRole("grid"), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(cells[1 + 5]);
+  });
+});
+
 describe("BandGrid", () => {
   it("sizes its weekday column to the labels, so none breaks mid-word", () => {
     const { container } = render(
       <BandGrid
+        ariaLabel="Grid"
         grid={fullGrid([])}
         bandLabel={(b) => b}
         dayLabel={() => "Wed"}
@@ -42,6 +79,7 @@ describe("BandGrid", () => {
   it("renders all 35 cells", () => {
     render(
       <BandGrid
+        ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
@@ -56,6 +94,7 @@ describe("BandGrid", () => {
   it("dims low-confidence cells to 0.5 opacity", () => {
     render(
       <BandGrid
+        ariaLabel="Grid"
         grid={fullGrid([{ dow: 2, band: "evening", v: 9.0, n: 5 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
@@ -87,11 +126,11 @@ describe("BandGrid", () => {
       onTip: vi.fn(),
       onLeave: vi.fn(),
     };
-    const { rerender } = render(<BandGrid grid={[]} {...props} />);
+    const { rerender } = render(<BandGrid ariaLabel="Grid" grid={[]} {...props} />);
     act(() => frames.splice(0).forEach((cb) => cb(0)));
     expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(false);
 
-    rerender(<BandGrid grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])} {...props} />);
+    rerender(<BandGrid ariaLabel="Grid" grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])} {...props} />);
     act(() => frames.splice(0).forEach((cb) => cb(0)));
     expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(true);
     vi.restoreAllMocks();
@@ -100,6 +139,7 @@ describe("BandGrid", () => {
   it("marks every cell with the staggered-fade entrance class", () => {
     render(
       <BandGrid
+        ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
@@ -128,6 +168,7 @@ describe("BandGrid severity outline", () => {
   it("outlines a cell at or above the severe threshold instead of recolouring it", () => {
     render(
       <BandGrid
+        ariaLabel="Grid"
         grid={fullGrid([
           { dow: 1, band: "midday", v: DELAY_THRESHOLDS.severe + 1 },
           { dow: 2, band: "midday", v: 1.0 },

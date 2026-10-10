@@ -288,7 +288,7 @@ describe("RouteForecastSection", () => {
   it("is one tab stop per grid, with the arrow keys moving inside it", () => {
     renderSection(overview(), "100");
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
-    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length > 24)!;
+    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length === 168)!;
     const cells = [...grid.querySelectorAll('[role="gridcell"]')];
 
     // 7x24 cells, exactly one of them reachable by Tab.

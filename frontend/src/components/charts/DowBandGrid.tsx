@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useRovingCells } from "../../hooks/useRovingCells";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 import { useFirstData } from "../../hooks/useFirstData";
@@ -31,6 +32,7 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
  * A cell at or beyond the severe threshold is outlined rather than
  * recoloured, so the outline survives whatever ramp `colorFor` applies. */
 export function BandGrid({
+  ariaLabel,
   grid,
   bandLabel,
   dayLabel,
@@ -38,6 +40,8 @@ export function BandGrid({
   onTip,
   onLeave,
 }: {
+  /** Already-translated accessible name for the grid. */
+  ariaLabel: string;
   grid: ForecastOverviewGridCell[];
   bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
@@ -48,26 +52,47 @@ export function BandGrid({
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useFirstData(grid.length > 0);
+  // Every cell is focusable, so a keyboard or screen-reader user reads the
+  // same value a pointer user gets from the tooltip, with one tab stop for
+  // the whole grid.
+  const slots = Array.from({ length: 7 * BAND_ORDER.length }, (_, i) => String(i));
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, BAND_ORDER.length);
   // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
   // entrance classes) the same --cell-opacity the fade would have landed on,
   // so the low-confidence dimming still applies.
   const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
   return (
-    <div onMouseLeave={onLeave}>
+    <div
+      ref={containerRef}
+      role="grid"
+      aria-label={ariaLabel}
+      // The roving cell owns the tab stop; the container is focusable only
+      // programmatically, which is what the composite pattern asks for.
+      tabIndex={-1}
+      aria-rowcount={7}
+      aria-colcount={BAND_ORDER.length}
+      onKeyDown={onKeyDown}
+      onMouseLeave={onLeave}
+    >
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
-        <span />
-        {BAND_ORDER.map((b) => (
-          <span key={b} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
-            {bandLabel(b)}
-          </span>
-        ))}
+        {/* `display: contents` so the rows carry the grid semantics while the
+            cells stay direct children of the CSS grid that lays them out. */}
+        <div role="row" style={{ display: "contents" }}>
+          <span aria-hidden="true" />
+          {BAND_ORDER.map((b) => (
+            <span key={b} role="columnheader" style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
+              {bandLabel(b)}
+            </span>
+          ))}
+        </div>
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
-          return [
-            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
+          return (
+            <div key={`r${dow}`} role="row" style={{ display: "contents" }}>
+            <div role="rowheader" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
               {dayLabel(dow)}
-            </div>,
-            ...BAND_ORDER.map((b, bi) => {
+            </div>
+            {BAND_ORDER.map((b, bi) => {
               const c = byKey.get(`${dow}-${b}`);
               const v = c?.expected_avg_min ?? null;
               const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : formatMinutes(v)}`;
@@ -80,6 +105,14 @@ export function BandGrid({
               const targetOpacity = c?.low_confidence ? 0.5 : 1;
               const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
               const showTip = (e: React.MouseEvent) => onTip(e, tipText);
+              const index = di * BAND_ORDER.length + bi;
+              const cellA11y = {
+                role: "gridcell",
+                "aria-label": tipText,
+                "data-cell": index,
+                tabIndex: activeSlot === String(index) ? 0 : -1,
+                onFocus: () => onCellFocus(index),
+              };
               // inset, not `border`/`outline`: a border would resize the cell
               // and break the grid's alignment with its unmarked neighbours.
               const severeOutline =
@@ -91,6 +124,7 @@ export function BandGrid({
                   <div
                     key={b}
                     data-testid="ov-band-cell"
+                    {...cellA11y}
                     className={cellClass}
                     onMouseEnter={showTip}
                     onMouseMove={showTip}
@@ -107,14 +141,16 @@ export function BandGrid({
                 <div
                   key={b}
                   data-testid="ov-band-cell"
+                  {...cellA11y}
                   className={cellClass}
                   onMouseEnter={showTip}
                   onMouseMove={showTip}
                   style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...staggerStyle }}
                 />
               );
-            }),
-          ];
+            })}
+            </div>
+          );
         })}
       </div>
     </div>
