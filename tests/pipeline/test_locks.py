@@ -206,3 +206,62 @@ def test_agency_ingest_lock_releases_when_the_block_raises(pg_conn):
         _unlock_agency(other, 14)
     finally:
         other.close()
+
+
+def test_agency_ingest_lock_releases_when_the_block_aborted_its_transaction(pg_conn):
+    """A failed statement inside the block leaves the transaction aborted. The
+    unlock must still run, and the block's own error must be the one raised."""
+    other = psycopg2.connect(DATABASE_URL)
+    other.autocommit = True
+    try:
+        try:
+            with agency_ingest_lock(pg_conn, 15):
+                with pg_conn.cursor() as cur:
+                    cur.execute("SELECT * FROM a_table_that_does_not_exist")
+        except psycopg2.errors.UndefinedTable:
+            pass
+        assert try_lock_agency_ingest(other, 15) is True
+        _unlock_agency(other, 15)
+    finally:
+        other.close()
+
+
+def _run_row(conn, kind, started_hours_ago):
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO pipeline_runs (kind, status, started_at) "
+            "VALUES (%s, 'running', now() - make_interval(hours => %s)) RETURNING run_id",
+            (kind, started_hours_ago),
+        )
+        run_id = cur.fetchone()[0]
+    conn.commit()
+    return run_id
+
+
+def _status(conn, run_id):
+    with conn.cursor() as cur:
+        cur.execute("SELECT status, error FROM pipeline_runs WHERE run_id = %s", (run_id,))
+        row = cur.fetchone()
+    conn.commit()
+    return row
+
+
+def test_the_reaper_spares_a_locked_kind_while_the_lock_is_held(pg_conn):
+    """A full rebuild can run for hours under the lock; its old running row is
+    still being worked on as long as that lock is held."""
+    from pipeline.runs import reap_abandoned_runs
+
+    analyze_run = _run_row(pg_conn, "analyze", 3)
+    weather_run = _run_row(pg_conn, "weather", 3)
+    holder = psycopg2.connect(DATABASE_URL)
+    holder.autocommit = True
+    try:
+        assert try_lock_ingest_analyze(holder) is True
+        reap_abandoned_runs(pg_conn)
+        assert _status(pg_conn, analyze_run) == ("running", None)
+        assert _status(pg_conn, weather_run) == ("error", "abandoned")
+    finally:
+        holder.close()
+    # The lock died with its session: nothing is left to finish the row.
+    reap_abandoned_runs(pg_conn)
+    assert _status(pg_conn, analyze_run) == ("error", "abandoned")

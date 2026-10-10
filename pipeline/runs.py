@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
+from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
 from pipeline.url_guard import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
@@ -65,18 +66,37 @@ _FINISH_RUN_SQL = """
     WHERE run_id = %s
 """
 
+#: The job kinds that run holding the ingest/analyze advisory lock
+#: (pipeline/locks.py). The lock is session-level, so it dies with the process
+#: that took it: while it is held, its holder is alive and may still be the
+#: one working on an old ``running`` row of one of these kinds.
+_LOCKED_RUN_KINDS = ("ingest", "promote", "analyze")
+
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given
-#: up on, and the cutoff only decides which rows qualify.
+#: up on, and the cutoff only decides which rows qualify. A row of a locked
+#: kind is left alone while the lock is held (``pg_locks`` names a one-bigint
+#: key by its high and low halves, with ``objsubid = 1``).
 _REAP_ABANDONED_SQL = """
     UPDATE pipeline_runs
     SET status = 'error', error = 'abandoned', finished_at = %s
     WHERE status = 'running' AND finished_at IS NULL AND started_at < %s
+      AND NOT (
+          kind = ANY(%s)
+          AND EXISTS (
+              SELECT 1 FROM pg_locks
+              WHERE locktype = 'advisory' AND granted
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                AND classid = %s AND objid = %s AND objsubid = 1
+          )
+      )
 """
 
 #: How long a ``running`` row is left alone before it is treated as
-#: abandoned. Comfortably longer than the slowest real sweep, since reaping a
-#: run that is still working would replace a true bar with a false error.
+#: abandoned, since reaping a run that is still working would replace a true
+#: bar with a false error. A full rebuild can hold the lock for hours, which
+#: is why a locked kind is also spared for as long as the lock is held; this
+#: age only bounds how long a dead process's row stays open.
 DEFAULT_REAP_AGE = timedelta(hours=2)
 
 
@@ -198,7 +218,16 @@ def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: 
     now = now or datetime.now(timezone.utc)
     try:
         with conn.cursor() as cur:
-            cur.execute(_REAP_ABANDONED_SQL, (now, now - older_than))
+            cur.execute(
+                _REAP_ABANDONED_SQL,
+                (
+                    now,
+                    now - older_than,
+                    list(_LOCKED_RUN_KINDS),
+                    INGEST_ANALYZE_LOCK_KEY >> 32,
+                    INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
+                ),
+            )
             reaped = cur.rowcount
         conn.commit()
         if reaped:

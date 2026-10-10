@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
 from pipeline.runs import (
     MAX_ERROR_CHARS,
     RUN_KINDS,
@@ -175,21 +176,30 @@ def test_the_reaper_closes_only_rows_still_open_past_the_cutoff():
     conn = _Conn(rowcount=3)
     assert reap_abandoned_runs(conn, older_than=timedelta(hours=2), now=_NOW) == 3
     sql, params = conn.statements[0]
-    assert sql == (
+    assert sql.startswith(
         "UPDATE pipeline_runs SET status = 'error', error = 'abandoned', finished_at = %s "
         "WHERE status = 'running' AND finished_at IS NULL AND started_at < %s"
     )
     # finished_at is the reap moment, not the cutoff: the row says when it
     # was given up on, and the cutoff only decides which rows qualify.
-    assert params == (_NOW, _NOW - timedelta(hours=2))
+    assert params[:2] == (_NOW, _NOW - timedelta(hours=2))
     assert conn.events == ["commit"]
+
+
+def test_the_reaper_spares_the_locked_kinds_while_the_lock_is_held():
+    """The lock key goes to pg_locks as its high and low 32-bit halves."""
+    conn = _Conn()
+    reap_abandoned_runs(conn, now=_NOW)
+    sql, params = conn.statements[0]
+    assert "FROM pg_locks" in sql
+    assert params[2:] == (["ingest", "promote", "analyze"], 0, INGEST_ANALYZE_LOCK_KEY)
 
 
 def test_the_reaper_defaults_to_a_two_hour_grace_so_a_long_sweep_is_left_alone():
     conn = _Conn()
     reap_abandoned_runs(conn, now=_NOW)
     _, params = conn.statements[0]
-    assert params == (_NOW, _NOW - timedelta(hours=2))
+    assert params[:2] == (_NOW, _NOW - timedelta(hours=2))
 
 
 def test_the_reaper_dates_itself_when_no_clock_is_supplied():
