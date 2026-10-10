@@ -897,6 +897,8 @@ async def compute_trend_series(
     ``None`` there.
     """
     _SMOOTH_WINDOW = 7
+    # A route-service group needs more samples than this to be named an offender.
+    _OFFENDER_MIN_SAMPLES = 5
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
@@ -925,14 +927,12 @@ async def compute_trend_series(
             "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
-            "GROUP BY bucket, route_code, service_type\n"
-            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5"
+            "GROUP BY bucket, route_code, service_type"
         )
         per_day = await conn.fetch(sql, agency_id, *params)
     else:
         # time_band filter needs the hour-of-day, only on raw updates
-        # (ClickHouse). Every group here has > 5 rows (the HAVING gate), so
-        # avg() is never NaN.
+        # (ClickHouse). Every group has at least one row, so avg() is never NaN.
         if ch is None:
             raise RuntimeError("compute_trend_series's time_band-filtered live fallback requires a ClickHouse client")
         _CH_BUCKET_EXPR = {"day": "date", "week": "toStartOfWeek(date, 1)", "month": "toStartOfMonth(date)"}
@@ -945,8 +945,7 @@ async def compute_trend_series(
             "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
-            "GROUP BY bucket, route_code, service_type\n"
-            "HAVING count(*) > 5",
+            "GROUP BY bucket, route_code, service_type",
             parameters={"agency_id": agency_id, **ch_params},
         )
         per_day = _ch_rows(result)
@@ -969,17 +968,24 @@ async def compute_trend_series(
         # a group whose samples counted here but whose delay total didn't
         # (matches pipeline/reports/overview.py's identical FILTER rationale
         # applied at the SQL layer for other queries).
-        if sum_sec is not None:
-            by_date_samples[d] = by_date_samples.get(d, 0) + n
-            by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
-        by_date.setdefault(d, []).append(
-            {
-                "route_code": r["route_code"],
-                "service_type": r["service_type"],
-                "avg_min": avg,
-                "samples": n,
-            }
-        )
+        if sum_sec is None:
+            continue
+        by_date_samples[d] = by_date_samples.get(d, 0) + n
+        by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
+        # Every group counts toward its bucket's average and sample total, as
+        # in Overview's pooling of agg_daily_trend. Only the worst-route
+        # attribution applies a floor: a handful of trips is too noisy to
+        # name a worst route.
+        by_date.setdefault(d, [])
+        if n > _OFFENDER_MIN_SAMPLES:
+            by_date[d].append(
+                {
+                    "route_code": r["route_code"],
+                    "service_type": r["service_type"],
+                    "avg_min": avg,
+                    "samples": n,
+                }
+            )
 
     daily = []
     for d in sorted(by_date.keys()):
