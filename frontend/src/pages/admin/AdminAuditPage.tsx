@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AdminAuditItem, AuditSnapshot } from "../../api/admin";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
@@ -106,6 +106,64 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
   );
 }
 
+const FILTER_DEBOUNCE_MS = 300;
+
+/** A text filter backed by one URL param. Keystrokes edit local state; only
+ * the settled value is written to the URL, and as a replace so the browser's
+ * Back button leaves the page rather than stepping through every prefix. The
+ * URL stays the source of truth: a param change from elsewhere (Back/Forward)
+ * discards a stale local edit during render, without an effect or a remount
+ * that would drop focus. `digitsOnly` drops every non-digit as it is typed, for an integer id. */
+function DebouncedFilterInput({
+  param,
+  value,
+  setSearchParams,
+  placeholder,
+  digitsOnly = false,
+}: {
+  param: keyof AdminAuditFilters;
+  value: string;
+  setSearchParams: SetURLSearchParams;
+  placeholder: string;
+  digitsOnly?: boolean;
+}) {
+  const [committed, setCommitted] = useState(value);
+  const [override, setOverride] = useState<string | null>(null);
+  if (value !== committed) {
+    setCommitted(value);
+    setOverride(null);
+  }
+  const shown = override ?? value;
+
+  useEffect(() => {
+    if (override == null) return;
+    const settled = override.trim();
+    if (settled === value) return;
+    const id = setTimeout(() => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (settled) next.set(param, settled);
+          else next.delete(param);
+          return next;
+        },
+        { replace: true },
+      );
+    }, FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [override, value, param, setSearchParams]);
+
+  return (
+    <AdminSearchInput
+      aria-label={placeholder}
+      placeholder={placeholder}
+      inputMode={digitsOnly ? "numeric" : undefined}
+      value={shown}
+      onChange={(e) => setOverride(digitsOnly ? e.target.value.replace(/\D/g, "") : e.target.value)}
+    />
+  );
+}
+
 /** Admin: unified audit timeline (admin_audit + login/login_failed events),
  * with before→after diff pills, filters, cursor paging, and CSV export. */
 export function AdminAuditPage() {
@@ -163,23 +221,24 @@ export function AdminAuditPage() {
     <div style={{ padding: 24 }}>
       <PageHeader title={t("admin.audit.title")} />
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
-        <AdminSearchInput
-          aria-label={t("admin.audit.filter.actor_placeholder")}
-          placeholder={t("admin.audit.filter.actor_placeholder")}
+        <DebouncedFilterInput
+          param="actor"
           value={filters.actor ?? ""}
-          onChange={(e) => setFilter("actor", e.target.value)}
+          setSearchParams={setSearchParams}
+          placeholder={t("admin.audit.filter.actor_placeholder")}
+          digitsOnly
         />
-        <AdminSearchInput
-          aria-label={t("admin.audit.filter.target_placeholder")}
-          placeholder={t("admin.audit.filter.target_placeholder")}
+        <DebouncedFilterInput
+          param="target"
           value={filters.target ?? ""}
-          onChange={(e) => setFilter("target", e.target.value)}
+          setSearchParams={setSearchParams}
+          placeholder={t("admin.audit.filter.target_placeholder")}
         />
-        <AdminSearchInput
-          aria-label={t("admin.audit.filter.action_placeholder")}
-          placeholder={t("admin.audit.filter.action_placeholder")}
+        <DebouncedFilterInput
+          param="action"
           value={filters.action ?? ""}
-          onChange={(e) => setFilter("action", e.target.value)}
+          setSearchParams={setSearchParams}
+          placeholder={t("admin.audit.filter.action_placeholder")}
         />
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
           {t("admin.audit.filter.from")}
