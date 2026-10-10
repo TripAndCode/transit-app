@@ -173,13 +173,37 @@ async def test_describe_data_stops_filter_no_match_is_empty(conn_with_observatio
 
 
 @pytest.mark.asyncio
-async def test_describe_data_date_range_summary_names_jst_days(conn_with_observations_ch):
-    """The fixture's captures are 08:00 JST, the previous day in UTC."""
-    pool, agency_id, ch = conn_with_observations_ch
+async def test_describe_data_date_range_summary_names_jst_days(conn_with_seed, ch_client, ch_async_client):
+    """08:00 JST is 23:00 the PREVIOUS day in UTC -- the day .date() on a bare
+    UTC datetime would report. Seeded with an explicit JST tzinfo, not a
+    naive datetime passed to asyncpg: asyncpg encodes a naive value via
+    Python's astimezone(), which reads the *host process's* local timezone
+    (not the session's SET TIME ZONE), so a naive seed's stored instant --
+    and whether this test can tell the bug from the fix at all -- would
+    depend on the machine running it rather than on the code under test."""
+    from zoneinfo import ZoneInfo
+
+    pool, agency_id = conn_with_seed
+    jst = ZoneInfo("Asia/Tokyo")
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, '1021', 1, $4, '08:00'::time, '平日', 60)",
+            [
+                (agency_id, "pb_first", "T_first", datetime(2026, 5, 1, 8, 0, 0, tzinfo=jst)),
+                (agency_id, "pb_last", "T_last", datetime(2026, 5, 26, 8, 0, 0, tzinfo=jst)),
+            ],
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
     async with pool.acquire() as conn:
-        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch)
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
     assert "2026-05-01" in result.summary and "2026-05-26" in result.summary
-    assert "2026-04-30" not in result.summary
+    assert "2026-04-30" not in result.summary and "2026-05-25" not in result.summary
 
 
 @pytest.mark.asyncio

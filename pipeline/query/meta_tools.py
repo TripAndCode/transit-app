@@ -180,8 +180,8 @@ async def describe_data(
                 limit,
                 offset,
             )
-            # Counted under the same filter, like the routes branch: a total of
-            # every stop beside a filtered page would misstate both.
+            # A total scoped only by agency_id would overcount a filtered
+            # page, so the COUNT uses the same WHERE the row query does.
             total = await conn.fetchval(
                 "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%'",
                 agency_id,
@@ -210,14 +210,15 @@ async def describe_data(
                 rows=[[r["stop_id"], r["stop_name"]] for r in rows],
                 columns=["stop_id", "stop_name"],
             )
-        else:
-            rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops "
-                "WHERE agency_id = $1 ORDER BY stop_name, stop_id LIMIT $2 OFFSET $3",
-                agency_id,
-                limit,
-                offset,
-            )
+        # The filtered branch above always returns, so this path is reached
+        # only when substring is falsy.
+        rows = await conn.fetch(
+            "SELECT stop_id, stop_name FROM static_stops "
+            "WHERE agency_id = $1 ORDER BY stop_name, stop_id LIMIT $2 OFFSET $3",
+            agency_id,
+            limit,
+            offset,
+        )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         if total == 0:
             return ToolResult(
