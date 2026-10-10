@@ -212,8 +212,11 @@ export function AdminAskOpsPage() {
   // The funnel answers "where did questions go in this window", so it takes
   // the date range but not the route/status filters -- narrowing it by route
   // would leave a funnel with one bar.
-  const { data: funnel } = useAdminAskFunnel({ from: filters.from, to: filters.to });
-  const { data: evalResult } = useAdminAskEval();
+  const { data: funnel, error: funnelError, refetch: refetchFunnel } = useAdminAskFunnel({
+    from: filters.from,
+    to: filters.to,
+  });
+  const { data: evalResult, error: evalError, refetch: refetchEval } = useAdminAskEval();
 
   const maxCount = Math.max(1, ...(funnel?.by_route.map((r) => r.count) ?? [1]));
 
@@ -264,21 +267,33 @@ export function AdminAskOpsPage() {
         style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
       >
         <h2 style={{ fontSize: 15, marginBottom: 12 }}>{t("admin.ask_ops.funnel.title")}</h2>
-        {ROUTE_ORDER.map((r) => {
-          const entry = funnel?.by_route.find((fr) => fr.route === r);
-          return (
-            <FunnelBar
-              key={r}
-              route={r}
-              count={entry?.count ?? 0}
-              successCount={entry?.success_count ?? 0}
-              maxCount={maxCount}
-            />
-          );
-        })}
-        <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 8 }}>
-          {t("admin.ask_ops.funnel.total", { count: funnel?.total ?? 0 })}
-        </div>
+        {funnel == null ? (
+          // Not yet loaded or failed: zeros here would read as "no questions
+          // were asked", which the page has not been told.
+          funnelError != null ? (
+            <ErrorBanner error={funnelError} onRetry={() => refetchFunnel()} />
+          ) : (
+            <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
+          )
+        ) : (
+          <>
+            {ROUTE_ORDER.map((r) => {
+              const entry = funnel.by_route.find((fr) => fr.route === r);
+              return (
+                <FunnelBar
+                  key={r}
+                  route={r}
+                  count={entry?.count ?? 0}
+                  successCount={entry?.success_count ?? 0}
+                  maxCount={maxCount}
+                />
+              );
+            })}
+            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 8 }}>
+              {t("admin.ask_ops.funnel.total", { count: funnel.total })}
+            </div>
+          </>
+        )}
         <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
           {t("admin.ask_ops.funnel.providers_not_tracked")}
         </p>
@@ -300,7 +315,15 @@ export function AdminAskOpsPage() {
         style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
       >
         <h2 style={{ fontSize: 15, marginBottom: 8 }}>{t("admin.ask_ops.eval.title")}</h2>
-        {evalResult ? (
+        {evalResult === undefined ? (
+          // "Not run" is a statement about the eval job; a query that is still
+          // loading or failed says nothing about it.
+          evalError != null ? (
+            <ErrorBanner error={evalError} onRetry={() => refetchEval()} />
+          ) : (
+            <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
+          )
+        ) : evalResult ? (
           <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
             {evalResult.score !== null && (
               <span style={{ marginRight: 16 }}>

@@ -103,6 +103,21 @@ describe("AdminAuditPage", () => {
     expect(dimmed).toHaveStyle({ opacity: "0.6" });
   });
 
+  it("does not claim the trail is empty while loading or after a failed load", () => {
+    useAdminAuditMock.mockReturnValue({ data: undefined, isLoading: true, isPlaceholderData: false, error: null });
+    const { unmount } = wrap(<AdminAuditPage />);
+    expect(screen.queryByText(i18n.t("admin.audit.empty"))).toBeNull();
+    unmount();
+    useAdminAuditMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isPlaceholderData: false,
+      error: new Error("boom"),
+    });
+    wrap(<AdminAuditPage />);
+    expect(screen.queryByText(i18n.t("admin.audit.empty"))).toBeNull();
+  });
+
   it("names the timeline for a screen reader instead of leaking the i18n key", () => {
     // The caption is the table's accessible name; locale parity cannot
     // catch a key that is missing from both files.

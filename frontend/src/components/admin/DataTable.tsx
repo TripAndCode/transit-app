@@ -73,6 +73,11 @@ type DataTableProps<Row> = {
    *  discover is a shortcut nobody uses. */
   extraShortcuts?: readonly ShortcutHint[];
   emptyLabel?: string;
+  /** Whether `rows` is the answer to the query rather than a placeholder for
+   *  one still loading or failed. While `false` an empty `rows` renders no
+   *  empty label: "No x found" is a definitive claim only a successful empty
+   *  response can make. Defaults to `true`. */
+  settled?: boolean;
   /** The row a detail surface is currently open on, marked so an operator
    *  scanning the list can still see which one they opened. */
   activeRowKey?: string | null;
@@ -123,6 +128,7 @@ export function DataTable<Row>({
   savedViews,
   savedViewParam = "view",
   emptyLabel,
+  settled = true,
   activeRowKey = null,
   pending = false,
   activeView: controlledView,
@@ -257,9 +263,11 @@ export function DataTable<Row>({
       )}
 
       {rows.length === 0 ? (
-        <p style={{ color: "var(--text-secondary)", fontSize: 14, padding: "14px 2px" }}>
-          {emptyLabel ?? t("admin.table.empty")}
-        </p>
+        settled && (
+          <p style={{ color: "var(--text-secondary)", fontSize: 14, padding: "14px 2px" }}>
+            {emptyLabel ?? t("admin.table.empty")}
+          </p>
+        )
       ) : (
         <div style={{ overflow: "auto", maxHeight: "70vh" }}>
           <table

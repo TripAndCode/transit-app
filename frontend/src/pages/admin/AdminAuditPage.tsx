@@ -92,6 +92,7 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
         columns={columns}
         rowKey={(item) => `${item.at}-${item.action}-${item.target_id ?? ""}-${item.actor_id ?? ""}`}
         emptyLabel={t("admin.audit.empty")}
+        settled={data != null}
         pending={isPlaceholderData}
       />
       <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>

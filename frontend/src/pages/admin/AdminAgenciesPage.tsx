@@ -382,6 +382,7 @@ export function AdminAgenciesPage() {
         rowLabel={(a) => a.agency_name}
         caption={t("admin.agencies.table_label")}
         emptyLabel={t("admin.agencies.empty")}
+        settled={agencies != null}
         onOpen={(a) => setOpenedId(a.agency_id)}
         activeRowKey={openedId == null ? null : String(openedId)}
         savedViews={[
