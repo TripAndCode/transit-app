@@ -233,7 +233,7 @@ describe("RouteForecastSection", () => {
     // A role=button card would make its bar grid presentational for assistive tech.
     expect(card).not.toHaveAttribute("role");
     expect(card).not.toHaveAttribute("tabindex");
-    const expand = within(card).getByRole("button", { name: /^Expand By day of week/ });
+    const expand = within(card).getByRole("button", { name: /^Expand By day$/ });
     fireEvent.click(expand);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
