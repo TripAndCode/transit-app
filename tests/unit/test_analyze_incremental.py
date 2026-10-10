@@ -10,6 +10,7 @@ restates them.
 from datetime import date
 
 import pytest
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
 from pipeline.analyze import analyze
@@ -118,6 +119,9 @@ class FakeConn:
 
     def rollback(self):
         pass
+
+    def get_transaction_status(self):
+        return TRANSACTION_STATUS_IDLE
 
     def respond(self, sql):
         if "FROM static_stops" in sql:
