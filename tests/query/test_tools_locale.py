@@ -62,14 +62,25 @@ def test_summary_suggest_reason_anomaly_exact_strings():
     )
 
 
-def test_summary_suggest_reason_trend_shift_exact_strings():
+def test_summary_suggest_reason_trend_worsened_exact_strings():
     assert (
-        _summary("suggest_reason_trend_shift", lang="ja", route="路線R2", delta_min="+4.0")
+        _summary("suggest_reason_trend_worsened", lang="ja", route="路線R2", delta_min="+4.0")
         == "路線R2の遅延が今週の途中から悪化しています（+4.0分の変化）。"
     )
     assert (
-        _summary("suggest_reason_trend_shift", lang="en", route="Route R2", delta_min="+4.0")
-        == "The delay pattern on Route R2 shifted partway through this week (+4.0 min change)."
+        _summary("suggest_reason_trend_worsened", lang="en", route="Route R2", delta_min="+4.0")
+        == "Delays on Route R2 worsened partway through this week (+4.0 min change)."
+    )
+
+
+def test_summary_suggest_reason_trend_improved_exact_strings():
+    assert (
+        _summary("suggest_reason_trend_improved", lang="ja", route="路線R2", delta_min="-2.5")
+        == "路線R2の遅延が今週の途中から改善しています（-2.5分の変化）。"
+    )
+    assert (
+        _summary("suggest_reason_trend_improved", lang="en", route="Route R2", delta_min="-2.5")
+        == "Delays on Route R2 improved partway through this week (-2.5 min change)."
     )
 
 

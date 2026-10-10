@@ -170,6 +170,36 @@ async def test_trend_shift_wins_when_no_anomaly_today(suggest_agency, ch_client)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_half_sec", "second_half_sec", "expected_ja", "unexpected_ja"),
+    [(60, 300, "悪化", "改善"), (300, 60, "改善", "悪化")],
+)
+async def test_trend_shift_reason_names_the_direction_of_the_shift(
+    suggest_agency, ch_client, first_half_sec, second_half_sec, expected_ja, unexpected_ja
+):
+    pool, agency_id = suggest_agency
+    today = jst_today()
+    for offset in range(6, 3, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        await _seed(pool, agency_id, "R2", day, [first_half_sec] * 25)
+    for offset in range(2, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        await _seed(pool, agency_id, "R2", day, [second_half_sec] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    async with pool.acquire() as conn:
+        ja = await compute_suggestion(agency_id, conn, ch_client, locale="ja")
+        en = await compute_suggestion(agency_id, conn, ch_client, locale="en")
+
+    assert ja is not None and en is not None
+    assert ja["report_type"] == "trend"
+    assert expected_ja in ja["reason_text"]
+    assert unexpected_ja not in ja["reason_text"]
+    english = "worsened" if expected_ja == "悪化" else "improved"
+    assert english in en["reason_text"]
+
+
+@pytest.mark.asyncio
 async def test_falls_back_to_worst_on_time_route(suggest_agency, ch_client):
     pool, agency_id = suggest_agency
     today = jst_today()
