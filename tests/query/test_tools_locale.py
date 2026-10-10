@@ -7,7 +7,7 @@ Covers two surfaces:
 
 These are deliberately offline so they run regardless of Postgres
 availability — the DB-driven handler paths are exercised by the live
-integration tests in tests/test_tool_queries.py.
+integration tests in tests/query/test_tool_queries.py.
 """
 
 import asyncio
@@ -16,6 +16,7 @@ import re
 import pytest
 
 from pipeline.query.tools import (
+    _LOCALES,
     JSON_MODE_ADDENDUM,
     SYSTEM_PROMPT,
     TOOLS,
@@ -37,10 +38,15 @@ def test_summary_returns_en_when_locale_en():
     assert _summary("no_data", lang="en") == "No data available."
 
 
-def test_summary_falls_back_to_ja_when_en_missing():
-    """An unknown template short-circuits to the template name itself."""
-    # ``not_a_template`` has no row in either locale → returns the literal key.
+def test_summary_unknown_template_returns_the_key():
+    """A template with no row in either locale returns the literal key."""
     assert _summary("not_a_template", lang="en") == "not_a_template"
+
+
+def test_summary_falls_back_to_ja_when_en_missing(monkeypatch):
+    """A key that exists only in the JA table resolves to the JA text for EN."""
+    monkeypatch.setitem(_LOCALES, ("ja_only_key", "ja"), "日本語のみ {n}")
+    assert _summary("ja_only_key", lang="en", n=3) == "日本語のみ 3"
 
 
 def test_summary_interpolates_vars():
