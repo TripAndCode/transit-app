@@ -373,6 +373,17 @@ def _carries_dates(args: Any) -> bool:
     return isinstance(args, dict) and not _DATED_ARG_KEYS.isdisjoint(args)
 
 
+#: Maps a ``_call_llm`` ``error_kind`` to the ``_CHAT_STRINGS`` key describing
+#: it to the user. Shared by both call sites that handle ``msg is None`` so
+#: they can't drift apart on which failure kind gets which message.
+_ERROR_KIND_LOCALE_KEY = {
+    "rate_limit": "llm_rate_limited",
+    "no_providers": "llm_unconfigured",
+    "not_approved": "llm_not_approved",
+    "disabled": "llm_disabled",
+}
+
+
 async def chat_with_tools(
     question: str,
     ctx: RangeCtx,
@@ -452,6 +463,11 @@ async def chat_with_tools(
     so internal callers/tests that don't construct the real value aren't
     silently gated — the API layer is the one place responsible for passing
     the caller's actual approval status.
+    :func:`_call_llm` checks the operator's ``ask_llm_enabled`` kill switch
+    first and the per-caller ``llm_approved`` gate second, so a caller who is
+    both unapproved and hitting a disabled feature always sees
+    ``error_kind="disabled"`` (the operator-wide state), never
+    ``"not_approved"``.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -465,9 +481,11 @@ async def chat_with_tools(
     ladder, so one would leave every other rung unable to answer.
     """
     client = _get_client()
-    # The operator's kill switch for every LLM call this function makes.
-    # Stages 1-2, the intent-cache pre-hit and the build sentinel never reach
-    # one, so they keep answering while it is off.
+    # The operator's kill switch, checked inside _call_llm before any provider
+    # or BYOK key is touched. The rules/embedding routing stages (resolved by
+    # the caller before this function runs), the intent-cache pre-hit, and the
+    # build sentinel never call _call_llm, so they keep answering while it is
+    # off.
     llm_enabled = await aflag("ask_llm_enabled")
     # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
     # caller isn't approved: _call_llm below rejects them unconditionally
@@ -657,7 +675,7 @@ async def chat_with_tools(
     # phrasing, but generic anaphora ("その路線は？") also needs the prior
     # turn and doesn't match it. That means this block is just as often
     # attached ahead of a genuinely NEW, unrelated question that merely
-    # failed to get a confident Stage 1/2 match, which risks the model
+    # failed to get a confident rules/embedding match, which risks the model
     # answering from the attached (unrelated) history text instead of
     # recognizing that the current question needs a fresh tool call. The
     # trailing guard line below makes the scope of "use history" explicit
@@ -764,9 +782,11 @@ async def chat_with_tools(
         # history_block instead of returning a stale, history-blind answer.
         pre_row = None if force_tool_call else await _cache_lookup_by_question(conn, question, agency_id)
         # The same text can mean different dates on different days ("昨日",
-        # "先週"), and the cached args hold the absolute dates the LLM resolved
-        # it to the first time. Such a row answers its own signature, not its
-        # text, so the LLM resolves the text again.
+        # "先週"): a time_window token in the LLM's signature is resolved to
+        # absolute dates by canonicalize() against that request's RangeCtx, and
+        # the cached args hold the absolute dates from the first time it ran.
+        # Such a row answers its own signature, not its text, so the LLM
+        # resolves the text again.
         if pre_row is not None and _carries_dates(pre_row["args"]):
             pre_row = None
         if pre_row is not None:
@@ -800,12 +820,7 @@ async def chat_with_tools(
         # Stage 2: question is new — call LLM to get the intent signature.
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
-            key = {
-                "rate_limit": "llm_rate_limited",
-                "no_providers": "llm_unconfigured",
-                "not_approved": "llm_not_approved",
-                "disabled": "llm_disabled",
-            }.get(error_kind or "", "service_unreachable")
+            key = _ERROR_KIND_LOCALE_KEY.get(error_kind or "", "service_unreachable")
             return {
                 "answer": _chat_str(key, locale),
                 "tool_call": None,
@@ -924,17 +939,15 @@ async def chat_with_tools(
 
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
-        # The LLM ladder is exhausted — a hard failure, not a deliberate
-        # decline. success=False so analytics don't count it.
+        # No answer was produced — whether the ladder is exhausted
+        # (rate_limit/connection/no_providers) or the operator/caller
+        # deliberately gated it off (disabled/not_approved), it's equally a
+        # non-answer from the caller's perspective. success=False so
+        # analytics don't count it either way.
         # Route by failure kind: quota exhaustion steers the user toward
-        # question types Stages 1-2 answer without any LLM; everything else
-        # falls back to the generic retry message.
-        key = {
-            "rate_limit": "llm_rate_limited",
-            "no_providers": "llm_unconfigured",
-            "not_approved": "llm_not_approved",
-            "disabled": "llm_disabled",
-        }.get(error_kind or "", "service_unreachable")
+        # question types the rules/embedding routing stages answer without
+        # any LLM; everything else falls back to the generic retry message.
+        key = _ERROR_KIND_LOCALE_KEY.get(error_kind or "", "service_unreachable")
         return {
             "answer": _chat_str(key, locale),
             "tool_call": None,
