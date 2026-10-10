@@ -43,11 +43,12 @@ def run_backtest(
     cutoffs = [origins[start] - timedelta(days=1) for start in starts]
     fallback: set[int] = set()
     all_agencies = {int(agency) for agency in runs["agency_id"].unique()}
-    # Every week's training targets are dated at or before its own cutoff, and a target's
-    # drawn origin and features never depend on which cutoff produced the frame -- only on
-    # the target day itself -- so one training_frame built at the LAST cutoff already holds
-    # every earlier week's rows too. Each week takes that dated subset and reweights it from
-    # its own cutoff, instead of paying training_frame's full per-origin cost again.
+    # training_targets' per-agency RNG draw for a given target day depends only on that
+    # agency's first_day and the seed, never on the cutoff, and build_frame's own features
+    # never read the cutoff either -- so one training_frame built at the LAST cutoff already
+    # holds every earlier week's rows, unchanged, as a dated prefix. Each week takes that
+    # prefix and reweights it from its own cutoff, instead of paying training_frame's full
+    # per-origin cost again. See test_a_sliced_week_matches_training_frame_at_its_own_cutoff.
     full_frame = (
         training_frame(
             runs, cutoffs[-1], window_days=params.window_days, half_life_days=params.half_life_days, seed=params.seed
@@ -86,8 +87,9 @@ def run_backtest(
                 sub, sub_preds = frame.iloc[index], take(preds, index)
                 # Unlike add_cells below, not gated by on_model: this tracks the model's own
                 # interval calibration wherever it was fit, independent of which agencies are
-                # currently shown it, since the adoption gate judges the model itself, not the
-                # current display routing.
+                # currently shown it, since the adoption gate's coverage check judges the
+                # model's own calibration, not the current display routing (its skill checks
+                # are deliberately routing-aware, through add_cells' own use_model gating).
                 add_intervals(intervals[MODEL][str(agency_id)], intervals["B0"][str(agency_id)], sub, sub_preds)
                 m, b = add_cells(rows[int(agency_id)], cell_frame(sub, sub_preds), use_model=int(agency_id) in on_model)
                 model_shared.merge(m)

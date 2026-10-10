@@ -6,9 +6,11 @@ pd = require("pandas")
 np = require("numpy")
 require("lightgbm")
 
+from ml.features import route_ids, with_route_ids  # noqa: E402
 from ml.model_backtest import run_backtest  # noqa: E402
 from ml.model_result import result_from_json, result_to_json  # noqa: E402
 from ml.models import ModelParams  # noqa: E402
+from ml.training import training_frame  # noqa: E402
 
 START = date(2026, 6, 1)
 FAST = ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5)
@@ -103,6 +105,26 @@ def test_fallback_agencies_only_names_agencies_the_report_can_show():
     result = run_backtest(pd.concat([runs, extra], ignore_index=True), params=FAST, origin_count=7)
     assert 50 not in {agency.agency_id for agency in result.agencies}
     assert 50 not in result.fallback_agencies
+
+
+def test_a_sliced_week_matches_training_frame_at_its_own_cutoff():
+    """Pins the prefix property run_backtest's single training_frame build relies
+    on: an earlier cutoff's own training_frame call must equal the later cutoff's
+    frame, filtered to that cutoff and reweighted from it."""
+    runs = with_route_ids(_runs(), route_ids(_runs()))
+    early_cutoff = START + timedelta(days=20)
+    late_cutoff = START + timedelta(days=60)
+
+    direct = training_frame(runs, early_cutoff, window_days=FAST.window_days, half_life_days=FAST.half_life_days)
+    sliced = training_frame(runs, late_cutoff, window_days=FAST.window_days, half_life_days=FAST.half_life_days)
+    sliced = sliced[sliced["service_date"] <= pd.Timestamp(early_cutoff)]
+    age_days = (pd.Timestamp(early_cutoff) - sliced["service_date"]).dt.days
+    sliced = sliced.assign(weight=(0.5 ** (age_days / FAST.half_life_days)).astype("float32"))
+
+    sort_cols = ["agency_id", "trip_id", "service_date"]
+    direct = direct.sort_values(sort_cols).reset_index(drop=True)
+    sliced = sliced.sort_values(sort_cols).reset_index(drop=True)
+    pd.testing.assert_frame_equal(direct, sliced)
 
 
 def test_training_frame_is_built_once_for_every_retrain_week(monkeypatch):

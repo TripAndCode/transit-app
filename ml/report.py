@@ -1,6 +1,8 @@
 """The baselines' evaluation as one static HTML page: overall, by horizon,
 peak against off-peak, sparse cells, and per agency, with coverage beside
-every error so a method that abstains is seen to."""
+every error so a method that abstains is seen to. With a model backtest
+result, adds a section comparing the model against B0 and its adoption
+verdict."""
 
 from __future__ import annotations
 
@@ -70,7 +72,7 @@ MODEL_METHODS = ("B0", MODEL)
 
 def _interval_rows(models: ModelBacktestResult) -> str:
     rows = []
-    for method, label in ((MODEL, "LGBM p10–p90 (calibrated)"), ("B0", "B0 slot p10–p90")):
+    for method, label in ((MODEL, f"{MODEL} p10–p90 (calibrated)"), ("B0", "B0 slot p10–p90")):
         stats = merged_intervals(models, method)
         pinball = " / ".join(_num(stats.mean_pinball(a)) for a in ("0.1", "0.5", "0.9"))
         rows.append(

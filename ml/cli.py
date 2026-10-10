@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from ml import sync
 from ml.backtest import evaluate_agency, results_from_json, results_to_json
 from ml.data import agencies_with_data, fetch_cells
-from ml.model_result import result_from_json
+from ml.model_result import result_from_json, result_to_json
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -69,7 +69,6 @@ def _train_eval(args: argparse.Namespace) -> int:
     # Imported here: they need the optional `ml` group, which sync and report do not.
     from ml.dataset import load_runs
     from ml.model_backtest import run_backtest
-    from ml.model_result import result_to_json
     from ml.models import ModelParams
 
     client = get_client()
