@@ -3,14 +3,15 @@ import { serializeSvgForImage } from "./exportPng";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+// --heat-ring stands for a per-instance property that no element here sets.
 function chart(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
   const line = document.createElementNS(SVG_NS, "path");
   line.setAttribute("stroke", "var(--accent)");
-  line.setAttribute("style", "fill: var(--missing, #abcdef); opacity: 0.5");
+  line.setAttribute("style", "fill: var(--heat-ring, #abcdef); opacity: 0.5");
   const label = document.createElementNS(SVG_NS, "text");
-  label.setAttribute("fill", "var(--missing, var(--accent))");
-  label.setAttribute("stroke", "var(--missing, rgb(1, 2, 3))");
+  label.setAttribute("fill", "var(--heat-ring, var(--accent))");
+  label.setAttribute("stroke", "var(--heat-ring, rgb(1, 2, 3))");
   svg.append(line, label);
   document.body.appendChild(svg);
   return svg;
