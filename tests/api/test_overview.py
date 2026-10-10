@@ -7,6 +7,7 @@ loads stay sub-second on multi-month windows. Tests seed both layers:
 stay covered, while ``agg_*`` is what the Overview reads.
 """
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
@@ -181,6 +182,28 @@ async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aag
     await aconn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id=$1", aagency_id)
     r = await client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 404
+
+
+async def test_the_overview_never_holds_a_connection_while_it_waits_for_another(client, aagency_id):
+    """Every stage takes its own pooled connection. A request that also held
+    one across the fan-out could wait forever on a pool it had drained itself,
+    and a pool of a single connection is the smallest case of that."""
+    from api.main import app
+    from pipeline.reports.overview import compute_overview_summary
+
+    compute_overview_summary.cache_clear()
+    app.state.ch_client = None
+    shared, app.state.pool = app.state.pool, await _test_pool(max_size=1)
+    try:
+        r = await asyncio.wait_for(
+            client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07"), timeout=15
+        )
+    finally:
+        # terminate, not close: close waits for every connection to come back,
+        # and a deadlocked request never returns its own.
+        app.state.pool.terminate()
+        app.state.pool = shared
+    assert r.status_code == 200
 
 
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
@@ -1364,11 +1387,11 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
-    # Use _init_connection (SET TIME ZONE 'Asia/Tokyo') so pooled conns
+    # Use the production session settings (Asia/Tokyo) so pooled conns
     # mirror production setup exactly.
-    from api.main import _init_connection
+    from api.main import PG_SESSION_SETTINGS
 
-    pool = await _test_pool(init=_init_connection)
+    pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
     finally:
@@ -1982,13 +2005,13 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
 
     mirror_updates_to_ch(ch_client, aagency_id)
 
-    from api.main import _init_connection
+    from api.main import PG_SESSION_SETTINGS
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
 
-    pool = await _test_pool(init=_init_connection)
+    pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool, ch=ch_async_client)
     finally:
