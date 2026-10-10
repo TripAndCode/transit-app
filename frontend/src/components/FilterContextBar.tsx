@@ -6,6 +6,8 @@ import type { DowFilter } from "../api/scope";
 import { dowValueLabel } from "../utils/filterValueLabels";
 import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
+import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { pill, groupLabel } from "./pillStyles";
@@ -57,11 +59,12 @@ function filterSummary(
 function routesSummary(
   fc: FilterCtx,
   t: (key: string) => string,
+  formatRoute: (code: string) => string,
 ): string {
   if (!fc.routes || fc.routes.length === 0) {
     return t("ask.filter_bar.no_routes_selected");
   }
-  return fc.routes.join(", ");
+  return fc.routes.map(formatRoute).join(t("common.list_separator"));
 }
 
 // ─── style helpers ────────────────────────────────────────────────────────────
@@ -106,6 +109,7 @@ const dateInputStyle: CSSProperties = {
 export function FilterContextBar({ value, onChange, pending }: Props) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const routeNames = useRouteNames(useAgencyId());
 
   // Draft uses explicit date defaults when value has no dates
   const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
@@ -149,7 +153,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   }
 
   const summary = filterSummary(value, t);
-  const routes = routesSummary(value, t);
+  const routes = routesSummary(value, t, routeNames.format);
 
   // ── collapsed pill row ────────────────────────────────────────────────────
   if (!editing) {
