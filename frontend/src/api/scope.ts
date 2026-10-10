@@ -185,7 +185,7 @@ export function presetScopePatch(rangeCtx: Record<string, unknown>): ScopePatch 
 export const DEFAULT_RANGE_DAYS = 30;
 
 /** JST is the only timezone the server uses (see api/main.py _init_connection). */
-const JST_TZ = "Asia/Tokyo";
+export const JST_TZ = "Asia/Tokyo";
 
 // en-CA renders YYYY-MM-DD without locale-specific separators.
 const jstFmt = new Intl.DateTimeFormat("en-CA", {
