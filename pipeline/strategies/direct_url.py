@@ -4,7 +4,8 @@ For each agency:
   - GET <static_url> (treat as `current_data.zip`)
   - Also try <neighbour>/latest.zip — if its sha256 differs, prefer it (pre-cutover)
   - Persist as <dest_dir>/<agency_id>/gtfs_static_<YYYYMMDD>.zip
-  - Update manifest at <dest_dir>/<agency_id>/_manifest.json
+  - Stage the updated manifest beside <dest_dir>/<agency_id>/_manifest.json, and
+    promote it once that zip has loaded (record_loaded)
 
 Conditional GET via If-Modified-Since / If-None-Match. 304 → no-op.
 """
@@ -75,12 +76,22 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for this agency.
 
-    Returns the path of the zip ready for load_static, or None if no change.
+    Returns the path of the zip ready for load_static, or None on no change
+    or failure.
     """
     agency_dir = dest_dir / str(agency_id)
     agency_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = agency_dir / "_manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest_path = _manifest_path(agency_dir)
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            parsed = json.loads(manifest_path.read_text())
+            manifest = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, OSError):
+            # A manifest the promote-on-load rename should have kept valid,
+            # but isn't (unreadable, not JSON, or not an object), is read the
+            # same as a first-ever fetch for this agency: everything is new.
+            manifest = {}
 
     # Derive latest_url from static_url by replacing the basename
     parsed = urllib.parse.urlparse(static_url)
@@ -138,6 +149,24 @@ def fetch(
         "etag": lat_et or manifest.get("latest", {}).get("etag"),
         "sha256": lat_sha,
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2))
+    # Staged, not written: the manifest is what the next fetch's conditional
+    # GET and "no change" both read, so it may describe only a zip that loaded.
+    _pending_path(agency_dir).write_text(json.dumps(manifest, indent=2))
     logger.info(f"[direct_url] agency={agency_id} persisted {final.name}")
     return final
+
+
+def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None:
+    """Promote the manifest fetch() staged for *zip_path*, now that it loaded."""
+    agency_dir = dest_dir / str(agency_id)
+    pending = _pending_path(agency_dir)
+    if pending.exists():
+        pending.replace(_manifest_path(agency_dir))
+
+
+def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.json"
+
+
+def _pending_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.pending.json"
