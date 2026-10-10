@@ -37,9 +37,9 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "time_pattern": {},
     "schedule_realism": {},
     "trend_shift": {},
-    "on_time_rate": {"threshold_min": 1, "n": 20},
+    "on_time_rate": {"threshold_min": 1, "n": 20, "best_first": True},
     "capabilities": {},
-    "on_time": {},
+    "on_time": {"best_first": True},
     "trend": {},
     "cmp_service": {},
 }

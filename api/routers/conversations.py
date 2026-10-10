@@ -163,8 +163,28 @@ class AnonThread(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
+def _utf16_units(text: str) -> int:
+    # surrogatepass: a JSON escape can carry a lone surrogate into the text.
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+# The messages are stored as sent. Their source is the browser's
+# localStorage, whose per-origin quota (about 5 MiB, counted in UTF-16 units)
+# a real history cannot exceed, so a larger payload is not one.
+_MAX_ANON_MESSAGES_CHARS = 5 * 1024 * 1024
+
+
 class MigrateAnon(BaseModel):
     threads: list[AnonThread] = Field(max_length=100)
+
+    @field_validator("threads")
+    @classmethod
+    def _bounded_messages(cls, v: list[AnonThread]) -> list[AnonThread]:
+        # Measured as the browser stored it: compact JSON, in UTF-16 units.
+        size = sum(_utf16_units(json.dumps(t.messages, ensure_ascii=False, separators=(",", ":"))) for t in v)
+        if size > _MAX_ANON_MESSAGES_CHARS:
+            raise ValueError(f"messages exceed {_MAX_ANON_MESSAGES_CHARS} characters serialized")
+        return v
 
 
 @router.get("/conversations", response_model=None)

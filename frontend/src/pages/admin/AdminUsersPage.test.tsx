@@ -376,6 +376,31 @@ describe("AdminUsersPage", () => {
       );
     });
 
+    it("leaves rows already in the target state out of an action and of its undo", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Suspend" }));
+      // suspended@example.com was suspended already; undoing must not resume it.
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [1], patch: { suspended: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+      expect(await screen.findByText("Suspended 1")).toBeTruthy();
+      bulkMutate.mockClear();
+      await user.click(screen.getByRole("button", { name: "Undo" }));
+      expect(bulkMutate).toHaveBeenCalledWith({ ids: [1], patch: { suspended: false } });
+    });
+
+    it("sends nothing when every target already holds what the action sets", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select suspended@example.com" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Suspend" }));
+      expect(bulkMutate).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    });
+
     it("bulk-promotes via the role change control in the bulk bar", async () => {
       const user = userEvent.setup();
       wrap();

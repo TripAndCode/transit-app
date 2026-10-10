@@ -155,7 +155,9 @@ def execute(
             else:
                 for archive in action.archives:
                     _download(archive, scratch, bucket=bucket, endpoint=endpoint, run=run)
-                run([python, "gtfs_pipeline.py", "ingest", str(scratch), "--agency-id", str(agency_id)])
+                # --strict: a partial ingest exits nonzero, so its archives stay
+                # out of the done-set and the next run retries the skipped files.
+                run([python, "gtfs_pipeline.py", "ingest", str(scratch), "--agency-id", str(agency_id), "--strict"])
                 done.update(a.key for a in action.archives if is_final(a, today_jst))
             save_done(state_path, done)
         except subprocess.CalledProcessError as error:

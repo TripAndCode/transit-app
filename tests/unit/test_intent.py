@@ -216,3 +216,12 @@ def test_build_schema_defaults_match_canonical_defaults():
                 canonical = _TOOL_DEFAULTS[tool].get(f["key"])
                 assert not callable(canonical), (tool, f["key"])
                 assert f["default"] == canonical, (tool, f["key"])
+
+
+@pytest.mark.parametrize("tool", ["on_time", "on_time_rate"])
+def test_on_time_tools_collapse_their_best_first_default(tool):
+    """The on-time tools list best-first unless told otherwise, so an explicit
+    true is the same intent as none, and false stays a different one."""
+    omitted = canonicalize(tool, {"k": 5}, _ctx())
+    assert canonicalize(tool, {"k": 5, "best_first": True}, _ctx()) == omitted
+    assert canonicalize(tool, {"k": 5, "best_first": False}, _ctx()) != omitted
