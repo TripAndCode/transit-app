@@ -76,12 +76,22 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for this agency.
 
-    Returns the path of the zip ready for load_static, or None if no change.
+    Returns the path of the zip ready for load_static, or None on no change
+    or failure.
     """
     agency_dir = dest_dir / str(agency_id)
     agency_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = _manifest_path(agency_dir)
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            parsed = json.loads(manifest_path.read_text())
+            manifest = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, OSError):
+            # A manifest the promote-on-load rename should have kept valid,
+            # but isn't (unreadable, not JSON, or not an object), is read the
+            # same as a first-ever fetch for this agency: everything is new.
+            manifest = {}
 
     # Derive latest_url from static_url by replacing the basename
     parsed = urllib.parse.urlparse(static_url)

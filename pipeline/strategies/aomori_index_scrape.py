@@ -23,15 +23,6 @@ logger = logging.getLogger(__name__)
 _HREF_RE = re.compile(r'href="([^"]*gtfs-aomoricitybus[^"]*\.zip)"')
 
 
-def _sha256(path: pathlib.Path) -> str:
-    """Return the hex SHA-256 digest of the file at path."""
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _resolve(href: str, index_url: str) -> str:
     """Resolve a potentially-relative href against the index page URL."""
     if href.startswith(("http://", "https://")):
@@ -100,6 +91,10 @@ def fetch(
         logger.info(f"[aomori_index_scrape] agency={agency_id} no change (sha256={sha[:12]})")
         return None
 
+    # Staged now, while the sha is already in hand from the check above, so
+    # record_loaded() has nothing left to do but promote it -- no second read
+    # or hash of a file that was just downloaded into memory.
+    _pending_path(agency_dir).write_text(json.dumps({"sha256": sha}))
     final.write_bytes(data)
     history_path = agency_dir / "fetch_history.csv"
     if not history_path.exists():
@@ -116,17 +111,15 @@ def fetch(
 
 
 def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None:
-    """Remember *zip_path*'s bytes as the last that loaded, for fetch() to compare against.
+    """Promote the manifest fetch() already staged for *zip_path*, now that it loaded.
 
-    Staged then renamed, like direct_url.record_loaded: a process killed
-    mid-write must never leave a truncated manifest in place, which would
-    otherwise break every later fetch() for this agency until someone
-    manually removed the file.
+    The rename is atomic (direct_url.record_loaded does the same): a process
+    killed mid-write leaves the still-valid old manifest or nothing at all,
+    never a truncated one. _loaded_sha treats any other way a manifest can
+    go bad the same as no prior load, so the agency recovers on its own
+    rather than being stuck until someone deletes the file by hand.
     """
-    agency_dir = dest_dir / str(agency_id)
-    pending = _pending_path(agency_dir)
-    pending.write_text(json.dumps({"sha256": _sha256(zip_path)}))
-    pending.replace(_manifest_path(agency_dir))
+    _pending_path(dest_dir / str(agency_id)).replace(_manifest_path(dest_dir / str(agency_id)))
 
 
 def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
@@ -142,9 +135,13 @@ def _loaded_sha(agency_dir: pathlib.Path) -> str | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text()).get("sha256")
-    except (json.JSONDecodeError, OSError):
-        # A manifest that is unreadable or not valid JSON (e.g. a prior write
-        # that never got this far) is the same as no prior load: the zip is
-        # fetched and loaded again rather than leaving the agency stuck.
+        parsed = json.loads(path.read_text())
+        return parsed.get("sha256") if isinstance(parsed, dict) else None
+    except (ValueError, OSError):
+        # ValueError covers both a decode failure (json.JSONDecodeError) and
+        # a read stopping mid multi-byte character (UnicodeDecodeError). A
+        # manifest that is unreadable, not valid JSON, or valid JSON that
+        # isn't an object (e.g. a prior write that never got this far) is the
+        # same as no prior load: the zip is fetched and loaded again rather
+        # than leaving the agency stuck.
         return None
