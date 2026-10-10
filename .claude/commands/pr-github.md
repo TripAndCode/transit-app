@@ -43,8 +43,8 @@ Write PR descriptions to be **scanned, not read**. Default to structure over pro
 - **Bold the keywords** in each bullet so the eye lands on them.
 - **Cut prose to the load-bearing clause.** Move rationale into the table cell /
   bullet it belongs to; don't write a paragraph to set it up.
-- **State the origin**, right after the one-line summary: `**Origin:**
-  Interactive session` (per AGENTS.md's "Git and pull requests").
+- **Open the body with the Origin line**, before the summary; its exact form is
+  in AGENTS.md's "Git and pull requests".
 - Keep sections short and titled: What · Affected · Behaviour · Fixes · Tests ·
   Verification (include only those that apply). End with the Claude Code trailer.
 
