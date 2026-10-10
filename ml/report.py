@@ -10,7 +10,7 @@ from html import escape
 
 from ml.adoption import judge
 from ml.backtest import HORIZONS, METHODS, SPARSE_RUNS, AgencyResult
-from ml.model_result import ModelBacktestResult, merged_intervals
+from ml.model_result import MODEL, ModelBacktestResult, merged_intervals
 from ml.summary import summarize
 
 
@@ -65,12 +65,12 @@ def _table(
     return f"<table>{_HEAD}{''.join(rows)}</table>"
 
 
-MODEL_METHODS = ("B0", "LGBM")
+MODEL_METHODS = ("B0", MODEL)
 
 
 def _interval_rows(models: ModelBacktestResult) -> str:
     rows = []
-    for method, label in (("LGBM", "LGBM p10–p90 (calibrated)"), ("B0", "B0 slot p10–p90")):
+    for method, label in ((MODEL, "LGBM p10–p90 (calibrated)"), ("B0", "B0 slot p10–p90")):
         stats = merged_intervals(models, method)
         pinball = " / ".join(_num(stats.mean_pinball(a)) for a in ("0.1", "0.5", "0.9"))
         rows.append(

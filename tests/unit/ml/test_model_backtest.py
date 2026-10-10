@@ -75,3 +75,46 @@ def test_an_agency_with_too_little_history_keeps_b0():
 def test_a_result_round_trips_through_json():
     result = run_backtest(_runs(), params=FAST, origin_count=7)
     assert result_from_json(result_to_json(result)) == result
+
+
+def test_a_retrain_week_too_thin_to_train_on_is_skipped_not_a_crash():
+    result = run_backtest(_runs(days=8), params=FAST, origin_count=28)
+    assert result.origin_skill
+    assert all(skill is None for _, skill in result.origin_skill)
+
+
+def test_fallback_agencies_only_names_agencies_the_report_can_show():
+    runs = _runs()
+    extra = pd.DataFrame(
+        [
+            {
+                "agency_id": 50,
+                "route_code": "X1",
+                "trip_id": "X10",
+                "service_date": pd.Timestamp(START),
+                "hour": 7,
+                "service": "wk",
+                "delay_min": 1.0,
+                "stops": 10,
+                "span_min": 30.0,
+            }
+        ]
+    ).astype(runs.dtypes.to_dict())
+    result = run_backtest(pd.concat([runs, extra], ignore_index=True), params=FAST, origin_count=7)
+    assert 50 not in {agency.agency_id for agency in result.agencies}
+    assert 50 not in result.fallback_agencies
+
+
+def test_training_frame_is_built_once_for_every_retrain_week(monkeypatch):
+    import ml.model_backtest as model_backtest
+
+    calls = []
+    real_training_frame = model_backtest.training_frame
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real_training_frame(*args, **kwargs)
+
+    monkeypatch.setattr(model_backtest, "training_frame", spy)
+    run_backtest(_runs(), params=FAST, origin_count=28)
+    assert len(calls) == 1

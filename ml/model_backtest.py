@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from ml.backtest import AgencyResult, SliceRow, choose_origins
-from ml.features import build_frame, route_ids, with_route_ids
+from ml.features import build_frame, route_ids, weekend_days, with_route_ids
 from ml.metrics import ErrorStats
 from ml.model_metrics import MODEL, add_cells, add_intervals, cell_frame, take
 from ml.model_result import IntervalStats, ModelBacktestResult
@@ -39,21 +39,44 @@ def run_backtest(
         "B0": defaultdict(IntervalStats),
     }
     origin_skill: list[tuple[date, float | None]] = []
-    cutoffs: list[date] = []
+    starts = list(range(0, len(origins), RETRAIN_EVERY))
+    cutoffs = [origins[start] - timedelta(days=1) for start in starts]
     fallback: set[int] = set()
-    for start in range(0, len(origins), RETRAIN_EVERY):
-        week = origins[start : start + RETRAIN_EVERY]
-        cutoff = week[0] - timedelta(days=1)
-        cutoffs.append(cutoff)
-        train = training_frame(
-            runs, cutoff, window_days=params.window_days, half_life_days=params.half_life_days, seed=params.seed
+    all_agencies = {int(agency) for agency in runs["agency_id"].unique()}
+    # Every week's training targets are dated at or before its own cutoff, and a target's
+    # drawn origin and features never depend on which cutoff produced the frame -- only on
+    # the target day itself -- so one training_frame built at the LAST cutoff already holds
+    # every earlier week's rows too. Each week takes that dated subset and reweights it from
+    # its own cutoff, instead of paying training_frame's full per-origin cost again.
+    full_frame = (
+        training_frame(
+            runs, cutoffs[-1], window_days=params.window_days, half_life_days=params.half_life_days, seed=params.seed
         )
+        if cutoffs
+        else pd.DataFrame()
+    )
+    days_table = weekend_days(runs)
+    for start, cutoff in zip(starts, cutoffs, strict=True):
+        week = origins[start : start + RETRAIN_EVERY]
+        train = full_frame if full_frame.empty else full_frame[full_frame["service_date"] <= pd.Timestamp(cutoff)]
+        if train.empty:
+            fallback |= all_agencies
+            origin_skill.extend((origin, None) for origin in week)
+            continue
+        age_days = (pd.Timestamp(cutoff) - train["service_date"]).dt.days
+        train = train.assign(weight=(0.5 ** (age_days / params.half_life_days)).astype("float32"))
         models = fit_calibrated(train, params, cutoff)
         seen = runs[runs["service_date"] <= pd.Timestamp(cutoff)].groupby("agency_id")["service_date"].nunique()
         on_model = {int(agency) for agency, days in seen.items() if days >= MIN_MODEL_DAYS}
-        fallback |= {int(agency) for agency in runs["agency_id"].unique()} - on_model
+        fallback |= all_agencies - on_model
         for origin in week:
-            frame = build_frame(runs, origin, window_days=params.window_days, horizon_days=HORIZON_DAYS)
+            frame = build_frame(
+                runs,
+                origin,
+                window_days=params.window_days,
+                horizon_days=HORIZON_DAYS,
+                precomputed_weekend_days=days_table,
+            )
             if frame.empty:
                 origin_skill.append((origin, None))
                 continue
@@ -76,7 +99,7 @@ def run_backtest(
         agencies=[_agency_result(runs, agency_id, rows[agency_id], origins, params) for agency_id in sorted(rows)],
         intervals={method: dict(by_agency) for method, by_agency in intervals.items()},
         origin_skill=origin_skill,
-        fallback_agencies=sorted(fallback),
+        fallback_agencies=sorted(fallback & set(rows)),
     )
 
 
