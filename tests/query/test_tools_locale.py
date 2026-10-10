@@ -16,6 +16,7 @@ import re
 import pytest
 
 from pipeline.query.tools import (
+    _LOCALES,
     JSON_MODE_ADDENDUM,
     SYSTEM_PROMPT,
     TOOLS,
@@ -190,3 +191,30 @@ def test_json_mode_addendum_is_not_baked_into_system_prompt():
     plain message content instead of issuing a real tool_calls entry, for
     some tools (reproducible deterministically at temperature=0)."""
     assert JSON_MODE_ADDENDUM not in SYSTEM_PROMPT
+
+
+def test_every_locale_key_has_both_languages():
+    keys = {key for key, _lang in _LOCALES}
+    assert not [k for k in keys if (k, "ja") not in _LOCALES or (k, "en") not in _LOCALES]
+
+
+def test_summary_follow_up_no_history_exact_strings():
+    assert (
+        _summary("follow_up_no_history", lang="ja")
+        == "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+    )
+    assert (
+        _summary("follow_up_no_history", lang="en")
+        == "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+    )
+
+
+def test_summary_aggregate_not_ready_exact_strings():
+    assert (
+        _summary("aggregate_not_ready", lang="ja")
+        == "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"
+    )
+    assert (
+        _summary("aggregate_not_ready", lang="en")
+        == "Data for this view hasn't been prepared in this environment yet. Please try again later."
+    )
