@@ -69,9 +69,10 @@ _LOW_ON_TIME_RANKS = r"ワースト|下位"
 _LOW_ON_TIME_TRAITS = r"低い|低め|悪い|最低"
 _LOW_ON_TIME_WORDS = rf"{_LOW_ON_TIME_RANKS}|{_LOW_ON_TIME_TRAITS}"
 _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
-# "N分以上/超" names a delay threshold. Only 5 minutes is a metric the router
-# knows (worst_5min), so a ranking over any other threshold has no rule.
-_DELAY_THRESHOLD = r"\d+分\s*(?:超|以上)"
+# "N分以上/超/を超える" names a delay threshold. Only 5 minutes is a metric the
+# router knows (worst_5min), which is matched by its own rule before the
+# average-delay rules; a ranking over any other threshold has no rule.
+_DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 
 # Compile regexes ONCE at import time. First match wins (priority = order).
 _RULES: list[Rule] = [
@@ -130,7 +131,7 @@ _RULES: list[Rule] = [
         name="ranking-worst-5min",
         # The count is tried first, so "…が多い路線TOP3" reads its 3 rather than
         # stopping at 多い; "5分" must not be the tail of "15分" or "2.5分".
-        pattern=re.compile(r"(?<![\d.])5分.*?(?:超|以上)(?:.*?TOP\s*(\d+)|.*?(?:多い|TOP))"),
+        pattern=re.compile(r"(?<![\d.．])5分.*?(?:超|以上)(?:.*?(?:TOP|ワースト|上位)\s*(\d+)|.*?(?:多い|TOP|ワースト|上位|ランキング))"),
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
         # worst_5min has no fewest-first order.
@@ -166,8 +167,8 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
-        # A delay threshold other than 5 minutes asks for a count of long
-        # delays, not the mean ranking this rule answers.
+        # A delay threshold asks for a count of long delays, not the mean
+        # ranking this rule answers (5 minutes is taken by ranking-worst-5min).
         unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_DELAY_THRESHOLD}"),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
