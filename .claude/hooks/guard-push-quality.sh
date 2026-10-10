@@ -304,9 +304,9 @@ fi
 # A branch every one of whose commits suppresses CI produces no run at all, so
 # the PR has nothing for the merge gate to read. Only the tip of the push is
 # consulted, which is the part that is easy to get wrong: a trailer-less commit
-# buried earlier in the branch changes nothing. A warning, not a block —
-# suppressing CI on intermediate pushes is the normal case, and only the last
-# push before readying has to differ.
+# buried earlier in the branch changes nothing. A warning, not a block: the
+# policy lives in AGENTS.md (a branch tip must not carry the trailer), and this
+# only reports a tip that breaks it.
 #
 # The token is assembled rather than written out because this file's own
 # content would otherwise land in a commit message quoting it, and the match
@@ -320,8 +320,8 @@ tip_msg=""
 case "$tip_msg" in
   *"$SKIP_TOKEN"*)
     echo "NOTE: this push's tip suppresses CI, so no run will appear for it." >&2
-    echo "  Before marking the PR ready, push a tip whose message omits that" >&2
-    echo "  trailer — the merge gate needs a green run to read." >&2
+    echo "  A branch tip must not carry that trailer (see AGENTS.md, Git and pull" >&2
+    echo "  requests): the merge gate needs a green run to read." >&2
     ;;
 esac
 
