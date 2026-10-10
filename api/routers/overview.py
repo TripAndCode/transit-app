@@ -226,7 +226,6 @@ async def peak_hour_breakdown(
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
@@ -236,6 +235,10 @@ async def overview_summary(
     Locale picks the language of any string fields the backend emits
     (today: none — strings are frontend-side. Reserved for future
     qualitative labels). See spec section "Architecture".
+
+    Takes no request connection: every stage acquires its own from the pool,
+    and one held here across that fan-out is what lets enough concurrent
+    requests wait on each other forever.
     """
-    payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool, ch=ch)
+    payload = await compute_overview_summary(agency_id, ctx, None, locale, pool=request.app.state.pool, ch=ch)
     return OverviewSummary(**payload, scope_applied=_SUMMARY_SCOPE)

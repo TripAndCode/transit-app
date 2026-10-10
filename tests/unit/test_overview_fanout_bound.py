@@ -79,9 +79,11 @@ def stages(monkeypatch):
 async def test_fanout_never_holds_more_than_the_limit(stages):
     pool = _FakePool()
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
-    payload = await ov.compute_overview_summary(7, ctx, object(), "ja", pool=pool)
+    # No request connection: the pool path takes every connection it uses.
+    payload = await ov.compute_overview_summary(7, ctx, None, "ja", pool=pool)
 
-    assert pool.acquires == 11, "every stage still gets its own connection"
+    # The latest-date read ahead of the fan-out takes one, and every stage its own.
+    assert pool.acquires == 12
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"
     assert pool.active == 0
@@ -93,6 +95,6 @@ async def test_the_peak_hour_pair_takes_the_first_slots(stages):
     """The two `_peak_hour_by_dow` reads dominate a cold load, so under the
     bound they must not queue behind stages that finish quickly."""
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
-    await ov.compute_overview_summary(7, ctx, object(), "ja", pool=_FakePool())
+    await ov.compute_overview_summary(7, ctx, None, "ja", pool=_FakePool())
 
     assert stages[:2] == ["_peak_hour_by_dow", "_peak_hour_by_dow"]
