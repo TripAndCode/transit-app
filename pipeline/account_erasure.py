@@ -44,12 +44,18 @@ class ErasureRefused(Exception):
 
 
 # JSON-string replacement rather than key-by-key edits, so the value is found
-# however deeply or in whatever array shape an audit snapshot stored it.
-_MASK_AUDIT_EMAIL = """
+# however deeply or in whatever array shape an audit snapshot stored it. The
+# match ignores case: an address is one identity whatever its case, and a
+# snapshot keeps the casing it was written with. Every non-alphanumeric
+# character of the quoted address is escaped, so the pattern matches it
+# literally.
+_MASK_AUDIT_EMAIL = r"""
+    WITH email AS (SELECT regexp_replace(to_jsonb($1::text)::text, '([^[:alnum:]])', '\\\1', 'g') AS pattern)
     UPDATE admin_audit SET
-        before = replace(before::text, to_jsonb($1::text)::text, '"[deleted]"')::jsonb,
-        after = replace(after::text, to_jsonb($1::text)::text, '"[deleted]"')::jsonb
-    WHERE strpos(coalesce(before::text, '') || coalesce(after::text, ''), to_jsonb($1::text)::text) > 0
+        before = regexp_replace(before::text, email.pattern, '"[deleted]"', 'gi')::jsonb,
+        after = regexp_replace(after::text, email.pattern, '"[deleted]"', 'gi')::jsonb
+    FROM email
+    WHERE coalesce(before::text, '') || coalesce(after::text, '') ~* email.pattern
 """
 
 # Names are not unique, so they are masked only where the row is about this user.
@@ -90,9 +96,9 @@ async def erase_user(conn: asyncpg.Connection, user_id: int) -> None:
     await conn.execute("DELETE FROM login_events WHERE user_id = $1", user_id)
     await conn.execute("UPDATE login_events SET ip = NULL, user_agent = NULL WHERE actor_id = $1", user_id)
     await conn.execute(
-        # Exact match: users.email is case-sensitive, so another account can
-        # hold the same address in different case and its legacy key is theirs.
-        "DELETE FROM api_keys WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND owner_email = $2)",
+        # An address is one identity whatever its case, and a key whose owner
+        # row is gone kept the casing it was issued under.
+        "DELETE FROM api_keys WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND lower(owner_email) = lower($2))",
         user_id,
         email,
     )
