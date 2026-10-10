@@ -218,7 +218,9 @@ jobs:
         id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
-          container-name: transit-ci-db
+          # Per shard: the shards of one run overlap and share a scope, so a
+          # shared prefix would have each shard remove the others' database.
+          container-name: transit-ci-db-${{ matrix.shard }}
 
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up

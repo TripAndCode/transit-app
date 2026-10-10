@@ -11,6 +11,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".github" / "actions" / "start-test-postgres" / "container-name.sh"
 
@@ -94,3 +96,12 @@ def test_long_refs_are_truncated_but_still_distinguish_branches():
 def test_prefix_is_required():
     result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True)
     assert result.returncode != 0
+
+
+def test_matrix_shards_of_one_run_get_distinct_containers():
+    """Shards of one run share a scope and overlap, so the prefix ci.yml passes
+    must differ per shard; otherwise one shard's start or teardown removes
+    another shard's live database."""
+    job = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"]["test"]
+    step = next(s for s in job["steps"] if str(s.get("uses", "")).endswith("start-test-postgres"))
+    assert "matrix.shard" in step["with"]["container-name"]
