@@ -92,3 +92,21 @@ def test_a_real_trailing_comment_is_still_stripped():
     or kana parked in a trailing comment starts failing the lint."""
     lines = ["<div>{label}</div>  // 日本語のコメント"]
     assert lint.find_violations(lines) == []
+
+
+def test_a_file_that_is_not_utf8_is_a_violation(tmp_path):
+    """Shift_JIS source is the file most likely to hold hardcoded Japanese;
+    skipping it silently would exempt exactly what the lint exists to catch."""
+    bad = tmp_path / "Legacy.tsx"
+    bad.write_bytes('const label = "曜日";\n'.encode("shift_jis"))
+    assert rules(lint.lint_file(bad)) == [(0, "unreadable")]
+
+
+def test_a_missing_file_is_a_violation(tmp_path):
+    assert rules(lint.lint_file(tmp_path / "gone.tsx")) == [(0, "unreadable")]
+
+
+def test_a_utf8_file_is_linted_normally(tmp_path):
+    ok = tmp_path / "Fine.tsx"
+    ok.write_text('const label = "曜日";\n', encoding="utf-8")
+    assert rules(lint.lint_file(ok)) == [(1, "kana")]
