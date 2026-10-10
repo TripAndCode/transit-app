@@ -3,8 +3,9 @@
 Each report is computed per request so the global time-range / DOW /
 time-band filter changes the numbers. Most reports read precomputed ``agg_*``
 tables and fall back to scanning ClickHouse ``updates`` only for a narrowed
-time band; others (dwell/run, forecast, headway, performance) read aggregates
-only. ``rendered_at`` reflects the moment the request was served.
+time band (or, for on-time, a custom tolerance); others (dwell/run, forecast,
+headway, performance) read aggregates only, and ``delay_certificate`` always
+scans ClickHouse. ``rendered_at`` reflects the moment the request was served.
 """
 
 import csv
