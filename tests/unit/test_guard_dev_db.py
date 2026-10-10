@@ -85,6 +85,16 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit make prune-query-log",
         id="later-assignment-points-back-at-dev",
     ),
+    # A separator glued to a word still ends the simple command.
+    pytest.param("make prune-query-log;ls", id="semicolon-glued-to-the-target"),
+    pytest.param("echo hi|make prune-query-log", id="pipe-glued-before-make"),
+    pytest.param("true||make prune-query-log", id="or-glued-before-make"),
+    pytest.param('bash -c "make prune-query-log;ls"', id="glued-semicolon-inside-bash-c"),
+    # :5544 in the password is not the port the URL connects to.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:5544@localhost:5433/transit make prune-query-log",
+        id="throwaway-port-only-in-the-password",
+    ),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
@@ -224,6 +234,10 @@ ALLOWED = [
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
     pytest.param('git commit -m "make it faster"', id="quoted-prose-naming-no-target"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        id="test-db-with-a-glued-redirect",
+    ),
     pytest.param(
         "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="test-db-as-a-make-variable",

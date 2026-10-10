@@ -50,7 +50,8 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # or a make variable -- so a throwaway port named anywhere else (another
 # command, a comment) points nothing at it.
 THROWAWAY = {
-    "pg": ("database_url", re.compile(r"\S*:5544\b")),
+    # The port of the URL's host, not a ":5544" anywhere in it (a password).
+    "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
     "ch": ("clickhouse_port", re.compile(r"8124$")),
 }
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
@@ -227,7 +228,7 @@ def runs_a_sql_script(lowered: list[str]) -> bool:
     return "psql" in lowered and ("-f" in lowered or "--file" in lowered)
 
 
-def runs_destructive_command(tokens: list[str]) -> bool:
+def runs_destructive_command(cmd: str) -> bool:
     """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
     command, that writes a store its own assignments do not point at the
     throwaway stack.
@@ -236,22 +237,33 @@ def runs_destructive_command(tokens: list[str]) -> bool:
     "..."`) and is read as a command line of its own. Quoted prose naming a
     destructive target is read the same way and blocked, the cheap direction.
     """
-    lowered = [t.lower() for t in tokens]
-    for segment in _simple_commands(lowered):
+    for segment in _simple_commands(_shell_tokens(cmd.lower())):
         if _segment_writes_dev(segment):
             return True
-        for tok in segment:
-            if any(c.isspace() for c in tok):
-                try:
-                    inner = shlex.split(tok)
-                except ValueError:
-                    inner = tok.split()
-                if runs_destructive_command(inner):
-                    return True
+        if any(runs_destructive_command(tok) for tok in segment if any(c.isspace() for c in tok)):
+            return True
     return False
 
 
-_SHELL_SEPARATORS = {"&&", "||", ";", "|", "&"}
+def _shell_tokens(text: str) -> list[str]:
+    """shlex tokens with each run of shell operator characters (`;`, `&&`,
+    `|`, `>` ...) a token of its own, also where it is glued to a word:
+    `shlex.split("make a;ls")` keeps `a;ls` as one token."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return text.split()
+
+
+_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _is_separator(tok: str) -> bool:
+    return bool(tok) and set(tok) <= _OPERATOR_CHARS
+
+
 _ASSIGNMENT = re.compile(r"^[a-z_][a-z0-9_]*=")
 _MAKE_NAMES = {"make", "gmake"}
 # `python gtfs_pipeline.py ...` and `python -m gtfs_pipeline ...`.
@@ -261,7 +273,7 @@ _CLI_NAMES = {"gtfs_pipeline.py", "gtfs_pipeline"}
 def _simple_commands(lowered: list[str]) -> list[list[str]]:
     segments: list[list[str]] = [[]]
     for tok in lowered:
-        if tok in _SHELL_SEPARATORS:
+        if _is_separator(tok):
             segments.append([])
         else:
             segments[-1].append(tok)
@@ -297,7 +309,7 @@ def make_targets(args: list[str]) -> list[str]:
     targets: list[str] = []
     skip = False
     for arg in args:
-        if arg in _SHELL_SEPARATORS:
+        if _is_separator(arg):
             break
         if skip:
             skip = False
@@ -340,7 +352,7 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    if destroys_dev_volume(cmd) or runs_destructive_command(tokens):
+    if destroys_dev_volume(cmd) or runs_destructive_command(cmd):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
@@ -368,7 +380,9 @@ def main() -> int:
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
-            "so run it as its own call. See AGENTS.md.\n"
+            "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "
+            "DATABASE_URL=...:5544/... and/or CLICKHOUSE_PORT=8124 assigned on that same command, for each store "
+            "it writes. See AGENTS.md.\n"
         )
         return 2
     return 0
