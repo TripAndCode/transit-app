@@ -1364,8 +1364,8 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
-    # The production session settings (Asia/Tokyo), so pooled conns mirror
-    # production setup exactly.
+    # Use the production session settings (Asia/Tokyo) so pooled conns
+    # mirror production setup exactly.
     from api.main import PG_SESSION_SETTINGS
 
     pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
