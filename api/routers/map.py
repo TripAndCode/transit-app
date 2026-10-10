@@ -565,6 +565,8 @@ _TODAY_BASELINE_SQL = """
         -- the denominator without also contributing to the numerator, or
         -- base_avg_min would be biased toward zero whenever any
         -- contributing service_type hasn't been backfilled yet.
+        -- base_samples counts the same sum_delay_sec IS NOT NULL population
+        -- as base_avg_min, so it never overstates the evidence behind it.
         -- base_p90_min's numerator/denominator are both FILTERed to the same
         -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
         -- produce a null p90_min alongside a non-null avg_min/samples for a
@@ -589,7 +591,7 @@ _TODAY_BASELINE_SQL = """
                    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
                SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
                    / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
-               SUM(samples) AS base_samples
+               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS base_samples
         FROM agg_route_stats
         WHERE agency_id = $1 AND samples IS NOT NULL AND route_code = ANY($2)
         GROUP BY route_code

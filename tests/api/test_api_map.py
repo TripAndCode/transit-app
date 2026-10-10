@@ -1130,6 +1130,35 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, 
 
 
 @pytest.mark.asyncio
+async def test_route_grain_baseline_samples_exclude_rows_the_average_skips(map_app_ch, ch_client):
+    """A pre-backfill row with NULL sum_delay_sec adds nothing to the pooled
+    average, so its samples must not inflate the evidence count either."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    await _seed_live_route(
+        pool,
+        ch_client,
+        agency_id,
+        "R_NULLSUM",
+        "",
+        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
+        baseline=None,
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
+            "samples, sum_delay_sec) VALUES ($1, 'R_NULLSUM', '平日', 2.0, 6.0, 500, 60000), "
+            "($1, 'R_NULLSUM', '休日', 2.0, 6.0, 300, NULL)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSUM"]
+    assert r["baseline_avg_sec"] == 120
+    assert r["baseline_samples"] == 500
+
+
+@pytest.mark.asyncio
 async def test_route_summary_baseline_columns_stay_same_source(map_app_ch, ch_client):
     """A group's p90_min can be null while avg_min isn't -- not something
     `analyze()`'s own SQL can currently produce for a live group (dep_delay is
