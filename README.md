@@ -103,7 +103,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make migrate` | Apply pending Postgres migrations |
 | `make ingest FOLDER=./raw_archives` | Load realtime archives |
 | `make load_static STATIC_PATH=./raw_archives_static` | Load static GTFS |
-| `make analyze` | Rebuild one agency's aggregates |
+| `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline |
 | `make check-aggs` | Detect stale aggregate tables |

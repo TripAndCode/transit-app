@@ -258,7 +258,10 @@ def test_a_run_with_a_changed_date_rebuilds_the_scheduled_headway_whole():
 
 
 def test_the_scheduled_headway_reads_only_fingerprinted_columns():
-    """The skip is safe only while the fingerprint covers its inputs."""
+    """Pins the columns the skip relies on as a known-good snapshot of
+    _STATIC_DEPENDENCY_COLUMNS, not a check derived from the headway SQL
+    itself -- a column the query reads that this snapshot omits would not
+    fail this test."""
     covered = analyze_mod._STATIC_DEPENDENCY_COLUMNS
     assert {"trip_id", "route_id", "service_id"} <= set(covered["static_trips"])
     assert {"trip_id", "stop_id", "departure_time"} <= set(covered["static_stop_times"])

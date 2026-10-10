@@ -207,8 +207,10 @@ _ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route
 _KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
 
 # Aggregates built from the static schedule alone. Every column they read is
-# in _STATIC_DEPENDENCY_COLUMNS, so a run with no changed date, which also
-# means the fingerprint matched, would rebuild them to what already stands.
+# in _STATIC_DEPENDENCY_COLUMNS, plus constants the fingerprint covers via
+# ANALYZE_LOGIC_VERSION (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC
+# threshold) -- so a run with no changed date, which also means the
+# fingerprint matched, would rebuild them to what already stands.
 _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
 
 # What a run with no changed date may leave standing: a date-scoped table with
