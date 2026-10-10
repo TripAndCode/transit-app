@@ -221,15 +221,34 @@ def destroys_dev_volume(cmd: str) -> bool:
 
 _SQL_CLIENTS = {"psql", "clickhouse-client", "clickhouse"}
 _SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
-# Statements fed to a client other than through its own arguments: any input
-# redirect or here-doc (bar `< /dev/null`), a pipe into the client, or psql's
-# `\i`/`\ir` include.
-_STDIN_REDIRECT = re.compile(r"<(?!\s*/dev/null\b)")
-_PIPE_INTO_CLIENT = re.compile(r"\|[^|]*\b(psql|clickhouse-client|clickhouse)\b")
+# psql's `\i`/`\ir` include, which sits inside the quoted `-c` argument.
 _INCLUDE_META = re.compile(r"\\ir?\s")
 
 
-def runs_a_sql_script(lowered: list[str], cmd: str = "") -> bool:
+def _feeds_a_client_stdin(shell: list[str]) -> bool:
+    """An unquoted input redirect or here-doc (bar `< /dev/null`), or a pipe
+    into a SQL client.
+
+    Read from operator tokens, not the raw text: a `<` inside a quoted SQL
+    argument (`<>`, `<=`, pgvector's `<->`) is a comparison, not a redirect, and
+    a glued `cat x.sql|psql` is still a pipe."""
+    for i, tok in enumerate(shell):
+        if not _is_separator(tok):
+            continue
+        if "<" in tok and not (tok == "<" and shell[i + 1 : i + 2] == ["/dev/null"]):
+            return True
+        if tok in ("|", "|&"):
+            piped = []
+            for nxt in shell[i + 1 :]:
+                if _is_separator(nxt):
+                    break
+                piped.append(nxt.rsplit("/", 1)[-1])
+            if _SQL_CLIENTS & set(piped):
+                return True
+    return False
+
+
+def runs_a_sql_script(cmd: str) -> bool:
     """A script run whose statements this hook cannot read: `psql -f file.sql`,
     a client fed on stdin or by pipe, an `\\i` include, or an HTTP body read
     from a file.
@@ -237,15 +256,15 @@ def runs_a_sql_script(lowered: list[str], cmd: str = "") -> bool:
     Structural rather than textual: the way the statements arrive is what makes
     the command a write, and nothing in the visible text says so.
     """
-    text = cmd.lower()
-    names = {tok.rsplit("/", 1)[-1] for tok in lowered}
+    shell = _shell_tokens(cmd.lower())
+    names = {tok.rsplit("/", 1)[-1] for tok in shell}
     if names & _SQL_CLIENTS:
-        if any(tok in _SCRIPT_FLAGS or tok.startswith(("--file=", "--queries-file=")) for tok in lowered):
+        if any(tok in _SCRIPT_FLAGS or tok.startswith(("--file=", "--queries-file=")) for tok in shell):
             return True
-        if _STDIN_REDIRECT.search(text) or _PIPE_INTO_CLIENT.search(text) or _INCLUDE_META.search(text):
+        if _feeds_a_client_stdin(shell) or _INCLUDE_META.search(cmd.lower()):
             return True
     if "curl" in names:
-        return any(tok.startswith(("@", "-d@")) or tok in ("-t", "--upload-file") for tok in lowered)
+        return any(tok.startswith(("@", "-d@")) or tok in ("-t", "--upload-file") for tok in shell)
     return False
 
 
@@ -372,12 +391,11 @@ def should_block(cmd: str) -> bool:
         # up, so a malformed command can't slip past by failing to tokenize.
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
-    lowered = [t.lower() for t in tokens]
     if destroys_dev_volume(cmd) or runs_destructive_command(cmd):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
-    return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered, cmd)
+    return bool(WRITE.search(cmd)) or runs_a_sql_script(cmd)
 
 
 def read_command() -> str | None:
