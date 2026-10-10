@@ -147,8 +147,6 @@ def test_an_uninspectable_container_does_not_abort_the_sweep(tmp_path):
 
 def test_requires_both_arguments(tmp_path):
     for args in ([], [LABEL]):
-        result = subprocess.run(
-            ["bash", str(SCRIPT), *args], capture_output=True, text=True
-        )
+        result = subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True)
         assert result.returncode != 0
         assert "usage: reap-stale.sh" in result.stderr, result.stderr
