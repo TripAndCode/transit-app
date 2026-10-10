@@ -19,7 +19,10 @@ def runs_sql() -> str:
     midnight on its service day keeps an hour of 24 or more. A strategy that
     stores only the "HH:MM" schedule string gets that string's hour instead,
     as the app's own reports read it. A stop with neither field (a non-timepoint
-    stop) stays out of its run's mean, and a run left with no hour has no row."""
+    stop) stays out of its run's mean, and a run left with no hour has no row.
+    It also carries the run's service (a timetable service id, or the feed's
+    own weekday/holiday label), its count of observed stops, and its scheduled
+    span in minutes. The models read these as history only."""
     dedup = build_dedup_ch_sql(include_scheduled_sec=True, extra_where=_DATE_RANGE)
     return f"""
 SELECT
@@ -30,7 +33,10 @@ SELECT
         intDiv(argMin(scheduled_sec, stop_sequence), 3600),
         toUInt8OrNull(substring(argMin(scheduled_time, stop_sequence), 1, 2))
     ) AS hour,
-    avg(dep_delay) / 60 AS mean_delay_min
+    avg(dep_delay) / 60 AS mean_delay_min,
+    any(service_type) AS service,
+    count() AS stops,
+    (max(scheduled_sec) - min(scheduled_sec)) / 60 AS span_min
 FROM ({dedup})
 WHERE route_code IS NOT NULL AND (scheduled_sec IS NOT NULL OR scheduled_time IS NOT NULL)
 GROUP BY route_code, trip_id, date
