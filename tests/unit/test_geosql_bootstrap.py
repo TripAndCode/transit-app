@@ -58,3 +58,28 @@ def test_readiness_wait_is_bounded():
     )
     assert result.returncode != 0
     assert "did not answer" in result.stdout
+
+
+def test_ipv6_loopback_host_and_port_are_parsed_whole():
+    result = _run({"DATABASE_URL": "postgresql://u:p@[::1]:6543/transit"})
+    assert result.returncode == 0, result.stderr
+    assert "u:***@host.docker.internal:6543/transit" in result.stdout
+
+
+def test_quoted_value_in_env_file_is_unquoted():
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "tools" / "geosql"
+        tree.mkdir(parents=True)
+        (tree / "bootstrap.sh").write_text(SCRIPT.read_text())
+        (Path(tmp) / ".env").write_text('DATABASE_URL="postgresql://u:p@localhost:6543/transit"\n')
+        stub = Path(tmp) / "curl"
+        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+        env["PATH"] = f"{tmp}:{env['PATH']}"
+        result = subprocess.run(
+            ["bash", str(tree / "bootstrap.sh")], env=env, capture_output=True, text=True, timeout=30
+        )
+    assert result.returncode == 0, result.stderr
+    assert "u:***@host.docker.internal:6543/transit?options=" in result.stdout
+    assert '"' not in result.stdout.split("add this connection:")[1].split("Replace")[0]

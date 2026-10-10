@@ -13,6 +13,8 @@ url="${DATABASE_URL:-}"
 env_file="$(cd "$(dirname "$0")/../.." && pwd)/.env"
 if [ -z "$url" ] && [ -f "$env_file" ]; then
   url="$(grep -E '^DATABASE_URL=' "$env_file" | tail -n 1 | cut -d= -f2-)"
+  # `.env` files commonly quote values; the quotes are not part of the URL.
+  url="${url%\"}"; url="${url#\"}"; url="${url%\'}"; url="${url#\'}"
 fi
 [ -n "$url" ] || { echo "ERROR: DATABASE_URL is not set (environment or .env)."; exit 1; }
 
@@ -24,10 +26,16 @@ target="${rest#*@}"
 user="${creds%%:*}"
 hostport="${target%%/*}"
 path="${target#*/}"
-host="${hostport%%:*}"
 port=5432
-case "$hostport" in *:*) port="${hostport##*:}" ;; esac
-case "$host" in localhost | 127.0.0.1 | ::1) host=host.docker.internal ;; esac
+case "$hostport" in
+  \[*) # bracketed IPv6 literal: the host is everything up to the closing bracket
+    host="${hostport%%]*}]"
+    case "${hostport#*]}" in :*) port="${hostport#*]:}" ;; esac ;;
+  *)
+    host="${hostport%%:*}"
+    case "$hostport" in *:*) port="${hostport##*:}" ;; esac ;;
+esac
+case "$host" in localhost | 127.0.0.1 | "[::1]") host=host.docker.internal ;; esac
 sep='?'
 case "$path" in *\?*) sep='&' ;; esac
 shown="${scheme}://${user}:***@${host}:${port}/${path}${sep}options=-c%20default_transaction_read_only%3Don"
