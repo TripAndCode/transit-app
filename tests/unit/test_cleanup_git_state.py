@@ -352,6 +352,8 @@ def test_a_worktree_holding_ignored_work_is_kept_but_regenerable_files_are_not(
         ("frontend/node_modules", True),
         ("frontend/tsconfig.tsbuildinfo", True),
         ("api/static/", True),
+        ("frontend/coverage/", True),
+        ("frontend/.vite/", True),
         ("transit_delay_app.egg-info/", True),
         ("docs/superpowers/", False),
         (".env", False),

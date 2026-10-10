@@ -477,6 +477,8 @@ _REGENERABLE_PATHS = frozenset(
         "api/static",
         "build",
         "dist",
+        "frontend/.vite",
+        "frontend/coverage",
         "frontend/dist",
         "frontend/vite.config.d.ts",
         "frontend/vite.config.js",
