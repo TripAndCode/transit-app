@@ -301,7 +301,8 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    done
    python gtfs_pipeline.py analyze_all
    # retention: aggregates are materialized, so old raw rows can go. analyze
-   # full-rebuilds, so history == this window (reports max range is 365d).
+   # rebuilds every date whose rows changed, the ones deleted here included,
+   # so history == this window (reports max range is 365d).
    # `updates` lives in ClickHouse, not Postgres — DELETE is a mutation there.
    python -c "
    from pipeline.clickhouse import get_client

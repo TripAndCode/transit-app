@@ -239,6 +239,36 @@ def test_a_noop_run_neither_purges_nor_rebuilds_agg_stop_routes():
     assert not [s for s in conn.executed if "INSERT INTO agg_stop_routes" in s]
 
 
+# The scheduled headway's median reads the static schedule and nothing else.
+_HEADWAY_MEDIAN = "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec"
+
+
+def test_a_noop_run_neither_purges_nor_rebuilds_the_scheduled_headway():
+    """Every column it reads is in the fingerprint, which a run with no
+    changed date has just matched."""
+    conn, _ = _noop_run(has_static=True)
+    assert not [s for s in conn.executed if "DELETE FROM agg_route_headway WHERE" in s]
+    assert not [s for s in conn.executed if _HEADWAY_MEDIAN in s]
+
+
+def test_a_run_with_a_changed_date_rebuilds_the_scheduled_headway_whole():
+    conn, _ = _changed_run(has_static=True)
+    assert [s for s in conn.executed if "DELETE FROM agg_route_headway WHERE agency_id = %s" in s]
+    assert [s for s in conn.executed if _HEADWAY_MEDIAN in s]
+
+
+def test_the_scheduled_headway_reads_only_fingerprinted_columns():
+    """Pins the columns the skip relies on as a known-good snapshot of
+    _STATIC_DEPENDENCY_COLUMNS, not a check derived from the headway SQL
+    itself -- a column the query reads that this snapshot omits would not
+    fail this test."""
+    covered = analyze_mod._STATIC_DEPENDENCY_COLUMNS
+    assert {"trip_id", "route_id", "service_id"} <= set(covered["static_trips"])
+    assert {"trip_id", "stop_id", "departure_time"} <= set(covered["static_stop_times"])
+    assert "route_id" in covered["static_routes"]
+    assert "agg_route_headway" in analyze_mod._NOOP_SKIPPABLE_AGG_TABLES
+
+
 @pytest.mark.parametrize("table", ["agg_service_delivered_daily", "agg_schedule_revision_daily"])
 def test_the_delayless_readers_are_incremental_now(table):
     assert table in analyze_mod._INCREMENTAL_AGG_TABLES

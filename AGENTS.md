@@ -113,7 +113,9 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
   header lists what it leaves out. Other agents run them before pushing. Either way,
   CI sees only the tip that triggered it, so local verification stays mandatory.
 - After analyze changes, rebuild affected aggregates. Use `make analyze-all` for all
-  agencies and `make check-aggs` to detect stale aggregates.
+  agencies and `make check-aggs` to detect stale aggregates. `check-aggs` only compares
+  each agency's newest day, so a date whose row count didn't change but whose rows did
+  (replaced one-for-one) needs `FULL=1` to actually rebuild.
 
 ## Tests
 
