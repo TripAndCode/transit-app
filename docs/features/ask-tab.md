@@ -271,8 +271,9 @@ so it is a separate mechanism to build, not a knob to turn on.
   out to `scripts/ask_eval.py`, which reads
   `tests/ask_eval/gold_questions.jsonl` and checks that each entry's
   expected args are unchanged by `canonicalize` (it never reads the
-  `question` text, so it is not routing coverage). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
-  `RUN_LLM_EVAL=1` + a real `GEMINI_API_KEY`, hits a running dev API) replays
+  `question` text, so it is not routing coverage). Separately,
+  `tests/ask_eval/test_baseline.py` (opt-in via `RUN_LLM_EVAL=1` + a real
+  `GEMINI_API_KEY`, hits a running dev API) replays
   `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
   scores tool-selection accuracy — `golden_set.jsonl` is also the file
   `make build-rag-index` embeds into `rag_chunks` for Stage 2 (see

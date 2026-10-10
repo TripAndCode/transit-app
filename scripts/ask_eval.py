@@ -10,7 +10,8 @@ Usage:
     poetry run python scripts/ask_eval.py
 
 Exit codes:
-    0 — builder_coverage 100% (chip gate skipped — catalog removed in Phase ③.5)
+    0 — every builder entry is a canonicalization fixed point (chip gate skipped —
+        catalog removed)
     1 — at least one CI-gate metric failed
     2 — gold JSONL not found
 """
