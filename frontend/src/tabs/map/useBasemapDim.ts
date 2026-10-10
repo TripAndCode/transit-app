@@ -10,43 +10,36 @@ export const SCRIM_LAYER = "basemap-scrim";
 export const LIGHT_LAYER = "ambient-light";
 const BASEMAP_LAYER = "basemap";
 
-// Zoom-gated mute: none at overview (the heatmap owns it and basemap context is
-// useful), ramping in over [startZoom, 14] -- the same 14 the detail dots fade
-// in at -- so dots/route pop without a louder basemap. Paint props on a raster
-// layer accept zoom expressions.
-//
-// startZoom is 12 for the default heatmap-dot view but widens to 6 in route
-// mode: a focused route is viewed much further out than the heatmap's
-// per-stop detail, and an unmuted basemap there lets its saturated land
-// colours compete with the route line's severity colours, below the WCAG 3:1
-// floor for meaningful graphics.
+// Zoom-gated mute: none at overview, ramping in over [DIM_START_ZOOM, 14] so
+// the route line, live trips and relief columns own the contrast at detail
+// zoom without a louder basemap. A focused route is viewed from far out, and an
+// unmuted basemap there lets its saturated land colours compete with the
+// overlays' severity colours, below the WCAG 3:1 floor for meaningful
+// graphics. Paint props on a raster layer accept zoom expressions.
+const DIM_START_ZOOM = 6;
 // Each function's literal is the mute at dimAmount = 1 (full strength).
 // Scaling linearly by dimAmount makes 0 a true no-op mute and any
 // intermediate amount interpolate smoothly between it and this design.
-function dimSaturation(startZoom: number, dimAmount: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.5 * dimAmount];
+function dimSaturation(dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], DIM_START_ZOOM, 0, 14, -0.5 * dimAmount];
 }
-function dimContrast(startZoom: number, dimAmount: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.12 * dimAmount];
+function dimContrast(dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], DIM_START_ZOOM, 0, 14, -0.12 * dimAmount];
 }
-function dimBrightnessMax(startZoom: number, dimAmount: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 1, 14, 1 - 0.08 * dimAmount];
+function dimBrightnessMax(dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], DIM_START_ZOOM, 1, 14, 1 - 0.08 * dimAmount];
 }
-function scrimOpacity(startZoom: number, dimAmount: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, 0.2 * dimAmount];
+function scrimOpacity(dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], DIM_START_ZOOM, 0, 14, 0.2 * dimAmount];
 }
 
 /**
- * Mute the basemap so the POI/heatmap layer (or, in route mode, the route
- * overlay line) owns the contrast at detail zoom (the standard data-overlay
- * treatment). Desaturates + slightly darkens the `basemap` raster and lays a
+ * Mute the basemap so the live overlays (trips, route line, relief columns)
+ * own the contrast at detail zoom (the standard data-overlay treatment). Desaturates + slightly darkens the `basemap` raster and lays a
  * faint surface-coloured scrim directly above it — but BELOW the overlay layers, which
  * is why MapTab calls this hook before the overlay hooks (effect order =
  * call order). Re-applies on each `styleEpoch` bump because `setStyle` wipes
  * the paint overrides and the scrim.
- *
- * `isRouteMode` (default false) widens the zoom range the ramp is active
- * over — see the startZoom comment above the helper functions.
  *
  * `dimAmount` (default 1, full strength) scales how strong the mute gets at
  * zoom 14 — the user-facing "basemap dim" slider passes its current value
@@ -63,7 +56,6 @@ function scrimOpacity(startZoom: number, dimAmount: number): ExpressionSpecifica
 export function useBasemapDim(
   mapRef: React.MutableRefObject<MLMap | null>,
   styleEpoch: number,
-  isRouteMode = false,
   dimAmount = 1,
   light: AmbientLight | null = null,
   lightTransitionMs = 0,
@@ -76,13 +68,12 @@ export function useBasemapDim(
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
-    const startZoom = isRouteMode ? 6 : 12;
 
     function apply() {
       if (!m || !m.getLayer(BASEMAP_LAYER)) return;
-      m.setPaintProperty(BASEMAP_LAYER, "raster-saturation", dimSaturation(startZoom, dimAmount));
-      m.setPaintProperty(BASEMAP_LAYER, "raster-contrast", dimContrast(startZoom, dimAmount));
-      m.setPaintProperty(BASEMAP_LAYER, "raster-brightness-max", dimBrightnessMax(startZoom, dimAmount));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-saturation", dimSaturation(dimAmount));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-contrast", dimContrast(dimAmount));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-brightness-max", dimBrightnessMax(dimAmount));
       if (!m.getLayer(SCRIM_LAYER)) {
         // First non-basemap layer = the lowest overlay (if any yet). Insert the
         // scrim before it so it sits ABOVE basemap but BELOW the overlay; if no
@@ -96,13 +87,13 @@ export function useBasemapDim(
           {
             id: SCRIM_LAYER,
             type: "background",
-            paint: { "background-color": surfaceColorResolved(), "background-opacity": scrimOpacity(startZoom, dimAmount) },
+            paint: { "background-color": surfaceColorResolved(), "background-opacity": scrimOpacity(dimAmount) },
           },
           before,
         );
       } else {
         m.setPaintProperty(SCRIM_LAYER, "background-color", surfaceColorResolved());
-        m.setPaintProperty(SCRIM_LAYER, "background-opacity", scrimOpacity(startZoom, dimAmount));
+        m.setPaintProperty(SCRIM_LAYER, "background-opacity", scrimOpacity(dimAmount));
       }
       applyLight(m);
     }
@@ -139,5 +130,5 @@ export function useBasemapDim(
     // one-shot `style.load`) so the scrim survives a basemap/language reload
     // even when basemap tiles finish after style.load fires.
     return whenStyleReady(m, apply);
-  }, [mapRef, styleEpoch, isRouteMode, dimAmount, lightColor, lightOpacity, lightTransitionMs, theme]);
+  }, [mapRef, styleEpoch, dimAmount, lightColor, lightOpacity, lightTransitionMs, theme]);
 }

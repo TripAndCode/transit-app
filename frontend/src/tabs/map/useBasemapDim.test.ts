@@ -25,13 +25,13 @@ describe("useBasemapDim", () => {
     const map = makeMockMap();
     run(map);
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.5,
     ]);
     expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.12,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.12,
     ]);
     expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 1, 14, 0.92,
+      "interpolate", ["linear"], ["zoom"], 6, 1, 14, 0.92,
     ]);
   });
 
@@ -43,7 +43,7 @@ describe("useBasemapDim", () => {
     const scrim = map.getLayer(SCRIM_LAYER)!;
     expect(scrim.type).toBe("background");
     expect((scrim.paint as Record<string, unknown>)["background-opacity"]).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, 0.2,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, 0.2,
     ]);
   });
 
@@ -62,7 +62,7 @@ describe("useBasemapDim", () => {
     map.settleStyle(); // isStyleLoaded() → true + emits styledata
     expect(map.getLayer(SCRIM_LAYER)).toBeDefined(); // applied once ready
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.5,
     ]);
   });
 
@@ -90,56 +90,24 @@ describe("useBasemapDim", () => {
     expect(map.getLayer(SCRIM_LAYER)).toBeDefined();
   });
 
-  it("widens the zoom-gated ramp to start at 6 (not 12) when isRouteMode is true", () => {
-    const map = makeMockMap();
-    renderHook(() => {
-      const mapRef = useRef(map as never);
-      useBasemapDim(mapRef, 0, true);
-    });
-    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.5,
-    ]);
-    expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.12,
-    ]);
-    expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 6, 1, 14, 0.92,
-    ]);
-    const scrim = map.getLayer(SCRIM_LAYER)!;
-    expect((scrim.paint as Record<string, unknown>)["background-opacity"]).toEqual([
-      "interpolate", ["linear"], ["zoom"], 6, 0, 14, 0.2,
-    ]);
-  });
-
-  it("keeps the 12->14 ramp when isRouteMode is false or omitted (default heatmap view)", () => {
-    const map = makeMockMap();
-    renderHook(() => {
-      const mapRef = useRef(map as never);
-      useBasemapDim(mapRef, 0, false);
-    });
-    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
-    ]);
-  });
-
   it("scales every ramp end-value by dimAmount, leaving the zoom range untouched", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
-      useBasemapDim(mapRef, 0, false, 0.5);
+      useBasemapDim(mapRef, 0, 0.5);
     });
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.25,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.25,
     ]);
     expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.06,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.06,
     ]);
     expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 1, 14, 0.96,
+      "interpolate", ["linear"], ["zoom"], 6, 1, 14, 0.96,
     ]);
     const scrim = map.getLayer(SCRIM_LAYER)!;
     expect((scrim.paint as Record<string, unknown>)["background-opacity"]).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, 0.1,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, 0.1,
     ]);
   });
 
@@ -150,7 +118,7 @@ describe("useBasemapDim", () => {
       useBasemapDim(mapRef, 0);
     });
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.5,
     ]);
   });
 
@@ -158,13 +126,13 @@ describe("useBasemapDim", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
-      useBasemapDim(mapRef, 0, false, 0);
+      useBasemapDim(mapRef, 0, 0);
     });
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0,
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0,
     ]);
     expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
-      "interpolate", ["linear"], ["zoom"], 12, 1, 14, 1,
+      "interpolate", ["linear"], ["zoom"], 6, 1, 14, 1,
     ]);
   });
 
@@ -196,7 +164,7 @@ describe("useBasemapDim", () => {
 
   it("lays the ambient light directly above the scrim with the given transition", () => {
     const map = makeMockMap();
-    renderHook(() => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, { color: "#D9A066", opacity: 0.07 }, 600); });
+    renderHook(() => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, 0.3, { color: "#D9A066", opacity: 0.07 }, 600); });
     expect(map.layers.map((l) => l.id)).toEqual(["basemap", SCRIM_LAYER, LIGHT_LAYER]);
     const light = map.getLayer(LIGHT_LAYER)!.paint as Record<string, unknown>;
     expect(light["background-color"]).toBe("#D9A066");
@@ -208,7 +176,7 @@ describe("useBasemapDim", () => {
   it("repaints an existing light at once, even while another source's reload holds the style unloaded", () => {
     const map = makeMockMap();
     map.reloadsOnSetData = true;
-    const { rerender } = renderHook(({ l }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, 600); },
+    const { rerender } = renderHook(({ l }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, 0.3, l, 600); },
       { initialProps: { l: { color: "#D9A066", opacity: 0.07 } } });
     map.addSource("relief", { type: "geojson" });
     (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
@@ -219,7 +187,7 @@ describe("useBasemapDim", () => {
 
   it("updates an existing light in place and steps when the transition is 0", () => {
     const map = makeMockMap();
-    const { rerender } = renderHook(({ l, ms }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, ms); },
+    const { rerender } = renderHook(({ l, ms }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, 0.3, l, ms); },
       { initialProps: { l: { color: "#D9A066", opacity: 0.07 }, ms: 600 } });
     rerender({ l: { color: "#3B4A8C", opacity: 0.1 }, ms: 0 });
     expect(map.layers.filter((l) => l.id === LIGHT_LAYER)).toHaveLength(1);
