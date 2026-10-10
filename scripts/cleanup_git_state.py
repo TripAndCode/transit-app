@@ -209,7 +209,13 @@ def decide_branch(facts: BranchFacts) -> Decision:
             facts.branch, facts.head, "keep", "worktree metadata is prunable; inspect it first", facts.worktree
         )
     if facts.worktree and facts.dirty:
-        return Decision(facts.branch, facts.head, "keep", "worktree has uncommitted or untracked files", facts.worktree)
+        return Decision(
+            facts.branch,
+            facts.head,
+            "keep",
+            "worktree has uncommitted or untracked files, or ignored ones that exist nowhere else",
+            facts.worktree,
+        )
 
     if facts.ancestor_of_base:
         return Decision(facts.branch, facts.head, "delete", "tip is already an ancestor of the base", facts.worktree)
@@ -297,7 +303,7 @@ def decide_detached(facts: DetachedFacts) -> Decision:
     if worktree.prunable or not worktree.head:
         return keep("worktree metadata is prunable or incomplete; inspect it first")
     if facts.dirty:
-        return keep("worktree has uncommitted or untracked files")
+        return keep("worktree has uncommitted or untracked files, or ignored ones that exist nowhere else")
     if facts.ancestor_of_base:
         return delete("detached HEAD is an ancestor of the base")
     if facts.tree_matches_base:
@@ -459,10 +465,51 @@ class MergedPullHeads:
         return tuple(sorted(numbers))
 
 
-def worktree_is_dirty(repo: Path, worktree: Worktree) -> bool:
-    """Treat staged, unstaged, and untracked files as non-discardable state."""
+# Ignored paths a worktree regenerates by itself: caches, installs, build
+# output. `git worktree remove` deletes ignored files without asking, and any
+# other ignored file (a plan under docs/superpowers/, a .env) exists nowhere
+# else, so a worktree holding one is not discardable however merged its tip is.
+_REGENERABLE_DIRS = frozenset({"__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache", "node_modules", ".venv"})
+_REGENERABLE_PATHS = frozenset(
+    {
+        ".coverage",
+        ".eggs",
+        "api/static",
+        "build",
+        "dist",
+        "frontend/.vite",
+        "frontend/coverage",
+        "frontend/dist",
+        "frontend/vite.config.d.ts",
+        "frontend/vite.config.js",
+    }
+)
+_REGENERABLE_SUFFIXES = (".pyc", ".tsbuildinfo")
 
-    return bool(run_git(repo, "-C", str(worktree.path), "status", "--porcelain").stdout)
+
+def is_regenerable(path: str) -> bool:
+    """Whether an ignored path, as `git status` prints it, is one the worktree regenerates."""
+
+    path = path.rstrip("/")
+    parts = path.split("/")
+    return (
+        path in _REGENERABLE_PATHS
+        or any(part in _REGENERABLE_DIRS or part.endswith(".egg-info") for part in parts)
+        or parts[-1] == ".DS_Store"
+        or parts[-1].endswith(_REGENERABLE_SUFFIXES)
+    )
+
+
+def worktree_is_dirty(repo: Path, worktree: Worktree) -> bool:
+    """Treat staged, unstaged, untracked and non-regenerable ignored files as non-discardable state."""
+
+    status = run_git(repo, "-C", str(worktree.path), "status", "--porcelain=v1", "-z", "--ignored=matching").stdout
+    # A rename's second NUL-separated field is its source path, not an entry;
+    # the rename entry before it already makes the worktree dirty.
+    for entry in filter(None, status.split("\0")):
+        if entry[:2] != "!!" or not is_regenerable(entry[3:]):
+            return True
+    return False
 
 
 def validate_base(repo: Path, base: str, remote: str) -> None:

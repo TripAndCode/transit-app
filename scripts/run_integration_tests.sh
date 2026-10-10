@@ -31,12 +31,12 @@ case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,
 # a safe, unattended entry point into the THROWAWAY stack, so an inherited
 # dev-pointing value (e.g. this repo's own tracked `.env`, which sets
 # DATABASE_URL at :5433 and CLICKHOUSE_DATABASE=transit -- the real,
-# read-only dev DBs) must never silently pass through. Postgres has a
-# partial safety net (tests/conftest.py's _redirect_to_test_db() rewrites
-# any non-`_test`-suffixed DATABASE_URL) but ClickHouse has none --
-# pipeline/clickhouse.py reads CLICKHOUSE_DATABASE unconditionally, and
-# --dashboard-e2e's spawned app subprocess would otherwise inherit an
-# ambient dev value straight into a live connection against the real,
+# read-only dev DBs) must never silently pass through. tests/conftest.py
+# backs this up inside pytest -- _redirect_to_test_db() rewrites any
+# non-`_test`-suffixed DATABASE_URL, and _pin_clickhouse_to_test_instance()
+# sets CLICKHOUSE_* outright -- but this script is the boundary for anything
+# it runs: pipeline/clickhouse.py reads CLICKHOUSE_DATABASE unconditionally,
+# and a dev value reaching it is a live connection against the real,
 # hundreds-of-millions-of-rows dev dataset.
 #
 # The host/db-name/user/password stay force-set for that same reason, but

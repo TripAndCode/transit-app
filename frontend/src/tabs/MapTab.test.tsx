@@ -64,6 +64,7 @@ describe("MapTab", () => {
   it("renders the operations heading and the empty state when there are no live trips", () => {
     mockCommonHooks();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,
@@ -79,6 +80,7 @@ describe("MapTab", () => {
     mockCommonHooks();
     const capturedAt = new Date().toISOString();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([
         {
           trip_id: "t1",
@@ -122,6 +124,7 @@ describe("MapTab when no trip is reporting", () => {
 
   function mockLive(latest: string | null) {
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: { latest_captured_at: latest, rows: [] },
       error: null,
       isLoading: false,
@@ -187,6 +190,7 @@ describe("MapTab basemap style from the URL", () => {
   function renderWithStyle(search: string) {
     mockCommonHooks();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,
@@ -302,6 +306,45 @@ describe("MapTab delayed-trips cap", () => {
     expect(screen.getByText(remainder)).toBeInTheDocument();
   });
 
+  it("keeps a poll's fresh rows when no tick has moved the clock since mount", () => {
+    // Only Date is faked: nothing advances the page's own tick here, which is
+    // exactly the quiet-feed case where every poll re-arms it before it fires.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const mounted = Date.parse("2026-06-01T00:00:00Z");
+    vi.setSystemTime(mounted);
+    mockCommonHooks();
+    vi.spyOn(hooks, "useRouteStopProfile").mockReturnValue({ data: undefined } as never);
+    const poll = (at: number) => {
+      const capturedAt = new Date(at).toISOString();
+      return { data: { latest_captured_at: capturedAt, rows: [delayedTrip("R1", 0, capturedAt)] }, dataUpdatedAt: at };
+    };
+    let liveResult = poll(mounted);
+    vi.spyOn(hooks, "useLiveTrips").mockImplementation(() => ({
+      ...liveResult,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    }) as never);
+    const tree = () => (
+      <MemoryRouter initialEntries={["/agencies/1/map"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/map" element={<MapTab />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = renderWithProviders(tree());
+    expect(screen.getAllByText(/Stop 0/).length).toBeGreaterThan(0);
+
+    const later = mounted + 120_000;
+    vi.setSystemTime(later);
+    liveResult = poll(later);
+    rerender(tree());
+    expect(screen.getAllByText(/Stop 0/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Last updated —")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it.each([
     [401, "Sign in to fetch the latest live observation"],
     [429, "Too many refreshes; please try again shortly"],
@@ -309,6 +352,7 @@ describe("MapTab delayed-trips cap", () => {
   ])("explains a refused refresh (%i) without inviting a retry it cannot win", async (status, message) => {
     mockCommonHooks();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,
@@ -343,6 +387,7 @@ describe("MapTab manual refresh", () => {
     // tick's `now`; timing it against that stale tick would read as future.
     const fresh = new Date(mounted + 25_000).toISOString();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,
@@ -391,6 +436,7 @@ describe("MapTab relief layer", () => {
   function renderAndOpenPanel(search = "") {
     mockCommonHooks();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,
@@ -452,6 +498,7 @@ describe("MapTab segment highlight and ambient light chips", () => {
   function openPanel() {
     mockCommonHooks();
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
       data: liveTrips([]),
       error: null,
       isLoading: false,

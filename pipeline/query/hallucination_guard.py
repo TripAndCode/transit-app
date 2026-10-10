@@ -30,6 +30,21 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
 _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
+# A numbered list's markers ("1. ", "2) ", "3．") order the answer's lines;
+# they claim nothing about the data. An ASCII "." or ")" counts only before a
+# space, since "1.5" opening a line is a value; a full-width one is never part
+# of a number.
+_LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILINE)
+
+
+def _without_list_ordinals(answer: str) -> str:
+    """``answer`` with its numbered list's markers removed, when it has one:
+    markers numbering two or more lines 1, 2, 3, ... in order. A lone
+    line-leading "99) ..." is a number like any other, so it stays a claim."""
+    markers = [int(m.group(1)) for m in _LIST_ORDINAL_RE.finditer(answer)]
+    if len(markers) < 2 or markers != list(range(1, len(markers) + 1)):
+        return answer
+    return _LIST_ORDINAL_RE.sub("", answer)
 
 
 def _extract_numbers(text: str) -> list[float]:
@@ -56,7 +71,7 @@ def _flatten_numbers(value: object) -> set[float]:
 
 
 def verify_numeric_claims(answer: str, grounding: dict) -> bool:
-    claimed = _extract_numbers(answer)
+    claimed = _extract_numbers(_without_list_ordinals(answer))
     if not claimed:
         return True
     allowed = _flatten_numbers(grounding)
