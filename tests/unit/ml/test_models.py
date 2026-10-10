@@ -153,7 +153,8 @@ def test_fit_calibrated_falls_back_at_production_scale_even_above_twice_min_data
     cutoff = START + timedelta(days=50)
     frame = training_frame(runs, cutoff, window_days=28, half_life_days=28)
     train, _ = split_calibration(frame, cutoff)
-    assert 2 * PRODUCTION_SCALE.min_data_in_leaf <= len(train) < 230  # the gap the old guard missed
+    # past 2x min_data_in_leaf, short of the bagging-adjusted floor
+    assert 2 * PRODUCTION_SCALE.min_data_in_leaf <= len(train) < 230
 
     models = fit_calibrated(frame, PRODUCTION_SCALE, cutoff)
     preds = predict(models, frame)

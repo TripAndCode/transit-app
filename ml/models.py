@@ -120,8 +120,8 @@ def _min_rows_to_split(params: ModelParams) -> int:
     always at the smaller end of the range. Calling code that needs a
     guarantee of a non-degenerate model — not just a fit that avoids this
     specific collapse — must check its own history requirement; whether an
-    agency has enough of its own history is the backtest orchestrator's job
-    (MIN_MODEL_DAYS, routed to B0), not this function's."""
+    agency has enough of its own history is the backtest orchestrator's own
+    history-length check, not this function's."""
     floor = 2 * params.min_data_in_leaf
     if params.bagging_freq > 0:
         floor = math.ceil(floor / params.bagging_fraction)
