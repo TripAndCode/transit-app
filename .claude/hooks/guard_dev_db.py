@@ -219,13 +219,34 @@ def destroys_dev_volume(cmd: str) -> bool:
     return compose_down_v or volume_rm or prune or rm_v
 
 
-def runs_a_sql_script(lowered: list[str]) -> bool:
-    """`psql -f file.sql` carries its statements in a file this hook can't read.
+_SQL_CLIENTS = {"psql", "clickhouse-client", "clickhouse"}
+_SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
+# Statements fed to a client other than through its own arguments: any input
+# redirect or here-doc (bar `< /dev/null`), a pipe into the client, or psql's
+# `\i`/`\ir` include.
+_STDIN_REDIRECT = re.compile(r"<(?!\s*/dev/null\b)")
+_PIPE_INTO_CLIENT = re.compile(r"\|[^|]*\b(psql|clickhouse-client|clickhouse)\b")
+_INCLUDE_META = re.compile(r"\\ir?\s")
 
-    Structural rather than textual: the flag is what makes the command a write,
-    and nothing in the visible text says so.
+
+def runs_a_sql_script(lowered: list[str], cmd: str = "") -> bool:
+    """A script run whose statements this hook cannot read: `psql -f file.sql`,
+    a client fed on stdin or by pipe, an `\\i` include, or an HTTP body read
+    from a file.
+
+    Structural rather than textual: the way the statements arrive is what makes
+    the command a write, and nothing in the visible text says so.
     """
-    return "psql" in lowered and ("-f" in lowered or "--file" in lowered)
+    text = cmd.lower()
+    names = {tok.rsplit("/", 1)[-1] for tok in lowered}
+    if names & _SQL_CLIENTS:
+        if any(tok in _SCRIPT_FLAGS or tok.startswith(("--file=", "--queries-file=")) for tok in lowered):
+            return True
+        if _STDIN_REDIRECT.search(text) or _PIPE_INTO_CLIENT.search(text) or _INCLUDE_META.search(text):
+            return True
+    if "curl" in names:
+        return any(tok.startswith(("@", "-d@")) or tok in ("-t", "--upload-file") for tok in lowered)
+    return False
 
 
 def runs_destructive_command(cmd: str) -> bool:
@@ -356,7 +377,7 @@ def should_block(cmd: str) -> bool:
         return True
     if not targets_dev_db(tokens, cmd):
         return False
-    return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered)
+    return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered, cmd)
 
 
 def read_command() -> str | None:
