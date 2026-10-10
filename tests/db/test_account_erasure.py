@@ -1,5 +1,6 @@
 """Hard deletion of a user (`pipeline/account_erasure.py`)."""
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -176,13 +177,22 @@ async def test_the_break_glass_local_admin_cannot_be_erased(aconn):
 
 
 @pytest.mark.asyncio
-async def test_another_users_legacy_key_survives_even_if_their_email_differs_only_in_case(aconn):
-    await _user(aconn, "boss2@x", role="admin")
-    uid = await _user(aconn, "casey@x")
-    await _user(aconn, "CASEY@x")
+async def test_erasure_finds_the_address_in_whatever_case_a_key_or_audit_row_kept(aconn):
+    """An address is one identity whatever its case, and a legacy key or an
+    audit snapshot keeps the casing it was written with. The match is literal
+    otherwise: a dot in the address matches only a dot."""
+    admin_id = await _user(aconn, "boss2@x", role="admin")
+    uid = await _user(aconn, "casey.k@x")
     await aconn.execute(
-        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'CASEY@x', 'pro')", token_hash("legacy-other")
+        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'Casey.K@X', 'pro')", token_hash("legacy-casey")
+    )
+    await aconn.execute(
+        "INSERT INTO admin_audit (actor_id, action, target_type, target_id, after) VALUES"
+        " ($1, 'invite.created', 'invite', '9', jsonb_build_object('email', 'Casey.K@X', 'other', 'caseyxk@x'))",
+        admin_id,
     )
     async with aconn.transaction():
         await erase_user(aconn, uid)
-    assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE owner_email = 'CASEY@x'") == 1
+    assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE lower(owner_email) = 'casey.k@x'") == 0
+    after = await aconn.fetchval("SELECT after FROM admin_audit WHERE action = 'invite.created'")
+    assert json.loads(after) == {"email": "[deleted]", "other": "caseyxk@x"}
