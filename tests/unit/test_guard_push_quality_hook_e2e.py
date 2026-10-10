@@ -218,3 +218,41 @@ def test_a_branch_changing_only_a_checked_non_python_path_is_not_waved_through(f
     result = _run_hook(f"git -C {fake_repo} push origin feature", claude_project_dir=fake_repo)
     assert result.returncode == 2, result.stderr
     assert "nothing differs from" in result.stderr
+
+
+@pytest.mark.parametrize("changed", ["db/migrations/0050_x.up.sql", "scripts/tool.sh", "Makefile"])
+def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(fake_repo, changed):
+    """The safety net above only refuses a misdirected gate; the gate itself
+    must also treat such a path as a reason to run the backend checks, or a
+    correctly directed push of it verifies nothing."""
+    venv = fake_repo.parent / "venv"
+    (venv / "bin").mkdir(parents=True)
+    for tool in ("pytest", "mypy"):
+        (venv / "bin" / tool).write_text("#!/bin/sh\nexit 0\n")
+        (venv / "bin" / tool).chmod(0o755)
+    shims = fake_repo.parent / "shims"
+    shims.mkdir()
+    (shims / "poetry").write_text(f'#!/bin/sh\n[ "$1 $2" = "env info" ] && echo {venv}\nexit 0\n')
+    (shims / "poetry").chmod(0o755)
+
+    _git("branch", "feature", cwd=fake_repo)
+    worktree = fake_repo.parent / "feature-worktree"
+    _git("worktree", "add", "-q", str(worktree), "feature", cwd=fake_repo)
+    target = worktree / changed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x\n")
+    _git("add", changed, cwd=worktree)
+    _git("commit", "-q", "-m", "change", cwd=worktree)
+
+    env = {
+        **os.environ,
+        "CLAUDE_PROJECT_DIR": str(fake_repo),
+        "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
+        "PUSH_GATE_SKIP_TESTS": "1",
+    }
+    payload = json.dumps({"tool_input": {"command": f"git -C {worktree} push origin feature"}, "cwd": ""})
+    result = subprocess.run(
+        ["bash", str(HOOK_PATH)], input=payload, capture_output=True, text=True, timeout=60, env=env, cwd=fake_repo
+    )
+    assert result.returncode == 0, result.stderr
+    assert "skipping the backend suite" in result.stderr
