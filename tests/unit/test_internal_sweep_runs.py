@@ -125,7 +125,7 @@ def test_a_displaced_cron_sweep_records_the_run_it_lost(sweep):
     """A skipped poke's row is the only evidence a scheduled job was
     displaced; nothing else in the system keeps it."""
     sweep.got_lock = False
-    assert internal._ingest_and_analyze_sweep(_DB_URL) == "skipped"
+    assert internal._ingest_and_analyze_sweep(_DB_URL).status == "skipped"
     assert sweep.started == [("ingest", "skipped")]
 
 
@@ -133,13 +133,13 @@ def test_a_displaced_sweep_with_a_caller_row_does_not_open_a_second_one(sweep):
     """The operator's umbrella row is closed as `skipped` by the caller, so
     opening another here would draw two bars for one button press."""
     sweep.got_lock = False
-    assert internal._ingest_and_analyze_sweep(_DB_URL, run_id=77) == "skipped"
+    assert internal._ingest_and_analyze_sweep(_DB_URL, run_id=77).status == "skipped"
     assert sweep.started == []
 
 
 def test_an_ingest_sweep_promotes_closed_days_between_ingest_and_analyze(sweep, monkeypatch):
     monkeypatch.setattr(pipeline.promote, "promote_closed_days", lambda *_a, **_k: 3)
-    assert internal._ingest_and_analyze_sweep(_DB_URL) == "ok"
+    assert internal._ingest_and_analyze_sweep(_DB_URL).status == "ok"
     assert sweep.recorded == [("ingest", 1), ("promote", 1), ("analyze", 1)]
 
 
@@ -153,24 +153,52 @@ def test_a_failed_promotion_still_analyzes(sweep, monkeypatch):
         raise RuntimeError("clickhouse down")
 
     monkeypatch.setattr(pipeline.promote, "promote_closed_days", _boom)
-    assert internal._ingest_and_analyze_sweep(_DB_URL) == "ok"
+    outcome = internal._ingest_and_analyze_sweep(_DB_URL)
     assert ("analyze", 1) in sweep.recorded
+    # The operator's bar still says what failed.
+    assert outcome == internal.SweepOutcome("error", "failed: promote agency 1")
+
+
+def test_a_sweep_whose_every_stage_failed_is_an_error_naming_each(sweep, monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("down")
+
+    for module, name in ((pipeline.ingest, "ingest_live"), (pipeline.promote, "promote_closed_days")):
+        monkeypatch.setattr(module, name, _boom)
+    monkeypatch.setattr(pipeline.analyze, "analyze", _boom)
+    sweep.conn = _Conn([1, 2])
+    outcome = internal._ingest_and_analyze_sweep(_DB_URL, agency_ids=[1, 2])
+    assert outcome.status == "error"
+    assert outcome.error == (
+        "failed: ingest agency 1, promote agency 1, analyze agency 1, "
+        "ingest agency 2, promote agency 2, analyze agency 2"
+    )
+
+
+def test_a_scope_with_no_active_agency_is_skipped_work(sweep):
+    """The agency was disabled between the request and the run: nothing ran."""
+    sweep.conn = _Conn([])
+    outcome = internal._ingest_and_analyze_sweep(_DB_URL, agency_ids=[9])
+    assert outcome == internal.SweepOutcome("skipped", "no active agency in scope")
+    assert sweep.recorded == []
 
 
 def test_the_scheduled_sweep_still_drives_the_fleet_weather_pass(sweep):
-    assert internal._ingest_and_analyze_sweep(_DB_URL) == "ok"
+    assert internal._ingest_and_analyze_sweep(_DB_URL).status == "ok"
     assert sweep.weather == [_DB_URL]
 
 
 def test_a_sweep_told_not_to_fetch_weather_leaves_the_third_party_alone(sweep):
-    assert internal._ingest_and_analyze_sweep(_DB_URL, run_weather=False) == "ok"
+    assert internal._ingest_and_analyze_sweep(_DB_URL, run_weather=False).status == "ok"
     assert sweep.weather == []
 
 
 def test_the_runner_passes_its_weather_decision_through_to_the_sweep(monkeypatch):
     seen: list[dict] = []
     monkeypatch.setenv("DATABASE_URL", _DB_URL)
-    monkeypatch.setattr(internal, "_ingest_and_analyze_sweep", lambda _url, **kwargs: seen.append(kwargs) or "ok")
+    monkeypatch.setattr(
+        internal, "_ingest_and_analyze_sweep", lambda _url, **kwargs: seen.append(kwargs) or internal.SweepOutcome("ok")
+    )
     monkeypatch.setattr(internal, "_finish_manual_run", lambda *_a, **_k: None)
 
     internal._run_ingest_and_analyze(run_weather=False, run_id=5)
@@ -198,3 +226,18 @@ def test_a_failed_sweep_stores_an_error_without_the_feed_credential(monkeypatch)
     assert "SECRET" not in error
     assert "u:p" not in error
     assert "https://feeds.test/rt.pb" in error
+
+
+def test_the_runner_closes_the_operators_row_with_what_the_sweep_reported(monkeypatch):
+    closed: list[tuple] = []
+    monkeypatch.setenv("DATABASE_URL", _DB_URL)
+    outcome = internal.SweepOutcome("error", "failed: analyze agency 3")
+    monkeypatch.setattr(internal, "_ingest_and_analyze_sweep", lambda _url, **_kwargs: outcome)
+    monkeypatch.setattr(
+        internal,
+        "_finish_manual_run",
+        lambda db_url, run_id, status, error=None: closed.append((run_id, status, error)),
+    )
+
+    internal._run_ingest_and_analyze(run_id=5)
+    assert closed == [(5, "error", "failed: analyze agency 3")]

@@ -7,6 +7,7 @@ loads stay sub-second on multi-month windows. Tests seed both layers:
 stay covered, while ``agg_*`` is what the Overview reads.
 """
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
@@ -181,6 +182,28 @@ async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aag
     await aconn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id=$1", aagency_id)
     r = await client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 404
+
+
+async def test_the_overview_never_holds_a_connection_while_it_waits_for_another(client, aagency_id):
+    """Every stage takes its own pooled connection. A request that also held
+    one across the fan-out could wait forever on a pool it had drained itself,
+    and a pool of a single connection is the smallest case of that."""
+    from api.main import app
+    from pipeline.reports.overview import compute_overview_summary
+
+    compute_overview_summary.cache_clear()
+    app.state.ch_client = None
+    shared, app.state.pool = app.state.pool, await _test_pool(max_size=1)
+    try:
+        r = await asyncio.wait_for(
+            client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07"), timeout=15
+        )
+    finally:
+        # terminate, not close: close waits for every connection to come back,
+        # and a deadlocked request never returns its own.
+        app.state.pool.terminate()
+        app.state.pool = shared
+    assert r.status_code == 200
 
 
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
