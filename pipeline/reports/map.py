@@ -47,7 +47,11 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
 
 
 def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
-    """Per-(trip, stop) dedup used to weight `compute_route_shape`'s shape vote.
+    """Per-(trip, day, stop) dedup used to weight `compute_route_shape`'s shape vote.
+
+    Keyed on the JST service day as well, like `pipeline.db.build_dedup_ch_sql`:
+    a GTFS trip_id recurs on every service day, so (trip, stop) alone would
+    keep one day's observation out of a multi-day range.
 
     Broken out as a pure builder — like `api.routers.map.build_route_trips_sql`
     — so its shape, including the plausibility clamp, is unit-testable without
@@ -63,14 +67,14 @@ def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
           AND u.dep_delay IS NOT NULL
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
           AND {ch_where_frag}
-        GROUP BY u.trip_id, u.stop_sequence
+        GROUP BY u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence
     """
 
 
 def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> str:
-    """Per-(trip, stop) dedup backing `compute_route_shape`'s per-stop delay stats.
+    """Per-(trip, day, stop) dedup backing `compute_route_shape`'s per-stop delay stats.
 
-    Same clamp and pure-builder rationale as `_route_shape_vote_dedup_sql`.
+    Same key, clamp and pure-builder rationale as `_route_shape_vote_dedup_sql`.
     """
     return f"""
         SELECT u.trip_id, u.stop_sequence,
@@ -81,8 +85,8 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
           {trip_filter_sql}
           AND {ch_where_frag}
-        GROUP BY u.trip_id, u.stop_sequence
-        ORDER BY u.trip_id, u.stop_sequence
+        GROUP BY u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence
+        ORDER BY u.trip_id, u.stop_sequence, toDate(u.captured_at, 'Asia/Tokyo')
     """
 
 
@@ -147,9 +151,9 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # single argMax suffices; base-table columns are qualified with the `u.`
     # alias per that same docstring's convention, in case ch_where_frag (built
     # by api.range.build_updates_filter_ch) ever references an output alias.
-    # The per-stop stats query below (once a shape is chosen) keeps
-    # `ORDER BY u.trip_id, u.stop_sequence` (matching route_trips' equivalent
-    # dedup query) for the same reason that query needs it: `lon`/`lat` are
+    # The per-stop stats query below (once a shape is chosen) keeps a full
+    # `ORDER BY` over its dedup key (as route_trips' equivalent dedup query
+    # does) for the same reason that query needs it: `lon`/`lat` are
     # float means accumulated by summing `dedup_rows` in whatever order they
     # arrive, and a bare GROUP BY has no defined output order — without a
     # fixed order, floating-point summation is order-dependent and could
@@ -158,8 +162,8 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # no ORDER BY.
     # Bounded by trip count, not trip x stop count: the vote only needs
     # "how many deduped stop-events did each trip contribute", so the
-    # per-(trip_id, stop_sequence) dedup runs as a subquery and only its
-    # per-trip roll-up crosses into Python. A prior version transferred every
+    # per-(trip, day, stop) dedup runs as a subquery and only its per-trip
+    # roll-up crosses into Python. A prior version transferred every
     # (trip_id, stop_sequence, dep_delay) row for the whole ctx window here —
     # for a busy route over a wide window that's easily >200k rows, past the
     # async client's result_overflow_mode="throw" cap (api/clickhouse.py),

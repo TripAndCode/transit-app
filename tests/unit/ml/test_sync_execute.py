@@ -62,11 +62,13 @@ def test_days_ingest_as_one_folder_and_only_final_days_are_done(tmp_path):
     assert failures == []
     ingests = [c for c in run.commands if c[1:3] == ["gtfs_pipeline.py", "ingest"]]
     assert len(ingests) == 1
+    # A partial ingest must fail the action, not reach the done-set.
+    assert ingests[0][-1] == "--strict"
     assert done == {"rt/8/20261006.tar.gz", "rt/8/20261007.tar.gz"}
 
 
 def test_a_failing_agency_stops_there_and_the_next_agency_still_runs(tmp_path):
-    run = Recorder(fail_when=lambda cmd: cmd[1:3] == ["gtfs_pipeline.py", "ingest"] and cmd[-1] == "8")
+    run = Recorder(fail_when=lambda cmd: cmd[1:3] == ["gtfs_pipeline.py", "ingest"] and "8" in cmd)
     actions = [
         IngestDays(8, (_rt(8, "2026-10-01"),)),
         IngestDays(8, (_rt(8, "2026-10-02"),)),

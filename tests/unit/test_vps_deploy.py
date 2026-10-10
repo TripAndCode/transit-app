@@ -33,20 +33,13 @@ GUARD = _load_guard()
 # port or volume added there is held off the replica too.
 DEV_PORTS = tuple(GUARD.DEV_PORTS)
 DEV_VOLUMES = tuple(yaml.safe_load((ROOT / "compose.yml").read_text())["volumes"])
-# Every system log ClickHouse 26.8 writes on its own. The others (backup_log,
-# s3queue_log, query_views_log, …) fill only from features the replica never uses.
-SYSTEM_LOGS = (
-    "query_log",
-    "query_metric_log",
-    "trace_log",
-    "text_log",
-    "error_log",
-    "metric_log",
-    "asynchronous_metric_log",
-    "part_log",
-    "processors_profile_log",
-    "background_schedule_pool_log",
-)
+# Every system log ClickHouse 26.8 writes on its own is either kept with a TTL or
+# turned off. The others (backup_log, s3queue_log, query_views_log, …) fill only
+# from features the replica never uses.
+KEPT_LOGS = ("query_log", "part_log", "error_log", "asynchronous_metric_log", "background_schedule_pool_log")
+# A column per metric or event, or a row per thread sample: merging these needs more
+# memory than the server cap leaves a running query, and nothing here reads them.
+REMOVED_LOGS = ("metric_log", "query_metric_log", "trace_log", "text_log", "processors_profile_log")
 
 
 def _compose() -> dict:
@@ -83,7 +76,7 @@ def test_the_guard_hook_lets_writes_reach_the_replica():
 
 def test_both_services_carry_a_memory_limit():
     services = _compose()["services"]
-    assert services["ml-ch"]["mem_limit"] == "1536m"
+    assert services["ml-ch"]["mem_limit"] == "2048m"
     assert services["ml-pg"]["mem_limit"] == "640m"
 
 
@@ -102,15 +95,23 @@ def test_clickhouse_image_matches_ci():
 def test_clickhouse_server_memory_is_capped_below_the_container_limit():
     root = ET.parse(VPS / "clickhouse" / "config.d" / "memory.xml").getroot()
     cap = int(root.findtext("max_server_memory_usage"))
-    assert cap < 1536 * 1024 * 1024
+    container = int(_compose()["services"]["ml-ch"]["mem_limit"].removesuffix("m")) * 1024 * 1024
+    assert cap <= container * 0.8
     assert int(root.findtext("mark_cache_size")) <= cap // 4
 
 
-def test_every_system_log_expires():
+def test_every_kept_system_log_expires():
     root = ET.parse(VPS / "clickhouse" / "config.d" / "system-logs.xml").getroot()
-    for log in SYSTEM_LOGS:
+    for log in KEPT_LOGS:
         ttl = root.findtext(f"{log}/ttl")
         assert ttl and re.fullmatch(r"event_date \+ INTERVAL \d+ DAY DELETE", ttl), f"{log} has no TTL"
+
+
+def test_the_wide_system_logs_are_off():
+    root = ET.parse(VPS / "clickhouse" / "config.d" / "system-logs.xml").getroot()
+    for log in REMOVED_LOGS:
+        element = root.find(log)
+        assert element is not None and element.get("remove") == "1", f"{log} is still on"
 
 
 def test_env_example_names_every_variable_and_holds_no_value_for_secrets():
