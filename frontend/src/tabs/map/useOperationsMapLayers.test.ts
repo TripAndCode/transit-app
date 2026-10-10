@@ -75,6 +75,7 @@ const LIVE: LiveTripsResponse = {
     liveTrip(),
     liveTrip({ trip_id: "trip-without-location", stop_lat: null, stop_lon: null }),
   ],
+  truncated: false,
 };
 
 const SHAPE: RouteShapeResponse = {
