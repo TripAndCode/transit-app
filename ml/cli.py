@@ -11,8 +11,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from clickhouse_connect.driver.client import Client
+
 from ml import sync
-from ml.backtest import DataSpan, evaluate_agency, lookback_days, results_from_json, results_to_json
+from ml.backtest import DataSpan, evaluate_agency, lookback_days, needs_older_cells, results_from_json, results_to_json
+from ml.cells import Cell
 from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from ml.report import render
 from pipeline.clickhouse import get_client
@@ -52,6 +55,18 @@ def _sync(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _recent_cells(client: Client, agency_id: int, first: date, last: date, origins: int, window: int) -> list[Cell]:
+    """The cells the latest origins score from, widening the lookback while
+    gaps in the data push those origins' windows back past what was fetched."""
+    lookback = lookback_days(origins, window)
+    while True:
+        since = last - timedelta(days=lookback)
+        cells = fetch_cells(client, agency_id, since=since)
+        if since <= first or not needs_older_cells(cells, since, origins, window):
+            return cells
+        lookback *= 2
+
+
 def _backtest(args: argparse.Namespace) -> int:
     client = get_client()
     results = []
@@ -60,8 +75,7 @@ def _backtest(args: argparse.Namespace) -> int:
         if edges is None:
             continue
         first, last = edges
-        since = last - timedelta(days=lookback_days(args.origins, args.window))
-        cells = fetch_cells(client, agency_id, since=since)
+        cells = _recent_cells(client, agency_id, first, last, args.origins, args.window)
         if cells:
             span = DataSpan(first, last, count_days(client, agency_id))
             results.append(

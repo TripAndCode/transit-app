@@ -8,6 +8,7 @@ from ml.backtest import (
     choose_origins,
     evaluate_agency,
     lookback_days,
+    needs_older_cells,
     results_from_json,
     results_to_json,
 )
@@ -113,3 +114,10 @@ def test_an_explicit_span_replaces_the_one_read_off_the_cells():
 def test_the_lookback_covers_the_origins_their_windows_and_the_gap_slack():
     assert lookback_days(28, 28) > 28 + 28
     assert lookback_days(3, 14) < lookback_days(28, 28)
+
+
+def test_a_fetch_whose_origins_window_reaches_before_its_start_needs_older_cells():
+    cells = _daily(60)
+    assert not needs_older_cells(cells, _day(0), origin_count=3, window_days=14)
+    assert needs_older_cells(cells, _day(55), origin_count=3, window_days=14)
+    assert needs_older_cells([], _day(0), origin_count=3, window_days=14)

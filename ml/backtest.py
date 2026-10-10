@@ -67,6 +67,15 @@ def lookback_days(origin_count: int, window_days: int = WINDOW_DAYS) -> int:
     return origin_count + window_days + max(HORIZONS) + GAP_SLACK_DAYS
 
 
+def needs_older_cells(cells: Sequence[Cell], since: date, origin_count: int, window_days: int = WINDOW_DAYS) -> bool:
+    """Whether the fetch from `since` can leave out cells the scored origins
+    depend on: fewer origins than asked for, or an earliest origin whose window
+    reaches before `since`. Gaps longer than the slack in `lookback_days` cause
+    either, and the result then depends on cells that were not fetched."""
+    origins = choose_origins({c.service_date for c in cells}, origin_count)
+    return len(origins) < origin_count or origins[0] - timedelta(days=window_days) < since
+
+
 def choose_origins(dates: Iterable[date], count: int, horizon: int = 7) -> list[date]:
     """The latest `count` days T with data on T−1 and on at least one of T+1..T+horizon."""
     have = set(dates)
