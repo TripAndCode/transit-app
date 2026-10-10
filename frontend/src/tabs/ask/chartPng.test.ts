@@ -57,6 +57,20 @@ describe("exportSvgAsPng", () => {
     expect(revokeObjectURL).toHaveBeenCalled();
   });
 
+  it("releases the SVG's object URL when the image fails to load", () => {
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:mock"), revokeObjectURL });
+    class FailingImage {
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        this.onerror?.();
+      }
+    }
+    vi.stubGlobal("Image", FailingImage);
+    exportSvgAsPng(makeSvg(), "chart.png");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+  });
+
   it("does nothing (no throw) when canvas 2D context is unavailable", () => {
     const svg = makeSvg();
     vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:mock"), revokeObjectURL: vi.fn() });
