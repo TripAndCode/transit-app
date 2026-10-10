@@ -2,10 +2,12 @@
 
 Mirrors the existing oracle_cloud/poller_static.sh: GET the opendata index
 page, find the first `gtfs-aomoricitybus*.zip` href, resolve it relative to
-the site root, download, sha256, persist as gtfs_static_YYYYMMDD.zip.
+the site root, download, sha256, persist as gtfs_static_YYYYMMDD.zip -- unless
+the bytes match the last zip that loaded, which is no change.
 """
 
 import hashlib
+import json
 import logging
 import pathlib
 import re
@@ -48,7 +50,8 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for Aomori.
 
-    Returns the path of the zip ready for load_static, or None on failure.
+    Returns the path of the zip ready for load_static, or None on failure
+    or when the download is byte-identical to the last zip that loaded.
     Idempotent same-day overwrite (matches existing shell behaviour).
     """
     agency_dir = dest_dir / str(agency_id)
@@ -90,8 +93,14 @@ def fetch(
         logger.warning("[aomori_index_scrape] downloaded file is not a ZIP (missing PK header)")
         return None
 
+    # Reloading identical bytes would rewrite every static table and mint a
+    # new static_version_id for unchanged content.
+    sha = hashlib.sha256(data).hexdigest()
+    if sha == _loaded_sha(agency_dir):
+        logger.info(f"[aomori_index_scrape] agency={agency_id} no change (sha256={sha[:12]})")
+        return None
+
     final.write_bytes(data)
-    sha = _sha256(final)
     history_path = agency_dir / "fetch_history.csv"
     if not history_path.exists():
         history_path.write_text("timestamp,zip_url,sha256,bytes,file_path\n")
@@ -104,3 +113,17 @@ def fetch(
 
     logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final
+
+
+def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None:
+    """Remember *zip_path*'s bytes as the last that loaded, for fetch() to compare against."""
+    _manifest_path(dest_dir / str(agency_id)).write_text(json.dumps({"sha256": _sha256(zip_path)}))
+
+
+def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.json"
+
+
+def _loaded_sha(agency_dir: pathlib.Path) -> str | None:
+    path = _manifest_path(agency_dir)
+    return json.loads(path.read_text()).get("sha256") if path.exists() else None

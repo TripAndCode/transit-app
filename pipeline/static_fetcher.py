@@ -36,6 +36,7 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
         return None
 
     load_static(str(zip_path), agency_id, conn)
+    strategy.record_loaded(agency_id, dest_dir, zip_path)
     logger.info(f"[static_fetcher] agency={agency_id} loaded {zip_path.name}")
     return zip_path
 
