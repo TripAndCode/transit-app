@@ -147,8 +147,9 @@ DOCKER_VALUE_FLAGS = {
 }
 # A dev port written as a `port=` key inside any token: a libpq keyword DSN
 # (`host=h port=5433`) or URI query (`?port=5433`), a client kwarg
-# (`connect(port=5433)`), or a `CLICKHOUSE_PORT=` assignment. DEV_PORTS is the one list of ports.
-PORT_KEY = re.compile(r"(?<![a-z0-9])port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
+# (`connect(port=5433)`), or a `CLICKHOUSE_PORT=`/`PGPORT=` assignment, also
+# one that ends in `;` or sits inside a `bash -c` string. DEV_PORTS is the one list of ports.
+PORT_KEY = re.compile(r"(?<![a-z0-9])(?:pg)?port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
 
 # The shell's DATABASE_URL is the dev database, so a command that expands it is
 # treated as aimed there. An inline `DATABASE_URL=<throwaway> cmd
@@ -299,7 +300,9 @@ def _segment_writes_dev(segment: list[str]) -> bool:
     assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
     for store in writes:
         name, throwaway = THROWAWAY[store]
-        if not throwaway.match(assigned.get(name, "")):
+        value = assigned.get(name, "")
+        # A throwaway host:port whose `?port=` query overrides it is the dev store.
+        if not throwaway.match(value) or PORT_KEY.search(value):
             return True
     return False
 
@@ -384,7 +387,7 @@ def main() -> int:
         return 2
     if should_block(cmd):
         sys.stderr.write(
-            "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
+            "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123/:9000 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
             "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "

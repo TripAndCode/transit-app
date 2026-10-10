@@ -209,6 +209,12 @@ BLOCKED = [
         id="clickhouse-port-env-assignment",
     ),
     pytest.param('psql "postgresql://localhost/transit?port=5433" -c "TRUNCATE agg_x"', id="uri-query-port"),
+    pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
+    pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
+    pytest.param(
+        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        id="throwaway-url-overridden-by-port-query",
+    ),
     # clickhouse-client's native port, which compose.yml says can be published.
     pytest.param("clickhouse-client --host localhost --port 9000 -q 'TRUNCATE TABLE updates'", id="ch-native-port"),
     # The dev Postgres container as it runs today, created outside compose.
@@ -250,6 +256,7 @@ ALLOWED = [
     pytest.param(
         "CLICKHOUSE_PORT=8124 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"", id="test-ch-port-env"
     ),
+    pytest.param('psql "host=localhost sport=5433 dbname=x" -c "TRUNCATE agg_x"', id="port-key-inside-longer-word"),
     pytest.param('psql "host=localhost port=55432 dbname=x" -c "TRUNCATE agg_x"', id="port-key-longer-than-dev-port"),
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
