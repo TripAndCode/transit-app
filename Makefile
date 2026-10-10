@@ -262,10 +262,10 @@ load_static:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py load_static $(STATIC_PATH) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
 analyze:
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),) $(if $(FULL),--full,)
 
 analyze-all:
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze_all
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze_all $(if $(FULL),--full,)
 
 check-aggs:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py check_aggs
