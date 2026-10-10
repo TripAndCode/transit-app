@@ -1,4 +1,4 @@
-"""CI gate: ensures the gold-set eval passes (chip + builder coverage = 100%)."""
+"""CI gate: ensures the gold-set eval passes (builder coverage = 100%)."""
 
 import os
 import subprocess
