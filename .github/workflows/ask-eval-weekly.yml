@@ -212,7 +212,7 @@ jobs:
         run: kill "$(cat /tmp/uvicorn.pid)" 2>/dev/null || true
 
       # The action's label reaper would eventually collect this, but only
-      # after three hours. Removing it here returns the disk and the volume
+      # once it is stale. Removing it here returns the disk and the volume
       # as soon as the job ends.
       - name: Stop and remove the Postgres container
         if: always()
