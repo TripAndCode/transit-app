@@ -45,7 +45,7 @@ from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from pipeline.flags import flag
+from pipeline.flags import get_flag_state
 from pipeline.url_guard import FeedURLError, safe_urlopen
 
 logger = logging.getLogger(__name__)
@@ -485,7 +485,7 @@ def weather_ingest_enabled() -> bool:
     "not available" from the absence of rows, which is exactly what it already
     does for an agency with no representative station configured.
     """
-    return flag("weather_ingest_enabled", False)
+    return get_flag_state("weather_ingest_enabled").value
 
 
 _STATIONS_SQL = """
@@ -573,7 +573,11 @@ def ingest_weather(
         # switch, and the CLI configures logging at info level, so an operator
         # who has not turned it on must be able to tell "skipped, switch off"
         # from "ran, nothing to do".
-        logger.info("weather: WEATHER_INGEST_ENABLED is not set; skipping weather ingest")
+        source = get_flag_state("weather_ingest_enabled").source
+        logger.info(
+            "weather: ingest disabled (source=%s); skipping weather ingest",
+            "override" if source == "override" else "env (WEATHER_INGEST_ENABLED)",
+        )
         return (0, 0, [])
     if days < 1:
         return (0, 0, [])
