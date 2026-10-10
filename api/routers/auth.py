@@ -92,7 +92,7 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
         # because this runs during api/main.py's lifespan startup, before
         # the app begins serving OAuth callbacks (single uvicorn process,
         # no --workers).
-        existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=$1 FOR UPDATE", username)
+        existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=lower($1) FOR UPDATE", username)
         if existing is not None:
             has_oauth = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM oauth_identities WHERE user_id=$1)", existing["user_id"]
@@ -109,7 +109,7 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
         row = await conn.fetchrow(
             """
             INSERT INTO users (email, name, role, password_hash)
-            VALUES ($1, 'Local Admin', 'admin', $2)
+            VALUES (lower($1), 'Local Admin', 'admin', $2)
             ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'admin'
             RETURNING user_id
             """,
@@ -334,7 +334,7 @@ async def _upsert_user(
         uid = row["user_id"]
     else:
         local_only = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email=$1 AND password_hash IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE email=lower($1) AND password_hash IS NOT NULL)",
             email,
         )
         if local_only:
@@ -347,7 +347,7 @@ async def _upsert_user(
         # exactly once per user.
         row = await conn.fetchrow(
             """
-            INSERT INTO users (email, name, avatar_url) VALUES ($1, $2, $3)
+            INSERT INTO users (email, name, avatar_url) VALUES (lower($1), $2, $3)
             ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
             RETURNING user_id, (xmax = 0) AS is_new
             """,
@@ -576,7 +576,7 @@ async def local_login(
     ua = request.headers.get("user-agent")
     ip = request.client.host if request.client else None
     row = await conn.fetchrow(
-        "SELECT user_id, password_hash FROM users WHERE email=$1",
+        "SELECT user_id, password_hash FROM users WHERE email=lower($1)",
         body.username,
     )
     password_hash = row["password_hash"] if row is not None else None
