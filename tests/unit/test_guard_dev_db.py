@@ -325,7 +325,6 @@ def _make_recipes() -> dict[str, str]:
 # Targets and subcommands that reach a dev store without writing it, each
 # checked by hand.
 READ_ONLY_TARGETS = {
-    "ask-eval",
     "check-aggs",
     "check-hash-token-cleanup",
     "check-migrations",
