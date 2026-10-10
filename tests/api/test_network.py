@@ -639,3 +639,28 @@ async def test_network_summary_endpoint_surfaces_ridership_weighting(net_client)
     arow = next(x for x in r.json()["agencies"] if x["agency_id"] == a)
     assert arow["has_ridership_weights"] is True
     assert arow["weighted_on_time_pct"] == 82.7
+
+
+async def test_the_board_shows_an_agency_edit_on_its_next_load(net_client, aconn):
+    """A deleted agency leaves the board, and new ridership weights show, at
+    once rather than after the board's cache expires."""
+    from tests.api.test_admin_flags import _seed_admin
+    from tests.conftest import TEST_ORIGIN
+
+    client, pool, a, b, _cc = net_client
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)])
+    sid, _uid = await _seed_admin(aconn)
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    admin = {"cookies": {"sid": sid}, "headers": {"Origin": TEST_ORIGIN}}
+
+    before = (await client.get("/api/network/summary", params=params)).json()["agencies"]
+    assert b in {row["agency_id"] for row in before}
+    assert next(row for row in before if row["agency_id"] == a)["has_ridership_weights"] is False
+
+    assert (await client.delete(f"/api/agencies/{b}", **admin)).status_code == 204
+    weights = {"upsert": [{"route_code": None, "weight": 2.0}]}
+    assert (await client.patch(f"/api/admin/agencies/{a}/weights", json=weights, **admin)).status_code == 200
+
+    after = (await client.get("/api/network/summary", params=params)).json()["agencies"]
+    assert b not in {row["agency_id"] for row in after}
+    assert next(row for row in after if row["agency_id"] == a)["has_ridership_weights"] is True
