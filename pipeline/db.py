@@ -99,8 +99,8 @@ def build_dedup_ch_sql(
 
     `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
     every Postgres connection that ever touched `updates` pins
-    `SET TIME ZONE 'Asia/Tokyo'` (see api/main.py::_init_connection's
-    docstring), so `captured_at::date` throughout this codebase has
+    the Asia/Tokyo session time zone (see api/main.py's
+    PG_SESSION_SETTINGS), so `captured_at::date` throughout this codebase has
     always meant the JST calendar day, not the UTC one. The ClickHouse
     column is UTC (`DateTime64(0, 'UTC')`); using bare `toDate()` here
     would silently misbucket every row whose captured_at falls in
