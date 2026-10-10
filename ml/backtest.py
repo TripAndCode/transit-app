@@ -18,6 +18,9 @@ from ml.metrics import ErrorStats
 
 METHODS = ("B0", "B1", "B2")
 HORIZONS = range(1, 8)
+# Days of gaps the lookback tolerates before the latest origins start to reach
+# further back than it fetches.
+GAP_SLACK_DAYS = 14
 PEAK_HOURS = frozenset({7, 8, 17, 18})
 # A route-hour with this many trips or fewer averages one or two observations,
 # so its error is mostly those trips' own noise; the report shows it apart.
@@ -48,6 +51,22 @@ class AgencyResult:
     rows: list[SliceRow]
 
 
+@dataclass(frozen=True)
+class DataSpan:
+    """An agency's whole recorded history, for a caller that scores only its recent end."""
+
+    first_day: date
+    last_day: date
+    days_of_data: int
+
+
+def lookback_days(origin_count: int, window_days: int = WINDOW_DAYS) -> int:
+    """How far back from the last day the evaluation reads: the latest
+    `origin_count` origins, each looking `window_days` back, plus the horizon
+    and slack for days without data. Older cells never change the result."""
+    return origin_count + window_days + max(HORIZONS) + GAP_SLACK_DAYS
+
+
 def choose_origins(dates: Iterable[date], count: int, horizon: int = 7) -> list[date]:
     """The latest `count` days T with data on T−1 and on at least one of T+1..T+horizon."""
     have = set(dates)
@@ -57,8 +76,15 @@ def choose_origins(dates: Iterable[date], count: int, horizon: int = 7) -> list[
 
 
 def evaluate_agency(
-    agency_id: int, cells: Sequence[Cell], *, origin_count: int = 28, window_days: int = WINDOW_DAYS
+    agency_id: int,
+    cells: Sequence[Cell],
+    *,
+    origin_count: int = 28,
+    window_days: int = WINDOW_DAYS,
+    span: DataSpan | None = None,
 ) -> AgencyResult:
+    """`span` is the agency's whole history when `cells` holds only its recent
+    end (see `lookback_days`); without it the span is read off `cells`."""
     if not cells:
         raise ValueError(f"agency {agency_id} has no cells to evaluate")
     history = History(cells)
@@ -93,13 +119,14 @@ def evaluate_agency(
                     if reference is not None:
                         row.paired.add(prediction - cell.mean_min, cell.runs)
                         row.paired_b0.add(reference - cell.mean_min, cell.runs)
+    span = span or DataSpan(dates[0], dates[-1], len(dates))
     return AgencyResult(
         agency_id=agency_id,
-        first_day=dates[0],
-        last_day=dates[-1],
-        days_of_data=len(dates),
+        first_day=span.first_day,
+        last_day=span.last_day,
+        days_of_data=span.days_of_data,
         origins=origins,
-        short_history=len(dates) < window_days + 7,
+        short_history=span.days_of_data < window_days + 7,
         rows=[rows[k] for k in sorted(rows)],
     )
 

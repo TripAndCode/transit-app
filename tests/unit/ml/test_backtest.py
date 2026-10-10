@@ -2,7 +2,15 @@ from datetime import date, timedelta
 
 import pytest
 
-from ml.backtest import SPARSE_RUNS, choose_origins, evaluate_agency, results_from_json, results_to_json
+from ml.backtest import (
+    SPARSE_RUNS,
+    DataSpan,
+    choose_origins,
+    evaluate_agency,
+    lookback_days,
+    results_from_json,
+    results_to_json,
+)
 from ml.cells import Cell
 
 START = date(2026, 6, 1)
@@ -80,3 +88,28 @@ def test_results_survive_a_json_round_trip():
 def test_an_agency_without_cells_is_refused_by_name():
     with pytest.raises(ValueError, match="agency 8"):
         evaluate_agency(8, [])
+
+
+def test_scoring_only_the_lookback_gives_the_same_result_as_scoring_all_history():
+    cells = [
+        Cell("R1", _day(d), hour, 3, (2.0 + (d * 7 + hour) % 5) * 3) for d in range(240) for hour in (8, 17) if d % 11
+    ]
+    full = evaluate_agency(8, cells, origin_count=28)
+    recent_start = _day(239) - timedelta(days=lookback_days(28))
+    recent = [c for c in cells if c.service_date >= recent_start]
+    assert len(recent) < len(cells)
+    span = DataSpan(full.first_day, full.last_day, full.days_of_data)
+
+    assert evaluate_agency(8, recent, origin_count=28, span=span) == full
+
+
+def test_an_explicit_span_replaces_the_one_read_off_the_cells():
+    span = DataSpan(_day(-100), _day(60), 150)
+    result = evaluate_agency(8, _daily(30), origin_count=3, span=span)
+    assert (result.first_day, result.last_day, result.days_of_data) == (_day(-100), _day(60), 150)
+    assert not result.short_history
+
+
+def test_the_lookback_covers_the_origins_their_windows_and_the_gap_slack():
+    assert lookback_days(28, 28) > 28 + 28
+    assert lookback_days(3, 14) < lookback_days(28, 28)

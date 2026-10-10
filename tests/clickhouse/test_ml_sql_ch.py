@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from ml.cells import Cell
-from ml.data import agencies_with_data, date_span, fetch_cells
+from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
@@ -69,6 +69,21 @@ def test_an_after_midnight_run_keeps_its_hour_on_its_jst_capture_date(loaded):
 
 def test_fetching_in_chunks_returns_the_same_cells(loaded):
     assert fetch_cells(loaded, 8, chunk_days=1) == fetch_cells(loaded, 8, chunk_days=30)
+
+
+def test_fetching_from_a_start_day_returns_only_the_cells_from_that_day(loaded):
+    everything = fetch_cells(loaded, 8)
+    assert {c.service_date for c in everything} == {date(2026, 6, 1), date(2026, 6, 2)}
+    assert fetch_cells(loaded, 8, since=date(2026, 6, 2)) == [
+        c for c in everything if c.service_date >= date(2026, 6, 2)
+    ]
+    assert fetch_cells(loaded, 8, since=date(2026, 5, 1)) == everything
+    assert fetch_cells(loaded, 8, since=date(2026, 7, 1)) == []
+
+
+def test_days_are_counted_by_distinct_jst_capture_day(loaded):
+    assert count_days(loaded, 8) == 2
+    assert count_days(loaded, 99) == 0
 
 
 def test_an_agency_without_rows_has_no_cells(loaded):

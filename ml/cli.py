@@ -7,13 +7,13 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ml import sync
-from ml.backtest import evaluate_agency, results_from_json, results_to_json
-from ml.data import agencies_with_data, fetch_cells
+from ml.backtest import DataSpan, evaluate_agency, lookback_days, results_from_json, results_to_json
+from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -56,9 +56,17 @@ def _backtest(args: argparse.Namespace) -> int:
     client = get_client()
     results = []
     for agency_id in args.agency or agencies_with_data(client):
-        cells = fetch_cells(client, agency_id)
+        edges = date_span(client, agency_id)
+        if edges is None:
+            continue
+        first, last = edges
+        since = last - timedelta(days=lookback_days(args.origins, args.window))
+        cells = fetch_cells(client, agency_id, since=since)
         if cells:
-            results.append(evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window))
+            span = DataSpan(first, last, count_days(client, agency_id))
+            results.append(
+                evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window, span=span)
+            )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(results_to_json(results))
     return 0
