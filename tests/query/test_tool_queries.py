@@ -200,15 +200,27 @@ async def test_route_compare_service_returns_per_service_type(aconn, aagency_id,
 
 
 @pytest.mark.asyncio
-async def test_route_info_returns_static_metadata(aconn, aagency_id):
-    """Helper joins static_routes + static_trips + static_stop_times."""
+@pytest.mark.parametrize(
+    "route_id, route_code",
+    [
+        ("route_X (1021)", "1021"),
+        # A static_join feed's route_code is its plain route_id.
+        ("R3", "R3"),
+    ],
+)
+async def test_route_info_returns_static_metadata(aconn, aagency_id, route_id, route_code):
+    """Helper joins static_routes + static_trips + static_stop_times, finding
+    the route by the same route_code every other reader derives from
+    route_id: the "(NNNN)" suffix when there is one, else the whole id."""
     await aconn.execute(
-        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'route_X (R3)', 'Test Route')",
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, $2, 'Test Route')",
         aagency_id,
+        route_id,
     )
     await aconn.execute(
-        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', 'route_X (R3)')",
+        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', $2)",
         aagency_id,
+        route_id,
     )
     await aconn.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) "
@@ -223,10 +235,10 @@ async def test_route_info_returns_static_metadata(aconn, aagency_id):
         "  ($1, 'trip_a', 2, 'stop_2', '08:30:00')",
         aagency_id,
     )
-    result = await route_info(aagency_id, aconn, route="R3")
+    result = await route_info(aagency_id, aconn, route=route_code)
     assert result is not None
     # (route_id, route_short_name, stop_count, first_dep, last_dep, trip_count)
-    assert result[0] == "route_X (R3)"
+    assert result[0] == route_id
     assert result[1] == "Test Route"
     assert result[2] == 2  # stop_count
     assert result[3] == "08:00:00"  # first_dep

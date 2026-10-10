@@ -40,7 +40,6 @@ from fastapi import HTTPException
 
 from api.range import RangeCtx
 from pipeline.flags import flag
-from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
@@ -250,40 +249,22 @@ def _completion_with_key(
     return resp.choices[0].message
 
 
-def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[str | None, bool]:
-    """Replace ``answer`` with the localized fallback if it makes a numeric
-    claim not traceable to ``grounding``.
-
-    Only ever called at a site where ``answer`` is LLM-authored free text —
-    ``_dispatch_and_respond``'s ``render_tool_result`` output is already
-    grounded by construction (a formatted SQL aggregate) and is never routed
-    through this helper. ``grounding={}`` means a turn with no dispatched data
-    at all (e.g. an out-of-scope refusal); the answer passes through unchanged
-    there, because there is nothing to trace a number back to. See
-    :func:`pipeline.query.hallucination_guard.verify_numeric_claims`.
-    """
-    if not answer:
-        return answer, False
-    if verify_numeric_claims(answer, grounding):
-        return answer, False
-    return _summary("numeric_guard_fallback", lang=locale), True
-
-
-def _text_reply(body: str, locale: str) -> dict:
+def _text_reply(body: str) -> dict:
     """Response for an LLM-authored plain-text answer, where no tool ran.
 
     With no dispatched data there is nothing to trace a number back to, so
-    ``_numeric_guard`` passes the reply through. The guard covers the paths
-    where an answer can actually be checked; constraining this one means
-    constraining what the model may return here, not verifying it afterwards.
+    the numeric guard gives no verdict here, and ``numeric_guard_triggered``
+    stays None rather than claiming a clean check. The guard covers answers
+    that have grounding (the follow-up, :mod:`pipeline.query.followup`);
+    constraining this one means constraining what the model may return, not
+    verifying it afterwards.
     """
-    guarded_body, triggered = _numeric_guard(body, {}, locale)
     return {
-        "answer": guarded_body,
+        "answer": body,
         "tool_call": None,
         "result": None,
         "success": True,
-        "numeric_guard_triggered": triggered,
+        "numeric_guard_triggered": None,
     }
 
 
@@ -364,8 +345,8 @@ async def _dispatch_and_respond(
             **extra,
         }
     # render_tool_result formats `result` (a dispatched ToolResult) deterministically
-    # from grounded data — it never contains LLM-authored prose, so it is not
-    # routed through _numeric_guard (see that helper's docstring).
+    # from grounded data — it never contains LLM-authored prose, so the numeric
+    # guard has nothing to check.
     return {
         "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
@@ -597,7 +578,7 @@ async def chat_with_tools(
                     "cache_outcome": "bypass",
                 }
             # render_tool_result formats a dispatched ToolResult deterministically —
-            # never LLM-authored prose — so it is not routed through _numeric_guard.
+            # never LLM-authored prose — so the numeric guard has nothing to check.
             return {
                 "answer": render_tool_result(result, locale=locale),
                 "tool_call": {"name": build_tool, "arguments": can_args},
@@ -835,7 +816,7 @@ async def chat_with_tools(
         # JSON_MODE_FORCE_TOOL_ADDENDUM), so there a reply is not an answer.
         if text_reply is not None and not force_tool_call:
             return {
-                **_text_reply(text_reply, locale),
+                **_text_reply(text_reply),
                 "signature_hash": None,
                 "confidence": None,
                 "canonical_args": None,
@@ -940,7 +921,7 @@ async def chat_with_tools(
         # string, which is a genuine failure to parse the question → False.
         body = (msg.content or "").strip()
         if body:
-            return _text_reply(body, locale)
+            return _text_reply(body)
         return {
             "answer": _chat_str("refusal_fallback", locale),
             "tool_call": None,
