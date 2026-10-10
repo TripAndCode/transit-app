@@ -1137,7 +1137,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
 async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
-    # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
+    # Card chips send "k"; LLM tool calls send "n".
     n = int(args.get("k", args.get("n", 20)))
     best_first = bool(args.get("best_first", True))
     rows = await compute_on_time(
