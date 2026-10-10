@@ -327,13 +327,7 @@ async def ch_async_client(ch_client):
     both `ch_client` (e.g. to call `mirror_updates_to_ch`) and this fixture
     shares the same underlying ClickHouse instance/database.
     """
-    client = await clickhouse_connect.get_async_client(
-        host="localhost",
-        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
-        username="transit",
-        password="transit",
-        database="transit_test",
-    )
+    client = await clickhouse_connect.get_async_client(**{**_CH_TEST, "port": int(_CH_TEST["port"])})
     yield client
     await client.close()
 
