@@ -2,8 +2,8 @@ name: Nightly extended
 
 # Runs suites `ci.yml` deliberately skips on every push/PR because they're
 # either slow (RUN_SLOW's ~120MB model download), need a real browser
-# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN), or the 15 Oracle-collector bash
-# suites under oracle_cloud/v3/tests/, which nothing else runs at all.
+# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
+# bash suites under oracle_cloud/v3/tests/, which `ci.yml` runs on every push.
 on:
   schedule:
     - cron: "0 2 * * *"

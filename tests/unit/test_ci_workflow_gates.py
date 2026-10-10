@@ -495,3 +495,10 @@ def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart
     assert "${{" not in install["run"]
     cache = next(step for step in steps if step.get("name") == "Restore the Poetry venv")
     assert "inputs.groups" in cache["with"]["key"]
+
+
+def test_oracle_collector_bash_suites_gate_every_pull_request() -> None:
+    """The production collector's suites need no network, browser or model, so
+    they run in the PR workflow rather than only after a merge."""
+    job = _workflow_yaml()["jobs"]["oracle-bash-tests"]
+    assert any("scripts/run_oracle_tests.sh" in step.get("run", "") for step in job["steps"])
