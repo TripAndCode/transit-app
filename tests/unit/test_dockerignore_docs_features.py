@@ -30,6 +30,14 @@ def test_dockerignore_reincludes_docs_features_after_excluding_docs():
     )
 
 
+def test_dockerignore_reincludes_the_golden_set_after_excluding_tests():
+    """pipeline/query/router.py and the RAG index read the Ask golden set at
+    runtime; without the re-include the image has none and Stage 2 degrades."""
+    lines = _dockerignore_lines()
+    assert lines.index("!tests/ask_eval/golden_set.jsonl") > lines.index("tests")
+    assert (_REPO_ROOT / "tests" / "ask_eval" / "golden_set.jsonl").is_file()
+
+
 def test_dockerfile_runs_as_non_root_user():
     text = (_REPO_ROOT / "Dockerfile").read_text()
     assert "USER " in text, "Dockerfile must switch to a non-root user before CMD"
