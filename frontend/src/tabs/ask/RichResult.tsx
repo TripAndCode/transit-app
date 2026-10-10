@@ -6,7 +6,7 @@ import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
-import { conditionsLabel, formatWindow, provenancePath, sampleCount, toolLabel } from "./provenance";
+import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
 import { SHARED_TABLE } from "../../components/tableStyles";
 
 type Conditions = { dow?: string; time_band?: string; service?: string } | null;
@@ -168,7 +168,7 @@ function EvidenceCard({
   const path = provenancePath({ tool });
   const label = toolLabel(tool, t);
   const window_ = formatWindow(args ?? null, t);
-  const count = sampleCount(result);
+  const count = resultRowCount(result);
   const chips = buildNextStepChips({ tool, args: args ?? null, conditions: conditions ?? null, resultKind: result.kind, t });
   const cardRef = useRef<HTMLDivElement | null>(null);
 
@@ -211,7 +211,7 @@ function EvidenceCard({
         </span>
         {label && <span>{label}</span>}
         {window_ && <span>{window_}</span>}
-        {count != null && <span>{t("ask.evidence.sample_count", { count })}</span>}
+        {count != null && <span>{t("ask.evidence.row_count", { count })}</span>}
       </div>
 
       {children}

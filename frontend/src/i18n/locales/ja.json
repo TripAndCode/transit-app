@@ -743,7 +743,8 @@
         "sql": "確定（集計から直接算出）",
         "llm": "生成AIによる要約（既存の取得結果のみを参照）"
       },
-      "sample_count": "観測 {{count}}件"
+      "row_count_one": "{{count}}行",
+      "row_count_other": "{{count}}行"
     },
     "workspace": {
       "investigations": "これまでの調査",
