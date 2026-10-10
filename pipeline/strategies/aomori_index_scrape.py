@@ -116,14 +116,35 @@ def fetch(
 
 
 def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None:
-    """Remember *zip_path*'s bytes as the last that loaded, for fetch() to compare against."""
-    _manifest_path(dest_dir / str(agency_id)).write_text(json.dumps({"sha256": _sha256(zip_path)}))
+    """Remember *zip_path*'s bytes as the last that loaded, for fetch() to compare against.
+
+    Staged then renamed, like direct_url.record_loaded: a process killed
+    mid-write must never leave a truncated manifest in place, which would
+    otherwise break every later fetch() for this agency until someone
+    manually removed the file.
+    """
+    agency_dir = dest_dir / str(agency_id)
+    pending = _pending_path(agency_dir)
+    pending.write_text(json.dumps({"sha256": _sha256(zip_path)}))
+    pending.replace(_manifest_path(agency_dir))
 
 
 def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
     return agency_dir / "_manifest.json"
 
 
+def _pending_path(agency_dir: pathlib.Path) -> pathlib.Path:
+    return agency_dir / "_manifest.pending.json"
+
+
 def _loaded_sha(agency_dir: pathlib.Path) -> str | None:
     path = _manifest_path(agency_dir)
-    return json.loads(path.read_text()).get("sha256") if path.exists() else None
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text()).get("sha256")
+    except (json.JSONDecodeError, OSError):
+        # A manifest that is unreadable or not valid JSON (e.g. a prior write
+        # that never got this far) is the same as no prior load: the zip is
+        # fetched and loaded again rather than leaving the agency stuck.
+        return None

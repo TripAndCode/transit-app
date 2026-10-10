@@ -13,6 +13,8 @@ import json
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
+import pytest
+
 from pipeline.strategies import aomori_index_scrape, direct_url
 from pipeline.url_guard import FeedURLError, _opener
 
@@ -287,12 +289,37 @@ def test_refresh_static_records_a_zip_only_once_it_has_loaded(tmp_path, monkeypa
         raise RuntimeError("constraint violated")
 
     monkeypatch.setattr(static_fetcher, "load_static", failing_load)
-    try:
+    # A failed load must still propagate to the caller (refresh_all's
+    # rollback/failure accounting, or the CLI's single-agency path) rather
+    # than being swallowed here — only record_loaded not being called is not
+    # enough to prove that on its own.
+    with pytest.raises(RuntimeError):
         static_fetcher.refresh_static(8, conn, tmp_path)
-    except RuntimeError:
-        pass
     assert _Strategy.recorded == []
 
     monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
     static_fetcher.refresh_static(8, conn, tmp_path)
     assert _Strategy.recorded == ["gtfs_static_20261001.zip"]
+
+
+def test_refresh_static_still_reports_success_when_recording_the_load_fails(tmp_path, monkeypatch):
+    """record_loaded runs only after load_static has already committed, so its
+    own failure must not turn a successful load into a reported failure."""
+    from pipeline import static_fetcher
+
+    class _Strategy:
+        @staticmethod
+        def fetch(agency_id, url, dest_dir):
+            return tmp_path / "gtfs_static_20261001.zip"
+
+        @staticmethod
+        def record_loaded(agency_id, dest_dir, zip_path):
+            raise OSError("disk full")
+
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: _Strategy)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+
+    result = static_fetcher.refresh_static(8, conn, tmp_path)
+    assert result == tmp_path / "gtfs_static_20261001.zip"

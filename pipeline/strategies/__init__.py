@@ -13,9 +13,9 @@ Each ingest strategy module exposes:
         insert_updates instead.
 
 Each static strategy module exposes:
-    fetch(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]
+    fetch(agency_id: int, static_url: str, dest_dir: pathlib.Path) -> Optional[pathlib.Path]
         Returns the path of a freshly persisted GTFS zip ready for load_static,
-        or None if no change.
+        or None on no change or failure.
     record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None
         Called once load_static has committed the zip fetch() returned. "No
         change" means no change since the last zip that loaded, so a strategy
