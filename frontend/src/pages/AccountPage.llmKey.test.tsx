@@ -86,4 +86,57 @@ describe("AccountPage BYOK section", () => {
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(putSpy).toHaveBeenCalledWith("/api/me/llm-key", { provider: "openai", api_key: "sk-newkeyvalue" });
   });
+
+  it("does not call the key status 'shared tier' when its fetch failed, and keeps Remove reachable", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) => {
+      if (path === "/api/me/llm-key") throw new client.ApiError(503, "down");
+      return [];
+    });
+    renderPage();
+    expect(await screen.findByText(/couldn't load your key status|キーの状態を読み込めませんでした/i)).toBeTruthy();
+    expect(screen.queryByText(/using the shared free tier|無料の共有枠を使用中/i)).toBeNull();
+    expect(screen.getByText(/^remove$|^削除$/i)).toBeTruthy();
+  });
+
+  it("does not call the key status 'shared tier' while its fetch is still pending", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path === "/api/me/llm-key" ? new Promise(() => {}) : Promise.resolve([]),
+    );
+    renderPage();
+    await screen.findByLabelText(/api key|apiキー/i);
+    expect(screen.queryByText(/using the shared free tier|無料の共有枠を使用中/i)).toBeNull();
+  });
+
+  it("says 'rejected' only for a 400 from key validation", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) =>
+      path === "/api/me/llm-key" ? { configured: false } : [],
+    );
+    vi.spyOn(client, "apiPut").mockRejectedValue(new client.ApiError(400, JSON.stringify({ detail: "key_rejected" })));
+    renderPage();
+    await userEvent.type(await screen.findByLabelText(/api key|apiキー/i), "bad");
+    await userEvent.click(screen.getByText(/^save$|^保存$/i));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/key rejected|キーが拒否/i);
+  });
+
+  it("does not call a 5xx or network failure on save a rejected key", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) =>
+      path === "/api/me/llm-key" ? { configured: false } : [],
+    );
+    vi.spyOn(client, "apiPut").mockRejectedValue(new client.ApiError(503, JSON.stringify({ detail: "validation_unavailable" })));
+    renderPage();
+    await userEvent.type(await screen.findByLabelText(/api key|apiキー/i), "maybe-good");
+    await userEvent.click(screen.getByText(/^save$|^保存$/i));
+    const alert = await screen.findByRole("alert");
+    expect(alert).not.toHaveTextContent(/key rejected|キーが拒否/i);
+    expect(alert).toHaveTextContent(/couldn't save|保存できませんでした/i);
+  });
+
+  it("shows an error, not a blank section, when the sessions fetch failed", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) => {
+      if (path === "/api/me/sessions") throw new client.ApiError(500, "boom");
+      return path === "/api/me/llm-key" ? { configured: false } : [];
+    });
+    renderPage();
+    expect(await screen.findByText(/couldn't load your sessions|セッションを読み込めませんでした/i)).toBeTruthy();
+  });
 });
