@@ -269,9 +269,16 @@ async def get_message(
     return d
 
 
-def _anon_message(message: Any) -> dict[str, Any] | None:
-    """``append_message``'s arguments for one localStorage message, or None
-    for one the messages table cannot hold.
+_INSERT_ANON_MESSAGE = (
+    "INSERT INTO ask_conversation_messages "
+    "(conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions) "
+    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)"
+)
+
+
+def _anon_message(message: Any) -> tuple[Any, ...] | None:
+    """``_INSERT_ANON_MESSAGE``'s values after the conversation id for one
+    localStorage message, or None for one the messages table cannot hold.
 
     The payload is the browser's own copy, so every field is checked rather
     than trusted: a wrong-typed field is dropped, and a value the column would
@@ -290,16 +297,16 @@ def _anon_message(message: Any) -> dict[str, Any] | None:
         return value if isinstance(value, dict) else None
 
     signature = text("signature_hash")
-    return {
-        "role": message["role"],
-        "chip_id": text("chip_id"),
-        "tool": text("tool"),
-        "args": obj("args"),
-        "signature_hash": signature if signature is not None and len(signature) == 16 else None,
-        "result": obj("result"),
-        "rendered_summary": text("rendered_summary"),
-        "conditions": obj("conditions"),
-    }
+    return (
+        message["role"],
+        text("chip_id"),
+        text("tool"),
+        _to_json(obj("args")),
+        signature if signature is not None and len(signature) == 16 else None,
+        _to_json(obj("result")),
+        text("rendered_summary"),
+        _to_json(obj("conditions")),
+    )
 
 
 async def migrate_anon_threads(
@@ -350,9 +357,10 @@ async def migrate_anon_threads(
                 json.dumps(fc),
                 bool(t.get("pinned", False)),
             )
-            for raw in t.get("messages") or []:
-                message = _anon_message(raw)
-                if message is not None:
-                    await append_message(conn, conversation_id, **message)
+            # One batch per thread rather than append_message per message: the
+            # thread row was just created, so its updated_at needs no touch.
+            rows = [(conversation_id, *m) for m in map(_anon_message, t.get("messages") or []) if m is not None]
+            if rows:
+                await conn.executemany(_INSERT_ANON_MESSAGE, rows)
         inserted += 1
     return inserted

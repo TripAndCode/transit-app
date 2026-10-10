@@ -63,6 +63,18 @@ def test_migrate_anon_bounds_the_messages_of_all_threads_together():
         MigrateAnon(threads=[_thread(client_id=str(i), messages=half) for i in range(2)])
 
 
+def test_migrate_anon_counts_the_cap_in_utf16_units():
+    """The quota is counted in UTF-16 units, where a character outside the
+    BMP takes two, so a code-point count would let twice the quota through."""
+    emoji = [{"role": "user", "rendered_summary": "\U0001f600" * (_MAX_ANON_MESSAGES_CHARS // 2)}]
+    with pytest.raises(ValidationError):
+        MigrateAnon(threads=[_thread(messages=emoji)])
+
+
+def test_migrate_anon_measures_a_lone_surrogate():
+    MigrateAnon(threads=[_thread(messages=[{"role": "user", "rendered_summary": "\ud800"}])])
+
+
 def test_anon_thread_rejects_oversized_filter_ctx():
     """`filter_ctx` is client-supplied and persisted as jsonb, so it needs the
     same ceiling as the sibling fields on this model."""
