@@ -447,7 +447,7 @@ export function MapTab() {
   // signal: no tint, and any change steps rather than fades.
   const playbackFrame = playbackOn ? playback.frames[playback.index] : undefined;
   const light = lightFor(playbackFrame ? frameHour(playbackFrame.t) : null, lightOn && !playback.steppingOnly);
-  useBasemapDim(mapRef, styleEpoch, true, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  useBasemapDim(mapRef, styleEpoch, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useOperationsMapLayers(
     mapRef,
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
