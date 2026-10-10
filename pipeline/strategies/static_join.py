@@ -29,8 +29,6 @@ expiry so trust in a feed that later changes shape lapses on its own.
 
 import logging
 
-from psycopg2 import sql
-
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import parse_departure_time
 
@@ -364,47 +362,18 @@ def parse_feed(
     trip_ids = [k[0] for k in keys]
     stop_seqs = [k[1] for k in keys]
 
-    # Table name is scoped per agency_id, not a single shared name: both
-    # cmd_ingest_live's all-agencies branch (gtfs_pipeline.py) and the
-    # production cron path (api/routers/internal.py) loop
-    # `ingest_live(aid, conn, ...)` over every active agency on ONE shared
-    # psycopg2 connection. A single shared table name would make
-    # `CREATE TABLE IF NOT EXISTS ... AS SELECT` a no-op for every agency
-    # after the first on that connection, silently reusing agency A's
-    # schedule rows for agency B's per-file join.
-    schedule_table = sql.Identifier(f"_sj_schedule_{int(agency_id)}")
-    schedule_idx = sql.Identifier(f"_sj_schedule_{int(agency_id)}_idx")
-
     with conn.cursor() as cur:
-        # No-op after the first call for this agency on this connection: temp
-        # tables persist for the whole session (default ON COMMIT PRESERVE
-        # ROWS), not just one transaction, and `CREATE TABLE IF NOT EXISTS
-        # ... AS SELECT` only runs the SELECT the first time the table
-        # doesn't yet exist. This intentionally does NOT pick up a static
-        # schedule change made mid-run for a given agency (accepted
-        # trade-off; static GTFS data doesn't change during a single ingest
-        # run in practice).
+        # One primary-key probe per (trip_id, stop_sequence) the feed reported,
+        # into both tables' PKs. A collector push parses each poll on a fresh
+        # connection, so anything built once per connection (a copy of the
+        # whole schedule) would be rebuilt for every poll.
         cur.execute(
-            sql.SQL(
-                "CREATE TEMP TABLE IF NOT EXISTS {} AS "
-                "SELECT t.trip_id, st.stop_sequence, t.service_id, st.departure_time, t.static_version_id "
-                "FROM static_stop_times st "
-                "JOIN static_trips t ON t.agency_id = st.agency_id AND t.trip_id = st.trip_id "
-                "WHERE st.agency_id = %s"
-            ).format(schedule_table),
-            (agency_id,),
-        )
-        cur.execute(
-            sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (trip_id, stop_sequence)").format(schedule_idx, schedule_table)
-        )
-        cur.execute(
-            sql.SQL(
-                "SELECT s.trip_id, s.stop_sequence, s.service_id, s.departure_time, s.static_version_id "
-                "FROM {} s "
-                "JOIN unnest(%s::text[], %s::int[]) AS k(trip_id, stop_sequence) "
-                "  ON k.trip_id = s.trip_id AND k.stop_sequence = s.stop_sequence"
-            ).format(schedule_table),
-            (trip_ids, stop_seqs),
+            "SELECT k.trip_id, k.stop_sequence, t.service_id, st.departure_time, t.static_version_id "
+            "FROM unnest(%s::text[], %s::int[]) AS k(trip_id, stop_sequence) "
+            "JOIN static_stop_times st "
+            "  ON st.agency_id = %s AND st.trip_id = k.trip_id AND st.stop_sequence = k.stop_sequence "
+            "JOIN static_trips t ON t.agency_id = %s AND t.trip_id = k.trip_id",
+            (trip_ids, stop_seqs, agency_id, agency_id),
         )
         joined = {(tid, seq): (svc, dep, ver) for (tid, seq, svc, dep, ver) in cur.fetchall()}
         # Per trip, not per stop: a stop the schedule JOIN misses is still on
