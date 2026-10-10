@@ -31,7 +31,9 @@ _TEXT_ATTRS = (
 # a plain quoted string (`aria-label="More options"`) or a string literal
 # wrapped in an expression container (`title={"Open"}`, ``title={`Open`}``).
 # Any other expression (`title={label}`, `title={t("k")}`, a template with
-# `${}`, a ternary) is routed through a variable or `t()` and is not matched.
+# `${}`) is not matched; a compound expression such as a ternary whose
+# branches are bare string literals is beyond what a line-oriented regex
+# can judge and is also not matched.
 # Requires at least one ASCII letter so an empty or purely symbolic value
 # (e.g. `alt=""`) doesn't false-positive.
 JSX_ATTR_PATTERN = re.compile(
