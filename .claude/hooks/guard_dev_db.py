@@ -146,9 +146,9 @@ DOCKER_VALUE_FLAGS = {
     "--tlskey",
 }
 # A dev port written as a `port=` key inside any token: a libpq keyword DSN
-# (`host=h port=5433`), a client kwarg (`connect(port=5433)`), or a
-# `CLICKHOUSE_PORT=`/`PGPORT=` assignment. DEV_PORTS is the one list of ports.
-PORT_KEY = re.compile(r"(?:^|[\s,_(])port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
+# (`host=h port=5433`) or URI query (`?port=5433`), a client kwarg
+# (`connect(port=5433)`), or a `CLICKHOUSE_PORT=` assignment. DEV_PORTS is the one list of ports.
+PORT_KEY = re.compile(r"(?<![a-z0-9])port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
 
 # The shell's DATABASE_URL is the dev database, so a command that expands it is
 # treated as aimed there. An inline `DATABASE_URL=<throwaway> cmd
