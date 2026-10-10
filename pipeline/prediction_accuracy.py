@@ -67,10 +67,9 @@ def _parse_scheduled_time(value: _time | str) -> _time:
     typed time value; a caller that already has a real `datetime.time` (a
     test fixture, or a future caller reading Postgres's typed
     `_analyze_deduped.scheduled_time` instead) is passed through unchanged.
-    Extended-hour GTFS notation (">=24:00:00") never reaches `updates` at
-    all -- see `pipeline.strategies._time.normalize_departure_time`'s
-    docstring -- so every string this sees parses as a plain "H:MM[:SS]"
-    time-of-day.
+    Stop events with a NULL `scheduled_time` (extended-hour GTFS notation
+    ">=24:00:00", or no static match) are filtered out of the query, so every
+    string this sees parses as a plain "H:MM[:SS]" time-of-day.
     """
     if isinstance(value, _time):
         return value

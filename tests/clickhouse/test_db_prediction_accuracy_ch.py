@@ -73,3 +73,31 @@ def test_prediction_accuracy_ch_sql_end_to_end():
     total_samples = sum(r["samples"] for r in stats)
     assert total_samples == 2  # 2 early observations (a.pb, b.pb), c.pb excluded as final
     client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_prediction_accuracy_ch_sql_skips_stop_events_without_a_scheduled_time():
+    """An unmatched or extended-hour stop event is stored with a NULL
+    scheduled_time; it has no scheduled instant to measure lead time from, so
+    it must be left out rather than reaching the string parser."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import insert_updates
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(
+        client,
+        1,
+        [
+            ("a.pb", datetime(2026, 4, 1, 8, 39, 0, tzinfo=timezone.utc), "T1", "weekday", None, "R1", 1, 600),
+            ("b.pb", datetime(2026, 4, 1, 8, 58, 0, tzinfo=timezone.utc), "T1", "weekday", None, "R1", 1, 120),
+            ("c.pb", datetime(2026, 4, 1, 8, 39, 0, tzinfo=timezone.utc), "T2", "weekday", "09:00", "R1", 1, 600),
+            ("d.pb", datetime(2026, 4, 1, 8, 58, 0, tzinfo=timezone.utc), "T2", "weekday", "09:00", "R1", 1, 120),
+        ],
+    )
+    rows = client.query(build_prediction_accuracy_ch_sql(), parameters={"agency_id": 1}).result_rows
+
+    assert [r[3] for r in rows] == ["T2"]
+    assert sum(r["samples"] for r in rows_to_lead_bucket_stats(rows)) == 1
+    client.close()

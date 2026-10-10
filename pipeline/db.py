@@ -253,6 +253,11 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
     to compare early readings against that final value.
 
+    `u.scheduled_time IS NOT NULL` drops stop events with no scheduled
+    instant to measure lead time from -- an extended-hour or unmatched row is
+    stored with a NULL `scheduled_time` -- so `pipeline.prediction_accuracy`
+    never has to parse one.
+
     `HAVING count() > 1` drops every stop event observed exactly once: a
     singleton has no EARLY observation to compare against its own (only)
     final one, so it can never contribute to this metric and would just be
@@ -275,7 +280,8 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
         "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
         "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
         "FROM updates AS u "
-        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        "WHERE u.dep_delay IS NOT NULL AND u.scheduled_time IS NOT NULL "
+        "AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
