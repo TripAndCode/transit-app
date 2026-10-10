@@ -188,3 +188,10 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # such prior ordering guarantee.
     rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
     return rows
+
+
+def invalidate_network_summary() -> None:
+    """Forget every cached board, after a write to what it reads (an agency's
+    row, or its ridership weights), so the board's next load shows the change
+    instead of waiting out the cache's TTL."""
+    compute_network_summary.cache_clear()  # type: ignore[attr-defined]
