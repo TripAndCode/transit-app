@@ -269,6 +269,46 @@ async def get_message(
     return d
 
 
+_INSERT_ANON_MESSAGE = (
+    "INSERT INTO ask_conversation_messages "
+    "(conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions) "
+    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)"
+)
+
+
+def _anon_message(message: Any) -> tuple[Any, ...] | None:
+    """``_INSERT_ANON_MESSAGE``'s values after the conversation id for one
+    localStorage message, or None for one the messages table cannot hold.
+
+    The payload is the browser's own copy, so every field is checked rather
+    than trusted: a wrong-typed field is dropped, and a value the column would
+    reject (a role outside the CHECK, a signature longer than CHAR(16)) must
+    not fail the whole migration.
+    """
+    if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
+        return None
+
+    def text(key: str) -> str | None:
+        value = message.get(key)
+        return value if isinstance(value, str) else None
+
+    def obj(key: str) -> dict[str, Any] | None:
+        value = message.get(key)
+        return value if isinstance(value, dict) else None
+
+    signature = text("signature_hash")
+    return (
+        message["role"],
+        text("chip_id"),
+        text("tool"),
+        _to_json(obj("args")),
+        signature if signature is not None and len(signature) == 16 else None,
+        _to_json(obj("result")),
+        text("rendered_summary"),
+        _to_json(obj("conditions")),
+    )
+
+
 async def migrate_anon_threads(
     conn: asyncpg.Connection,
     *,
@@ -276,10 +316,13 @@ async def migrate_anon_threads(
     agency_id: int,
     threads: list[dict[str, Any]],
 ) -> int:
-    """Upload anonymous (localStorage) threads into the DB on first sign-in.
+    """Upload anonymous (localStorage) threads, with their messages, into the
+    DB on first sign-in.
 
     Idempotent via ``client_id`` (stashed in filter_ctx._client_id). If a thread
-    with the same (user_id, _client_id) already exists, skip it.
+    with the same (user_id, _client_id) already exists, skip it. Each thread
+    and its messages land in one transaction, so a thread is never stored
+    without the messages the browser is about to discard.
     """
     if not threads:
         return 0
@@ -304,14 +347,20 @@ async def migrate_anon_threads(
             thread_agency = int(t.get("agency_id"))  # type: ignore[arg-type]
         except (TypeError, ValueError):
             thread_agency = agency_id
-        await conn.execute(
-            "INSERT INTO ask_conversations (user_id, agency_id, title, filter_ctx, pinned) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5)",
-            user_id,
-            thread_agency,
-            str(t.get("title", "(no title)"))[:_MAX_TITLE],
-            json.dumps(fc),
-            bool(t.get("pinned", False)),
-        )
+        async with conn.transaction():
+            conversation_id = await conn.fetchval(
+                "INSERT INTO ask_conversations (user_id, agency_id, title, filter_ctx, pinned) "
+                "VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING conversation_id",
+                user_id,
+                thread_agency,
+                str(t.get("title", "(no title)"))[:_MAX_TITLE],
+                json.dumps(fc),
+                bool(t.get("pinned", False)),
+            )
+            # One batch per thread rather than append_message per message: the
+            # thread row was just created, so its updated_at needs no touch.
+            rows = [(conversation_id, *m) for m in map(_anon_message, t.get("messages") or []) if m is not None]
+            if rows:
+                await conn.executemany(_INSERT_ANON_MESSAGE, rows)
         inserted += 1
     return inserted
