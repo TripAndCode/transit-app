@@ -1375,6 +1375,7 @@
       "col_name": "Name",
       "status_deleted": "Deleted",
       "action_edit": "Edit",
+      "action_edit_disabled_hint": "Restore this agency before editing it.",
       "form_title_add": "Add agency",
       "form_title_edit": "Edit agency",
       "form_name": "Agency name",
