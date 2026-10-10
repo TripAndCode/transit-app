@@ -1,14 +1,15 @@
 """``api.routers.conversations.MigrateAnon``: the anon-to-account
 migration body is entirely client-supplied localStorage content, so it needs
 the same kind of bound a paginated list gets server-side -- capped at 100
-threads, each thread capped at 500 messages, and ``AnonThread.title`` capped
-at 200 chars to mirror ``CreateConversation.title``.
+threads, each thread capped at 500 messages, all messages together capped at
+the browser storage they came from, and ``AnonThread.title`` capped at 200
+chars to mirror ``CreateConversation.title``.
 """
 
 import pytest
 from pydantic import ValidationError
 
-from api.routers.conversations import _MAX_FILTER_CTX_BYTES, AnonThread, MigrateAnon
+from api.routers.conversations import _MAX_ANON_MESSAGES_CHARS, _MAX_FILTER_CTX_BYTES, AnonThread, MigrateAnon
 
 
 def _thread(**overrides) -> dict:
@@ -51,6 +52,15 @@ def test_migrate_anon_rejects_more_than_100_threads():
 
 def test_migrate_anon_accepts_exactly_100_threads():
     MigrateAnon(threads=[_thread(client_id=str(i)) for i in range(100)])
+
+
+def test_migrate_anon_bounds_the_messages_of_all_threads_together():
+    """Every message is stored, so the migration as a whole is capped at what
+    the browser's own copy could hold, even when no one thread is large."""
+    half = [{"role": "user", "rendered_summary": "x" * (_MAX_ANON_MESSAGES_CHARS // 2)}]
+    MigrateAnon(threads=[_thread(client_id="a", messages=half)])
+    with pytest.raises(ValidationError):
+        MigrateAnon(threads=[_thread(client_id=str(i), messages=half) for i in range(2)])
 
 
 def test_anon_thread_rejects_oversized_filter_ctx():
