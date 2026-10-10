@@ -37,7 +37,7 @@ import re
 import shlex
 import sys
 
-DEV_PORTS = ("5433", "5543", "8123")
+DEV_PORTS = ("5433", "5543", "8123", "9000")
 DEV_SERVICES = {"db", "clickhouse"}
 # Container names compose did not derive: the pinned names from before
 # compose.yml dropped `container_name`, and the dev Postgres recreated by hand
@@ -145,6 +145,11 @@ DOCKER_VALUE_FLAGS = {
     "--tlscert",
     "--tlskey",
 }
+# A dev port written as a `port=` key inside any token: a libpq keyword DSN
+# (`host=h port=5433`), a client kwarg (`connect(port=5433)`), or a
+# `CLICKHOUSE_PORT=`/`PGPORT=` assignment. DEV_PORTS is the one list of ports.
+PORT_KEY = re.compile(r"(?:^|[\s,_(])port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
+
 # The shell's DATABASE_URL is the dev database, so a command that expands it is
 # treated as aimed there. An inline `DATABASE_URL=<throwaway> cmd
 # "$DATABASE_URL"` assignment does not reach the expansion, which the shell
@@ -327,6 +332,8 @@ def targets_dev_db(tokens: list[str], cmd: str) -> bool:
         return True
 
     for i, tok in enumerate(lowered):
+        if PORT_KEY.search(tok):
+            return True
         for port in DEV_PORTS:
             if f":{port}" in tok:
                 return True

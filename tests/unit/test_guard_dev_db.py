@@ -196,6 +196,20 @@ BLOCKED = [
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
     ),
+    # A dev port spelled as a `port=` key: a libpq keyword DSN, a client kwarg,
+    # or a CLICKHOUSE_PORT assignment, none of which carry a `:<port>` token.
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "TRUNCATE agg_x"', id="libpq-keyword-dsn"),
+    pytest.param(
+        "poetry run python -c \"import psycopg2; psycopg2.connect(host='localhost', port=5433)"
+        ".cursor().execute('TRUNCATE agg_x')\"",
+        id="python-kwarg-port",
+    ),
+    pytest.param(
+        "CLICKHOUSE_PORT=8123 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"",
+        id="clickhouse-port-env-assignment",
+    ),
+    # clickhouse-client's native port, which compose.yml says can be published.
+    pytest.param("clickhouse-client --host localhost --port 9000 -q 'TRUNCATE TABLE updates'", id="ch-native-port"),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -229,6 +243,11 @@ ALLOWED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
+    ),
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "SELECT 1"', id="keyword-dsn-read"),
+    pytest.param('psql "host=localhost port=5544 dbname=transit_test" -c "TRUNCATE agg_x"', id="keyword-dsn-test-db"),
+    pytest.param(
+        "CLICKHOUSE_PORT=8124 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"", id="test-ch-port-env"
     ),
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
