@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
 import "../../i18n";
 import { StopRibbon } from "./StopRibbon";
 import type { StopRibbonSegment } from "./mareyLayout";
@@ -59,30 +59,9 @@ describe("StopRibbon", () => {
     expect(screen.getByText("Depot: No observation")).toBeInTheDocument();
   });
 
-  it("is inert by default and interactive only when a handler is given", () => {
-    const { container, rerender } = render(<StopRibbon segments={SEGMENTS} label="Delay by stop" />);
-    expect(container.querySelector("[role='button']")).toBeNull();
-
-    const onSelect = vi.fn();
-    rerender(<StopRibbon segments={SEGMENTS} label="Delay by stop" onSelect={onSelect} />);
-    const bands = [...container.querySelectorAll("[data-stop-sequence]")];
-    expect(bands.every((b) => b.getAttribute("role") === "button")).toBe(true);
-    fireEvent.click(bands[1]);
-    expect(onSelect).toHaveBeenCalledWith(2);
-  });
-
-  it("selects a band from the keyboard when it is interactive", () => {
-    const onSelect = vi.fn();
-    const { container } = render(<StopRibbon segments={SEGMENTS} label="Delay by stop" onSelect={onSelect} />);
-    fireEvent.keyDown(container.querySelectorAll("[data-stop-sequence]")[2], { key: "Enter" });
-    expect(onSelect).toHaveBeenCalledWith(3);
-  });
-
-  it("marks the selected stop", () => {
-    const { container } = render(<StopRibbon segments={SEGMENTS} label="Delay by stop" selectedSequence={2} />);
-    const bands = [...container.querySelectorAll("[data-stop-sequence]")];
-    expect(bands[1].getAttribute("data-selected")).toBe("true");
-    expect(bands[0].getAttribute("data-selected")).toBe("false");
+  it("adds no tab stops or button roles", () => {
+    const { container } = render(<StopRibbon segments={SEGMENTS} label="Delay by stop" />);
+    expect(container.querySelector("[role='button'], [tabindex]")).toBeNull();
   });
 
   it("renders nothing for an empty route", () => {
