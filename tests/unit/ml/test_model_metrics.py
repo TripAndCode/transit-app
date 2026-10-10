@@ -60,8 +60,17 @@ def test_an_agency_kept_on_b0_scores_b0_wherever_b0_forecasts():
 
 
 def test_take_selects_the_same_rows_across_every_field():
-    sliced = take(_preds(), np.array([2, 0]))
-    assert list(sliced.mean) == [1.5, 1.0] and list(sliced.q10) == [0.0, 0.0] and list(sliced.q90) == [2.0, 3.0]
+    preds = Predictions(
+        mean=np.array([0.0, 1.0, 2.0]),
+        q10=np.array([10.0, 11.0, 12.0]),
+        q50=np.array([20.0, 21.0, 22.0]),
+        q90=np.array([30.0, 31.0, 32.0]),
+    )
+    sliced = take(preds, np.array([2, 0]))
+    assert list(sliced.mean) == [2.0, 0.0]
+    assert list(sliced.q10) == [12.0, 10.0]
+    assert list(sliced.q50) == [22.0, 20.0]
+    assert list(sliced.q90) == [32.0, 30.0]
 
 
 def test_intervals_count_coverage_and_pinball_per_run():

@@ -80,11 +80,12 @@ def test_a_narrowing_shift_never_lifts_q10_above_the_median():
     assert preds.q10[0] == preds.q50[0] == preds.q90[0] == 3.0
 
 
-def test_the_last_week_before_the_cutoff_is_held_out_for_calibration():
+def test_the_last_week_through_the_cutoff_is_held_out_for_calibration():
     runs = _runs()
     cutoff = START + timedelta(days=60)
     train, calib = split_calibration(training_frame(runs, cutoff, window_days=28, half_life_days=28), cutoff)
     assert calib["service_date"].min() == pd.Timestamp(cutoff - timedelta(days=6))
+    assert calib["service_date"].max() == pd.Timestamp(cutoff)
     assert train["service_date"].max() == pd.Timestamp(cutoff - timedelta(days=7))
 
 
@@ -128,3 +129,16 @@ def test_fit_calibrated_trains_on_everything_when_all_rows_are_held_for_calibrat
 def test_fit_calibrated_raises_a_clear_error_for_a_genuinely_empty_frame():
     with pytest.raises(ValueError, match="no training rows"):
         fit_calibrated(pd.DataFrame(), FAST, START)
+
+
+def test_fit_calibrated_falls_back_when_training_rows_are_too_few_to_split():
+    runs = _runs(days=21)
+    cutoff = START + timedelta(days=15)
+    frame = training_frame(runs, cutoff, window_days=28, half_life_days=28)
+    train, _ = split_calibration(frame, cutoff)
+    assert 0 < len(train) < 2 * FAST.min_data_in_leaf  # too few rows to split even one leaf
+
+    models = fit_calibrated(frame, FAST, cutoff)
+    preds = predict(models, frame)
+    by_route = frame.assign(pred=preds.mean).groupby("route_code")["pred"].mean()
+    assert abs(by_route["LATE"] - by_route["EARLY"]) > 1.0  # not collapsed to one constant

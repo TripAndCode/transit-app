@@ -69,7 +69,7 @@ class Predictions:
 
 def fit(frame: pd.DataFrame, params: ModelParams) -> ModelSet:
     if frame.empty:
-        raise ValueError("no training rows before the cutoff")
+        raise ValueError("no training rows in this frame")
     data = lgb.Dataset(
         frame[FEATURES],
         label=frame[TARGET],
@@ -110,11 +110,14 @@ def split_calibration(frame: pd.DataFrame, cutoff: date) -> tuple[pd.DataFrame, 
 
 
 def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> ModelSet:
-    """A short-history agency can have every target row fall within the
-    calibration window, leaving nothing to train on; train on the whole frame
-    uncalibrated (interval_shift stays 0.0) rather than treat that as no data."""
+    """A short-history agency can have too few rows outside the calibration
+    window to split even one leaf — LightGBM needs at least min_data_in_leaf
+    rows per leaf, so a thin, non-empty train set still trains, but collapses
+    to one constant prediction with no signal. Train on the whole frame
+    uncalibrated (interval_shift stays 0.0) below twice that floor, the same
+    as when the split leaves nothing to train on at all."""
     train, calib = split_calibration(frame, cutoff)
-    if train.empty:
+    if len(train) < 2 * params.min_data_in_leaf:
         return fit(frame, params)
     models = fit(train, params)
     if not calib.empty:
