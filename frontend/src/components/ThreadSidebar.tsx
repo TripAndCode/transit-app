@@ -1,4 +1,5 @@
 import {
+  use,
   useState,
   useRef,
   useEffect,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
+import { DataEndContext, defaultPeriod } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
@@ -33,15 +35,16 @@ function conversationScopeParts(
   conv: Conversation,
   t: (key: string, opts?: Record<string, unknown>) => string,
   formatRoute: (code: string) => string,
+  anchorDay: string,
 ): string[] {
-  return [...(conv.filter_ctx.routes ?? []).map(formatRoute), filterSummary(conv.filter_ctx, t)];
+  return [...(conv.filter_ctx.routes ?? []).map(formatRoute), filterSummary(conv.filter_ctx, t, anchorDay)];
 }
 
-function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
+function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string, anchorDay: string): string {
   const parts: string[] = [];
 
   // Date range
-  const range = rangeLabel(fc, t);
+  const range = rangeLabel(fc, t, anchorDay);
   if (range) parts.push(range);
 
   // Day-of-week
@@ -78,6 +81,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const { t } = useTranslation();
   const { data: conversations = [], isLoading } = useConversations(agencyId);
   const routeNames = useRouteNames(agencyId);
+  const anchorDay = defaultPeriod(use(DataEndContext)).to;
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
 
@@ -194,7 +198,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const query = search.normalize("NFKC").trim().toLocaleLowerCase();
   const matching = conversations.filter((c) =>
     // Codes stay searchable beside the labels shown.
-    [c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format)]
+    [c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format, anchorDay)]
       .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
@@ -305,7 +309,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t, routeNames.format).filter(Boolean).join(FILTER_SEPARATOR)}
+                  filterSummaryText={conversationScopeParts(conv, t, routeNames.format, anchorDay).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>

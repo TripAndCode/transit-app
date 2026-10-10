@@ -30,12 +30,13 @@ type Props = {
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  anchorDay: string,
 ): string {
   const parts: string[] = [];
 
   // Date range — defaults to "last 30 days" here (unlike ThreadSidebar,
   // which shows nothing for a conversation with no range set).
-  parts.push(rangeLabel(fc, t) ?? t("filters.range.last_30d"));
+  parts.push(rangeLabel(fc, t, anchorDay) ?? t("filters.range.last_30d"));
 
   // Day-of-week
   if (fc.dow === "weekday" || fc.dow === "weekend") {
@@ -148,7 +149,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
     setEditing(false);
   }
 
-  const summary = filterSummary(value, t);
+  const summary = filterSummary(value, t, defaultTo);
   const routes = routesSummary(value, t);
 
   // ── collapsed pill row ────────────────────────────────────────────────────
