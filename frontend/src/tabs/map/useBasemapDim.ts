@@ -35,9 +35,10 @@ function scrimOpacity(dimAmount: number): ExpressionSpecification {
 
 /**
  * Mute the basemap so the live overlays (trips, route line, relief columns)
- * own the contrast at detail zoom (the standard data-overlay treatment). Desaturates + slightly darkens the `basemap` raster and lays a
- * faint surface-coloured scrim directly above it — but BELOW the overlay layers, which
- * is why MapTab calls this hook before the overlay hooks (effect order =
+ * own the contrast at detail zoom (the standard data-overlay treatment).
+ * Desaturates + slightly darkens the `basemap` raster and lays a faint
+ * surface-coloured scrim directly above it — but BELOW the overlay layers,
+ * which is why MapTab calls this hook before the overlay hooks (effect order =
  * call order). Re-applies on each `styleEpoch` bump because `setStyle` wipes
  * the paint overrides and the scrim.
  *
