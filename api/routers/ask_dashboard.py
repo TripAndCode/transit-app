@@ -76,11 +76,10 @@ async def anomalies_endpoint(
     time_band: str = Query(default="all"),
     service: str = Query(default="all"),
     routes: list[str] = Query(default=[]),
-    days: int = Query(default=30, ge=7, le=90),
     sigma: float = Query(default=2.0, ge=1.0, le=5.0),
 ) -> dict[str, Any]:
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
-    result = await anomaly_timeline(conn, agency_id=agency_id, ctx=ctx, days=days, sigma=sigma)
+    result = await anomaly_timeline(conn, agency_id=agency_id, ctx=ctx, sigma=sigma)
     return asdict(result)
 
 

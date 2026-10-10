@@ -233,7 +233,6 @@ async def anomaly_timeline(
     *,
     agency_id: int,
     ctx: RangeCtx,
-    days: int = 30,
     sigma: float = 2.0,
 ) -> AnomalyTimeline:
     """Per-day network avg delay (min) over the ctx range + ±sigma outliers.
@@ -329,10 +328,12 @@ async def _movers_from_agg(
         SELECT cur.route_code,
                cur.avg_min AS current_avg,
                prv.avg_min AS previous_avg,
-               cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
+               cur.avg_min - prv.avg_min AS delta,
                cur.n AS samples
         FROM cur LEFT JOIN prv USING (route_code)
-        ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
+        -- A route with no prior average has no delta, not one measured from
+        -- 0 min, so it sorts after every route that has a comparison.
+        ORDER BY ABS(cur.avg_min - prv.avg_min) DESC NULLS LAST, cur.route_code
         LIMIT ${p_top}
     """
     return await conn.fetch(sql, agency_id, *cur_params, *prv_params, *extra_params, top)
@@ -369,13 +370,11 @@ async def movers(
         rc = r["route_code"]
         cur_v = float(r["current_avg"]) if r["current_avg"] is not None else None
         prv_v = float(r["previous_avg"]) if r["previous_avg"] is not None else None
-        # `delta` is NULL exactly when `current_avg` itself is NULL (the SQL's
-        # COALESCE(prv.avg_min, 0) only ever substitutes a 0 on the PREVIOUS
-        # side, not the current one) — i.e. the current window has no
-        # observed data. Propagate that as None ("no data") rather than
-        # coercing to 0.0, which would misread as "no change" and could
-        # surface for an agency with fewer routes than `top`, past where
-        # ORDER BY ... DESC NULLS LAST pushes genuinely-NULL rows.
+        # `delta` is NULL when either window has no observed average: there is
+        # nothing to compare. Propagate that as None ("no comparison") rather
+        # than coercing to 0.0, which would misread as "no change"; such rows
+        # surface only for an agency with fewer comparable routes than `top`,
+        # past where ORDER BY ... DESC NULLS LAST pushes them.
         delta = float(r["delta"]) if r["delta"] is not None else None
         pct = (delta / prv_v * 100.0) if (delta is not None and prv_v) else None
         out_rows.append(
