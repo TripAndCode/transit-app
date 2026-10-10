@@ -110,7 +110,7 @@ describe("MapTab", () => {
     expect(screen.queryByTestId("live-truncated")).not.toBeInTheDocument();
   });
 
-  it("says the counts cover only the trips shown when more were reporting", () => {
+  it("says the counts cover only the trips shown when more were reporting, counting what the tiles count", () => {
     mockCommonHooks();
     const capturedAt = new Date().toISOString();
     const row: LiveTrip = {
@@ -127,9 +127,11 @@ describe("MapTab", () => {
       stop_lon: 140.7,
       headsign: "Downtown",
     };
+    // An hour-old report is dropped from the tiles, so the notice must not count it either.
+    const stale = { ...row, trip_id: "t2", captured_at: new Date(Date.now() - 60 * 60_000).toISOString() };
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
       dataUpdatedAt: 0,
-      data: liveTrips([row], true),
+      data: liveTrips([row, stale], true),
       error: null,
       isLoading: false,
       isFetching: false,

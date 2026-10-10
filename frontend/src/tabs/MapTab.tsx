@@ -582,7 +582,7 @@ export function MapTab() {
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
           {liveQuery.data?.truncated && (
-            <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveQuery.data.rows.length })}</p>
+            <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveRows.length })}</p>
           )}
           {/* Directly under the tiles, because the CSV is exactly the rows
               they count -- and above the delay list, so a long list can't
