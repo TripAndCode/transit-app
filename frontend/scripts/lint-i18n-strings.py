@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Lint script to catch hardcoded, non-translated UI text in TypeScript/TSX
-source: stray Japanese kana/kanji, and literal JSX accessibility/text
-attributes (aria-label, placeholder, alt, title). Both checks are suppressed
-by an `i18n-ignore` marker on the same line.
+source: stray Japanese kana/kanji, literal JSX accessibility/text attributes
+(aria-label and the other aria text attributes, placeholder, alt, title; a
+quoted string or a string literal inside braces), and capitalised English
+text between single-line JSX tags. Every check is suppressed by an
+`i18n-ignore` marker on the same line.
 Exits with 0 if no matches found, 1 if matches found.
 """
 
@@ -18,13 +20,35 @@ from pathlib import Path
 # Han: U+4E00–U+9FFF
 KANA_PATTERN = re.compile(r"[぀-ゟ゠-ヿ一-鿿]")
 
-# A literal (non-expression) JSX attribute value on one of the accessible/
-# visible-text attributes, e.g. `aria-label="More options"`. Deliberately
-# does not match an expression container (`title={...}`), since that's
-# already routed through `t()` or a variable -- only a plain quoted string
-# is a hardcoded literal. Requires at least one ASCII letter so an empty or
-# purely symbolic value (e.g. `alt=""`) doesn't false-positive.
-JSX_ATTR_PATTERN = re.compile(r'\b(?:aria-label|placeholder|alt|title)=(["\'])([^"\']*[A-Za-z][^"\']*)\1')
+# Attributes whose value is read by users or assistive technology.
+_TEXT_ATTRS = (
+    r"aria-label|aria-description|aria-roledescription|aria-valuetext|"
+    r"aria-placeholder|aria-braillelabel|aria-brailleroledescription|"
+    r"placeholder|alt|title"
+)
+
+# A hardcoded literal JSX attribute value on one of those attributes, either
+# a plain quoted string (`aria-label="More options"`) or a string literal
+# wrapped in an expression container (`title={"Open"}`, ``title={`Open`}``).
+# Any other expression (`title={label}`, `title={t("k")}`, a template with
+# `${}`, a ternary) is routed through a variable or `t()` and is not matched.
+# Requires at least one ASCII letter so an empty or purely symbolic value
+# (e.g. `alt=""`) doesn't false-positive.
+JSX_ATTR_PATTERN = re.compile(
+    rf"""\b(?:{_TEXT_ATTRS})=(?:
+        (["'])[^"']*[A-Za-z][^"']*\1
+        |
+        \{{\s*(["`'])[^"'`$]*[A-Za-z][^"'`$]*\2\s*\}}
+    )""",
+    re.VERBOSE,
+)
+
+# Capitalised English prose as the whole text node of a single-line element,
+# e.g. `<button>Save</button>`. Text containing an expression (`{...}`) or
+# starting lowercase/symbolic is not matched, so interpolated labels and
+# punctuation glyphs pass; multi-line text nodes are out of scope for this
+# line-oriented lint.
+JSX_TEXT_PATTERN = re.compile(r">\s*[A-Z][a-z][^<>{}]*</")
 
 #: Lines that are pure comments — `//`, `*` (JSDoc body), `/*` openers.
 COMMENT_LINE_RE = re.compile(r"^\s*(//|\*|/\*)")
@@ -80,6 +104,8 @@ def find_violations(lines: list[str]) -> list[Violation]:
             violations.append(Violation(line_num, line.rstrip(), "kana"))
         elif JSX_ATTR_PATTERN.search(code):
             violations.append(Violation(line_num, line.rstrip(), "jsx-attribute"))
+        elif JSX_TEXT_PATTERN.search(code):
+            violations.append(Violation(line_num, line.rstrip(), "jsx-text"))
     return violations
 
 

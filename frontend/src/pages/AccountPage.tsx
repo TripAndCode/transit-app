@@ -88,8 +88,8 @@ function LlmKeySection() {
     >
       <Toolbar>
         <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-          <option value="gemini">Gemini</option>
-          <option value="openai">OpenAI</option>
+          <option value="gemini" /* i18n-ignore: provider brand name */>Gemini</option>
+          <option value="openai" /* i18n-ignore: provider brand name */>OpenAI</option>
         </select>
         <label>
           {t("account.llm_key.input_label")}

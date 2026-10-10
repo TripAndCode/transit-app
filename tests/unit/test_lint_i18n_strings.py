@@ -92,3 +92,59 @@ def test_a_real_trailing_comment_is_still_stripped():
     or kana parked in a trailing comment starts failing the lint."""
     lines = ["<div>{label}</div>  // 日本語のコメント"]
     assert lint.find_violations(lines) == []
+
+
+def test_flags_string_literal_inside_braces():
+    lines = [
+        '<button aria-label={"Close dialog"}>\n',
+        "<button title={`Open`}>\n",
+        "<input placeholder={'Search'} />\n",
+        '<button aria-label={ "Close dialog" }>\n',
+    ]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-attribute") for i in range(1, 5)]
+
+
+def test_flags_other_aria_text_attributes():
+    lines = [
+        '<div aria-description="Details" />\n',
+        '<div aria-roledescription="Slide" />\n',
+        '<div aria-valuetext="Half full" />\n',
+        '<div aria-placeholder="Pick one" />\n',
+    ]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-attribute") for i in range(1, 5)]
+
+
+def test_allows_template_with_interpolation_and_call_expressions():
+    lines = [
+        "<button title={`${t(a)} ${b}`}>\n",
+        '<button aria-label={cond ? t("a") : t("b")}>\n',
+        "<button aria-label={label}>\n",
+    ]
+    assert lint.find_violations(lines) == []
+
+
+def test_non_text_aria_attributes_are_not_flagged():
+    lines = ['<div aria-live="polite" aria-hidden="true" aria-orientation="vertical" />\n']
+    assert lint.find_violations(lines) == []
+
+
+def test_flags_capitalised_english_jsx_text():
+    lines = ["<button>Save</button>\n", "<p>No results found.</p>\n", "<span>Open dialog</span>\n"]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-text") for i in range(1, 4)]
+
+
+def test_allows_jsx_text_that_is_not_prose():
+    lines = [
+        "<span>{t('a')}</span>\n",
+        "<span>42%</span>\n",
+        "<span>{count} items</span>\n",
+        "<span>·</span>\n",
+        "const x = useState<string>('A');\n",
+        "type P = Array<Foo>;\n",
+    ]
+    assert lint.find_violations(lines) == []
+
+
+def test_jsx_text_with_i18n_ignore_marker_is_ignored():
+    lines = ["<option>Gemini</option> {/* i18n-ignore: brand name */}\n"]
+    assert lint.find_violations(lines) == []
