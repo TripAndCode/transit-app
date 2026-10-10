@@ -39,7 +39,7 @@ import clickhouse_connect
 from fastapi import HTTPException
 
 from api.range import RangeCtx
-from pipeline.flags import flag
+from pipeline.flags import aflag, flag
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
@@ -150,6 +150,12 @@ _CHAT_STRINGS = {
     ),
     ("llm_unconfigured", "ja"): "AIプロバイダーが設定されていません。",
     ("llm_unconfigured", "en"): "No AI provider is configured.",
+    ("llm_disabled", "ja"): (
+        "AIによる回答は現在停止しています。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。"
+    ),
+    ("llm_disabled", "en"): (
+        "AI answers are switched off right now. Questions like route lists, delay rankings, and stop counts still work."
+    ),
     ("llm_not_approved", "ja"): (
         "この機能は現在、管理者の承認が必要です。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。"
     ),
@@ -357,6 +363,16 @@ async def _dispatch_and_respond(
     }
 
 
+#: The arg names that pin an answer to absolute dates: the tools' own
+#: ``from``/``to``, and the ``from_date``/``to_date`` canonicalize resolves
+#: relative windows into.
+_DATED_ARG_KEYS = frozenset({"from", "to", "from_date", "to_date"})
+
+
+def _carries_dates(args: Any) -> bool:
+    return isinstance(args, dict) and not _DATED_ARG_KEYS.isdisjoint(args)
+
+
 async def chat_with_tools(
     question: str,
     ctx: RangeCtx,
@@ -449,11 +465,15 @@ async def chat_with_tools(
     ladder, so one would leave every other rung unable to answer.
     """
     client = _get_client()
+    # The operator's kill switch for every LLM call this function makes.
+    # Stages 1-2, the intent-cache pre-hit and the build sentinel never reach
+    # one, so they keep answering while it is off.
+    llm_enabled = await aflag("ask_llm_enabled")
     # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
     # caller isn't approved: _call_llm below rejects them unconditionally
     # before user_key is ever read, so fetching it would be wasted work on
     # every request from a not-yet-approved signed-in caller.
-    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and llm_approved else None
+    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and llm_approved and llm_enabled else None
 
     def _call_llm(**kwargs: Any) -> tuple[Any | None, str | None]:
         """Dispatch one completion call, normalized to ``(message, error_kind)``.
@@ -475,6 +495,8 @@ async def chat_with_tools(
         shared ladder, so a disallowed BYOK provider fails the same
         machine-readable way the caller already knows how to handle.
         """
+        if not llm_enabled:
+            return None, "disabled"
         if not llm_approved:
             return None, "not_approved"
         if user_key is None:
@@ -741,6 +763,12 @@ async def chat_with_tools(
         # fall through to Stage 2 below so the LLM call actually sees
         # history_block instead of returning a stale, history-blind answer.
         pre_row = None if force_tool_call else await _cache_lookup_by_question(conn, question, agency_id)
+        # The same text can mean different dates on different days ("昨日",
+        # "先週"), and the cached args hold the absolute dates the LLM resolved
+        # it to the first time. Such a row answers its own signature, not its
+        # text, so the LLM resolves the text again.
+        if pre_row is not None and _carries_dates(pre_row["args"]):
+            pre_row = None
         if pre_row is not None:
             # Exact same question seen before — skip LLM entirely.
             _log.debug("Intent cache pre-hit for question %r (sig=%s)", question[:60], pre_row["signature_hash"])
@@ -776,6 +804,7 @@ async def chat_with_tools(
                 "rate_limit": "llm_rate_limited",
                 "no_providers": "llm_unconfigured",
                 "not_approved": "llm_not_approved",
+                "disabled": "llm_disabled",
             }.get(error_kind or "", "service_unreachable")
             return {
                 "answer": _chat_str(key, locale),
@@ -904,6 +933,7 @@ async def chat_with_tools(
             "rate_limit": "llm_rate_limited",
             "no_providers": "llm_unconfigured",
             "not_approved": "llm_not_approved",
+            "disabled": "llm_disabled",
         }.get(error_kind or "", "service_unreachable")
         return {
             "answer": _chat_str(key, locale),

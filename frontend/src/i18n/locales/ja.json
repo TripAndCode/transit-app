@@ -1516,6 +1516,7 @@
       "clear_error": "上書きを解除できませんでした。",
       "save_error": "変更を保存できませんでした。入力した理由はそのまま残っています。もう一度お試しください。",
       "labels": {
+        "askLlmEnabled": "Ask: AI による回答（LLM）",
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",
         "copilotInsightEnabled": "Copilot: 自動インサイト",
