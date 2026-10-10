@@ -3,7 +3,8 @@
 Three-stage pipeline orchestrated from :func:`route_question`:
 
 1. **Rules** — :data:`_RULES` regex match → direct dispatch.
-2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance < 0.15
+2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance is below
+   :data:`_EMBED_DISPATCH_THRESHOLD`
    → direct dispatch using that Q's stored tool/args.
 3. **(caller)** — When ``route_question`` returns ``None``,
    :func:`retrieve_examples` provides top-3 nearest as few-shot context
@@ -28,8 +29,8 @@ from typing import Any, Literal
 _log = logging.getLogger(__name__)
 
 # Distance below which Stage 2 will dispatch directly (cosine distance;
-# smaller = closer). Genuine paraphrases cluster ≤0.13; confirmed false
-# dispatches landed at 0.13–0.15, so the threshold is tightened to 0.12.
+# smaller = closer). Kept tight because a wrong direct dispatch is worse than
+# falling through to the LLM stage, which can still use the match as context.
 _EMBED_DISPATCH_THRESHOLD = 0.12
 
 # Minimum gap between the top match and the runner-up. When two golden Qs
@@ -190,7 +191,7 @@ def _validate_rules() -> None:
     known = set(_HANDLERS.keys())
     bad = [r.name for r in _RULES if r.tool not in known]
     if bad:
-        raise RuntimeError(f"Phase 2 router has rules pointing at unknown tools: {bad}. Known tools: {sorted(known)}")
+        raise RuntimeError(f"Router has rules pointing at unknown tools: {bad}. Known tools: {sorted(known)}")
 
 
 _validate_rules()

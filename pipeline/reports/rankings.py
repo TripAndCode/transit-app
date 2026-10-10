@@ -66,9 +66,10 @@ def _round1(x: float) -> Decimal:
 
 
 def _weighted_avg_min(days: list[dict]) -> float | None:
-    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+    """Sample-weighted mean delay across trend buckets — the pooled mean (approximate).
 
-    Each `days` entry is already a per-bucket sample-weighted mean with a
+    Each `days` entry is already a per-bucket sample-weighted mean (rounded to
+    2 dp, so the pooled figure is approximate) with a
     `samples` weight, so a plain mean-of-means would overweight thin days (one
     sparse outlier day could dominate the headline). Null-`avg_min` days are
     skipped (not counted as 0). Returns None when there are no measured samples.
@@ -272,7 +273,7 @@ async def compute_on_time(
     """On-time percentage per route-service.
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
-    ``sort_order='asc'`` returns worst routes first (lowest %) for BUG-3.
+    ``sort_order='asc'`` returns worst routes first (lowest %).
 
     ``early_tolerance_sec``/``late_tolerance_sec`` generalize the on-time
     window to ``-early_tolerance_sec <= dep_delay <= late_tolerance_sec`` (an
@@ -697,10 +698,9 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
     """Per-route (wd_avg_min, wd_n, we_avg_min, we_n) from ClickHouse `updates`,
     computed with ONE query via conditional aggregates instead of two separate
     queries (weekday ctx + weekend ctx) plus a Python-side mean/count/HAVING
-    reduction over every raw deduped row. The old shape shipped hundreds of
-    thousands of raw rows over HTTP for a 30-day window on agency 8 — this
-    moves the aggregation (and the >10-sample HAVING gate) into ClickHouse, so
-    only one row per qualifying route crosses the wire.
+    reduction over every raw deduped row. The aggregation (and the >10-sample
+    HAVING gate) runs in ClickHouse, so only one row per qualifying route
+    crosses the wire rather than every raw deduped row.
 
     Deduped on a narrower key than `build_dedup_ch_sql` (no service_type/
     scheduled_time — the weekday-vs-weekend rollup doesn't need them; assumes

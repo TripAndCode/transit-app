@@ -401,7 +401,7 @@ async def chat_with_tools(
     """Run one round-trip Ask flow.
 
     ``ch`` is the ClickHouse client threaded through to every internal
-    :func:`dispatch` call (Task 8 — handlers reading the live `updates`
+    :func:`dispatch` call (handlers reading the live `updates`
     table read it from ClickHouse). Defaults to ``None`` for callers/tests
     that never exercise those specific tool paths.
 
