@@ -177,6 +177,23 @@ describe("MapTab when no trip is reporting", () => {
     expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--stale");
   });
 
+  it("reads a report a few seconds ahead of a lagging client clock as just updated, not unknown", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-10-03T13:24:20Z");
+    renderMap();
+    const status = screen.getByText("Last updated just now");
+    expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--normal");
+  });
+
+  it("still calls a report far ahead of the client clock unknown", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-10-03T13:30:00Z");
+    renderMap();
+    expect(screen.getByText("Last updated —").closest(".ops-freshness")).toHaveClass("ops-freshness--unknown");
+  });
+
   it("counts a feed quiet since an earlier day in days, and dates its last report", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));

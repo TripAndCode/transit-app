@@ -46,6 +46,7 @@ import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../utils/clockSkew";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
@@ -102,7 +103,9 @@ function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation
 function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
   const age = now - new Date(timestamp).getTime();
-  if (!Number.isFinite(age) || age < 0) return "unknown";
+  // Rows this far ahead of the client clock are still drawn as live
+  // (filterLiveRows), so the badge judges them by the same allowance.
+  if (!Number.isFinite(age) || age < CLOCK_SKEW_ALLOWANCE_MS) return "unknown";
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
