@@ -1,6 +1,8 @@
-"""The three baselines a model has to beat. B0 is the app's own
-"expected delay": the same route×weekday×hour, pooled by runs, over the 28
-days before the origin."""
+"""The three baselines a model has to beat. B0 is a seasonal-naive baseline:
+the same route×weekday×hour, pooled by runs, over the 28 days before the
+origin. It is not the app's expected delay (agg_route_hour_dow), which pools
+the whole history by stop observation, takes each stop's own scheduled hour
+and drops rows without a service type."""
 
 from __future__ import annotations
 

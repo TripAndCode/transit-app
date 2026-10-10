@@ -44,4 +44,4 @@ R2 keeps everything, so old history can leave the replica whenever the disk need
 
 ## Baselines
 
-B0 is the app's "expected delay": the same route×weekday×hour, pooled by runs, over the 28 days before the forecast day. B1 is the latest such cell, and B2 is the route's 28-day mean. The report scores each on T+1..T+7 from data through T−1. It measures skill against B0 only where both predict, and shows coverage beside every error.
+B0 is a seasonal-naive baseline: the same route×weekday×hour, pooled by runs, over the 28 days before the forecast day. It is not the app's expected delay (`agg_route_hour_dow`), which pools the whole history by stop observation, takes each stop's own scheduled hour and drops rows without a service type, so "skill vs B0" does not measure improvement over what the app shows. B1 is the latest such cell, and B2 is the route's 28-day mean. The report scores each on T+1..T+7 from data through T−1. It measures skill against B0 only where both predict, and shows coverage beside every error.
