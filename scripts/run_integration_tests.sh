@@ -59,6 +59,18 @@ export CLICKHOUSE_USER=transit
 export CLICKHOUSE_PASSWORD=transit
 export CLICKHOUSE_DATABASE=transit_test
 
+# CI's `test` job always installs the optional `ml` group and sets this, so a
+# missing group fails loudly there instead of a quiet `tests/unit/ml/` skip.
+# A caller of this script (e.g. scripts/run_full_ci.sh) may be verifying a
+# change with no `ml` group installed at all, where forcing this on would
+# turn every ml-dependent test into a hard failure instead of the clean skip
+# a non-ml change should see -- so this only forces it on when the group is
+# actually present, mirroring CI's own install-then-require pairing rather
+# than CI's unconditional flag alone.
+if poetry run python -c "import lightgbm, numpy, pandas" >/dev/null 2>&1; then
+  export ML_DEPS_REQUIRED=1
+fi
+
 pytest_args=()
 llm_eval=0
 had_real_gemini_key="${GEMINI_API_KEY:-}"

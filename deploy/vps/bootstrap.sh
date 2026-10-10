@@ -22,9 +22,15 @@ if ! command -v aws >/dev/null; then
 fi
 docker compose -f deploy/vps/compose.yml --env-file /etc/transit-ml/env up -d --build --wait
 
+# LightGBM's wheel links libgomp.so.1 at runtime rather than bundling it, so a
+# minimal server image can install the Python package yet fail the models'
+# first real import. Fail here, at setup, rather than inside a later job.
+dpkg -s libgomp1 >/dev/null 2>&1 || { apt-get update -q && apt-get install -y -q libgomp1; }
+
 # The environment variable rather than `poetry config --local`, which would
 # leave an untracked poetry.toml in the clone.
-POETRY_VIRTUALENVS_IN_PROJECT=true "${POETRY:-$HOME/.local/bin/poetry}" install --only main --no-interaction
+POETRY_VIRTUALENVS_IN_PROJECT=true "${POETRY:-$HOME/.local/bin/poetry}" install --only main,ml --no-interaction
+.venv/bin/python -c "import lightgbm, pandas"
 .venv/bin/python gtfs_pipeline.py migrate up
 .venv/bin/python -c "from pipeline.clickhouse import get_client; from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
 .venv/bin/python gtfs_pipeline.py seed_agencies agencies.csv
