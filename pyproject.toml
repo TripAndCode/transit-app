@@ -65,7 +65,9 @@ optional = true
 
 [tool.poetry.group.ml.dependencies]
 # The delay-forecast models. The VPS workbench and CI's test job install this
-# group; the deploy image installs `--only main` and nothing in the app imports it.
+# group; the deploy image installs `--only main`, and the `image` job's
+# `import api.main` (which loads every router) catches an accidental import
+# of it creeping into the app.
 numpy = ">=2.2"
 pandas = "^3"
 lightgbm = "^4.6"

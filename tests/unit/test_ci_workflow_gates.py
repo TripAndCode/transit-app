@@ -488,5 +488,10 @@ def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart
     install = next(step for step in steps if step.get("name") == "Install dependencies")
     assert install["env"]["POETRY_EXTRA_GROUPS"] == "${{ inputs.groups }}"
     assert "--with" in install["run"]
+    # The group list reaches the shell only through the env var, never spliced
+    # into the command text, so a reverted "${{ inputs.groups }}" interpolation
+    # (the injection-shaped pattern the step's own comment says this avoids) fails.
+    assert "POETRY_EXTRA_GROUPS" in install["run"]
+    assert "${{" not in install["run"]
     cache = next(step for step in steps if step.get("name") == "Restore the Poetry venv")
     assert "inputs.groups" in cache["with"]["key"]
