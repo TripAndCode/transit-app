@@ -82,3 +82,25 @@ def test_an_agencys_span_runs_from_its_first_to_its_last_jst_day(loaded):
 
 def test_agencies_are_listed_from_the_data(loaded):
     assert agencies_with_data(loaded) == [8, 9]
+
+
+def test_a_feed_without_scheduled_sec_takes_the_hour_from_its_schedule_string(ch_client):
+    # Some ingest strategies store only the "HH:MM" schedule; their runs still count.
+    rows = [
+        (1, _utc(2026, 5, 31, 23, 0), "c/1.pb", "A1", "weekday", "08:05", "A", 1, 120, None),
+        (1, _utc(2026, 5, 31, 23, 20), "c/2.pb", "A1", "weekday", "08:20", "A", 2, 240, None),
+        # Neither schedule field: no hour to place the run in, so no cell.
+        (1, _utc(2026, 5, 31, 23, 30), "c/3.pb", "A2", "weekday", None, "A", 1, 60, None),
+    ]
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 8, 1, 3.0)]
+
+
+def test_a_stop_with_no_schedule_stays_out_of_its_runs_mean(ch_client):
+    # A non-timepoint stop carries a realtime delay but no schedule of its own.
+    rows = [
+        (8, _utc(2026, 5, 31, 23, 0), "d/1.pb", "M1", "weekday", "08:05", "R1", 1, 60, EIGHT_O_FIVE),
+        (8, _utc(2026, 5, 31, 23, 10), "d/2.pb", "M1", "weekday", None, "R1", 2, 600, None),
+    ]
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 8) == [Cell("R1", date(2026, 6, 1), 8, 1, 1.0)]

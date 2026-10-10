@@ -215,6 +215,52 @@ async def test_dispatch_time_series_applies_route_filter(conn_two_routes_obs):
     assert empty_result.kind == "empty"
 
 
+@pytest.fixture
+async def conn_punctual_and_late(apply_schema, ch_client):
+    """Route 1021 always on time, route 3021 always five minutes late, each
+    with 25 observations, clearing the on-time ranking's sample gate."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
+        agency_id = await conn.fetchval(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
+        )
+        await conn.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, $4, $5, $6, '08:00'::time, '平日', $7)",
+            [
+                (agency_id, f"pb_{route}_{d}_{s}", f"T{route}_{d}_{s}", route, s, datetime(2026, 5, d + 1, 8), delay)
+                for route, delay in (("1021", 0), ("3021", 300))
+                for d in range(5)
+                for s in range(1, 6)
+            ],
+        )
+    _analyze_sync(agency_id, ch_client)
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "best_first, routes, summary_word",
+    [(True, ["1021", "3021"], "top"), (False, ["3021", "1021"], "bottom")],
+)
+async def test_dispatch_on_time_lists_the_end_best_first_asks_for(
+    conn_punctual_and_late, best_first, routes, summary_word
+):
+    """The Ask card sends `on_time` with best_first; false must list the least
+    punctual routes first, and say so."""
+    pool, agency_id = conn_punctual_and_late
+    async with pool.acquire() as conn:
+        result = await dispatch("on_time", {"best_first": best_first}, _ctx(), conn, agency_id, locale="en")
+    assert [r[0] for r in result.rows] == routes
+    assert summary_word in result.summary
+
+
 class _ExplodingChClient:
     """Stand-in ``ch`` that fails the test if `_is_route_registered` ever
     reaches the ClickHouse fallback query — used to prove the agg_route_daily
