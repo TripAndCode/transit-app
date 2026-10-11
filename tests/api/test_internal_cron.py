@@ -237,3 +237,41 @@ def test_weather_ingest_runs_only_after_the_advisory_lock_is_released(two_agenci
     assert fake_analyze.call_count > 0
     fake_weather.assert_called_once()
     assert lock_was_free_during_weather is True
+
+
+async def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
+    import api.routers.internal as internal_module
+
+    calls = []
+
+    async def fake_ingest_forecast(conn, s3_client, bucket):
+        calls.append(bucket)
+        return 0
+
+    monkeypatch.setattr(internal_module, "ingest_forecast", fake_ingest_forecast)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "test")
+
+    # Exercises only the forecast step in isolation, not the whole sweep
+    # (which needs ClickHouse/live agencies already covered by this file's
+    # other tests) -- the fake replaces ingest_forecast, so the connection
+    # object passed through is never actually used.
+    await internal_module._ingest_ml_forecast(object())
+    assert calls == ["transit-ml"]
+
+
+async def test_a_forecast_ingest_failure_does_not_raise(monkeypatch):
+    import api.routers.internal as internal_module
+
+    async def raising_ingest_forecast(conn, s3_client, bucket):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(internal_module, "ingest_forecast", raising_ingest_forecast)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "test")
+
+    await internal_module._ingest_ml_forecast(object())  # must not raise

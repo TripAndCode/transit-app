@@ -20,12 +20,13 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.ml_forecast_ingest import ingest_forecast
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
@@ -388,6 +389,28 @@ def _ingest_and_analyze_sweep(
                 _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
         except Exception:
             _log.exception("cron: check_agg_freshness failed")
+
+        # A separate asyncpg connection, opened and closed entirely within
+        # this one step -- `_ingest_ml_forecast`/`ingest_forecast` use
+        # asyncpg's positional-placeholder style, while this sweep is
+        # synchronous (psycopg2) throughout, same reasoning as
+        # `_run_weather_ingest`'s own dedicated connection. `asyncio.run`
+        # bridges sync->async here because this whole function runs inside a
+        # FastAPI BackgroundTask's worker thread, which has no event loop of
+        # its own to conflict with.
+        try:
+            import asyncpg
+
+            async def _run_ml_forecast_ingest() -> None:
+                ml_conn = await asyncpg.connect(db_url)
+                try:
+                    await _ingest_ml_forecast(ml_conn)
+                finally:
+                    await ml_conn.close()
+
+            asyncio.run(_run_ml_forecast_ingest())
+        except Exception:
+            _log.exception("cron: could not open a connection for the ml_forecast ingest")
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
@@ -430,6 +453,31 @@ def _ingest_and_analyze_sweep(
     if failed:
         return SweepOutcome("error", "failed: " + ", ".join(failed))
     return SweepOutcome("ok")
+
+
+async def _ingest_ml_forecast(conn: Any) -> None:
+    """Best-effort: a missing/misconfigured ML bucket or a transient R2
+    failure must not abort the surrounding ingest+analyze sweep, which is
+    this job's primary purpose. `ingest_forecast` itself never raises for a
+    missing manifest; this guard is for everything else (missing env vars,
+    a broken S3 client, a network error)."""
+    bucket = os.environ.get("ML_STORE_BUCKET")
+    endpoint = os.environ.get("ML_STORE_ENDPOINT")
+    if not bucket or not endpoint:
+        return
+    try:
+        import boto3
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=os.environ.get("ML_STORE_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("ML_STORE_SECRET_ACCESS_KEY"),
+        )
+        count = await ingest_forecast(conn, s3, bucket)
+        _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
+    except Exception:
+        _log.exception("cron: ml_forecast ingest failed")
 
 
 def _run_weather_ingest(db_url: str) -> None:
