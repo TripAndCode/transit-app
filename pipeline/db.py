@@ -227,7 +227,7 @@ def hms_to_sec_sql(column: str) -> str:
     same parse instead of re-deriving it.
     """
     return (
-        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-9]{{2}}(:[0-9]{{2}})?$' THEN "
+        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-5][0-9](:[0-5][0-9])?$' THEN "
         f"split_part({column}, ':', 1)::int * 3600 "
         f"+ split_part({column}, ':', 2)::int * 60 "
         f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
