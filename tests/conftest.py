@@ -398,12 +398,21 @@ async def aconn(apply_schema, reset_sql):
     # tests use the same JST civil calendar as production.
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
     yield conn
-    # clean up
+    # A test can leave its connection unusable (closed, cancelled mid-query,
+    # or inside a failed transaction). The reset then runs on a fresh
+    # connection, and a failure there propagates: swallowing it would leave
+    # this test's rows for the next one to trip over.
     try:
         await conn.execute(reset_sql)
     except Exception:
-        pass
-    await conn.close()
+        conn.terminate()
+        fresh = await asyncpg.connect(os.environ["DATABASE_URL"])
+        try:
+            await fresh.execute(reset_sql)
+        finally:
+            await fresh.close()
+    else:
+        await conn.close()
 
 
 @pytest.fixture
