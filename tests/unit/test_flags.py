@@ -531,7 +531,5 @@ def test_a_superseded_first_refresh_resolves_from_env_rather_than_raising(monkey
 
 
 def test_ml_forecast_is_registered_and_defaults_off():
-    from pipeline import flags
-
     assert flags._BY_KEY["ml_forecast"].env_default is False
     assert flags.flag("ml_forecast", False) is False

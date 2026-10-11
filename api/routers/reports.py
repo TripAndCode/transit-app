@@ -24,7 +24,7 @@ from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
-from pipeline.flags import flag
+from pipeline.flags import aflag
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -91,6 +91,14 @@ _POOLED_DELAY_PROJECTION_SQL = (
 # stale row here means the job itself has stopped running, not a slow day).
 _ML_FRESHNESS_DAYS = 2
 
+# Mirrors ml.training.HORIZON_DAYS, duplicated (not imported) since this
+# module runs in the production image, which never installs the optional
+# `ml` group. Bounding service_date to this window (not just origin_date to
+# recency) keeps each (route, weekday) slot to at most one row -- an older
+# run's still origin-fresh leftover outside its own horizon would otherwise
+# share a weekday with the new horizon's row for that slot.
+_ML_HORIZON_DAYS = 7
+
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
     """Fresh `agg_route_forecast_ml` rows for this agency (and route, if
@@ -98,17 +106,29 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
     rows rather than a (dow, hour)-keyed mapping: when `route_code` is
     `None` (the agency-wide overview), more than one route can share a
     (dow, hour) slot, and collapsing them into one dict entry per key would
-    silently drop every route but the last one fetched."""
-    if not flag("ml_forecast", False):
+    silently drop every route but the last one fetched.
+
+    Never raises: this overlay is additive and flag-gated, so a DB failure
+    here (a migration not yet applied, a transient error) degrades to no
+    overlay rather than 500ing a response that would otherwise have served
+    a perfectly good baseline.
+    """
+    if not await aflag("ml_forecast"):
         return []
-    rows = await conn.fetch(
-        "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
-        "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
-        "AND origin_date >= now()::date - $3::int",
-        agency_id,
-        route_code,
-        _ML_FRESHNESS_DAYS,
-    )
+    try:
+        rows = await conn.fetch(
+            "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
+            "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
+            "AND service_date > now()::date AND service_date <= now()::date + $3::int "
+            "AND origin_date >= now()::date - $4::int",
+            agency_id,
+            route_code,
+            _ML_HORIZON_DAYS,
+            _ML_FRESHNESS_DAYS,
+        )
+    except Exception:
+        _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)
+        return []
     return [{"dow": row["service_date"].isoweekday(), "hour": row["hour"], "mean_min": row["mean_min"]} for row in rows]
 
 
