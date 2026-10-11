@@ -20,12 +20,13 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.ml_forecast_ingest import ingest_forecast
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
@@ -305,12 +306,11 @@ def _ingest_and_analyze_sweep(
     try:
         ch_client = get_client()
         conn = psycopg2.connect(db_url)
-        # Pin JST so analyze() buckets `captured_at::date` on the same civil
-        # day the read API serves under (api/main + gtfs_pipeline._get_conn
-        # both pin JST); the cluster default is UTC, which would mis-bucket
-        # rows near the day boundary and also desync agg_route_daily from the
-        # JST-based freshness check below. Committed up front (autocommit)
-        # so it survives analyze's txn rollback.
+        # Pin JST so any Postgres-side date cast agrees with the civil day the
+        # read API serves under (api/main + gtfs_pipeline._get_conn both pin
+        # JST); the cluster default is UTC. The aggregates are filed by service
+        # date in ClickHouse (pipeline.service_day), not by this setting.
+        # Committed up front (autocommit) so it survives analyze's txn rollback.
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SET TIME ZONE 'Asia/Tokyo'")
@@ -392,10 +392,10 @@ def _ingest_and_analyze_sweep(
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
         # a session holds when it ends. This is also what makes the weather
-        # pass below safe to run afterwards: it never observes the lock as
-        # held, so it can never be blamed for one poke's "already in flight"
-        # skip of another.
-        #
+        # and ml_forecast passes below safe to run afterwards: neither ever
+        # observes the lock as held, so neither can be blamed for one poke's
+        # "already in flight" skip of another.
+
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
         # skip the ClickHouse close on a Postgres close error, silently
@@ -427,9 +427,67 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
+    # The published forecast is fleet-wide too (one R2 object, not one per
+    # agency) -- same scoping as weather, but its own gate rather than
+    # run_weather's: an operator who asked to skip the weather fetch hasn't
+    # said anything about the ML forecast.
+    if kind == "ingest" and requested_agency_ids is None:
+        _run_ml_forecast_ingest(db_url)
     if failed:
         return SweepOutcome("error", "failed: " + ", ".join(failed))
     return SweepOutcome("ok")
+
+
+def _ingest_ml_forecast(conn: Any) -> None:
+    """Best-effort: a missing/misconfigured ML bucket or a transient R2
+    failure must not abort the surrounding ingest+analyze sweep, which is
+    this job's primary purpose. `ingest_forecast` itself never raises for a
+    missing manifest; this guard is for everything else (missing env vars,
+    a broken S3 client, a network error)."""
+    bucket = os.environ.get("ML_STORE_BUCKET")
+    endpoint = os.environ.get("ML_STORE_ENDPOINT")
+    if not bucket or not endpoint:
+        return
+    try:
+        import boto3
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=os.environ.get("ML_STORE_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("ML_STORE_SECRET_ACCESS_KEY"),
+        )
+        count = ingest_forecast(conn, s3, bucket)
+        _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
+    except Exception:
+        _log.exception("cron: ml_forecast ingest failed")
+
+
+def _run_ml_forecast_ingest(db_url: str) -> None:
+    """Reads the ML workbench's latest published forecast from R2 and
+    upserts it into `agg_route_forecast_ml`, on its own connection opened
+    only after `_run_ingest_and_analyze`'s advisory lock has already been
+    released -- same reasoning as `_run_weather_ingest`'s own dedicated
+    connection just below: a slow R2 round trip must not extend the
+    "already in flight" window a concurrent poke would otherwise see.
+
+    The env-var check happens before connecting, not just inside
+    `_ingest_ml_forecast`: a deployment with no ML bucket configured should
+    not pay for a throwaway connect/close on every sweep.
+    """
+    if not os.environ.get("ML_STORE_BUCKET") or not os.environ.get("ML_STORE_ENDPOINT"):
+        return
+    import psycopg2  # local import: keeps the import-graph cheap on cold starts
+
+    try:
+        ml_conn = psycopg2.connect(db_url)
+    except Exception:
+        _log.exception("cron: ml_forecast ingest failed to connect")
+        return
+    try:
+        _ingest_ml_forecast(ml_conn)
+    finally:
+        ml_conn.close()
 
 
 def _run_weather_ingest(db_url: str) -> None:

@@ -128,10 +128,10 @@ async def guard_async_conn(conn) -> None:
 def _get_conn(require_schema: bool = True):
     _log_target()
     conn = psycopg2.connect(DATABASE_URL)
-    # Pin JST so `captured_at::date` buckets every aggregate on the same civil
-    # day the API reads it under (api/main pins Asia/Tokyo; tests too). The
-    # server default is UTC, which mis-bucketed ~20% of observations by date —
-    # silently diverging the agg fast paths from the live fallbacks they replace.
+    # Pin JST so any Postgres-side date cast agrees with the civil day the API
+    # reads under (api/main pins Asia/Tokyo; tests too); the server default is
+    # UTC. The aggregates themselves are filed by service date in ClickHouse
+    # (pipeline.service_day), independent of this session setting.
     # Committed up front (autocommit) so it survives analyze's txn rollback.
     conn.autocommit = True
     with conn.cursor() as cur:

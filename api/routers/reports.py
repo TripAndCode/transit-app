@@ -12,7 +12,7 @@ import csv
 import io
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
@@ -24,6 +24,7 @@ from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
+from pipeline.flags import aflag
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -83,6 +84,53 @@ _POOLED_DELAY_PROJECTION_SQL = (
     "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
     "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples "
 )
+
+# A published forecast older than this many days is dropped in favor of the
+# seasonal baseline -- matches the parent spec's own freshness rule (the VPS
+# workbench's daily predict job republishes well inside this window, so a
+# stale row here means the job itself has stopped running, not a slow day).
+_ML_FRESHNESS_DAYS = 2
+
+# Mirrors ml.training.HORIZON_DAYS, duplicated (not imported) since this
+# module runs in the production image, which never installs the optional
+# `ml` group. Bounding service_date to this window (not just origin_date to
+# recency) keeps each (route, weekday) slot to at most one row -- an older
+# run's still origin-fresh leftover outside its own horizon would otherwise
+# share a weekday with the new horizon's row for that slot.
+_ML_HORIZON_DAYS = 7
+
+
+async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
+    """Fresh `agg_route_forecast_ml` rows for this agency (and route, if
+    given), as plain dicts with `dow`/`hour`/`mean_min`. Returns a list of
+    rows rather than a (dow, hour)-keyed mapping: when `route_code` is
+    `None` (the agency-wide overview), more than one route can share a
+    (dow, hour) slot, and collapsing them into one dict entry per key would
+    silently drop every route but the last one fetched.
+
+    Never raises: this overlay is additive and flag-gated, so a DB failure
+    here (a migration not yet applied, a transient error) degrades to no
+    overlay rather than 500ing a response that would otherwise have served
+    a perfectly good baseline.
+    """
+    if not await aflag("ml_forecast"):
+        return []
+    try:
+        rows = await conn.fetch(
+            "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
+            "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
+            "AND service_date > now()::date AND service_date <= now()::date + $3::int "
+            "AND origin_date >= now()::date - $4::int",
+            agency_id,
+            route_code,
+            _ML_HORIZON_DAYS,
+            _ML_FRESHNESS_DAYS,
+        )
+    except Exception:
+        _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)
+        return []
+    return [{"dow": row["service_date"].isoweekday(), "hour": row["hour"], "mean_min": row["mean_min"]} for row in rows]
+
 
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
@@ -484,6 +532,7 @@ class ForecastHeatmapCell(BaseModel):
     expected_avg_min: float | None
     samples: int
     low_confidence: bool
+    source: Literal["ml", "baseline"]
 
 
 class ForecastHeatmapResponse(BaseModel):
@@ -515,7 +564,11 @@ async def forecast_heatmap(
         agency_id,
         route,
     )
-    return {**summarize_expected_delay_heatmap(rows, route, locale), "scope_applied": _FORECAST_HEATMAP_SCOPE}
+    ml_cells = await _fetch_ml_cells(conn, agency_id, route)
+    return {
+        **summarize_expected_delay_heatmap(rows, route, locale, ml_cells=ml_cells),
+        "scope_applied": _FORECAST_HEATMAP_SCOPE,
+    }
 
 
 class ForecastOverviewGridCell(BaseModel):
@@ -526,6 +579,7 @@ class ForecastOverviewGridCell(BaseModel):
     expected_avg_min: float | None
     samples: int
     low_confidence: bool
+    source: Literal["ml", "baseline"]
 
 
 class ForecastOverviewWorst(BaseModel):
@@ -634,8 +688,9 @@ async def forecast_overview(
             exc_info=True,
         )
         recent_daily_rows = []
+    ml_cells = await _fetch_ml_cells(conn, agency_id, None)
     return {
-        **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale),
+        **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale, ml_cells=ml_cells),
         "scope_applied": _FORECAST_OVERVIEW_SCOPE,
     }
 

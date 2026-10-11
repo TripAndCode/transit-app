@@ -5,7 +5,14 @@ from tests.unit.ml.ml_group import require
 pd = require("pandas")
 np = require("numpy")
 
-from ml.features import FEATURES, build_frame, route_ids, weekend_days, with_route_ids  # noqa: E402
+from ml.features import (  # noqa: E402
+    FEATURES,
+    build_frame,
+    route_ids,
+    template_future_runs,
+    weekend_days,
+    with_route_ids,
+)
 
 ORIGIN = date(2026, 9, 8)  # a Tuesday
 
@@ -124,3 +131,71 @@ def test_weekend_share_does_not_see_rows_on_or_after_the_origin():
     table = weekend_days(runs)  # built over rows that include origin day and later
     frame = build_frame(runs, ORIGIN, precomputed_weekend_days=table)
     assert frame.set_index("trip_id").loc["S"].service_weekend_share == 1.0
+
+
+def test_template_future_runs_copies_the_most_recent_matching_weekday_forward():
+    # ORIGIN is a Tuesday; day+1 is a Wednesday. -13 and -6 are both Wednesdays
+    # (one week apart) -- the template must pick -6, the more recent one.
+    runs = _runs(
+        [
+            (-13, "R1", "T1", 8, 9.0, "wk"),
+            (-6, "R1", "T1", 8, 3.0, "wk"),
+        ]
+    )
+    template = template_future_runs(runs, ORIGIN, horizon_days=1)
+    assert len(template) == 1
+    row = template.iloc[0]
+    assert row.service_date == pd.Timestamp(_day(1))
+    assert row.route_code == "R1" and row.hour == 8
+    assert pd.isna(row.delay_min)
+
+
+def test_template_future_runs_skips_a_target_day_with_no_matching_weekday_history():
+    runs = _runs([(-1, "R1", "T1", 8, 2.0, "wk")])  # a Monday; day+1/+2 are Wed/Thu
+    template = template_future_runs(runs, ORIGIN, horizon_days=2)
+    assert template.empty
+
+
+def test_template_future_runs_templates_each_agency_from_its_own_history_only():
+    # -7 and -14 are both one or two full weeks back, so both share day+7's
+    # weekday. Agency 8 only has data at -7; agency 9 only at -14 -- each
+    # must template day+7 from its OWN most recent match, never the other
+    # agency's.
+    agency_8 = _runs([(-7, "R1", "T1", 8, 2.0, "wk")])
+    agency_9 = _runs([(-14, "R2", "T2", 9, 3.0, "wk")])
+    agency_9 = agency_9.assign(agency_id=pd.array([9] * len(agency_9), dtype="int16"))
+    runs = pd.concat([agency_8, agency_9], ignore_index=True)
+
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+
+    by_agency = {int(agency): rows for agency, rows in template.groupby("agency_id")}
+    assert set(by_agency) == {8, 9}
+    assert by_agency[8].iloc[0].service_date == pd.Timestamp(_day(7))
+    assert by_agency[9].iloc[0].service_date == pd.Timestamp(_day(7))
+
+
+def test_template_future_runs_skips_an_agency_whose_only_match_is_outside_the_lookback_window():
+    # 21 days back shares day+7's weekday (both multiples of 7 from ORIGIN) but
+    # is older than the lookback window -- a feed this stale gets no synthetic
+    # row for that day rather than one templated from a 3-week-old timetable.
+    runs = _runs([(-21, "R1", "T1", 8, 2.0, "wk")])
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+    assert template.empty
+
+
+def test_template_future_runs_does_not_template_from_a_same_day_partial_row():
+    # ORIGIN is a Tuesday; day+7 is also a Tuesday. At predict time, ORIGIN
+    # itself (day 0) can already hold a same-day partial row -- GTFS-RT
+    # ingestion is continuous, so the morning's trips may already be in
+    # ClickHouse by the time the daily predict job runs. day+7 must template
+    # from day -7's complete data, never from ORIGIN's still-incomplete one.
+    runs = _runs(
+        [
+            (-7, "R1", "T1", 8, 2.0, "wk"),
+            (0, "R1", "T2", 9, 5.0, "wk"),
+        ]
+    )
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+    day7 = template[template["service_date"] == pd.Timestamp(_day(7))]
+    assert len(day7) == 1
+    assert day7.iloc[0].trip_id == "T1"

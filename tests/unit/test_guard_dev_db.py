@@ -196,6 +196,28 @@ BLOCKED = [
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
     ),
+    # A script fed on stdin, by pipe, by `\i` or as an HTTP body is as unreadable
+    # to the hook as `psql -f`.
+    pytest.param("psql -h localhost -p 5433 -U transit transit < dump.sql", id="psql-stdin-redirect"),
+    pytest.param("cat x.sql | psql postgresql://transit:transit@localhost:5433/transit", id="psql-piped-script"),
+    pytest.param("docker compose exec -T db psql -U transit transit < x.sql", id="compose-exec-restore"),
+    pytest.param(
+        "docker compose exec -T clickhouse clickhouse-client < x.sql", id="compose-exec-clickhouse-stdin-redirect"
+    ),
+    pytest.param(
+        "docker compose exec -T clickhouse clickhouse-client --queries-file x.sql", id="clickhouse-queries-file"
+    ),
+    pytest.param("cat x.sql|psql -h localhost -p 5433 -U transit transit", id="psql-glued-pipe"),
+    pytest.param("cat x.sql | (psql -h localhost -p 5433 -U transit transit)", id="psql-pipe-into-subshell"),
+    pytest.param("psql -h localhost -p 5433 -U transit -c '\\include fix.sql'", id="psql-include-long-alias"),
+    pytest.param(
+        "psql postgresql://transit:pa#ss@localhost:5433/transit -f fix.sql", id="hash-inside-password-then-file"
+    ),
+    pytest.param("curl -sT x.sql http://localhost:8123/", id="ch-http-upload-short-cluster"),
+    pytest.param("psql -h localhost -p 5433 -U transit -c '\\i fix.sql'", id="psql-include-meta-command"),
+    pytest.param("psql -h localhost -p 5433 -U transit <<'SQL'\nSELECT 1\nSQL", id="psql-heredoc"),
+    pytest.param("curl -s http://localhost:8123/ --data-binary @x.sql", id="ch-http-body-from-file"),
+    pytest.param("curl -s http://localhost:8123/ -T x.sql", id="ch-http-upload-file"),
     # Statements that mutate a store without any of the common write verbs.
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/transit -c "COPY stops FROM STDIN csv" < stops.csv',
@@ -289,6 +311,20 @@ ALLOWED = [
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
     ),
+    pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' > out.txt && wc -l < out.txt",
+        id="dev-read-redirect-belongs-to-another-command",
+    ),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1 FROM t WHERE a <> 1 AND b <= 2'",
+        id="dev-read-sql-comparison",
+    ),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c \"SELECT id FROM t ORDER BY emb <-> '[1,2]' LIMIT 3\"",
+        id="dev-read-pgvector-distance",
+    ),
+    pytest.param("psql -h localhost -p 5544 -U transit transit_test < dump.sql", id="test-db-stdin-script"),
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/transit -c "COPY (SELECT * FROM stops) TO STDOUT"',
         id="sql-copy-to-reads-data-out",

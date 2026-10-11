@@ -25,6 +25,8 @@ authlib = ">=1.3"
 itsdangerous = ">=2.2"
 cryptography = ">=48,<51"
 clickhouse-connect = {version = "^1.6.0", extras = ["async"]}
+boto3 = "^1.35"
+pyarrow = "^22"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"

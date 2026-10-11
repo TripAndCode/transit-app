@@ -441,7 +441,7 @@ export function MapTab() {
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
-  const playback = useDayPlayback(id, playbackOn);
+  const playback = useDayPlayback(id, playbackOn, ctx.routes);
 
   // The light follows the hour of the frame on screen; outside playback the
   // view is "now" and carries no tint. steppingOnly is the reduced-motion

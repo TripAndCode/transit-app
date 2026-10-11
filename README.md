@@ -187,7 +187,7 @@ The main endpoints are:
 | `GET /api/agencies` | List agencies |
 | `GET /api/{agency_id}/delays/live` | Latest realtime delays |
 | `GET /api/{agency_id}/reports/{type}` | Report data or CSV |
-| `GET /api/{agency_id}/delays/heatmap` | Map delay data |
+| `GET /api/{agency_id}/delays/heatmap` | Delay heatmap data (API only; the SPA does not call it) |
 | `POST /api/{agency_id}/conversations/{cid}/messages` | Deterministic Ask tools |
 | `POST /api/{agency_id}/ask` | Natural-language Ask fallback |
 | `GET /api/auth/{provider}/login` | Start Google or GitHub OAuth |

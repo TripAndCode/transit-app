@@ -917,6 +917,10 @@ summary::-webkit-details-marker { display: none; }
   color: var(--accent);
 }
 
+/* Print-only header and footer (components/PrintFrame): hidden on screen, shown
+   by the print block below. */
+.print-frame { display: none; }
+
 /* Shared print stylesheet: strips the app chrome so `window.print()` (from
    `ExportMenu`) prints just the tab's content, on any page -- not only the
    `.focus-page` tabs this originally shipped with. Declared once, here,
@@ -933,4 +937,10 @@ summary::-webkit-details-marker { display: none; }
      keeping its on-screen floor (focusedAnalysis.css) and being clipped.
      svg.focus-chart outranks that lazily loaded rule, which comes later. */
   svg.focus-chart { min-width: 0; }
+  /* A printout loses its URL, so it carries what produced the numbers: the
+     header once at the top, the generated time pinned to every page's foot. */
+  .print-frame { display: block !important; color: black; }
+  .print-frame__header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #999; font-size: 11pt; }
+  .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; color: #444; text-align: right; }
+  main { padding-bottom: 14mm; }
 }

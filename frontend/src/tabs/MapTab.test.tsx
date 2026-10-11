@@ -144,6 +144,23 @@ describe("MapTab", () => {
   });
 });
 
+describe("MapTab day playback scope", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+    mockCommonHooks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("scopes the day's frames to the routes the map is filtered to", () => {
+    const timeline = vi.spyOn(hooks, "useTimeline").mockReturnValue({ data: undefined, isLoading: true } as never);
+    renderMap("1", "?routes=R1,R2");
+    expect(timeline).toHaveBeenLastCalledWith(1, false, ["R1", "R2"]);
+  });
+});
+
 describe("MapTab when no trip is reporting", () => {
   beforeEach(() => {
     stubReducedMotion();

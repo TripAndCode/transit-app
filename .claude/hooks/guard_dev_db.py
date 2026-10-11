@@ -232,13 +232,66 @@ def destroys_dev_volume(cmd: str) -> bool:
     return compose_down_v or volume_rm or prune or rm_v
 
 
-def runs_a_sql_script(lowered: list[str]) -> bool:
-    """`psql -f file.sql` carries its statements in a file this hook can't read.
+_SQL_CLIENTS = {"psql", "clickhouse-client", "clickhouse"}
+_SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
+# psql's `\i`/`\ir`/`\include` include, which sits inside the quoted `-c` argument.
+_INCLUDE_META = re.compile(r"\\(?:ir?|include(?:_relative)?)\s")
+# A curl short-option cluster that ends in `-T` (upload file) or carries `-d@file`.
+_CURL_FILE_CLUSTER = re.compile(r"-[a-z]*(?:t|d@.*)")
 
-    Structural rather than textual: the flag is what makes the command a write,
-    and nothing in the visible text says so.
+
+def _feeds_a_client_stdin(shell: list[str]) -> bool:
+    """An unquoted input redirect or here-doc (bar `< /dev/null`) in the same
+    simple command as a SQL client, or a pipe into a client.
+
+    Read from operator tokens, not the raw text: a `<` inside a quoted SQL
+    argument (`<>`, `<=`, pgvector's `<->`) is a comparison, not a redirect, a
+    glued `cat x.sql|psql` is still a pipe, and a redirect that belongs to
+    another command (`psql ... > out && wc -l < out`) does not feed the client."""
+    piped = False
+    segment: list[str] = []
+
+    def feeds(seg: list[str], was_piped: bool) -> bool:
+        if not _SQL_CLIENTS & {tok.rsplit("/", 1)[-1] for tok in seg}:
+            return False
+        if was_piped:
+            return True
+        for i, tok in enumerate(seg):
+            if "<" in tok and _is_separator(tok) and not tok.startswith("<("):
+                if not (tok == "<" and seg[i + 1 : i + 2] == ["/dev/null"]):
+                    return True
+        return False
+
+    for tok in [*shell, ";"]:
+        if _is_separator(tok) and "<" not in tok and ">" not in tok:
+            if segment:
+                if feeds(segment, piped):
+                    return True
+                segment, piped = [], False
+            piped = piped or ("|" in tok and tok != "||")
+        else:
+            segment.append(tok)
+    return False
+
+
+def runs_a_sql_script(cmd: str) -> bool:
+    """A script run whose statements this hook cannot read: `psql -f file.sql`,
+    a client fed on stdin or by pipe, an `\\i` include, or an HTTP body read
+    from a file.
+
+    Structural rather than textual: the way the statements arrive is what makes
+    the command a write, and nothing in the visible text says so.
     """
-    return "psql" in lowered and ("-f" in lowered or "--file" in lowered)
+    shell = _shell_tokens(cmd.lower())
+    names = {tok.rsplit("/", 1)[-1] for tok in shell}
+    if names & _SQL_CLIENTS:
+        if any(tok in _SCRIPT_FLAGS or tok.startswith(("--file=", "--queries-file=")) for tok in shell):
+            return True
+        if _feeds_a_client_stdin(shell) or _INCLUDE_META.search(cmd.lower()):
+            return True
+    if "curl" in names:
+        return any(tok.startswith("@") or tok == "--upload-file" or _CURL_FILE_CLUSTER.fullmatch(tok) for tok in shell)
+    return False
 
 
 def runs_destructive_command(cmd: str) -> bool:
@@ -262,12 +315,19 @@ def _shell_tokens(text: str) -> list[str]:
     """shlex tokens with each run of shell operator characters (`;`, `&&`,
     `|`, `>` ...) a token of its own, also where it is glued to a word:
     `shlex.split("make a;ls")` keeps `a;ls` as one token."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return text.split()
+    # A `#` starts a comment only at the start of a word, which shlex's default
+    # (any `#`) gets wrong: `pa#ss@host ... -f x.sql` would lose its flag. The
+    # comment-aware lexer is the fallback for a trailing comment holding an
+    # unbalanced quote, which the comment-free one cannot lex.
+    for commenters in ("", "#"):
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = commenters
+        try:
+            return list(lexer)
+        except ValueError:
+            continue
+    return text.split()
 
 
 _OPERATOR_CHARS = frozenset("();<>|&")
@@ -368,12 +428,11 @@ def should_block(cmd: str) -> bool:
         # up, so a malformed command can't slip past by failing to tokenize.
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
-    lowered = [t.lower() for t in tokens]
     if destroys_dev_volume(cmd) or runs_destructive_command(cmd):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
-    return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered)
+    return bool(WRITE.search(cmd)) or runs_a_sql_script(cmd)
 
 
 def read_command() -> str | None:

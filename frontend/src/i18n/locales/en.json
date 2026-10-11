@@ -1544,7 +1544,8 @@
         "weatherIngestEnabled": "Weather: observed-data ingest",
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
-        "loginRequired": "Access: sign-in required"
+        "loginRequired": "Access: sign-in required",
+        "mlForecast": "ML forecast"
       }
     },
     "table": {
@@ -1855,5 +1856,9 @@
     },
     "unapplied_note": "Not used on this screen: {{list}}",
     "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]"
+  },
+  "print": {
+    "generated_at": "Generated {{time}}",
+    "routes": "Routes: {{names}}"
   }
 }

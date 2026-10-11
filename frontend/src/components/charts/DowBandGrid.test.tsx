@@ -16,6 +16,7 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
         expected_avg_min: p ? p.v : null,
         samples: p ? (p.n ?? 200) : 0,
         low_confidence: p ? (p.n ?? 200) < 30 : false,
+        source: "baseline" as const,
       });
     }
   }

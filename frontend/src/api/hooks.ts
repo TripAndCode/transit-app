@@ -378,10 +378,18 @@ export function useLiveTrips(
 export function useTimeline(
   agencyId: number | null,
   enabled: boolean,
+  routes: readonly string[] = [],
 ): UseQueryResult<DelayTimelineResponse> {
+  // The same comma list every scope endpoint takes. It is part of the key, so a
+  // different selection fetches its own frames instead of reusing another's.
+  const routeList = routes.map(encodeURIComponent).join(",");
   return useQuery({
-    queryKey: ["delay_timeline", agencyId],
-    queryFn: ({ signal }) => apiGet<DelayTimelineResponse>(`/api/${agencyId}/delays/timeline`, { signal }),
+    queryKey: ["delay_timeline", agencyId, routeList],
+    queryFn: ({ signal }) =>
+      apiGet<DelayTimelineResponse>(
+        `/api/${agencyId}/delays/timeline${routeList ? `?routes=${routeList}` : ""}`,
+        { signal },
+      ),
     enabled: agencyId != null && enabled,
     staleTime: 10 * 60 * 1000,
   });

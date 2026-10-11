@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from db.migrate import _versions_on_disk
+from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
 
@@ -113,9 +114,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     probed = await max_captured_at_before_by_agency(
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
     )
-    live_max: dict[int, date | None] = {
-        aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
-    }
+    live_max: dict[int, date | None] = {aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()}
 
     # A never-analyzed agency (agg_day is None) needs the earliest live day
     # too, to size agg_behind_days off the real unaggregated span instead of
@@ -130,7 +129,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     earliest_live: dict[int, date | None] = {}
     if never_analyzed_ids:
         probed_earliest = await min_captured_at_by_agency(ch, never_analyzed_ids, _log)
-        earliest_live = {aid: None if mn is None else mn.astimezone(_JST).date() for aid, mn in probed_earliest.items()}
+        earliest_live = {aid: None if mn is None else service_date_of(mn) for aid, mn in probed_earliest.items()}
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

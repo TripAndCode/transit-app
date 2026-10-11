@@ -105,6 +105,64 @@ def test_dedup_ch_buckets_by_jst_day_not_utc_day():
     client.close()
 
 
+_COLUMNS = [
+    "agency_id",
+    "captured_at",
+    "file_name",
+    "trip_id",
+    "service_type",
+    "scheduled_time",
+    "route_code",
+    "stop_sequence",
+    "dep_delay",
+]
+
+
+def _dedup_rows(rows):
+    from db.clickhouse.bootstrap import apply_schema
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    client.insert("updates", rows, column_names=_COLUMNS)
+    try:
+        return client.query(build_dedup_ch_sql(), parameters={"agency_id": 1}).result_rows
+    finally:
+        client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_dedup_ch_keeps_a_stop_event_polled_across_midnight_as_one_event():
+    """A trip's post-midnight stop is polled before and after midnight JST. It is
+    one stop event of one service day: the final estimate wins and it is not
+    counted a second time under the next calendar date."""
+    rows = _dedup_rows(
+        [
+            # 23:50 JST on 03-06 (stale estimate) and 00:10 JST on 03-07 (final).
+            (1, datetime(2026, 3, 6, 14, 50, 0, tzinfo=timezone.utc), "a/1.pb", "T9", "weekday", "00:05", "R1", 3, 600),
+            (1, datetime(2026, 3, 6, 15, 10, 0, tzinfo=timezone.utc), "a/2.pb", "T9", "weekday", "00:05", "R1", 3, 120),
+        ]
+    )
+    assert len(rows) == 1
+    date_col_index = 4  # route_code, service_type, scheduled_time, trip_id, date, ...
+    assert rows[0][date_col_index] == date(2026, 3, 6)
+    assert rows[0][-1] == 120
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+@pytest.mark.parametrize(
+    ("captured_utc", "service_day"),
+    [
+        (datetime(2026, 3, 6, 15, 15, 0, tzinfo=timezone.utc), date(2026, 3, 6)),  # 00:15 JST on the 7th
+        (datetime(2026, 3, 6, 18, 59, 0, tzinfo=timezone.utc), date(2026, 3, 6)),  # 03:59 JST on the 7th
+        (datetime(2026, 3, 6, 19, 0, 0, tzinfo=timezone.utc), date(2026, 3, 7)),  # 04:00 JST: next service day opens
+    ],
+)
+def test_dedup_ch_files_an_observation_under_its_service_day(captured_utc, service_day):
+    rows = _dedup_rows([(1, captured_utc, "a/1.pb", "T1", "weekday", "10:00", "R1", 1, 30)])
+    assert [r[4] for r in rows] == [service_day]
+
+
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_dedup_ch_tiebreak_uses_file_name_when_captured_at_ties():
     from db.clickhouse.bootstrap import apply_schema
