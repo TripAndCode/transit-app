@@ -53,7 +53,7 @@ def main() -> int:
 
         if via == "chip":
             chip_total += 1
-            print(f"  WARN: skipping chip entry {e['id']!r} (catalog removed)", file=sys.stderr)
+            print(f"  WARN: skipping chip entry {e['id']!r} (chip entries are not gated)", file=sys.stderr)
             continue
 
         elif via == "builder":
@@ -66,7 +66,7 @@ def main() -> int:
 
         elif via == "paraphrase-reachable":
             paraphrase_total += 1
-            print(f"  WARN: skipping paraphrase entry {e['id']!r} (chip catalog removed)", file=sys.stderr)
+            print(f"  WARN: skipping paraphrase entry {e['id']!r} (paraphrase entries are not gated)", file=sys.stderr)
             continue
 
     def pct(p: int, t: int) -> str:

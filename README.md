@@ -156,9 +156,7 @@ actually run rather than silently skipping. `make check` runs `fmt-check`
 Example targeted test:
 
 ```bash
-DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-  GEMINI_API_KEY=test-key \
-  poetry run pytest tests/query/test_tool_queries.py -v
+scripts/run_integration_tests.sh tests/query/test_tool_queries.py -v
 ```
 
 That fixed `:5544`/`:8124` pair is shared, and a concurrent run against it can

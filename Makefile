@@ -10,12 +10,9 @@
 # its own :5544/:8124 block regardless of what the caller exports.
 export
 
-# No literal fallback. This used to default to a hardcoded localhost port,
-# which is not where this project's data lives and, on a machine running more
-# than one Postgres, is somebody else's database -- and `.env` is gitignored,
-# so every git worktree lacks one. A missing `.env` therefore aimed `migrate`,
-# `analyze`, `ingest` and `seed-agencies` at whatever happened to answer on
-# that port. Unset now means a stopped Make, not a silent wrong target.
+# No literal fallback: an unset DATABASE_URL stops Make rather than guessing a
+# target. A hardcoded localhost port can be another project's database, and
+# `.env` is gitignored, so a git worktree has none until one is copied in.
 DATABASE_URL ?=
 
 # Expanded per recipe, not at parse time, so targets that need no database
