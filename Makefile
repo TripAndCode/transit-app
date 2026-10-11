@@ -354,14 +354,12 @@ verify-secrets-all-branches:
 hooks:
 	@bash scripts/setup_git_hooks.sh
 
-# ── Ask eval (manual / local; not wired into CI) ─────────────────────────────
-# Checks that every builder entry's expected args in the gold JSONL survive
-# canonicalize unchanged (the chip gate is skipped — the chip catalog was
-# removed); it does not exercise routing. Regenerate the gold set after card
+# ── Ask eval (local; pytest runs the same check) ─────────────────────────────
+# Checks that every gold entry's stored signature survives canonicalization:
+# no database, router or LLM is involved. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
-# No workflow calls this target -- the scheduled Ask eval CI gate is
-# .github/workflows/ask-eval-weekly.yml, which runs
-# tests/ask_eval/test_baseline.py directly instead.
+# The scheduled Ask eval workflow, .github/workflows/ask-eval-weekly.yml, runs
+# tests/ask_eval/test_baseline.py instead.
 
 ask-eval:
-	DATABASE_URL=$(db_url) poetry run python scripts/ask_eval.py
+	poetry run python scripts/ask_eval.py
