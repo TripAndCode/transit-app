@@ -36,7 +36,7 @@
     "station_figure_unusual": "要注意 {{n}}"
   },
   "compare": {
-    "mode_periods": "平日と土日祝",
+    "mode_periods": "平日と土日",
     "mode_agencies": "事業者どうし",
     "bars": {
       "period_label": "期間",
@@ -795,7 +795,7 @@
       "on_time_pct": "定時率",
       "late5_count": "5分超回数",
       "heijitsu_min": "平日(分)",
-      "kyujitsu_min": "土日祝(分)",
+      "kyujitsu_min": "土日(分)",
       "abs_delta": "遅延差（絶対値）",
       "signed_delta": "遅延差（符号付き）",
       "stop_sequence": "停留所順",
@@ -971,7 +971,7 @@
       "on_time": "定時率",
       "worst_5min": "5分超の遅延",
       "trend": "トレンド",
-      "compare_ranking": "平日・土日祝の差",
+      "compare_ranking": "平日・土日の差",
       "dow_weekday": "平日の系統別遅延",
       "dow_weekend": "土日祝の系統別遅延",
       "dwell_run": "滞留・走行時間",
@@ -999,8 +999,8 @@
     },
     "confidence_low_mark": "データ少",
     "direction": {
-      "weekend_higher": "土日祝>平日",
-      "weekday_higher": "平日>土日祝"
+      "weekend_higher": "土日>平日",
+      "weekday_higher": "平日>土日"
     },
     "hint": {
       "title": "レポートの読み分け",
@@ -1093,7 +1093,7 @@
       },
       "needs_arrivals": "遅れの内訳には到着時刻が必要です",
       "see_when": "いつ遅れるかを見る",
-      "compare_day_types": "平日と土日祝を比べる"
+      "compare_day_types": "平日と土日を比べる"
     },
     "headway_quality": {
       "title": "運行間隔の質",
@@ -1161,7 +1161,7 @@
       "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
       "worst_5min": "5分を超える遅れが多い系統を抽出します。",
       "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
-      "compare_ranking": "路線ごとの平日または土日祝の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。",
+      "compare_ranking": "路線ごとの平日または土日の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。",
       "dow_weekday": "平日の系統ごとの平均遅延です。",
       "dow_weekend": "土日祝の系統ごとの平均遅延です。",
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
@@ -1738,7 +1738,7 @@
     "nav_routes_sublabel": "どの路線が、どの時間帯に",
     "nav_time_sublabel": "ネットワーク全体で、いつ遅れるか",
     "nav_why_sublabel": "データで説明できること・できないこと",
-    "nav_compare_sublabel": "平日と土日祝、事業者どうしを比べる",
+    "nav_compare_sublabel": "平日と土日、事業者どうしを比べる",
     "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
     "group": {
