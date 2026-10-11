@@ -68,6 +68,9 @@ const DIAGNOSTICS = {
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
 };
 
+/** Overrides fields of the agencies list query result; `null` keeps the fixture. */
+let agenciesOverride: { data?: undefined; isLoading?: boolean; error?: Error | null } | null = null;
+
 let delState: { isPending: boolean; variables: number | undefined; error?: Error } = {
   isPending: false,
   variables: undefined,
@@ -102,6 +105,7 @@ vi.mock("../../api/admin", () => ({
     ],
     isLoading: false,
     error: null,
+    ...agenciesOverride,
   }),
   useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
@@ -129,6 +133,7 @@ function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
 describe("AdminAgenciesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    agenciesOverride = null;
     createMutateAsync.mockResolvedValue({});
     patchMutateAsync.mockResolvedValue({});
     delState = { isPending: false, variables: undefined };
@@ -139,6 +144,18 @@ describe("AdminAgenciesPage", () => {
     wrap(<AdminAgenciesPage />);
     expect(screen.getByText("Aomori Bus")).toBeTruthy();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("disables Edit on a disabled agency, whose PATCH would 404, and keeps it on an active one", () => {
+    wrap(<AdminAgenciesPage />);
+    const editFor = (name: string) => {
+      const row = screen.getByText(name).closest("tr") as HTMLElement;
+      return within(row).getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    };
+    expect(editFor("Aomori Bus").disabled).toBe(false);
+    const deletedEdit = editFor("Deleted Bus");
+    expect(deletedEdit.disabled).toBe(true);
+    expect(deletedEdit.title).toMatch(/restore/i);
   });
 
   it("shows Add agency button", () => {
@@ -257,6 +274,16 @@ describe("AdminAgenciesPage", () => {
     await user.type(screen.getByPlaceholderText("Search by name"), "Deleted");
     expect(screen.queryByText("Aomori Bus")).toBeNull();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("does not claim there are no agencies while loading or after a failed load", () => {
+    agenciesOverride = { data: undefined, isLoading: true, error: null };
+    const { unmount } = wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
+    unmount();
+    agenciesOverride = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
   });
 
   it("shows an empty-state row when the search matches nothing", async () => {

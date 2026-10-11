@@ -129,7 +129,7 @@ than hardcoding `updates`.
 |---|---|
 | `frontend/src/tabs/MapTab.tsx` | Operations workspace, MapLibre lifecycle, marker interactions, freshness, and route selection |
 | `frontend/src/tabs/map/useOperationsMapLayers.ts` | Clustered trip markers, selected-route shape, and selected-trip report trail |
-| `frontend/src/tabs/map/currentRouteStatus.ts` | Current route aggregation and baseline classification |
+| `frontend/src/tabs/map/selectedRouteDelay.ts` | Mean live delay of the selected route, which keys the route overlay's severity colour |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
 | `frontend/src/tabs/map/FilterDock.tsx` | Route/pattern filter control and the day-playback toggle |
@@ -154,8 +154,8 @@ Automated coverage:
   compaction, schedule-time normalization, and static stop enrichment.
 - `frontend/src/tabs/map/useOperationsMapLayers.test.ts` verifies marker
   filtering, delay labels, route coloring, and overlay removal.
-- `frontend/src/tabs/map/currentRouteStatus.test.ts` verifies baseline and
-  no-baseline classification, including service-type matching.
+- `frontend/src/tabs/map/selectedRouteDelay.test.ts` verifies the selected
+  route's mean delay, including the no-route and no-rows cases.
 - `frontend/src/tabs/map/OperationsTripPanel.test.tsx` verifies direction,
   concurrent-trip selection, and stop progression.
 - `frontend/src/routes/legacyRedirects.test.tsx` verifies the `operations`,
