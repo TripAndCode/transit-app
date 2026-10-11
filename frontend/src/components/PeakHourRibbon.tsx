@@ -135,7 +135,11 @@ function PeakHourChart({
     const scaleX = rect.width / W;
     const localX = (e.clientX - rect.left) / scaleX;
     const idx = Math.max(0, Math.min(23, Math.floor((localX - PAD_LEFT) / CELL_W)));
-    if (hourValues[idx] != null) onHourClick(idx);
+    if (hourValues[idx] == null) return;
+    // The bar's own action replaces the card's: letting the click bubble
+    // would open the card's detail dialog on top of the hour breakdown.
+    e.stopPropagation();
+    onHourClick(idx);
   }
 
   return (

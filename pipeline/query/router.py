@@ -3,7 +3,8 @@
 Three-stage pipeline orchestrated from :func:`route_question`:
 
 1. **Rules** — :data:`_RULES` regex match → direct dispatch.
-2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance < 0.15
+2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance is below
+   :data:`_EMBED_DISPATCH_THRESHOLD`
    → direct dispatch using that Q's stored tool/args.
 3. **(caller)** — When ``route_question`` returns ``None``,
    :func:`retrieve_examples` provides top-3 nearest as few-shot context
@@ -28,8 +29,8 @@ from typing import Any, Literal
 _log = logging.getLogger(__name__)
 
 # Distance below which Stage 2 will dispatch directly (cosine distance;
-# smaller = closer). Genuine paraphrases cluster ≤0.13; confirmed false
-# dispatches landed at 0.13–0.15, so the threshold is tightened to 0.12.
+# smaller = closer). Kept tight because a wrong direct dispatch is worse than
+# falling through to the LLM stage, which can still use the match as context.
 _EMBED_DISPATCH_THRESHOLD = 0.12
 
 # Minimum gap between the top match and the runner-up. When two golden Qs
@@ -74,6 +75,14 @@ _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 # average-delay rules; a ranking over any other threshold has no rule.
 _DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 
+# The meta rules answer questions about what the dataset holds (routes, date
+# range, stops). A delay word or a route code (4+ digits) marks an analytic
+# question about the data itself, which the meta answers would replace with an
+# answer to a different question, so such a question is left to the later stages.
+_ANALYTIC_WORDS = r"遅延|遅れ|遅く|\d{4,}"
+# The ranking rules rank routes; a question about stops has no rule here.
+_STOP_WORDS = r"停留所|バス停"
+
 # Compile regexes ONCE at import time. First match wins (priority = order).
 _RULES: list[Rule] = [
     # ---- describe_data meta-tool fan-out ----
@@ -82,18 +91,23 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(どんな.*?(路線|系統))|((路線|系統).*?(一覧|リスト))|(何.*?路線.*?(ある|登録))"),
         tool="describe_data",
         args={"kind": "routes"},
+        unless=re.compile(_ANALYTIC_WORDS),
     ),
     Rule(
         name="meta-date-range",
-        pattern=re.compile(r"(いつ.*?(から|まで))|((最新|最古).*?(データ|観測))|(何件.*?(観測|データ))"),
+        # "いつ" must be followed directly (or by 頃/ごろ) by から/まで:
+        # "いつも…から" is a habit, not a date.
+        pattern=re.compile(r"(いつ(頃|ごろ)?(から|まで))|((最新|最古).*?(データ|観測))|(何件.*?(観測|データ))"),
         tool="describe_data",
         args={"kind": "date_range"},
+        unless=re.compile(_ANALYTIC_WORDS),
     ),
     Rule(
         name="meta-stops",
         pattern=re.compile(r"停留所.*?(いくつ|何個|一覧)"),
         tool="describe_data",
         args={"kind": "stops"},
+        unless=re.compile(_ANALYTIC_WORDS),
     ),
     Rule(
         name="meta-agencies",
@@ -135,7 +149,7 @@ _RULES: list[Rule] = [
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
         # worst_5min has no fewest-first order.
-        unless=re.compile(_LITTLE_DELAY_WORDS),
+        unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_STOP_WORDS}"),
     ),
     Rule(
         name="ranking-on-time-low",
@@ -146,13 +160,14 @@ _RULES: list[Rule] = [
         ),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10, "best_first": False},
+        unless=re.compile(_STOP_WORDS),
     ),
     Rule(
         name="ranking-on-time",
         pattern=re.compile(r"定時率(?:.*?TOP\s*(\d+)|.*?(?:TOP|ランキング|高い))"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10},
-        unless=re.compile(_LOW_ON_TIME_WORDS),
+        unless=re.compile(rf"{_LOW_ON_TIME_WORDS}|{_STOP_WORDS}"),
     ),
     Rule(
         name="ranking-least-delay",
@@ -160,7 +175,7 @@ _RULES: list[Rule] = [
         tool="top_n",
         args={"metric": "avg_delay", "n": 10, "best_first": True},
         # Fewest >5min incidents is a different metric from least mean delay.
-        unless=re.compile(rf"5分|{_DELAY_THRESHOLD}"),
+        unless=re.compile(rf"5分|{_DELAY_THRESHOLD}|{_STOP_WORDS}"),
     ),
     Rule(
         name="ranking-worst",
@@ -169,7 +184,7 @@ _RULES: list[Rule] = [
         args={"metric": "avg_delay", "n": 10},
         # A delay threshold asks for a count of long delays, not the mean
         # ranking this rule answers (5 minutes is taken by ranking-worst-5min).
-        unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_DELAY_THRESHOLD}"),
+        unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_DELAY_THRESHOLD}|{_STOP_WORDS}"),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
@@ -198,7 +213,7 @@ def _validate_rules() -> None:
     known = set(_HANDLERS.keys())
     bad = [r.name for r in _RULES if r.tool not in known]
     if bad:
-        raise RuntimeError(f"Phase 2 router has rules pointing at unknown tools: {bad}. Known tools: {sorted(known)}")
+        raise RuntimeError(f"Router has rules pointing at unknown tools: {bad}. Known tools: {sorted(known)}")
 
 
 _validate_rules()

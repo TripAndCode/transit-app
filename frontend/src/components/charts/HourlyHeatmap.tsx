@@ -5,6 +5,7 @@ import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
 import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
 import { isoDow, useTrendFocus } from "./trendFocus";
+import { onActivateKey } from "../../utils/a11y";
 import { formatDate, formatMinutes, formatNumber, formatShortDate } from "../../utils/format";
 
 export type HourlyCell = {
@@ -78,6 +79,14 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
     );
   }
 
+  function filterHour(hour: number) {
+    const b = bandFor(hour);
+    if (b) setCtx({ time_band: b });
+  }
+  function filterDay(date: string) {
+    setCtx({ from: date, to: date });
+  }
+
   const padL = 38;
   const padT = 12;
   const padB = 28;
@@ -98,6 +107,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
           type="button"
           onClick={() => setShowLegend((v) => !v)}
           aria-label={t("reports.heatmap.legend_aria")}
+          aria-expanded={showLegend}
           style={{
             background: "transparent",
             border: "1px solid var(--border-subtle)",
@@ -161,7 +171,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
         )}
       </div>
       <div style={{ overflowX: "auto" }}>
-      <svg width={padL + innerW + 8} height={chartHeight} role="img" aria-label={t("reports.heatmap.svg_aria")}>
+      <svg width={padL + innerW + 8} height={chartHeight} role="group" aria-label={t("reports.heatmap.svg_aria")}>
         {Array.from({ length: 24 }, (_, h) => (
           <text
             key={`h-${h}`}
@@ -171,10 +181,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             fill="var(--text-tertiary)"
             textAnchor="end"
             style={{ cursor: bandFor(h) ? "pointer" : "default" }}
-            onClick={() => {
-              const b = bandFor(h);
-              if (b) setCtx({ time_band: b });
-            }}
+            role="button"
+            tabIndex={0}
+            aria-label={t("reports.heatmap.hour_filter_aria", { hour: h })}
+            onClick={() => filterHour(h)}
+            onKeyDown={onActivateKey(() => filterHour(h))}
           >
             {h}
           </text>
@@ -191,7 +202,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               fill="var(--text-tertiary)"
               textAnchor="middle"
               style={{ cursor: "pointer" }}
-              onClick={() => setCtx({ from: d, to: d })}
+              role="button"
+              tabIndex={0}
+              aria-label={t("reports.heatmap.date_filter_aria", { date: formatDate(d) })}
+              onClick={() => filterDay(d)}
+              onKeyDown={onActivateKey(() => filterDay(d))}
             >
               {formatShortDate(d)}
             </text>
