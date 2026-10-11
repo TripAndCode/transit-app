@@ -176,6 +176,38 @@ describe("DailyChart annotations", () => {
   });
 });
 
+describe("DailyChart bucket granularity", () => {
+  const buckets = [day({ date: "2026-05-04", avg_min: 1 }), day({ date: "2026-05-11", avg_min: 9 }), day({ date: "2026-05-18", avg_min: 2 })];
+
+  it("names weekly buckets as weeks in the chart name, worst marker and tooltip", async () => {
+    await i18n.changeLanguage("en");
+    const { container } = renderChart(<DailyChart days={buckets} granularity="week" brushable={false} />);
+    expect(screen.getByRole("img", { name: "Weekly average delay chart" })).toBeInTheDocument();
+    expect(screen.getByText("Worst week")).toBeInTheDocument();
+    expect(screen.queryByText("Worst day")).toBeNull();
+    fireEvent.mouseEnter(dayRects(container)[1]);
+    expect(screen.getByText(/Week of May 11, 2026/)).toBeInTheDocument();
+  });
+
+  it("names monthly buckets as months", async () => {
+    await i18n.changeLanguage("en");
+    const { container } = renderChart(
+      <DailyChart days={[day({ date: "2026-04-01", avg_min: 1 }), day({ date: "2026-05-01", avg_min: 9 })]} granularity="month" brushable={false} />,
+    );
+    expect(screen.getByRole("img", { name: "Monthly average delay chart" })).toBeInTheDocument();
+    expect(screen.getByText("Worst month")).toBeInTheDocument();
+    fireEvent.mouseEnter(dayRects(container)[1]);
+    expect(screen.getByText(/Month of May 1, 2026/)).toBeInTheDocument();
+  });
+
+  it("keeps the daily wording by default", async () => {
+    await i18n.changeLanguage("en");
+    renderChart(<DailyChart days={buckets} />);
+    expect(screen.getByRole("img", { name: "Daily average delay chart" })).toBeInTheDocument();
+    expect(screen.getByText("Worst day")).toBeInTheDocument();
+  });
+});
+
 describe("DailyChart brush", () => {
   const days = WEEK_DAYS.map((date) => day({ date }));
 

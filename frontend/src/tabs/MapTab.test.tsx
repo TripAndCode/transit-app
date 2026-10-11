@@ -172,9 +172,26 @@ describe("MapTab when no trip is reporting", () => {
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
     mockLive("2026-10-03T12:41:00Z");
     renderMap();
-    const time = formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short" });
+    const time = formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short", timeZone: "Asia/Tokyo" });
     const status = screen.getByText(`Feed quiet for 43 min · last report ${time}`);
     expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--stale");
+  });
+
+  it("reads a report a few seconds ahead of a lagging client clock as just updated, not unknown", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-10-03T13:24:20Z");
+    renderMap();
+    const status = screen.getByText("Last updated just now");
+    expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--normal");
+  });
+
+  it("still calls a report far ahead of the client clock unknown", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-10-03T13:30:00Z");
+    renderMap();
+    expect(screen.getByText("Last updated —").closest(".ops-freshness")).toHaveClass("ops-freshness--unknown");
   });
 
   it("counts a feed quiet since an earlier day in days, and dates its last report", () => {
@@ -182,7 +199,7 @@ describe("MapTab when no trip is reporting", () => {
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
     mockLive("2026-09-29T00:59:00Z");
     renderMap();
-    expect(screen.getByText(`Feed quiet for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z")}`)).toBeInTheDocument();
+    expect(screen.getByText(`Feed quiet for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" })}`)).toBeInTheDocument();
   });
 
   it("marks a quiet feed in amber, not alarm red", () => {

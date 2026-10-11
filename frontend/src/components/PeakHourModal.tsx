@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { PeakHourBreakdown } from "../api/types";
+import { ErrorBanner } from "./ErrorBanner";
 import { Spinner } from "./Spinner";
 import { Modal } from "./Modal";
 import { WEEK } from "../utils/week";
@@ -7,10 +8,15 @@ import { WEEK } from "../utils/week";
 export function PeakHourModal({
   data,
   loading,
+  error = null,
+  onRetry,
   onClose,
 }: {
   data: PeakHourBreakdown | null;
   loading: boolean;
+  /** The breakdown request's failure, shown in place of the list. */
+  error?: Error | null;
+  onRetry?: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -63,6 +69,7 @@ export function PeakHourModal({
           </button>
         </div>
         {loading && <Spinner label={t("common.loading")} size={20} />}
+        {!loading && error != null && <ErrorBanner error={error} onRetry={onRetry} />}
         {!loading && data?.routes.length === 0 && (
           <p
             data-testid="peak-hour-modal-empty"

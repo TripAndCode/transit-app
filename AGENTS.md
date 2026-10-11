@@ -11,10 +11,15 @@ file through `CLAUDE.md`; local Codex reads it directly. Claude's hooks live in
 trusted. Agents in sessions without active hooks must apply the same rules by hand.
 
 Longer reference notes live in `.claude/skills/*/SKILL.md`; `.agents/skills/` links
-to the same files for Codex discovery. They are plain Markdown any agent can read:
+the three below to the same files for Codex discovery. They are plain Markdown any
+agent can read:
 - `transit-app-gotchas`: test databases, i18n parity, worktrees, CI trailer mechanics;
 - `postgres-perf`: query and aggregate performance traps;
 - `maplibre-map`: Map tab conventions.
+
+`.agents/skills/review-branch/SKILL.md` is the one Codex-specific entry, not a link.
+It carries only the Codex steps and defers to `.claude/commands/review-branch.md` for
+tier routing, the high-risk overlay and the fix cap.
 
 ## Hard rules
 
@@ -112,9 +117,12 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
 - Claude Code's pre-push hook runs most of these checks on the pushed worktree; its
   header lists what it leaves out. Other agents run them before pushing. Either way,
   CI sees only the tip that triggered it, so local verification stays mandatory.
-- After analyze changes, rebuild affected aggregates. Use `make analyze-all` for all
-  agencies and `make check-aggs` to detect stale aggregates. `check-aggs` only compares
-  each agency's newest day, so a date whose row count didn't change but whose rows did
+- After analyze changes, rebuilding aggregates (`make analyze-all`) writes `agg_*`, so
+  an agent runs it only against the throwaway database
+  (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make analyze-all`);
+  rebuilding the dev aggregates is the operator's step, which the PR body flags.
+  `make check-aggs` only reads, and detects stale aggregates. It only compares each
+  agency's newest day, so a date whose row count didn't change but whose rows did
   (replaced one-for-one) needs `FULL=1` to actually rebuild.
 
 ## Tests

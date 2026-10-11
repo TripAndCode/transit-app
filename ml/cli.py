@@ -7,13 +7,17 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from clickhouse_connect.driver.client import Client
+
 from ml import sync
-from ml.backtest import evaluate_agency, results_from_json, results_to_json
-from ml.data import agencies_with_data, fetch_cells
+from ml.backtest import DataSpan, evaluate_agency, lookback_days, needs_older_cells, results_from_json, results_to_json
+from ml.cells import Cell
+from ml.data import agencies_with_data, count_days, date_span, fetch_cells
+from ml.model_result import result_from_json, result_to_json
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -52,22 +56,56 @@ def _sync(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _recent_cells(client: Client, agency_id: int, first: date, last: date, origins: int, window: int) -> list[Cell]:
+    """The cells the latest origins score from, widening the lookback while
+    gaps in the data push those origins' windows back past what was fetched."""
+    lookback = lookback_days(origins, window)
+    while True:
+        since = last - timedelta(days=lookback)
+        cells = fetch_cells(client, agency_id, since=since)
+        if since <= first or not needs_older_cells(cells, since, origins, window):
+            return cells
+        lookback *= 2
+
+
 def _backtest(args: argparse.Namespace) -> int:
     client = get_client()
     results = []
     for agency_id in args.agency or agencies_with_data(client):
-        cells = fetch_cells(client, agency_id)
+        edges = date_span(client, agency_id)
+        if edges is None:
+            continue
+        first, last = edges
+        cells = _recent_cells(client, agency_id, first, last, args.origins, args.window)
         if cells:
-            results.append(evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window))
+            span = DataSpan(first, last, count_days(client, agency_id))
+            results.append(
+                evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window, span=span)
+            )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(results_to_json(results))
     return 0
 
 
+def _train_eval(args: argparse.Namespace) -> int:
+    # Imported here: they need the optional `ml` group, which sync and report do not.
+    from ml.dataset import load_runs
+    from ml.model_backtest import run_backtest
+    from ml.models import ModelParams
+
+    client = get_client()
+    runs = load_runs(client, args.agency or agencies_with_data(client))
+    result = run_backtest(runs, params=ModelParams(window_days=args.window), origin_count=args.origins)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(result_to_json(result))
+    return 0
+
+
 def _report(args: argparse.Namespace) -> int:
     results = results_from_json(args.input.read_text())
+    models = result_from_json(args.models.read_text()) if args.models else None
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(render(results, generated=_today_jst()))
+    args.out.write_text(render(results, generated=_today_jst(), models=models))
     return 0
 
 
@@ -91,7 +129,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_report = sub.add_parser("report", help="Render a backtest as HTML")
     p_report.add_argument("--in", dest="input", type=Path, required=True)
     p_report.add_argument("--out", type=Path, required=True)
+    p_report.add_argument("--models", type=Path)
     p_report.set_defaults(handler=_report)
+
+    p_train = sub.add_parser("train-eval", help="Backtest the models against B0")
+    p_train.add_argument("--out", type=Path, required=True)
+    p_train.add_argument("--origins", type=int, default=28)
+    p_train.add_argument("--window", type=int, default=28)
+    p_train.add_argument("--agency", type=int, action="append")
+    p_train.set_defaults(handler=_train_eval)
 
     args = parser.parse_args(argv)
     return int(args.handler(args))

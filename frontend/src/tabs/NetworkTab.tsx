@@ -202,10 +202,16 @@ export function NetworkTab() {
   // identical to the unweighted one would be a no-op, not a real feature.
   const ridershipWeightingAvailable = data?.agencies.some((a) => a.has_ridership_weights) ?? false;
 
-  // Carry the full current range into each agency's Overview, matching how
-  // Sidebar/AnalysisTab build agency links (proper encoding; "all" dims omitted).
+  // `filterQS` identifies the fetched list. Each agency link opens that
+  // agency's Live view with the same range and conditions, minus the route and
+  // stop filter: those codes belong to one agency and would scope another
+  // agency's map to routes it may not have.
   const filterQS = scopeToQueryString(ctx);
-  const suffix = filterQS ? `?${filterQS}` : "";
+  const linkParams = new URLSearchParams(filterQS);
+  linkParams.delete("routes");
+  linkParams.delete("stop");
+  const linkQS = linkParams.toString();
+  const suffix = linkQS ? `?${linkQS}` : "";
 
   const ordered = data ? [...data.agencies].sort(byDelayDescending) : [];
   // Whatever can change the order: the sorted identity itself. Cheap to build

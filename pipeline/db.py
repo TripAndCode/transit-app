@@ -20,13 +20,10 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # beyond ±this are excluded from the shared dedup (and from the heatmap aggregates
 # in pipeline/analyze.py, which import this constant) as data-quality faults.
 #
-# WHY THIS EXISTS — root-cause from a 2026-06-07 investigation:
-#   The map showed 馬木料金所前 (an expressway tollgate stop on route 550332996)
-#   at a 72.2-min AVERAGE delay. That stop is actually fine: median 3 min, p90
-#   4 min. The mean was hijacked by two trips on 2026-06-07 whose realtime
-#   TripUpdate feed FROZE and kept re-emitting an impossible delay — 976 min
-#   (16.3 h) and 715 min (11.9 h) — once every ~30 s for minutes. No city bus is
-#   16 h late: that magnitude is a stale/stuck feed, not a delay.
+# Why it exists: a realtime TripUpdate feed can freeze and keep re-emitting an
+# impossible delay (many hours late) for as long as it stays stuck. Such a
+# reading is a stale feed, not a delay, and a handful of them would dominate any
+# average over a stop or route.
 #
 # Clamping here, in the ONE shared dedup builder, protects every averaged surface
 # (reports, overview, route-summary, and the live Ask/report queries) — not just
@@ -230,7 +227,7 @@ def hms_to_sec_sql(column: str) -> str:
     same parse instead of re-deriving it.
     """
     return (
-        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-9]{{2}}(:[0-9]{{2}})?$' THEN "
+        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-5][0-9](:[0-5][0-9])?$' THEN "
         f"split_part({column}, ':', 1)::int * 3600 "
         f"+ split_part({column}, ':', 2)::int * 60 "
         f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
@@ -252,6 +249,11 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     `groupArray(tuple(u.captured_at, u.dep_delay))`, the raw per-observation
     history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
     to compare early readings against that final value.
+
+    `u.scheduled_time IS NOT NULL` drops stop events with no scheduled
+    instant to measure lead time from -- an extended-hour or unmatched row is
+    stored with a NULL `scheduled_time` -- so `pipeline.prediction_accuracy`
+    never has to parse one.
 
     `HAVING count() > 1` drops every stop event observed exactly once: a
     singleton has no EARLY observation to compare against its own (only)
@@ -275,7 +277,8 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
         "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
         "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
         "FROM updates AS u "
-        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        "WHERE u.dep_delay IS NOT NULL AND u.scheduled_time IS NOT NULL "
+        "AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "

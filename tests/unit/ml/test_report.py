@@ -48,3 +48,48 @@ def test_the_report_shows_every_method_every_slice_and_flags_short_history():
     for text in ("B0", "B1", "B2", "<svg", "Peak", "Off-peak", "≤ 2 runs", "Agency 11"):
         assert text in html
     assert html.count("short history") == 1
+    assert "early origins have less than a full window" in html
+
+
+from ml.backtest import SliceRow  # noqa: E402
+from ml.metrics import ErrorStats  # noqa: E402
+from ml.model_result import IntervalStats, ModelBacktestResult  # noqa: E402
+
+
+def _model_result():
+    def row(method, err):
+        return SliceRow(
+            method,
+            1,
+            True,
+            False,
+            target_runs=10,
+            predicted_runs=10,
+            errors=ErrorStats(10, err * 10, err * err * 10),
+            paired=ErrorStats(10, err * 10, err * err * 10),
+            paired_b0=ErrorStats(10, 20, 40),
+        )
+
+    agencies = _results()[:1]
+    agencies[0].rows = [row("B0", 2.0), row("LGBM", 1.8)]
+    return ModelBacktestResult(
+        params={"window_days": 28},
+        origins=agencies[0].origins,
+        cutoffs=[agencies[0].origins[0]],
+        agencies=agencies,
+        intervals={
+            "LGBM": {"8": IntervalStats(100, 80, 300.0, {"0.1": 10.0, "0.5": 20.0, "0.9": 10.0})},
+            "B0": {"8": IntervalStats(100, 70, 250.0, {"0.1": 12.0, "0.9": 12.0})},
+        },
+        origin_skill=[(agencies[0].origins[0], 0.1)],
+    )
+
+
+def test_the_report_shows_the_model_against_b0_and_its_verdict():
+    html = render(_results(), generated=date(2026, 10, 11), models=_model_result())
+    for text in ("LGBM", "Model against B0", "80.0%", "Verdict: adopted."):
+        assert text in html
+
+
+def test_the_report_without_a_model_has_no_model_section():
+    assert "Model against B0" not in render(_results(), generated=date(2026, 10, 11))
