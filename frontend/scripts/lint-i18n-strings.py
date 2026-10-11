@@ -112,12 +112,15 @@ def find_violations(lines: list[str]) -> list[Violation]:
 
 
 def lint_file(file_path) -> list[Violation]:
+    """Lint one file. A file that cannot be read or decoded as UTF-8 is itself
+    a violation: it is exactly the file (say, one saved as Shift_JIS) whose
+    hardcoded text this check could not look at, so it must fail the run
+    rather than contribute nothing."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return find_violations(f.readlines())
-    except Exception as e:
-        print(f"Error reading {file_path}: {e}", file=sys.stderr)
-        return []
+    except (OSError, UnicodeDecodeError) as e:
+        return [Violation(0, f"cannot read as UTF-8: {e}", "unreadable")]
 
 
 def main():
