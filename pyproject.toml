@@ -71,7 +71,7 @@ optional = true
 numpy = ">=2.2"
 pandas = "^3"
 lightgbm = "^4.6"
-pyarrow = "^18"
+pyarrow = "^22"
 
 [[tool.poetry.source]]
 name = "pytorch-cpu"
