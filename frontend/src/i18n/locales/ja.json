@@ -472,7 +472,9 @@
       "input_label": "APIキー",
       "remove": "削除",
       "rejected": "キーが拒否されました。確認して再度お試しください。",
-      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
+      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。",
+      "save_error": "キーを保存できませんでした。接続を確認して再度お試しください。",
+      "status_unavailable": "キーの状態を読み込めませんでした。"
     },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
@@ -528,6 +530,7 @@
     "this_device": "この端末",
     "session_sign_out": "サインアウト",
     "session_sign_out_aria": "このセッションをサインアウト",
+    "sessions_load_error": "セッションを読み込めませんでした。",
     "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {

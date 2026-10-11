@@ -472,7 +472,9 @@
       "input_label": "API key",
       "remove": "Remove",
       "rejected": "Key rejected — check it and try again.",
-      "remove_error": "Couldn't remove the key. Please check your connection and try again."
+      "remove_error": "Couldn't remove the key. Please check your connection and try again.",
+      "save_error": "Couldn't save the key. Please check your connection and try again.",
+      "status_unavailable": "Couldn't load your key status."
     },
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",
@@ -528,6 +530,7 @@
     "this_device": "This device",
     "session_sign_out": "Sign out",
     "session_sign_out_aria": "Sign out this session",
+    "sessions_load_error": "Couldn't load your sessions.",
     "session_sign_out_error": "Couldn't sign out that session. Please try again."
   },
   "presets": {
