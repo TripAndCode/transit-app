@@ -196,6 +196,27 @@ BLOCKED = [
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
     ),
+    # A dev port spelled as a `port=` key: a libpq keyword DSN, a client kwarg,
+    # or a CLICKHOUSE_PORT assignment, none of which carry a `:<port>` token.
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "TRUNCATE agg_x"', id="libpq-keyword-dsn"),
+    pytest.param(
+        "poetry run python -c \"import psycopg2; psycopg2.connect(host='localhost', port=5433)"
+        ".cursor().execute('TRUNCATE agg_x')\"",
+        id="python-kwarg-port",
+    ),
+    pytest.param(
+        "CLICKHOUSE_PORT=8123 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"",
+        id="clickhouse-port-env-assignment",
+    ),
+    pytest.param('psql "postgresql://localhost/transit?port=5433" -c "TRUNCATE agg_x"', id="uri-query-port"),
+    pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
+    pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
+    pytest.param(
+        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        id="throwaway-url-overridden-by-port-query",
+    ),
+    # clickhouse-client's native port, which compose.yml says can be published.
+    pytest.param("clickhouse-client --host localhost --port 9000 -q 'TRUNCATE TABLE updates'", id="ch-native-port"),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -230,6 +251,13 @@ ALLOWED = [
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
     ),
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "SELECT 1"', id="keyword-dsn-read"),
+    pytest.param('psql "host=localhost port=5544 dbname=transit_test" -c "TRUNCATE agg_x"', id="keyword-dsn-test-db"),
+    pytest.param(
+        "CLICKHOUSE_PORT=8124 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"", id="test-ch-port-env"
+    ),
+    pytest.param('psql "host=localhost sport=5433 dbname=x" -c "TRUNCATE agg_x"', id="port-key-inside-longer-word"),
+    pytest.param('psql "host=localhost port=55432 dbname=x" -c "TRUNCATE agg_x"', id="port-key-longer-than-dev-port"),
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
