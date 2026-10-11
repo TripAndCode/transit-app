@@ -218,6 +218,65 @@ BLOCKED = [
     pytest.param("psql -h localhost -p 5433 -U transit <<'SQL'\nSELECT 1\nSQL", id="psql-heredoc"),
     pytest.param("curl -s http://localhost:8123/ --data-binary @x.sql", id="ch-http-body-from-file"),
     pytest.param("curl -s http://localhost:8123/ -T x.sql", id="ch-http-upload-file"),
+    # Statements that mutate a store without any of the common write verbs.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY stops FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-stdin",
+    ),
+    pytest.param(
+        "psql postgresql://transit:transit@localhost:5433/transit -c \"COPY stops (stop_id) FROM '/tmp/s.csv'\"",
+        id="sql-copy-columns-from-file",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME TABLE updates TO updates_old'",
+        id="ch-rename-table",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY \\"Stops\\" FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-escaped-quoted-table",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME updates TO updates_old'",
+        id="ch-rename-without-table-keyword",
+    ),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'DETACH TABLE updates'", id="ch-detach-table"),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'ATTACH TABLE updates'", id="ch-attach-table"),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'EXCHANGE TABLES a AND b'", id="ch-exchange-tables"
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates FINAL DEDUPLICATE'",
+        id="ch-optimize-deduplicate",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "REFRESH MATERIALIZED VIEW mv_x"',
+        id="pg-refresh-materialized-view",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "SELECT * INTO stops_copy FROM stops"',
+        id="pg-select-into-new-table",
+    ),
+    # A dev port spelled as a `port=` key: a libpq keyword DSN, a client kwarg,
+    # or a CLICKHOUSE_PORT assignment, none of which carry a `:<port>` token.
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "TRUNCATE agg_x"', id="libpq-keyword-dsn"),
+    pytest.param(
+        "poetry run python -c \"import psycopg2; psycopg2.connect(host='localhost', port=5433)"
+        ".cursor().execute('TRUNCATE agg_x')\"",
+        id="python-kwarg-port",
+    ),
+    pytest.param(
+        "CLICKHOUSE_PORT=8123 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"",
+        id="clickhouse-port-env-assignment",
+    ),
+    pytest.param('psql "postgresql://localhost/transit?port=5433" -c "TRUNCATE agg_x"', id="uri-query-port"),
+    pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
+    pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
+    pytest.param(
+        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        id="throwaway-url-overridden-by-port-query",
+    ),
+    # clickhouse-client's native port, which compose.yml says can be published.
+    pytest.param("clickhouse-client --host localhost --port 9000 -q 'TRUNCATE TABLE updates'", id="ch-native-port"),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -266,6 +325,24 @@ ALLOWED = [
         id="dev-read-pgvector-distance",
     ),
     pytest.param("psql -h localhost -p 5544 -U transit transit_test < dump.sql", id="test-db-stdin-script"),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY (SELECT * FROM stops) TO STDOUT"',
+        id="sql-copy-to-reads-data-out",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q \"SELECT * FROM updates INTO OUTFILE '/tmp/u.csv'\"",
+        id="ch-select-into-outfile",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates'", id="ch-optimize-merges-only"
+    ),
+    pytest.param('psql "host=localhost port=5433 dbname=transit" -c "SELECT 1"', id="keyword-dsn-read"),
+    pytest.param('psql "host=localhost port=5544 dbname=transit_test" -c "TRUNCATE agg_x"', id="keyword-dsn-test-db"),
+    pytest.param(
+        "CLICKHOUSE_PORT=8124 poetry run python -c \"c.command('TRUNCATE TABLE updates')\"", id="test-ch-port-env"
+    ),
+    pytest.param('psql "host=localhost sport=5433 dbname=x" -c "TRUNCATE agg_x"', id="port-key-inside-longer-word"),
+    pytest.param('psql "host=localhost port=55432 dbname=x" -c "TRUNCATE agg_x"', id="port-key-longer-than-dev-port"),
     pytest.param("make check-aggs", id="make-read-only-target"),
     pytest.param("poetry run python gtfs_pipeline.py check_aggs", id="cli-read-only-subcommand"),
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),

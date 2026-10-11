@@ -466,6 +466,9 @@ def test_a_dependency_change_without_its_own_virtualenv_blocks():
         result = _python_env(Path(tmp), deps_changed=True, gate_venv=False)
     assert result.returncode == 2
     assert "poetry install" in result.stderr
+    # The opt-out it offers is read from the hook's own environment, so the
+    # message has to say where to set it.
+    assert "session environment" in result.stderr
 
 
 def test_the_explicit_opt_out_skips_python_steps_instead_of_blocking():

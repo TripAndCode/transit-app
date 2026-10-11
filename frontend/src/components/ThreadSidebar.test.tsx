@@ -288,4 +288,39 @@ describe("ThreadSidebar", () => {
     expect(within(item).getByText(/Harbor Loop/)).toBeInTheDocument();
     expect(within(item).queryByText(/39061/)).not.toBeInTheDocument();
   });
+
+  describe("renaming", () => {
+    async function startRename() {
+      const mutate = vi.fn();
+      mockConversations([conv({ title: "Morning delays" })]);
+      vi.spyOn(hooks, "useUpdateConversation").mockReturnValue({ mutate } as never);
+      render();
+      fireEvent.contextMenu(screen.getByRole("button", { name: /Morning delays/ }));
+      await userEvent.click(screen.getByText("Rename"));
+      const input = screen.getByDisplayValue("Morning delays");
+      await userEvent.clear(input);
+      await userEvent.type(input, "Renamed");
+      return { mutate, input };
+    }
+
+    it("discards the typed title on Escape", async () => {
+      const { mutate } = await startRename();
+      await userEvent.keyboard("{Escape}");
+      expect(mutate).not.toHaveBeenCalled();
+      expect(screen.queryByDisplayValue("Renamed")).toBeNull();
+      expect(screen.getByRole("button", { name: /Morning delays/ })).toBeInTheDocument();
+    });
+
+    it("saves the typed title on Enter", async () => {
+      const { mutate } = await startRename();
+      await userEvent.keyboard("{Enter}");
+      expect(mutate).toHaveBeenCalledWith({ id: "c1", patch: { title: "Renamed" } });
+    });
+
+    it("saves the typed title on blur", async () => {
+      const { mutate, input } = await startRename();
+      fireEvent.blur(input);
+      expect(mutate).toHaveBeenCalledWith({ id: "c1", patch: { title: "Renamed" } });
+    });
+  });
 });

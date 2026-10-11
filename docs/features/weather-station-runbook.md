@@ -177,7 +177,9 @@ All read-only:
   enabling ingest, not a sign anything is broken.
 - Application logs show `weather: wrote N of M station-days examined` (info
   level, from `pipeline/weather.py`'s `ingest_weather`) rather than `weather:
-  WEATHER_INGEST_ENABLED is not set; skipping weather ingest`.
+  ingest disabled (source=...); skipping weather ingest`, whose `source` names
+  the control that switched ingest off: `override` (the admin flag) or
+  `env (WEATHER_INGEST_ENABLED)`.
 
 ## Key files
 
