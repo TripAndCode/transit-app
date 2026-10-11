@@ -31,6 +31,10 @@ def _resolve_ctx(
     (they carry extra per-endpoint params alongside), so the validation,
     clamping and route de-duplication have to come from the same shared
     helper instead of a hand-copied variant.
+
+    ``routes`` arrives as repeated query keys; each value is also split on
+    commas, the form every other scope endpoint and the SPA's scope serializer
+    use, so ``routes=a,b`` means two routes rather than one route named "a,b".
     """
     return clamp_range_ctx(
         from_=from_date,
@@ -38,7 +42,7 @@ def _resolve_ctx(
         dow=dow,
         time_band=time_band,
         service=service,
-        routes=routes,
+        routes=tuple(part for item in routes for part in item.split(",") if part),
     )
 
 
