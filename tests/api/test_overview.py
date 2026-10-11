@@ -1387,7 +1387,6 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
-    # `_test_pool` already mirrors production's session settings (Asia/Tokyo).
     pool = await _test_pool()
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
