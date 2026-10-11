@@ -1544,7 +1544,8 @@
         "weatherIngestEnabled": "Weather: observed-data ingest",
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
-        "loginRequired": "Access: sign-in required"
+        "loginRequired": "Access: sign-in required",
+        "mlForecast": "ML forecast"
       }
     },
     "table": {
