@@ -9,9 +9,9 @@ nvidia-*/triton entry is excluded on Linux.
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
-import tomllib
 from packaging.markers import Marker
 
 LOCK = Path(__file__).resolve().parents[2] / "poetry.lock"
