@@ -9,6 +9,9 @@
 # per-run name could never do. Runs in different groups can overlap, and get
 # different containers, which is what lets two of them share a Docker daemon.
 #
+# Jobs within one run do overlap and share a scope, so a caller that runs
+# parallel jobs (a matrix) must make the prefix unique per job.
+#
 # Cancellation is the common case, not the rare one: the group sets
 # `cancel-in-progress` for pull requests, so every re-push abandons a
 # container mid-life.
