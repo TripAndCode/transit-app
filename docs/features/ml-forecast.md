@@ -14,15 +14,18 @@ After that, each nightly run adds only the archives that have become final.
 | Timer (Asia/Tokyo) | Job | Output |
 |---|---|---|
 | daily 10:30 | `python -m ml.cli sync` | R2 archives replayed into the replica in timeline order; done-set in `/var/lib/transit-ml/sync-state.json` |
-| Sundays 04:00 | `python -m ml.cli backtest` then `report` | `/var/lib/transit-ml/backtests/latest.json`, `/var/lib/transit-ml/reports/latest/index.html` |
+| Sundays 04:00 | `backtest` → `train-eval` → `report` → `train`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models) |
+| daily 11:00 | `python -m ml.cli predict` | `/var/lib/transit-ml/forecast/forecast.parquet`, uploaded to R2 as the latest published forecast |
 
-Each job reports to healthchecks.io through `deploy/vps/run-with-ping.sh` (`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`).
+`train` runs last in the Sunday chain so a publish failure can never suppress the
+report. Each job reports to healthchecks.io through `deploy/vps/run-with-ping.sh`
+(`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`, `HC_PING_URL_PREDICT`).
 
 The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, so it does not run `analyze_all`.
 
 ## Setup
 
-1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. The R2 token is read-only and scoped to `transit-archives`.
+1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict` publish to). `train` and `predict` swap `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for their own short-lived process, so the read-only pair is never exposed to a process that writes.
 2. `bash deploy/vps/bootstrap.sh` from `/root/transit-app`. It is safe to re-run.
 
 ## Operating it
@@ -56,4 +59,27 @@ The weekly job also backtests LightGBM forecasters of each trip run's mean delay
 - **Intervals**: the quantile models are trained without the last week before the cutoff, and that week calibrates the 10th–90th percentile interval to hold 80% of runs (conformalized quantile regression).
 - **Evaluation** chooses 28 origins from every agency's pooled dates, the same way the baselines do from one agency's, retraining once per week of origins on data before it. Point error is compared with B0 on the cells both predict. Intervals are scored per run, against B0's own slot 10th–90th percentile.
 - **Short history**: an agency with fewer than 56 days of history before a cutoff keeps B0, because a model trained mostly on other agencies forecasts it worse. It moves to the model on its own once it has the history, and the report names the agencies kept on B0.
-- **Adoption** requires at least 5% better error than B0 overall, no agency worse than B0, and an interval that holds 75–85% of runs. The report states the verdict and the reasons it fails.
+- **Adoption** requires at least 5% better error than B0 overall, no agency worse than B0, and an interval that holds 75–85% of runs. The report states the verdict and the reasons it fails. Weekly retraining means this is re-decided every run: a week that clears the bar publishes a new model version; a week that doesn't keeps serving whichever version is already published (or none, if none ever has).
+
+## Publishing and serving the forecast
+
+An adopted model is written to `/var/lib/transit-ml/model` and uploaded to R2 under
+`models/<version>/` plus a `models/latest.json` pointer, where `<version>` is the
+training cutoff date. The daily `predict` job loads whichever version
+`models/latest.json` names, forecasts each on-model agency's routes for the next
+`HORIZON_DAYS` days, and uploads the result as the latest published forecast.
+`predict` needs the target days' rows to already exist in `runs` to build their
+features, which ClickHouse's observed-only history never has for the future — it
+templates each future day's slot features from the most recent prior day sharing
+that weekday (`ml.features.template_future_runs`), scoped per agency so a staler
+agency's forecast never silently borrows a fresher agency's template.
+
+Outside the VPS, production's `/internal/cron/ingest` sweep polls R2 for a newer
+published forecast and upserts it into Postgres's `agg_route_forecast_ml`
+(`pipeline/ml_forecast_ingest.py`), keyed by `(agency_id, route_code, service_date,
+hour)` so a forecast is replaced in place rather than accumulating duplicates, and
+pruned once its service date is old enough. The `ml_forecast` flag
+(`pipeline/flags.py`, default off) gates whether `/forecast/heatmap` and
+`/forecast/overview` overlay this table's rows (`source: "ml"`) over the seasonal
+baseline (`source: "baseline"`); with the flag off, the ingest still runs and the
+table still fills, but the API never reads it.
