@@ -498,6 +498,19 @@ async def test_bulk_patch_keeps_original_suspended_at_for_already_suspended_ids(
 
 
 @pytest.mark.asyncio
+async def test_soft_delete_keeps_original_suspended_at_for_already_suspended_user(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    uid = await _seed_suspended_long_ago(aconn)
+    r = await admin_client.delete(
+        f"/api/admin/users/{uid}",
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 204
+    assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) == _ORIGINAL_SUSPENSION
+
+
+@pytest.mark.asyncio
 async def test_suspension_transitions_still_stamp_and_clear_suspended_at(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn)

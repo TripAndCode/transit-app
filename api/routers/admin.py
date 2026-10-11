@@ -548,7 +548,7 @@ async def delete_user(
             """
             UPDATE users
             SET email = $1, name = NULL, avatar_url = NULL,
-                suspended_at = now(), updated_at = now()
+                suspended_at = COALESCE(suspended_at, now()), updated_at = now()
             WHERE user_id = $2
             """,
             f"deleted-{uid}@local",
