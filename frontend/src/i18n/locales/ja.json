@@ -394,6 +394,7 @@
     "no": "いいえ",
     "unit_min": "分",
     "unit_sec": "秒",
+    "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
     "range_separator": "〜",
@@ -1075,7 +1076,7 @@
       "worst_day_label_month": "最も遅い月",
       "bucket_date": "{{date}}",
       "bucket_date_week": "{{date}}の週",
-      "bucket_date_month": "{{date}}からの月",
+      "bucket_date_month": "{{date}}始まりの月",
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
@@ -1388,6 +1389,8 @@
       "add_button": "事業者を追加",
       "search_placeholder": "事業者名で検索",
       "empty": "該当する事業者がありません。",
+      "disable_failed": "{{name}}を無効化できませんでした。",
+      "restore_failed": "{{name}}を復元できませんでした。",
       "col_name": "事業者名",
       "status_deleted": "削除済",
       "action_edit": "編集",

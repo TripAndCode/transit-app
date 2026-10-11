@@ -145,7 +145,6 @@ async def conn_two_routes_obs(apply_schema, ch_client):
     time_series tool applies the route filter from args."""
     pool = await _test_pool()
     async with pool.acquire() as conn:
-        await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
         )
@@ -221,7 +220,6 @@ async def conn_punctual_and_late(apply_schema, ch_client):
     with 25 observations, clearing the on-time ranking's sample gate."""
     pool = await _test_pool()
     async with pool.acquire() as conn:
-        await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
         agency_id = await conn.fetchval(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
         )
