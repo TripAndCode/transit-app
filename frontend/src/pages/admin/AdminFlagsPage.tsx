@@ -216,6 +216,7 @@ export function AdminFlagsPage() {
         columns={columns}
         rowKey={(f) => f.key}
         emptyLabel={t("admin.flags.empty")}
+        settled={data != null}
       />
 
       {pending && (
