@@ -324,8 +324,13 @@ so it is a separate mechanism to build, not a knob to turn on.
 8. To exercise the 3-stage NL router directly (not reachable from the
    current chip-only UI), call the API directly:
    ```bash
+   # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
+   # While sign-in is required, also pass a session cookie from a signed-in
+   # browser; see the README's API example.
    curl -X POST localhost:8000/api/1/ask \
      -H 'Content-Type: application/json' \
+     -H 'Origin: http://localhost:8000' \
+     -H 'Cookie: sid=<your session cookie>' \
      -d '{"question":"遅延ワースト10"}'
    ```
    Expect `router_stage: "rules"`. A paraphrase near a golden-set entry
