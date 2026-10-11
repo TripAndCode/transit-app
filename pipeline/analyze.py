@@ -993,10 +993,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # row lacking a scheduled time would otherwise yield a NULL hour and abort
         # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
         # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
-        # notation, e.g. "25:30:00") is rejected at ingest time (see
-        # pipeline/strategies/_time.py) and never reaches `_analyze_alltime`, so
-        # a late-night continuation trip is absent from this aggregate rather
-        # than folded into the early-morning bucket.
+        # notation, e.g. "25:30:00") cannot be a same-day `scheduled_time`, so such a
+        # row reaches `_analyze_alltime` with a NULL `scheduled_time` (static_join
+        # keeps it; only the aomori_regex strategy skips it) and is excluded by the
+        # filter below. A late-night continuation trip is therefore absent from this
+        # aggregate rather than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
                 SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
