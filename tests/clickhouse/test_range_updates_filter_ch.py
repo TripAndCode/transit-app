@@ -26,6 +26,7 @@ from api.range import (
     dow_clause_ch,
     time_band_clause_ch,
 )
+from pipeline.service_day import service_date_ch
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -41,10 +42,10 @@ def _ctx(**over: Any) -> RangeCtx:
     return RangeCtx(**base)
 
 
-def test_date_range_clause_ch_uses_jst_todate_not_bare_todate():
+def test_date_range_clause_ch_uses_the_service_date_not_bare_todate():
     frag, params = date_range_clause_ch(_ctx())
-    assert "toDate(captured_at, 'Asia/Tokyo')" in frag
-    assert "toDate(captured_at)" not in frag.replace("toDate(captured_at, 'Asia/Tokyo')", "")
+    assert service_date_ch() in frag
+    assert "toDate(captured_at)" not in frag.replace(service_date_ch(), "")
     assert params["ch_from_date"] == date(2026, 5, 13)
     assert params["ch_to_date"] == date(2026, 6, 11)
 

@@ -5,15 +5,16 @@ latest observation per stop event, with implausible delays clamped out."""
 from __future__ import annotations
 
 from pipeline.db import build_dedup_ch_sql
+from pipeline.service_day import service_date_ch
 
-# Every stop event's rows share one JST date (the dedup groups by it), so a
+# Every stop event's rows share one service date (the dedup groups by it), so a
 # date range splits the work with no group cut in two. `u.` because the dedup
 # query's own SELECT aliases would otherwise capture a bare column name.
-_DATE_RANGE = "toDate(u.captured_at, 'Asia/Tokyo') BETWEEN {start:Date} AND {end:Date}"
+_DATE_RANGE = f"{service_date_ch('u.captured_at')} BETWEEN {{start:Date}} AND {{end:Date}}"
 
 
 def runs_sql() -> str:
-    """One row per trip run (trip × JST capture date): the mean of its stops'
+    """One row per trip run (trip × service date): the mean of its stops'
     departure delays in minutes, and the hour of its first observed stop's
     scheduled departure. The hour comes from scheduled_sec, so a run after
     midnight on its service day keeps an hour of 24 or more. A strategy that

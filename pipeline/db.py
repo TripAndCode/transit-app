@@ -10,6 +10,7 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 import psycopg2
 
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.service_day import service_date_ch
 
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
@@ -94,6 +95,9 @@ def build_dedup_ch_sql(
     against a live instance). No current caller combines the two, but the
     distinct alias name means no future one can hit this by accident.
 
+    The `date` column is the *service date* (`pipeline.service_day`): the
+    Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
+    before and after midnight is one event of one day. It is built on
     `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
     every Postgres connection that ever touched `updates` pins
     the Asia/Tokyo session time zone (see api/main.py's
@@ -195,13 +199,13 @@ def build_dedup_ch_sql(
     )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
         f"FROM {checked_table(table)} AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )
 
 
@@ -273,7 +277,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     extra = f" AND ({extra_where})" if extra_where else ""
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
         "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
         "FROM updates AS u "
@@ -281,7 +285,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
         "AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence "
         "HAVING count() > 1"
     )
 

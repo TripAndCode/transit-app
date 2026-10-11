@@ -22,13 +22,14 @@ from api.routers.map import (
     clock_to_sec,
     resolve_route_trips_date,
 )
+from pipeline.service_day import service_date_ch
 
 # --- rendered SQL -----------------------------------------------------------
 
 
 def test_route_trips_sql_filters_the_target_date_in_jst():
     sql, params = build_route_trips_sql("all")
-    assert "toDate(u.captured_at, 'Asia/Tokyo') = {target_date:Date}" in sql
+    assert f"{service_date_ch('u.captured_at')} = {{target_date:Date}}" in sql
     # A bare toDate() buckets captured_at by UTC day, so a JST evening
     # observation would fall under the previous day -- one day off the JST
     # bucketing the rest of this query and the response's `date` depend on.

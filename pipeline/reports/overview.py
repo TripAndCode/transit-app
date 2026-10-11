@@ -127,9 +127,9 @@ def _require_grain(grain: _Grain | None) -> _Grain:
 def _dow_matches(d: date, dow: str) -> bool:
     """Python counterpart of :func:`api.range.dow_clause_ch`.
 
-    ``dow_clause_ch`` filters on ``toDayOfWeek(toDate(captured_at,
-    'Asia/Tokyo'))`` — mode 0, so 1=Monday..7=Sunday — and the grain's ``date``
-    column IS that same ``toDate(captured_at, 'Asia/Tokyo')`` expression, so
+    ``dow_clause_ch`` filters on ``toDayOfWeek`` of the service date
+    (:mod:`pipeline.service_day`) — mode 0, so 1=Monday..7=Sunday — and the
+    grain's ``date`` column IS that same service date, so
     ``date.isoweekday()`` (also 1=Monday..7=Sunday) reproduces it exactly.
     """
     days = dow_isodays(dow)

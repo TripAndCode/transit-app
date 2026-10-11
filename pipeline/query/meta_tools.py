@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from api.range import RangeCtx
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.service_day import service_date_ch
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -272,13 +273,12 @@ async def describe_data(
             parameters={"agency_id": agency_id},
         )
         last_obs = last_result.result_rows[0][0]
-        # toDate(captured_at, 'Asia/Tokyo') — NOT a bare toDate(captured_at) —
-        # matches the JST civil day every Postgres connection touching
-        # `updates` has always bucketed by (SET TIME ZONE 'Asia/Tokyo').
+        # The service date, the day every aggregate is bucketed by
+        # (pipeline.service_day) — never a bare toDate(captured_at).
         # COUNT(DISTINCT ...) / COUNT(*) still need a full scan (unrelated to
         # the min/max sort-key optimization above), so they stay one query.
         counts_result = await ch.query(
-            "SELECT COUNT(DISTINCT toDate(captured_at, 'Asia/Tokyo')) AS days, "
+            f"SELECT COUNT(DISTINCT {service_date_ch()}) AS days, "
             "       COUNT(*) AS rows_n "
             "FROM updates WHERE agency_id = {agency_id:UInt16}",
             parameters={"agency_id": agency_id},
@@ -383,7 +383,7 @@ async def describe_data(
         data_end_ch = await ch.query(
             "SELECT captured_at FROM updates "
             "WHERE agency_id = {agency_id:UInt16} "
-            "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date} "
+            f"  AND {service_date_ch()} BETWEEN {{from_date:Date}} AND {{to_date:Date}} "
             "ORDER BY captured_at DESC LIMIT 1",
             parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
         )

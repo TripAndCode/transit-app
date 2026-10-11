@@ -59,6 +59,7 @@ from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_mi
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
+from pipeline.service_day import service_date_ch
 
 _log = logging.getLogger(__name__)
 
@@ -870,7 +871,7 @@ def build_route_trips_sql(
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
               AND u.dep_delay IS NOT NULL
               AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-              AND toDate(u.captured_at, 'Asia/Tokyo') = {{target_date:Date}}{band_clause}
+              AND {service_date_ch("u.captured_at")} = {{target_date:Date}}{band_clause}
             GROUP BY u.trip_id, u.stop_sequence
         ),
         kept AS (
@@ -1106,7 +1107,7 @@ def build_route_stop_profile_sql(table: str) -> str:
     WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
       AND u.dep_delay IS NOT NULL
       AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-      AND toDate(u.captured_at, 'Asia/Tokyo') = {{day:Date}}
+      AND {service_date_ch("u.captured_at")} = {{day:Date}}
     GROUP BY u.trip_id, u.stop_sequence
 """
 
