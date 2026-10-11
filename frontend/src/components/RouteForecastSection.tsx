@@ -776,9 +776,10 @@ function RouteDetail({
       <button
         type="button"
         onClick={onToggleGrid}
+        aria-expanded={showGrid}
         style={{ marginTop: 16, background: "none", border: "1px solid var(--border-soft)", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}
       >
-        {t("forecast.detail_show_grid")}
+        {t(showGrid ? "forecast.detail_hide_grid" : "forecast.detail_show_grid")}
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
