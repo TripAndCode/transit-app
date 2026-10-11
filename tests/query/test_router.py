@@ -134,6 +134,7 @@ async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks,
         ("どんな路線がデータにあるの？", "describe_data", "routes"),
         ("路線一覧を見せて", "describe_data", "routes"),
         ("いつからのデータ？", "describe_data", "date_range"),
+        ("いつ頃からのデータ？", "describe_data", "date_range"),
         ("最新のデータはいつ？", "describe_data", "date_range"),
         ("何件くらいの観測がある？", "describe_data", "date_range"),
         ("停留所はいくつ？", "describe_data", "stops"),
@@ -161,6 +162,26 @@ def test_rule_meta_dispatch(question, expected_tool, expected_kind):
 )
 def test_rule_no_match(question):
     """Questions outside the rule set return None — fall through to Stage 2."""
+    assert _match_rules(question) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "22171はいつから遅れ始めた?",
+        "いつも混む時間帯から教えて",
+        "最新のデータで22171の遅延は?",
+        "何分遅れている路線がある?",
+        "系統ごとの遅延一覧",
+        "路線22171の停留所一覧",
+        "停留所ごとの遅延一覧",
+        "22171の遅延が多い停留所TOP5",
+        "停留所別の定時率ワースト5",
+    ],
+)
+def test_analytic_questions_are_not_answered_by_a_meta_or_route_ranking_rule(question):
+    """These ask about delays on a route or stop, not what the dataset holds
+    or the agency-wide route ranking, so no Stage-1 rule may answer them."""
     assert _match_rules(question) is None
 
 
@@ -207,6 +228,14 @@ def test_rule_default_n_when_no_digit():
         ("定時率ワースト5", "on_time_rate", False, 5),
         ("定時率下位3", "on_time_rate", False, 3),
         ("定時率TOP10", "on_time_rate", None, 10),
+        ("定時率TOP5", "on_time_rate", None, 5),
+        ("定時率が高い路線TOP3", "on_time_rate", None, 3),
+        ("定時率ランキング", "on_time_rate", None, 10),
+        ("5分超の遅延が多い路線TOP3", "worst_5min", None, 3),
+        ("5分以上の遅れが多い系統TOP10", "worst_5min", None, 10),
+        ("5分以上の遅れが多い系統", "worst_5min", None, 10),
+        ("5分超の遅延ワースト5", "worst_5min", None, 5),
+        ("5分を超える遅れが多い路線上位3", "worst_5min", None, 3),
         ("遅延が少ない路線TOP5", "avg_delay", True, 5),
         ("遅れが最も少ない路線ワースト", "avg_delay", True, 10),
         ("遅延ワースト3", "avg_delay", None, 3),
@@ -225,6 +254,13 @@ def test_ranking_rules_follow_the_asked_direction(question, metric, best_first, 
     [
         "5分以上の遅れが少ない路線TOP10",
         "5分以上の遅れが短い系統TOP10",
+        # A threshold other than 5 minutes is not the worst_5min metric (nor an
+        # average-delay ranking), so it goes to the LLM rather than a wrong tool.
+        "15分以上の遅れが多い路線TOP10",
+        "10分超の遅延が多い路線TOP5",
+        "15分を超える遅れが多い路線TOP3",
+        "2.5分以上の遅れワースト3",
+        "15 分以上の遅れが多い路線TOP3",
         "少ない遅延のTOP",
         "低い定時率のランキング",
         "A系統の定時率が低い理由は？",

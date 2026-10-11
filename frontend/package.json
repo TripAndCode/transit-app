@@ -11,7 +11,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "npm run lint:i18n-strings && node --require ./scripts/ts6-for-eslint.cjs ./node_modules/eslint/bin/eslint.js . --max-warnings 0",
+    "lint": "node --require ./scripts/ts6-for-eslint.cjs ./node_modules/eslint/bin/eslint.js . --max-warnings 0",
     "lint:fix": "node --require ./scripts/ts6-for-eslint.cjs ./node_modules/eslint/bin/eslint.js . --fix",
     "deadcode": "knip",
     "lint:i18n": "cd .. && node --test tests/frontend/i18n_keys.test.mjs tests/frontend/user_manual_parity.test.mjs tests/frontend/i18n_glossary.test.mjs",

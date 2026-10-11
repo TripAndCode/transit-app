@@ -165,3 +165,45 @@ def test_migration_0053_backfill_digest_matches_token_hash(pg_conn):
         conn.rollback()
         migrate_up(conn)
         conn.close()
+
+
+def test_migration_0015_down_dedups_signatures_shared_across_agencies():
+    """The up migration scopes ask_intent_cache per agency because
+    signature_hash is agency-agnostic, so two agencies can hold one signature.
+    The down must collapse those to the single-column key instead of failing
+    on a unique violation, and is marked destructive because it drops rows."""
+    from db.migrate import DestructiveMigrationError
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        migrate_down("0015", conn, force_destructive=True)  # leave 0015 itself applied
+        with conn.cursor() as cur:
+            agencies = []
+            for name in ("down-dedup-a", "down-dedup-b"):
+                cur.execute(
+                    "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+                    (name, f"http://{name}.example.com"),
+                )
+                agencies.append(cur.fetchone()[0])
+            for agency_id, hits in zip(agencies, (1, 9), strict=True):
+                cur.execute(
+                    "INSERT INTO ask_intent_cache "
+                    "(signature_hash, tool, args, confidence, hit_count, last_question, agency_id) "
+                    "VALUES ('sig0000000000001', 't', '{}', 0.9, %s, 'q', %s)",
+                    (hits, agency_id),
+                )
+        conn.commit()
+        with pytest.raises(DestructiveMigrationError):
+            migrate_down("0014", conn)
+        migrate_down("0014", conn, force_destructive=True)
+        with conn.cursor() as cur:
+            cur.execute("SELECT hit_count FROM ask_intent_cache WHERE signature_hash = 'sig0000000000001'")
+            assert cur.fetchall() == [(9,)], "the most-used row survives the dedup"
+    finally:
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ask_intent_cache WHERE signature_hash = 'sig0000000000001'")
+            cur.execute("DELETE FROM agencies WHERE agency_name LIKE 'down-dedup-%'")
+        conn.commit()
+        migrate_up(conn)
+        conn.close()

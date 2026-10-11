@@ -135,15 +135,31 @@ def execute(
     today_jst: date,
     run: Runner,
     python: str,
+    skip_static: AbstractSet[str] = frozenset(),
+    notices: list[str] | None = None,
 ) -> list[str]:
     """Run the plan in order, saving the done-set after every action. A
     failure stops that agency's timeline, since a later day may need what
-    failed, and leaves the other agencies running."""
+    failed, and leaves the other agencies running.
+
+    A static archive named in `skip_static` is the operator's decision to give
+    up on a timetable that cannot load: it is marked done without being
+    fetched, and the agency's later days then replay under the previous
+    timetable. Nothing is skipped on its own, so that choice is never made
+    silently; each skip is appended to `notices`."""
     failures: list[str] = []
     stopped: set[int] = set()
     for action in actions:
         agency_id = action.archive.agency_id if isinstance(action, LoadStatic) else action.agency_id
         if agency_id in stopped:
+            continue
+        if isinstance(action, LoadStatic) and action.archive.key in skip_static:
+            done.add(action.archive.key)
+            save_done(state_path, done)
+            if notices is not None:
+                notices.append(
+                    f"agency {agency_id}: skipped {action.archive.key}; later days replay under the previous timetable"
+                )
             continue
         scratch = work_dir / str(agency_id)
         scratch.mkdir(parents=True, exist_ok=True)

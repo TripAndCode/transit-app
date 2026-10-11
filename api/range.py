@@ -28,11 +28,9 @@ _JST = ZoneInfo("Asia/Tokyo")
 def jst_today() -> date:
     """Today's date in Asia/Tokyo.
 
-    Every agg_*/analyze query is bucketed against the JST civil calendar
-    (api/main.py pins the DB session to the same zone). Using the
-    server's local date here caused a real ~20%-of-rows mis-bucketing bug
-    in analyze() before (UTC-vs-JST) - this avoids the same class of bug
-    for the request-side default date-range window.
+    Requests and aggregates both bucket on the JST civil day (api/main.py
+    pins the DB session to the same zone), so the default date-range window
+    must be derived from that calendar too, never the server's local date.
     """
     return datetime.now(_JST).date()
 
@@ -248,8 +246,8 @@ def clamp_range_ctx(
     a request body, and a conversation's persisted ``filter_ctx`` — because
     a persisted filter is still client input: it was accepted from a client,
     stored verbatim, and can be replayed long after the code that wrote it
-    changed. Hand-copied variants of this logic drifted apart before, each
-    enforcing a different subset of the rules below.
+    changed. Keeping one implementation means every source enforces the same
+    rules below.
 
     Rules, in order:
 

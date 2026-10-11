@@ -29,9 +29,9 @@ case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,
 
 # Force-set, not `${VAR:-default}` fallbacks: this script's whole point is
 # a safe, unattended entry point into the THROWAWAY stack, so an inherited
-# dev-pointing value (e.g. this repo's own tracked `.env`, which sets
-# DATABASE_URL at :5433 and CLICKHOUSE_DATABASE=transit -- the real,
-# read-only dev DBs) must never silently pass through. tests/conftest.py
+# dev-pointing value (e.g. a local `.env` exported by the Makefile, which
+# sets DATABASE_URL and CLICKHOUSE_DATABASE to the real, read-only dev DBs)
+# must never silently pass through. tests/conftest.py
 # backs this up inside pytest -- _redirect_to_test_db() rewrites any
 # non-`_test`-suffixed DATABASE_URL, and _pin_clickhouse_to_test_instance()
 # sets CLICKHOUSE_* outright -- but this script is the boundary for anything
@@ -42,7 +42,7 @@ case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,
 # The host/db-name/user/password stay force-set for that same reason, but
 # the PORT is deliberately read from TEST_PG_PORT/TEST_CH_PORT (falling
 # back to the well-known shared instances on :5544/:8124) rather than also
-# being force-set: those two names are never set by this repo's tracked
+# being force-set: those two names are never set by a local
 # `.env`, so honouring them can't reintroduce the dev-DB leak above, while
 # letting scripts/run_full_ci.sh (or any other caller that started its own
 # isolated, per-invocation containers) point this script at a dedicated

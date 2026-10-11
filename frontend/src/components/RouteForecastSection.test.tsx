@@ -117,6 +117,16 @@ describe("RouteForecastSection", () => {
     expect(screen.queryByText("Day × time of day (all routes)")).toBeNull();
   });
 
+  it("flips the full-grid toggle to a hide label with aria-expanded once the grid is open", () => {
+    renderSection(overview(), "100");
+    const toggle = screen.getByRole("button", { name: "Show day × hour detail" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    const open = screen.getByRole("button", { name: "Hide day × hour detail" });
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("fc-detail-fullgrid")).toBeInTheDocument();
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
@@ -221,10 +231,29 @@ describe("RouteForecastSection", () => {
 
   it("opens the by-day detail modal with stats + disclaimer", () => {
     renderSection(overview(), "100");
-    fireEvent.click(screen.getByTestId("fc-card-dow"));
+    fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
+  });
+
+  it("opens a summary card from an explicit Expand button, once, and leaves the card itself non-interactive", () => {
+    renderSection(overview(), "100");
+    const card = screen.getByTestId("fc-card-dow");
+    // A role=button card would make its bar grid presentational for assistive tech.
+    expect(card).not.toHaveAttribute("role");
+    expect(card).not.toHaveAttribute("tabindex");
+    const expand = within(card).getByRole("button", { name: /^Expand By day$/ });
+    fireEvent.click(expand);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("does not open the modal when Enter or Space is pressed on a bar inside the card", () => {
+    renderSection(overview(), "100");
+    const bar = screen.getAllByTestId("dow-bar")[0];
+    fireEvent.keyDown(bar, { key: "Enter" });
+    fireEvent.keyDown(bar, { key: " " });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows visible amber badge on low-confidence heatmap cells", () => {
@@ -288,7 +317,7 @@ describe("RouteForecastSection", () => {
   it("is one tab stop per grid, with the arrow keys moving inside it", () => {
     renderSection(overview(), "100");
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
-    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length > 24)!;
+    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length === 168)!;
     const cells = [...grid.querySelectorAll('[role="gridcell"]')];
 
     // 7x24 cells, exactly one of them reachable by Tab.

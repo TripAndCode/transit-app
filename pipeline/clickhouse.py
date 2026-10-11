@@ -250,10 +250,12 @@ def recent_file_name_exists(
 
 
 def max_captured_at(client, agency_id: int) -> datetime | None:
-    """Absolute latest `captured_at` for the agency, today included.
+    """Latest `captured_at` for the agency in `updates` (closed days only).
 
-    For "is this feed still alive at all" checks (e.g. `/delays/live`'s
-    freshness header). For "what's the latest COMPLETED day" checks, use
+    `updates` holds only closed JST days; the current day lives in
+    `updates_live`, so this never reflects today and is not a feed-liveness
+    probe (the async twin in `api.clickhouse` takes a `table` argument for
+    that). For "what's the latest COMPLETED day" checks, use
     `max_captured_at_before` instead — do not add a same-day exclusion here,
     it would silently change this function's meaning for existing callers.
 

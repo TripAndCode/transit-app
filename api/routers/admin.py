@@ -309,8 +309,12 @@ async def bulk_patch_users(
             args.append(patch.role)
             set_clauses.append(f"role = ${len(args)}")
         if patch.suspended is not None:
-            args.append(datetime.now(timezone.utc) if patch.suspended else None)
-            set_clauses.append(f"suspended_at = ${len(args)}")
+            # suspended_at records when the suspension began, so an id that is
+            # already suspended keeps its original stamp.
+            args.append(patch.suspended)
+            set_clauses.append(
+                f"suspended_at = CASE WHEN ${len(args)}::bool THEN COALESCE(suspended_at, now()) ELSE NULL END"
+            )
         if patch.llm_approved is not None:
             args.append(patch.llm_approved)
             set_clauses.append(f"llm_approved = ${len(args)}")
@@ -466,9 +470,13 @@ async def patch_user(
             raise HTTPException(400, "would leave no admins")
 
         await conn.execute(
-            "UPDATE users SET role=$1, suspended_at=$2, llm_approved=$3, updated_at=now() WHERE user_id=$4",
+            # suspended_at records when the suspension began: keep it while the
+            # user stays suspended, so only a transition changes it.
+            "UPDATE users SET role=$1,"
+            " suspended_at = CASE WHEN $2::bool THEN COALESCE(suspended_at, now()) ELSE NULL END,"
+            " llm_approved=$3, updated_at=now() WHERE user_id=$4",
             new_role,
-            datetime.now(timezone.utc) if new_suspended else None,
+            new_suspended,
             new_llm_approved,
             uid,
         )
@@ -591,7 +599,7 @@ async def list_user_sessions(
 ) -> list[SessionOut]:
     rows = await conn.fetch(
         "SELECT sid_hash, created_at, last_seen_at, expires_at, user_agent, ip::text AS ip "
-        "FROM sessions WHERE user_id=$1 ORDER BY created_at DESC",
+        "FROM sessions WHERE user_id=$1 AND expires_at > now() ORDER BY created_at DESC",
         uid,
     )
     return [

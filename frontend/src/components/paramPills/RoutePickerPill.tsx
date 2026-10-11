@@ -106,7 +106,7 @@ export function RoutePickerPill({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={label}
+        aria-label={value ? t("common.label_value", { label, value: display }) : label}
       >
         <span className="rp-glyph" aria-hidden>
           <SearchIcon />

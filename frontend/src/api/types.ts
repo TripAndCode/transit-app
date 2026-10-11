@@ -35,8 +35,9 @@ export type RouteSummaryResponse = {
   latest_captured_at: string | null;
   date: string | null;
   routes: RouteSummary[];
-  /** Feed-health for the latest analyzed date: raw observations and how many
-   * were implausible (frozen/stale-feed delay spikes) and clamped out. */
+  /** Feed-health summed over the 7 calendar days ending at the latest analyzed
+   * date (not a single day): raw observations and how many were implausible
+   * (frozen/stale-feed delay spikes) and clamped out. */
   raw_samples: number;
   clamp_count: number;
 };

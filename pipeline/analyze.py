@@ -1,9 +1,13 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
-Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's agg_* tables and rewrites them from freshly computed
-SELECTs in one transaction, so re-running is idempotent and a crash
-mid-run rolls back to the prior snapshot.
+Called by `gtfs_pipeline.py analyze` after ingestion. Each run rebuilds
+incrementally: a ledger of per-date source-row counts and a static-schedule
+fingerprint decide which dates changed, and only those dates' rows are purged
+and recomputed in the date-keyed tables. Whole-history tables are rebuilt as a
+unit, or skipped together when nothing changed. Everything happens in one
+transaction, so re-running is idempotent and a crash mid-run rolls back to the
+prior snapshot. The ledger's blind spot (see `_static_fingerprint`) is
+recovered only by a deliberate full rebuild (`analyze --full`).
 
 Aggregation tables produced:
 - agg_route_stats      — overall delay stats per route/service_type
@@ -99,7 +103,7 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 1
+ANALYZE_LOGIC_VERSION = 2
 
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
@@ -744,10 +748,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
 
 def _analyze_locked(agency_id: int, conn, ch_client) -> None:
-    """Wipes this agency's agg_* rows, then INSERTs the freshly
-    computed set, all in one transaction. A crash mid-run rolls back to
-    the prior snapshot so the agency is never observed empty. Re-running
-    is idempotent — same inputs produce the same final state.
+    """Purges and rebuilds this agency's agg_* rows for the dates the ledger
+    marks as changed (everything, on a full rebuild), skipping whole-history
+    tables when nothing changed, all in one transaction. A crash mid-run rolls
+    back to the prior snapshot so the agency is never observed empty.
+    Re-running is idempotent — same inputs produce the same final state.
 
     *ch_client* is the ClickHouse client used to fetch the deduped fact
     slice (the `updates` fact table now lives in ClickHouse); every
@@ -993,10 +998,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # row lacking a scheduled time would otherwise yield a NULL hour and abort
         # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
         # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
-        # notation, e.g. "25:30:00") is rejected at ingest time (see
-        # pipeline/strategies/_time.py) and never reaches `_analyze_alltime`, so
-        # a late-night continuation trip is absent from this aggregate rather
-        # than folded into the early-morning bucket.
+        # notation, e.g. "25:30:00") cannot be a same-day `scheduled_time`, so such a
+        # row reaches `_analyze_alltime` with a NULL `scheduled_time` (static_join
+        # keeps it; only the aomori_regex strategy skips it) and is excluded by the
+        # filter below. A late-night continuation trip is therefore absent from this
+        # aggregate rather than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
                 SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
@@ -1421,12 +1427,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # unlike `updates.scheduled_time` (normalized at ingest time by
             # pipeline.strategies._time.normalize_departure_time and capped
             # to same-day hours), static_stop_times stores it completely
-            # unvalidated, so this filters to the strict numeric "H+:MM:SS"
-            # shape before splitting on ':' and summing to seconds-of-day
+            # unvalidated, so it is parsed with the shared hms_to_sec_sql
             # (deliberately NOT capped at 24h -- GTFS's
             # post-midnight-continuation hours like "25:30:00" are valid
-            # schedule data and must not raise or misparse; only a
-            # non-numeric/malformed shape is excluded).
+            # schedule data and must not raise or misparse; a malformed shape
+            # parses to NULL and is excluded, exactly as in every other reader
+            # of static times).
             hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
             sql = f"""
                 WITH route_map AS (
@@ -1451,21 +1457,19 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ),
                 scheduled_departures AS (
                     SELECT twr.route_code, sst.stop_id,
-                        (split_part(sst.departure_time, ':', 1))::int * 3600
-                      + (split_part(sst.departure_time, ':', 2))::int * 60
-                      + (split_part(sst.departure_time, ':', 3))::int AS dep_sec
+                        {hms_to_sec_sql("sst.departure_time")} AS dep_sec
                     FROM trips_with_route twr
                     JOIN dominant_service ds
                       ON ds.route_code = twr.route_code AND ds.service_id = twr.service_id
                     JOIN static_stop_times sst
                       ON sst.agency_id = %(agency_id)s AND sst.trip_id = twr.trip_id
-                    WHERE sst.departure_time ~ '^[0-9]+:[0-5][0-9]:[0-5][0-9]$'
                 ),
                 gaps AS (
                     SELECT route_code,
                            dep_sec - LAG(dep_sec) OVER (PARTITION BY route_code, stop_id ORDER BY dep_sec)
                                AS headway_sec
                     FROM scheduled_departures
+                    WHERE dep_sec IS NOT NULL
                 ),
                 medians AS (
                     SELECT route_code,

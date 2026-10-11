@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
+import { JST_TZ } from "../api/scope";
 import { isToday } from "./threadDateBuckets";
 
 /** Locale-neutral separator for joining short filter/context fragments
@@ -62,9 +63,14 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
 }
 
 /** When a feed report arrived: its time alone when that was today (JST),
- *  otherwise its date and time. */
+ *  otherwise its date and time. The clock is read in JST too, the zone that
+ *  decides which day "today" is, so a time never belongs to a different
+ *  calendar day than the one it is judged against. */
 export function formatReportTime(iso: string): string {
-  return isToday(iso) ? formatDateTime(iso, { timeStyle: "short" }) : formatDateTime(iso);
+  return formatDateTime(
+    iso,
+    isToday(iso) ? { timeStyle: "short", timeZone: JST_TZ } : { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ },
+  );
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the

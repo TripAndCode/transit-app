@@ -13,7 +13,7 @@
  * consequence, not a bug. The section's route picker is the way back to all
  * routes, as is clearing the route chip in the shared Filters bar.
  */
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useScope } from "../api/scope";
@@ -27,6 +27,7 @@ import { BandGrid, Legend } from "./charts/DowBandGrid";
 import { Card } from "./ui/Card";
 import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
+import { useRovingCells } from "../hooks/useRovingCells";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, formatMinutes } from "../utils/format";
@@ -138,75 +139,6 @@ function RankedRoutes({
       ))}
     </div>
   );
-}
-
-/**
- * Roving focus over a grid of read-only value cells: the widget is one tab
- * stop and the arrow keys move inside it.
- *
- * A tab stop per cell is the obvious way to make a heatmap keyboard-reachable
- * and the wrong one -- a day x hour grid then sits 168 Tab presses deep in
- * front of everything after it on the page, which is its own barrier. This is
- * the composite-widget pattern ARIA has for that.
- *
- * `slots` is row-major and may hold `null` where a position renders nothing
- * focusable; navigation skips those rather than landing on them.
- */
-function useRovingCells(slots: (string | null)[], columns: number) {
-  const firstFilled = slots.findIndex((slot) => slot !== null);
-  const [requested, setRequested] = useState(firstFilled);
-  const containerRef = useRef<HTMLDivElement>(null);
-  // Derived, not synchronised: the data can shrink under a held index, and an
-  // effect correcting it afterwards would render one frame with no tab stop.
-  const active = slots[requested] != null ? requested : firstFilled;
-
-  function step(from: number, delta: number): number | null {
-    if (Math.abs(delta) === 1) {
-      const row = Math.floor(from / columns);
-      for (let i = from + delta; i >= 0 && i < slots.length && Math.floor(i / columns) === row; i += delta) {
-        if (slots[i] !== null) return i;
-      }
-      return null;
-    }
-    const target = from + delta;
-    if (target < 0 || target >= slots.length || slots[target] === null) return null;
-    return target;
-  }
-
-  function edgeOfRow(from: number, side: "first" | "last"): number | null {
-    const row = Math.floor(from / columns);
-    const indices = [];
-    for (let i = row * columns; i < Math.min((row + 1) * columns, slots.length); i++) {
-      if (slots[i] !== null) indices.push(i);
-    }
-    return (side === "first" ? indices[0] : indices.at(-1)) ?? null;
-  }
-
-  function onKeyDown(event: ReactKeyboardEvent) {
-    const next =
-      event.key === "ArrowRight"
-        ? step(active, 1)
-        : event.key === "ArrowLeft"
-          ? step(active, -1)
-          : event.key === "ArrowDown"
-            ? step(active, columns)
-            : event.key === "ArrowUp"
-              ? step(active, -columns)
-              : event.key === "Home"
-                ? edgeOfRow(active, "first")
-                : event.key === "End"
-                  ? edgeOfRow(active, "last")
-                  : null;
-    if (next === null) return;
-    event.preventDefault();
-    setRequested(next);
-    // Focused straight from the handler rather than from an effect on
-    // `active`: an effect would also fire on first render and pull focus into
-    // the grid before anyone asked for it.
-    containerRef.current?.querySelector<HTMLElement>(`[data-cell="${next}"]`)?.focus();
-  }
-
-  return { containerRef, activeSlot: slots[active], onKeyDown, onCellFocus: setRequested };
 }
 
 function HeatmapGrid({
@@ -424,23 +356,38 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
   );
 }
 
-/** Titled surface built on the shared `Card`; `onOpen` makes the whole card a
- *  keyboard-operable control (see `clickable`), matching the Overview card
- *  pattern this was migrated from. */
-function SectionCard({ title, sublabel, action, testid, onOpen, children }: {
+/** Titled surface built on the shared `Card`; `onOpen` adds an explicit Expand
+ *  button (keyboard and assistive-tech entry point) and makes a pointer click
+ *  anywhere on the card open it too. */
+function SectionCard({ title, sublabel, testid, onOpen, children }: {
   title: string;
   sublabel: string;
-  action?: React.ReactNode;
   testid: string;
   onOpen?: () => void;
   children: React.ReactNode;
 }) {
-  const activation = onOpen ? clickable(onOpen) : {};
+  const { t } = useTranslation();
+  // The card is not itself a button: a button's children are presentational,
+  // which would hide the focusable grid inside it. Keyboard and assistive-tech
+  // users open it from the explicit Expand button; a pointer click anywhere on
+  // the card still works as a convenience.
   return (
-    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} {...activation}>
+    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} onClick={onOpen}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
-        {action}
+        {onOpen && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            aria-label={t("forecast.expand_named", { title })}
+            style={{ appearance: "none", background: "transparent", border: "none", padding: 0, font: "inherit", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", cursor: "pointer" }}
+          >
+            {t("forecast.expand")} ⤢
+          </button>
+        )}
       </div>
       <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
@@ -655,7 +602,7 @@ function AgencyLanding({
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid ariaLabel={gridTitle} grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
         {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
       </SectionCard>
 
@@ -760,15 +707,15 @@ function RouteDetail({
       )}
 
       <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
       </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-dow" onOpen={() => setView("dow")}>
           <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
-        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-hr" onOpen={() => setView("hr")}>
           <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
         </SectionCard>
       </div>
@@ -776,9 +723,10 @@ function RouteDetail({
       <button
         type="button"
         onClick={onToggleGrid}
+        aria-expanded={showGrid}
         style={{ marginTop: 16, background: "none", border: "1px solid var(--border-soft)", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}
       >
-        {t("forecast.detail_show_grid")}
+        {t(showGrid ? "forecast.detail_hide_grid" : "forecast.detail_show_grid")}
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">

@@ -14,8 +14,8 @@ export function MessageList({
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
   /** Forwarded to each message's evidence card next-step chips (see
-   *  RichResult/nextStepChips). Omitted in read-only/historical contexts
-   *  that don't wire up chip actions (e.g. the full-log disclosure). */
+   *  RichResult/nextStepChips). When omitted the chips still render, but
+   *  every action except the PNG export is a no-op. */
   onChip?: (action: NextStepAction) => void;
 }) {
   return (

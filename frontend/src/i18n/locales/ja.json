@@ -179,6 +179,7 @@
     "band_night": "夜",
     "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
+    "detail_hide_grid": "曜日×時間帯の詳細を閉じる",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
     "no_data": "この路線の計測記録がまだありません。",
@@ -197,6 +198,7 @@
     "dow_sat": "土",
     "dow_sun": "日",
     "expand": "詳しく",
+    "expand_named": "{{title}}を拡大",
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",
@@ -396,6 +398,7 @@
     "unit_sec_signed": "{{sign}}{{value}}秒",
     "range_separator": "〜",
     "list_separator": "・",
+    "label_value": "{{label}}：{{value}}",
     "language_aria": "言語",
     "language_switch_error": "言語を切り替えられませんでした。接続を確認して再度お試しください。",
     "theme_aria": "外観",
@@ -470,7 +473,9 @@
       "input_label": "APIキー",
       "remove": "削除",
       "rejected": "キーが拒否されました。確認して再度お試しください。",
-      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
+      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。",
+      "save_error": "キーを保存できませんでした。接続を確認して再度お試しください。",
+      "status_unavailable": "キーの状態を読み込めませんでした。"
     },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
@@ -526,6 +531,7 @@
     "this_device": "この端末",
     "session_sign_out": "サインアウト",
     "session_sign_out_aria": "このセッションをサインアウト",
+    "sessions_load_error": "セッションを読み込めませんでした。",
     "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
@@ -743,7 +749,8 @@
         "sql": "確定（集計から直接算出）",
         "llm": "生成AIによる要約（既存の取得結果のみを参照）"
       },
-      "sample_count": "観測 {{count}}件"
+      "row_count_one": "{{count}}行",
+      "row_count_other": "{{count}}行"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -1023,6 +1030,8 @@
       "delay_label": "遅延:",
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
+      "hour_filter_aria": "{{hour}}時で絞り込む",
+      "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
       "ramp_max": "{{min}}分以上",
@@ -1060,6 +1069,13 @@
       "brush_aria": "日次チャートの期間選択。矢印キーでカーソル移動、Shift+矢印キーで範囲を拡張、Enterで適用します。",
       "brush_range": "{{from}} 〜 {{to}}",
       "severe_band_label": "重大 ({{min}}分以上)",
+      "svg_aria_week": "週次平均遅延チャート",
+      "svg_aria_month": "月次平均遅延チャート",
+      "worst_day_label_week": "最も遅い週",
+      "worst_day_label_month": "最も遅い月",
+      "bucket_date": "{{date}}",
+      "bucket_date_week": "{{date}}の週",
+      "bucket_date_month": "{{date}}からの月",
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
@@ -1375,6 +1391,7 @@
       "col_name": "事業者名",
       "status_deleted": "削除済",
       "action_edit": "編集",
+      "action_edit_disabled_hint": "編集するには、先に事業者を復元してください。",
       "form_title_add": "事業者を追加",
       "form_title_edit": "事業者を編集",
       "form_name": "事業者名",
@@ -1492,7 +1509,8 @@
       },
       "export": {
         "csv": "CSVエクスポート",
-        "loading": "エクスポート中…"
+        "loading": "エクスポート中…",
+        "truncated": "エクスポートには新しい順に{{count}}件のみが含まれ、それより古い該当分は含まれていません。期間を絞って再度エクスポートしてください。"
       }
     },
     "flags": {
@@ -1607,6 +1625,7 @@
       "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
       "alerts_title": "アラート",
       "alerts_none": "対応が必要な項目はありません。",
+      "section_unavailable": "このセクションを読み込めませんでした。",
       "alert_open": "開く",
       "alert": {
         "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",

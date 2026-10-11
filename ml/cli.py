@@ -12,10 +12,13 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from clickhouse_connect.driver.client import Client
+
 from ml import sync
 from ml.adoption import judge
-from ml.backtest import evaluate_agency, results_from_json, results_to_json
-from ml.data import agencies_with_data, fetch_cells
+from ml.backtest import DataSpan, evaluate_agency, lookback_days, needs_older_cells, results_from_json, results_to_json
+from ml.cells import Cell
+from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from ml.model_result import result_from_json, result_to_json
 from ml.r2 import upload_dir, upload_file
 from ml.report import render
@@ -50,6 +53,7 @@ def _sync(args: argparse.Namespace) -> int:
     if args.dry_run:
         sys.stdout.writelines(f"{action}\n" for action in actions)
         return 0
+    notices: list[str] = []
     failures = sync.execute(
         actions,
         bucket=bucket,
@@ -60,18 +64,39 @@ def _sync(args: argparse.Namespace) -> int:
         today_jst=_today_jst(),
         run=_run,
         python=sys.executable,
+        skip_static=frozenset(args.skip_static),
+        notices=notices,
     )
-    sys.stderr.writelines(f"{failure}\n" for failure in failures)
+    sys.stderr.writelines(f"{line}\n" for line in (*notices, *failures))
     return 1 if failures else 0
+
+
+def _recent_cells(client: Client, agency_id: int, first: date, last: date, origins: int, window: int) -> list[Cell]:
+    """The cells the latest origins score from, widening the lookback while
+    gaps in the data push those origins' windows back past what was fetched."""
+    lookback = lookback_days(origins, window)
+    while True:
+        since = last - timedelta(days=lookback)
+        cells = fetch_cells(client, agency_id, since=since)
+        if since <= first or not needs_older_cells(cells, since, origins, window):
+            return cells
+        lookback *= 2
 
 
 def _backtest(args: argparse.Namespace) -> int:
     client = get_client()
     results = []
     for agency_id in args.agency or agencies_with_data(client):
-        cells = fetch_cells(client, agency_id)
+        edges = date_span(client, agency_id)
+        if edges is None:
+            continue
+        first, last = edges
+        cells = _recent_cells(client, agency_id, first, last, args.origins, args.window)
         if cells:
-            results.append(evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window))
+            span = DataSpan(first, last, count_days(client, agency_id))
+            results.append(
+                evaluate_agency(agency_id, cells, origin_count=args.origins, window_days=args.window, span=span)
+            )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(results_to_json(results))
     return 0
@@ -211,6 +236,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_sync.add_argument("--state", type=Path, required=True)
     p_sync.add_argument("--work", type=Path, required=True)
     p_sync.add_argument("--dry-run", action="store_true")
+    p_sync.add_argument(
+        "--skip-static",
+        metavar="KEY",
+        action="append",
+        default=[],
+        help="give up on this static archive (its bucket key); later days run under the previous timetable",
+    )
     p_sync.set_defaults(handler=_sync)
 
     p_backtest = sub.add_parser("backtest", help="Score the baselines with rolling origins")

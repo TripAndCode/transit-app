@@ -6,6 +6,8 @@ import type { DowFilter } from "../api/scope";
 import { dowValueLabel } from "../utils/filterValueLabels";
 import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
+import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { pill, groupLabel } from "./pillStyles";
@@ -30,12 +32,13 @@ type Props = {
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  anchorDay: string,
 ): string {
   const parts: string[] = [];
 
   // Date range — defaults to "last 30 days" here (unlike ThreadSidebar,
   // which shows nothing for a conversation with no range set).
-  parts.push(rangeLabel(fc, t) ?? t("filters.range.last_30d"));
+  parts.push(rangeLabel(fc, t, anchorDay) ?? t("filters.range.last_30d"));
 
   // Day-of-week
   if (fc.dow === "weekday" || fc.dow === "weekend") {
@@ -57,11 +60,12 @@ function filterSummary(
 function routesSummary(
   fc: FilterCtx,
   t: (key: string) => string,
+  formatRoute: (code: string) => string,
 ): string {
   if (!fc.routes || fc.routes.length === 0) {
     return t("ask.filter_bar.no_routes_selected");
   }
-  return fc.routes.join(", ");
+  return fc.routes.map(formatRoute).join(t("common.list_separator"));
 }
 
 // ─── style helpers ────────────────────────────────────────────────────────────
@@ -106,6 +110,7 @@ const dateInputStyle: CSSProperties = {
 export function FilterContextBar({ value, onChange, pending }: Props) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const routeNames = useRouteNames(useAgencyId());
 
   // Draft uses explicit date defaults when value has no dates
   const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
@@ -148,8 +153,8 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
     setEditing(false);
   }
 
-  const summary = filterSummary(value, t);
-  const routes = routesSummary(value, t);
+  const summary = filterSummary(value, t, defaultTo);
+  const routes = routesSummary(value, t, routeNames.format);
 
   // ── collapsed pill row ────────────────────────────────────────────────────
   if (!editing) {
@@ -189,6 +194,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           <input
             type="date"
             lang={i18n.language}
+            aria-label={t("scope.control.from")}
             value={draft.from_date ?? defaultFrom}
             max={draft.to_date ?? defaultTo}
             onChange={(e) => setDraft((d) => ({ ...d, from_date: e.target.value }))}
@@ -199,6 +205,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           <input
             type="date"
             lang={i18n.language}
+            aria-label={t("scope.control.to")}
             value={draft.to_date ?? defaultTo}
             min={draft.from_date ?? defaultFrom}
             onChange={(e) => setDraft((d) => ({ ...d, to_date: e.target.value }))}
@@ -218,6 +225,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, dow: o.value }))}
               disabled={pending}
+              aria-pressed={(draft.dow ?? "all") === o.value}
               style={pill((draft.dow ?? "all") === o.value, "sm")}
             >
               {o.label}
@@ -236,6 +244,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, time_band: o.value }))}
               disabled={pending}
+              aria-pressed={(draft.time_band ?? "all") === o.value}
               style={pill((draft.time_band ?? "all") === o.value, "sm")}
             >
               {o.label}

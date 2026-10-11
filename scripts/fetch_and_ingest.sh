@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fetch archives from Oracle Cloud server then ingest into Postgres.
+# Fetch archives from Oracle Cloud server then ingest them (raw RT updates go
+# to ClickHouse; timetable and aggregate data to Postgres).
 # Local-dev replay path: requires SSH access to the Oracle VM. Production
 # history comes from the live path instead (collector pushes into
 # updates_live, promoted daily by the cron); the same archives reach R2/S3 for
@@ -66,8 +67,9 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
         fi
     done
 else
-    # ── legacy single-agency path (unchanged) ────────────────────────────
-    # 2. Ingest new RT archives (ON CONFLICT DO NOTHING handles already-ingested files)
+    # ── legacy single-agency path ──────────────────────────────────
+    # 2. Ingest new RT archives (ClickHouse has no ON CONFLICT: ingest skips files whose
+    #    names are already stored for the agency, which keeps reruns idempotent)
     echo "==> Ingesting RT archives for agency $AGENCY_ID"
     poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest "$SCRIPT_DIR/../raw_archives" --agency-id "$AGENCY_ID"
 

@@ -30,7 +30,8 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 - View the report: `ssh -L 8000:127.0.0.1:8000 root@<vps> 'cd /var/lib/transit-ml/reports/latest && python3 -m http.server 8000 --bind 127.0.0.1'`, then open http://localhost:8000.
 - A failed sync leaves that agency's later days for the next run. The done-set holds only archives whose rows are all in, so a realtime archive stays out of it until the JST day after its UTC day has ended.
 - Sync runs ingest with `--strict`, so an ingest that skipped a file fails its action: the archive stays out of the done-set and the next run retries the skipped files. A file that can never ingest, such as a corrupt member, keeps failing there; once its log line is read, add the archive's key to the done-set by hand to move that agency past it.
-- To replay from scratch: stop the timers, remove the stack together with its volumes (`docker compose -f deploy/vps/compose.yml down --volumes`), delete the done-set, and run the bootstrap again.
+- A static archive that cannot load (an error page stored as a zip, or a GTFS file the loader rejects) stops that agency's timeline on every run. Once the failure is read, pass its bucket key as `python -m ml.cli sync --skip-static <key>` to give up on that timetable: it is marked done without being fetched, the skip is printed, and the agency's later days then replay under the previous timetable. Nothing is skipped without that flag, so the choice is always an operator's.
+- To replay from scratch: stop the timers, remove the stack (`docker compose -f deploy/vps/compose.yml --env-file /etc/transit-ml/env down`), then remove its volumes by name (`docker volume rm transit-ml_ml_pg transit-ml_ml_ch`; the shared dev-DB hook blocks `down --volumes` for every compose project), delete the done-set, and run the bootstrap again.
 
 ## How the data grows
 
@@ -44,7 +45,7 @@ R2 keeps everything, so old history can leave the replica whenever the disk need
 
 ## Baselines
 
-B0 is the app's "expected delay": the same route×weekday×hour, pooled by runs, over the 28 days before the forecast day. B1 is the latest such cell, and B2 is the route's 28-day mean. The report scores each on T+1..T+7 from data through T−1. It measures skill against B0 only where both predict, and shows coverage beside every error.
+B0 is a seasonal-naive baseline: the same route×weekday×hour, pooled by runs, over the 28 days before the forecast day. It is not the app's expected delay (`agg_route_hour_dow`), which pools the whole history by stop observation, takes each stop's own scheduled hour and drops rows without a service type, so "skill vs B0" does not measure improvement over what the app shows. B1 is the latest such cell, and B2 is the route's 28-day mean. The report scores each on T+1..T+7 from data through T−1. It measures skill against B0 only where both predict, and shows coverage beside every error.
 
 ## Models
 

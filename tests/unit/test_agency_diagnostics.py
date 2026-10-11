@@ -64,16 +64,11 @@ def test_weights_sql_matches_the_weights_table():
     assert "route_code" in sql and "weight" in sql
 
 
-def test_weight_upserts_target_the_two_partial_unique_indexes():
+def test_default_weight_upsert_targets_the_null_route_partial_index():
     # ridership_weights has no table-level unique constraint: the default row
-    # and the per-route rows are each covered by their own partial index, so
-    # ON CONFLICT has to name the matching predicate or the upsert errors.
-    assert "ON CONFLICT (agency_id, route_code) WHERE route_code IS NOT NULL" in ad.UPSERT_ROUTE_WEIGHT_SQL
+    # is covered by its own partial index, so ON CONFLICT has to name the
+    # matching predicate or the upsert errors.
     assert "ON CONFLICT (agency_id) WHERE route_code IS NULL" in ad.UPSERT_DEFAULT_WEIGHT_SQL
-
-
-def test_standard_upsert_targets_the_agency_route_metric_index():
-    assert "ON CONFLICT (agency_id, route_code, metric_type)" in ad.UPSERT_STANDARD_SQL
 
 
 # ── batched editor statements (A10) ─────────────────────────────────────────

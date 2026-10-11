@@ -57,8 +57,8 @@ TREND_SHIFT_MIN_DELTA_MIN = 2.0
 # pairs for an agency's trailing window, or a route's service-type rows can
 # be truncated BEFORE the corresponding _pool_*_by_route sees them, silently
 # corrupting the pooled figure for whichever route lands on the boundary.
-# Real data tops out around ~880 pairs (agency 1); 5000 leaves ~5.7x
-# headroom for both constants -- keep them equal rather than re-introducing
+# 5000 sits well above the qualifying-pair count of any agency, for both
+# constants -- keep them equal rather than re-introducing
 # a soft cap sitting near real utilization on just one of the two. Since
 # there's no live-scan fallback at this ctx shape, a higher limit here costs
 # nothing extra -- the full agg-table scan already happened either way.
@@ -303,7 +303,8 @@ async def _trend_shift_this_week(agency_id, conn, ch, week_ctx, baseline_ctx, ex
         "report_type": "trend",
         "route_code": route_code,
         "reason_text": _summary(
-            "suggest_reason_trend_shift",
+            # delta_min is second-half minus first-half, so a positive shift is a worsening.
+            "suggest_reason_trend_worsened" if delta_min > 0 else "suggest_reason_trend_improved",
             lang=locale,
             route=await _route_name(agency_id, conn, route_code, locale),
             delta_min=f"{delta_min:+.1f}",

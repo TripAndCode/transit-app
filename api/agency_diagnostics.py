@@ -33,17 +33,12 @@ __all__ = [
     "CLAMP_HISTORY_DAYS",
     "CLAMP_HISTORY_SQL",
     "CURRENT_STATIC_VERSION_SQL",
-    "DELETE_DEFAULT_WEIGHT_SQL",
-    "DELETE_ROUTE_WEIGHT_SQL",
-    "DELETE_STANDARD_SQL",
     "METRIC_TYPES",
     "RT_COVERAGE_FIELDS",
     "RT_COVERAGE_SQL",
     "STANDARDS_SQL",
     "STATIC_VERSIONS_SQL",
     "UPSERT_DEFAULT_WEIGHT_SQL",
-    "UPSERT_ROUTE_WEIGHT_SQL",
-    "UPSERT_STANDARD_SQL",
     "WEATHER_STATION_SQL",
     "WEIGHTS_COVERAGE_SQL",
     "WEIGHTS_SQL",
@@ -194,40 +189,12 @@ WEIGHTS_COVERAGE_SQL = """
           WHERE r.agency_id = $1) AS routes_total
 """
 
-UPSERT_STANDARD_SQL = """
-    INSERT INTO route_performance_standards
-        (agency_id, route_code, metric_type, threshold_value, bonus_malus_rate)
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (agency_id, route_code, metric_type) DO UPDATE SET
-        threshold_value  = EXCLUDED.threshold_value,
-        bonus_malus_rate = EXCLUDED.bonus_malus_rate
-"""
-
-DELETE_STANDARD_SQL = """
-    DELETE FROM route_performance_standards
-    WHERE agency_id = $1 AND route_code = $2 AND metric_type = $3
-"""
-
-# ridership_weights has two PARTIAL unique indexes rather than one table
-# constraint, so each upsert has to restate the matching predicate for
-# Postgres to infer the right index.
-UPSERT_ROUTE_WEIGHT_SQL = """
-    INSERT INTO ridership_weights (agency_id, route_code, weight)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (agency_id, route_code) WHERE route_code IS NOT NULL
-    DO UPDATE SET weight = EXCLUDED.weight
-"""
-
 UPSERT_DEFAULT_WEIGHT_SQL = """
     INSERT INTO ridership_weights (agency_id, route_code, weight)
     VALUES ($1, NULL, $2)
     ON CONFLICT (agency_id) WHERE route_code IS NULL
     DO UPDATE SET weight = EXCLUDED.weight
 """
-
-DELETE_ROUTE_WEIGHT_SQL = "DELETE FROM ridership_weights WHERE agency_id = $1 AND route_code = $2"
-
-DELETE_DEFAULT_WEIGHT_SQL = "DELETE FROM ridership_weights WHERE agency_id = $1 AND route_code IS NULL"
 
 # Batched editor statements (patch_standards / patch_weights): one round trip
 # for the whole payload instead of one per row, via unnest($n::type[], ...)
@@ -400,9 +367,10 @@ def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
     """Raise ``ValueError`` for a standards payload the table would reject.
 
     Checked here rather than left to the database so a bad edit is a 422
-    naming the offending field, and so the in-payload duplicate case (which
-    no constraint can see, because the rows are applied one at a time) is
-    caught before any of them is written.
+    naming the offending field, and so the in-payload duplicate case is
+    caught before any row is written: the batched upsert is one INSERT ...
+    ON CONFLICT, which cannot touch the same row twice and would otherwise
+    fail with a CardinalityViolation.
     """
     seen: set[tuple[str, str]] = set()
     for item in items:

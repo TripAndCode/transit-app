@@ -308,7 +308,7 @@ def _ingest_and_analyze_sweep(
         # Pin JST so analyze() buckets `captured_at::date` on the same civil
         # day the read API serves under (api/main + gtfs_pipeline._get_conn
         # both pin JST); the cluster default is UTC, which would mis-bucket
-        # ~20% of rows by date and also desync agg_route_daily from the
+        # rows near the day boundary and also desync agg_route_daily from the
         # JST-based freshness check below. Committed up front (autocommit)
         # so it survives analyze's txn rollback.
         conn.autocommit = True
