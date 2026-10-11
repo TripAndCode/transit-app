@@ -88,13 +88,13 @@ describe("TopBar", () => {
     it("says in one place how far the analysis runs and when the feed last reported", () => {
       renderBar();
       const time = formatDateTime("2026-09-30T11:41:00Z", { timeStyle: "short", timeZone: "Asia/Tokyo" });
-      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · live ${time}` })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · live ${time} JST` })).toBeInTheDocument();
     });
 
     it("dates the last reading when it did not arrive today", () => {
       renderBar("/agencies/9/pulse", "2026-09-28T11:41:00Z");
       const when = formatDateTime("2026-09-28T11:41:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" });
-      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · last reading ${when}` })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · last reading ${when} JST` })).toBeInTheDocument();
     });
 
     it("leaves the live part out before any reading has arrived", () => {
