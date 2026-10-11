@@ -280,8 +280,9 @@ async def compute_delay_timeline(
     """Playback frames for one agency-day. Cached per (agency, day, step, table, routes).
 
     ``routes`` limits the frames to those routes' stop events; empty means the
-    whole agency. A finished service day never changes, so the TTL only bounds
-    how long a still-accumulating day (today) can be served stale.
+    whole agency. The TTL bounds how long a still-accumulating day can be served
+    stale; a day that has ended is read from `updates`, which receives its
+    after-midnight tail only when the following calendar day is promoted.
     """
     ctx = RangeCtx(from_date=day, to_date=day, routes=routes)
     sql, params = build_timeline_ch_sql(ctx, step_minutes, table=table)

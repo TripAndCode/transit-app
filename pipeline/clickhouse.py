@@ -44,12 +44,15 @@ def jst_midnight_utc(day: date) -> datetime:
 
 
 def live_table_for(day: date, *, now: datetime | None = None) -> str:
-    """The table that holds JST *day*'s observations.
+    """The table that holds JST calendar *day*'s observations.
 
     Today and any later day are `updates_live`; every closed day is `updates`.
     A closed day reads `updates` even before promotion has copied it there, so
     a reader asking for yesterday between JST midnight and the first promotion
-    run gets nothing yet.
+    run gets nothing yet. This routes by calendar day, as promotion does: a
+    service day (`pipeline.service_day`) spans two of them, so the newest
+    service day's after-midnight tail is still in `updates_live` and reaches
+    `updates` with the next promotion.
     """
     today = jst_date(now or datetime.now(timezone.utc))
     return LIVE_TABLE if day >= today else UPDATES_TABLE

@@ -10,6 +10,7 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 import psycopg2
 
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.service_day import service_date_ch
 
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
@@ -94,21 +95,17 @@ def build_dedup_ch_sql(
     against a live instance). No current caller combines the two, but the
     distinct alias name means no future one can hit this by accident.
 
-    `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
-    every Postgres connection that ever touched `updates` pins
-    the Asia/Tokyo session time zone (see api/main.py's
-    PG_SESSION_SETTINGS), so `captured_at::date` throughout this codebase has
-    always meant the JST calendar day, not the UTC one. The ClickHouse
-    column is UTC (`DateTime64(0, 'UTC')`); using bare `toDate()` here
-    would silently misbucket every row whose captured_at falls in
-    UTC 15:00-23:59 (JST 00:00-08:59 the next day) — reproducing the
-    exact UTC/JST aggregate-mis-bucketing bug this project already hit
-    once (see the design doc's Risks section). `toDate(value, timezone)`
-    is a real ClickHouse signature — it converts to a calendar date in
-    the given timezone regardless of the column's stored timezone. The
-    `GROUP BY` repeats the full `toDate(...)` expression rather than the
-    `date` alias, to sidestep any ambiguity in how ClickHouse resolves a
-    GROUP BY key that shares a name with a SELECT-list alias.
+    The `date` column is the *service date* (`pipeline.service_day`): the
+    Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
+    before and after midnight is one event of one day. It is never a bare
+    `toDate(captured_at)`: the ClickHouse column is UTC
+    (`DateTime64(0, 'UTC')`), so a UTC day would misbucket every row whose
+    captured_at falls in UTC 15:00-23:59 (JST 00:00-08:59 the next day).
+    `toDate(value, timezone)` converts to a calendar date in the given
+    timezone regardless of the column's stored timezone. The `GROUP BY`
+    repeats the full expression rather than the `date` alias, to sidestep any
+    ambiguity in how ClickHouse resolves a GROUP BY key that shares a name
+    with a SELECT-list alias.
 
     Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
     than a Python-formatted literal, for clickhouse-connect's server-side
@@ -195,13 +192,13 @@ def build_dedup_ch_sql(
     )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
         f"FROM {checked_table(table)} AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )
 
 
@@ -273,7 +270,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     extra = f" AND ({extra_where})" if extra_where else ""
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
         "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
         "FROM updates AS u "
@@ -281,7 +278,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
         "AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence "
         "HAVING count() > 1"
     )
 

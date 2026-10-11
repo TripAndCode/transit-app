@@ -207,6 +207,38 @@ async def test_describe_data_date_range_summary_names_jst_days(conn_with_seed, c
 
 
 @pytest.mark.asyncio
+async def test_describe_data_date_range_names_the_service_day_of_a_post_midnight_capture(
+    conn_with_seed, ch_client, ch_async_client
+):
+    """The last capture is at 00:30 JST on 05-26, still service day 05-25: the
+    summary's last day matches the service-day count beside it, not the
+    calendar date of the timestamp."""
+    from zoneinfo import ZoneInfo
+
+    pool, agency_id = conn_with_seed
+    jst = ZoneInfo("Asia/Tokyo")
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, '1021', 1, $4, '08:00'::time, '平日', 60)",
+            [
+                (agency_id, "pb_first", "T_first", datetime(2026, 5, 1, 8, 0, 0, tzinfo=jst)),
+                (agency_id, "pb_late", "T_late", datetime(2026, 5, 26, 0, 30, 0, tzinfo=jst)),
+            ],
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert "2026-05-25" in result.summary
+    assert "2026-05-26" not in result.summary
+
+
+@pytest.mark.asyncio
 async def test_describe_data_date_range(conn_with_observations_ch):
     pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:

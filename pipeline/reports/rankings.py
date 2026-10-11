@@ -15,6 +15,7 @@ from pipeline.histogram import (
     percentile_from_hist,
 )
 from pipeline.reports.filters import _MIN, _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter, _round2
+from pipeline.service_day import service_date_ch
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
@@ -734,11 +735,11 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
         FROM (
             SELECT u.route_code AS route_code,
                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                   toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo')) AS dow
+                   toDayOfWeek({service_date_ch("u.captured_at")}) AS dow
             FROM updates AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where_frag}
-            GROUP BY u.route_code, u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence,
-                     toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo'))
+            GROUP BY u.route_code, u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence,
+                     toDayOfWeek({service_date_ch("u.captured_at")})
         )
         GROUP BY route_code
         HAVING wd_n > 10 AND we_n > 10

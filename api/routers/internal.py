@@ -306,12 +306,11 @@ def _ingest_and_analyze_sweep(
     try:
         ch_client = get_client()
         conn = psycopg2.connect(db_url)
-        # Pin JST so analyze() buckets `captured_at::date` on the same civil
-        # day the read API serves under (api/main + gtfs_pipeline._get_conn
-        # both pin JST); the cluster default is UTC, which would mis-bucket
-        # rows near the day boundary and also desync agg_route_daily from the
-        # JST-based freshness check below. Committed up front (autocommit)
-        # so it survives analyze's txn rollback.
+        # Pin JST so any Postgres-side date cast agrees with the civil day the
+        # read API serves under (api/main + gtfs_pipeline._get_conn both pin
+        # JST); the cluster default is UTC. The aggregates are filed by service
+        # date in ClickHouse (pipeline.service_day), not by this setting.
+        # Committed up front (autocommit) so it survives analyze's txn rollback.
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SET TIME ZONE 'Asia/Tokyo'")

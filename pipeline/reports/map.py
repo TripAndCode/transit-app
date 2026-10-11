@@ -16,6 +16,7 @@ from typing import Any
 from api.clickhouse import max_captured_at
 from api.range import RangeCtx, build_updates_filter_ch
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+from pipeline.service_day import service_date_ch
 
 
 async def route_exists(conn, agency_id: int, route_code: str) -> bool:
@@ -67,7 +68,7 @@ def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
           AND u.dep_delay IS NOT NULL
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
           AND {ch_where_frag}
-        GROUP BY u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence
+        GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
     """
 
 
@@ -85,8 +86,8 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
           {trip_filter_sql}
           AND {ch_where_frag}
-        GROUP BY u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence
-        ORDER BY u.trip_id, u.stop_sequence, toDate(u.captured_at, 'Asia/Tokyo')
+        GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
+        ORDER BY u.trip_id, u.stop_sequence, {service_date_ch("u.captured_at")}
     """
 
 

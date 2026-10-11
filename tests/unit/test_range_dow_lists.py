@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from api.range import RangeCtx, canonical_dow, clamp_range_ctx, dow_clause, dow_clause_ch, dow_isodays
 from pipeline.reports.overview import _dow_matches
+from pipeline.service_day import service_date_ch
 
 
 @pytest.mark.parametrize(
@@ -48,7 +49,7 @@ def test_sql_and_clickhouse_clauses_honour_a_weekday_list():
     assert frag == "EXTRACT(ISODOW FROM date) IN (1, 3)"
     assert (params, n) == ([], 3)
     ch_frag, ch_params = dow_clause_ch(_ctx("mon,wed"))
-    assert ch_frag == "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo')) IN (1, 3)"
+    assert ch_frag == f"toDayOfWeek({service_date_ch()}) IN (1, 3)"
     assert ch_params == {}
 
 
