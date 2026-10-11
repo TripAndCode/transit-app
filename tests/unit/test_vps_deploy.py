@@ -198,3 +198,17 @@ def test_the_weekly_job_scores_the_models_before_rendering_the_report():
     )
     assert backtest < train_eval < report
     assert "--models" in exec_start
+
+
+def test_the_weekly_job_publishes_the_live_model_after_scoring_it():
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
+    assert exec_start.index("-m ml.cli train-eval") < exec_start.index("-m ml.cli train ")
+    assert "--backtest /var/lib/transit-ml/backtests/models.json" in exec_start
+
+
+def test_the_daily_predict_job_runs_after_sync_and_publishes_to_the_model_bucket():
+    calendar = re.search(r"^OnCalendar=(.+)$", _unit("transit-ml-predict.timer"), re.MULTILINE)[1]
+    assert calendar.endswith("Asia/Tokyo")
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-predict.service"), re.MULTILINE)[1]
+    assert "-m ml.cli predict" in exec_start
+    assert "deploy/vps/run-with-ping.sh PREDICT" in exec_start
