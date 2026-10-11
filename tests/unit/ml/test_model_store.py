@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 from tests.unit.ml.ml_group import require
@@ -7,7 +8,7 @@ np = require("numpy")
 require("lightgbm")
 
 from ml.features import build_frame, route_ids, with_route_ids  # noqa: E402
-from ml.model_store import load_model_set, save_model_set  # noqa: E402
+from ml.model_store import load_model_set, load_routes, save_model_set  # noqa: E402
 from ml.models import ModelParams, fit_calibrated, predict  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
@@ -45,11 +46,13 @@ def _runs(days=70):
             "span_min": "float32",
         }
     )
-    return with_route_ids(frame, route_ids(frame))
+    return frame
 
 
 def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     runs = _runs()
+    routes = route_ids(runs)
+    runs = with_route_ids(runs, routes)
     cutoff = START + timedelta(days=60)
     train = training_frame(runs, cutoff, window_days=28, half_life_days=28)
     models = fit_calibrated(train, FAST, cutoff)
@@ -57,7 +60,7 @@ def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     before = predict(models, frame)
 
     directory = tmp_path / "model"
-    save_model_set(models, directory)
+    save_model_set(models, directory, version="2026-06-30", routes=routes)
     loaded = load_model_set(directory)
     after = predict(loaded, frame)
 
@@ -66,3 +69,23 @@ def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     np.testing.assert_allclose(before.q50, after.q50)
     np.testing.assert_allclose(before.q90, after.q90)
     assert loaded.interval_shift == models.interval_shift
+    assert json.loads((directory / "meta.json").read_text())["version"] == "2026-06-30"
+
+
+def test_the_route_vocabulary_round_trips(tmp_path):
+    runs = _runs()
+    routes = route_ids(runs)
+    runs = with_route_ids(runs, routes)
+    cutoff = START + timedelta(days=60)
+    train = training_frame(runs, cutoff, window_days=28, half_life_days=28)
+    models = fit_calibrated(train, FAST, cutoff)
+
+    directory = tmp_path / "model"
+    save_model_set(models, directory, version="2026-06-30", routes=routes)
+    loaded_routes = load_routes(directory)
+
+    pd.testing.assert_frame_equal(
+        loaded_routes.sort_values("route_code").reset_index(drop=True),
+        routes.sort_values("route_code").reset_index(drop=True),
+        check_dtype=False,  # a parquet round trip changes pandas' nullable-string NA flavor, not the values
+    )

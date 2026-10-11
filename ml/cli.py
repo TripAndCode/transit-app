@@ -13,9 +13,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ml import sync
+from ml.adoption import judge
 from ml.backtest import evaluate_agency, results_from_json, results_to_json
 from ml.data import agencies_with_data, fetch_cells
 from ml.model_result import result_from_json, result_to_json
+from ml.r2 import upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -30,6 +32,15 @@ def _run(cmd: Sequence[str]) -> None:
 
 def _capture(cmd: Sequence[str]) -> str:
     return subprocess.run(list(cmd), check=True, capture_output=True, text=True).stdout
+
+
+def _use_store_credentials() -> None:
+    # `sync` reads this same EnvironmentFile and must keep using the read-only
+    # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
+    # `train`/`predict` swap in the read-write transit-ml pair only for their
+    # own (separate, short-lived) process, from distinctly named variables.
+    os.environ["AWS_ACCESS_KEY_ID"] = os.environ["ML_STORE_ACCESS_KEY_ID"]
+    os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ["ML_STORE_SECRET_ACCESS_KEY"]
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -81,28 +92,23 @@ def _train_eval(args: argparse.Namespace) -> int:
 
 
 def _train(args: argparse.Namespace) -> int:
-    import os
-    import sys
-
-    from ml.adoption import judge
-    from ml.model_result import result_from_json
-
     verdict = judge(result_from_json(args.backtest.read_text()))
     if not verdict.adopted:
         sys.stderr.write(f"not adopted, keeping the previous model: {'; '.join(verdict.reasons)}\n")
         return 0
 
-    # Imported here: they need the optional `ml` group, which sync and
-    # report do not.
-    from ml.data import agencies_with_data
+    # Imported here: they need the optional `ml` group, which sync, report,
+    # and the adoption gate above do not.
     from ml.dataset import load_runs
+    from ml.features import route_ids, with_route_ids
     from ml.model_store import save_model_set
     from ml.models import ModelParams, fit_calibrated
-    from ml.r2 import upload_dir, upload_file
     from ml.training import training_frame
 
     client = get_client()
     runs = load_runs(client, args.agency or agencies_with_data(client))
+    routes = route_ids(runs)
+    runs = with_route_ids(runs, routes)
     cutoff = _today_jst() - timedelta(days=1)
     params = ModelParams(window_days=args.window)
     train = training_frame(runs, cutoff, window_days=params.window_days, half_life_days=params.half_life_days)
@@ -110,19 +116,12 @@ def _train(args: argparse.Namespace) -> int:
         sys.stderr.write("not enough history to train; keeping the previous model\n")
         return 0
     models = fit_calibrated(train, params, cutoff)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    save_model_set(models, args.out)
-    # save_model_set already wrote meta.json with interval_shift; add the
-    # version here rather than deriving it from the local directory name
-    # (which is a fixed path, e.g. /var/lib/transit-ml/model, overwritten
-    # every week -- the version has to live inside the file, not the path).
     version = cutoff.isoformat()
-    meta_path = args.out / "meta.json"
-    meta = json.loads(meta_path.read_text())
-    meta["version"] = version
-    meta_path.write_text(json.dumps(meta))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    save_model_set(models, args.out, version=version, routes=routes)
 
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    _use_store_credentials()
     upload_dir(args.out, bucket, f"models/{version}", endpoint, run=_run)
     latest_path = args.out.parent / "latest.json"
     latest_path.write_text(json.dumps({"version": version, "window_days": params.window_days}))
@@ -130,10 +129,10 @@ def _train(args: argparse.Namespace) -> int:
     return 0
 
 
-def _predict(args: argparse.Namespace) -> int:
-    import os
-    import sys
+_CELL = ["agency_id", "route_code", "service_date", "hour"]
 
+
+def _predict(args: argparse.Namespace) -> int:
     model_dir = args.model
     if not (model_dir / "meta.json").exists():
         sys.stderr.write(f"no published model at {model_dir}; run `ml train` first\n")
@@ -141,25 +140,44 @@ def _predict(args: argparse.Namespace) -> int:
 
     # Imported here: they need the optional `ml` group, which sync and
     # report do not.
-    from ml.data import agencies_with_data
+    import pandas as pd
+
     from ml.dataset import load_runs
-    from ml.features import build_frame
-    from ml.model_store import load_model_set
+    from ml.features import build_frame, template_future_runs, with_route_ids
+    from ml.model_backtest import MIN_MODEL_DAYS
+    from ml.model_store import load_model_set, load_routes
     from ml.models import predict
-    from ml.r2 import upload_file
     from ml.training import HORIZON_DAYS
 
     models = load_model_set(model_dir)
+    routes = load_routes(model_dir)
     client = get_client()
-    runs = load_runs(client, args.agency or agencies_with_data(client))
+    runs = with_route_ids(load_runs(client, args.agency or agencies_with_data(client)), routes)
     origin = _today_jst()
-    frame = build_frame(runs, origin, window_days=args.window, horizon_days=HORIZON_DAYS)
+    # `runs` is ClickHouse's observed-trip history -- origin+1..+horizon_days
+    # haven't happened, so build_frame's target slate is templated from the
+    # most recent history sharing each future day's weekday (see
+    # template_future_runs), not read from `runs` itself.
+    template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS)
+    frame = build_frame(
+        pd.concat([runs, template], ignore_index=True), origin, window_days=args.window, horizon_days=HORIZON_DAYS
+    )
     preds = predict(models, frame)
-    forecast = frame[["agency_id", "route_code", "service_date", "hour"]].copy()
-    forecast["mean_min"] = preds.mean
-    forecast["q10"] = preds.q10
-    forecast["q50"] = preds.q50
-    forecast["q90"] = preds.q90
+
+    # Below MIN_MODEL_DAYS of its own history, an agency's forecast is worse
+    # than its own slot average (see ml.model_backtest's own fallback gate) --
+    # never publish a model forecast for it; the app falls back to B0.
+    seen = runs[runs["service_date"] <= pd.Timestamp(origin)].groupby("agency_id")["service_date"].nunique()
+    on_model = {int(agency) for agency, days in seen.items() if days >= MIN_MODEL_DAYS}
+
+    cells = frame[_CELL].assign(mean_min=preds.mean, q10=preds.q10, q50=preds.q50, q90=preds.q90)
+    cells = cells[cells["agency_id"].isin(on_model)]
+    # One run per trip, but one forecast per (route, date, hour) slot: several
+    # trips can share an hour, and agg_route_forecast_ml's primary key is the
+    # slot, not the trip.
+    forecast = cells.groupby(_CELL, as_index=False, observed=True).agg(
+        mean_min=("mean_min", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean")
+    )
     forecast["model_version"] = json.loads((model_dir / "meta.json").read_text())["version"]
     forecast["origin_date"] = origin.isoformat()
     forecast["generated_at"] = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
@@ -170,6 +188,7 @@ def _predict(args: argparse.Namespace) -> int:
     manifest.write_text(json.dumps({"rows": len(forecast), "origin_date": origin.isoformat()}))
 
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    _use_store_credentials()
     prefix = f"forecasts/{origin.isoformat()}"
     upload_file(args.out, bucket, f"{prefix}/forecast.parquet", endpoint, run=_run)
     upload_file(manifest, bucket, f"{prefix}/manifest.json", endpoint, run=_run)

@@ -76,6 +76,27 @@ def with_route_ids(runs: pd.DataFrame, ids: pd.DataFrame) -> pd.DataFrame:
     return runs.merge(ids, on=ROUTE, how="left", validate="many_to_one")
 
 
+def template_future_runs(runs: pd.DataFrame, origin: date, horizon_days: int = 7) -> pd.DataFrame:
+    """Live prediction has no observed runs after `origin` -- `runs` holds only
+    completed trips. Each of origin+1..origin+horizon_days is templated from the
+    most recent day at or before `origin` sharing its weekday, so the trip/route/
+    hour shape (what build_frame's `upcoming` slate needs) repeats the way a
+    timetable does; only the realized delay is actually unknown, so it is NaN."""
+    t = pd.Timestamp(origin)
+    frames = []
+    for d in range(1, horizon_days + 1):
+        target_day = t + pd.Timedelta(days=d)
+        same_weekday = runs[(runs["service_date"] <= t) & (runs["service_date"].dt.dayofweek == target_day.dayofweek)]
+        if same_weekday.empty:
+            continue
+        template_day = same_weekday["service_date"].max()
+        rows = runs[runs["service_date"] == template_day].copy()
+        rows["service_date"] = target_day
+        rows["delay_min"] = np.nan
+        frames.append(rows)
+    return pd.concat(frames, ignore_index=True) if frames else runs.iloc[0:0].copy()
+
+
 def weekend_days(runs: pd.DataFrame) -> pd.DataFrame:
     """Each service's distinct days, deduplicated once, with a weekend flag. A
     caller that builds many origins from the same `runs` (training_frame) passes

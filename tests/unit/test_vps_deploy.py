@@ -117,10 +117,30 @@ def test_the_wide_system_logs_are_off():
 def test_env_example_names_every_variable_and_holds_no_value_for_secrets():
     lines = [line for line in (VPS / "env.example").read_text().splitlines() if line and not line.startswith("#")]
     values = dict(line.split("=", 1) for line in lines)
-    for secret in ("ML_PG_PASSWORD", "ML_CH_PASSWORD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+    for secret in (
+        "ML_PG_PASSWORD",
+        "ML_CH_PASSWORD",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "ML_STORE_ACCESS_KEY_ID",
+        "ML_STORE_SECRET_ACCESS_KEY",
+    ):
         assert values[secret] == "", f"env.example carries a value for {secret}"
     assert values["CLICKHOUSE_PORT"] == "18123"
     assert "127.0.0.1:15432" in values["DATABASE_URL"]
+    assert "ML_STORE_BUCKET" in values and "ML_STORE_ENDPOINT" in values
+    assert "HC_PING_URL_PREDICT" in values
+
+
+def test_the_read_only_archive_pair_and_the_write_capable_store_pair_are_distinct_variables():
+    # train/predict swap ML_STORE_* into AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY at
+    # runtime (ml.cli._use_store_credentials) rather than the operator setting the
+    # same AWS_* names to the transit-ml pair -- sync shares this EnvironmentFile and
+    # must keep seeing the read-only transit-archives pair in AWS_ACCESS_KEY_ID.
+    names = {line.split("=", 1)[0] for line in (VPS / "env.example").read_text().splitlines() if "=" in line}
+    assert {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ML_STORE_ACCESS_KEY_ID", "ML_STORE_SECRET_ACCESS_KEY"} <= (
+        names
+    )
 
 
 def _fake_curl(tmp_path):
@@ -200,9 +220,14 @@ def test_the_weekly_job_scores_the_models_before_rendering_the_report():
     assert "--models" in exec_start
 
 
-def test_the_weekly_job_publishes_the_live_model_after_scoring_it():
+def test_the_weekly_job_publishes_the_live_model_after_the_report_so_a_bad_week_cannot_hide_it():
     exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
-    assert exec_start.index("-m ml.cli train-eval") < exec_start.index("-m ml.cli train ")
+    train_eval, report, train = (
+        exec_start.index("-m ml.cli train-eval"),
+        exec_start.index("-m ml.cli report"),
+        exec_start.index("-m ml.cli train "),
+    )
+    assert train_eval < report < train
     assert "--backtest /var/lib/transit-ml/backtests/models.json" in exec_start
 
 

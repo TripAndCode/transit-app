@@ -1,8 +1,7 @@
 """Thin `aws s3` wrapper for the model/forecast bucket (`transit-ml`),
 matching `ml.sync`'s subprocess-injection pattern so these calls are testable
-without a real network or AWS CLI. Does not need the optional `ml` group --
-only the two functions here are used by `ml/cli.py`'s `train`/`predict`,
-which do."""
+without a real network or AWS CLI. Readable without the optional `ml`
+group."""
 
 from __future__ import annotations
 
