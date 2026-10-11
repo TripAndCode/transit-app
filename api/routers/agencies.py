@@ -77,7 +77,7 @@ async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn
     return _agencies.agency_row_to_dict(row)
 
 
-@router.post("", response_model=AgencyOut, status_code=201)
+@router.post("", response_model=AdminAgencyOut, status_code=201)
 async def create_agency(
     body: AgencyCreate,
     request: Request,
@@ -97,7 +97,7 @@ async def create_agency(
             """
             INSERT INTO agencies (agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern)
             VALUES ($1, $2, $3, $4, $5)
-            RETURNING agency_id, agency_name, feed_url, static_url
+            RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at
             """,
             body.agency_name,
             body.feed_url,

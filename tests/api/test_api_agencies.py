@@ -120,6 +120,9 @@ async def test_create_agency(agencies_client):
     assert "agency_id" in data
     assert data["agency_name"] == "Aomori Bus"
     assert data["static_url"] is None
+    # Same admin shape as PATCH / restore, which the SPA types as AdminAgency.
+    assert {"ingest_strategy", "trip_id_pattern", "deleted_at"} <= data.keys()
+    assert data["deleted_at"] is None
 
 
 @pytest.mark.asyncio
