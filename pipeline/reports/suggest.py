@@ -57,8 +57,8 @@ TREND_SHIFT_MIN_DELTA_MIN = 2.0
 # pairs for an agency's trailing window, or a route's service-type rows can
 # be truncated BEFORE the corresponding _pool_*_by_route sees them, silently
 # corrupting the pooled figure for whichever route lands on the boundary.
-# Real data tops out around ~880 pairs (agency 1); 5000 leaves ~5.7x
-# headroom for both constants -- keep them equal rather than re-introducing
+# 5000 sits well above the qualifying-pair count of any agency, for both
+# constants -- keep them equal rather than re-introducing
 # a soft cap sitting near real utilization on just one of the two. Since
 # there's no live-scan fallback at this ctx shape, a higher limit here costs
 # nothing extra -- the full agg-table scan already happened either way.

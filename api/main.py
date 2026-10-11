@@ -270,7 +270,7 @@ async def lifespan(app: FastAPI):
 
         embedder = get_embedder()
         if not embedder.available:
-            _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+            _log.warning("Embedder unavailable at startup — router degrades to LLM-only")
         activity.start(app)
         retention.start(app)
     except Exception:
