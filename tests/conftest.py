@@ -496,10 +496,21 @@ async def _test_pool(*, min_size=1, **kw):
     more than one connection at once still can. Centralized so a future test
     author copying an existing fixture doesn't reintroduce the slow default
     by hand-rolling `asyncpg.create_pool(...)` again.
+
+    Carries `api.main`'s own `server_settings` (the `aconn`/`pg_conn` fixtures
+    mirror it too) so SQL that reads `now()` sees the same Asia/Tokyo civil
+    date the app's production pool would, rather than the Postgres
+    container's own default timezone -- otherwise a test seeding JST-dated
+    fixtures disagrees with a handler's `now()::date` for the hours each day
+    where the UTC and JST calendar dates differ.
     """
     import asyncpg
 
-    return await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=min_size, **kw)
+    from api.main import PG_SESSION_SETTINGS
+
+    return await asyncpg.create_pool(
+        os.environ["DATABASE_URL"], min_size=min_size, server_settings=PG_SESSION_SETTINGS, **kw
+    )
 
 
 @pytest.fixture
