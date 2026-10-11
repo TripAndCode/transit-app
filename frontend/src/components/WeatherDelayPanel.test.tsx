@@ -93,6 +93,27 @@ describe("WeatherDelayPanel", () => {
     expect(screen.getByText("Source: example weather service")).toBeInTheDocument();
   });
 
+  it("never prints -0.0 for a tiny negative delay or delta", () => {
+    mockWeatherDelay({
+      data: {
+        available: true,
+        station: { station_id: "47765", station_name: "Example Station", note: "n" },
+        wet_day_threshold_mm: 1.0,
+        wet: { days: 8, samples: 240, avg_delay_sec: -0.03, avg_precip_mm: 12.3 },
+        dry: { days: 22, samples: 660, avg_delay_sec: 60.2, avg_precip_mm: 0.0 },
+        delta_sec: -0.04,
+        low_confidence: false,
+        ctx: CTX,
+        disclaimer: "d",
+        attribution: "a",
+      },
+    });
+    const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    expect(container.textContent).not.toMatch(/-\s*0\.0/);
+    expect(screen.getByText("0.0s")).toBeInTheDocument();
+    expect(screen.getByText(/\+0\.0\s*s/)).toBeInTheDocument();
+  });
+
   it("shows a skeleton while loading", () => {
     mockWeatherDelay({ isLoading: true });
     const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
