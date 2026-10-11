@@ -9,7 +9,7 @@ from ml.cli import main
 
 def test_unknown_commands_are_refused():
     with pytest.raises(SystemExit):
-        main(["train"])
+        main(["bogus"])
 
 
 def test_report_reads_a_backtest_and_writes_html(tmp_path):
@@ -42,4 +42,39 @@ def test_report_renders_the_model_section_when_given_a_model_result(tmp_path):
 def test_train_eval_is_a_command():
     with pytest.raises(SystemExit) as exit_info:
         main(["train-eval", "--help"])
+    assert exit_info.value.code == 0
+
+
+def test_train_skips_publishing_when_the_backtest_was_not_adopted(tmp_path, monkeypatch):
+    from datetime import date
+
+    from ml.backtest import AgencyResult
+    from ml.model_result import ModelBacktestResult, result_to_json
+
+    backtest = tmp_path / "models.json"
+    # No agencies, no intervals: judge() reads this as "unmeasured" on every
+    # criterion, which is "not adopted" -- the cheapest fixture that is
+    # reliably rejected without needing a real skill/coverage computation.
+    backtest.write_text(
+        result_to_json(
+            ModelBacktestResult(
+                params={},
+                origins=[date(2026, 6, 1)],
+                cutoffs=[date(2026, 5, 31)],
+                agencies=[AgencyResult(8, date(2026, 6, 1), date(2026, 6, 1), 1, [date(2026, 6, 1)], False, [])],
+                intervals={},
+                origin_skill=[],
+            )
+        )
+    )
+    out = tmp_path / "model"
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    assert main(["train", "--backtest", str(backtest), "--out", str(out)]) == 0
+    assert not out.exists()
+
+
+def test_train_is_a_command():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["train", "--help"])
     assert exit_info.value.code == 0
