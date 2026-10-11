@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
-import { DailyChart } from "../../components/charts/DailyChart";
+import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
@@ -64,13 +64,19 @@ export function RichResult({
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
       <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
-        <DailyChart days={result.series as TrendDay[]} height={200} brushable={false} />
+        <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} />
       </EvidenceCard>
     );
   }
 
   // empty, text, or series with no points → plain text, no evidence chrome
   return <span style={{ whiteSpace: "pre-wrap" }}>{fallbackText}</span>;
+}
+
+/** The bucket width the series was requested at; the tool defaults to days. */
+function seriesGranularity(args: Record<string, unknown> | null): TrendGranularity {
+  const g = args?.granularity;
+  return g === "week" || g === "month" ? g : "day";
 }
 
 function ResultTable({

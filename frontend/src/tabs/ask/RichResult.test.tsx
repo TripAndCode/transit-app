@@ -182,4 +182,13 @@ describe("RichResult evidence card", () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0]).toBeInstanceOf(SVGElement);
   });
+
+  it("passes the answer's granularity to the series chart, so weekly buckets are not called days", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper result={seriesResult} tool="time_series" args={{ granularity: "week" }} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("img", { name: t("reports.daily.svg_aria_week") })).toBeInTheDocument();
+  });
 });

@@ -1064,6 +1064,13 @@
       "brush_aria": "日次チャートの期間選択。矢印キーでカーソル移動、Shift+矢印キーで範囲を拡張、Enterで適用します。",
       "brush_range": "{{from}} 〜 {{to}}",
       "severe_band_label": "重大 ({{min}}分以上)",
+      "svg_aria_week": "週次平均遅延チャート",
+      "svg_aria_month": "月次平均遅延チャート",
+      "worst_day_label_week": "最も遅い週",
+      "worst_day_label_month": "最も遅い月",
+      "bucket_date": "{{date}}",
+      "bucket_date_week": "{{date}}の週",
+      "bucket_date_month": "{{date}}からの月",
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
