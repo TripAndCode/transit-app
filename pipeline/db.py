@@ -204,7 +204,9 @@ def build_dedup_ch_sql(
 
 def hms_to_sec_sql(column: str) -> str:
     """Return a SQL expression parsing a static-schedule HH:MM:SS (or H:MM)
-    text field into seconds since the service day's midnight.
+    text field into seconds since the service day's midnight. Whitespace
+    (space, tab, CR, LF) around the value is ignored, because feeds hand-edited
+    or exported from spreadsheets can pad a time field.
 
     Tolerates GTFS's after-midnight extended-hour notation (e.g. "25:30:00")
     since this is plain integer arithmetic, not a cast into a Postgres TIME
@@ -223,11 +225,12 @@ def hms_to_sec_sql(column: str) -> str:
     seconds -- not just the `analyze()` batch builders -- can share the exact
     same parse instead of re-deriving it.
     """
+    text = f"btrim({column}, E' \\t\\r\\n')"
     return (
-        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-5][0-9](:[0-5][0-9])?$' THEN "
-        f"split_part({column}, ':', 1)::int * 3600 "
-        f"+ split_part({column}, ':', 2)::int * 60 "
-        f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
+        f"CASE WHEN {text} ~ '^[0-9]{{1,3}}:[0-5][0-9](:[0-5][0-9])?$' THEN "
+        f"split_part({text}, ':', 1)::int * 3600 "
+        f"+ split_part({text}, ':', 2)::int * 60 "
+        f"+ COALESCE(NULLIF(split_part({text}, ':', 3), ''), '0')::int "
         f"ELSE NULL END"
     )
 
