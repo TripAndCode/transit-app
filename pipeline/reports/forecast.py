@@ -59,6 +59,7 @@ def summarize_expected_delay_heatmap(
     rows: Iterable[Mapping[str, Any]],
     route: str,
     locale: str = "ja",
+    ml_cells: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
 
@@ -68,20 +69,32 @@ def summarize_expected_delay_heatmap(
     (SUM(sum_delay_sec) / SUM(samples)), so it is already the exact pooled
     mean; this lays it on the grid (missing cells → null/0) and flags low
     confidence. No percentile (cannot pool per-bucket percentiles).
+
+    `ml_cells`: published-forecast rows (already flag- and freshness-
+    filtered by the caller) with keys ``dow``, ``hour``, ``mean_min`` --
+    this `route`'s own forecast, so at most one row per (dow, hour). When
+    present for a cell, its `mean_min` replaces `expected_avg_min` and
+    `source` becomes ``"ml"``; `samples`/`low_confidence` stay whatever the
+    historical baseline above already computed for that slot, since they
+    describe how much history backs the comparison, not the prediction.
     """
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    ml_by = {(int(r["dow"]), int(r["hour"])): float(r["mean_min"]) for r in ml_cells}
     cells: list[dict[str, Any]] = []
     for d in range(1, 8):
         for h in range(24):
             r = by.get((d, h))
             n = int(r["samples"]) if r else 0
+            ml_mean = ml_by.get((d, h))
+            baseline_mean = round(float(r["avg_min"]), 1) if r else None
             cells.append(
                 {
                     "dow": d,
                     "hour": h,
-                    "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                    "expected_avg_min": round(ml_mean, 1) if ml_mean is not None else baseline_mean,
                     "samples": n,
                     "low_confidence": 0 < n < LOW_CONFIDENCE_SAMPLES,
+                    "source": "ml" if ml_mean is not None else "baseline",
                 }
             )
     return {"route": route, "cells": cells, "disclaimer": _disclaimer("heatmap", locale)}
@@ -156,6 +169,7 @@ def summarize_agency_overview(
     recent_daily_rows: Iterable[Mapping[str, Any]] = (),
     locale: str = "ja",
     top_n: int | None = None,
+    ml_cells: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Agency-wide 7×band grid + worst-window + delay-ranked routes. Pure.
 
@@ -186,8 +200,24 @@ def summarize_agency_overview(
     is used as-is regardless of source.
     The worst window excludes low-confidence buckets so a small-sample fluke
     can never headline. No percentile (cannot pool per-bucket percentiles).
+
+    ``ml_cells``: published-forecast rows (already flag- and freshness-
+    filtered by the caller) with keys ``dow``, ``hour``, ``mean_min``, one
+    row per (route, upcoming slot) -- unlike the heatmap's single-route
+    ``ml_cells``, this agency-wide grid can see several routes sharing a
+    (dow, hour), and several hours sharing a (dow, band); both are pooled
+    into a plain (unweighted) mean, since a published forecast carries no
+    per-row sample count to weight by. When a (dow, band) has any ML rows,
+    that mean replaces ``expected_avg_min`` and ``source`` becomes ``"ml"``;
+    ``samples``/``low_confidence`` stay whatever the historical baseline
+    already computed, for the same reason as the heatmap's own ``ml_cells``.
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
+    ml_buckets: dict[tuple[int, str], list[float]] = {}
+    for r in ml_cells:
+        key = (int(r["dow"]), band_of(int(r["hour"])))
+        ml_buckets.setdefault(key, []).append(float(r["mean_min"]))
+
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
     for r in grid_rows:
         if r["avg_min"] is None or not r["samples"]:
@@ -212,17 +242,31 @@ def summarize_agency_overview(
         for band, _ in BANDS:
             mean, n = _pooled(buckets.get((d, band), []))
             low_conf = 0 < n < LOW_CONFIDENCE_SAMPLES
+            ml_values = ml_buckets.get((d, band))
+            if ml_values:
+                display_mean: float | None = sum(ml_values) / len(ml_values)
+                source = "ml"
+            else:
+                display_mean = mean
+                source = "baseline"
             grid.append(
                 {
                     "dow": d,
                     "band": band,
-                    "expected_avg_min": round(mean, 1) if mean is not None else None,
+                    "expected_avg_min": round(display_mean, 1) if display_mean is not None else None,
                     "samples": n,
                     "low_confidence": low_conf,
+                    "source": source,
                 }
             )
-            if mean is not None and not low_conf and (worst is None or mean > worst["_m"]):
-                worst = {"dow": d, "band": band, "expected_avg_min": round(mean, 1), "samples": n, "_m": mean}
+            if display_mean is not None and not low_conf and (worst is None or display_mean > worst["_m"]):
+                worst = {
+                    "dow": d,
+                    "band": band,
+                    "expected_avg_min": round(display_mean, 1),
+                    "samples": n,
+                    "_m": display_mean,
+                }
     if worst is not None:
         worst.pop("_m")
 
