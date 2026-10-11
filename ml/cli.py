@@ -41,6 +41,7 @@ def _sync(args: argparse.Namespace) -> int:
     if args.dry_run:
         sys.stdout.writelines(f"{action}\n" for action in actions)
         return 0
+    notices: list[str] = []
     failures = sync.execute(
         actions,
         bucket=bucket,
@@ -51,8 +52,10 @@ def _sync(args: argparse.Namespace) -> int:
         today_jst=_today_jst(),
         run=_run,
         python=sys.executable,
+        skip_static=frozenset(args.skip_static),
+        notices=notices,
     )
-    sys.stderr.writelines(f"{failure}\n" for failure in failures)
+    sys.stderr.writelines(f"{line}\n" for line in (*notices, *failures))
     return 1 if failures else 0
 
 
@@ -117,6 +120,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_sync.add_argument("--state", type=Path, required=True)
     p_sync.add_argument("--work", type=Path, required=True)
     p_sync.add_argument("--dry-run", action="store_true")
+    p_sync.add_argument(
+        "--skip-static",
+        metavar="KEY",
+        action="append",
+        default=[],
+        help="give up on this static archive (its bucket key); later days run under the previous timetable",
+    )
     p_sync.set_defaults(handler=_sync)
 
     p_backtest = sub.add_parser("backtest", help="Score the baselines with rolling origins")
