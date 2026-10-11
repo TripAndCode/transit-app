@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily forecast publish
+
+[Timer]
+# 11:00 JST, after transit-ml-sync.timer's 10:30 run, so predict reads that
+# day's freshly-synced replica -- no systemd ordering enforces this, the two
+# times are just set far enough apart.
+OnCalendar=*-*-* 11:00:00 Asia/Tokyo
+Persistent=true
+
+[Install]
+WantedBy=timers.target
