@@ -3,6 +3,7 @@ and a 2-day origin_date freshness check."""
 
 from datetime import date, timedelta
 
+from api.range import jst_today
 from pipeline import flags
 
 _COLUMNS = (
@@ -44,11 +45,11 @@ async def test_heatmap_serves_the_ml_value_when_the_flag_is_on_and_the_row_is_fr
 ):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
-    target_dow = (date.today() + timedelta(days=1)).isoweekday()
+    target_dow = (jst_today() + timedelta(days=1)).isoweekday()
     body = response.json()
     cell = next(c for c in body["cells"] if c["dow"] == target_dow and c["hour"] == 8)
     assert cell["source"] == "ml"
@@ -58,7 +59,7 @@ async def test_heatmap_serves_the_ml_value_when_the_flag_is_on_and_the_row_is_fr
 async def test_heatmap_falls_back_to_baseline_when_the_flag_is_off(client, aconn, aagency_id, monkeypatch):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "false")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
@@ -69,7 +70,7 @@ async def test_heatmap_falls_back_to_baseline_when_the_flag_is_off(client, aconn
 async def test_heatmap_falls_back_to_baseline_when_the_ml_row_is_stale(client, aconn, aagency_id, monkeypatch):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today() - timedelta(days=5))
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today() - timedelta(days=5))
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
@@ -82,11 +83,11 @@ async def test_overview_serves_the_ml_value_when_the_flag_is_on_and_the_row_is_f
 ):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())  # mean_min=9.0, hour 8 -> band "morning"
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # mean_min=9.0, hour 8 -> band "morning"
 
     response = await client.get(f"/api/{aagency_id}/forecast/overview")
 
-    target_dow = (date.today() + timedelta(days=1)).isoweekday()
+    target_dow = (jst_today() + timedelta(days=1)).isoweekday()
     body = response.json()
     cell = next(c for c in body["grid"] if c["dow"] == target_dow and c["band"] == "morning")
     assert cell["source"] == "ml"
@@ -101,13 +102,13 @@ async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropp
     # single-route heatmap) can have more than one.
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    target_service_date = date.today() + timedelta(days=1)
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())  # mean_min=9.0, hour 8
+    target_service_date = jst_today() + timedelta(days=1)
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # mean_min=9.0, hour 8
     await aconn.execute(
         f"INSERT INTO agg_route_forecast_ml ({_COLUMNS}) VALUES ($1, 'R2', $2, 8, 5.0, 3.0, 5.0, 7.0, 'v1', $3, now())",
         aagency_id,
         target_service_date,
-        date.today(),
+        jst_today(),
     )
 
     response = await client.get(f"/api/{aagency_id}/forecast/overview")
@@ -122,7 +123,7 @@ async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropp
 async def test_overview_falls_back_to_baseline_when_the_flag_is_off(client, aconn, aagency_id, monkeypatch):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "false")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
 
     response = await client.get(f"/api/{aagency_id}/forecast/overview")
 
@@ -149,24 +150,24 @@ async def test_heatmap_does_not_let_a_stale_leftover_row_collide_with_the_new_ho
         aconn,
         aagency_id,
         "R1",
-        service_date=date.today() + timedelta(days=7),
+        service_date=jst_today() + timedelta(days=7),
         hour=8,
         mean_min=9.0,
-        origin_date=date.today(),
+        origin_date=jst_today(),
     )
     await _seed_raw_ml_row(
         aconn,
         aagency_id,
         "R1",
-        service_date=date.today(),
+        service_date=jst_today(),
         hour=8,
         mean_min=2.0,
-        origin_date=date.today() - timedelta(days=1),
+        origin_date=jst_today() - timedelta(days=1),
     )
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
-    target_dow = date.today().isoweekday()
+    target_dow = jst_today().isoweekday()
     body = response.json()
     cell = next(c for c in body["cells"] if c["dow"] == target_dow and c["hour"] == 8)
     assert cell["source"] == "ml"
@@ -178,7 +179,7 @@ async def test_heatmap_disclaimer_acknowledges_the_ml_overlay_when_any_cell_uses
 ):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
@@ -194,11 +195,11 @@ async def test_heatmap_flags_an_ml_cell_with_no_baseline_history_as_low_confiden
     # present as more confident than a 1-sample baseline cell would.
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
-    await _seed_ml_row(aconn, aagency_id, "R1", date.today())
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
 
     response = await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})
 
-    target_dow = (date.today() + timedelta(days=1)).isoweekday()
+    target_dow = (jst_today() + timedelta(days=1)).isoweekday()
     body = response.json()
     cell = next(c for c in body["cells"] if c["dow"] == target_dow and c["hour"] == 8)
     assert cell["samples"] == 0
