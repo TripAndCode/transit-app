@@ -355,7 +355,9 @@ hooks:
 	@bash scripts/setup_git_hooks.sh
 
 # ── Ask eval (manual / local; not wired into CI) ─────────────────────────────
-# Verifies builder_coverage = 100% against the gold JSONL. Regenerate the gold set after card
+# Checks that every builder entry's expected args in the gold JSONL survive
+# canonicalize unchanged (the chip gate is skipped — the chip catalog was
+# removed); it does not exercise routing. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
 # No workflow calls this target -- the scheduled Ask eval CI gate is
 # .github/workflows/ask-eval-weekly.yml, which runs
