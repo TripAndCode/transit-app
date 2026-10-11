@@ -134,6 +134,12 @@ describe("ReportTable route column", () => {
     vi.restoreAllMocks();
   });
 
+  it("labels the compare ranking's weekend column as the plain Sat/Sun split, not weekend/holiday", () => {
+    renderTable([["39061", 5.2, 3.1, 2.1, 2.1]], "compare_ranking");
+    expect(screen.getByRole("columnheader", { name: /^Weekend\b/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Weekend\/Holiday/)).not.toBeInTheDocument();
+  });
+
   it("renders a matched route's name alongside its code", () => {
     mockRoutes([
       { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },

@@ -104,7 +104,7 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 3
+ANALYZE_LOGIC_VERSION = 4
 
 # The service date of an observation, spliced into the builders below that
 # group or bucket raw `updates` rows by day (`pipeline.service_day`).

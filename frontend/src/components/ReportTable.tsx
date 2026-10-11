@@ -99,7 +99,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   compare_ranking: [
     ROUTE_COL,
     { index: 1, labelKey: "common.service_value.平日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
-    { index: 2, labelKey: "common.service_value.土日祝", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
+    { index: 2, labelKey: "common.service_value.土日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: Sat/Sun split label
     { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
     {
       index: 4,

@@ -1132,6 +1132,30 @@ def test_agg_route_headway_parses_departure_times_like_hms_to_sec_sql(pg_conn, a
     assert median == 600
 
 
+def test_agg_route_headway_counts_whitespace_padded_departure_times(pg_conn, agency_id, ch_client):
+    """A padded departure_time is still a departure: the headway builder
+    parses through hms_to_sec_sql, which ignores surrounding whitespace."""
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R_PAD",
+        "WD",
+        "s1",
+        ["8:00:00", " 8:10:00 ", "\t8:20:00\n"],
+    )
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT scheduled_samples, scheduled_headway_median_sec FROM agg_route_headway "
+            "WHERE agency_id = %s AND route_code = 'R_PAD'",
+            (agency_id,),
+        )
+        samples, median = cur.fetchone()
+    assert samples == 2
+    assert median == 600
+
+
 def _ch_headway_row(
     trip_id,
     captured_at,

@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tomllib
 from pathlib import Path, PurePosixPath
 
-import tomllib
 import yaml
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
