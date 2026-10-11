@@ -68,6 +68,9 @@ const DIAGNOSTICS = {
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
 };
 
+/** Overrides fields of the agencies list query result; `null` keeps the fixture. */
+let agenciesOverride: { data?: undefined; isLoading?: boolean; error?: Error | null } | null = null;
+
 let delState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
 let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
 
@@ -96,6 +99,7 @@ vi.mock("../../api/admin", () => ({
     ],
     isLoading: false,
     error: null,
+    ...agenciesOverride,
   }),
   useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
@@ -123,6 +127,7 @@ function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
 describe("AdminAgenciesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    agenciesOverride = null;
     createMutateAsync.mockResolvedValue({});
     patchMutateAsync.mockResolvedValue({});
     delState = { isPending: false, variables: undefined };
@@ -251,6 +256,16 @@ describe("AdminAgenciesPage", () => {
     await user.type(screen.getByPlaceholderText("Search by name"), "Deleted");
     expect(screen.queryByText("Aomori Bus")).toBeNull();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("does not claim there are no agencies while loading or after a failed load", () => {
+    agenciesOverride = { data: undefined, isLoading: true, error: null };
+    const { unmount } = wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
+    unmount();
+    agenciesOverride = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
   });
 
   it("shows an empty-state row when the search matches nothing", async () => {
