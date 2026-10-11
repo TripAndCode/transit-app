@@ -23,7 +23,7 @@ import { RouteLabel } from "./RouteLabel";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { BandGrid, Legend } from "./charts/DowBandGrid";
+import { BandGrid, Legend, type TipAnchor } from "./charts/DowBandGrid";
 import { Card } from "./ui/Card";
 import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
@@ -476,7 +476,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
   const min1 = t("forecast.axis_min");
   // Feeds BandGrid's own cursor-following tip only — see CrosshairTip.
-  const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
+  const onTip = (anchor: TipAnchor, text: string) => setTip({ x: anchor.clientX, y: anchor.clientY, text });
   const onLeave = () => setTip(null);
 
   return (
@@ -596,7 +596,7 @@ function AgencyLanding({
   legendUnit: string;
   worstPhrase: (w: ForecastOverviewWorst) => string;
   onPick: (code: string) => void;
-  onTip: (e: React.MouseEvent, text: string) => void;
+  onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
   const { data, isPending, error, refetch } = useForecastOverview(aid);
@@ -660,7 +660,7 @@ function RouteDetail({
   onToggleGrid: () => void;
   view: View;
   setView: (v: View) => void;
-  onTip: (e: React.MouseEvent, text: string) => void;
+  onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
   const { t } = useTranslation();

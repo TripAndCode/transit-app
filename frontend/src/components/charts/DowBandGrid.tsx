@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useRovingCells } from "../../hooks/useRovingCells";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
@@ -7,6 +7,10 @@ import { staggerDelay } from "./ChartEnter";
 import { formatMinutes } from "../../utils/format";
 
 const RAMP_STOPS = 5;
+
+/** Where a tooltip is anchored: a pointer position, or the cell's own edge for a
+ *  keyboard focus, which has no pointer. */
+export type TipAnchor = { clientX: number; clientY: number };
 
 /** Anchored min→max colour ramp legend (shown inline, not only in the modal).
  * `colorFor` defaults to the absolute ramp; pass a relative ramp to match a grid
@@ -46,12 +50,15 @@ export function BandGrid({
   bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
   colorFor: (v: number) => string;
-  onTip: (e: React.MouseEvent, text: string) => void;
+  onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useFirstData(grid.length > 0);
+  // The cell under the pointer or holding keyboard focus, outlined so a sighted
+  // keyboard user sees which cell the tooltip is about.
+  const [active, setActive] = useState<number | null>(null);
   // Every cell is focusable, so a keyboard or screen-reader user reads the
   // same value a pointer user gets from the tooltip, with one tab stop for
   // the whole grid.
@@ -73,7 +80,10 @@ export function BandGrid({
       aria-rowcount={7 + 1}
       aria-colcount={BAND_ORDER.length + 1}
       onKeyDown={onKeyDown}
-      onMouseLeave={onLeave}
+      onMouseLeave={() => {
+        setActive(null);
+        onLeave();
+      }}
     >
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
         {/* `display: contents` so the rows carry the grid semantics while the
@@ -105,14 +115,27 @@ export function BandGrid({
               // nothing for the fade-in to animate.
               const targetOpacity = c?.low_confidence ? 0.5 : 1;
               const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
-              const showTip = (e: React.MouseEvent) => onTip(e, tipText);
               const index = di * BAND_ORDER.length + bi;
+              const showTip = (e: React.MouseEvent) => {
+                setActive(index);
+                onTip(e, tipText);
+              };
+              const highlight = active === index ? { outline: "2px solid var(--accent)", outlineOffset: 1 } : null;
               const cellA11y = {
                 role: "gridcell",
                 "aria-label": tipText,
                 "data-cell": index,
                 tabIndex: activeSlot === String(index) ? 0 : -1,
-                onFocus: () => onCellFocus(index),
+                onFocus: (e: React.FocusEvent<HTMLElement>) => {
+                  onCellFocus(index);
+                  setActive(index);
+                  const box = e.currentTarget.getBoundingClientRect();
+                  onTip({ clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 }, tipText);
+                },
+                onBlur: () => {
+                  setActive(null);
+                  onLeave();
+                },
               };
               // inset, not `border`/`outline`: a border would resize the cell
               // and break the grid's alignment with its unmarked neighbours.
@@ -133,6 +156,7 @@ export function BandGrid({
                       height: 30,
                       borderRadius: 3,
                       background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                      ...highlight,
                       ...staggerStyle,
                     }}
                   />
@@ -146,7 +170,7 @@ export function BandGrid({
                   className={cellClass}
                   onMouseEnter={showTip}
                   onMouseMove={showTip}
-                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...staggerStyle }}
+                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...highlight, ...staggerStyle }}
                 />
               );
             })}
