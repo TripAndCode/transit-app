@@ -23,7 +23,7 @@ import {
   loadWhyTab,
 } from "./routes/lazyTabs";
 import { i18nReady } from "./i18n";
-import { refreshAuthStateOn401, retryUnlessAuthRequired } from "./api/authExpiry";
+import { refreshAuthStateOn401, retryTransientOnce } from "./api/authExpiry";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
@@ -97,7 +97,7 @@ const queryClient: QueryClient = new QueryClient({
   queryCache: new QueryCache({ onError: (err) => onAuthError(err) }),
   mutationCache: new MutationCache({ onError: (err) => onAuthError(err) }),
   defaultOptions: {
-    queries: { retry: retryUnlessAuthRequired, refetchOnWindowFocus: false },
+    queries: { retry: retryTransientOnce, refetchOnWindowFocus: false },
   },
 });
 const onAuthError = refreshAuthStateOn401(queryClient);
