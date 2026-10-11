@@ -8,7 +8,10 @@
 # PUSH_GATE_SKIP_TESTS=1 for a deliberate, visible opt-out of the
 # container-backed backend suite (and of mypy too, when a dependency change
 # leaves no virtualenv to run it in), or PUSH_GATE_SKIP_BUILD=1 to skip the
-# frontend build:bundle + entry-chunk check specifically.
+# frontend build:bundle + entry-chunk check specifically. Both are read from
+# this hook's own environment, which the harness spawns: they must be in the
+# Claude Code session's environment (settings `env`, or the launch
+# environment). A `VAR=1 git push ...` prefix reaches git only, never the hook.
 #
 # Every check reads the branch being pushed ($GATE_DIR below), never whatever
 # $CLAUDE_PROJECT_DIR's own working tree holds. A worktree inherits neither a
@@ -600,7 +603,8 @@ prepare_python_env() {
       fi
       echo "BLOCKED: git push — this branch changes pyproject.toml/poetry.lock, which the main checkout's" >&2
       echo "  virtualenv does not reflect. Run 'poetry install' in $GATE_DIR so the gate can test" >&2
-      echo "  against the new dependencies, or set PUSH_GATE_SKIP_TESTS=1 to leave them to CI." >&2
+      echo "  against the new dependencies, or set PUSH_GATE_SKIP_TESTS=1 in the Claude Code session environment" >&2
+      echo "  (settings \`env\` or the launch environment; a prefix on the push command does not reach this hook) to leave them to CI." >&2
       exit 2
     fi
   else
@@ -645,7 +649,7 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
   if [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
     echo "WARNING: PUSH_GATE_SKIP_TESTS=1 set — skipping the backend suite for this push (deliberate opt-out; CI still runs it)." >&2
   elif ! run_with_timeout 30 docker info >/dev/null 2>&1; then
-    echo "Docker is not reachable, so the backend suite's own Postgres + ClickHouse cannot start. Start Docker, or set PUSH_GATE_SKIP_TESTS=1 to skip explicitly (not recommended)." >"$STEP_DIR/docker"
+    echo "Docker is not reachable, so the backend suite's own Postgres + ClickHouse cannot start. Start Docker, or set PUSH_GATE_SKIP_TESTS=1 in the Claude Code session environment (not as a prefix on the push command) to skip explicitly (not recommended)." >"$STEP_DIR/docker"
     note_failed "backend suite" "$STEP_DIR/docker"
     FAIL=1
   else
