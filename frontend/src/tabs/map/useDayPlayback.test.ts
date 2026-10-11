@@ -39,6 +39,12 @@ afterEach(() => {
 });
 
 describe("useDayPlayback", () => {
+  it("fetches the day for the routes it is given", () => {
+    const timeline = vi.spyOn(hooks, "useTimeline");
+    renderHook(() => useDayPlayback(1, true, ["50"]));
+    expect(timeline).toHaveBeenLastCalledWith(1, true, ["50"]);
+  });
+
   it("rests on the first frame and schedules nothing until asked to play", () => {
     const { result } = renderHook(() => useDayPlayback(1, true));
     expect(result.current.index).toBe(0);

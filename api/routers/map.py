@@ -45,6 +45,7 @@ from api.range import (
     RangeCtx,
     TimeBand,
     build_agg_stop_filter,
+    clamp_range_ctx,
     ctx_payload,
     get_range_ctx,
     jst_today,
@@ -1443,11 +1444,16 @@ async def delay_timeline(
     request: Request,
     date_: str | None = Query(default=None, alias="date"),
     step: int = Query(default=60),
+    routes: str | None = Query(default=None, description="Comma-separated route_codes"),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
 ) -> DelayTimelineResponse:
     """Positioned per-stop delays for every time bucket of one service day.
+
+    ``routes`` (comma-separated route codes, the form every scope endpoint
+    takes) narrows the frames to those routes, so the playback can show the
+    same selection the live map is filtered to; omitted means every route.
 
     Backs the map's day-playback rail. ``date`` omitted resolves to the
     agency's latest observed JST day, so a caller with no prior knowledge of
@@ -1480,5 +1486,10 @@ async def delay_timeline(
             detail=f"date must be within the last {MAX_RANGE_DAYS} days and not in the future",
         )
 
-    frames = await compute_delay_timeline(agency_id, day, step, conn, ch, table=live_table_for(day))
+    # The shared clamp strips, de-duplicates and caps the route list, so a long
+    # or repeated list cannot multiply cache entries or widen the query.
+    route_filter = clamp_range_ctx(from_=day, to=day, routes=routes.split(",") if routes else ()).routes
+    frames = await compute_delay_timeline(
+        agency_id, day, step, conn, ch, table=live_table_for(day), routes=tuple(route_filter)
+    )
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)
