@@ -1388,6 +1388,8 @@
       "add_button": "事業者を追加",
       "search_placeholder": "事業者名で検索",
       "empty": "該当する事業者がありません。",
+      "disable_failed": "{{name}}を無効化できませんでした。",
+      "restore_failed": "{{name}}を復元できませんでした。",
       "col_name": "事業者名",
       "status_deleted": "削除済",
       "action_edit": "編集",
