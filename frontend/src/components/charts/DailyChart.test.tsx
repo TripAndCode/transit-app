@@ -200,6 +200,20 @@ describe("DailyChart bucket granularity", () => {
     expect(screen.getByText(/Month of May 1, 2026/)).toBeInTheDocument();
   });
 
+  it("reads a monthly bucket as the month starting on its date in Japanese", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      const { container } = renderChart(
+        <DailyChart days={[day({ date: "2026-04-01", avg_min: 1 }), day({ date: "2026-05-01", avg_min: 9 })]} granularity="month" brushable={false} />,
+      );
+      fireEvent.mouseEnter(dayRects(container)[1]);
+      expect(screen.getByText(/2026年5月1日始まりの月/)).toBeInTheDocument();
+      expect(screen.queryByText(/からの月/)).toBeNull();
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
   it("keeps the daily wording by default", async () => {
     await i18n.changeLanguage("en");
     renderChart(<DailyChart days={buckets} />);
