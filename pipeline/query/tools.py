@@ -188,6 +188,18 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dash", "en"): "—",
     ("unsupported_tool", "ja"): "未対応のツール: {name}",
     ("unsupported_tool", "en"): "Unsupported tool: {name}",
+    ("follow_up_no_history", "ja"): (
+        "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+    ),
+    ("follow_up_no_history", "en"): (
+        "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+    ),
+    ("aggregate_not_ready", "ja"): (
+        "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"
+    ),
+    ("aggregate_not_ready", "en"): (
+        "Data for this view hasn't been prepared in this environment yet. Please try again later."
+    ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",
