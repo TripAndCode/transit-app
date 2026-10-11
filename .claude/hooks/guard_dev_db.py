@@ -104,12 +104,22 @@ DESTRUCTIVE_SUBCOMMANDS = {
 # The CLI names are spelled out because `\bCREATE\b` does not match inside
 # `createdb` -- the boundary it needs isn't there. `VACUUM FULL` is listed but
 # plain `VACUUM` is not: it takes no exclusive lock and mutates no rows.
-# `\copy ... FROM` loads data in; `\copy ... TO` reads it out and stays allowed.
+# `COPY t FROM` and `\copy ... FROM` load data in; `TO` reads it out and stays
+# allowed. ClickHouse takes `RENAME a TO b` with no `TABLE` keyword, so any `RENAME`
+# followed by an operand is a write. A bare `OPTIMIZE` only merges parts, so just `DEDUPLICATE` is listed;
+# `SELECT ... INTO <table>` creates a table, `INTO OUTFILE` reads out.
 WRITE = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|REINDEX)\b"
     r"|\b(dropdb|createdb|pg_restore)\b"
     r"|\bVACUUM\s+FULL\b"
     r"|\\copy\b[^|;&]*\bfrom\b"
+    r"|\bcopy\s+(?!\()[\w.\"\\]+(\s*\([^)]*\))?\s+from\b"
+    r"|\brename\s+\S"
+    r"|\b(detach|attach)\s+(table|database|dictionary|view|partition)\b"
+    r"|\bexchange\s+(tables|dictionaries)\b"
+    r"|\boptimize\b[^|;&]*\bdeduplicate\b"
+    r"|\brefresh\s+materialized\s+view\b"
+    r"|\bselect\b[^|;&]*\binto\s+(?!outfile\b|dumpfile\b)"
     r"|migrate[\s_-]*down|downgrade",
     re.IGNORECASE,
 )

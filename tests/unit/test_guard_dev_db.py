@@ -196,6 +196,44 @@ BLOCKED = [
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
     ),
+    # Statements that mutate a store without any of the common write verbs.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY stops FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-stdin",
+    ),
+    pytest.param(
+        "psql postgresql://transit:transit@localhost:5433/transit -c \"COPY stops (stop_id) FROM '/tmp/s.csv'\"",
+        id="sql-copy-columns-from-file",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME TABLE updates TO updates_old'",
+        id="ch-rename-table",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY \\"Stops\\" FROM STDIN csv" < stops.csv',
+        id="sql-copy-from-escaped-quoted-table",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'RENAME updates TO updates_old'",
+        id="ch-rename-without-table-keyword",
+    ),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'DETACH TABLE updates'", id="ch-detach-table"),
+    pytest.param("docker compose exec clickhouse clickhouse-client -q 'ATTACH TABLE updates'", id="ch-attach-table"),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'EXCHANGE TABLES a AND b'", id="ch-exchange-tables"
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates FINAL DEDUPLICATE'",
+        id="ch-optimize-deduplicate",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "REFRESH MATERIALIZED VIEW mv_x"',
+        id="pg-refresh-materialized-view",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "SELECT * INTO stops_copy FROM stops"',
+        id="pg-select-into-new-table",
+    ),
     # A dev port spelled as a `port=` key: a libpq keyword DSN, a client kwarg,
     # or a CLICKHOUSE_PORT assignment, none of which carry a `:<port>` token.
     pytest.param('psql "host=localhost port=5433 dbname=transit" -c "TRUNCATE agg_x"', id="libpq-keyword-dsn"),
@@ -250,6 +288,17 @@ ALLOWED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
+    ),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/transit -c "COPY (SELECT * FROM stops) TO STDOUT"',
+        id="sql-copy-to-reads-data-out",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q \"SELECT * FROM updates INTO OUTFILE '/tmp/u.csv'\"",
+        id="ch-select-into-outfile",
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates'", id="ch-optimize-merges-only"
     ),
     pytest.param('psql "host=localhost port=5433 dbname=transit" -c "SELECT 1"', id="keyword-dsn-read"),
     pytest.param('psql "host=localhost port=5544 dbname=transit_test" -c "TRUNCATE agg_x"', id="keyword-dsn-test-db"),
