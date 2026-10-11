@@ -181,3 +181,21 @@ def test_template_future_runs_skips_an_agency_whose_only_match_is_outside_the_lo
     runs = _runs([(-21, "R1", "T1", 8, 2.0, "wk")])
     template = template_future_runs(runs, ORIGIN, horizon_days=7)
     assert template.empty
+
+
+def test_template_future_runs_does_not_template_from_a_same_day_partial_row():
+    # ORIGIN is a Tuesday; day+7 is also a Tuesday. At predict time, ORIGIN
+    # itself (day 0) can already hold a same-day partial row -- GTFS-RT
+    # ingestion is continuous, so the morning's trips may already be in
+    # ClickHouse by the time the daily predict job runs. day+7 must template
+    # from day -7's complete data, never from ORIGIN's still-incomplete one.
+    runs = _runs(
+        [
+            (-7, "R1", "T1", 8, 2.0, "wk"),
+            (0, "R1", "T2", 9, 5.0, "wk"),
+        ]
+    )
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+    day7 = template[template["service_date"] == pd.Timestamp(_day(7))]
+    assert len(day7) == 1
+    assert day7.iloc[0].trip_id == "T1"

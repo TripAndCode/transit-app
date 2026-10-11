@@ -310,3 +310,18 @@ def test_use_store_credentials_swaps_in_the_write_capable_pair(monkeypatch):
 
     assert os.environ["AWS_ACCESS_KEY_ID"] == "store-write-key"
     assert os.environ["AWS_SECRET_ACCESS_KEY"] == "store-write-secret"
+
+
+def test_use_store_credentials_rejects_an_unset_but_present_variable(monkeypatch):
+    # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=`,
+    # exactly what env.example ships as a template -- os.environ[...] would
+    # return "" rather than raise, silently swapping in an empty credential.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
+
+    with pytest.raises(SystemExit):
+        cli._use_store_credentials()
+
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "archive-readonly-key"

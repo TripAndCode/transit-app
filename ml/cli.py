@@ -42,8 +42,14 @@ def _use_store_credentials() -> None:
     # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
     # `train`/`predict` swap in the read-write transit-ml pair only for their
     # own (separate, short-lived) process, from distinctly named variables.
-    os.environ["AWS_ACCESS_KEY_ID"] = os.environ["ML_STORE_ACCESS_KEY_ID"]
-    os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ["ML_STORE_SECRET_ACCESS_KEY"]
+    access_key, secret_key = os.environ["ML_STORE_ACCESS_KEY_ID"], os.environ["ML_STORE_SECRET_ACCESS_KEY"]
+    # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=` --
+    # env.example ships exactly that, so a `KeyError` alone would not catch
+    # an operator who never filled it in.
+    if not access_key or not secret_key:
+        raise SystemExit("ML_STORE_ACCESS_KEY_ID/ML_STORE_SECRET_ACCESS_KEY must be set, not empty")
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -203,7 +209,7 @@ def _predict(args: argparse.Namespace) -> int:
     # Below MIN_MODEL_DAYS of its own history, an agency's forecast is worse
     # than its own slot average (see ml.model_backtest's own fallback gate) --
     # never publish a model forecast for it; the app falls back to B0.
-    seen = runs[runs["service_date"] <= pd.Timestamp(origin)].groupby("agency_id")["service_date"].nunique()
+    seen = runs[runs["service_date"] < pd.Timestamp(origin)].groupby("agency_id")["service_date"].nunique()
     on_model = {int(agency) for agency, days in seen.items() if days >= MIN_MODEL_DAYS}
 
     cells = frame[_CELL].assign(mean_min=preds.mean, q10=preds.q10, q50=preds.q50, q90=preds.q90)

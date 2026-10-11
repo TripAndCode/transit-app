@@ -20,10 +20,6 @@ _META_FILE = "meta.json"
 _ROUTES_FILE = "routes.parquet"
 
 
-def exists(directory: Path) -> bool:
-    return (directory / _META_FILE).exists()
-
-
 def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: pd.DataFrame, window_days: int) -> None:
     """`version`, `window_days` (the training window the published model was
     actually fit with) and `routes` (the vocabulary `ml.features.route_ids`
