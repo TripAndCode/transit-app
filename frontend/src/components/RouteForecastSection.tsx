@@ -356,23 +356,38 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
   );
 }
 
-/** Titled surface built on the shared `Card`; `onOpen` makes the whole card a
- *  keyboard-operable control (see `clickable`), matching the Overview card
- *  pattern this was migrated from. */
-function SectionCard({ title, sublabel, action, testid, onOpen, children }: {
+/** Titled surface built on the shared `Card`; `onOpen` adds an explicit Expand
+ *  button (keyboard and assistive-tech entry point) and makes a pointer click
+ *  anywhere on the card open it too. */
+function SectionCard({ title, sublabel, testid, onOpen, children }: {
   title: string;
   sublabel: string;
-  action?: React.ReactNode;
   testid: string;
   onOpen?: () => void;
   children: React.ReactNode;
 }) {
-  const activation = onOpen ? clickable(onOpen) : {};
+  const { t } = useTranslation();
+  // The card is not itself a button: a button's children are presentational,
+  // which would hide the focusable grid inside it. Keyboard and assistive-tech
+  // users open it from the explicit Expand button; a pointer click anywhere on
+  // the card still works as a convenience.
   return (
-    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} {...activation}>
+    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} onClick={onOpen}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
-        {action}
+        {onOpen && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            aria-label={t("forecast.expand_named", { title })}
+            style={{ appearance: "none", background: "transparent", border: "none", padding: 0, font: "inherit", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", cursor: "pointer" }}
+          >
+            {t("forecast.expand")} ⤢
+          </button>
+        )}
       </div>
       <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
@@ -697,10 +712,10 @@ function RouteDetail({
       </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-dow" onOpen={() => setView("dow")}>
           <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
-        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-hr" onOpen={() => setView("hr")}>
           <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
         </SectionCard>
       </div>

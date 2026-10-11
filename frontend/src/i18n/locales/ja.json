@@ -198,6 +198,7 @@
     "dow_sat": "土",
     "dow_sun": "日",
     "expand": "詳しく",
+    "expand_named": "{{title}}を拡大",
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",

@@ -198,6 +198,7 @@
     "dow_sat": "Sat",
     "dow_sun": "Sun",
     "expand": "Details",
+    "expand_named": "Expand {{title}}",
     "stat_worst": "Worst",
     "stat_calmest": "Calmest",
     "stat_mean": "Route avg",
