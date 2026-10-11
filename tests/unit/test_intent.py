@@ -225,3 +225,34 @@ def test_on_time_tools_collapse_their_best_first_default(tool):
     omitted = canonicalize(tool, {"k": 5}, _ctx())
     assert canonicalize(tool, {"k": 5, "best_first": True}, _ctx()) == omitted
     assert canonicalize(tool, {"k": 5, "best_first": False}, _ctx()) != omitted
+
+
+async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch):
+    """With the UI on 平日, an explicit service_type='all' ranks every service,
+    where leaving it out keeps 平日. Canonicalization must not turn the first
+    into the second, or the intent-cache path answers a different question
+    than the direct path."""
+    from api.range import RangeCtx
+    from pipeline.query import tools
+
+    seen: list[str] = []
+
+    async def fake_ranking(agency_id, ctx, conn, ch=None, sort_order="desc", limit=10):
+        seen.append(ctx.service)
+        return []
+
+    monkeypatch.setattr(tools, "compute_ranking", fake_ranking)
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 30), service="平日")
+    ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
+    raw = {"metric": "avg_delay", "service_type": "all"}
+
+    canonical = canonicalize("top_n", raw, ctx_dict)
+    assert canonical.get("service_type") == "all"
+    assert signature_hash("top_n", canonical) != signature_hash(
+        "top_n", canonicalize("top_n", {"metric": "avg_delay"}, ctx_dict)
+    )
+
+    await tools._tool_top_n(raw, ctx, None, 1, "en")
+    await tools._tool_top_n(canonical, ctx, None, 1, "en")
+    await tools._tool_top_n({"metric": "avg_delay"}, ctx, None, 1, "en")
+    assert seen == ["all", "all", "平日"]

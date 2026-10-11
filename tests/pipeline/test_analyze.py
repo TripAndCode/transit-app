@@ -1108,6 +1108,30 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
     assert abs(slow_wait - 900) < 1
 
 
+def test_agg_route_headway_parses_departure_times_like_hms_to_sec_sql(pg_conn, agency_id, ch_client):
+    """The headway builder shares hms_to_sec_sql's parse: an H:MM departure
+    (no seconds) counts as a departure, and an out-of-range minute does not."""
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R_PARSE",
+        "WD",
+        "s1",
+        ["8:00", "8:10:00", "8:20:00", "8:75:00"],
+    )
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT scheduled_samples, scheduled_headway_median_sec FROM agg_route_headway "
+            "WHERE agency_id = %s AND route_code = 'R_PARSE'",
+            (agency_id,),
+        )
+        samples, median = cur.fetchone()
+    assert samples == 2  # three valid departures -> two gaps
+    assert median == 600
+
+
 def _ch_headway_row(
     trip_id,
     captured_at,

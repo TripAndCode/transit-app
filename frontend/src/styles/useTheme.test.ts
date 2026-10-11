@@ -74,4 +74,47 @@ describe("useTheme", () => {
     act(() => scheme.set(true));
     expect(document.documentElement.dataset.theme).toBe("light");
   });
+
+  it("keeps every caller on one preference, so a choice made in one is seen by the others", () => {
+    mockColorScheme(false);
+    const palette = renderHook(() => useTheme());
+    const menu = renderHook(() => useTheme());
+    act(() => menu.result.current[1]("dark"));
+    expect(menu.result.current[0]).toBe("dark");
+    expect(palette.result.current[0]).toBe("dark");
+  });
+
+  it("does not let the OS repaint over an explicit choice made through another caller", () => {
+    const scheme = mockColorScheme(false);
+    renderHook(() => useTheme());
+    const menu = renderHook(() => useTheme());
+    act(() => menu.result.current[1]("dark"));
+    act(() => scheme.set(false));
+    act(() => scheme.set(true));
+    act(() => scheme.set(false));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(scheme.listenerCount()).toBe(0);
+  });
+
+  it("holds a single OS listener however many callers follow the system theme", () => {
+    const scheme = mockColorScheme(false);
+    renderHook(() => useTheme());
+    renderHook(() => useTheme());
+    expect(scheme.listenerCount()).toBe(1);
+  });
+
+  it("keeps a choice for the session when storage refuses the write", () => {
+    mockColorScheme(false);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    const first = renderHook(() => useTheme());
+    const second = renderHook(() => useTheme());
+    act(() => first.result.current[1]("dark"));
+    expect(second.result.current[0]).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    // Storage working again, a later write is the record once more.
+    vi.restoreAllMocks();
+    act(() => first.result.current[1]("system"));
+  });
 });

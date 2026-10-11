@@ -41,11 +41,12 @@ import {
   LIVE_TRIPS_LAYER,
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
-import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { meanRouteDelaySec } from "./map/selectedRouteDelay";
 import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../utils/clockSkew";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
@@ -102,7 +103,9 @@ function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation
 function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
   const age = now - new Date(timestamp).getTime();
-  if (!Number.isFinite(age) || age < 0) return "unknown";
+  // Rows this far ahead of the client clock are still drawn as live
+  // (filterLiveRows), so the badge judges them by the same allowance.
+  if (!Number.isFinite(age) || age < CLOCK_SKEW_ALLOWANCE_MS) return "unknown";
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
@@ -156,8 +159,8 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   // `route_focus_agency` guards against a stale `route_focus` value matching
-  // a different agency's route code after an agency switch, the same way
-  // the old `RouteSelection.agencyId` field did.
+  // a different agency's route code after an agency switch; it is carried as
+  // `RouteSelection.agencyId` and compared with the current agency below.
   const [routeFocusAgencyParam] = useUrlState<string>("route_focus_agency", "");
   const [routeFocusParam] = useUrlState<string>("route_focus", "");
   const patchUrl = useUrlPatch();
@@ -271,7 +274,6 @@ export function MapTab() {
     { header: "captured_at", value: (r) => r.captured_at },
   ];
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
-  const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
   // effectiveRoute only highlights matching markers and loads that route's shape.
   // It's independent of ctx.routes, which already scoped liveRows (and so every
@@ -280,7 +282,6 @@ export function MapTab() {
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;
-  const selectedSummary = activeSummaries.find((route) => route.route_code === effectiveRoute);
   const routeTrips = effectiveRoute
     ? liveRows.filter((trip) => trip.route_code === effectiveRoute)
     : [];
@@ -352,9 +353,9 @@ export function MapTab() {
     );
     if (!created.map) return created.cleanup;
     const map: MLMap = created.map;
-    // top-right, not the default top-left: the legend now occupies top-left
-    // (see .ops-map-legend) and the two used to be squeezed into the same
-    // corner, forcing the legend to offset itself around the zoom buttons.
+    // top-right, not the default top-left: top-left holds the filter dock
+    // (.ops-dock) and the reference chip (.ops-map-ref), which would otherwise
+    // have to offset themselves around the zoom buttons.
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
@@ -447,13 +448,13 @@ export function MapTab() {
   // signal: no tint, and any change steps rather than fades.
   const playbackFrame = playbackOn ? playback.frames[playback.index] : undefined;
   const light = lightFor(playbackFrame ? frameHour(playbackFrame.t) : null, lightOn && !playback.steppingOnly);
-  useBasemapDim(mapRef, styleEpoch, true, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  useBasemapDim(mapRef, styleEpoch, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useOperationsMapLayers(
     mapRef,
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
     shapeQuery.data,
     effectiveRoute,
-    selectedSummary?.avg_delay_sec ?? 0,
+    meanRouteDelaySec(liveRows, effectiveRoute),
     id,
     styleEpoch,
     effectiveTrip?.trip_id ?? null,
