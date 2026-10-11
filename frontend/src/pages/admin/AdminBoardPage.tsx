@@ -152,7 +152,7 @@ export function AdminBoardPage() {
   // page never received.
   const unavailable = data == null && error != null;
   const unavailableNote = (
-    <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{t("admin.board.section_unavailable")}</p>
+    <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{t("admin.board.section_unavailable")}</p>
   );
 
   // Why the control is unavailable, or null when it is usable. Kept as the
