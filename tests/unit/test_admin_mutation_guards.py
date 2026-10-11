@@ -8,8 +8,8 @@ silently shipping an action any cross-site page, or any signed-in user, could
 trigger.
 
 Requests are served by a minimal standalone app assembled from every router
-under ``api.routers`` (subpackages included), with ``get_conn``/``get_ch``
-overridden to stand-ins that raise if ever touched -- a guard that let a
+under ``api.routers`` (subpackages included), with ``get_conn``, ``get_pooled_conn`` and
+``get_ch`` overridden to stand-ins that raise if ever touched -- a guard that let a
 request through would otherwise fail with a confusing downstream error
 instead of naming the missing guard. That app must serve every route the
 sweeps take from ``api.main.app``, and each response names the endpoint that
@@ -40,7 +40,7 @@ from starlette.routing import Mount
 
 import api.routers
 from api import main
-from api.deps import get_agency, get_ch, get_conn
+from api.deps import get_agency, get_ch, get_conn, get_pooled_conn
 from api.middleware.ratelimit import limiter
 from api.security import User, csrf_guard, require_admin
 from pipeline import flags
@@ -162,6 +162,7 @@ def _build_app(user: User) -> FastAPI:
     for router in _routers():
         app.include_router(router)
     app.dependency_overrides[get_conn] = lambda: _UnusedDependency()
+    app.dependency_overrides[get_pooled_conn] = lambda: _UnusedDependency()
     app.dependency_overrides[get_ch] = lambda: _UnusedDependency()
     app.dependency_overrides[get_agency] = _any_agency
 

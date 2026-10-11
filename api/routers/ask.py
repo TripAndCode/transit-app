@@ -21,7 +21,7 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     RangeCtx,
@@ -145,7 +145,9 @@ async def ask(
     request: Request,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
+    # Per-statement borrowing: the LLM wait below can last tens of seconds and
+    # must not pin one of the pool's connections while it does.
+    conn: asyncpg.Connection = Depends(get_pooled_conn),
     ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     user: User | None = Depends(get_current_user_optional),
