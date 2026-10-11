@@ -745,7 +745,8 @@
         "sql": "Exact (computed directly from the aggregate)",
         "llm": "LLM-generated summary (grounded only in the already-fetched result)"
       },
-      "sample_count": "{{count}} observations"
+      "row_count_one": "{{count}} row",
+      "row_count_other": "{{count}} rows"
     },
     "workspace": {
       "investigations": "Your investigations",
