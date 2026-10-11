@@ -1856,5 +1856,9 @@
     },
     "unapplied_note": "この画面では使いません：{{list}}",
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
+  },
+  "print": {
+    "generated_at": "作成日時 {{time}}",
+    "routes": "路線: {{names}}"
   }
 }

@@ -1856,5 +1856,9 @@
     },
     "unapplied_note": "Not used on this screen: {{list}}",
     "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]"
+  },
+  "print": {
+    "generated_at": "Generated {{time}}",
+    "routes": "Routes: {{names}}"
   }
 }
