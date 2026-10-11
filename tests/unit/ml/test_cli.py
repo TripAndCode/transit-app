@@ -78,3 +78,17 @@ def test_train_is_a_command():
     with pytest.raises(SystemExit) as exit_info:
         main(["train", "--help"])
     assert exit_info.value.code == 0
+
+
+def test_predict_without_a_published_model_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    out = tmp_path / "forecast.parquet"
+    assert main(["predict", "--model", str(tmp_path / "no-model-here"), "--out", str(out)]) != 0
+    assert not out.exists()
+
+
+def test_predict_is_a_command():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["predict", "--help"])
+    assert exit_info.value.code == 0

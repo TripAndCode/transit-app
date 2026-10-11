@@ -130,6 +130,52 @@ def _train(args: argparse.Namespace) -> int:
     return 0
 
 
+def _predict(args: argparse.Namespace) -> int:
+    import os
+    import sys
+
+    model_dir = args.model
+    if not (model_dir / "meta.json").exists():
+        sys.stderr.write(f"no published model at {model_dir}; run `ml train` first\n")
+        return 1
+
+    # Imported here: they need the optional `ml` group, which sync and
+    # report do not.
+    from ml.data import agencies_with_data
+    from ml.dataset import load_runs
+    from ml.features import build_frame
+    from ml.model_store import load_model_set
+    from ml.models import predict
+    from ml.r2 import upload_file
+    from ml.training import HORIZON_DAYS
+
+    models = load_model_set(model_dir)
+    client = get_client()
+    runs = load_runs(client, args.agency or agencies_with_data(client))
+    origin = _today_jst()
+    frame = build_frame(runs, origin, window_days=args.window, horizon_days=HORIZON_DAYS)
+    preds = predict(models, frame)
+    forecast = frame[["agency_id", "route_code", "service_date", "hour"]].copy()
+    forecast["mean_min"] = preds.mean
+    forecast["q10"] = preds.q10
+    forecast["q50"] = preds.q50
+    forecast["q90"] = preds.q90
+    forecast["model_version"] = json.loads((model_dir / "meta.json").read_text())["version"]
+    forecast["origin_date"] = origin.isoformat()
+    forecast["generated_at"] = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    forecast.to_parquet(args.out)
+    manifest = args.out.parent / "manifest.json"
+    manifest.write_text(json.dumps({"rows": len(forecast), "origin_date": origin.isoformat()}))
+
+    bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    prefix = f"forecasts/{origin.isoformat()}"
+    upload_file(args.out, bucket, f"{prefix}/forecast.parquet", endpoint, run=_run)
+    upload_file(manifest, bucket, f"{prefix}/manifest.json", endpoint, run=_run)
+    return 0
+
+
 def _report(args: argparse.Namespace) -> int:
     results = results_from_json(args.input.read_text())
     models = result_from_json(args.models.read_text()) if args.models else None
@@ -174,6 +220,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_train_live.add_argument("--window", type=int, default=28)
     p_train_live.add_argument("--agency", type=int, action="append")
     p_train_live.set_defaults(handler=_train)
+
+    p_predict = sub.add_parser("predict", help="Predict the next 7 days with the latest published model")
+    p_predict.add_argument("--model", type=Path, required=True)
+    p_predict.add_argument("--out", type=Path, required=True)
+    p_predict.add_argument("--window", type=int, default=28)
+    p_predict.add_argument("--agency", type=int, action="append")
+    p_predict.set_defaults(handler=_predict)
 
     args = parser.parse_args(argv)
     return int(args.handler(args))
