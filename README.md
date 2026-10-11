@@ -132,7 +132,8 @@ destructive and is not part of the normal reset flow.
 
 `make geosql-up` starts a local [Dekart](https://dekart.xyz/) instance for
 exploratory spatial SQL, local-only and never wired into `check`/`test`/
-`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
+`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add, derived
+from `DATABASE_URL` with a read-only session; it
 points at the dev Postgres/PostGIS database, so the same read-only rule as
 any other dev-database access applies — see `AGENTS.md`. `make geosql-down`
 stops it.
@@ -156,9 +157,7 @@ actually run rather than silently skipping. `make check` runs `fmt-check`
 Example targeted test:
 
 ```bash
-DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-  GEMINI_API_KEY=test-key \
-  poetry run pytest tests/query/test_tool_queries.py -v
+scripts/run_integration_tests.sh tests/query/test_tool_queries.py -v
 ```
 
 That fixed `:5544`/`:8124` pair is shared, and a concurrent run against it can

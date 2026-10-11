@@ -134,6 +134,7 @@ async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks,
         ("どんな路線がデータにあるの？", "describe_data", "routes"),
         ("路線一覧を見せて", "describe_data", "routes"),
         ("いつからのデータ？", "describe_data", "date_range"),
+        ("いつ頃からのデータ？", "describe_data", "date_range"),
         ("最新のデータはいつ？", "describe_data", "date_range"),
         ("何件くらいの観測がある？", "describe_data", "date_range"),
         ("停留所はいくつ？", "describe_data", "stops"),
@@ -161,6 +162,26 @@ def test_rule_meta_dispatch(question, expected_tool, expected_kind):
 )
 def test_rule_no_match(question):
     """Questions outside the rule set return None — fall through to Stage 2."""
+    assert _match_rules(question) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "22171はいつから遅れ始めた?",
+        "いつも混む時間帯から教えて",
+        "最新のデータで22171の遅延は?",
+        "何分遅れている路線がある?",
+        "系統ごとの遅延一覧",
+        "路線22171の停留所一覧",
+        "停留所ごとの遅延一覧",
+        "22171の遅延が多い停留所TOP5",
+        "停留所別の定時率ワースト5",
+    ],
+)
+def test_analytic_questions_are_not_answered_by_a_meta_or_route_ranking_rule(question):
+    """These ask about delays on a route or stop, not what the dataset holds
+    or the agency-wide route ranking, so no Stage-1 rule may answer them."""
     assert _match_rules(question) is None
 
 

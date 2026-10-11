@@ -44,3 +44,16 @@ describe("RoutesPicker touch targets", () => {
     expect(px(variant.style.minHeight)).toBeGreaterThanOrEqual(32);
   });
 });
+
+describe("RoutesPicker group checkbox", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is named after its line, so a screen reader does not announce a bare checkbox", () => {
+    renderPicker();
+    const checkbox = screen.getByRole("checkbox");
+    const expand = screen.getByRole("button", { name: "Expand" });
+    const lineName = expand.parentElement!.querySelector("span")!.textContent!;
+    expect(lineName).not.toBe("");
+    expect(screen.getByRole("checkbox", { name: lineName })).toBe(checkbox);
+  });
+});

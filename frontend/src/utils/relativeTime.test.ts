@@ -30,8 +30,13 @@ describe("relativeTime", () => {
     expect(relativeTime("2026-10-03T00:00:00Z", now)).toBe("10 minutes ago");
   });
 
-  it("returns the em dash for an unparseable or future time", () => {
+  it("reads a time a few seconds ahead of the clock as just now, within the clock-skew allowance", () => {
+    expect(relativeTime("2026-10-03T00:00:30Z", Date.parse("2026-10-03T00:00:00Z"))).toBe("just now");
+    expect(relativeTime("2026-10-03T00:01:00Z", Date.parse("2026-10-03T00:00:00Z"))).toBe("just now");
+  });
+
+  it("returns the em dash for an unparseable time or one beyond the allowance", () => {
     expect(relativeTime("nope")).toBe("—");
-    expect(relativeTime(new Date(Date.now() + 60_000).toISOString())).toBe("—");
+    expect(relativeTime("2026-10-03T00:01:01Z", Date.parse("2026-10-03T00:00:00Z"))).toBe("—");
   });
 });
