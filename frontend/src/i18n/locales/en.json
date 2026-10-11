@@ -394,6 +394,7 @@
     "no": "No",
     "unit_min": "min",
     "unit_sec": "s",
+    "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}} min",
     "unit_sec_signed": "{{sign}}{{value}} s",
     "range_separator": "–",

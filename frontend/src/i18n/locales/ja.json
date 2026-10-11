@@ -394,6 +394,7 @@
     "no": "いいえ",
     "unit_min": "分",
     "unit_sec": "秒",
+    "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
     "range_separator": "〜",
