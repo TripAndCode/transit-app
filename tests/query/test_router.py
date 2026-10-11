@@ -250,6 +250,29 @@ def test_ranking_rules_follow_the_asked_direction(question, metric, best_first, 
 
 
 @pytest.mark.parametrize(
+    "question, metric, n",
+    [
+        ("５分以上の遅れが多い系統", "worst_5min", 10),
+        ("５分以上の遅れが多い系統ＴＯＰ１０", "worst_5min", 10),
+        ("５分超の遅延ワースト３", "worst_5min", 3),
+        ("遅延ﾜｰｽﾄ3", "avg_delay", 3),
+        ("遅延ワースト５", "avg_delay", 5),
+    ],
+)
+def test_rules_match_after_nfkc_normalisation(question, metric, n):
+    """Full-width digits/latin and half-width kana fold to their canonical
+    forms before the rules run, so they match like the plain spelling."""
+    d = _match_rules(question)
+    assert d is not None and d.tool == "top_n"
+    assert (d.args["metric"], d.args["n"]) == (metric, n)
+
+
+def test_full_width_threshold_other_than_five_still_goes_to_the_llm():
+    assert _match_rules("１５分以上の遅れが多い路線ＴＯＰ１０") is None
+    assert _match_rules("１５分を超える遅れが多い路線上位３") is None
+
+
+@pytest.mark.parametrize(
     "question",
     [
         "5分以上の遅れが少ない路線TOP10",
