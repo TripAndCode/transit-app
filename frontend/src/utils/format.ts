@@ -42,6 +42,12 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return format;
 }
 
+/** Round to one decimal. Derive a displayed sign from this value, not the raw one,
+ *  so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
+export function roundTenth(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {

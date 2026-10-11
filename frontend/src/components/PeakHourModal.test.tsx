@@ -85,6 +85,17 @@ describe("PeakHourModal", () => {
     expect(screen.getByText("+6.5min")).toBeInTheDocument();
   });
 
+  it("shows a delay that rounds to zero as +0.0min, never -0.0min", () => {
+    const tiny: PeakHourBreakdown = {
+      hour: 8,
+      dow: 5,
+      routes: [{ route_code: "K31", service_type: "平日", avg_min: -0.04, samples: 50 }],
+    };
+    render(<PeakHourModal data={tiny} loading={false} onClose={() => {}} />);
+    expect(screen.getByText("+0.0min")).toBeInTheDocument();
+    expect(screen.queryByText("-0.0min")).not.toBeInTheDocument();
+  });
+
   it("does not render a NaN width when every route has avg_min of exactly 0", () => {
     // Without a `|| 1` fallback maxAvg would be 0 in this case, so
     // (0/0)*100 is NaN, and Math.max(NaN, 0) is NaN (not 0) since any
