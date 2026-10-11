@@ -146,16 +146,23 @@ export function AskTab() {
   // is reported once (as a failure banner) rather than as an unhandled
   // rejection.
   const pendingFilterSave = useRef<Promise<boolean> | null>(null);
+  // The filter the user applied that never reached the thread. The screen
+  // shows it, but the backend reads the persisted one, so a dispatch must save
+  // it first or it would answer under a scope the user is not looking at.
+  const unsavedFilter = useRef<{ id: string; fc: FilterCtx } | null>(null);
   function handleFilterChange(next: FilterCtx) {
     setFilterEdit({ key: activeId, fc: next });
     if (activeId) {
-      pendingFilterSave.current = updateConv.mutateAsync({ id: activeId, patch: { filter_ctx: next } }).then(
+      const id = activeId;
+      pendingFilterSave.current = updateConv.mutateAsync({ id, patch: { filter_ctx: next } }).then(
         () => {
           pendingFilterSave.current = null;
+          unsavedFilter.current = null;
           return true;
         },
         (error: unknown) => {
           pendingFilterSave.current = null;
+          unsavedFilter.current = { id, fc: next };
           setDispatchFailure({ error, retry: null });
           return false;
         },
@@ -174,6 +181,7 @@ export function AskTab() {
     historyRef.current?.removeAttribute("open");
     setActiveId(threadId);
     setFilterEdit(null);
+    unsavedFilter.current = null;
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -189,6 +197,7 @@ export function AskTab() {
     historyRef.current?.removeAttribute("open");
     setActiveId(null);
     setFilterEdit(null);
+    unsavedFilter.current = null;
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -218,6 +227,13 @@ export function AskTab() {
       // has already been reported, and dispatching would answer under the
       // previous filter scope.
       if (pendingFilterSave.current && !(await pendingFilterSave.current)) return;
+      // A save that failed earlier is retried now; if it fails again the
+      // error surfaces with a retry that repeats this whole submission.
+      const unsaved = unsavedFilter.current;
+      if (unsaved && unsaved.id === activeId) {
+        await updateConv.mutateAsync({ id: unsaved.id, patch: { filter_ctx: unsaved.fc } });
+        unsavedFilter.current = null;
+      }
 
       let convId = createdConvId ?? activeId;
       if (convId === null) {
