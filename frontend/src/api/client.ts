@@ -160,17 +160,25 @@ export function formatApiError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Parse a response body as JSON. A timeout or caller abort that lands while
+ *  the body is still streaming is rethrown as-is: folding it into "not valid
+ *  JSON" would hide a stall behind a generic error class. */
+async function parseJsonBody<T>(r: Response): Promise<T> {
+  try {
+    return (await r.json()) as T;
+  } catch (e) {
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
+    throw new ApiError(r.status, "Response was not valid JSON");
+  }
+}
+
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   const r = await rawFetch(path, init);
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new ApiError(r.status, text);
   }
-  try {
-    return (await r.json()) as T;
-  } catch {
-    throw new ApiError(r.status, "Response was not valid JSON");
-  }
+  return parseJsonBody<T>(r);
 }
 
 async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T | undefined> {
@@ -180,11 +188,34 @@ async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T 
     throw new ApiError(r.status, text);
   }
   if (r.status === 204) return undefined;
-  try {
-    return (await r.json()) as T;
-  } catch {
-    throw new ApiError(r.status, "Response was not valid JSON");
+  return parseJsonBody<T>(r);
+}
+
+/** Upper bound on one request, headers and body together. A hung backend then
+ *  surfaces as a `TimeoutError` (classified `timeout`) instead of a section
+ *  that stays on its skeleton until the browser gives up. It sits above the
+ *  server's own limits (30s statement timeout, 30s per LLM call) so a request
+ *  the server would still answer is not cut off. */
+export const REQUEST_TIMEOUT_MS = 90_000;
+
+/** Aborts as soon as any of `signals` does, with that signal's own reason, so a
+ *  caller's `AbortError` and the timeout's `TimeoutError` stay distinguishable.
+ *  `AbortSignal.any` is used where it exists (Safari 17.4, Chrome 116,
+ *  Firefox 124); older browsers get the equivalent wiring by hand. */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  const settled = signals.find((s) => s.aborted);
+  if (settled) {
+    controller.abort(settled.reason);
+    return controller.signal;
   }
+  const onAbort = (e: Event) => {
+    for (const s of signals) s.removeEventListener("abort", onAbort);
+    controller.abort((e.target as AbortSignal).reason);
+  };
+  for (const s of signals) s.addEventListener("abort", onAbort);
+  return controller.signal;
 }
 
 // credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
@@ -203,5 +234,7 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
     "Accept-Language": lang,
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
-  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
+  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include", signal });
 }
