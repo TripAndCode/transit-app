@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clampQueueWidth, DEFAULT_QUEUE_WIDTH, MAX_QUEUE_WIDTH, MIN_QUEUE_WIDTH, readQueueWidth, storeQueueWidth } from "./queueWidth";
 
 describe("clampQueueWidth", () => {
@@ -38,5 +38,34 @@ describe("readQueueWidth", () => {
   it("clamps a stored width that is out of range", () => {
     localStorage.setItem("ops.queueWidth", "9999");
     expect(readQueueWidth()).toBe(MAX_QUEUE_WIDTH);
+  });
+});
+
+describe("with storage blocked", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the default when getItem throws", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    expect(readQueueWidth()).toBe(DEFAULT_QUEUE_WIDTH);
+  });
+
+  it("reads the default when localStorage itself is unavailable", () => {
+    vi.stubGlobal("localStorage", null);
+    expect(readQueueWidth()).toBe(DEFAULT_QUEUE_WIDTH);
+  });
+
+  it("drops a width it cannot persist instead of throwing", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    expect(() => storeQueueWidth(500)).not.toThrow();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("localStorage", null);
+    expect(() => storeQueueWidth(500)).not.toThrow();
   });
 });
