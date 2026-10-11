@@ -69,3 +69,18 @@ def test_train_eval_is_a_command():
     with pytest.raises(SystemExit) as exit_info:
         main(["train-eval", "--help"])
     assert exit_info.value.code == 0
+
+
+def test_sync_passes_the_operators_skipped_archives_to_the_replay(monkeypatch, tmp_path, capsys):
+    key = "static/8/gtfs_static_20260601.zip"
+    monkeypatch.setenv("OBJECT_STORE_BUCKET", "bucket")
+    monkeypatch.setenv("OBJECT_STORE_ENDPOINT", "https://r2.example")
+    monkeypatch.setattr(cli, "_capture", lambda cmd: f"2026-06-01 00:00:00 1234 {key}\n")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(cli, "_run", lambda cmd: ran.append(list(cmd)))
+
+    code = main(["sync", "--state", str(tmp_path / "s.json"), "--work", str(tmp_path / "w"), "--skip-static", key])
+
+    assert code == 0
+    assert not [c for c in ran if "load_static" in c]
+    assert key in capsys.readouterr().err

@@ -80,6 +80,49 @@ def test_a_failing_agency_stops_there_and_the_next_agency_still_runs(tmp_path):
     assert not any("rt/8/20261002.tar.gz" in " ".join(c) for c in run.commands)
 
 
+def _execute_skipping(tmp_path, actions, run, skip):
+    notices: list[str] = []
+    done: set[str] = set()
+    failures = execute(
+        actions,
+        bucket="transit-archives",
+        endpoint="https://r2.example",
+        work_dir=tmp_path / "work",
+        state_path=tmp_path / "state.json",
+        done=done,
+        today_jst=date.fromisoformat("2026-10-09"),
+        run=run,
+        python="python",
+        skip_static=skip,
+        notices=notices,
+    )
+    return failures, load_done(tmp_path / "state.json"), notices
+
+
+def test_an_operator_skipped_static_is_neither_fetched_nor_loaded_and_is_reported(tmp_path):
+    bad = _static(8, "2026-06-01")
+    run = Recorder()
+    failures, done, notices = _execute_skipping(
+        tmp_path, [LoadStatic(bad), IngestDays(8, (_rt(8, "2026-06-02"),))], run, skip={bad.key}
+    )
+    assert failures == []
+    assert not [c for c in run.commands if "load_static" in c or bad.key in " ".join(c)]
+    assert bad.key in done
+    assert any(bad.key in n and "previous timetable" in n for n in notices)
+    # The agency's timeline carries on past the skipped timetable.
+    assert [c for c in run.commands if c[1:3] == ["gtfs_pipeline.py", "ingest"]]
+
+
+def test_skipping_one_static_archive_leaves_every_other_one_loading(tmp_path):
+    bad, good = _static(8, "2026-06-01"), _static(8, "2026-07-01")
+    run = Recorder()
+    _failures, done, notices = _execute_skipping(tmp_path, [LoadStatic(bad), LoadStatic(good)], run, skip={bad.key})
+    loads = [c for c in run.commands if c[1:3] == ["gtfs_pipeline.py", "load_static"]]
+    assert len(loads) == 1
+    assert done == {bad.key, good.key}
+    assert len(notices) == 1
+
+
 def test_downloads_are_removed_once_their_action_ends(tmp_path):
     run = Recorder()
     _execute(tmp_path, [IngestDays(8, (_rt(8, "2026-10-01"),))], run)
