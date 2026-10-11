@@ -312,19 +312,23 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
-# call runs FIRST on each request. Order today (request-side, outermost first):
-#   StarletteSessionMiddleware  (Authlib needs request.session)
-#   SessionMiddleware           (loads request.state.user from sid cookie)
-#   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
-#   LoginRequiredMiddleware     (401s a signed-out caller while sign-in is required)
-#   LocaleMiddleware            (parses Accept-Language → request.state.locale)
+# call runs FIRST on each request. The add_middleware calls below, outermost
+# (runs first on a request) to innermost (closest to the routers):
+#   ForwardedClientMiddleware      (resolves the real client address)
+#   RequestLogMiddleware           (request_id, timing, access log)
+#   CORSMiddleware                 (cross-origin SSO headers)
+#   StarletteSessionMiddleware     (Authlib needs request.session)
+#   SessionMiddleware              (loads request.state.user from sid cookie)
+#   APIKeyMiddleware               (loads request.state.tier from X-API-Key)
+#   LoginRequiredMiddleware        (401s a signed-out caller while sign-in is required)
+#   LocaleMiddleware               (parses Accept-Language → request.state.locale)
+#   CancelGETOnDisconnectMiddleware (cancels GET handler tasks when the client
+#                                    disconnects, so aborted SPA fetches also
+#                                    cancel the asyncpg query instead of letting
+#                                    heavy scans run to completion; GET-only by
+#                                    design — see api/middleware/cancel_on_disconnect.py)
 # That means require_user/require_admin see request.state.user before any
-# router runs, which is what we want. LocaleMiddleware is innermost (cheap,
-# no I/O) and only needs to run before the route handlers read state.locale.
-# Innermost (added first → runs closest to the routers): cancels GET handler
-# tasks when the client disconnects, so aborted SPA fetches also cancel the
-# asyncpg query instead of letting heavy scans run to completion. GET-only by
-# design — see api/middleware/cancel_on_disconnect.py.
+# router runs, which is what we want.
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(LoginRequiredMiddleware)
