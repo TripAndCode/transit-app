@@ -145,7 +145,9 @@ _RULES: list[Rule] = [
         name="ranking-worst-5min",
         # The count is tried first, so "…が多い路線TOP3" reads its 3 rather than
         # stopping at 多い; "5分" must not be the tail of "15分" or "2.5分".
-        pattern=re.compile(r"(?<![\d.．])5分.*?(?:超|以上)(?:.*?(?:TOP|ワースト|上位)\s*(\d+)|.*?(?:多い|TOP|ワースト|上位|ランキング))"),
+        pattern=re.compile(
+            r"(?<![\d.．])5分.*?(?:超|以上)(?:.*?(?:TOP|ワースト|上位)\s*(\d+)|.*?(?:多い|TOP|ワースト|上位|ランキング))"
+        ),
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
         # worst_5min has no fewest-first order.
