@@ -25,6 +25,11 @@ import pytest
 HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "guard-dev-db.sh"
 
 BLOCKED = [
+    pytest.param("clickhouse-client --query 'INSERT INTO t VALUES (1)'", id="ch-client-bare-no-port"),
+    pytest.param(
+        "docker exec -it transit-ch clickhouse-client --query 'INSERT INTO t VALUES (1)'",
+        id="ch-client-exec-dev-container",
+    ),
     pytest.param('psql postgresql://transit:transit@localhost:5433/transit -c "DROP TABLE updates"', id="url"),
     pytest.param('psql -h localhost -p 5433 -U transit -c "DELETE FROM updates"', id="separated-host-port"),
     pytest.param('psql -h 127.0.0.1 -p 5433 -U transit -c "DELETE FROM updates"', id="loopback-ip"),
@@ -371,6 +376,16 @@ BLOCKED = [
 ]
 
 ALLOWED = [
+    # An exec into a named service or container that is not a dev one is not the
+    # dev store, whatever port the client defaults to inside it.
+    pytest.param(
+        "docker compose -f deploy/vps/compose.yml exec ml-ch clickhouse-client --query 'INSERT INTO t VALUES (1)'",
+        id="ch-client-exec-replica-service",
+    ),
+    pytest.param(
+        "docker exec transit-ml-ml-ch-1 clickhouse-client --query 'INSERT INTO t VALUES (1)'",
+        id="ch-client-exec-replica-container",
+    ),
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/transit -c "SELECT count(*) FROM updates"', id="dev-read"
     ),

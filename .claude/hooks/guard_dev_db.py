@@ -71,6 +71,10 @@ THROWAWAY = {
 }
 # Container names the throwaway stack runs under (see the transit-app-gotchas skill).
 THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
+# The ML replica's compose file and the containers it names (`name: transit-ml`
+# in that file). Its clickhouse-client is not the dev one even with no port.
+REPLICA_COMPOSE_FILE = "deploy/vps/compose.yml"
+REPLICA_CONTAINER = re.compile(r"transit-ml-[a-z0-9_.-]+")
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
 # overrides nothing -- the Makefile's own defaults from .env, the shell's for
 # the CLI -- which are the real dev stores. They name no host, port or
@@ -453,9 +457,15 @@ def _clickhouse_client_aims_elsewhere(segment: list[str], at: int) -> bool:
             hosts.append(low.split("=", 1)[1])
     if any(not _is_dev_clickhouse_host(host) for host in hosts):
         return True
+    before = [tok.lower() for tok in segment[:at]]
     # A throwaway container counts only as the target of the `docker exec` in
     # front of the client, not as a word elsewhere (a trailing comment).
-    return any(THROWAWAY_CONTAINER.fullmatch(tok.lower()) for tok in segment[:at])
+    if any(THROWAWAY_CONTAINER.fullmatch(tok) for tok in before):
+        return True
+    # The ML replica is a store of its own: reached through its compose file or
+    # by its `transit-ml-*` container name. Any other unnamed container could be
+    # the dev instance under another name, so it is not exempted.
+    return any(tok.endswith(REPLICA_COMPOSE_FILE) or REPLICA_CONTAINER.fullmatch(tok) for tok in before)
 
 
 def runs_default_clickhouse_client(cmd: str) -> bool:
