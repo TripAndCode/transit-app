@@ -188,15 +188,17 @@ export function AdminAuditPage() {
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exportedCount, setExportedCount] = useState<number | null>(null);
+  // The notice describes one filter set, so it is keyed to it and stops
+  // showing once the filters change.
+  const [truncatedExport, setTruncatedExport] = useState<{ filterKey: string; count: number } | null>(null);
 
   async function handleExport() {
     setExporting(true);
     setExportError(null);
-    setExportedCount(null);
+    setTruncatedExport(null);
     try {
       const { items, truncated } = await fetchAllAdminAudit(filters);
-      if (truncated) setExportedCount(items.length);
+      if (truncated) setTruncatedExport({ filterKey, count: items.length });
       downloadCsv("admin-audit", [
         [
           t("admin.audit.col.at"),
@@ -261,9 +263,9 @@ export function AdminAuditPage() {
           {exportError}
         </div>
       )}
-      {exportedCount != null && (
+      {truncatedExport?.filterKey === filterKey && (
         <div role="status" style={{ marginBottom: 12, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("admin.audit.export.truncated", { count: exportedCount })}
+          {t("admin.audit.export.truncated", { count: truncatedExport.count })}
         </div>
       )}
       <AuditTimeline key={filterKey} filters={filters} />
