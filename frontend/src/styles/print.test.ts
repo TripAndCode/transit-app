@@ -28,4 +28,24 @@ describe("shared print stylesheet", () => {
     }
     expect(globalCss.slice(start, end)).toContain(".export-menu");
   });
+
+  it("hides the print frame on screen and shows it only inside the print block", () => {
+    const start = globalCss.indexOf("@media print");
+    let depth = 0;
+    let end = start;
+    for (let i = start; i < globalCss.length; i++) {
+      if (globalCss[i] === "{") depth++;
+      if (globalCss[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    const printBlock = globalCss.slice(start, end);
+    const screenCss = globalCss.slice(0, start) + globalCss.slice(end);
+    expect(screenCss).toMatch(/\.print-frame\s*\{[^}]*display:\s*none/);
+    expect(printBlock).toMatch(/\.print-frame[^{]*\{[^}]*display:\s*block/);
+  });
 });
