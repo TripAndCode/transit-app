@@ -288,9 +288,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     # {route} is the route's display name, or route_code_fallback below.
     ("suggest_reason_anomaly", "ja"): "{route}の本日の平均遅延が普段より大幅に悪化しています（平均{avg_min}分）。",
     ("suggest_reason_anomaly", "en"): ("Average delay on {route} today is much worse than usual (avg {avg_min} min)."),
-    ("suggest_reason_trend_shift", "ja"): "{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_shift", "en"): (
-        "The delay pattern on {route} shifted partway through this week ({delta_min} min change)."
+    ("suggest_reason_trend_worsened", "ja"): "{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
+    ("suggest_reason_trend_worsened", "en"): (
+        "Delays on {route} worsened partway through this week ({delta_min} min change)."
+    ),
+    ("suggest_reason_trend_improved", "ja"): "{route}の遅延が今週の途中から改善しています（{delta_min}分の変化）。",
+    ("suggest_reason_trend_improved", "en"): (
+        "Delays on {route} improved partway through this week ({delta_min} min change)."
     ),
     ("suggest_reason_on_time_fallback", "ja"): "{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
     ("suggest_reason_on_time_fallback", "en"): "{route} has the worst on-time rate this week ({pct}% on time).",
