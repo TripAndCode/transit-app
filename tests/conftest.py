@@ -10,6 +10,26 @@ from psycopg2 import sql
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
 from tests.sharding import assign_shards, shard_from_env
 
+# Host ports the dev Postgres is published on (see .claude/hooks/guard_dev_db.py).
+_DEV_POSTGRES_PORTS = frozenset({"5433", "5543"})
+
+
+def _refuse_dev_postgres_port(url: str, var: str) -> None:
+    """Raise ``pytest.UsageError`` when ``url`` targets a dev Postgres port.
+
+    Renaming the database does not move the suite off the dev server: the
+    ``CREATE DATABASE``, the migrations and the per-test table reset would all
+    run on it. Runs before any connection is opened.
+    """
+    port = urlsplit(url).port
+    if str(port) in _DEV_POSTGRES_PORTS:
+        raise pytest.UsageError(
+            f"{var} points at the dev Postgres port {port}; the suite "
+            "writes to its database and must only run against a throwaway instance. "
+            "Use scripts/run_integration_tests.sh, or point DATABASE_URL (or "
+            "TEST_DATABASE_URL) at the throwaway Postgres."
+        )
+
 
 def _redirect_to_test_db() -> None:
     """Auto-redirect pytest to a sibling ``<dbname>_test`` database.
@@ -25,7 +45,8 @@ def _redirect_to_test_db() -> None:
     dev DB; create the sibling on first run if it's missing.
 
     Opt-out: set ``DATABASE_URL`` to a name already ending in ``_test``,
-    or set ``TEST_DATABASE_URL`` explicitly.
+    or set ``TEST_DATABASE_URL`` explicitly. Either variable on a dev Postgres
+    port is refused outright.
 
     Robustness notes (review feedback):
     - Parsing via ``urllib.parse.urlsplit`` instead of a hand-rolled regex
@@ -42,6 +63,7 @@ def _redirect_to_test_db() -> None:
     os.environ.setdefault("ALLOW_TEST_ORIGIN", "1")
     explicit = os.environ.get("TEST_DATABASE_URL")
     if explicit:
+        _refuse_dev_postgres_port(explicit, "TEST_DATABASE_URL")
         os.environ["DATABASE_URL"] = explicit
         return
 
@@ -50,6 +72,7 @@ def _redirect_to_test_db() -> None:
         return  # downstream code raises a clearer error
 
     parts = urlsplit(current)
+    _refuse_dev_postgres_port(current, "DATABASE_URL")
     db_name = parts.path.lstrip("/").rstrip("/")
     if not db_name or db_name.endswith("_test"):
         return  # already pointing at a test DB or no path component
