@@ -43,6 +43,8 @@ function renderOverview(data: OverviewSummary, path = "/agencies/8/overview?from
 }
 
 describe("OverviewTab", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("shows the empty state when every real signal is empty, even though peak_hour is non-null", () => {
     // peak_hour reads a fixed analyze-period rollup with no date column
     // (see pipeline/reports/overview.py's _peak_hour docstring) — it stays
@@ -113,6 +115,27 @@ describe("OverviewTab", () => {
     expect(search.has("peak_hour")).toBe(true);
     // The range the tab was opened with must survive the selection write.
     expect(search.get("from")).toBe("2030-01-01");
+  });
+
+  it.each([
+    ["a non-numeric hour", "peak_hour=abc"],
+    ["an hour past 23", "peak_hour=24"],
+    ["a negative hour", "peak_hour=-1"],
+    ["a fractional hour", "peak_hour=7.5"],
+    ["a weekday past 7", "peak_hour=8&peak_dow=9"],
+    ["a weekday of 0", "peak_hour=8&peak_dow=0"],
+    ["a non-numeric weekday", "peak_hour=8&peak_dow=mon"],
+  ])("opens no breakdown for %s in the URL", (_label, query) => {
+    renderOverview(summary(), `/agencies/8/overview?from=2030-01-01&to=2030-01-07&${query}`);
+    const breakdown = vi.mocked(hooks.usePeakHourBreakdown);
+    expect(breakdown).toHaveBeenCalled();
+    for (const call of breakdown.mock.calls) expect(call.slice(1)).toEqual([null, null]);
+    expect(document.querySelector("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens the breakdown for an in-range hour and weekday in the URL", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&peak_hour=8&peak_dow=3");
+    expect(vi.mocked(hooks.usePeakHourBreakdown)).toHaveBeenLastCalledWith(8, 8, 3);
   });
 
   it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {

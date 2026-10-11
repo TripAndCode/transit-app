@@ -8,8 +8,8 @@ import * as hooks from "../api/hooks";
 import { DataEndContext } from "../api/scope";
 import type { FilterCtx } from "../api/types";
 
-function renderBar(value: FilterCtx, dataEnd: string | null = null) {
-  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false } as never);
+function renderBar(value: FilterCtx, dataEnd: string | null = null, routes: unknown[] = []) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: routes, isPending: false } as never);
   return renderWithProviders(
     <DataEndContext value={dataEnd}>
       <MemoryRouter initialEntries={["/agencies/1/ask"]}>
@@ -61,5 +61,46 @@ describe("FilterContextBar", () => {
     const inputs = document.querySelectorAll("input[type='date']");
     expect(inputs.length).toBe(2);
     inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
+  });
+
+  it("shows scoped routes by their display names, joined with the language's list separator", async () => {
+    const routes = [
+      { route_code: "R1", route_short_name: "A1", route_long_name: "Coast Line" },
+      { route_code: "R2", route_short_name: "B2", route_long_name: "Hill Line" },
+    ];
+    const value = { dow: "all", time_band: "all", routes: ["R1", "R2"] } as FilterCtx;
+    const { unmount } = renderBar(value, null, routes);
+    const en = screen.getByText(/A1/);
+    expect(en.textContent).not.toContain("R1");
+    expect(en.textContent).toContain("A1");
+    expect(en.textContent).toContain("B2");
+    expect(en.textContent).toContain(", ");
+    unmount();
+    await i18n.changeLanguage("ja");
+    renderBar(value, null, routes);
+    const ja = screen.getByText(/A1/);
+    expect(ja.textContent).toContain("・");
+    expect(ja.textContent).not.toContain(", ");
+  });
+
+  describe("editor accessibility", () => {
+    it("labels the two date inputs from and to", () => {
+      renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "all", time_band: "all", routes: [] });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByLabelText("From")).toHaveValue("2026-06-01");
+      expect(screen.getByLabelText("To")).toHaveValue("2026-07-15");
+    });
+
+    it("reports which day-of-week and time-band pills are selected", () => {
+      renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "weekday", time_band: "morning", routes: [] });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const pressed = screen.getAllByRole("button", { pressed: true }).map((b) => b.textContent);
+      expect(pressed).toContain("Weekdays only");
+      expect(pressed).toContain(i18n.t("filters.time_band.morning"));
+      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: false })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Weekends/holidays only" }));
+      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: true })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Weekdays only", pressed: false })).toBeInTheDocument();
+    });
   });
 });

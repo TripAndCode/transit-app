@@ -8,7 +8,10 @@
 # PUSH_GATE_SKIP_TESTS=1 for a deliberate, visible opt-out of the
 # container-backed backend suite (and of mypy too, when a dependency change
 # leaves no virtualenv to run it in), or PUSH_GATE_SKIP_BUILD=1 to skip the
-# frontend build:bundle + entry-chunk check specifically.
+# frontend build:bundle + entry-chunk check specifically. Both are read from
+# this hook's own environment, which the harness spawns: they must be in the
+# Claude Code session's environment (settings `env`, or the launch
+# environment). A `VAR=1 git push ...` prefix reaches git only, never the hook.
 #
 # Every check reads the branch being pushed ($GATE_DIR below), never whatever
 # $CLAUDE_PROJECT_DIR's own working tree holds. A worktree inherits neither a
@@ -304,9 +307,9 @@ fi
 # A branch every one of whose commits suppresses CI produces no run at all, so
 # the PR has nothing for the merge gate to read. Only the tip of the push is
 # consulted, which is the part that is easy to get wrong: a trailer-less commit
-# buried earlier in the branch changes nothing. A warning, not a block —
-# suppressing CI on intermediate pushes is the normal case, and only the last
-# push before readying has to differ.
+# buried earlier in the branch changes nothing. A warning, not a block: the
+# policy lives in AGENTS.md (a branch tip must not carry the trailer), and this
+# only reports a tip that breaks it.
 #
 # The token is assembled rather than written out because this file's own
 # content would otherwise land in a commit message quoting it, and the match
@@ -320,8 +323,8 @@ tip_msg=""
 case "$tip_msg" in
   *"$SKIP_TOKEN"*)
     echo "NOTE: this push's tip suppresses CI, so no run will appear for it." >&2
-    echo "  Before marking the PR ready, push a tip whose message omits that" >&2
-    echo "  trailer — the merge gate needs a green run to read." >&2
+    echo "  A branch tip must not carry that trailer (see AGENTS.md, Git and pull" >&2
+    echo "  requests): the merge gate needs a green run to read." >&2
     ;;
 esac
 
@@ -479,7 +482,14 @@ fi
 PY_PATHSPEC=('*.py')
 FE_PATHSPEC=(
   'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs'
+  'frontend/*.cjs' 'frontend/*.mts' 'frontend/*.py'
   'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs'
+)
+# Paths that are not Python but carry backend pytest coverage (migration drift,
+# Makefile and compose safety, the hooks' own tests), so changing one runs the
+# backend checks.
+BACKEND_PATHSPEC=(
+  '*.sql' '*.sh' '*Makefile' '*compose*.yml' '.claude/hooks/*' '.codex/*'
 )
 
 PY_FILES=()
@@ -512,6 +522,11 @@ if branch_changes "${DEPS_PATHSPEC[@]}"; then
   PY_DEPS_CHANGED=1
 fi
 
+BACKEND_PATHS_CHANGED=0
+if [ "$SCOPE_OK" -eq 1 ] && branch_changes "${BACKEND_PATHSPEC[@]}"; then
+  BACKEND_PATHS_CHANGED=1
+fi
+
 # "Nothing changed here" is the shape a misdirected gate takes, so it cannot
 # be accepted on the word of a directory we only guessed at. When the push
 # names a branch that does carry changes, this directory is the wrong one and
@@ -527,7 +542,7 @@ fi
 # would otherwise read as a deletion and switch this whole check off.
 IS_DELETE=0
 [ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
-if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ] && [ "$PY_DEPS_CHANGED" -eq 0 ]; then
+if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ] && [ "$PY_DEPS_CHANGED" -eq 0 ] && [ "$BACKEND_PATHS_CHANGED" -eq 0 ]; then
   # A literal `HEAD` (`git push origin HEAD`) or a completely bare
   # `git push` (relying on the branch's own upstream tracking) cannot be
   # checked by this safety net: both mean "whatever branch GATE_DIR is
@@ -548,11 +563,10 @@ if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
     # Filtered to the same pathspecs the scoped checks use (and with the
     # same --diff-filter=ACMR as PY_FILES/FE_FILES above): a branch whose
-    # only Python/frontend change is a deletion, or one that changes only
-    # shell/SQL/Markdown, legitimately produces no files here, and
-    # comparing against its unfiltered diff would refuse both pushes for
-    # a directory that was never actually wrong.
-    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" "${DEPS_PATHSPEC[@]}" 2>/dev/null)" ]; then
+    # only change is a deletion, or only Markdown, legitimately produces no
+    # files here, and comparing against its unfiltered diff would refuse
+    # both pushes for a directory that was never actually wrong.
+    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" "${DEPS_PATHSPEC[@]}" "${BACKEND_PATHSPEC[@]}" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
       echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
       echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
@@ -578,7 +592,7 @@ if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
 fi
 
 RUN_BACKEND=0
-if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ] || [ "$PY_DEPS_CHANGED" -eq 1 ]; then
+if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ] || [ "$PY_DEPS_CHANGED" -eq 1 ] || [ "$BACKEND_PATHS_CHANGED" -eq 1 ]; then
   RUN_BACKEND=1
 fi
 
@@ -600,7 +614,8 @@ prepare_python_env() {
       fi
       echo "BLOCKED: git push — this branch changes pyproject.toml/poetry.lock, which the main checkout's" >&2
       echo "  virtualenv does not reflect. Run 'poetry install' in $GATE_DIR so the gate can test" >&2
-      echo "  against the new dependencies, or set PUSH_GATE_SKIP_TESTS=1 to leave them to CI." >&2
+      echo "  against the new dependencies, or set PUSH_GATE_SKIP_TESTS=1 in the Claude Code session environment" >&2
+      echo "  (settings \`env\` or the launch environment; a prefix on the push command does not reach this hook) to leave them to CI." >&2
       exit 2
     fi
   else
@@ -645,7 +660,7 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
   if [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
     echo "WARNING: PUSH_GATE_SKIP_TESTS=1 set — skipping the backend suite for this push (deliberate opt-out; CI still runs it)." >&2
   elif ! run_with_timeout 30 docker info >/dev/null 2>&1; then
-    echo "Docker is not reachable, so the backend suite's own Postgres + ClickHouse cannot start. Start Docker, or set PUSH_GATE_SKIP_TESTS=1 to skip explicitly (not recommended)." >"$STEP_DIR/docker"
+    echo "Docker is not reachable, so the backend suite's own Postgres + ClickHouse cannot start. Start Docker, or set PUSH_GATE_SKIP_TESTS=1 in the Claude Code session environment (not as a prefix on the push command) to skip explicitly (not recommended)." >"$STEP_DIR/docker"
     note_failed "backend suite" "$STEP_DIR/docker"
     FAIL=1
   else

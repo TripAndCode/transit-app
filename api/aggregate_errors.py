@@ -18,16 +18,11 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from api.deps import get_locale
+from pipeline.query.tools import _summary
 
 logger = logging.getLogger("api.aggregate")
 
 AGGREGATE_NOT_READY_CODE = "aggregate_not_ready"
-
-# Plain language, no internal table names (those go to the server log only).
-_MESSAGE = {
-    "ja": "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。",
-    "en": "Data for this view hasn't been prepared in this environment yet. Please try again later.",
-}
 
 
 async def aggregate_not_ready_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -36,5 +31,6 @@ async def aggregate_not_ready_handler(request: Request, exc: Exception) -> JSONR
     # for ops to know which migration/analyze is outstanding; never sent to the client.
     logger.error("Aggregate table missing (migrations/analyze behind?): %s", exc)
     locale = get_locale(request)
-    detail = _MESSAGE.get(locale, _MESSAGE["ja"])
+    # Plain language, no internal table names (those go to the server log only).
+    detail = _summary("aggregate_not_ready", lang=locale)
     return JSONResponse(status_code=503, content={"detail": detail, "code": AGGREGATE_NOT_READY_CODE})

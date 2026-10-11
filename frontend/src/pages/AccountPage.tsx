@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
-import { apiDelete, apiErrorDetail, apiGet, apiPut } from "../api/client";
+import { ApiError, apiDelete, apiErrorDetail, apiGet, apiPut } from "../api/client";
 import { formatDateTime } from "../utils/format";
 import { describeUserAgent } from "../utils/userAgent";
 import { useAgencies } from "../api/hooks";
@@ -41,7 +41,11 @@ type LlmKeyStatus = {
 function LlmKeySection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { data: status } = useQuery({
+  const {
+    data: status,
+    isPending: statusPending,
+    isError: statusError,
+  } = useQuery({
     queryKey: ["myLlmKey"],
     queryFn: ({ signal }) => apiGet<LlmKeyStatus>("/api/me/llm-key", { signal }),
   });
@@ -62,9 +66,13 @@ function LlmKeySection() {
       // immediately without waiting on a second round-trip refetch.
       qc.setQueryData(["myLlmKey"], data);
     },
-    onError: () => {
+    onError: (err) => {
       setApiKey("");
-      setSaveError(t("account.llm_key.rejected"));
+      // Only the 400 the server raises about the key itself says "rejected";
+      // a 401/403 (session or CSRF), rate limit, 5xx or dropped connection
+      // says nothing about the key.
+      const rejected = err instanceof ApiError && err.status === 400;
+      setSaveError(t(rejected ? "account.llm_key.rejected" : "account.llm_key.save_error"));
     },
   });
 
@@ -83,13 +91,17 @@ function LlmKeySection() {
       description={
         status?.configured
           ? t("account.llm_key.status_own", { provider: status.provider, suffix: status.key_suffix })
-          : t("account.llm_key.status_shared")
+          : statusPending
+            ? t("common.loading")
+            : statusError
+              ? t("account.llm_key.status_unavailable")
+              : t("account.llm_key.status_shared")
       }
     >
       <Toolbar>
         <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-          <option value="gemini">Gemini</option>
-          <option value="openai">OpenAI</option>
+          <option value="gemini" /* i18n-ignore: provider brand name */>Gemini</option>
+          <option value="openai" /* i18n-ignore: provider brand name */>OpenAI</option>
         </select>
         <label>
           {t("account.llm_key.input_label")}
@@ -98,7 +110,7 @@ function LlmKeySection() {
         <button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
           {t("common.save")}
         </button>
-        {status?.configured && (
+        {(status?.configured || statusError) && (
           <button onClick={() => remove.mutate()} disabled={remove.isPending}>
             {t("account.llm_key.remove")}
           </button>
@@ -225,7 +237,7 @@ function AccountSkeleton() {
 export function AccountPage() {
   const { t } = useTranslation();
   const { data: session, isLoading } = useSession();
-  const { data: sessions } = useQuery({
+  const { data: sessions, isError: sessionsError } = useQuery({
     queryKey: ["mySessions"],
     queryFn: ({ signal }) => apiGet<SessionRow[]>("/api/me/sessions", { signal }),
   });
@@ -291,6 +303,11 @@ export function AccountPage() {
             </Card>
           );
         })}
+        {sessionsError && (
+          <p role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            {t("account.sessions_load_error")}
+          </p>
+        )}
         {signOutSession.isError && (
           <p role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {t("account.session_sign_out_error")}

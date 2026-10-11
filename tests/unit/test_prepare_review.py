@@ -297,6 +297,16 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
         "tests/unit/test_gitleaks_allowlist_scope.py",
         "tests/unit/test_gitleaks_version_pin.py",
         "tests/unit/test_gitleaks_fixtures.py",
+        ".github/actions/setup-backend/action.yml",
+        ".github/actions/start-test-postgres/container-name.sh",
+        ".github/dependabot.yml",
+        "scripts/run_full_ci.sh",
+        "scripts/run_integration_tests.sh",
+        "scripts/run_oracle_tests.sh",
+        "frontend/vitest.config.ts",
+        "frontend/knip.json",
+        "tests/conftest.py",
+        "tests/sharding.py",
     ],
 )
 def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path: Path, path: str):

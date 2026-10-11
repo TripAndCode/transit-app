@@ -1,12 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { ROUTE_CHUNK_LOADERS, loadMapTab, loadOverviewTab, loadSavedExportTab, prefetchRouteChunk } from "./lazyTabs";
+import { ROUTE_CHUNK_LOADERS, loadMapTab, loadOverviewTab, prefetchRouteChunk } from "./lazyTabs";
 import { DESTINATIONS } from "./destinations";
 import type { Destination } from "./destinations";
 
 vi.mock("../tabs/RoutesIndex", () => ({ RoutesIndex: () => null }));
 vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null }));
+vi.mock("../tabs/SavedExportTab", () => ({ SavedExportTab: () => null }));
+vi.mock("../tabs/ReportsHomeTab", () => ({ ReportsHomeTab: () => null }));
+vi.mock("../tabs/CompareTab", () => ({ CompareTab: () => null }));
+vi.mock("../tabs/NetworkTab", () => ({ NetworkTab: () => null }));
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
 const appTsx = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
@@ -41,7 +45,6 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     ]);
     expect(ROUTE_CHUNK_LOADERS.pulse).toBe(loadOverviewTab);
     expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
-    expect(ROUTE_CHUNK_LOADERS.reports).toBe(loadSavedExportTab);
   });
 
   it("warms the report screen a thin destination hosts along with it", async () => {
@@ -49,6 +52,21 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     const { AnalysisTab } = await import("../tabs/AnalysisTab");
     const loaded = await ROUTE_CHUNK_LOADERS.routes();
     expect(loaded).toEqual([{ default: RoutesIndex }, { default: AnalysisTab }]);
+  });
+
+  it("warms the default Reports view along with the Reports host", async () => {
+    const { SavedExportTab } = await import("../tabs/SavedExportTab");
+    const { ReportsHomeTab } = await import("../tabs/ReportsHomeTab");
+    const loaded = await ROUTE_CHUNK_LOADERS.reports();
+    expect(loaded).toEqual([{ default: SavedExportTab }, { default: ReportsHomeTab }]);
+  });
+
+  it("warms the agencies board and the analysis board along with the Compare host", async () => {
+    const { CompareTab } = await import("../tabs/CompareTab");
+    const { AnalysisTab } = await import("../tabs/AnalysisTab");
+    const { NetworkTab } = await import("../tabs/NetworkTab");
+    const loaded = await ROUTE_CHUNK_LOADERS.compare();
+    expect(loaded).toEqual([{ default: CompareTab }, { default: AnalysisTab }, { default: NetworkTab }]);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {

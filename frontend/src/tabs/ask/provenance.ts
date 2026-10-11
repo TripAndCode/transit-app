@@ -54,9 +54,10 @@ export function formatWindow(args: Record<string, unknown> | null, t: TFunction)
   return null;
 }
 
-/** How many observations back the answer, for a table/series result --
- *  `null` for a kv/text/empty result, which carries no row-level count. */
-export function sampleCount(result: { rows?: unknown[] | null; series?: unknown[] | null } | null): number | null {
+/** How many rows the result displays (series points count as rows) --
+ *  `null` for a kv/text/empty result, which carries no row-level count. This
+ *  is the size of the answer, not the number of readings behind it. */
+export function resultRowCount(result: { rows?: unknown[] | null; series?: unknown[] | null } | null): number | null {
   if (!result) return null;
   if (Array.isArray(result.rows)) return result.rows.length;
   if (Array.isArray(result.series)) return result.series.length;
