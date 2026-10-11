@@ -70,6 +70,10 @@ _LOW_ON_TIME_RANKS = r"ワースト|下位"
 _LOW_ON_TIME_TRAITS = r"低い|低め|悪い|最低"
 _LOW_ON_TIME_WORDS = rf"{_LOW_ON_TIME_RANKS}|{_LOW_ON_TIME_TRAITS}"
 _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
+# "N分以上/超/を超える" names a delay threshold. Only 5 minutes is a metric the
+# router knows (worst_5min), which is matched by its own rule before the
+# average-delay rules; a ranking over any other threshold has no rule.
+_DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 
 # The meta rules answer questions about what the dataset holds (routes, date
 # range, stops). A delay word or a route code (4+ digits) marks an analytic
@@ -139,7 +143,11 @@ _RULES: list[Rule] = [
     # skip such a question, so one no rule can place falls through instead.
     Rule(
         name="ranking-worst-5min",
-        pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
+        # The count is tried first, so "…が多い路線TOP3" reads its 3 rather than
+        # stopping at 多い; "5分" must not be the tail of "15分" or "2.5分".
+        pattern=re.compile(
+            r"(?<![\d.．])5分.*?(?:超|以上)(?:.*?(?:TOP|ワースト|上位)\s*(\d+)|.*?(?:多い|TOP|ワースト|上位|ランキング))"
+        ),
         tool="top_n",
         args={"metric": "worst_5min", "n": 10},
         # worst_5min has no fewest-first order.
@@ -158,7 +166,7 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="ranking-on-time",
-        pattern=re.compile(r"定時率.*?(TOP|ランキング|高い)"),
+        pattern=re.compile(r"定時率(?:.*?TOP\s*(\d+)|.*?(?:TOP|ランキング|高い))"),
         tool="top_n",
         args={"metric": "on_time_rate", "n": 10},
         unless=re.compile(rf"{_LOW_ON_TIME_WORDS}|{_STOP_WORDS}"),
@@ -169,14 +177,16 @@ _RULES: list[Rule] = [
         tool="top_n",
         args={"metric": "avg_delay", "n": 10, "best_first": True},
         # Fewest >5min incidents is a different metric from least mean delay.
-        unless=re.compile(rf"5分|{_STOP_WORDS}"),
+        unless=re.compile(rf"5分|{_DELAY_THRESHOLD}|{_STOP_WORDS}"),
     ),
     Rule(
         name="ranking-worst",
         pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
-        unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_STOP_WORDS}"),
+        # A delay threshold asks for a count of long delays, not the mean
+        # ranking this rule answers (5 minutes is taken by ranking-worst-5min).
+        unless=re.compile(rf"{_LITTLE_DELAY_WORDS}|{_DELAY_THRESHOLD}|{_STOP_WORDS}"),
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
