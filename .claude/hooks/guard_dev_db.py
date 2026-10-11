@@ -41,6 +41,8 @@ Known gaps, still allowed:
   `.pgpass` default; a ClickHouse `--connection` or config file; a host alias
   or tunnelled port other than DEV_PORTS and DEV_CONTAINERS.
 - curl options read from a config file (`-K`).
+- A `$(cat ...)` read anywhere in a command that also reads a dev store blocks it,
+  since the substitution check is not scoped to the client's own simple command.
 - A literal `|`, `&` or `;` argument on its own (`psql -F '|'`) reads as a shell
   operator, so it can block a read or split a command the hook then misjudges.
 """
@@ -146,7 +148,7 @@ WRITE = re.compile(
     re.IGNORECASE,
 )
 WRITE_STATEMENT = re.compile(
-    r"\\copy\b[^;]*\bfrom\b"
+    r"\\copy\s+(?!\()[^;]*\bfrom\b"
     r"|\boptimize\b[^;]*\bdeduplicate\b"
     r"|\bselect\b[^;]*\binto\s+(?!outfile\b|dumpfile\b)",
     re.IGNORECASE,
@@ -261,22 +263,36 @@ def destroys_dev_volume(cmd: str) -> bool:
 
 
 _SQL_CLIENTS = {"psql", "clickhouse-client", "clickhouse"}
-_SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
+_SCRIPT_FLAGS = {"--file", "--queries-file"}
 # psql's `\i`/`\ir`/`\include` include, which sits inside the quoted `-c` argument.
 _INCLUDE_META = re.compile(r"\\(?:ir?|include(?:_relative)?)\s")
 # A curl short-option cluster that ends in `-T` (upload file) or carries `-d@file`.
 _CURL_FILE_CLUSTER = re.compile(r"-[a-z]*(?:t|d@.*)")
 # psql's short options that take a value; the rest of the word after one is that value.
 _PSQL_VALUE_OPTIONS = frozenset("cdFhLopPRTUv")
+_PSQL_LONG_FILE = re.compile(r"--fil(?:e)?(?:=.*)?")
 # A curl form field whose content is a file (`name=@f`, `name=<f`), also glued to
 # `-F` inside a cluster of value-less flags (`-sFname=@f`).
 _FORM_FILE_VALUE = re.compile(r"[^=]*=[@<]")
 _FORM_CLUSTER = re.compile(r"-[sSfLkvi]*F(.+)")
+_FORM_CLUSTER_END = re.compile(r"-[sSfLkvi]*F")
 # `--data-urlencode` reads a file for `@file` and `name@file`; `name=content` is literal.
 _URLENCODE_FILE_VALUE = re.compile(r"[^=@]*@")
 # A script read into an argument by command substitution: `"$(cat f)"`, `"$(< f)"`
 # or the backtick spelling. Other substitutions (`$(date)`) read no script.
-_SUBSTITUTION_READ = re.compile(r"(?:\$\(|`)\s*(?:<|(?:cat|head|tail|tac|z?cat|gzcat|bzcat|xzcat|sed|awk|curl|wget)\b)")
+_SUBSTITUTION_READ = re.compile(
+    r"(?:\$\(|`)\s*(?:(?:command\s+|exec\s+)?<|(?:command\s+|exec\s+)?(?:\S*/)?(?:cat|head|tail|tac|z?cat|gzcat|bzcat|xzcat|sed|awk|curl|wget)\b)"
+)
+
+
+def _command_names(tokens: list[str]) -> set[str]:
+    """Basenames of the words in `tokens`, reading into a quoted script too, so a
+    client inside `sh -c '...'` counts for the redirect or pipe around it."""
+    names = {tok.rsplit("/", 1)[-1] for tok in tokens}
+    for tok in tokens:
+        if any(c.isspace() for c in tok):
+            names |= {word.rsplit("/", 1)[-1] for word in _WORD_SPLIT.split(tok) if word}
+    return names
 
 
 def _feeds_a_client_stdin(shell: list[str]) -> bool:
@@ -291,7 +307,7 @@ def _feeds_a_client_stdin(shell: list[str]) -> bool:
     segment: list[str] = []
 
     def feeds(seg: list[str], was_piped: bool) -> bool:
-        if not _SQL_CLIENTS & {tok.rsplit("/", 1)[-1] for tok in seg}:
+        if not _SQL_CLIENTS & _command_names(seg):
             return False
         if was_piped:
             return True
@@ -346,9 +362,11 @@ def _reads_a_script_file(segments: list[list[str]]) -> bool:
         name, args = found
         for tok in args:
             low = tok.lower()
-            if tok == "-f" or low in _SCRIPT_FLAGS or low.startswith(("--file=", "--queries-file=")):
+            if low in _SCRIPT_FLAGS or low.startswith(("--file=", "--queries-file=")):
                 return True
-            if name == "psql" and _psql_cluster_names_a_file(tok):
+            # `-f` is psql's file but ClickHouse's `--format`. getopt also
+            # accepts an unambiguous prefix of a long option (`--fil`).
+            if name == "psql" and (tok == "-f" or _PSQL_LONG_FILE.fullmatch(low) or _psql_cluster_names_a_file(tok)):
                 return True
     return False
 
@@ -362,7 +380,7 @@ def _uploads_a_file_over_http(tokens: list[str]) -> bool:
             return True
         if tok.startswith("@") or tok == "--upload-file" or _CURL_FILE_CLUSTER.fullmatch(tok.lower()):
             return True
-        if tok == "--form" or tok == "-F":
+        if tok == "--form" or _FORM_CLUSTER_END.fullmatch(tok):
             if _FORM_FILE_VALUE.match(following):
                 return True
         elif (glued := _FORM_CLUSTER.fullmatch(tok)) and _FORM_FILE_VALUE.match(glued[1]):
@@ -384,7 +402,7 @@ def runs_a_sql_script(cmd: str) -> bool:
     """
     raw = _shell_tokens(cmd)
     shell = [tok.lower() for tok in raw]
-    names = {tok.rsplit("/", 1)[-1] for tok in shell}
+    names = _command_names(shell)
     if names & _SQL_CLIENTS:
         if _reads_a_script_file(_simple_commands(raw)):
             return True
@@ -404,24 +422,53 @@ def writes_sql(cmd: str) -> bool:
     return any(WRITE_STATEMENT.search(" ".join(segment)) for segment in _simple_commands(_shell_tokens(cmd)))
 
 
+def _is_dev_clickhouse_host(host: str) -> bool:
+    """A host that still reaches the dev instance when no port is named: the
+    loopback, or a dev container."""
+    loopback = host in {"localhost", "::1", "0.0.0.0"} or host.startswith("127.")
+    return loopback or host in DEV_CONTAINERS or bool(CONTAINER.fullmatch(host))
+
+
+def _clickhouse_client_aims_elsewhere(segment: list[str], at: int) -> bool:
+    """Whether a `clickhouse-client` at `segment[at]` names a port, a non-dev
+    host, a connection, or runs in a throwaway container. A host alone does not:
+    the port then defaults to the dev one."""
+    rest = segment[at + 1 :]
+    hosts: list[str] = []
+    for i, tok in enumerate(rest):
+        low = tok.lower()
+        if low.startswith(("--port", "--connection")):
+            return True
+        if low in ("--host", "-h") and i + 1 < len(rest):
+            hosts.append(rest[i + 1].lower())
+        elif low.startswith("--host="):
+            hosts.append(low[len("--host=") :])
+        elif low.startswith("-h") and not low.startswith("--"):
+            hosts.append(low[2:])
+    for tok in segment:
+        low = tok.lower()
+        if low.startswith("clickhouse_port="):
+            return True
+        if low.startswith("clickhouse_host="):
+            hosts.append(low.split("=", 1)[1])
+    if any(not _is_dev_clickhouse_host(host) for host in hosts):
+        return True
+    # A throwaway container counts only as the target of the `docker exec` in
+    # front of the client, not as a word elsewhere (a trailing comment).
+    return any(THROWAWAY_CONTAINER.fullmatch(tok.lower()) for tok in segment[:at])
+
+
 def runs_default_clickhouse_client(cmd: str) -> bool:
-    """A `clickhouse-client` that names no host, port or connection, in any
-    simple command: it connects to the default instance, which is the dev one.
-    A throwaway port, a throwaway container or another host named anywhere on
-    that command line means it is aimed somewhere else."""
+    """A `clickhouse-client` that names no port, connection or non-dev host, in
+    any simple command: it connects to the default instance, which is the dev
+    one."""
     for segment in _simple_commands(_shell_tokens(cmd)):
         for i, tok in enumerate(segment):
             name = tok.rsplit("/", 1)[-1].lower()
-            if not (name == "clickhouse-client" or (name == "clickhouse" and segment[i + 1 : i + 2] == ["client"])):
-                continue
-            names_target = any(
-                t.startswith(("--host", "--port", "--connection")) or (t.startswith("-h") and not t.startswith("--"))
-                for t in segment[i + 1 :]
-            ) or any(
-                _ASSIGNMENT.match(t.lower()) and t.lower().startswith(("clickhouse_host=", "clickhouse_port="))
-                for t in segment
-            )
-            if not names_target and not any(THROWAWAY_CONTAINER.fullmatch(t.lower()) for t in segment):
+            if name == "clickhouse-client" or (name == "clickhouse" and segment[i + 1 : i + 2] == ["client"]):
+                if not _clickhouse_client_aims_elsewhere(segment, i):
+                    return True
+            elif tok != cmd and any(c.isspace() for c in tok) and runs_default_clickhouse_client(tok):
                 return True
     return False
 
@@ -552,6 +599,16 @@ def targets_dev_db(tokens: list[str], cmd: str) -> bool:
     return "compose" in lowered and bool({"exec", "run"} & set(lowered)) and bool(DEV_SERVICES & set(lowered))
 
 
+def _with_nested_tokens(tokens: list[str]) -> list[str]:
+    """`tokens` plus the words of each quoted script in them, so a target named
+    only inside `sh -c '...'` pairs with a statement outside it."""
+    out = list(tokens)
+    for tok in tokens:
+        if any(c.isspace() for c in tok):
+            out += _with_nested_tokens(_shell_tokens(tok))
+    return out
+
+
 def should_block(cmd: str) -> bool:
     try:
         tokens = shlex.split(cmd)
@@ -564,7 +621,7 @@ def should_block(cmd: str) -> bool:
         return True
     if runs_default_clickhouse_client(cmd) and (writes_sql(cmd) or runs_a_sql_script(cmd)):
         return True
-    if targets_dev_db(tokens, cmd) and (writes_sql(cmd) or runs_a_sql_script(cmd)):
+    if targets_dev_db(_with_nested_tokens(tokens), cmd) and (writes_sql(cmd) or runs_a_sql_script(cmd)):
         return True
     # A quoted script (`sh -c "psql -p ... < f.sql"`) can hold the target and the
     # statement together, so it is judged as a command line of its own.

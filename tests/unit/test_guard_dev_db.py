@@ -281,6 +281,34 @@ BLOCKED = [
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
     ),
+    # The client inside the quotes, the feed or the dev target outside them.
+    pytest.param(
+        "docker exec -i transit-pg sh -c 'psql -U transit' < f.sql", id="nested-client-outer-redirect-container"
+    ),
+    pytest.param('sh -c "psql -h localhost -p 5433 -U transit" < f.sql', id="nested-client-outer-redirect"),
+    pytest.param("cat f.sql | sh -c 'psql -h localhost -p 5433 -U transit'", id="nested-client-outer-pipe"),
+    pytest.param("cat f.sql | sh -c 'clickhouse-client --multiquery'", id="nested-ch-client-outer-pipe"),
+    pytest.param(
+        'bash -c \'psql -h localhost -p 5433 -U transit -c "$1"\' _ "DROP TABLE agencies"',
+        id="nested-target-outer-write",
+    ),
+    # clickhouse-client that only names a host: the port still defaults to the dev one.
+    pytest.param("clickhouse-client --host localhost -q 'TRUNCATE TABLE updates'", id="ch-client-loopback-host"),
+    pytest.param("clickhouse-client -h 127.0.0.1 < x.sql", id="ch-client-loopback-ip-script"),
+    pytest.param("clickhouse-client --host=localhost --queries-file x.sql", id="ch-client-host-equals-script"),
+    pytest.param("CLICKHOUSE_HOST=localhost clickhouse-client -q 'DROP TABLE updates'", id="ch-client-host-env"),
+    pytest.param("clickhouse-client --host=transit-ch -q 'DROP TABLE updates'", id="ch-client-dev-container-equals"),
+    pytest.param("clickhouse-client -htransit-ch -q 'DROP TABLE updates'", id="ch-client-dev-container-glued"),
+    pytest.param(
+        "clickhouse-client -q 'DROP TABLE updates' # transit-test-ch", id="ch-client-throwaway-name-only-in-a-comment"
+    ),
+    # curl clusters ending in -F, the value in the next word.
+    pytest.param("curl -sF query=@x.sql http://localhost:8123/", id="ch-http-form-cluster-then-value"),
+    pytest.param("curl -fsSLF 'query=<x.sql' http://localhost:8123/", id="ch-http-form-long-cluster-then-value"),
+    # Substitution readers spelled with a path or `command`; psql's abbreviated --file.
+    pytest.param('psql -h localhost -p 5433 -U transit -c "$(/bin/cat fix.sql)"', id="substitution-path-qualified-cat"),
+    pytest.param('psql -h localhost -p 5433 -U transit -c "$(command cat fix.sql)"', id="substitution-command-cat"),
+    pytest.param("psql -h localhost -p 5433 -U transit --fil=x.sql", id="psql-abbreviated-long-file"),
     # A script read by command substitution reaches psql as one opaque -c argument.
     pytest.param('psql -h localhost -p 5433 -U transit -c "$(cat fix.sql)"', id="psql-c-substitution-cat"),
     pytest.param('psql -h localhost -p 5433 -U transit -c "$(< fix.sql)"', id="psql-c-substitution-redirect"),
@@ -480,6 +508,12 @@ ALLOWED = [
     pytest.param(
         "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates' | grep deduplicate",
         id="ch-optimize-merges-only-piped-to-grep",
+    ),
+    pytest.param("clickhouse-client -f CSV -q 'SELECT 1'", id="ch-client-format-short-flag"),
+    pytest.param("psql -h localhost -p 5433 -U transit -A -F , -c 'SELECT 1'", id="psql-separate-field-separator"),
+    pytest.param(
+        r"psql -h localhost -p 5433 -U transit -c '\copy (select a||b from t) to out.csv'",
+        id="copy-query-to-reads-data-out",
     ),
 ]
 
