@@ -111,6 +111,20 @@ def test_clickhouse_server_pins_agree():
     assert len(tags) == 1, f"clickhouse-server pins disagree: {found}"
 
 
+def test_dependabot_github_actions_scans_the_composite_actions():
+    """`directory: /` reads only the workflows. Each composite action pins its
+    own `uses:` versions, so its directory has to be matched by a listed glob
+    or those pins drift from the workflows' unnoticed."""
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    entry = next(e for e in config["updates"] if e["package-ecosystem"] == "github-actions")
+    globs = entry["directories"]
+    actions = sorted((REPO_ROOT / ".github" / "actions").glob("*/action.y*ml"))
+    assert actions, "no composite actions found; the scan no longer guards anything"
+    for action in actions:
+        directory = "/" + action.parent.relative_to(REPO_ROOT).as_posix()
+        assert any(fnmatch(directory, pattern) for pattern in globs), f"{directory} is not scanned"
+
+
 def test_dependabot_cannot_swamp_the_single_ci_runner():
     """Every update PR costs a full run on the one runner that also gates
     merges, and none of these three settings fails loudly when dropped —
