@@ -1,10 +1,11 @@
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from fastapi import HTTPException, Request
 
 from api.security import current_user, require_user
 from pipeline.cache import _REGISTERED_CLEARS
+from pipeline.query.pooled_conn import PooledConnection
 
 if TYPE_CHECKING:
     import asyncpg
@@ -13,41 +14,6 @@ if TYPE_CHECKING:
 async def get_conn(request: Request):
     async with request.app.state.pool.acquire() as conn:
         yield conn
-
-
-class PooledConnection:
-    """Stands in for an ``asyncpg.Connection`` while holding none.
-
-    Each call borrows a pooled connection for just that statement and returns
-    it, so a request that spends most of its time waiting on something slow (an
-    LLM call, for one) pins nothing while it waits. Only the single-statement
-    methods exist; anything that needs one connection across several
-    statements, such as ``transaction()``, is deliberately absent and fails
-    loudly rather than silently spanning connections.
-    """
-
-    def __init__(self, pool: Any) -> None:
-        self._pool = pool
-
-    async def fetch(self, *args: Any, **kwargs: Any) -> Any:
-        async with self._pool.acquire() as conn:
-            return await conn.fetch(*args, **kwargs)
-
-    async def fetchrow(self, *args: Any, **kwargs: Any) -> Any:
-        async with self._pool.acquire() as conn:
-            return await conn.fetchrow(*args, **kwargs)
-
-    async def fetchval(self, *args: Any, **kwargs: Any) -> Any:
-        async with self._pool.acquire() as conn:
-            return await conn.fetchval(*args, **kwargs)
-
-    async def execute(self, *args: Any, **kwargs: Any) -> Any:
-        async with self._pool.acquire() as conn:
-            return await conn.execute(*args, **kwargs)
-
-    async def executemany(self, *args: Any, **kwargs: Any) -> Any:
-        async with self._pool.acquire() as conn:
-            return await conn.executemany(*args, **kwargs)
 
 
 async def get_pooled_conn(request: Request) -> "asyncpg.Connection":
