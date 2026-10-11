@@ -103,6 +103,21 @@ describe("AdminAuditPage", () => {
     expect(dimmed).toHaveStyle({ opacity: "0.6" });
   });
 
+  it("does not claim the trail is empty while loading or after a failed load", () => {
+    useAdminAuditMock.mockReturnValue({ data: undefined, isLoading: true, isPlaceholderData: false, error: null });
+    const { unmount } = wrap(<AdminAuditPage />);
+    expect(screen.queryByText(i18n.t("admin.audit.empty"))).toBeNull();
+    unmount();
+    useAdminAuditMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isPlaceholderData: false,
+      error: new Error("boom"),
+    });
+    wrap(<AdminAuditPage />);
+    expect(screen.queryByText(i18n.t("admin.audit.empty"))).toBeNull();
+  });
+
   it("names the timeline for a screen reader instead of leaking the i18n key", () => {
     // The caption is the table's accessible name; locale parity cannot
     // catch a key that is missing from both files.
@@ -145,6 +160,30 @@ describe("AdminAuditPage", () => {
     await waitFor(() => {
       const lastCall = useAdminAuditMock.mock.calls.at(-1);
       expect(lastCall?.[0]).toMatchObject({ actor: "7" });
+    });
+  });
+
+  it("queries once for a typed text filter, not once per keystroke", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAuditPage />);
+    await user.type(screen.getByLabelText(/action/i), "agency.updated");
+    await waitFor(() => {
+      expect(useAdminAuditMock.mock.calls.at(-1)?.[0]).toMatchObject({ action: "agency.updated" });
+    });
+    const actions = useAdminAuditMock.mock.calls.map((c) => (c[0] as { action?: string }).action);
+    // Every intermediate prefix would be an exact-match query that finds
+    // nothing, plus a history entry and a remount of the timeline.
+    expect(actions.filter((a) => a !== undefined && a !== "agency.updated")).toEqual([]);
+  });
+
+  it("accepts only digits in the actor filter, which the server parses as an integer", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAuditPage />);
+    const actor = screen.getByLabelText(/actor id/i);
+    await user.type(actor, "1a2b");
+    expect(actor).toHaveValue("12");
+    await waitFor(() => {
+      expect(useAdminAuditMock.mock.calls.at(-1)?.[0]).toMatchObject({ actor: "12" });
     });
   });
 

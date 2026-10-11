@@ -146,8 +146,8 @@ export function AskTab() {
     followup.reset();
     // A template left composing (chip tapped, ParamStrip open, never run)
     // must not survive a thread switch -- otherwise QuestionDock keeps
-    // rendering it over the new thread's own landing-state picker,
-    // reintroducing the duplicated-picker bug this component was fixed for.
+    // rendering it over the new thread's own landing-state picker, showing
+    // two pickers at once.
     setComposingId(null);
     setValues({});
   }
@@ -344,10 +344,9 @@ export function AskTab() {
           }}
         >
           {activeId !== null && convQuery.isPending ? (
-            // Thread selected but its messages haven't loaded yet — show a
-            // skeleton instead of the empty-state hint, which would otherwise
-            // read 'start a new conversation' while a saved thread is still
-            // fetching (review-flagged regression: R5 P1).
+            // A selected thread shows a skeleton until its messages load: the
+            // empty-state hint would otherwise read 'start a new conversation'
+            // while a saved thread is still fetching.
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <Skeleton height={64} />
               <Skeleton height={120} />

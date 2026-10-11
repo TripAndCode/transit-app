@@ -177,6 +177,11 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     setRenameValue("");
   }
 
+  function cancelRename() {
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
   function handleTogglePin(conv: Conversation) {
     closeMenu();
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
@@ -303,6 +308,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameChange={setRenameValue}
                   onRenameCommit={commitRename}
                   onRenameBlur={commitRename}
+                  onRenameCancel={cancelRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
                   filterSummaryText={conversationScopeParts(conv, t, routeNames.format).filter(Boolean).join(FILTER_SEPARATOR)}
@@ -388,6 +394,7 @@ type ConvItemProps = {
   onRenameChange: (v: string) => void;
   onRenameCommit: (id: string) => void;
   onRenameBlur: (id: string) => void;
+  onRenameCancel: () => void;
   onSelect: () => void;
   onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   filterSummaryText: string;
@@ -402,6 +409,7 @@ function ConvItem({
   onRenameChange,
   onRenameCommit,
   onRenameBlur,
+  onRenameCancel,
   onSelect,
   onContextMenu,
   filterSummaryText,
@@ -441,7 +449,7 @@ function ConvItem({
               onChange={(e) => onRenameChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onRenameCommit(conv.conversation_id);
-                if (e.key === "Escape") onRenameBlur(conv.conversation_id);
+                if (e.key === "Escape") onRenameCancel();
                 e.stopPropagation();
               }}
               onBlur={() => onRenameBlur(conv.conversation_id)}

@@ -188,6 +188,18 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("No users found.")).toBeTruthy();
   });
 
+  it("does not claim there are no users while the list is loading", () => {
+    useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    wrap();
+    expect(screen.queryByText("No users found.")).toBeNull();
+  });
+
+  it("does not claim there are no users after the load failed", () => {
+    useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("boom"), refetch: vi.fn() });
+    wrap();
+    expect(screen.queryByText("No users found.")).toBeNull();
+  });
+
   it("resets the page URL param to 1 when the role filter changes", async () => {
     const user = userEvent.setup();
     wrap(["/admin/users?page=3"]);

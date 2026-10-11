@@ -8,8 +8,8 @@ import * as hooks from "../api/hooks";
 import { DataEndContext } from "../api/scope";
 import type { FilterCtx } from "../api/types";
 
-function renderBar(value: FilterCtx, dataEnd: string | null = null) {
-  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false } as never);
+function renderBar(value: FilterCtx, dataEnd: string | null = null, routes: unknown[] = []) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: routes, isPending: false } as never);
   return renderWithProviders(
     <DataEndContext value={dataEnd}>
       <MemoryRouter initialEntries={["/agencies/1/ask"]}>
@@ -61,5 +61,25 @@ describe("FilterContextBar", () => {
     const inputs = document.querySelectorAll("input[type='date']");
     expect(inputs.length).toBe(2);
     inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
+  });
+
+  it("shows scoped routes by their display names, joined with the language's list separator", async () => {
+    const routes = [
+      { route_code: "R1", route_short_name: "A1", route_long_name: "Coast Line" },
+      { route_code: "R2", route_short_name: "B2", route_long_name: "Hill Line" },
+    ];
+    const value = { dow: "all", time_band: "all", routes: ["R1", "R2"] } as FilterCtx;
+    const { unmount } = renderBar(value, null, routes);
+    const en = screen.getByText(/A1/);
+    expect(en.textContent).not.toContain("R1");
+    expect(en.textContent).toContain("A1");
+    expect(en.textContent).toContain("B2");
+    expect(en.textContent).toContain(", ");
+    unmount();
+    await i18n.changeLanguage("ja");
+    renderBar(value, null, routes);
+    const ja = screen.getByText(/A1/);
+    expect(ja.textContent).toContain("・");
+    expect(ja.textContent).not.toContain(", ");
   });
 });
