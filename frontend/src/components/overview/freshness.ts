@@ -1,4 +1,4 @@
-import { CLOCK_SKEW_ALLOWANCE_MS } from "../../tabs/map/liveRowsFilter";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../../utils/clockSkew";
 
 /** The hero's freshness dot breathes only while the feed is this fresh: a
  *  pulse on a stale feed would claim a liveness the data does not have. */

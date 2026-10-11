@@ -26,6 +26,16 @@ describe("PeakHourModal", () => {
     expect(screen.getByText("K37")).toBeInTheDocument();
   });
 
+  it("shows the request's failure and a retry instead of an empty body", () => {
+    const onRetry = vi.fn();
+    render(
+      <PeakHourModal data={null} loading={false} error={new Error("boom")} onRetry={onRetry} onClose={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("common.retry") }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("peak-hour-modal-empty")).not.toBeInTheDocument();
+  });
+
   it("calls onClose when backdrop clicked", () => {
     const onClose = vi.fn();
     render(

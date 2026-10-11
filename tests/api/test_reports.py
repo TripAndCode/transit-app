@@ -1130,6 +1130,40 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
 
 
 @pytest.mark.asyncio
+async def test_compute_trend_series_bucket_totals_include_thin_groups_but_offenders_do_not(aconn, aagency_id):
+    """A route-service group with 5 or fewer samples still counts toward its
+    day's average and sample total (the same pooling Overview applies to
+    agg_daily_trend); only the top-offenders attribution ignores it, because a
+    handful of trips is too noisy to name a worst route."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    day = date(2026, 5, 18)
+    # 10 samples at 5 min, and a thin group of 3 samples at 10 min.
+    for route_code, avg_min, samples in (("R_THICK", 5.0, 10), ("R_THIN", 10.0, 3)):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, $3, '平日', $4, $5, $6)",
+            aagency_id,
+            day,
+            route_code,
+            avg_min,
+            samples,
+            round(avg_min * 60 * samples),
+        )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    out = await compute_trend_series(aagency_id, ctx, aconn)
+    (bucket,) = out["days"]
+    assert bucket["samples"] == 13
+    assert bucket["avg_min"] == 6.15  # (10*5 + 3*10) / 13, not the thick group's 5.0
+    assert [o["route_code"] for o in bucket["top_offenders"]] == ["R_THICK"]
+
+
+@pytest.mark.asyncio
 async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_min(aconn, aagency_id):
     """A 'week' bucket pools MULTIPLE agg_daily_trend rows (one per day) for
     the same route/service. This must divide the exact raw-seconds sums once

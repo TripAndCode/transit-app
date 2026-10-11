@@ -3,12 +3,11 @@
 Covers dev Postgres and dev ClickHouse. Both hold real production data and are
 read-only for agents; the throwaway pair on :5544/:8124 is where writes belong.
 
-Two Postgres ports, not one. `compose.yml` publishes :5433, but the container
-actually holding the dev dataset can be published elsewhere -- :5543 today --
-and the guard has to name every port the data is reachable on, not the one the
-compose file happens to declare. A port listed here that turns out to hold
-someone else's database is harmless: refusing to write to it is right either
-way. A port left out is the dataset.
+DEV_PORTS must list every port a dev store is published on, not only the one
+`compose.yml` declares: the container holding the dev dataset can be published
+elsewhere. A port listed here that holds someone else's database is harmless,
+since refusing to write to it is right either way. A port left out is the
+dataset.
 
 Reads the tool input JSON on stdin; exit 2 = block the tool call (also when the
 payload cannot be parsed), 0 = allow.
@@ -37,11 +36,9 @@ import re
 import shlex
 import sys
 
-DEV_PORTS = ("5433", "5543", "8123")
+DEV_PORTS = ("5433", "5543", "8123", "9000")
 DEV_SERVICES = {"db", "clickhouse"}
-# Container names compose did not derive: the pinned names from before
-# compose.yml dropped `container_name`, and the dev Postgres recreated by hand
-# on a newer major.
+# Container names compose does not derive, which a dev store can still run under.
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
@@ -155,6 +152,12 @@ DOCKER_VALUE_FLAGS = {
     "--tlscert",
     "--tlskey",
 }
+# A dev port written as a `port=` key inside any token: a libpq keyword DSN
+# (`host=h port=5433`) or URI query (`?port=5433`), a client kwarg
+# (`connect(port=5433)`), or a `CLICKHOUSE_PORT=`/`PGPORT=` assignment, also
+# one that ends in `;` or sits inside a `bash -c` string. DEV_PORTS is the one list of ports.
+PORT_KEY = re.compile(r"(?<![a-z0-9])(?:pg)?port\s*=\s*['\"]?(?:" + "|".join(DEV_PORTS) + r")\b")
+
 # The shell's DATABASE_URL is the dev database, so a command that expands it is
 # treated as aimed there. An inline `DATABASE_URL=<throwaway> cmd
 # "$DATABASE_URL"` assignment does not reach the expansion, which the shell
@@ -304,7 +307,9 @@ def _segment_writes_dev(segment: list[str]) -> bool:
     assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
     for store in writes:
         name, throwaway = THROWAWAY[store]
-        if not throwaway.match(assigned.get(name, "")):
+        value = assigned.get(name, "")
+        # A throwaway host:port whose `?port=` query overrides it is the dev store.
+        if not throwaway.match(value) or PORT_KEY.search(value):
             return True
     return False
 
@@ -337,6 +342,8 @@ def targets_dev_db(tokens: list[str], cmd: str) -> bool:
         return True
 
     for i, tok in enumerate(lowered):
+        if PORT_KEY.search(tok):
+            return True
         for port in DEV_PORTS:
             if f":{port}" in tok:
                 return True
@@ -387,7 +394,7 @@ def main() -> int:
         return 2
     if should_block(cmd):
         sys.stderr.write(
-            "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
+            "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123/:9000 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
             "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "

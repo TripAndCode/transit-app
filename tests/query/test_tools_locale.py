@@ -7,7 +7,7 @@ Covers two surfaces:
 
 These are deliberately offline so they run regardless of Postgres
 availability — the DB-driven handler paths are exercised by the live
-integration tests in tests/test_tool_queries.py.
+integration tests in tests/query/test_tool_queries.py.
 """
 
 import asyncio
@@ -16,6 +16,7 @@ import re
 import pytest
 
 from pipeline.query.tools import (
+    _LOCALES,
     JSON_MODE_ADDENDUM,
     SYSTEM_PROMPT,
     TOOLS,
@@ -37,10 +38,15 @@ def test_summary_returns_en_when_locale_en():
     assert _summary("no_data", lang="en") == "No data available."
 
 
-def test_summary_falls_back_to_ja_when_en_missing():
-    """An unknown template short-circuits to the template name itself."""
-    # ``not_a_template`` has no row in either locale → returns the literal key.
+def test_summary_unknown_template_returns_the_key():
+    """A template with no row in either locale returns the literal key."""
     assert _summary("not_a_template", lang="en") == "not_a_template"
+
+
+def test_summary_falls_back_to_ja_when_en_missing(monkeypatch):
+    """A key that exists only in the JA table resolves to the JA text for EN."""
+    monkeypatch.setitem(_LOCALES, ("ja_only_key", "ja"), "日本語のみ {n}")
+    assert _summary("ja_only_key", lang="en", n=3) == "日本語のみ 3"
 
 
 def test_summary_interpolates_vars():
@@ -62,14 +68,25 @@ def test_summary_suggest_reason_anomaly_exact_strings():
     )
 
 
-def test_summary_suggest_reason_trend_shift_exact_strings():
+def test_summary_suggest_reason_trend_worsened_exact_strings():
     assert (
-        _summary("suggest_reason_trend_shift", lang="ja", route="路線R2", delta_min="+4.0")
+        _summary("suggest_reason_trend_worsened", lang="ja", route="路線R2", delta_min="+4.0")
         == "路線R2の遅延が今週の途中から悪化しています（+4.0分の変化）。"
     )
     assert (
-        _summary("suggest_reason_trend_shift", lang="en", route="Route R2", delta_min="+4.0")
-        == "The delay pattern on Route R2 shifted partway through this week (+4.0 min change)."
+        _summary("suggest_reason_trend_worsened", lang="en", route="Route R2", delta_min="+4.0")
+        == "Delays on Route R2 worsened partway through this week (+4.0 min change)."
+    )
+
+
+def test_summary_suggest_reason_trend_improved_exact_strings():
+    assert (
+        _summary("suggest_reason_trend_improved", lang="ja", route="路線R2", delta_min="-2.5")
+        == "路線R2の遅延が今週の途中から改善しています（-2.5分の変化）。"
+    )
+    assert (
+        _summary("suggest_reason_trend_improved", lang="en", route="Route R2", delta_min="-2.5")
+        == "Delays on Route R2 improved partway through this week (-2.5 min change)."
     )
 
 
@@ -190,3 +207,30 @@ def test_json_mode_addendum_is_not_baked_into_system_prompt():
     plain message content instead of issuing a real tool_calls entry, for
     some tools (reproducible deterministically at temperature=0)."""
     assert JSON_MODE_ADDENDUM not in SYSTEM_PROMPT
+
+
+def test_every_locale_key_has_both_languages():
+    keys = {key for key, _lang in _LOCALES}
+    assert not [k for k in keys if (k, "ja") not in _LOCALES or (k, "en") not in _LOCALES]
+
+
+def test_summary_follow_up_no_history_exact_strings():
+    assert (
+        _summary("follow_up_no_history", lang="ja")
+        == "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+    )
+    assert (
+        _summary("follow_up_no_history", lang="en")
+        == "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+    )
+
+
+def test_summary_aggregate_not_ready_exact_strings():
+    assert (
+        _summary("aggregate_not_ready", lang="ja")
+        == "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"
+    )
+    assert (
+        _summary("aggregate_not_ready", lang="en")
+        == "Data for this view hasn't been prepared in this environment yet. Please try again later."
+    )
