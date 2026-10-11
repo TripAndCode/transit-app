@@ -1,12 +1,12 @@
 import { useRef, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
-import { DailyChart } from "../../components/charts/DailyChart";
+import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
-import { conditionsLabel, formatWindow, provenancePath, sampleCount, toolLabel } from "./provenance";
+import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
 import { SHARED_TABLE } from "../../components/tableStyles";
 
 type Conditions = { dow?: string; time_band?: string; service?: string } | null;
@@ -64,13 +64,19 @@ export function RichResult({
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
       <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
-        <DailyChart days={result.series as TrendDay[]} height={200} brushable={false} />
+        <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} />
       </EvidenceCard>
     );
   }
 
   // empty, text, or series with no points → plain text, no evidence chrome
   return <span style={{ whiteSpace: "pre-wrap" }}>{fallbackText}</span>;
+}
+
+/** The bucket width the series was requested at; the tool defaults to days. */
+function seriesGranularity(args: Record<string, unknown> | null): TrendGranularity {
+  const g = args?.granularity;
+  return g === "week" || g === "month" ? g : "day";
 }
 
 function ResultTable({
@@ -168,7 +174,7 @@ function EvidenceCard({
   const path = provenancePath({ tool });
   const label = toolLabel(tool, t);
   const window_ = formatWindow(args ?? null, t);
-  const count = sampleCount(result);
+  const count = resultRowCount(result);
   const chips = buildNextStepChips({ tool, args: args ?? null, conditions: conditions ?? null, resultKind: result.kind, t });
   const cardRef = useRef<HTMLDivElement | null>(null);
 
@@ -211,7 +217,7 @@ function EvidenceCard({
         </span>
         {label && <span>{label}</span>}
         {window_ && <span>{window_}</span>}
-        {count != null && <span>{t("ask.evidence.sample_count", { count })}</span>}
+        {count != null && <span>{t("ask.evidence.row_count", { count })}</span>}
       </div>
 
       {children}

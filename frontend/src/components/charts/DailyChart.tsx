@@ -10,8 +10,14 @@ import { brushIndices, brushRange } from "./brush";
 import { isoDow, useTrendFocus } from "./trendFocus";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
+/** The width of one bucket in `days`; each entry's `date` is its first day. */
+export type TrendGranularity = "day" | "week" | "month";
+
 type Props = {
   days: TrendDay[];
+  /** What one entry of `days` spans. Names the chart, its worst marker and the
+   *  tooltip's date so a week or month bucket is not read as a single day. */
+  granularity?: TrendGranularity;
   height?: number;
   revisionBoundaries?: RevisionBoundaries;
   /** Whether dragging across the plot rewrites the shared date range. Off for
@@ -24,8 +30,9 @@ type Props = {
  *  pointer (or keyboard cursor) is on now. Either may be the larger index. */
 type Drag = { anchor: number; head: number };
 
-export function DailyChart({ days, height = 240, revisionBoundaries = [], brushable = true }: Props) {
+export function DailyChart({ days, granularity = "day", height = 240, revisionBoundaries = [], brushable = true }: Props) {
   const { t } = useTranslation();
+  const suffix = granularity === "day" ? "" : `_${granularity}`;
   const [rawHover, setHover] = useState<number | null>(null);
   const [rawDrag, setDrag] = useState<Drag | null>(null);
   const [brushed, setBrushed] = useState(false);
@@ -226,7 +233,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           : {})}
         style={{ overflowX: "auto" }}
       >
-        <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
+        <svg width={W} height={H} role="img" aria-label={t(`reports.daily.svg_aria${suffix}`)} style={{ display: "block" }}>
           {/* Y axis grid */}
           {axis.ticks.slice(1).map((value) => {
             const y = toY(value);
@@ -292,7 +299,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
               y1={padT}
               y2={padT + innerH}
               variant="highlight"
-              label={t("reports.daily.worst_day_label")}
+              label={t(`reports.daily.worst_day_label${suffix}`)}
               title={days[worstIdx].date}
             />
           )}
@@ -415,7 +422,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           }}
         >
           <div>
-            <strong>{formatDate(days[cursor].date)}</strong>:{" "}
+            <strong>{t(`reports.daily.bucket_date${suffix}`, { date: formatDate(days[cursor].date) })}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
               min: formatMinutes(days[cursor].avg_min ?? 0),
               count: formatNumber(days[cursor].samples ?? 0),

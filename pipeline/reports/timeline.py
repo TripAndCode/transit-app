@@ -236,7 +236,7 @@ async def _stop_positions(
     """``(trip_id, stop_sequence) -> stop_id`` plus each stop's name and position.
 
     Scoped to the observed trips rather than the whole agency: a day touches a
-    fraction of `static_stop_times`, and `idx_sst_trip` serves exactly this
+    fraction of `static_stop_times`, and its primary key (agency_id, trip_id, ...) serves exactly this
     shape. Stops with no geometry are omitted from both maps, so a visit that
     cannot be drawn never reaches a frame.
     """
