@@ -1075,7 +1075,7 @@
       "worst_day_label_month": "最も遅い月",
       "bucket_date": "{{date}}",
       "bucket_date_week": "{{date}}の週",
-      "bucket_date_month": "{{date}}からの月",
+      "bucket_date_month": "{{date}}始まりの月",
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
