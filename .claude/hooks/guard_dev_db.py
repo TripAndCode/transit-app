@@ -27,6 +27,22 @@ costs a rephrase, a missed write costs the dataset. The case that actually
 bites is prose *about* this guard: a heredoc commit message naming a dev
 container beside a keyword is a Bash command like any other. Put the text in a
 file and pass the path, so it never reaches the command line.
+
+A quoted script (`sh -c "..."`) is judged as a command line of its own, and a
+`clickhouse-client` that names no host, port or connection is treated as aimed at
+the default, dev, instance.
+
+Known gaps, still allowed:
+- Statements whose text the hook cannot see: a variable (`-c "$SQL"`), a
+  substitution that runs a program of its own (`-c "$(./gen_sql.sh)"`), a file
+  fed through a reader outside the recognised ones, or a driver script
+  (`python -c`, `python x.py`) that reads the statements itself.
+- A dev store reached without naming it: a psql service file, `PGSERVICE` or
+  `.pgpass` default; a ClickHouse `--connection` or config file; a host alias
+  or tunnelled port other than DEV_PORTS and DEV_CONTAINERS.
+- curl options read from a config file (`-K`).
+- A literal `|`, `&` or `;` argument on its own (`psql -F '|'`) reads as a shell
+  operator, so it can block a read or split a command the hook then misjudges.
 """
 
 from __future__ import annotations
@@ -51,6 +67,8 @@ THROWAWAY = {
     "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
     "ch": ("clickhouse_port", re.compile(r"8124$")),
 }
+# Container names the throwaway stack runs under (see the transit-app-gotchas skill).
+THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
 # overrides nothing -- the Makefile's own defaults from .env, the shell's for
 # the CLI -- which are the real dev stores. They name no host, port or
@@ -108,19 +126,29 @@ DESTRUCTIVE_SUBCOMMANDS = {
 # allowed. ClickHouse takes `RENAME a TO b` with no `TABLE` keyword, so any `RENAME`
 # followed by an operand is a write. A bare `OPTIMIZE` only merges parts, so just `DEDUPLICATE` is listed;
 # `SELECT ... INTO <table>` creates a table, `INTO OUTFILE` reads out.
+#
+# Those three -- `\copy ... from`, `OPTIMIZE ... DEDUPLICATE`, `SELECT ... INTO` --
+# span several words, so they live in WRITE_STATEMENT and are matched per simple
+# command rather than over the raw text: `|`, `&` and `&&` inside a quoted SQL
+# argument are operators of the SQL (`a||b`, array overlap), while the same
+# characters outside quotes end the shell command and must not join two commands
+# into one statement. Only `;` ends the SQL statement.
 WRITE = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|REINDEX)\b"
     r"|\b(dropdb|createdb|pg_restore)\b"
     r"|\bVACUUM\s+FULL\b"
-    r"|\\copy\b[^|;&]*\bfrom\b"
     r"|\bcopy\s+(?!\()[\w.\"\\]+(\s*\([^)]*\))?\s+from\b"
     r"|\brename\s+\S"
     r"|\b(detach|attach)\s+(table|database|dictionary|view|partition)\b"
     r"|\bexchange\s+(tables|dictionaries)\b"
-    r"|\boptimize\b[^|;&]*\bdeduplicate\b"
     r"|\brefresh\s+materialized\s+view\b"
-    r"|\bselect\b[^|;&]*\binto\s+(?!outfile\b|dumpfile\b)"
     r"|migrate[\s_-]*down|downgrade",
+    re.IGNORECASE,
+)
+WRITE_STATEMENT = re.compile(
+    r"\\copy\b[^;]*\bfrom\b"
+    r"|\boptimize\b[^;]*\bdeduplicate\b"
+    r"|\bselect\b[^;]*\binto\s+(?!outfile\b|dumpfile\b)",
     re.IGNORECASE,
 )
 
@@ -238,6 +266,17 @@ _SCRIPT_FLAGS = {"-f", "--file", "--queries-file"}
 _INCLUDE_META = re.compile(r"\\(?:ir?|include(?:_relative)?)\s")
 # A curl short-option cluster that ends in `-T` (upload file) or carries `-d@file`.
 _CURL_FILE_CLUSTER = re.compile(r"-[a-z]*(?:t|d@.*)")
+# psql's short options that take a value; the rest of the word after one is that value.
+_PSQL_VALUE_OPTIONS = frozenset("cdFhLopPRTUv")
+# A curl form field whose content is a file (`name=@f`, `name=<f`), also glued to
+# `-F` inside a cluster of value-less flags (`-sFname=@f`).
+_FORM_FILE_VALUE = re.compile(r"[^=]*=[@<]")
+_FORM_CLUSTER = re.compile(r"-[sSfLkvi]*F(.+)")
+# `--data-urlencode` reads a file for `@file` and `name@file`; `name=content` is literal.
+_URLENCODE_FILE_VALUE = re.compile(r"[^=@]*@")
+# A script read into an argument by command substitution: `"$(cat f)"`, `"$(< f)"`
+# or the backtick spelling. Other substitutions (`$(date)`) read no script.
+_SUBSTITUTION_READ = re.compile(r"(?:\$\(|`)\s*(?:<|(?:cat|head|tail|tac|z?cat|gzcat|bzcat|xzcat|sed|awk|curl|wget)\b)")
 
 
 def _feeds_a_client_stdin(shell: list[str]) -> bool:
@@ -274,23 +313,116 @@ def _feeds_a_client_stdin(shell: list[str]) -> bool:
     return False
 
 
+def _client_args(segment: list[str]) -> tuple[str, list[str]] | None:
+    """The SQL client a simple command runs and the words after it, or None."""
+    for i, tok in enumerate(segment):
+        name = tok.rsplit("/", 1)[-1].lower()
+        if name in _SQL_CLIENTS:
+            return name, segment[i + 1 :]
+    return None
+
+
+def _psql_cluster_names_a_file(tok: str) -> bool:
+    """A psql short-option cluster that carries `-f`, alone (`-fx.sql`) or after
+    value-less flags (`-Atfx.sql`). The first option that takes a value ends the
+    scan: the rest of the word is that value. Case matters here (`-F` is the
+    field separator), so this reads the tokens as typed."""
+    if not tok.startswith("-") or tok.startswith("--"):
+        return False
+    for ch in tok[1:]:
+        if ch == "f":
+            return True
+        if ch in _PSQL_VALUE_OPTIONS:
+            return False
+    return False
+
+
+def _reads_a_script_file(segments: list[list[str]]) -> bool:
+    """`-f`/`--file`/`--queries-file` on a SQL client's own command line."""
+    for segment in segments:
+        found = _client_args(segment)
+        if found is None:
+            continue
+        name, args = found
+        for tok in args:
+            low = tok.lower()
+            if tok == "-f" or low in _SCRIPT_FLAGS or low.startswith(("--file=", "--queries-file=")):
+                return True
+            if name == "psql" and _psql_cluster_names_a_file(tok):
+                return True
+    return False
+
+
+def _uploads_a_file_over_http(tokens: list[str]) -> bool:
+    """A curl or wget body read from a file. Read as typed: curl's `-F` and
+    `-f` are different options."""
+    for i, tok in enumerate(tokens):
+        following = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if tok in ("--post-file", "--body-file") or tok.startswith(("--post-file=", "--body-file=")):
+            return True
+        if tok.startswith("@") or tok == "--upload-file" or _CURL_FILE_CLUSTER.fullmatch(tok.lower()):
+            return True
+        if tok == "--form" or tok == "-F":
+            if _FORM_FILE_VALUE.match(following):
+                return True
+        elif (glued := _FORM_CLUSTER.fullmatch(tok)) and _FORM_FILE_VALUE.match(glued[1]):
+            return True
+        elif tok == "--data-urlencode" and _URLENCODE_FILE_VALUE.match(following):
+            return True
+    return False
+
+
 def runs_a_sql_script(cmd: str) -> bool:
     """A script run whose statements this hook cannot read: `psql -f file.sql`,
-    a client fed on stdin or by pipe, an `\\i` include, or an HTTP body read
-    from a file.
+    a client fed on stdin or by pipe, an `\\i` include, a file read by command
+    substitution, or an HTTP body read from a file.
 
     Structural rather than textual: the way the statements arrive is what makes
-    the command a write, and nothing in the visible text says so.
+    the command a write, and nothing in the visible text says so. A token holding
+    whitespace is a quoted script (`sh -c "psql ... < f.sql"`) and is read as a
+    command line of its own.
     """
-    shell = _shell_tokens(cmd.lower())
+    raw = _shell_tokens(cmd)
+    shell = [tok.lower() for tok in raw]
     names = {tok.rsplit("/", 1)[-1] for tok in shell}
     if names & _SQL_CLIENTS:
-        if any(tok in _SCRIPT_FLAGS or tok.startswith(("--file=", "--queries-file=")) for tok in shell):
+        if _reads_a_script_file(_simple_commands(raw)):
             return True
         if _feeds_a_client_stdin(shell) or _INCLUDE_META.search(cmd.lower()):
             return True
-    if "curl" in names:
-        return any(tok.startswith("@") or tok == "--upload-file" or _CURL_FILE_CLUSTER.fullmatch(tok) for tok in shell)
+    if names & (_SQL_CLIENTS | {"curl", "wget"}) and _SUBSTITUTION_READ.search(cmd.lower()):
+        return True
+    if names & {"curl", "wget"} and _uploads_a_file_over_http(raw):
+        return True
+    return any(runs_a_sql_script(tok) for tok in raw if tok != cmd and any(c.isspace() for c in tok))
+
+
+def writes_sql(cmd: str) -> bool:
+    """A mutating statement anywhere in the command; see WRITE and WRITE_STATEMENT."""
+    if WRITE.search(cmd):
+        return True
+    return any(WRITE_STATEMENT.search(" ".join(segment)) for segment in _simple_commands(_shell_tokens(cmd)))
+
+
+def runs_default_clickhouse_client(cmd: str) -> bool:
+    """A `clickhouse-client` that names no host, port or connection, in any
+    simple command: it connects to the default instance, which is the dev one.
+    A throwaway port, a throwaway container or another host named anywhere on
+    that command line means it is aimed somewhere else."""
+    for segment in _simple_commands(_shell_tokens(cmd)):
+        for i, tok in enumerate(segment):
+            name = tok.rsplit("/", 1)[-1].lower()
+            if not (name == "clickhouse-client" or (name == "clickhouse" and segment[i + 1 : i + 2] == ["client"])):
+                continue
+            names_target = any(
+                t.startswith(("--host", "--port", "--connection")) or (t.startswith("-h") and not t.startswith("--"))
+                for t in segment[i + 1 :]
+            ) or any(
+                _ASSIGNMENT.match(t.lower()) and t.lower().startswith(("clickhouse_host=", "clickhouse_port="))
+                for t in segment
+            )
+            if not names_target and not any(THROWAWAY_CONTAINER.fullmatch(t.lower()) for t in segment):
+                return True
     return False
 
 
@@ -430,9 +562,13 @@ def should_block(cmd: str) -> bool:
     tokens = normalise_docker(tokens)
     if destroys_dev_volume(cmd) or runs_destructive_command(cmd):
         return True
-    if not targets_dev_db(tokens, cmd):
-        return False
-    return bool(WRITE.search(cmd)) or runs_a_sql_script(cmd)
+    if runs_default_clickhouse_client(cmd) and (writes_sql(cmd) or runs_a_sql_script(cmd)):
+        return True
+    if targets_dev_db(tokens, cmd) and (writes_sql(cmd) or runs_a_sql_script(cmd)):
+        return True
+    # A quoted script (`sh -c "psql -p ... < f.sql"`) can hold the target and the
+    # statement together, so it is judged as a command line of its own.
+    return any(should_block(tok) for tok in _shell_tokens(cmd) if tok != cmd and any(c.isspace() for c in tok))
 
 
 def read_command() -> str | None:

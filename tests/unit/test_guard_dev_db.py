@@ -281,6 +281,65 @@ BLOCKED = [
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
     ),
+    # A script read by command substitution reaches psql as one opaque -c argument.
+    pytest.param('psql -h localhost -p 5433 -U transit -c "$(cat fix.sql)"', id="psql-c-substitution-cat"),
+    pytest.param('psql -h localhost -p 5433 -U transit -c "$(< fix.sql)"', id="psql-c-substitution-redirect"),
+    pytest.param("psql -h localhost -p 5433 -U transit -c `cat fix.sql`", id="psql-c-backtick-cat"),
+    pytest.param('docker compose exec db psql -U transit -c "$(cat fix.sql)"', id="compose-exec-psql-c-substitution"),
+    # A nested shell keeps the target and the file-fed script inside one quoted string.
+    pytest.param('sh -c "psql -h localhost -p 5433 -U transit < f.sql"', id="nested-sh-psql-stdin"),
+    pytest.param("bash -c 'cat f.sql | psql -h localhost -p 5433 -U transit'", id="nested-bash-piped-psql"),
+    pytest.param(
+        'bash -c "psql postgresql://transit:transit@localhost:5433/transit -f f.sql"', id="nested-bash-psql-file"
+    ),
+    pytest.param("sh -c 'clickhouse-client --host transit-ch < f.sql'", id="nested-sh-clickhouse-stdin"),
+    # The target outside the quotes, the script inside them.
+    pytest.param("docker compose exec db sh -c 'psql -U transit < f.sql'", id="compose-exec-nested-sh-script"),
+    # curl and wget uploads of a file to the ClickHouse HTTP port.
+    pytest.param("curl -s http://localhost:8123/ -F name=@x.sql", id="ch-http-form-short"),
+    pytest.param("curl -s http://localhost:8123/ -Fname=@x.sql", id="ch-http-form-glued"),
+    pytest.param("curl -s http://localhost:8123/ --form 'query=@x.sql'", id="ch-http-form-long"),
+    pytest.param("curl -s http://localhost:8123/ --form 'query=<x.sql'", id="ch-http-form-content-from-file"),
+    pytest.param("curl -s http://localhost:8123/ --data-urlencode query@x.sql", id="ch-http-urlencode-name-file"),
+    pytest.param("curl -s http://localhost:8123/ --data-urlencode @x.sql", id="ch-http-urlencode-file"),
+    pytest.param("wget -qO- --post-file=x.sql http://localhost:8123/", id="ch-http-wget-post-file-equals"),
+    pytest.param("wget -qO- --post-file x.sql http://transit-ch:8123/", id="ch-http-wget-post-file"),
+    # clickhouse-client with no host or port connects to the default, i.e. dev, instance.
+    pytest.param("clickhouse-client -q 'TRUNCATE TABLE updates'", id="ch-client-bare-truncate"),
+    pytest.param('clickhouse-client --query "INSERT INTO updates VALUES (1)"', id="ch-client-bare-insert"),
+    pytest.param("clickhouse-client < x.sql", id="ch-client-bare-stdin-script"),
+    pytest.param("cat x.sql | clickhouse-client", id="ch-client-bare-piped-script"),
+    pytest.param("clickhouse-client --queries-file x.sql", id="ch-client-bare-queries-file"),
+    pytest.param("clickhouse client -q 'DROP TABLE updates'", id="ch-client-subcommand-bare-drop"),
+    pytest.param(
+        "docker exec some-box clickhouse-client -q 'DROP TABLE updates'", id="ch-client-bare-in-unknown-container"
+    ),
+    pytest.param("bash -c \"clickhouse-client -q 'DROP TABLE updates'\"", id="nested-bare-ch-client"),
+    # psql short options glued: -f with its filename, alone or last in a cluster.
+    pytest.param("psql -h localhost -p 5433 -U transit -fx.sql", id="psql-f-glued-filename"),
+    pytest.param("psql -h localhost -p 5433 -U transit -Atfx.sql", id="psql-f-glued-in-cluster"),
+    pytest.param("psql -h localhost -p 5433 -U transit -Atf x.sql", id="psql-f-ends-cluster"),
+    # SELECT ... INTO, \copy ... FROM and OPTIMIZE ... DEDUPLICATE with an operator inside the SQL.
+    pytest.param(
+        'psql -h localhost -p 5433 -U transit -c "SELECT a||b INTO t FROM s"', id="pg-select-into-after-concat-operator"
+    ),
+    pytest.param(
+        'psql -h localhost -p 5433 -U transit -c "SELECT a && b AS x INTO t FROM s"',
+        id="pg-select-into-after-overlap-operator",
+    ),
+    pytest.param(
+        'psql -h localhost -p 5433 -U transit -c "\\copy \\"r&d\\" from stdin"', id="copy-from-after-ampersand"
+    ),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q "
+        "\"OPTIMIZE TABLE updates PARTITION ID 'a&b' FINAL DEDUPLICATE\"",
+        id="ch-optimize-deduplicate-after-ampersand",
+    ),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' | "
+        "psql -h localhost -p 5433 -U transit -c 'SELECT a||b INTO t FROM s'",
+        id="select-into-in-the-second-piped-command",
+    ),
 ]
 
 ALLOWED = [
@@ -375,6 +434,52 @@ ALLOWED = [
     pytest.param(
         'psql "postgresql://transit:transit@localhost:5544/transit_test" -c "DROP TABLE x"',
         id="explicit-test-url-write",
+    ),
+    # A read-only substitution or nested shell stays allowed.
+    pytest.param("psql -h localhost -p 5433 -U transit -c \"SELECT '$(date +%F)'\"", id="dev-read-date-substitution"),
+    pytest.param("sh -c \"psql -h localhost -p 5433 -U transit -c 'SELECT 1'\"", id="nested-sh-dev-read"),
+    pytest.param('sh -c "psql -h localhost -p 5544 -U transit < f.sql"', id="nested-sh-test-db-script"),
+    pytest.param('psql -h localhost -p 5544 -U transit -c "$(cat fix.sql)"', id="test-db-substitution-script"),
+    # HTTP bodies aimed at the throwaway ClickHouse, and harmless requests to the dev one.
+    pytest.param("curl -s http://localhost:8124/ -F name=@x.sql", id="test-ch-http-form"),
+    pytest.param("wget -qO- --post-file x.sql http://localhost:8124/", id="test-ch-wget-post-file"),
+    pytest.param("curl -s 'http://user@localhost:8123/?query=SELECT+1'", id="ch-http-read-with-userinfo"),
+    pytest.param("curl -s http://localhost:8123/ --data-urlencode 'query=SELECT 1'", id="ch-http-urlencode-read"),
+    pytest.param("curl -s http://localhost:8123/ -F 'name=a@b.example'", id="ch-http-form-literal-value"),
+    pytest.param("curl -sf http://localhost:8123/ping", id="ch-http-ping-fail-flag"),
+    # clickhouse-client that names a target of its own, or only reads.
+    pytest.param("clickhouse-client -q 'SELECT 1'", id="ch-client-bare-read"),
+    pytest.param("clickhouse-client --port 8124 -q 'TRUNCATE TABLE updates'", id="ch-client-test-port"),
+    pytest.param("clickhouse-client --port=8124 < x.sql", id="ch-client-test-port-equals-script"),
+    pytest.param("CLICKHOUSE_PORT=8124 clickhouse-client -q 'DROP TABLE x'", id="ch-client-test-port-env"),
+    pytest.param(
+        "docker exec transit-test-ch clickhouse-client -q 'TRUNCATE TABLE updates'", id="ch-client-test-container"
+    ),
+    pytest.param("clickhouse-client --host ch.example.net -q 'TRUNCATE TABLE t'", id="ch-client-explicit-other-host"),
+    # psql option clusters that are not -f.
+    pytest.param("psql -h localhost -p 5433 -U transit -Atc 'SELECT 1'", id="psql-cluster-read"),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' | grep -f patterns.txt", id="dev-read-piped-grep-f"
+    ),
+    pytest.param("psql -h localhost -p 5433 -U transit -Fx.sql -c 'SELECT 1'", id="psql-field-separator-glued"),
+    # A shell pipeline or list beside a read is not part of the SQL.
+    pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' | tee into.txt", id="dev-read-piped-to-tee-into"),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' && echo wrote it into the log", id="dev-read-and-list-into"
+    ),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' & echo started into the background",
+        id="dev-read-background-into",
+    ),
+    pytest.param(
+        "psql -h localhost -p 5433 -U transit -c 'SELECT 1' | xargs -I{} echo {} && echo copy from here",
+        id="dev-read-pipeline-then-copy-from-prose",
+    ),
+    pytest.param('psql -h localhost -p 5433 -U transit -c "SELECT a||b FROM s" | sort', id="dev-read-concat-operator"),
+    pytest.param('psql -h localhost -p 5433 -U transit -c "SELECT a && b FROM s"', id="dev-read-overlap-operator"),
+    pytest.param(
+        "docker compose exec clickhouse clickhouse-client -q 'OPTIMIZE TABLE updates' | grep deduplicate",
+        id="ch-optimize-merges-only-piped-to-grep",
     ),
 ]
 
