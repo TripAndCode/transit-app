@@ -154,3 +154,30 @@ def test_template_future_runs_skips_a_target_day_with_no_matching_weekday_histor
     runs = _runs([(-1, "R1", "T1", 8, 2.0, "wk")])  # a Monday; day+1/+2 are Wed/Thu
     template = template_future_runs(runs, ORIGIN, horizon_days=2)
     assert template.empty
+
+
+def test_template_future_runs_templates_each_agency_from_its_own_history_only():
+    # -7 and -14 are both one or two full weeks back, so both share day+7's
+    # weekday. Agency 8 only has data at -7; agency 9 only at -14 -- each
+    # must template day+7 from its OWN most recent match, never the other
+    # agency's.
+    agency_8 = _runs([(-7, "R1", "T1", 8, 2.0, "wk")])
+    agency_9 = _runs([(-14, "R2", "T2", 9, 3.0, "wk")])
+    agency_9 = agency_9.assign(agency_id=pd.array([9] * len(agency_9), dtype="int16"))
+    runs = pd.concat([agency_8, agency_9], ignore_index=True)
+
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+
+    by_agency = {int(agency): rows for agency, rows in template.groupby("agency_id")}
+    assert set(by_agency) == {8, 9}
+    assert by_agency[8].iloc[0].service_date == pd.Timestamp(_day(7))
+    assert by_agency[9].iloc[0].service_date == pd.Timestamp(_day(7))
+
+
+def test_template_future_runs_skips_an_agency_whose_only_match_is_outside_the_lookback_window():
+    # 21 days back shares day+7's weekday (both multiples of 7 from ORIGIN) but
+    # is older than the lookback window -- a feed this stale gets no synthetic
+    # row for that day rather than one templated from a 3-week-old timetable.
+    runs = _runs([(-21, "R1", "T1", 8, 2.0, "wk")])
+    template = template_future_runs(runs, ORIGIN, horizon_days=7)
+    assert template.empty

@@ -1,3 +1,4 @@
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -7,6 +8,7 @@ from tests.unit.ml.ml_group import require
 pd = require("pandas")
 np = require("numpy")
 require("lightgbm")
+require("pyarrow")
 
 from ml import cli  # noqa: E402
 from ml.backtest import evaluate_agency, results_to_json  # noqa: E402
@@ -113,17 +115,13 @@ def test_train_eval_is_a_command():
 
 
 def test_train_skips_publishing_when_the_backtest_was_not_adopted(tmp_path, monkeypatch):
-    from datetime import date
-
     from ml.backtest import AgencyResult
     from ml.model_result import ModelBacktestResult, result_to_json
 
     backtest = tmp_path / "models.json"
-    # One agency, but with no slice rows and no intervals: summarize()'s
-    # skill_vs_b0 and merged_intervals()'s coverage both come back None
-    # (unmeasured), which judge() reads as "not adopted" on every criterion --
-    # the cheapest fixture that is reliably rejected without a real skill/
-    # coverage computation.
+    # One agency, no slice rows: skill_vs_b0/coverage come back None
+    # (unmeasured), so judge() rejects on those two criteria -- the cheapest
+    # fixture reliably rejected without a real skill/coverage computation.
     backtest.write_text(
         result_to_json(
             ModelBacktestResult(
@@ -164,7 +162,7 @@ def test_predict_is_a_command():
 
 
 def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
-    import json as json_module
+    import json
 
     from ml.adoption import Verdict
     from ml.backtest import AgencyResult
@@ -193,11 +191,16 @@ def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
+    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # writes os.environ directly (it must, to reach the real aws CLI), and
+    # monkeypatch only undoes a variable it itself set.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
 
     out = tmp_path / "model"
     assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
 
-    meta = json_module.loads((out / "meta.json").read_text())
+    meta = json.loads((out / "meta.json").read_text())
     assert meta["version"]
     assert (out / "routes.parquet").exists()
     assert len(calls) == 2  # upload_dir (the model) + upload_file (latest.json)
@@ -217,7 +220,7 @@ def test_predict_writes_one_row_per_future_cell_for_an_agency_with_enough_histor
     models = fit_calibrated(train, ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5), cutoff)
 
     model_dir = tmp_path / "model"
-    save_model_set(models, model_dir, version=cutoff.isoformat(), routes=routes)
+    save_model_set(models, model_dir, version=cutoff.isoformat(), routes=routes, window_days=28)
 
     origin = START + timedelta(days=DAYS + 4)
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
@@ -229,6 +232,11 @@ def test_predict_writes_one_row_per_future_cell_for_an_agency_with_enough_histor
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
+    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # writes os.environ directly (it must, to reach the real aws CLI), and
+    # monkeypatch only undoes a variable it itself set.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
 
     out = tmp_path / "forecast.parquet"
     assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8"]) == 0
@@ -255,7 +263,7 @@ def test_predict_publishes_nothing_for_an_agency_below_the_model_history_floor(t
     models = fit_calibrated(train, ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5), cutoff)
 
     model_dir = tmp_path / "model"
-    save_model_set(models, model_dir, version=cutoff.isoformat(), routes=routes)
+    save_model_set(models, model_dir, version=cutoff.isoformat(), routes=routes, window_days=28)
 
     origin = START + timedelta(days=DAYS + 4)
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
@@ -266,6 +274,11 @@ def test_predict_publishes_nothing_for_an_agency_below_the_model_history_floor(t
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
+    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # writes os.environ directly (it must, to reach the real aws CLI), and
+    # monkeypatch only undoes a variable it itself set.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
 
     out = tmp_path / "forecast.parquet"
     assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8"]) == 0
@@ -285,3 +298,15 @@ def test_sync_passes_the_operators_skipped_archives_to_the_replay(monkeypatch, t
     assert code == 0
     assert not [c for c in ran if "load_static" in c]
     assert key in capsys.readouterr().err
+
+
+def test_use_store_credentials_swaps_in_the_write_capable_pair(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-write-key")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
+
+    cli._use_store_credentials()
+
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "store-write-key"
+    assert os.environ["AWS_SECRET_ACCESS_KEY"] == "store-write-secret"

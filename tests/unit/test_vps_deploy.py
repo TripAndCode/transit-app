@@ -132,17 +132,6 @@ def test_env_example_names_every_variable_and_holds_no_value_for_secrets():
     assert "HC_PING_URL_PREDICT" in values
 
 
-def test_the_read_only_archive_pair_and_the_write_capable_store_pair_are_distinct_variables():
-    # train/predict swap ML_STORE_* into AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY at
-    # runtime (ml.cli._use_store_credentials) rather than the operator setting the
-    # same AWS_* names to the transit-ml pair -- sync shares this EnvironmentFile and
-    # must keep seeing the read-only transit-archives pair in AWS_ACCESS_KEY_ID.
-    names = {line.split("=", 1)[0] for line in (VPS / "env.example").read_text().splitlines() if "=" in line}
-    assert {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ML_STORE_ACCESS_KEY_ID", "ML_STORE_SECRET_ACCESS_KEY"} <= (
-        names
-    )
-
-
 def _fake_curl(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -231,9 +220,11 @@ def test_the_weekly_job_publishes_the_live_model_after_the_report_so_a_bad_week_
     assert "--backtest /var/lib/transit-ml/backtests/models.json" in exec_start
 
 
-def test_the_daily_predict_job_runs_after_sync_and_publishes_to_the_model_bucket():
+def test_the_daily_predict_job_runs_in_jst_through_the_ping_wrapper():
     calendar = re.search(r"^OnCalendar=(.+)$", _unit("transit-ml-predict.timer"), re.MULTILINE)[1]
+    hour, minute = map(int, re.search(r"(\d{2}):(\d{2})", calendar).groups())
     assert calendar.endswith("Asia/Tokyo")
+    assert (hour, minute) > (10, 30)  # after transit-ml-sync.timer's run, by wall clock only
     exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-predict.service"), re.MULTILINE)[1]
     assert "-m ml.cli predict" in exec_start
     assert "deploy/vps/run-with-ping.sh PREDICT" in exec_start

@@ -1,14 +1,16 @@
-import json
 from datetime import date, timedelta
+
+import pytest
 
 from tests.unit.ml.ml_group import require
 
 pd = require("pandas")
 np = require("numpy")
 require("lightgbm")
+require("pyarrow")
 
 from ml.features import build_frame, route_ids, with_route_ids  # noqa: E402
-from ml.model_store import load_model_set, load_routes, save_model_set  # noqa: E402
+from ml.model_store import load_model_set, load_routes, read_meta, save_model_set  # noqa: E402
 from ml.models import ModelParams, fit_calibrated, predict  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
@@ -60,7 +62,7 @@ def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     before = predict(models, frame)
 
     directory = tmp_path / "model"
-    save_model_set(models, directory, version="2026-06-30", routes=routes)
+    save_model_set(models, directory, version="2026-06-30", routes=routes, window_days=28)
     loaded = load_model_set(directory)
     after = predict(loaded, frame)
 
@@ -69,7 +71,7 @@ def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     np.testing.assert_allclose(before.q50, after.q50)
     np.testing.assert_allclose(before.q90, after.q90)
     assert loaded.interval_shift == models.interval_shift
-    assert json.loads((directory / "meta.json").read_text())["version"] == "2026-06-30"
+    assert read_meta(directory) == {"interval_shift": models.interval_shift, "version": "2026-06-30", "window_days": 28}
 
 
 def test_the_route_vocabulary_round_trips(tmp_path):
@@ -81,7 +83,7 @@ def test_the_route_vocabulary_round_trips(tmp_path):
     models = fit_calibrated(train, FAST, cutoff)
 
     directory = tmp_path / "model"
-    save_model_set(models, directory, version="2026-06-30", routes=routes)
+    save_model_set(models, directory, version="2026-06-30", routes=routes, window_days=28)
     loaded_routes = load_routes(directory)
 
     pd.testing.assert_frame_equal(
@@ -89,3 +91,26 @@ def test_the_route_vocabulary_round_trips(tmp_path):
         routes.sort_values("route_code").reset_index(drop=True),
         check_dtype=False,  # a parquet round trip changes pandas' nullable-string NA flavor, not the values
     )
+
+
+def test_a_failed_save_leaves_the_previously_published_model_untouched(tmp_path, monkeypatch):
+    runs = _runs()
+    routes = route_ids(runs)
+    runs = with_route_ids(runs, routes)
+    cutoff = START + timedelta(days=60)
+    train = training_frame(runs, cutoff, window_days=28, half_life_days=28)
+    models = fit_calibrated(train, FAST, cutoff)
+
+    directory = tmp_path / "model"
+    save_model_set(models, directory, version="v1", routes=routes, window_days=28)
+    original_mean = (directory / "mean.txt").read_bytes()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", boom)
+    with pytest.raises(RuntimeError):
+        save_model_set(models, directory, version="v2", routes=routes, window_days=28)
+
+    assert (directory / "mean.txt").read_bytes() == original_mean
+    assert read_meta(directory)["version"] == "v1"
