@@ -14,6 +14,7 @@ import {
   EM_DASH,
   fmtPct,
   fmtRatioPct,
+  roundTenth,
 } from "./format";
 
 describe("formatNumber", () => {
@@ -231,5 +232,14 @@ describe("formatter reuse", () => {
     await i18n.changeLanguage("ja");
     expect(formatNumber(1234)).toBe("1,234");
     expect(formatDate("2026-09-29")).toBe("2026年9月29日");
+  });
+});
+
+describe("roundTenth", () => {
+  it("rounds to one decimal and never yields a value that prints as -0.0", () => {
+    expect(roundTenth(1.26)).toBe(1.3);
+    expect(roundTenth(-0.3)).toBe(-0.3);
+    expect(roundTenth(-0.04).toFixed(1)).toBe("0.0");
+    expect(roundTenth(-0.04) < 0).toBe(false);
   });
 });

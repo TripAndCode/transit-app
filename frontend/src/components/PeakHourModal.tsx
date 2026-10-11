@@ -4,6 +4,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { Spinner } from "./Spinner";
 import { Modal } from "./Modal";
 import { WEEK } from "../utils/week";
+import { roundTenth } from "../utils/format";
 
 export function PeakHourModal({
   data,
@@ -138,8 +139,8 @@ export function PeakHourModal({
                 }}
               >
                 {t("peakHourModal.avgMin", {
-                  sign: r.avg_min < 0 ? "-" : "+",
-                  value: Math.abs(r.avg_min).toFixed(1),
+                  sign: roundTenth(r.avg_min) < 0 ? "-" : "+",
+                  value: Math.abs(roundTenth(r.avg_min)).toFixed(1),
                 })}
               </span>
             </div>
