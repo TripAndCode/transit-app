@@ -11,6 +11,9 @@ docs
 # to take effect — a negation before the pattern it overrides is a no-op.
 !docs/features/
 tests
+# Re-include the Ask golden set: pipeline/query/router.py and the RAG index
+# read it at runtime. The negation must follow the broader `tests` exclusion.
+!tests/ask_eval/golden_set.jsonl
 .superpowers
 oracle_cloud
 .github

@@ -149,6 +149,7 @@ jobs:
         run: |
           docker run --rm --network none transit-app:ci python -c "import api.main"
           docker run --rm --network none transit-app:ci test -f api/static/index.html
+          docker run --rm --network none transit-app:ci test -f tests/ask_eval/golden_set.jsonl
 
   # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
   # while it is unset: standard hosted runners cost nothing for a public
