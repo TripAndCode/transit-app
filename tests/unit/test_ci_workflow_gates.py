@@ -498,6 +498,13 @@ def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart
     assert "inputs.groups" in cache["with"]["key"]
 
 
+def test_oracle_collector_bash_suites_gate_every_pull_request() -> None:
+    """The production collector's suites need no network, browser or model, so
+    they run in the PR workflow rather than only after a merge."""
+    job = _workflow_yaml()["jobs"]["oracle-bash-tests"]
+    assert any("scripts/run_oracle_tests.sh" in step.get("run", "") for step in job["steps"])
+
+
 def test_each_i18n_gate_has_one_home() -> None:
     """`lint` is eslint alone: the exact-string gate runs as its own CI step, so
     chaining it into `lint` would execute the same scan twice per job."""

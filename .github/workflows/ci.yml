@@ -150,6 +150,20 @@ jobs:
           docker run --rm --network none transit-app:ci python -c "import api.main"
           docker run --rm --network none transit-app:ci test -f api/static/index.html
 
+  # The collector's bash suites run against shimmed curl/aws, so they need no
+  # network, browser, model download, Docker or database. Hosted, like
+  # `frontend`, so a change to oracle_cloud/v3/bin is checked before it merges.
+  oracle-bash-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run Oracle-collector bash suites
+        run: bash scripts/run_oracle_tests.sh
+
   # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
   # while it is unset: standard hosted runners cost nothing for a public
   # repository. The day hosted minutes start counting, register a runner on
