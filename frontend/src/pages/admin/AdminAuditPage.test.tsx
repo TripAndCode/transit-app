@@ -53,7 +53,7 @@ const PAGE_2 = {
 };
 
 const useAdminAuditMock = vi.fn();
-const fetchAllAdminAuditMock = vi.fn().mockResolvedValue(PAGE_1.items);
+const fetchAllAdminAuditMock = vi.fn().mockResolvedValue({ items: PAGE_1.items, truncated: false });
 const downloadCsvMock = vi.fn();
 
 vi.mock("../../api/admin", () => ({
@@ -79,7 +79,7 @@ function wrap(ui: React.ReactElement) {
 describe("AdminAuditPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchAllAdminAuditMock.mockResolvedValue(PAGE_1.items);
+    fetchAllAdminAuditMock.mockResolvedValue({ items: PAGE_1.items, truncated: false });
     useAdminAuditMock.mockImplementation((_filters: unknown, cursor: string | null) => ({
       data: cursor === "cursor-page-2" ? PAGE_2 : PAGE_1,
       isLoading: false,
@@ -185,5 +185,22 @@ describe("AdminAuditPage", () => {
     await waitFor(() => {
       expect(useAdminAuditMock.mock.calls.at(-1)?.[0]).toMatchObject({ actor: "12" });
     });
+  });
+
+  it("tells the operator when the export stopped short of older rows", async () => {
+    fetchAllAdminAuditMock.mockResolvedValue({ items: PAGE_1.items, truncated: true });
+    const user = userEvent.setup();
+    wrap(<AdminAuditPage />);
+    await user.click(screen.getByRole("button", { name: /export csv/i }));
+    await waitFor(() => expect(downloadCsvMock).toHaveBeenCalled());
+    expect(await screen.findByRole("status")).toHaveTextContent(i18n.t("admin.audit.export.truncated", { count: 2 }));
+  });
+
+  it("shows no truncation notice for a complete export", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAuditPage />);
+    await user.click(screen.getByRole("button", { name: /export csv/i }));
+    await waitFor(() => expect(downloadCsvMock).toHaveBeenCalled());
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
