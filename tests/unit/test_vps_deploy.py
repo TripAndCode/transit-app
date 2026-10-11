@@ -187,3 +187,14 @@ def test_the_backtest_runs_weekly_in_jst_through_the_ping_wrapper():
     assert calendar.startswith("Sun") and calendar.endswith("Asia/Tokyo")
     exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
     assert "deploy/vps/run-with-ping.sh BACKTEST" in exec_start
+
+
+def test_the_weekly_job_scores_the_models_before_rendering_the_report():
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
+    backtest, train_eval, report = (
+        exec_start.index("-m ml.cli backtest"),
+        exec_start.index("-m ml.cli train-eval"),
+        exec_start.index("-m ml.cli report"),
+    )
+    assert backtest < train_eval < report
+    assert "--models" in exec_start

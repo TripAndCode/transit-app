@@ -130,6 +130,21 @@ async def test_sessions_mark_the_one_making_the_request(me_client, aconn):
 
 
 @pytest.mark.asyncio
+async def test_sessions_list_omits_expired_sessions(me_client, aconn):
+    sid, uid = await _seed_user_and_session(aconn)
+    expired = f"sid-expired-{uid:0>22}"
+    await aconn.execute(
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+        token_hash(expired),
+        uid,
+        datetime.now(timezone.utc) - timedelta(minutes=1),
+        "dead-ua",
+    )
+    rows = (await me_client.get("/api/me/sessions", cookies={"sid": sid})).json()
+    assert [row["sid_prefix"] for row in rows] == [token_hash(sid)[:12]]
+
+
+@pytest.mark.asyncio
 async def test_sessions_listed_then_revoked(me_client, aconn):
     """Sessions list shows the active session; revoking it logs out."""
     sid, _uid = await _seed_user_and_session(aconn)

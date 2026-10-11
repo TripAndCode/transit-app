@@ -4,7 +4,7 @@ Usage:
     poetry run python scripts/ask_eval.py
 
 Exit codes:
-    0 — builder_coverage 100% (chip gate skipped — catalog removed in Phase ③.5)
+    0 — builder_coverage 100% (chip and paraphrase entries are not gated)
     1 — at least one CI-gate metric failed
     2 — gold JSONL not found
 """
@@ -46,7 +46,7 @@ def main() -> int:
 
         if via == "chip":
             chip_total += 1
-            print(f"  WARN: skipping chip entry {e['id']!r} (catalog removed)", file=sys.stderr)
+            print(f"  WARN: skipping chip entry {e['id']!r} (chip entries are not gated)", file=sys.stderr)
             continue
 
         elif via == "builder":
@@ -59,7 +59,7 @@ def main() -> int:
 
         elif via == "paraphrase-reachable":
             paraphrase_total += 1
-            print(f"  WARN: skipping paraphrase entry {e['id']!r} (chip catalog removed)", file=sys.stderr)
+            print(f"  WARN: skipping paraphrase entry {e['id']!r} (paraphrase entries are not gated)", file=sys.stderr)
             continue
 
     def pct(p: int, t: int) -> str:
