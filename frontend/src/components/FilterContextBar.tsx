@@ -194,6 +194,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           <input
             type="date"
             lang={i18n.language}
+            aria-label={t("scope.control.from")}
             value={draft.from_date ?? defaultFrom}
             max={draft.to_date ?? defaultTo}
             onChange={(e) => setDraft((d) => ({ ...d, from_date: e.target.value }))}
@@ -204,6 +205,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           <input
             type="date"
             lang={i18n.language}
+            aria-label={t("scope.control.to")}
             value={draft.to_date ?? defaultTo}
             min={draft.from_date ?? defaultFrom}
             onChange={(e) => setDraft((d) => ({ ...d, to_date: e.target.value }))}
@@ -223,6 +225,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, dow: o.value }))}
               disabled={pending}
+              aria-pressed={(draft.dow ?? "all") === o.value}
               style={pill((draft.dow ?? "all") === o.value, "sm")}
             >
               {o.label}
@@ -241,6 +244,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, time_band: o.value }))}
               disabled={pending}
+              aria-pressed={(draft.time_band ?? "all") === o.value}
               style={pill((draft.time_band ?? "all") === o.value, "sm")}
             >
               {o.label}
