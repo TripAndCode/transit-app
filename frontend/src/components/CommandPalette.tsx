@@ -154,7 +154,7 @@ export function CommandPalette() {
   const agencyParam = agencyMatch?.params.agencyId;
   const tabRest = agencyMatch?.params["*"];
   const agencyId = agencyParam ? Number(agencyParam) : null;
-  const [ctx] = useScope();
+  const [ctx, updateScope] = useScope();
   const [theme, setTheme] = useTheme();
 
   const { data: agencies } = useAgencies();
@@ -210,8 +210,9 @@ export function CommandPalette() {
   }
 
   function goToTimeBand(band: TimeBand) {
-    const qs = scopeToQueryString({ ...ctx, time_band: band });
-    navigate(`${location.pathname}${qs ? `?${qs}` : ""}`);
+    // Patch the URL rather than rebuild it from the scope, so the screen's
+    // own params survive; an hour filter has to go because it outranks the band.
+    updateScope({ time_band: band, hour: null });
   }
 
   function cycleTheme() {

@@ -76,13 +76,12 @@ def _unwrap_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
     """Unwrap an IPv6 encoding of an IPv4 address to its plain ``IPv4Address``.
 
     ``ipaddress``'s own ``is_private``/``is_loopback``/etc. only reliably
-    reflect an IPv4-mapped address (``::ffff:a.b.c.d``) on Python versions
-    with the CVE-2024-4032 fix (3.12.4+ / 3.11.9+ — this project pins
-    ``>=3.11``, so an older patch release is a real possibility). 6to4
+    reflect an IPv4-mapped address (``::ffff:a.b.c.d``) on Python patch
+    releases with the CVE-2024-4032 fix (3.12.4+ / 3.11.9+); the project
+    allows ``>=3.11``, so an older patch release is possible. 6to4
     (``2002::/16``) and NAT64 (``64:ff9b::/96``) both embed a full IPv4
-    address in their low bits too, and are never unwrapped by those
-    properties on *any* version — confirmed empirically: on this project's
-    pinned 3.12.2, ``2002:7f00:1::`` (encoding 127.0.0.1) reports
+    address in their low bits too, and those properties never unwrap them on
+    *any* version, so ``2002:7f00:1::`` (encoding 127.0.0.1) reports
     ``is_private=False``. A redirect ``Location`` using one of these
     encodings would otherwise slip a blocked address past every check
     below, on the exact path (per-hop redirect validation) that receives

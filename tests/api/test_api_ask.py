@@ -489,6 +489,10 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
     data = resp.json()
     assert data.get("router_stage") == "no_history"
     assert data["tool_call"] is None
+    assert (
+        data["answer"]
+        == "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+    )
 
 
 @pytest.mark.asyncio

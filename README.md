@@ -110,7 +110,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
 | `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
-| `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
+| `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
 | `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon; the API also runs this daily) |
@@ -132,7 +132,8 @@ destructive and is not part of the normal reset flow.
 
 `make geosql-up` starts a local [Dekart](https://dekart.xyz/) instance for
 exploratory spatial SQL, local-only and never wired into `check`/`test`/
-`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
+`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add, derived
+from `DATABASE_URL` with a read-only session; it
 points at the dev Postgres/PostGIS database, so the same read-only rule as
 any other dev-database access applies — see `AGENTS.md`. `make geosql-down`
 stops it.
@@ -156,9 +157,7 @@ actually run rather than silently skipping. `make check` runs `fmt-check`
 Example targeted test:
 
 ```bash
-DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-  GEMINI_API_KEY=test-key \
-  poetry run pytest tests/query/test_tool_queries.py -v
+scripts/run_integration_tests.sh tests/query/test_tool_queries.py -v
 ```
 
 That fixed `:5544`/`:8124` pair is shared, and a concurrent run against it can

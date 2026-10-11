@@ -11,6 +11,7 @@ GitHub-hosted runner this repo doesn't use.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -502,3 +503,10 @@ def test_oracle_collector_bash_suites_gate_every_pull_request() -> None:
     they run in the PR workflow rather than only after a merge."""
     job = _workflow_yaml()["jobs"]["oracle-bash-tests"]
     assert any("scripts/run_oracle_tests.sh" in step.get("run", "") for step in job["steps"])
+
+
+def test_each_i18n_gate_has_one_home() -> None:
+    """`lint` is eslint alone: the exact-string gate runs as its own CI step, so
+    chaining it into `lint` would execute the same scan twice per job."""
+    scripts = json.loads((ROOT / "frontend" / "package.json").read_text())["scripts"]
+    assert "lint:i18n-strings" not in scripts["lint"]
