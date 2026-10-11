@@ -132,7 +132,8 @@ destructive and is not part of the normal reset flow.
 
 `make geosql-up` starts a local [Dekart](https://dekart.xyz/) instance for
 exploratory spatial SQL, local-only and never wired into `check`/`test`/
-`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
+`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add, derived
+from `DATABASE_URL` with a read-only session; it
 points at the dev Postgres/PostGIS database, so the same read-only rule as
 any other dev-database access applies — see `AGENTS.md`. `make geosql-down`
 stops it.
