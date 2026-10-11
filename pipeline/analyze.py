@@ -1,9 +1,13 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
-Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's agg_* tables and rewrites them from freshly computed
-SELECTs in one transaction, so re-running is idempotent and a crash
-mid-run rolls back to the prior snapshot.
+Called by `gtfs_pipeline.py analyze` after ingestion. Each run rebuilds
+incrementally: a ledger of per-date source-row counts and a static-schedule
+fingerprint decide which dates changed, and only those dates' rows are purged
+and recomputed in the date-keyed tables. Whole-history tables are rebuilt as a
+unit, or skipped together when nothing changed. Everything happens in one
+transaction, so re-running is idempotent and a crash mid-run rolls back to the
+prior snapshot. The ledger's blind spot (see `_static_fingerprint`) is
+recovered only by a deliberate full rebuild (`analyze --full`).
 
 Aggregation tables produced:
 - agg_route_stats      — overall delay stats per route/service_type
@@ -744,10 +748,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
 
 def _analyze_locked(agency_id: int, conn, ch_client) -> None:
-    """Wipes this agency's agg_* rows, then INSERTs the freshly
-    computed set, all in one transaction. A crash mid-run rolls back to
-    the prior snapshot so the agency is never observed empty. Re-running
-    is idempotent — same inputs produce the same final state.
+    """Purges and rebuilds this agency's agg_* rows for the dates the ledger
+    marks as changed (everything, on a full rebuild), skipping whole-history
+    tables when nothing changed, all in one transaction. A crash mid-run rolls
+    back to the prior snapshot so the agency is never observed empty.
+    Re-running is idempotent — same inputs produce the same final state.
 
     *ch_client* is the ClickHouse client used to fetch the deduped fact
     slice (the `updates` fact table now lives in ClickHouse); every
@@ -993,10 +998,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # row lacking a scheduled time would otherwise yield a NULL hour and abort
         # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
         # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
-        # notation, e.g. "25:30:00") is rejected at ingest time (see
-        # pipeline/strategies/_time.py) and never reaches `_analyze_alltime`, so
-        # a late-night continuation trip is absent from this aggregate rather
-        # than folded into the early-morning bucket.
+        # notation, e.g. "25:30:00") cannot be a same-day `scheduled_time`, so such a
+        # row reaches `_analyze_alltime` with a NULL `scheduled_time` (static_join
+        # keeps it; only the aomori_regex strategy skips it) and is excluded by the
+        # filter below. A late-night continuation trip is therefore absent from this
+        # aggregate rather than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
                 SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL

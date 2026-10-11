@@ -21,4 +21,8 @@ describe("signedMin", () => {
   it("treats zero as non-negative (a leading +)", () => {
     expect(signedMin(0, fakeT as never)).toBe('common.unit_min_signed:{"sign":"+","value":0}');
   });
+
+  it("renders a delay that rounds to zero minutes with a + sign, never '-0'", () => {
+    expect(signedMin(-20, fakeT as never)).toBe('common.unit_min_signed:{"sign":"+","value":0}');
+  });
 });

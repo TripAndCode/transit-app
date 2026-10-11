@@ -97,6 +97,11 @@ describe("InspectCard", () => {
     expect(screen.getByText("-1.5")).toBeTruthy();
   });
 
+  it("shows a delay that rounds to zero as +0.0, never -0.0", () => {
+    renderCard({ trip: { ...TRIP, dep_delay: -2 } });
+    expect(screen.getByText("+0.0")).toBeTruthy();
+  });
+
   it("names the segment where the delay grows most", () => {
     renderCard();
     expect(screen.getByText("Saigawa Bridge to Nomachi")).toBeTruthy();

@@ -310,6 +310,8 @@ export function AdminAgenciesPage() {
         <span style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} role="presentation">
           <AdminButton
             variant="secondary"
+            disabled={a.deleted_at != null}
+            title={a.deleted_at == null ? undefined : t("admin.agencies.action_edit_disabled_hint")}
             onClick={() => {
               create.reset();
               patch.reset();
@@ -382,6 +384,7 @@ export function AdminAgenciesPage() {
         rowLabel={(a) => a.agency_name}
         caption={t("admin.agencies.table_label")}
         emptyLabel={t("admin.agencies.empty")}
+        settled={agencies != null}
         onOpen={(a) => setOpenedId(a.agency_id)}
         activeRowKey={openedId == null ? null : String(openedId)}
         savedViews={[
