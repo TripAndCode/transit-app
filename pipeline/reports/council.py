@@ -47,6 +47,7 @@ from pipeline.histogram import (
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
+from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def compute_council_summary(
     # same shared degrade shape pipeline.reports.network.compute_network_summary
     # relies on for its own per-agency probes.
     live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
-    live_max_day = None if live_max_ts is None else live_max_ts.astimezone(_JST).date()
+    live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
     agency_is_stale = is_stale(agg_max_day, live_max_day)
 
     feed_row = await conn.fetchrow(

@@ -38,3 +38,15 @@ def service_date_ch(column: str = "captured_at") -> str:
 def service_date_of(moment: datetime) -> date:
     """The service date a timestamp belongs to, matching :func:`service_date_ch`."""
     return (moment.astimezone(_JST) - timedelta(hours=SERVICE_DAY_CUTOVER_HOURS)).date()
+
+
+def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:
+    """Seconds since the start of the service day for a wall-clock time.
+
+    A clock before the cutover hour is an after-midnight stop of the service
+    day that began the evening before, so it is a day later than its face
+    value: ``00:10`` is ``24:10``. GTFS's own extended hours (``24:10``) already
+    say so and are left as they are.
+    """
+    seconds = hour * 3600 + minute * 60 + second
+    return seconds + 24 * 3600 if hour < SERVICE_DAY_CUTOVER_HOURS else seconds

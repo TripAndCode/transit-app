@@ -43,6 +43,7 @@ from pipeline.freshness import is_stale
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from pipeline.reports.supply import compute_supply_metrics_by_agency
+from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
     )
     live_max: dict[int, "date | None"] = {
-        aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
+        aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
     }
 
     # planned_trips/executed_trips/service_delivered_pct come from a

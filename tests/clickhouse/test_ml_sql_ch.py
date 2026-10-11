@@ -116,6 +116,14 @@ def test_a_feed_without_scheduled_sec_takes_the_hour_from_its_schedule_string(ch
     assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 8, 1, 3.0)]
 
 
+def test_a_schedule_string_before_the_cutover_hour_is_an_after_midnight_hour_of_the_service_day(ch_client):
+    # A feed with only "HH:MM" writes a post-midnight stop as "00:20"; on its
+    # service day that is hour 24, the same hour scheduled_sec would give.
+    rows = [(1, _utc(2026, 6, 1, 15, 20), "e/1.pb", "N1", "weekday", "00:20", "A", 1, 120, None)]  # 00:20 JST 06-02
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 24, 1, 2.0)]
+
+
 def test_a_stop_with_no_schedule_stays_out_of_its_runs_mean(ch_client):
     # A non-timepoint stop carries a realtime delay but no schedule of its own.
     rows = [

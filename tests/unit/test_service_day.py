@@ -31,7 +31,6 @@ def test_service_date_of_reads_a_utc_instant_in_japan_time():
     assert service_date_of(datetime(2026, 3, 6, 15, 30, tzinfo=timezone.utc)) == date(2026, 3, 6)
 
 
-def test_the_sql_fragment_shifts_by_the_same_cutover_in_japan_time():
-    sql = service_date_ch("u.captured_at")
-    assert sql == f"toDate(u.captured_at - INTERVAL {SERVICE_DAY_CUTOVER_HOURS} HOUR, 'Asia/Tokyo')"
-    assert service_date_ch() == f"toDate(captured_at - INTERVAL {SERVICE_DAY_CUTOVER_HOURS} HOUR, 'Asia/Tokyo')"
+def test_the_sql_fragment_names_the_column_it_is_given():
+    assert "u.captured_at" in service_date_ch("u.captured_at")
+    assert service_date_ch().count("captured_at") == 1

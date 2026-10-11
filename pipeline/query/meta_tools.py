@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from api.range import RangeCtx
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -295,13 +295,14 @@ async def describe_data(
         ]
         return ToolResult(
             kind="kv",
-            # JST days, as every date in this app is: a 06:00 JST capture is
-            # still the previous UTC day.
+            # Service days, as every date in this app is (pipeline.service_day):
+            # a 00:30 JST capture still belongs to the previous day, and a
+            # 06:00 JST capture is the previous UTC day.
             summary=_summary(
                 "mt_date_range_summary",
                 locale,
-                first_date=first_obs.astimezone(_JST).date(),
-                last_date=last_obs.astimezone(_JST).date(),
+                first_date=service_date_of(first_obs),
+                last_date=service_date_of(last_obs),
             ),
             pairs=pairs,
         )
@@ -388,7 +389,7 @@ async def describe_data(
             parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
         )
         data_end_ts = _as_utc(data_end_ch.result_rows[0][0]) if data_end_ch.result_rows else None
-        data_end = data_end_ts.astimezone(_JST).date() if data_end_ts is not None else None
+        data_end = service_date_of(data_end_ts) if data_end_ts is not None else None
         window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
         if offset > 0:
             # Counts over the same `deduped` population as the paginated rows

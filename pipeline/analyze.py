@@ -1211,9 +1211,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
-        # into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare toDate() —
-        # same JST-not-UTC reasoning as everywhere else in this migration (see
-        # build_dedup_ch_sql's docstring in pipeline/db.py).
+        # into Postgres. The service date (pipeline.service_day), the same day
+        # every other aggregate is filed under — never a bare toDate().
         _ch_build_and_insert(
             "agg_feed_health",
             "(agency_id, date, raw_samples, clamp_count, total_rows)",

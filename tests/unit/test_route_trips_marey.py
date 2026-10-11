@@ -149,6 +149,15 @@ def test_clock_to_sec_accepts_a_post_midnight_continuation_hour():
     assert clock_to_sec("25:30") == 25 * 3600 + 30 * 60
 
 
+def test_clock_to_sec_puts_a_before_cutover_clock_on_the_next_calendar_day_of_its_service_day():
+    # A feed that writes a trip's after-midnight stop as "00:10" (not "24:10")
+    # still means 10 minutes past midnight of the service day that began the
+    # evening before.
+    assert clock_to_sec("00:10") == 24 * 3600 + 10 * 60
+    assert clock_to_sec("03:59") == 27 * 3600 + 59 * 60
+    assert clock_to_sec("04:00") == 4 * 3600
+
+
 # --- row -> trip transform --------------------------------------------------
 
 
@@ -273,3 +282,12 @@ def test_build_route_trips_default_stop_budget_is_max_route_trip_stops():
     trips, truncated = build_route_trips(rows)
     assert [t.trip_id for t in trips] == ["A"]
     assert truncated is False
+
+
+def test_a_trip_crossing_midnight_keeps_increasing_positions_and_its_earliest_clock_as_the_label():
+    """aomori_regex stores no scheduled_sec, only "HH:MM": the 23:50 and 00:10
+    stops of one service-day trip must not run backwards on the time axis, and
+    the trip is labelled with when it starts, not the string-smallest clock."""
+    trips, _ = build_route_trips([_row("N", 1, "23:50", 0), _row("N", 2, "00:10", 0)])
+    assert [s.scheduled_sec for s in trips[0].stops] == [23 * 3600 + 50 * 60, 24 * 3600 + 10 * 60]
+    assert trips[0].scheduled_time == "23:50"

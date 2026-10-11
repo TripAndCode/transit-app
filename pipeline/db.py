@@ -97,22 +97,15 @@ def build_dedup_ch_sql(
 
     The `date` column is the *service date* (`pipeline.service_day`): the
     Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
-    before and after midnight is one event of one day. It is built on
-    `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
-    every Postgres connection that ever touched `updates` pins
-    the Asia/Tokyo session time zone (see api/main.py's
-    PG_SESSION_SETTINGS), so `captured_at::date` throughout this codebase has
-    always meant the JST calendar day, not the UTC one. The ClickHouse
-    column is UTC (`DateTime64(0, 'UTC')`); using bare `toDate()` here
-    would silently misbucket every row whose captured_at falls in
-    UTC 15:00-23:59 (JST 00:00-08:59 the next day) — reproducing the
-    exact UTC/JST aggregate-mis-bucketing bug this project already hit
-    once (see the design doc's Risks section). `toDate(value, timezone)`
-    is a real ClickHouse signature — it converts to a calendar date in
-    the given timezone regardless of the column's stored timezone. The
-    `GROUP BY` repeats the full `toDate(...)` expression rather than the
-    `date` alias, to sidestep any ambiguity in how ClickHouse resolves a
-    GROUP BY key that shares a name with a SELECT-list alias.
+    before and after midnight is one event of one day. It is never a bare
+    `toDate(captured_at)`: the ClickHouse column is UTC
+    (`DateTime64(0, 'UTC')`), so a UTC day would misbucket every row whose
+    captured_at falls in UTC 15:00-23:59 (JST 00:00-08:59 the next day).
+    `toDate(value, timezone)` converts to a calendar date in the given
+    timezone regardless of the column's stored timezone. The `GROUP BY`
+    repeats the full expression rather than the `date` alias, to sidestep any
+    ambiguity in how ClickHouse resolves a GROUP BY key that shares a name
+    with a SELECT-list alias.
 
     Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
     than a Python-formatted literal, for clickhouse-connect's server-side

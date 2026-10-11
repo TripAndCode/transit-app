@@ -84,7 +84,7 @@ observations to a replay of one whole service day, one hour at a time
   time rather than incrementing per tick, so a delayed timer tick lands on the
   frame the clock says it is instead of drifting behind.
 - With no `date` given, the endpoint resolves to the agency's latest observed
-  JST day. Frames cover the 05:00–24:00 service window in 60-minute buckets
+  service day. Frames cover the 05:00–24:00 service window in 60-minute buckets
   (the endpoint also accepts a 15-minute step; the UI does not yet expose
   choosing it); each bucket needs at least 3 observations at a stop before
   that stop is drawn, and a frame is capped at 400 points.

@@ -928,7 +928,9 @@ async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
     assert body == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
 
 
-async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
+async def _seed_route(
+    pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None, seeded_at=None
+):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats,
     for tests that need a baseline row present even though these drilldowns
@@ -951,7 +953,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
     separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
-    seeded_at = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
+    seeded_at = seeded_at or datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
     async with pool.acquire() as conn:
         for i, (trip_id, seq, delay, sched) in enumerate(day_rows):
             # scheduled_time column is TIME WITHOUT TIME ZONE; asyncpg needs a
@@ -1419,6 +1421,31 @@ async def test_route_trips_reads_the_requested_jst_day(map_app_ch, ch_client):
     assert [t["trip_id"] for t in same_day.json()["trips"]] == ["A"]
     assert day_before.json()["date"] == "2026-06-08"
     assert day_before.json()["trips"] == []
+
+
+@pytest.mark.asyncio
+async def test_route_trips_default_day_is_the_service_day_of_a_post_midnight_observation(map_app_ch, ch_client):
+    """A route last seen at 00:40 JST is still running the previous service day,
+    so the default day is that day and its trips come back rather than an empty
+    page for a calendar day that has no 04:00 start yet."""
+    from datetime import datetime, timezone
+
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_NIGHT",
+        "平日",
+        [("N1", 1, 120, "23:50")],
+        ch_client=ch_client,
+        seeded_at=datetime(2026, 6, 9, 15, 40, 0, tzinfo=timezone.utc),  # 00:40 JST on 06-10
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        trips = await client.get(f"/api/{agency_id}/today/route/R_NIGHT/trips")
+        profile = await client.get(f"/api/{agency_id}/today/route/R_NIGHT/stop-profile")
+    assert trips.json()["date"] == "2026-06-09"
+    assert [t["trip_id"] for t in trips.json()["trips"]] == ["N1"]
+    assert profile.json()["date"] == "2026-06-09"
 
 
 @pytest.mark.asyncio
