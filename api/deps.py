@@ -1,14 +1,25 @@
 import time
+from typing import TYPE_CHECKING, cast
 
 from fastapi import HTTPException, Request
 
 from api.security import current_user, require_user
 from pipeline.cache import _REGISTERED_CLEARS
+from pipeline.query.pooled_conn import PooledConnection
+
+if TYPE_CHECKING:
+    import asyncpg
 
 
 async def get_conn(request: Request):
     async with request.app.state.pool.acquire() as conn:
         yield conn
+
+
+async def get_pooled_conn(request: Request) -> "asyncpg.Connection":
+    """A connection stand-in that borrows from the pool per statement; see
+    :class:`PooledConnection`. Typed as the connection the callees expect."""
+    return cast("asyncpg.Connection", PooledConnection(request.app.state.pool))
 
 
 class _ClickHouseUnavailable:

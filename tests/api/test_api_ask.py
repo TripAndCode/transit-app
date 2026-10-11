@@ -91,6 +91,34 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ask_holds_no_pool_connection_while_the_llm_runs(ask_client, monkeypatch):
+    """A Stage-3 question waits on the LLM for tens of seconds; pinning a pooled
+    connection for that wait lets a handful of slow questions starve every
+    other endpoint, so the pool must be fully idle while the model runs."""
+    client, agency_id = ask_client
+    from api.main import app
+
+    pool = app.state.pool
+    in_use_during_llm: list[int] = []
+
+    async def mock_chat(question, ctx, conn, agency_id, **kwargs):
+        # Real work around the LLM call still reaches the database.
+        assert await conn.fetchval("SELECT 1") == 1
+        in_use_during_llm.append(pool.get_size() - pool.get_idle_size())
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", mock_chat)
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "一番遅れている路線は？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+
+    assert resp.status_code == 200
+    assert in_use_during_llm == [0]
+
+
+@pytest.mark.asyncio
 async def test_ask_endpoint_unknown_agency(ask_client):
     client, _ = ask_client
     resp = await client.post(
