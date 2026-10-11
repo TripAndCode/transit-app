@@ -17,11 +17,13 @@ from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, checked_table
 async def get_ch_client():
     """Caps any single query at 30s execution time and 200k result rows —
     the ClickHouse-side counterpart to api.main.PG_SESSION_SETTINGS' Postgres
-    `statement_timeout`. All read endpoints serve from small precomputed
-    agg_* tables (sub-second); ClickHouse only backs the pathological
-    live-fallback scans over `updates` (see api.main.lifespan), so these
-    caps should only ever fire as a safety net against a hung or
-    runaway request — never on real traffic.
+    `statement_timeout`. Reports mostly serve from small precomputed agg_*
+    tables, but ClickHouse is also read directly, on every call, by the live
+    and per-day endpoints (/delays/live, /delays/live-progress,
+    /delays/timeline, /today/route-summary, the /today/route/* trips and
+    stop-profile, /route-shape and delay_certificate), and by the narrowed
+    time-band fallbacks of the report family. These caps are a safety net
+    against a hung or runaway request, not a throttle on normal traffic.
 
     `result_overflow_mode: "throw"` (not the default "break") matters as
     much as the row number itself: "break" truncates the result set
@@ -30,10 +32,10 @@ async def get_ch_client():
     DatabaseError (TOO_MANY_ROWS_OR_BYTES) instead, so an over-cap query
     fails loudly rather than returning a partial answer that looks correct.
 
-    200_000 rows is generous headroom over this codebase's real query
-    shapes: every live-fallback path is a single-agency, date-bounded scan
-    over `updates` (per-stop/per-route rows for one agency's service day),
-    which tops out in the thousands, not hundreds of thousands — see
+    200_000 rows bounds a single-agency, date-bounded read. Result sets are
+    kept small by aggregating in ClickHouse rather than shipping raw rows, so
+    a query that can exceed the cap (a wide window over a busy route)
+    should aggregate server-side instead of raising the limit — see
     max_captured_at_before's docstring for how these queries are shaped to
     stay index-served. clickhouse-connect converts these to strings itself
     when posting settings over HTTP, so plain Python int/str values here are

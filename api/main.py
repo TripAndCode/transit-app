@@ -88,10 +88,10 @@ _API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json", "internal/")
 #   timezone: ``captured_at::date`` and every other date cast follow the
 #     operator's JST calendar instead of UTC (Aomori observations span
 #     midnight JST and would otherwise straddle two UTC dates).
-#   statement_timeout: every read endpoint serves from small precomputed
-#     agg_* tables, so this only fires on a pathological live-fallback scan,
-#     as a safety net against a hung request. (analyze/ingest run on their
-#     own psycopg2 connections, not this pool.)
+#   statement_timeout: a safety net against a hung or runaway request, not a
+#     throttle on normal reads (ClickHouse-backed reads carry their own caps in
+#     api.clickhouse.get_ch_client). (analyze/ingest run on their own psycopg2
+#     connections, not this pool.)
 PG_SESSION_SETTINGS = {"timezone": "Asia/Tokyo", "statement_timeout": "30s"}
 
 
@@ -228,8 +228,8 @@ async def lifespan(app: FastAPI):
         # request happened to touch a flag first.
         await asyncio.to_thread(warm_flags)
         _warn_if_login_gate_inactive(enabled)
-        # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
-        # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+        # Non-fatal: ClickHouse only backs a subset of routes (live and
+        # per-day reads, and narrowed-filter report fallbacks). Postgres-only routes (auth, admin, PostGIS
         # heatmap, any time_band="all" report path reading agg_* tables) have
         # nothing to do with ClickHouse and must keep working even if it's down
         # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
