@@ -34,16 +34,21 @@ const TICK_MS = 100;
 const NO_FRAMES: TimelineFrame[] = [];
 
 /**
- * Owns one day's frames and the playhead over them.
+ * Owns one day's frames and the playhead over them. `routes` scopes the frames to
+ * the selection the live map is filtered to; empty means every route.
  *
  * The playhead is derived from elapsed wall-clock time through the pure
  * `frameIndexAt`, not incremented per tick: a tick the browser delayed (a
  * background tab, a long paint) then lands on the frame the clock says it is,
  * rather than leaving playback permanently behind by however much it drifted.
  */
-export function useDayPlayback(agencyId: number | null, active: boolean): PlaybackController {
+export function useDayPlayback(
+  agencyId: number | null,
+  active: boolean,
+  routes: readonly string[] = [],
+): PlaybackController {
   const steppingOnly = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const query = useTimeline(agencyId, active);
+  const query = useTimeline(agencyId, active, routes);
   const frames = query.data?.frames ?? NO_FRAMES;
   const frameCount = frames.length;
 
