@@ -10,18 +10,34 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
-import pyarrow.parquet as pq
-
 _log = logging.getLogger(__name__)
 
 FORECAST_ML_RETENTION_DAYS = 14
 
+_COLUMNS = (
+    "agency_id",
+    "route_code",
+    "service_date",
+    "hour",
+    "mean_min",
+    "q10",
+    "q50",
+    "q90",
+    "model_version",
+    "origin_date",
+    "generated_at",
+)
+
 
 def _as_date(value: Any) -> date:
-    # ml.cli's _predict writes origin_date as an ISO string (and so does this
-    # test's parquet fixture for service_date); a real service_date column,
-    # written from a pandas datetime64 column, already round-trips as a date.
-    return date.fromisoformat(value) if isinstance(value, str) else value
+    # A real service_date column, written from a pandas datetime64 column,
+    # round-trips through parquet as a native datetime, not a date; origin_date
+    # (ml.cli's _predict writes it as an ISO string) round-trips as a str.
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    return value
 
 
 def _as_datetime(value: Any) -> datetime:
@@ -40,24 +56,43 @@ def prune_forecast_ml_sql(days: int) -> str:
 def fetch_latest_manifest(s3_client: Any, bucket: str) -> dict[str, Any] | None:
     """The most recent `forecasts/<date>/manifest.json`, by its own `prefix`
     (`forecasts/<date>`) sorted lexicographically -- ISO dates sort
-    chronologically as plain strings. `None` when the bucket has no forecast
-    published yet."""
-    response = s3_client.list_objects_v2(Bucket=bucket, Prefix="forecasts/")
-    manifest_keys = sorted(obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith("/manifest.json"))
+    chronologically as plain strings. Pages through the whole `forecasts/`
+    prefix: a single unpaginated `list_objects_v2` call silently truncates
+    past ~500 days of daily publishing (1000 keys / 2 objects a day), which
+    would make this quietly stop seeing newer manifests. `None` when the
+    bucket has no forecast published yet."""
+    manifest_keys: list[str] = []
+    continuation_token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": "forecasts/"}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        response = s3_client.list_objects_v2(**kwargs)
+        manifest_keys.extend(
+            obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith("/manifest.json")
+        )
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response.get("NextContinuationToken")
     if not manifest_keys:
         return None
-    key = manifest_keys[-1]
+    key = sorted(manifest_keys)[-1]
     body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
     manifest = json.loads(body)
     manifest["prefix"] = key.rsplit("/", 1)[0]
     return manifest
 
 
-async def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
+def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
     """Upsert the latest published forecast into `agg_route_forecast_ml`,
-    then prune rows whose service_date has aged out. Never raises: a missing
-    or corrupt manifest/parquet is logged and answered with `0`, so a bad
-    publish from the VPS side never aborts the caller's wider ingest sweep."""
+    then prune rows whose service_date has aged out, all in one transaction
+    (a failure partway through rolls back the whole batch rather than
+    leaving a half-upserted forecast with the prune skipped). Never raises:
+    a missing/corrupt manifest or a DB failure is logged and answered with
+    `0`, so a bad publish from the VPS side never aborts the caller's wider
+    ingest sweep."""
+    import pyarrow.parquet as pq
+
     try:
         manifest = fetch_latest_manifest(s3_client, bucket)
         if manifest is None:
@@ -70,16 +105,8 @@ async def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
         _log.exception("ml_forecast_ingest: could not read the latest forecast from R2")
         return 0
 
-    for row in rows:
-        await conn.execute(
-            "INSERT INTO agg_route_forecast_ml "
-            "(agency_id, route_code, service_date, hour, mean_min, q10, q50, q90, model_version, "
-            " origin_date, generated_at) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) "
-            "ON CONFLICT (agency_id, route_code, service_date, hour) DO UPDATE SET "
-            "mean_min = EXCLUDED.mean_min, q10 = EXCLUDED.q10, q50 = EXCLUDED.q50, q90 = EXCLUDED.q90, "
-            "model_version = EXCLUDED.model_version, origin_date = EXCLUDED.origin_date, "
-            "generated_at = EXCLUDED.generated_at",
+    pg_rows = [
+        (
             row["agency_id"],
             row["route_code"],
             _as_date(row["service_date"]),
@@ -92,5 +119,26 @@ async def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
             _as_date(row["origin_date"]),
             _as_datetime(row["generated_at"]),
         )
-    await conn.execute(prune_forecast_ml_sql(FORECAST_ML_RETENTION_DAYS))
+        for row in rows
+    ]
+    try:
+        from psycopg2.extras import execute_values
+
+        with conn.cursor() as cur:
+            if pg_rows:
+                execute_values(
+                    cur,
+                    f"INSERT INTO agg_route_forecast_ml ({', '.join(_COLUMNS)}) VALUES %s "
+                    "ON CONFLICT (agency_id, route_code, service_date, hour) DO UPDATE SET "
+                    "mean_min = EXCLUDED.mean_min, q10 = EXCLUDED.q10, q50 = EXCLUDED.q50, q90 = EXCLUDED.q90, "
+                    "model_version = EXCLUDED.model_version, origin_date = EXCLUDED.origin_date, "
+                    "generated_at = EXCLUDED.generated_at",
+                    pg_rows,
+                )
+            cur.execute(prune_forecast_ml_sql(FORECAST_ML_RETENTION_DAYS))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        _log.exception("ml_forecast_ingest: could not upsert the latest forecast")
+        return 0
     return len(rows)

@@ -239,12 +239,12 @@ def test_weather_ingest_runs_only_after_the_advisory_lock_is_released(two_agenci
     assert lock_was_free_during_weather is True
 
 
-async def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
+def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
     import api.routers.internal as internal_module
 
     calls = []
 
-    async def fake_ingest_forecast(conn, s3_client, bucket):
+    def fake_ingest_forecast(conn, s3_client, bucket):
         calls.append(bucket)
         return 0
 
@@ -258,14 +258,14 @@ async def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
     # (which needs ClickHouse/live agencies already covered by this file's
     # other tests) -- the fake replaces ingest_forecast, so the connection
     # object passed through is never actually used.
-    await internal_module._ingest_ml_forecast(object())
+    internal_module._ingest_ml_forecast(object())
     assert calls == ["transit-ml"]
 
 
-async def test_a_forecast_ingest_failure_does_not_raise(monkeypatch):
+def test_a_forecast_ingest_failure_does_not_raise(monkeypatch):
     import api.routers.internal as internal_module
 
-    async def raising_ingest_forecast(conn, s3_client, bucket):
+    def raising_ingest_forecast(conn, s3_client, bucket):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(internal_module, "ingest_forecast", raising_ingest_forecast)
@@ -274,4 +274,72 @@ async def test_a_forecast_ingest_failure_does_not_raise(monkeypatch):
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "test")
 
-    await internal_module._ingest_ml_forecast(object())  # must not raise
+    internal_module._ingest_ml_forecast(object())  # must not raise
+
+
+def test_ml_forecast_ingest_runs_only_for_an_unscoped_ingest_sweep(two_agencies, monkeypatch):
+    """The published forecast is fleet-wide (one R2 object, not one per
+    agency) -- a single-agency admin reanalyze must not trigger a
+    fleet-wide R2 fetch and upsert."""
+    active_id, _deleted_id = two_agencies
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+
+    from api.routers.internal import _ingest_and_analyze_sweep
+
+    with (
+        patch("pipeline.ingest.ingest_live"),
+        patch("pipeline.analyze.analyze"),
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.promote.promote_closed_days", return_value=0),
+        patch("api.routers.internal._run_weather_ingest"),
+        patch("api.routers.internal._run_ml_forecast_ingest") as fake_ml_ingest,
+    ):
+        _ingest_and_analyze_sweep(DATABASE_URL, agency_ids=[active_id])
+        assert fake_ml_ingest.call_count == 0
+
+        _ingest_and_analyze_sweep(DATABASE_URL)
+        assert fake_ml_ingest.call_count == 1
+
+
+def test_ml_forecast_ingest_runs_only_after_the_advisory_lock_is_released(two_agencies, monkeypatch):
+    """Same reasoning as weather's own lock-release test: ingest_forecast
+    must run on a fresh connection opened after the ingest+analyze advisory
+    lock's own connection has already closed, never while it is still held."""
+    _active_id, _deleted_id = two_agencies
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+
+    from api.routers.internal import _run_ingest_and_analyze
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
+
+    lock_was_free_during_ml_forecast = None
+
+    def fake_ingest_forecast(conn, s3_client, bucket):
+        nonlocal lock_was_free_during_ml_forecast
+        probe = psycopg2.connect(DATABASE_URL)
+        probe.autocommit = True
+        try:
+            with probe.cursor() as cur:
+                cur.execute("SELECT pg_try_advisory_lock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
+                lock_was_free_during_ml_forecast = cur.fetchone()[0]
+            if lock_was_free_during_ml_forecast:
+                with probe.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
+        finally:
+            probe.close()
+        return 0
+
+    with (
+        patch("pipeline.ingest.ingest_live"),
+        patch("pipeline.analyze.analyze"),
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.weather.ingest_weather", return_value=(0, 0, [])),
+        patch("api.routers.internal.ingest_forecast", side_effect=fake_ingest_forecast) as fake_ml,
+    ):
+        _run_ingest_and_analyze()
+
+    fake_ml.assert_called_once()
+    assert lock_was_free_during_ml_forecast is True
