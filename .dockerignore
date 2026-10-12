@@ -12,7 +12,7 @@ docs
 !docs/features/
 tests
 # Re-include the Ask golden set: pipeline/query/router.py and the RAG index
-# read it at runtime. The negation must follow the broader `tests` exclusion.
+# read it at runtime (ordering rule explained above).
 !tests/ask_eval/golden_set.jsonl
 .superpowers
 oracle_cloud
