@@ -9,11 +9,12 @@ from clickhouse_connect.driver.client import Client
 
 from ml.cells import Cell
 from ml.sql import cells_sql
+from pipeline.service_day import service_date_ch
 
 
 def _edge_day(client: Client, agency_id: int, order: Literal["ASC", "DESC"]) -> date | None:
     rows = client.query(
-        "SELECT toDate(captured_at, 'Asia/Tokyo') FROM updates WHERE agency_id = {agency_id:UInt16} "
+        f"SELECT {service_date_ch()} FROM updates WHERE agency_id = {{agency_id:UInt16}} "
         f"ORDER BY captured_at {order} LIMIT 1",
         parameters={"agency_id": agency_id},
     ).result_rows
@@ -30,10 +31,10 @@ def date_span(client: Client, agency_id: int) -> tuple[date, date] | None:
 
 
 def count_days(client: Client, agency_id: int) -> int:
-    """Distinct JST days with any row: one pass over the agency's capture times,
+    """Distinct service days with any row: one pass over the agency's capture times,
     without the per-stop-event dedup that fetching cells needs."""
     rows = client.query(
-        "SELECT uniqExact(toDate(captured_at, 'Asia/Tokyo')) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        f"SELECT uniqExact({service_date_ch()}) FROM updates WHERE agency_id = {{agency_id:UInt16}}",
         parameters={"agency_id": agency_id},
     ).result_rows
     return int(rows[0][0])

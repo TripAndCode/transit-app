@@ -26,7 +26,9 @@ vi.mock("./HeatSurface", async (importOriginal) => {
 });
 
 const hourly = [{ date: "2026-10-05", hour: 8, avg_min: 4, samples: 10 }, { date: "2026-10-11", hour: 20, avg_min: 1, samples: 10 }];
-const grid: ForecastOverviewGridCell[] = [{ dow: 1, band: "morning", expected_avg_min: 2, samples: 10, low_confidence: false }];
+const grid: ForecastOverviewGridCell[] = [
+  { dow: 1, band: "morning", expected_avg_min: 2, samples: 10, low_confidence: false, source: "baseline" },
+];
 const surface = () => <HeatSurface hourly={hourly} grid={grid} worst={null} rangeDays={14} />;
 const mount = () => renderWithProviders(surface());
 const cellAt = (dow: number, hour: number) => document.querySelector<HTMLElement>(`.heat-surface [data-dow="${dow}"][data-hour="${hour}"]`)!;

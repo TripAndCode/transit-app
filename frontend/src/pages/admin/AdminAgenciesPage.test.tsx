@@ -13,6 +13,8 @@ const createReset = vi.fn();
 const patchReset = vi.fn();
 const delMutate = vi.fn();
 const restoreMutate = vi.fn();
+const delReset = vi.fn();
+const restoreReset = vi.fn();
 const probeMutate = vi.fn();
 const reanalyzeMutate = vi.fn();
 
@@ -109,8 +111,8 @@ vi.mock("../../api/admin", () => ({
   }),
   useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
-  useDeleteAgency: () => ({ mutate: delMutate, error: null, ...delState }),
-  useRestoreAgency: () => ({ mutate: restoreMutate, error: null, ...restoreState }),
+  useDeleteAgency: () => ({ mutate: delMutate, reset: delReset, error: null, ...delState }),
+  useRestoreAgency: () => ({ mutate: restoreMutate, reset: restoreReset, error: null, ...restoreState }),
   useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
   useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
   useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
@@ -251,6 +253,39 @@ describe("AdminAgenciesPage", () => {
     restoreState = { isPending: false, variables: 2, error: new Error("boom") };
     wrap(<AdminAgenciesPage />);
     expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+  });
+
+  it("names the agency a failed disable was for", () => {
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.agencies.disable_failed", { name: "Aomori Bus" }));
+  });
+
+  it("names the agency a failed restore was for", () => {
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.agencies.restore_failed", { name: "Deleted Bus" }));
+  });
+
+  it("clears an earlier disable failure when a restore is started", async () => {
+    const user = userEvent.setup();
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Deleted Bus"));
+    await user.click(within(screen.getByLabelText("Agency details")).getByRole("button", { name: /^Restore$/ }));
+    expect(restoreMutate).toHaveBeenCalledWith(2);
+    expect(delReset).toHaveBeenCalled();
+  });
+
+  it("clears an earlier restore failure when a disable is started", async () => {
+    const user = userEvent.setup();
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    await user.type(drawer.getByLabelText(/type the agency name to confirm/i), "Aomori Bus");
+    await user.click(drawer.getByRole("button", { name: /^Disable$/ }));
+    expect(restoreReset).toHaveBeenCalled();
   });
 
   it("narrows the list to behind-schedule agencies via the saved view", async () => {

@@ -14,6 +14,7 @@ from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
 from pipeline.analyze import analyze
+from pipeline.service_day import service_date_ch
 
 AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
@@ -288,7 +289,7 @@ def test_a_changed_run_scopes_service_delivered_and_schedule_revision_to_the_cha
     _, ch = _changed_run(ingest_strategy="static_join")
     assert ch.service_delivered_builds and ch.schedule_revision_builds
     for sql, params in ch.service_delivered_builds + ch.schedule_revision_builds:
-        assert sql.count("toDate(captured_at, 'Asia/Tokyo') IN {rebuild_dates:Array(Date)}") >= 1
+        assert sql.count(f"{service_date_ch()} IN {{rebuild_dates:Array(Date)}}") >= 1
         assert params["rebuild_dates"] == [LEDGER_DATE]
     # Every FROM updates in the cancellation builder is bounded, not just the first.
     ((sd_sql, _),) = ch.service_delivered_builds

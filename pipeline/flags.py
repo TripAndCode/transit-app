@@ -101,6 +101,7 @@ REGISTRY: tuple[FlagDefinition, ...] = (
     FlagDefinition("openapi_docs_enabled", "OPENAPI_DOCS_ENABLED", "admin.flags.labels.openapiDocsEnabled", False),
     FlagDefinition("perf_debug_enabled", "PERF_DEBUG_ENABLED", "admin.flags.labels.perfDebugEnabled", False),
     FlagDefinition("login_required", "LOGIN_REQUIRED", "admin.flags.labels.loginRequired", True),
+    FlagDefinition("ml_forecast", "ML_FORECAST_ENABLED", "admin.flags.labels.mlForecast", False),
 )
 
 _BY_KEY = {d.key: d for d in REGISTRY}

@@ -42,6 +42,12 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return format;
 }
 
+/** Round to one decimal. Derive a displayed sign from this value, not the raw one,
+ *  so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
+export function roundTenth(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
@@ -65,12 +71,14 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
 /** When a feed report arrived: its time alone when that was today (JST),
  *  otherwise its date and time. The clock is read in JST too, the zone that
  *  decides which day "today" is, so a time never belongs to a different
- *  calendar day than the one it is judged against. */
+ *  calendar day than the one it is judged against. The result carries a "JST"
+ *  suffix so a viewer in another zone knows which clock it is. */
 export function formatReportTime(iso: string): string {
-  return formatDateTime(
+  const time = formatDateTime(
     iso,
     isToday(iso) ? { timeStyle: "short", timeZone: JST_TZ } : { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ },
   );
+  return i18n.t("common.report_time_jst", { time });
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the

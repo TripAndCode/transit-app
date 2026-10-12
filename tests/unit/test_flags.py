@@ -314,6 +314,7 @@ def test_registry_covers_every_known_gated_env_var():
         "OPENAPI_DOCS_ENABLED",
         "PERF_DEBUG_ENABLED",
         "LOGIN_REQUIRED",
+        "ML_FORECAST_ENABLED",
     }
     assert {d.env_var for d in flags.REGISTRY} == expected
 
@@ -340,6 +341,7 @@ def test_registry_env_defaults_match_prior_hardcoded_defaults():
         "openapi_docs_enabled": False,
         "perf_debug_enabled": False,
         "login_required": True,
+        "ml_forecast": False,
     }
     assert {d.key: d.env_default for d in flags.REGISTRY} == expected_defaults
 
@@ -526,3 +528,8 @@ def test_a_superseded_first_refresh_resolves_from_env_rather_than_raising(monkey
     state = flags.get_flag_state("weather_ingest_enabled")
     assert state.value is True
     assert state.source == "env"
+
+
+def test_ml_forecast_is_registered_and_defaults_off():
+    assert flags._BY_KEY["ml_forecast"].env_default is False
+    assert flags.flag("ml_forecast", False) is False

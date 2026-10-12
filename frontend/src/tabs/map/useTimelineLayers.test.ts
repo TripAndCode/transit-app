@@ -5,7 +5,7 @@ import { makeMockMap, type MockLayer } from "../../test/mockMap";
 import { severityStepColors, surfaceColorResolved } from "../../styles/tokens";
 import { applyTheme } from "../../styles/theme";
 import { CROSS_FADE_MS, GHOST_OPACITY } from "./playbackFrames";
-import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import {
   TIMELINE_LAYER,
   TIMELINE_SOURCE,
@@ -98,11 +98,7 @@ describe("useTimelineLayers", () => {
   });
 
   it("hides the live layers while playing and shows them again on exit", () => {
-    const map = makeMockMap([
-      { id: LIVE_TRIPS_LAYER },
-      { id: LIVE_TRIPS_LABEL_LAYER },
-      { id: LIVE_TRIPS_CLUSTER_LAYER },
-    ]);
+    const map = makeMockMap([{ id: LIVE_TRIPS_LAYER }, { id: LIVE_TRIPS_LABEL_LAYER }]);
     const { rerender, unmount } = renderHook(
       ({ active }: { active: boolean }) => {
         const mapRef = useRef(map as never);
@@ -111,7 +107,6 @@ describe("useTimelineLayers", () => {
       { initialProps: { active: true } },
     );
     expect(map.layout[`${LIVE_TRIPS_LAYER}|visibility`]).toBe("none");
-    expect(map.layout[`${LIVE_TRIPS_CLUSTER_LAYER}|visibility`]).toBe("none");
 
     rerender({ active: false });
     expect(map.layout[`${LIVE_TRIPS_LAYER}|visibility`]).toBe("visible");

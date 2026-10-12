@@ -52,6 +52,7 @@ from pipeline.query.llm_client import (
     get_client,
     log_usage,
 )
+from pipeline.query.pooled_conn import UnsupportedConnectionMethod
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -338,7 +339,7 @@ async def _dispatch_and_respond(
             "numeric_guard_triggered": None,
             **extra,
         }
-    except asyncpg.exceptions.UndefinedTableError:
+    except (asyncpg.exceptions.UndefinedTableError, UnsupportedConnectionMethod):
         raise
     except Exception:
         _log.exception("Tool %s failed%s", name, verb_suffix)
@@ -599,12 +600,14 @@ async def chat_with_tools(
                     "canonical_args": can_args,
                     "cache_outcome": "bypass",
                 }
-            except asyncpg.exceptions.UndefinedTableError:
+            except (asyncpg.exceptions.UndefinedTableError, UnsupportedConnectionMethod):
                 # An agg_* table missing (migration/analyze behind) must propagate
                 # to FastAPI's registered aggregate_not_ready_handler so the
                 # frontend gets the machine-readable {"code": "aggregate_not_ready"}
                 # 503 it reacts to — not a generic 200 tool_error that masks it,
-                # the same carve-out _dispatch_and_respond makes.
+                # the same carve-out _dispatch_and_respond makes. A call the
+                # pooled connection cannot serve is a programming error and is
+                # re-raised for the same reason: it must not read as a tool failure.
                 raise
             except Exception:
                 _log.exception("Build-mode dispatch failed for %s", build_tool)
