@@ -149,6 +149,7 @@ jobs:
         run: |
           docker run --rm --network none transit-app:ci python -c "import api.main"
           docker run --rm --network none transit-app:ci test -f api/static/index.html
+          docker run --rm --network none transit-app:ci test -f tests/ask_eval/golden_set.jsonl
 
   # Wired into this workflow's own pull_request trigger, so a change to
   # oracle_cloud/v3/bin, oracle_cloud/v3/tests, or scripts/run_oracle_tests.sh
