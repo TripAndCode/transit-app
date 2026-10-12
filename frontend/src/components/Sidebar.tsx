@@ -174,9 +174,8 @@ export function Sidebar() {
   }
 
   // The destinations, the Other group, and the account menu — everything
-  // below the brand block. Shared by the
-  // desktop rail (collapsedFlag reflects the persisted rail preference) and
-  // the mobile "more" sheet (always rendered expanded; onNavigate closes the
+  // below the brand block. Shared by the desktop rail (collapsedFlag
+  // reflects the persisted rail preference) and the mobile "more" sheet (always rendered expanded; onNavigate closes the
   // sheet after a link is followed, mirroring ThreadSidebar's onSelect-
   // closes-drawer UX). The rail draws the destinations and Ask as a line
   // map. `inSheet` lists only the destinations the bottom tab bar leaves

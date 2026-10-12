@@ -25,8 +25,9 @@ const COLLAPSED_KEY = "transit.insightPanelCollapsed";
 const SEEN_KEY = "transit.insightPanelSeen";
 
 /** Defaults on in dev builds (`import.meta.env.DEV`) so dogfooding needs
- *  no manual setup; a real deploy stays opt-in-only. An explicit localStorage preference
- *  (set either way via devtools) always wins over that default. Fail-open
+ *  no manual setup; a real deploy stays opt-in-only. An explicit
+ *  localStorage preference (set either way via devtools) always wins over
+ *  that default. Fail-open
  *  to off if localStorage is unavailable — same shape as
  *  Sidebar.tsx's readCollapsedPref. */
 function readEnabled(): boolean {

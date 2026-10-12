@@ -579,7 +579,7 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "More" }));
-      await user.click(within(screen.getByRole("dialog")).getByRole("link", { name: /^Time/ }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("link", { name: "Time" }));
       expect(screen.queryByRole("dialog")).toBeNull();
     });
   });
