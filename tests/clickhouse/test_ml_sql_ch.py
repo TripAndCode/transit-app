@@ -42,8 +42,11 @@ ROWS = [
     (8, _utc(2026, 5, 31, 23, 30), "a/4.pb", "T2", "weekday", "08:35", "R1", 1, 60, EIGHT_O_FIVE + 1800),
     # T2's implausible stop is clamped out, not averaged in.
     (8, _utc(2026, 5, 31, 23, 40), "a/5.pb", "T2", "weekday", "08:45", "R1", 2, IMPLAUSIBLE, EIGHT_O_FIVE + 2400),
-    # T3 departs after midnight on the service day: scheduled_sec 24:10, captured JST 06-02 00:15.
+    # T3 departs after midnight on the service day: scheduled_sec 24:10, captured JST 06-02 00:15,
+    # which is still service day 06-01.
     (8, _utc(2026, 6, 1, 15, 15), "a/6.pb", "T3", "weekday", None, "R1", 1, 240, 24 * 3600 + 600),
+    # T4 runs the next morning, so a second service day exists.
+    (8, _utc(2026, 6, 1, 23, 0), "a/7.pb", "T4", "weekday", "08:05", "R1", 1, 300, EIGHT_O_FIVE),
     # Another agency never leaks in.
     (9, _utc(2026, 5, 31, 23, 0), "b/1.pb", "T1", "weekday", "08:05", "R1", 1, 999, EIGHT_O_FIVE),
 ]
@@ -62,9 +65,11 @@ def test_cells_pool_each_runs_mean_of_its_latest_stop_delays(loaded):
     assert morning.delay_sum_min == pytest.approx((120 + 180) / 2 / 60 + 60 / 60)
 
 
-def test_an_after_midnight_run_keeps_its_hour_on_its_jst_capture_date(loaded):
+def test_an_after_midnight_run_keeps_its_hour_on_its_service_date(loaded):
     cells = {(c.service_date, c.hour): c for c in fetch_cells(loaded, 8)}
-    assert cells[(date(2026, 6, 2), 24)] == Cell("R1", date(2026, 6, 2), 24, 1, 4.0)
+    assert cells[(date(2026, 6, 1), 24)] == Cell("R1", date(2026, 6, 1), 24, 1, 4.0)
+    assert (date(2026, 6, 2), 24) not in cells
+    assert cells[(date(2026, 6, 2), 8)] == Cell("R1", date(2026, 6, 2), 8, 1, 5.0)
 
 
 def test_fetching_in_chunks_returns_the_same_cells(loaded):
@@ -81,7 +86,7 @@ def test_fetching_from_a_start_day_returns_only_the_cells_from_that_day(loaded):
     assert fetch_cells(loaded, 8, since=date(2026, 7, 1)) == []
 
 
-def test_days_are_counted_by_distinct_jst_capture_day(loaded):
+def test_days_are_counted_by_distinct_service_day(loaded):
     assert count_days(loaded, 8) == 2
     assert count_days(loaded, 99) == 0
 
@@ -90,7 +95,7 @@ def test_an_agency_without_rows_has_no_cells(loaded):
     assert fetch_cells(loaded, 99) == []
 
 
-def test_an_agencys_span_runs_from_its_first_to_its_last_jst_day(loaded):
+def test_an_agencys_span_runs_from_its_first_to_its_last_service_day(loaded):
     assert date_span(loaded, 8) == (date(2026, 6, 1), date(2026, 6, 2))
     assert date_span(loaded, 99) is None
 
@@ -109,6 +114,14 @@ def test_a_feed_without_scheduled_sec_takes_the_hour_from_its_schedule_string(ch
     ]
     ch_client.insert("updates", rows, column_names=COLUMNS)
     assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 8, 1, 3.0)]
+
+
+def test_a_schedule_string_before_the_cutover_hour_is_an_after_midnight_hour_of_the_service_day(ch_client):
+    # A feed with only "HH:MM" writes a post-midnight stop as "00:20"; on its
+    # service day that is hour 24, the same hour scheduled_sec would give.
+    rows = [(1, _utc(2026, 6, 1, 15, 20), "e/1.pb", "N1", "weekday", "00:20", "A", 1, 120, None)]  # 00:20 JST 06-02
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 24, 1, 2.0)]
 
 
 def test_a_stop_with_no_schedule_stays_out_of_its_runs_mean(ch_client):

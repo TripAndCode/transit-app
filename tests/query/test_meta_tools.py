@@ -7,16 +7,9 @@ from pipeline.query.meta_tools import capabilities, describe_data
 from tests.conftest import _test_pool
 
 
-async def _setup_jst(conn):
-    # asyncpg resets session state between pool acquires, so use ``setup``
-    # (per-acquire) rather than ``init`` (once on creation) to mirror
-    # api/main.py's per-acquire JST guarantee.
-    await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
-
-
 @pytest.fixture
 async def conn_with_seed(apply_schema):
-    pool = await _test_pool(setup=_setup_jst)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
@@ -204,6 +197,38 @@ async def test_describe_data_date_range_summary_names_jst_days(conn_with_seed, c
         result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
     assert "2026-05-01" in result.summary and "2026-05-26" in result.summary
     assert "2026-04-30" not in result.summary and "2026-05-25" not in result.summary
+
+
+@pytest.mark.asyncio
+async def test_describe_data_date_range_names_the_service_day_of_a_post_midnight_capture(
+    conn_with_seed, ch_client, ch_async_client
+):
+    """The last capture is at 00:30 JST on 05-26, still service day 05-25: the
+    summary's last day matches the service-day count beside it, not the
+    calendar date of the timestamp."""
+    from zoneinfo import ZoneInfo
+
+    pool, agency_id = conn_with_seed
+    jst = ZoneInfo("Asia/Tokyo")
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, '1021', 1, $4, '08:00'::time, '平日', 60)",
+            [
+                (agency_id, "pb_first", "T_first", datetime(2026, 5, 1, 8, 0, 0, tzinfo=jst)),
+                (agency_id, "pb_late", "T_late", datetime(2026, 5, 26, 0, 30, 0, tzinfo=jst)),
+            ],
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert "2026-05-25" in result.summary
+    assert "2026-05-26" not in result.summary
 
 
 @pytest.mark.asyncio
@@ -480,7 +505,7 @@ async def test_describe_data_offset_negative_clamped(conn_with_observations):
 
 @pytest.mark.asyncio
 async def test_stops_pagination_stable_under_name_ties(apply_schema):
-    pool = await _test_pool(setup=_setup_jst)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"

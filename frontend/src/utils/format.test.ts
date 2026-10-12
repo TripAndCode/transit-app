@@ -14,6 +14,7 @@ import {
   EM_DASH,
   fmtPct,
   fmtRatioPct,
+  roundTenth,
 } from "./format";
 
 describe("formatNumber", () => {
@@ -192,8 +193,8 @@ describe("formatReportTime", () => {
     await i18n.changeLanguage("en");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z")); // 22:24 JST
-    expect(plain(formatReportTime("2026-10-03T12:41:00Z"))).toBe("9:41 PM");
-    expect(plain(formatReportTime("2026-09-29T00:59:00Z"))).toBe("Sep 29, 2026, 9:59 AM");
+    expect(plain(formatReportTime("2026-10-03T12:41:00Z"))).toBe("9:41 PM JST");
+    expect(plain(formatReportTime("2026-09-29T00:59:00Z"))).toBe("Sep 29, 2026, 9:59 AM JST");
   });
 
   it("prints the clock in JST, the zone that decides which day is today, whatever the viewer's zone", async () => {
@@ -201,7 +202,21 @@ describe("formatReportTime", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-08T16:00:00Z")); // 01:00 JST on Oct 9
     // 00:30 JST on Oct 9: a viewer in New York would otherwise read 11:30 AM.
-    expect(plain(formatReportTime("2026-10-08T15:30:00Z"))).toBe("12:30 AM");
+    expect(plain(formatReportTime("2026-10-08T15:30:00Z"))).toBe("12:30 AM JST");
+  });
+});
+
+describe("formatReportTime zone label", () => {
+  afterEach(async () => {
+    vi.useRealTimers();
+    await i18n.changeLanguage("en");
+  });
+
+  it("labels the Japan-time clock in the Japanese UI too", async () => {
+    await i18n.changeLanguage("ja");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    expect(formatReportTime("2026-10-03T12:41:00Z")).toMatch(/JST$/);
   });
 });
 
@@ -231,5 +246,14 @@ describe("formatter reuse", () => {
     await i18n.changeLanguage("ja");
     expect(formatNumber(1234)).toBe("1,234");
     expect(formatDate("2026-09-29")).toBe("2026年9月29日");
+  });
+});
+
+describe("roundTenth", () => {
+  it("rounds to one decimal and never yields a value that prints as -0.0", () => {
+    expect(roundTenth(1.26)).toBe(1.3);
+    expect(roundTenth(-0.3)).toBe(-0.3);
+    expect(roundTenth(-0.04).toFixed(1)).toBe("0.0");
+    expect(roundTenth(-0.04) < 0).toBe(false);
   });
 });

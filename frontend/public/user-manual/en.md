@@ -2,7 +2,7 @@
 
 This manual walks through the Delay Dashboard screen by screen, for anyone using it for the first time.
 
-The screenshots use real data from Aomori City Bus (青森市バス) for 12 August – 10 September 2026, seen on the morning of 11 September. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
+The screenshots use real data from Aomori City Bus (青森市バス) for 20 August – 18 September 2026, seen on the afternoon of 18 September. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
 
 ---
 

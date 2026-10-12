@@ -256,10 +256,14 @@ def is_follow_up(question: str) -> bool:
 
 
 def _match_rules(question: str) -> RouterDecision | None:
-    """Return the first matching rule's decision, or ``None``."""
+    """Return the first matching rule's decision, or ``None``.
+
+    The question is NFKC-normalised first, so full-width digits and Latin
+    letters and half-width kana match the rules' plain spelling.
+    """
     if not question:
         return None
-    text = question.strip()
+    text = unicodedata.normalize("NFKC", question).strip()
     for rule in _RULES:
         m = rule.pattern.search(text)
         if m and not (rule.unless and rule.unless.search(text)):

@@ -23,7 +23,7 @@ import { RouteLabel } from "./RouteLabel";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { BandGrid, Legend } from "./charts/DowBandGrid";
+import { BandGrid, Legend, type TipAnchor } from "./charts/DowBandGrid";
 import { Card } from "./ui/Card";
 import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
@@ -405,28 +405,46 @@ function populatedRange<T extends { expected_avg_min: number | null }>(
   return { populated, min, max };
 }
 
-/** Collapse a per-route 7×24 heatmap into a 7×5 band grid (sample-weighted). */
+/**
+ * Collapse a per-route 7×24 heatmap into a 7×5 band grid, mirroring
+ * pipeline/reports/forecast.py::summarize_agency_overview's own split: the
+ * baseline pool is sample-weighted, the ML pool is a plain mean across
+ * whatever ML cells land in the band (an ML cell carries no sample count of
+ * its own to weight by). `samples`/`low_confidence` always come from the
+ * baseline side — see that function's docstring for why.
+ */
 function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell[] {
-  const acc = new Map<string, { sum: number; n: number }>();
+  const baseline = new Map<string, { sum: number; n: number }>();
+  const ml = new Map<string, number[]>();
   for (const c of cells) {
-    if (c.expected_avg_min == null || !c.samples) continue;
+    if (c.expected_avg_min == null) continue;
     const key = `${c.dow}-${bandOf(c.hour)}`;
-    const a = acc.get(key) ?? { sum: 0, n: 0 };
-    a.sum += c.expected_avg_min * c.samples;
-    a.n += c.samples;
-    acc.set(key, a);
+    if (c.source === "ml") {
+      const values = ml.get(key) ?? [];
+      values.push(c.expected_avg_min);
+      ml.set(key, values);
+    } else if (c.samples) {
+      const a = baseline.get(key) ?? { sum: 0, n: 0 };
+      a.sum += c.expected_avg_min * c.samples;
+      a.n += c.samples;
+      baseline.set(key, a);
+    }
   }
   const grid: ForecastOverviewGridCell[] = [];
   for (let dow = 1; dow <= 7; dow++) {
     for (const band of BAND_ORDER) {
-      const a = acc.get(`${dow}-${band}`);
+      const key = `${dow}-${band}`;
+      const a = baseline.get(key);
       const n = a?.n ?? 0;
+      const mlValues = ml.get(key);
+      const mlMean = mlValues?.length ? mlValues.reduce((sum, v) => sum + v, 0) / mlValues.length : null;
       grid.push({
         dow,
         band,
-        expected_avg_min: a && n ? Math.round((a.sum / n) * 10) / 10 : null,
+        expected_avg_min: mlMean != null ? Math.round(mlMean * 10) / 10 : a && n ? Math.round((a.sum / n) * 10) / 10 : null,
         samples: n,
-        low_confidence: n > 0 && n < LOW_CONFIDENCE_SAMPLES,
+        low_confidence: mlMean != null ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
+        source: mlMean != null ? "ml" : "baseline",
       });
     }
   }
@@ -458,7 +476,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
   const min1 = t("forecast.axis_min");
   // Feeds BandGrid's own cursor-following tip only — see CrosshairTip.
-  const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
+  const onTip = (anchor: TipAnchor, text: string) => setTip({ x: anchor.clientX, y: anchor.clientY, text });
   const onLeave = () => setTip(null);
 
   return (
@@ -578,7 +596,7 @@ function AgencyLanding({
   legendUnit: string;
   worstPhrase: (w: ForecastOverviewWorst) => string;
   onPick: (code: string) => void;
-  onTip: (e: React.MouseEvent, text: string) => void;
+  onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
   const { data, isPending, error, refetch } = useForecastOverview(aid);
@@ -642,7 +660,7 @@ function RouteDetail({
   onToggleGrid: () => void;
   view: View;
   setView: (v: View) => void;
-  onTip: (e: React.MouseEvent, text: string) => void;
+  onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
   const { t } = useTranslation();

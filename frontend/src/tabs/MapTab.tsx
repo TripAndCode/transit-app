@@ -35,12 +35,7 @@ import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } fro
 import { useBasemapDim } from "./map/useBasemapDim";
 import { QueueResizer } from "./map/QueueResizer";
 import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
-import {
-  LIVE_TRIPS_CLUSTER_LAYER,
-  LIVE_TRIPS_LABEL_LAYER,
-  LIVE_TRIPS_LAYER,
-  useOperationsMapLayers,
-} from "./map/useOperationsMapLayers";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER, useOperationsMapLayers } from "./map/useOperationsMapLayers";
 import { meanRouteDelaySec } from "./map/selectedRouteDelay";
 import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
@@ -68,11 +63,6 @@ const DELAYED_TRIPS_CAP = 200;
 // sooner (e.g. an idle map with no live rows, or a system clock jump) --
 // scheduling only ever exact boundaries would otherwise never re-check.
 const STALENESS_SAFETY_TICK_MS = 60_000;
-
-/** Clusters stop expanding here: past it MapLibre's own clusterMaxZoom has
- *  already broken them into individual vehicles, so a further step would move
- *  the camera for nothing. */
-const CLUSTER_STEP_MAX_ZOOM = 16;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -327,19 +317,6 @@ export function MapTab() {
 
   const onTripHoverEnd = useEffectEvent(() => setHoveredTripId(null));
 
-  const onClusterClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
-    const coordinates = event.features?.[0]?.geometry;
-    if (!mapRef.current || coordinates?.type !== "Point") return;
-    // A cluster steps in by a fixed amount rather than to the trip-inspect
-    // floor: the operator is asking "what is inside this puck", and jumping
-    // straight to street level would lose the surrounding clusters they are
-    // comparing it against.
-    inspectTrip(mapRef.current, coordinates.coordinates as [number, number], {
-      zoom: Math.min(mapRef.current.getZoom() + 2, CLUSTER_STEP_MAX_ZOOM),
-      pitch: restPitch,
-    });
-  });
-
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
     const created = createSafeMap(
@@ -361,13 +338,10 @@ export function MapTab() {
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
     map.on("click", LIVE_TRIPS_LAYER, onTripClick);
     map.on("click", LIVE_TRIPS_LABEL_LAYER, onTripClick);
-    map.on("click", LIVE_TRIPS_CLUSTER_LAYER, onClusterClick);
     map.on("mouseenter", LIVE_TRIPS_LAYER, onEnter);
     map.on("mouseenter", LIVE_TRIPS_LABEL_LAYER, onEnter);
-    map.on("mouseenter", LIVE_TRIPS_CLUSTER_LAYER, onEnter);
     map.on("mouseleave", LIVE_TRIPS_LAYER, onLeave);
     map.on("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
-    map.on("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
     // mousemove, not mouseenter: crossing from one vehicle straight onto
     // another inside the same layer fires no new enter, so the card would
     // keep previewing the vehicle the pointer already left.
@@ -379,13 +353,10 @@ export function MapTab() {
     return () => {
       map.off("click", LIVE_TRIPS_LAYER, onTripClick);
       map.off("click", LIVE_TRIPS_LABEL_LAYER, onTripClick);
-      map.off("click", LIVE_TRIPS_CLUSTER_LAYER, onClusterClick);
       map.off("mouseenter", LIVE_TRIPS_LAYER, onEnter);
       map.off("mouseenter", LIVE_TRIPS_LABEL_LAYER, onEnter);
-      map.off("mouseenter", LIVE_TRIPS_CLUSTER_LAYER, onEnter);
       map.off("mouseleave", LIVE_TRIPS_LAYER, onLeave);
       map.off("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
-      map.off("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
       map.off("mousemove", LIVE_TRIPS_LAYER, onTripHover);
       map.off("mousemove", LIVE_TRIPS_LABEL_LAYER, onTripHover);
       map.off("mouseleave", LIVE_TRIPS_LAYER, onTripHoverEnd);
@@ -441,7 +412,7 @@ export function MapTab() {
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
-  const playback = useDayPlayback(id, playbackOn);
+  const playback = useDayPlayback(id, playbackOn, ctx.routes);
 
   // The light follows the hour of the frame on screen; outside playback the
   // view is "now" and carries no tint. steppingOnly is the reduced-motion

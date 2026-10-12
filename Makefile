@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -319,6 +319,15 @@ frontend-dev:
 
 frontend-build:
 	cd frontend && npm install && npm run build
+
+# Recaptures docs/features/ml-forecast.md's sibling, the in-app user manual's
+# own screenshots: build+bake a production bundle first (the dev server's
+# dev-only sidebar section would otherwise leak into every scene), set
+# login_required off via the admin flags UI/API (the dev-database guard
+# blocks that write from an agent's own tool calls), run this, then set it
+# back on.
+capture-user-manual:
+	poetry run python scripts/capture_user_manual_screenshots.py
 
 # ── Secret scanning ──────────────────────────────────────────────────────────
 # Defense-in-depth. The pre-commit hook scans staged content on every

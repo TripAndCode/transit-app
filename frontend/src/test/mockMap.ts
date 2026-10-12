@@ -6,6 +6,7 @@ export interface MockLayer {
   type?: string;
   source?: string;
   paint?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
   [k: string]: unknown;
 }
 

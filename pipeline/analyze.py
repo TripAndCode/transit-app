@@ -92,6 +92,7 @@ from pipeline.histogram import (
     hist_array_sql,
 )
 from pipeline.locks import agency_ingest_lock
+from pipeline.service_day import service_date_ch
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,11 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 2
+ANALYZE_LOGIC_VERSION = 4
+
+# The service date of an observation, spliced into the builders below that
+# group or bucket raw `updates` rows by day (`pipeline.service_day`).
+_SERVICE_DATE = service_date_ch()
 
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
@@ -493,7 +498,7 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     ``None`` means every date, which is what a first run, a missing ledger, or
     a static schedule that changed since the last build resolves to.
 
-    A row's service date is ``toDate(captured_at, 'Asia/Tokyo')``, fixed by the
+    A row's service date (:mod:`pipeline.service_day`) is fixed by the
     observation itself, so a date's aggregates can only go stale when rows land
     in it — and ``agg_feed_health`` already records, per date, how many rows
     that date held when it was last built. Comparing that ledger against the
@@ -551,7 +556,9 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
         "plan: per-date ledger",
         ch_client,
         """
-        SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
+        SELECT """
+        + _SERVICE_DATE
+        + """ AS date,
                countIf(dep_delay IS NOT NULL) AS raw_samples,
                count() AS total_rows
         FROM updates
@@ -593,7 +600,7 @@ def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> 
     """
     if rebuild_dates is None:
         return ""
-    return f"toDate({column}, 'Asia/Tokyo') IN {{rebuild_dates:Array(Date)}}"
+    return f"{service_date_ch(column)} IN {{rebuild_dates:Array(Date)}}"
 
 
 def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
@@ -1204,16 +1211,17 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
-        # into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare toDate() —
-        # same JST-not-UTC reasoning as everywhere else in this migration (see
-        # build_dedup_ch_sql's docstring in pipeline/db.py).
+        # into Postgres. The service date (pipeline.service_day), the same day
+        # every other aggregate is filed under — never a bare toDate().
         _ch_build_and_insert(
             "agg_feed_health",
             "(agency_id, date, raw_samples, clamp_count, total_rows)",
             agency_id,
             ch_client,
             """
-            SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
+            SELECT """
+            + _SERVICE_DATE
+            + """ AS date,
                    countIf(dep_delay IS NOT NULL) AS raw_samples,
                    countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count,
                    count() AS total_rows
@@ -1566,7 +1574,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 """
                 SELECT svc_date, count() FROM (
                     SELECT svc_date, trip_id FROM (
-                        SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                        SELECT """
+                + _SERVICE_DATE
+                + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
                         FROM updates WHERE agency_id = {agency_id:UInt16}"""
                 + date_where
@@ -1575,7 +1585,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     ) WHERE trip_rel = 3
                     UNION DISTINCT
                     SELECT svc_date, trip_id FROM (
-                        SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                        SELECT """
+                + _SERVICE_DATE
+                + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
                         FROM updates WHERE agency_id = {agency_id:UInt16}"""
                 + date_where
@@ -1617,7 +1629,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             """
             SELECT svc_date, argMax(version, cnt) AS static_version_id
             FROM (
-                SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date,
+                SELECT """
+            + _SERVICE_DATE
+            + """ AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
                 FROM updates WHERE agency_id = {agency_id:UInt16}"""
@@ -1815,7 +1829,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_client,
                 """
                 WITH per_event AS (
-                    SELECT route_code, stop_id, toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                    SELECT route_code, stop_id, """
+                + _SERVICE_DATE
+                + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(dep_delay, (captured_at, file_name)) AS dep_delay,
                            argMax(scheduled_time, (captured_at, file_name)) AS scheduled_time

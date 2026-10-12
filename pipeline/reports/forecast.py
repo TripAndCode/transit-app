@@ -41,6 +41,21 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
         "(each = one stop, on one run, on one day). It does not account for incidents, "
         "weather, or today's conditions."
     ),
+    # Shown instead of ("heatmap", ...) whenever any cell's value came from the
+    # ML forecast overlay, since the plain historical-average wording above
+    # would then be false for those cells.
+    ("heatmap_ml", "ja"): (
+        "曜日・時間帯ごとの見込みです。一部は予測モデルによる見込み値で、"
+        "残りはこの路線の過去の遅れの計測記録から平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況を"
+        "完全には反映していません。"
+    ),
+    ("heatmap_ml", "en"): (
+        "Expected delay by day of week and hour. Some cells show a forecast model's "
+        "estimate; the rest average this route's past measurements "
+        "(each = one stop, on one run, on one day). It may not fully account for "
+        "incidents, weather, or today's conditions."
+    ),
 }
 
 
@@ -59,6 +74,7 @@ def summarize_expected_delay_heatmap(
     rows: Iterable[Mapping[str, Any]],
     route: str,
     locale: str = "ja",
+    ml_cells: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
 
@@ -68,23 +84,43 @@ def summarize_expected_delay_heatmap(
     (SUM(sum_delay_sec) / SUM(samples)), so it is already the exact pooled
     mean; this lays it on the grid (missing cells → null/0) and flags low
     confidence. No percentile (cannot pool per-bucket percentiles).
+
+    `ml_cells`: published-forecast rows (already flag- and freshness-
+    filtered by the caller, bounded to the forward horizon the daily publish
+    job actually covers) with keys ``dow``, ``hour``, ``mean_min`` -- this
+    `route`'s own forecast, so at most one row per (dow, hour). When present
+    for a cell, its `mean_min` replaces `expected_avg_min` and `source`
+    becomes ``"ml"``; `samples` stays whatever the historical baseline above
+    already computed for that slot (how much history backs the comparison,
+    not the prediction), but `low_confidence` is also true at zero baseline
+    samples for an ML cell -- unlike a baseline-only cell, where zero samples
+    already shows as `expected_avg_min: null` and needs no separate flag, an
+    ML cell always has a non-null value, so nothing else would signal "this
+    prediction has no local history to compare against."
     """
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    ml_by = {(int(r["dow"]), int(r["hour"])): float(r["mean_min"]) for r in ml_cells}
     cells: list[dict[str, Any]] = []
     for d in range(1, 8):
         for h in range(24):
             r = by.get((d, h))
             n = int(r["samples"]) if r else 0
+            ml_mean = ml_by.get((d, h))
+            baseline_mean = round(float(r["avg_min"]), 1) if r else None
+            source = "ml" if ml_mean is not None else "baseline"
+            low_confidence = n < LOW_CONFIDENCE_SAMPLES if source == "ml" else 0 < n < LOW_CONFIDENCE_SAMPLES
             cells.append(
                 {
                     "dow": d,
                     "hour": h,
-                    "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                    "expected_avg_min": round(ml_mean, 1) if ml_mean is not None else baseline_mean,
                     "samples": n,
-                    "low_confidence": 0 < n < LOW_CONFIDENCE_SAMPLES,
+                    "low_confidence": low_confidence,
+                    "source": source,
                 }
             )
-    return {"route": route, "cells": cells, "disclaimer": _disclaimer("heatmap", locale)}
+    case = "heatmap_ml" if any(c["source"] == "ml" for c in cells) else "heatmap"
+    return {"route": route, "cells": cells, "disclaimer": _disclaimer(case, locale)}
 
 
 # Ordered hour→band mapping. SINGLE SOURCE OF TRUTH for the time bands (the
@@ -156,6 +192,7 @@ def summarize_agency_overview(
     recent_daily_rows: Iterable[Mapping[str, Any]] = (),
     locale: str = "ja",
     top_n: int | None = None,
+    ml_cells: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Agency-wide 7×band grid + worst-window + delay-ranked routes. Pure.
 
@@ -186,8 +223,24 @@ def summarize_agency_overview(
     is used as-is regardless of source.
     The worst window excludes low-confidence buckets so a small-sample fluke
     can never headline. No percentile (cannot pool per-bucket percentiles).
+
+    ``ml_cells``: published-forecast rows (already flag- and freshness-
+    filtered by the caller) with keys ``dow``, ``hour``, ``mean_min``, one
+    row per (route, upcoming slot) -- unlike the heatmap's single-route
+    ``ml_cells``, this agency-wide grid can see several routes sharing a
+    (dow, hour), and several hours sharing a (dow, band); both are pooled
+    into a plain (unweighted) mean, since a published forecast carries no
+    per-row sample count to weight by. When a (dow, band) has any ML rows,
+    that mean replaces ``expected_avg_min`` and ``source`` becomes ``"ml"``;
+    ``samples``/``low_confidence`` stay whatever the historical baseline
+    already computed, for the same reason as the heatmap's own ``ml_cells``.
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
+    ml_buckets: dict[tuple[int, str], list[float]] = {}
+    for r in ml_cells:
+        key = (int(r["dow"]), band_of(int(r["hour"])))
+        ml_buckets.setdefault(key, []).append(float(r["mean_min"]))
+
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
     for r in grid_rows:
         if r["avg_min"] is None or not r["samples"]:
@@ -195,9 +248,9 @@ def summarize_agency_overview(
         samples = int(r["samples"])
         # Plain ``r["sum_delay_sec"]`` would KeyError for the direct-SQL
         # caller's asyncpg Records, which never select that column (their
-        # avg_min is already exact — see this function's docstring) —
-        # unlike a dict, a Record has no reliable `.get`/`in` to probe for
-        # an absent key first.
+        # avg_min is already an exact pooled mean, needing no raw-seconds
+        # total to re-derive) — unlike a dict, a Record has no reliable
+        # `.get`/`in` to probe for an absent key first.
         try:
             sum_delay_sec = r["sum_delay_sec"]
         except (KeyError, IndexError):
@@ -211,18 +264,40 @@ def summarize_agency_overview(
     for d in range(1, 8):
         for band, _ in BANDS:
             mean, n = _pooled(buckets.get((d, band), []))
-            low_conf = 0 < n < LOW_CONFIDENCE_SAMPLES
+            ml_values = ml_buckets.get((d, band))
+            if ml_values:
+                display_mean: float | None = sum(ml_values) / len(ml_values)
+                source = "ml"
+                # Unlike a baseline-only band (zero samples already shows as
+                # expected_avg_min: null, needing no separate flag), an
+                # ML-sourced band always has a non-null value, so zero
+                # baseline samples must still read as low-confidence --
+                # otherwise a prediction with no local history to compare
+                # against could outrank a genuinely low-confidence baseline
+                # band for `worst`, below.
+                low_conf = n < LOW_CONFIDENCE_SAMPLES
+            else:
+                display_mean = mean
+                source = "baseline"
+                low_conf = 0 < n < LOW_CONFIDENCE_SAMPLES
             grid.append(
                 {
                     "dow": d,
                     "band": band,
-                    "expected_avg_min": round(mean, 1) if mean is not None else None,
+                    "expected_avg_min": round(display_mean, 1) if display_mean is not None else None,
                     "samples": n,
                     "low_confidence": low_conf,
+                    "source": source,
                 }
             )
-            if mean is not None and not low_conf and (worst is None or mean > worst["_m"]):
-                worst = {"dow": d, "band": band, "expected_avg_min": round(mean, 1), "samples": n, "_m": mean}
+            if display_mean is not None and not low_conf and (worst is None or display_mean > worst["_m"]):
+                worst = {
+                    "dow": d,
+                    "band": band,
+                    "expected_avg_min": round(display_mean, 1),
+                    "samples": n,
+                    "_m": display_mean,
+                }
     if worst is not None:
         worst.pop("_m")
 
@@ -262,4 +337,5 @@ def summarize_agency_overview(
     if top_n is not None:
         routes = routes[:top_n]
 
-    return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer("heatmap", locale)}
+    case = "heatmap_ml" if any(c["source"] == "ml" for c in grid) else "heatmap"
+    return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer(case, locale)}

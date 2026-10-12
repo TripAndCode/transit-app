@@ -16,6 +16,7 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
         expected_avg_min: p ? p.v : null,
         samples: p ? (p.n ?? 200) : 0,
         low_confidence: p ? (p.n ?? 200) < 30 : false,
+        source: "baseline" as const,
       });
     }
   }
@@ -43,6 +44,32 @@ describe("BandGrid keyboard and screen-reader access", () => {
     expect(screen.getAllByRole("gridcell")).toHaveLength(35);
     expect(screen.getByRole("gridcell", { name: /^Day1 midday · 6\.8/ })).toBeInTheDocument();
     expect(screen.getByRole("gridcell", { name: "Day2 midday · —" })).toBeInTheDocument();
+  });
+
+  it("shows the cell's tooltip and a highlight on keyboard focus, and clears both on blur", () => {
+    const onTip = vi.fn();
+    const onLeave = vi.fn();
+    render(
+      <BandGrid
+        ariaLabel="Grid"
+        grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => `Day${d}`}
+        colorFor={() => "#000"}
+        onTip={onTip}
+        onLeave={onLeave}
+      />,
+    );
+    const cell = screen.getByRole("gridcell", { name: /^Day1 midday · 6\.8/ });
+    expect(cell.style.outline).not.toContain("accent");
+    act(() => cell.focus());
+    expect(onTip).toHaveBeenCalledTimes(1);
+    expect(onTip.mock.calls[0][0]).toEqual({ clientX: expect.any(Number), clientY: expect.any(Number) });
+    expect(onTip.mock.calls[0][1]).toMatch(/^Day1 midday · 6\.8/);
+    expect(cell.style.outline).toContain("var(--accent)");
+    act(() => cell.blur());
+    expect(onLeave).toHaveBeenCalled();
+    expect(cell.style.outline).not.toContain("accent");
   });
 
   it("declares the same row and column counts as the rows and headers it renders", () => {

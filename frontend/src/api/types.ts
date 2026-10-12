@@ -710,6 +710,7 @@ export interface ForecastHeatmapCell {
   expected_avg_min: number | null;
   samples: number;
   low_confidence: boolean;
+  source: "ml" | "baseline";
 }
 
 export interface ForecastHeatmap {
@@ -750,6 +751,7 @@ export interface ForecastOverviewGridCell {
   expected_avg_min: number | null;
   samples: number;
   low_confidence: boolean;
+  source: "ml" | "baseline";
 }
 
 export interface ForecastOverviewWorst {

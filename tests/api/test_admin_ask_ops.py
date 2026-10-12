@@ -233,9 +233,9 @@ async def test_both_date_bounds_are_jst_days_whatever_the_process_zone(ask_ops_c
     """A row at 03:00 JST on 1 October falls inside from=to=2026-10-01 even
     when the API process runs in UTC, as a container does."""
     c, sid, _uid, agency_id, _pool = ask_ops_client
-    from api.main import PG_SESSION_SETTINGS, app
+    from api.main import app
 
-    app.state.pool = jst_pool = await _test_pool(server_settings=PG_SESSION_SETTINGS)
+    app.state.pool = jst_pool = await _test_pool()
     monkeypatch.setenv("TZ", "UTC")
     time.tzset()
     try:
@@ -442,9 +442,7 @@ async def test_the_api_session_settings_survive_a_connection_going_back_to_the_p
     """The pool runs RESET ALL whenever it takes a connection back, which
     undoes a SET. Every later request on that connection still has to see
     the JST calendar and the statement cap."""
-    from api.main import PG_SESSION_SETTINGS
-
-    pool = await _test_pool(max_size=1, server_settings=PG_SESSION_SETTINGS)
+    pool = await _test_pool(max_size=1)
     try:
         for _ in range(2):
             async with pool.acquire() as conn:

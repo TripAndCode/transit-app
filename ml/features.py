@@ -76,6 +76,40 @@ def with_route_ids(runs: pd.DataFrame, ids: pd.DataFrame) -> pd.DataFrame:
     return runs.merge(ids, on=ROUTE, how="left", validate="many_to_one")
 
 
+_TEMPLATE_LOOKBACK_DAYS = 14
+
+
+def template_future_runs(runs: pd.DataFrame, origin: date, horizon_days: int = 7) -> pd.DataFrame:
+    """Live prediction has no observed runs after `origin` -- `runs` holds only
+    completed trips, and `origin` itself can already hold a same-day partial
+    row (GTFS-RT ingestion is continuous, so the morning's trips may already
+    be in ClickHouse by the time the daily predict job runs). Each agency
+    templates its own origin+1..origin+horizon_days from the most recent day
+    STRICTLY BEFORE origin, in its own trailing _TEMPLATE_LOOKBACK_DAYS of
+    history, sharing that target day's weekday -- never another agency's day
+    (multi-agency `runs` can have agencies at different freshness), never
+    origin's own still-incomplete day, and never arbitrarily old history. An
+    agency with no matching day in that window is skipped for that target
+    day; only the realized delay is actually unknown for a row that is
+    templated, so it is NaN."""
+    t = pd.Timestamp(origin)
+    window_start = t - pd.Timedelta(days=_TEMPLATE_LOOKBACK_DAYS)
+    frames = []
+    for _agency_id, agency_runs in runs.groupby("agency_id"):
+        recent = agency_runs[(agency_runs["service_date"] >= window_start) & (agency_runs["service_date"] < t)]
+        for d in range(1, horizon_days + 1):
+            target_day = t + pd.Timedelta(days=d)
+            same_weekday = recent[recent["service_date"].dt.dayofweek == target_day.dayofweek]
+            if same_weekday.empty:
+                continue
+            template_day = same_weekday["service_date"].max()
+            rows = agency_runs[agency_runs["service_date"] == template_day].copy()
+            rows["service_date"] = target_day
+            rows["delay_min"] = np.nan
+            frames.append(rows)
+    return pd.concat(frames, ignore_index=True) if frames else runs.iloc[0:0].copy()
+
+
 def weekend_days(runs: pd.DataFrame) -> pd.DataFrame:
     """Each service's distinct days, deduplicated once, with a weekend flag. A
     caller that builds many origins from the same `runs` (training_frame) passes

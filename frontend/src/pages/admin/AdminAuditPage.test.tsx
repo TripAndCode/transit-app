@@ -196,6 +196,19 @@ describe("AdminAuditPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(i18n.t("admin.audit.export.truncated", { count: 2 }));
   });
 
+  it("drops the truncation notice once the filters change, since it described another filter set", async () => {
+    fetchAllAdminAuditMock.mockResolvedValue({ items: PAGE_1.items, truncated: true });
+    const user = userEvent.setup();
+    wrap(<AdminAuditPage />);
+    await user.click(screen.getByRole("button", { name: /export csv/i }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/actor id/i), "7");
+    await waitFor(() => {
+      expect(useAdminAuditMock.mock.calls.at(-1)?.[0]).toMatchObject({ actor: "7" });
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("shows no truncation notice for a complete export", async () => {
     const user = userEvent.setup();
     wrap(<AdminAuditPage />);
