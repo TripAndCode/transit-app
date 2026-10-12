@@ -10,6 +10,7 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 import psycopg2
 
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.service_day import service_date_ch
 
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
@@ -20,13 +21,10 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # beyond ±this are excluded from the shared dedup (and from the heatmap aggregates
 # in pipeline/analyze.py, which import this constant) as data-quality faults.
 #
-# WHY THIS EXISTS — root-cause from a 2026-06-07 investigation:
-#   The map showed 馬木料金所前 (an expressway tollgate stop on route 550332996)
-#   at a 72.2-min AVERAGE delay. That stop is actually fine: median 3 min, p90
-#   4 min. The mean was hijacked by two trips on 2026-06-07 whose realtime
-#   TripUpdate feed FROZE and kept re-emitting an impossible delay — 976 min
-#   (16.3 h) and 715 min (11.9 h) — once every ~30 s for minutes. No city bus is
-#   16 h late: that magnitude is a stale/stuck feed, not a delay.
+# Why it exists: a realtime TripUpdate feed can freeze and keep re-emitting an
+# impossible delay (many hours late) for as long as it stays stuck. Such a
+# reading is a stale feed, not a delay, and a handful of them would dominate any
+# average over a stop or route.
 #
 # Clamping here, in the ONE shared dedup builder, protects every averaged surface
 # (reports, overview, route-summary, and the live Ask/report queries) — not just
@@ -97,21 +95,17 @@ def build_dedup_ch_sql(
     against a live instance). No current caller combines the two, but the
     distinct alias name means no future one can hit this by accident.
 
-    `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
-    every Postgres connection that ever touched `updates` pins
-    the Asia/Tokyo session time zone (see api/main.py's
-    PG_SESSION_SETTINGS), so `captured_at::date` throughout this codebase has
-    always meant the JST calendar day, not the UTC one. The ClickHouse
-    column is UTC (`DateTime64(0, 'UTC')`); using bare `toDate()` here
-    would silently misbucket every row whose captured_at falls in
-    UTC 15:00-23:59 (JST 00:00-08:59 the next day) — reproducing the
-    exact UTC/JST aggregate-mis-bucketing bug this project already hit
-    once (see the design doc's Risks section). `toDate(value, timezone)`
-    is a real ClickHouse signature — it converts to a calendar date in
-    the given timezone regardless of the column's stored timezone. The
-    `GROUP BY` repeats the full `toDate(...)` expression rather than the
-    `date` alias, to sidestep any ambiguity in how ClickHouse resolves a
-    GROUP BY key that shares a name with a SELECT-list alias.
+    The `date` column is the *service date* (`pipeline.service_day`): the
+    Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
+    before and after midnight is one event of one day. It is never a bare
+    `toDate(captured_at)`: the ClickHouse column is UTC
+    (`DateTime64(0, 'UTC')`), so a UTC day would misbucket every row whose
+    captured_at falls in UTC 15:00-23:59 (JST 00:00-08:59 the next day).
+    `toDate(value, timezone)` converts to a calendar date in the given
+    timezone regardless of the column's stored timezone. The `GROUP BY`
+    repeats the full expression rather than the `date` alias, to sidestep any
+    ambiguity in how ClickHouse resolves a GROUP BY key that shares a name
+    with a SELECT-list alias.
 
     Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
     than a Python-formatted literal, for clickhouse-connect's server-side
@@ -198,19 +192,21 @@ def build_dedup_ch_sql(
     )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
         f"FROM {checked_table(table)} AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )
 
 
 def hms_to_sec_sql(column: str) -> str:
     """Return a SQL expression parsing a static-schedule HH:MM:SS (or H:MM)
-    text field into seconds since the service day's midnight.
+    text field into seconds since the service day's midnight. Whitespace
+    (space, tab, CR, LF) around the value is ignored, because feeds hand-edited
+    or exported from spreadsheets can pad a time field.
 
     Tolerates GTFS's after-midnight extended-hour notation (e.g. "25:30:00")
     since this is plain integer arithmetic, not a cast into a Postgres TIME
@@ -229,11 +225,12 @@ def hms_to_sec_sql(column: str) -> str:
     seconds -- not just the `analyze()` batch builders -- can share the exact
     same parse instead of re-deriving it.
     """
+    text = f"btrim({column}, E' \\t\\r\\n')"
     return (
-        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-9]{{2}}(:[0-9]{{2}})?$' THEN "
-        f"split_part({column}, ':', 1)::int * 3600 "
-        f"+ split_part({column}, ':', 2)::int * 60 "
-        f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
+        f"CASE WHEN {text} ~ '^[0-9]{{1,3}}:[0-5][0-9](:[0-5][0-9])?$' THEN "
+        f"split_part({text}, ':', 1)::int * 3600 "
+        f"+ split_part({text}, ':', 2)::int * 60 "
+        f"+ COALESCE(NULLIF(split_part({text}, ':', 3), ''), '0')::int "
         f"ELSE NULL END"
     )
 
@@ -253,6 +250,11 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
     to compare early readings against that final value.
 
+    `u.scheduled_time IS NOT NULL` drops stop events with no scheduled
+    instant to measure lead time from -- an extended-hour or unmatched row is
+    stored with a NULL `scheduled_time` -- so `pipeline.prediction_accuracy`
+    never has to parse one.
+
     `HAVING count() > 1` drops every stop event observed exactly once: a
     singleton has no EARLY observation to compare against its own (only)
     final one, so it can never contribute to this metric and would just be
@@ -271,14 +273,15 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     extra = f" AND ({extra_where})" if extra_where else ""
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
         "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
         "FROM updates AS u "
-        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        "WHERE u.dep_delay IS NOT NULL AND u.scheduled_time IS NOT NULL "
+        "AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
+        f"{service_date_ch('u.captured_at')}, u.stop_sequence "
         "HAVING count() > 1"
     )
 

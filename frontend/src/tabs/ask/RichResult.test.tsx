@@ -105,6 +105,18 @@ describe("RichResult evidence card", () => {
     expect(screen.queryByText(t("ask.evidence.badge.llm"))).not.toBeInTheDocument();
   });
 
+  it("labels the evidence header's count as result rows, not observations", () => {
+    renderWithProviders(<Wrapper result={tableResult} tool="top_n" />);
+    expect(screen.getByText("1 row")).toBeInTheDocument();
+    expect(screen.queryByText(/observations/)).not.toBeInTheDocument();
+  });
+
+  it("pluralises the result row count", () => {
+    const rows = [...tableResult.rows!, ["39062", "平日", 4.0, 2.5, 7.1, 90]];
+    renderWithProviders(<Wrapper result={{ ...tableResult, rows }} tool="top_n" />);
+    expect(screen.getByText("2 rows")).toBeInTheDocument();
+  });
+
   it("shows the LLM badge for a dispatch-free message", () => {
     renderWithProviders(<Wrapper result={tableResult} tool={null} />);
     expect(screen.getByText(t("ask.evidence.badge.llm"))).toBeInTheDocument();
@@ -181,5 +193,14 @@ describe("RichResult evidence card", () => {
     await userEvent.click(chip);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0]).toBeInstanceOf(SVGElement);
+  });
+
+  it("passes the answer's granularity to the series chart, so weekly buckets are not called days", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper result={seriesResult} tool="time_series" args={{ granularity: "week" }} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("img", { name: t("reports.daily.svg_aria_week") })).toBeInTheDocument();
   });
 });

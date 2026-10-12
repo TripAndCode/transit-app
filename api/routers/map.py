@@ -45,6 +45,7 @@ from api.range import (
     RangeCtx,
     TimeBand,
     build_agg_stop_filter,
+    clamp_range_ctx,
     ctx_payload,
     get_range_ctx,
     jst_today,
@@ -58,6 +59,7 @@ from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_mi
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
+from pipeline.service_day import service_date_ch, service_date_of, service_day_seconds
 
 _log = logging.getLogger(__name__)
 
@@ -565,6 +567,8 @@ _TODAY_BASELINE_SQL = """
         -- the denominator without also contributing to the numerator, or
         -- base_avg_min would be biased toward zero whenever any
         -- contributing service_type hasn't been backfilled yet.
+        -- base_samples counts the same sum_delay_sec IS NOT NULL population
+        -- as base_avg_min, so it never overstates the evidence behind it.
         -- base_p90_min's numerator/denominator are both FILTERed to the same
         -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
         -- produce a null p90_min alongside a non-null avg_min/samples for a
@@ -589,7 +593,7 @@ _TODAY_BASELINE_SQL = """
                    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
                SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
                    / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
-               SUM(samples) AS base_samples
+               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS base_samples
         FROM agg_route_stats
         WHERE agency_id = $1 AND samples IS NOT NULL AND route_code = ANY($2)
         GROUP BY route_code
@@ -769,15 +773,17 @@ def clock_to_sec(text: str | None) -> int | None:
     Fallback for rows whose ``scheduled_sec`` is NULL: the `aomori_regex`
     ingest strategy writes a 5-char ``"HH:MM"`` with no seconds, while
     static_join agencies write 8 chars. An hour past 24 is a real GTFS
-    post-midnight continuation and stays unwrapped, so a trip that crosses
-    midnight keeps a monotonically increasing position on a time axis.
+    post-midnight continuation and stays unwrapped, and a clock before the
+    service-day cutover (``00:10``) is placed a day later (:func:`~pipeline.
+    service_day.service_day_seconds`), so a trip that crosses midnight keeps a
+    monotonically increasing position on a time axis.
     """
     if not text:
         return None
     m = _CLOCK_RE.match(text)
     if m is None:
         return None
-    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3) or 0)
+    return service_day_seconds(int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
 
 
 class RouteTripStop(BaseModel):
@@ -809,7 +815,7 @@ class RouteTripRow(BaseModel):
 
 
 class RouteTripsResponse(BaseModel):
-    date: str | None = Field(description="The JST calendar day drawn, or NULL when there is nothing to draw.")
+    date: str | None = Field(description="The service day drawn, or NULL when there is nothing to draw.")
     time_band: TimeBand
     truncated: bool = Field(
         description=(
@@ -823,7 +829,7 @@ class RouteTripsResponse(BaseModel):
 
 
 def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: CalendarDate) -> CalendarDate | None:
-    """The JST day to draw, or None when the request names a day worth refusing.
+    """The service day to draw, or None when the request names a day worth refusing.
 
     A day later than anything observed has nothing behind it. A day older than
     the probe's own bound is refused rather than answered, because reaching it
@@ -840,7 +846,7 @@ def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: Ca
 def build_route_trips_sql(
     time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS, *, table: str = UPDATES_TABLE
 ) -> tuple[str, dict]:
-    """Rendered per-stop dedup query for one route on one JST day, plus its params.
+    """Rendered per-stop dedup query for one route on one service day, plus its params.
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
     The four non-key columns are read off the SAME winning row via ONE
@@ -867,7 +873,7 @@ def build_route_trips_sql(
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
               AND u.dep_delay IS NOT NULL
               AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-              AND toDate(u.captured_at, 'Asia/Tokyo') = {{target_date:Date}}{band_clause}
+              AND {service_date_ch("u.captured_at")} = {{target_date:Date}}{band_clause}
             GROUP BY u.trip_id, u.stop_sequence
         ),
         kept AS (
@@ -937,7 +943,9 @@ def build_route_trips(
     for trip_id, t in per_trip.items():
         stops: list[RouteTripStop] = t["stops"]
         delays = [s.delay_sec for s in stops]
-        clock = min(t["clocks"]) if t["clocks"] else None
+        # The earliest clock by position in the service day, not by string
+        # order, so a trip that crosses midnight is labelled with its start.
+        clock = min(t["clocks"], key=lambda c: clock_to_sec(c) or 0) if t["clocks"] else None
         trips.append(
             RouteTripRow(
                 trip_id=trip_id,
@@ -985,7 +993,7 @@ async def route_trips(
     route_code: str = Path(min_length=1, max_length=300),
     date: CalendarDate | None = Query(
         default=None,
-        description="JST calendar day to read. Defaults to the route's latest observed day.",
+        description="Service day to read. Defaults to the route's latest observed day.",
     ),
     time_band: TimeBand = Query(default="all"),
     agency_id: int = Depends(get_agency),
@@ -1011,10 +1019,11 @@ async def route_trips(
     )
     if latest_ts is None:
         return empty
-    # The JST calendar day, not the UTC one: the query buckets captured_at in
-    # JST, so a UTC date would name a different day than the rows it returns
-    # for anything observed between 00:00 and 09:00 JST.
-    target_date = resolve_route_trips_date(date, latest_ts.astimezone(_JST).date())
+    # The service day of the latest observation: the query files captured_at by
+    # service date (pipeline.service_day), so a calendar date would name a
+    # different day than the rows it returns for anything observed between
+    # 00:00 and 04:00 JST, and a UTC date would be wrong until 09:00.
+    target_date = resolve_route_trips_date(date, service_date_of(latest_ts))
     if target_date is None:
         return empty
 
@@ -1089,7 +1098,7 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 
 
 def build_route_stop_profile_sql(table: str) -> str:
-    """Latest delay per (trip, stop) for one route on one JST day, read from
+    """Latest delay per (trip, stop) for one route on one service day, read from
     *table* (`pipeline.clickhouse.live_table_for` picks it from the day).
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
@@ -1103,7 +1112,7 @@ def build_route_stop_profile_sql(table: str) -> str:
     WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
       AND u.dep_delay IS NOT NULL
       AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-      AND toDate(u.captured_at, 'Asia/Tokyo') = {{day:Date}}
+      AND {service_date_ch("u.captured_at")} = {{day:Date}}
     GROUP BY u.trip_id, u.stop_sequence
 """
 
@@ -1130,9 +1139,9 @@ async def route_stop_profile(
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "stops": []}
-    # The JST day of the latest observation: the query buckets in JST, and
-    # the day picks the table.
-    day = latest_ts.astimezone(_JST).date()
+    # The service day of the latest observation: the query files captured_at by
+    # service date (pipeline.service_day), and the day picks the table.
+    day = service_date_of(latest_ts)
 
     dedup_result = await ch.query(
         build_route_stop_profile_sql(live_table_for(day)),
@@ -1441,11 +1450,16 @@ async def delay_timeline(
     request: Request,
     date_: str | None = Query(default=None, alias="date"),
     step: int = Query(default=60),
+    routes: str | None = Query(default=None, description="Comma-separated route_codes"),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
 ) -> DelayTimelineResponse:
     """Positioned per-stop delays for every time bucket of one service day.
+
+    ``routes`` (comma-separated route codes, the form every scope endpoint
+    takes) narrows the frames to those routes, so the playback can show the
+    same selection the live map is filtered to; omitted means every route.
 
     Backs the map's day-playback rail. ``date`` omitted resolves to the
     agency's latest observed JST day, so a caller with no prior knowledge of
@@ -1478,5 +1492,10 @@ async def delay_timeline(
             detail=f"date must be within the last {MAX_RANGE_DAYS} days and not in the future",
         )
 
-    frames = await compute_delay_timeline(agency_id, day, step, conn, ch, table=live_table_for(day))
+    # The shared clamp strips, de-duplicates and caps the route list, so a long
+    # or repeated list cannot multiply cache entries or widen the query.
+    route_filter = clamp_range_ctx(from_=day, to=day, routes=routes.split(",") if routes else ()).routes
+    frames = await compute_delay_timeline(
+        agency_id, day, step, conn, ch, table=live_table_for(day), routes=tuple(route_filter)
+    )
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)

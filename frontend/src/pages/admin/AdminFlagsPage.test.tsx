@@ -87,6 +87,24 @@ describe("AdminFlagsPage", () => {
     expect(screen.getByRole("button", { name: i18n.t("common.retry") })).toBeInTheDocument();
   });
 
+  it("does not claim the registry is empty while the flags are loading", () => {
+    useFeatureFlagsMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
+    wrap();
+    expect(screen.queryByText(i18n.t("admin.flags.empty"))).toBeNull();
+  });
+
+  it("does not claim the registry is empty after the load failed", () => {
+    useFeatureFlagsMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("boom"), refetch: vi.fn() });
+    wrap();
+    expect(screen.queryByText(i18n.t("admin.flags.empty"))).toBeNull();
+  });
+
+  it("shows the empty label for a successful empty registry", () => {
+    useFeatureFlagsMock.mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() });
+    wrap();
+    expect(screen.getByText(i18n.t("admin.flags.empty"))).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     useFeatureFlagsMock.mockReset();
     useFeatureFlagsMock.mockReturnValue(twoFlags());

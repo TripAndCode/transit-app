@@ -127,6 +127,20 @@ def test_env_example_has_no_active_database_url():
     assert active == [], f"active DATABASE_URL line breaks every target after `make bootstrap`: {active}"
 
 
+def test_env_example_values_are_valid_in_make_and_dotenv():
+    """The Makefile includes `.env` as Make syntax, which keeps the whitespace
+    before an inline comment (and any quote) as part of the value, so every
+    active line must be a plain NAME=value."""
+    bad = []
+    for line in ENV_EXAMPLE.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        _, _, value = line.partition("=")
+        if "#" in value or value != value.strip() or value.startswith(('"', "'")):
+            bad.append(line)
+    assert bad == [], f"value Make would read differently from dotenv: {bad}"
+
+
 def test_env_example_has_no_active_agency_id():
     lines = ENV_EXAMPLE.read_text().splitlines()
     active = [line for line in lines if line.startswith("AGENCY_ID=")]

@@ -2,11 +2,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useAckBoardAlert, usePatchUser, type AdminBoard } from "./admin";
+import { fetchAllAdminAudit, useAckBoardAlert, usePatchUser, type AdminBoard } from "./admin";
 
 const mockApiPatch = vi.fn();
 const mockApiPost = vi.fn();
+const mockApiGet = vi.fn();
 vi.mock("./client", () => ({
+  apiGet: (...args: unknown[]) => mockApiGet(...args),
   apiPatch: (...args: unknown[]) => mockApiPatch(...args),
   apiPost: (...args: unknown[]) => mockApiPost(...args),
 }));
@@ -98,5 +100,34 @@ describe("useAckBoardAlert", () => {
       await expect(result.current.mutateAsync("a1")).rejects.toThrow("403");
     });
     expect(queryClient.getQueryData<AdminBoard>(["adminBoard"])!.alerts.every((a) => !a.acked)).toBe(true);
+  });
+});
+
+describe("fetchAllAdminAudit", () => {
+  afterEach(() => mockApiGet.mockReset());
+
+  const item = (n: number) => ({ at: "2026-09-20T12:00:00Z", action: `a${n}`, target_type: "user", target_id: String(n) });
+
+  it("is not truncated when the last page has no further cursor", async () => {
+    mockApiGet
+      .mockResolvedValueOnce({ items: [item(1)], next_cursor: "c2" })
+      .mockResolvedValueOnce({ items: [item(2)], next_cursor: null });
+    const result = await fetchAllAdminAudit({});
+    expect(result.items).toHaveLength(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports truncation when the page cap is hit with a cursor still set", async () => {
+    mockApiGet.mockResolvedValue({ items: [item(1)], next_cursor: "more" });
+    const result = await fetchAllAdminAudit({}, 3);
+    expect(mockApiGet).toHaveBeenCalledTimes(3);
+    expect(result.items).toHaveLength(3);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("is not truncated when the final allowed page is also the last one", async () => {
+    mockApiGet.mockResolvedValue({ items: [item(1)], next_cursor: null });
+    const result = await fetchAllAdminAudit({}, 1);
+    expect(result.truncated).toBe(false);
   });
 });

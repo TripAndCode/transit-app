@@ -912,8 +912,8 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
     client, agency_id, pool = reports_client
     app.state.ch_client = ch_async_client
     day = "2026-05-11"
-    # > 5 samples so compute_trend_series' HAVING count(*) > 5 gate clears;
-    # > 3 samples (same rows) also clears compute_hourly_heatmap's HAVING >= 3.
+    # 6 samples: enough to clear compute_hourly_heatmap's HAVING >= 3 and to be
+    # named a top offender by compute_trend_series.
     await _seed_route_at(pool, agency_id, "R_TR2", "平日", day, "06:00", [180] * 6)  # 3.0 min, morning
     await _seed_route_at(pool, agency_id, "R_TR2", "平日", day, "20:00", [6000])  # evening — excluded
     from tests.conftest import mirror_updates_to_ch
@@ -934,6 +934,33 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
     # total (6 observations at 180s each) alongside the rounded avg_min.
     cell_6 = next(c for c in hourly if c["hour"] == 6)
     assert cell_6["sum_delay_sec"] == 1080
+
+
+@pytest.mark.asyncio
+async def test_reports_trend_live_bucket_totals_include_thin_groups_but_offenders_do_not(
+    reports_client, ch_client, ch_async_client
+):
+    """Under a time_band the trend reads ClickHouse, and a route-service group
+    with 5 or fewer samples still counts toward its day's average and sample
+    total; only the top-offenders attribution ignores it. Mirrors the
+    agg_daily_trend path's test of the same name."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-18"
+    # 10 samples at 5 min, and a thin group of 3 samples at 10 min.
+    await _seed_route_at(pool, agency_id, "R_THICK", "平日", day, "06:00", [300] * 10)
+    await _seed_route_at(pool, agency_id, "R_THIN", "平日", day, "06:00", [600] * 3)
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    (bucket,) = resp.json()["rows"][0]["days"]
+    assert bucket["samples"] == 13
+    assert bucket["avg_min"] == 6.15  # (10*5 + 3*10) / 13, not the thick group's 5.0
+    assert [o["route_code"] for o in bucket["top_offenders"]] == ["R_THICK"]
 
 
 @pytest.mark.asyncio
@@ -1127,6 +1154,40 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
     offenders = out["days"][0]["top_offenders"]
     codes = [o["route_code"] for o in offenders if o["route_code"].startswith("R_TR_")]
     assert codes == ["R_TR_A", "R_TR_Z"]
+
+
+@pytest.mark.asyncio
+async def test_compute_trend_series_bucket_totals_include_thin_groups_but_offenders_do_not(aconn, aagency_id):
+    """A route-service group with 5 or fewer samples still counts toward its
+    day's average and sample total (the same pooling Overview applies to
+    agg_daily_trend); only the top-offenders attribution ignores it, because a
+    handful of trips is too noisy to name a worst route."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    day = date(2026, 5, 18)
+    # 10 samples at 5 min, and a thin group of 3 samples at 10 min.
+    for route_code, avg_min, samples in (("R_THICK", 5.0, 10), ("R_THIN", 10.0, 3)):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, $3, '平日', $4, $5, $6)",
+            aagency_id,
+            day,
+            route_code,
+            avg_min,
+            samples,
+            round(avg_min * 60 * samples),
+        )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    out = await compute_trend_series(aagency_id, ctx, aconn)
+    (bucket,) = out["days"]
+    assert bucket["samples"] == 13
+    assert bucket["avg_min"] == 6.15  # (10*5 + 3*10) / 13, not the thick group's 5.0
+    assert [o["route_code"] for o in bucket["top_offenders"]] == ["R_THICK"]
 
 
 @pytest.mark.asyncio

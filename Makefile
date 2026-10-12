@@ -10,12 +10,9 @@
 # its own :5544/:8124 block regardless of what the caller exports.
 export
 
-# No literal fallback. This used to default to a hardcoded localhost port,
-# which is not where this project's data lives and, on a machine running more
-# than one Postgres, is somebody else's database -- and `.env` is gitignored,
-# so every git worktree lacks one. A missing `.env` therefore aimed `migrate`,
-# `analyze`, `ingest` and `seed-agencies` at whatever happened to answer on
-# that port. Unset now means a stopped Make, not a silent wrong target.
+# No literal fallback: an unset DATABASE_URL stops Make rather than guessing a
+# target. A hardcoded localhost port can be another project's database, and
+# `.env` is gitignored, so a git worktree has none until one is copied in.
 DATABASE_URL ?=
 
 # Expanded per recipe, not at parse time, so targets that need no database
@@ -33,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -323,6 +320,15 @@ frontend-dev:
 frontend-build:
 	cd frontend && npm install && npm run build
 
+# Recaptures docs/features/ml-forecast.md's sibling, the in-app user manual's
+# own screenshots: build+bake a production bundle first (the dev server's
+# dev-only sidebar section would otherwise leak into every scene), set
+# login_required off via the admin flags UI/API (the dev-database guard
+# blocks that write from an agent's own tool calls), run this, then set it
+# back on.
+capture-user-manual:
+	poetry run python scripts/capture_user_manual_screenshots.py
+
 # ── Secret scanning ──────────────────────────────────────────────────────────
 # Defense-in-depth. The pre-commit hook scans staged content on every
 # commit (see .pre-commit-config.yaml). This target re-scans the full git
@@ -357,13 +363,12 @@ verify-secrets-all-branches:
 hooks:
 	@bash scripts/setup_git_hooks.sh
 
-# ── Ask eval (manual / local; not wired into CI) ─────────────────────────────
-# Verifies builder_coverage = 100% against the gold JSONL (the chip gate is
-# skipped — the chip catalog was removed). Regenerate the gold set after card
+# ── Ask eval (local; pytest runs the same check) ─────────────────────────────
+# Checks that every gold entry's stored signature survives canonicalization:
+# no database, router or LLM is involved. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
-# No workflow calls this target -- the scheduled Ask eval CI gate is
-# .github/workflows/ask-eval-weekly.yml, which runs
-# tests/ask_eval/test_baseline.py directly instead.
+# The scheduled Ask eval workflow, .github/workflows/ask-eval-weekly.yml, runs
+# tests/ask_eval/test_baseline.py instead.
 
 ask-eval:
-	DATABASE_URL=$(db_url) poetry run python scripts/ask_eval.py
+	poetry run python scripts/ask_eval.py

@@ -78,7 +78,7 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
   onUnpin: () => void;
   t: TFunction;
 }) {
-  const delayMin = trip.dep_delay / 60;
+  const shownDelayMin = Math.round((trip.dep_delay / 60) * 10) / 10;
   const hourly = pinned ? hourlyDelayMinutes(progress) : [];
   const segment = pinned ? worstSegment(progress) : null;
 
@@ -114,7 +114,7 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
         <p className="ops-inspect__delay">
           {/* Sign comes from the value, so a trip running early reads "-1.5"
               rather than a caller-supplied "+" colliding with the minus. */}
-          <b className="num">{`${delayMin < 0 ? "-" : "+"}${Math.abs(delayMin).toFixed(1)}`}</b>
+          <b className="num">{`${shownDelayMin < 0 ? "-" : "+"}${Math.abs(shownDelayMin).toFixed(1)}`}</b>
           <span>{t("operations.inspect.delay_unit")}</span>
         </p>
 

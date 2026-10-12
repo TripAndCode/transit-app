@@ -40,3 +40,12 @@ async def test_unknown_locale_falls_back_to_ja():
     body = json.loads(bytes((await aggregate_not_ready_handler(_request("fr"), exc)).body))
     ja_body = json.loads(bytes((await aggregate_not_ready_handler(_request("ja"), exc)).body))
     assert body["detail"] == ja_body["detail"]
+
+
+@pytest.mark.asyncio
+async def test_detail_is_the_exact_localized_string():
+    exc = asyncpg.exceptions.UndefinedTableError('relation "agg_x" does not exist')
+    en = json.loads(bytes((await aggregate_not_ready_handler(_request("en"), exc)).body))["detail"]
+    ja = json.loads(bytes((await aggregate_not_ready_handler(_request("ja"), exc)).body))["detail"]
+    assert en == "Data for this view hasn't been prepared in this environment yet. Please try again later."
+    assert ja == "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"

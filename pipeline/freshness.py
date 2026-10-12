@@ -18,16 +18,18 @@ prior completed day — silently defeating staleness detection under the
 normal, continuously-ingesting operating condition. The cutoff itself still
 has to be computed in Python since the live `updates` table lives in
 ClickHouse (`DateTime64(0, 'UTC')`) while `agg_route_daily` stays in
-Postgres, bucketed under Asia/Tokyo by analyze() — comparing a
+Postgres, filed by service date by analyze() — comparing a
 Python-computed cutoff against ClickHouse's stored UTC instants keeps this
-correct regardless of the caller's session timezone. (analyze must still
-bucket under JST for the comparison to hold — every analyze path, including
-the cron task, pins Asia/Tokyo on its connection.)
+correct regardless of the caller's session timezone. The live side is
+reduced to a service date (`pipeline.service_day.service_date_of`), the same
+day analyze files each row under, so the two sides compare like with like.
 
 Only the newest completed day is compared, which catches the realistic failure
 modes (cron crashed mid-loop, forgot to re-analyze). It does NOT detect an
-interior missing day — analyze's atomic per-agency wipe-and-rewrite cannot
-produce one, so a mid-range gap would only arise from manual row surgery.
+interior missing day — analyze rebuilds every date whose source rows changed
+in one transaction, so a mid-range gap would only arise from manual row
+surgery or from a stale interior date the ledger cannot see (see
+`pipeline.analyze._static_fingerprint`).
 """
 
 from collections.abc import Iterable
@@ -36,6 +38,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from pipeline.clickhouse import max_captured_at_before as ch_max_captured_at_before
+from pipeline.service_day import service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -76,7 +79,7 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
     with conn.cursor() as cur:
         for aid in agency_ids:
             latest = ch_max_captured_at_before(ch_client, aid, today_jst_midnight_utc)
-            live_max = latest.astimezone(_JST).date() if latest is not None else None
+            live_max = service_date_of(latest) if latest is not None else None
             cur.execute(_AGG_MAX_SQL, (aid,))
             agg_max = cur.fetchone()[0]
             if is_stale(agg_max, live_max):

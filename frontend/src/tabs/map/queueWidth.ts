@@ -9,11 +9,23 @@ const STORAGE_KEY = "ops.queueWidth";
 
 export const clampQueueWidth = (px: number) => Math.min(MAX_QUEUE_WIDTH, Math.max(MIN_QUEUE_WIDTH, Math.round(px)));
 
+/* Storage can be absent or refuse access (blocked site data, private modes),
+   and a width preference is never worth failing the Live tab's render for: a
+   read falls back to the default and a write is dropped. */
 export function readQueueWidth(): number {
-  const stored = Number(localStorage.getItem(STORAGE_KEY));
-  return Number.isFinite(stored) && stored > 0 ? clampQueueWidth(stored) : DEFAULT_QUEUE_WIDTH;
+  try {
+    const stored = Number(localStorage.getItem(STORAGE_KEY));
+    if (Number.isFinite(stored) && stored > 0) return clampQueueWidth(stored);
+  } catch {
+    /* storage unavailable: use the default */
+  }
+  return DEFAULT_QUEUE_WIDTH;
 }
 
 export function storeQueueWidth(px: number) {
-  localStorage.setItem(STORAGE_KEY, String(px));
+  try {
+    localStorage.setItem(STORAGE_KEY, String(px));
+  } catch {
+    /* storage unavailable: the width lasts for this session only */
+  }
 }

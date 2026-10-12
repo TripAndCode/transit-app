@@ -118,12 +118,16 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
     """Static route metadata: route_id, route_short_name, stop count,
     first/last departure, trip count. Returns None when the route isn't
     in the agency's static GTFS at all. Backs tools._tool_route_meta.
+
+    ``departure_time`` is unvalidated GTFS text (``H:MM:SS`` allowed, blank
+    for non-timepoint stops), so first/last are taken over the parsed seconds,
+    never over the text; a time that does not parse is ignored.
     """
     row = await conn.fetchrow(
         "SELECT sr.route_id, sr.route_short_name, "
         "       COUNT(DISTINCT sst.stop_id) AS stop_count, "
-        "       MIN(sst.departure_time) AS first_dep, "
-        "       MAX(sst.departure_time) AS last_dep, "
+        f"       MIN({hms_to_sec_sql('sst.departure_time')}) AS first_dep_sec, "
+        f"       MAX({hms_to_sec_sql('sst.departure_time')}) AS last_dep_sec, "
         "       COUNT(DISTINCT st.trip_id) AS trip_count "
         "FROM static_routes sr "
         "JOIN static_trips st ON st.route_id = sr.route_id AND st.agency_id=$1 "
@@ -133,7 +137,25 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
         agency_id,
         str(route),
     )
-    return tuple(row) if row else None
+    if row is None:
+        return None
+    route_id, short_name, stop_count, first_sec, last_sec, trip_count = row
+    return (
+        route_id,
+        short_name,
+        stop_count,
+        _format_gtfs_seconds(first_sec),
+        _format_gtfs_seconds(last_sec),
+        trip_count,
+    )
+
+
+def _format_gtfs_seconds(seconds: int | None) -> str | None:
+    """``HH:MM:SS`` for seconds past service-day midnight; the hour keeps
+    counting past 24 for after-midnight trips. None when there is no time."""
+    if seconds is None:
+        return None
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
 async def segment_hotspots(

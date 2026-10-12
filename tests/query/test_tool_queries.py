@@ -247,6 +247,55 @@ async def test_route_info_returns_static_metadata(aconn, aagency_id, route_id, r
 
 
 @pytest.mark.asyncio
+async def test_route_info_orders_departures_by_time_not_by_text(aconn, aagency_id):
+    """departure_time is GTFS text: "6:05:00" sorts after "10:00:00" as text,
+    a blank non-timepoint time sorts before everything, and an after-midnight
+    "25:10:00" is later than any same-day time. First/last come from the
+    parsed seconds, rendered zero-padded with the hour kept past 24."""
+    await aconn.execute(
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R9', 'R9')", aagency_id
+    )
+    await aconn.execute(
+        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', 'R9')", aagency_id
+    )
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 's1', 'A'), ($1, 's2', 'B'), "
+        "($1, 's3', 'C'), ($1, 's4', 'D')",
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) VALUES "
+        "($1, 'trip_a', 1, 's1', '6:05:00'), ($1, 'trip_a', 2, 's2', '10:00:00'), "
+        "($1, 'trip_a', 3, 's3', ''), ($1, 'trip_a', 4, 's4', '25:10:00')",
+        aagency_id,
+    )
+    result = await route_info(aagency_id, aconn, route="R9")
+    assert result is not None
+    assert result[3] == "06:05:00"
+    assert result[4] == "25:10:00"
+
+
+@pytest.mark.asyncio
+async def test_route_info_has_no_departures_when_every_time_is_blank(aconn, aagency_id):
+    await aconn.execute(
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R8', 'R8')", aagency_id
+    )
+    await aconn.execute(
+        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', 'R8')", aagency_id
+    )
+    await aconn.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 's1', 'A')", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+        "VALUES ($1, 'trip_a', 1, 's1', '')",
+        aagency_id,
+    )
+    result = await route_info(aagency_id, aconn, route="R8")
+    assert result is not None
+    assert result[3] is None
+    assert result[4] is None
+
+
+@pytest.mark.asyncio
 async def test_route_info_returns_none_when_route_missing(aconn, aagency_id):
     result = await route_info(aagency_id, aconn, route="NOPE")
     assert result is None

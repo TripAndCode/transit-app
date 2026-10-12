@@ -44,12 +44,15 @@ def jst_midnight_utc(day: date) -> datetime:
 
 
 def live_table_for(day: date, *, now: datetime | None = None) -> str:
-    """The table that holds JST *day*'s observations.
+    """The table that holds JST calendar *day*'s observations.
 
     Today and any later day are `updates_live`; every closed day is `updates`.
     A closed day reads `updates` even before promotion has copied it there, so
     a reader asking for yesterday between JST midnight and the first promotion
-    run gets nothing yet.
+    run gets nothing yet. This routes by calendar day, as promotion does: a
+    service day (`pipeline.service_day`) spans two of them, so the newest
+    service day's after-midnight tail is still in `updates_live` and reaches
+    `updates` with the next promotion.
     """
     today = jst_date(now or datetime.now(timezone.utc))
     return LIVE_TABLE if day >= today else UPDATES_TABLE
@@ -250,10 +253,12 @@ def recent_file_name_exists(
 
 
 def max_captured_at(client, agency_id: int) -> datetime | None:
-    """Absolute latest `captured_at` for the agency, today included.
+    """Latest `captured_at` for the agency in `updates` (closed days only).
 
-    For "is this feed still alive at all" checks (e.g. `/delays/live`'s
-    freshness header). For "what's the latest COMPLETED day" checks, use
+    `updates` holds only closed JST days; the current day lives in
+    `updates_live`, so this never reflects today and is not a feed-liveness
+    probe (the async twin in `api.clickhouse` takes a `table` argument for
+    that). For "what's the latest COMPLETED day" checks, use
     `max_captured_at_before` instead — do not add a same-day exclusion here,
     it would silently change this function's meaning for existing callers.
 

@@ -108,7 +108,7 @@ class SyntheticPattern:
     route_code: str
     stop_id: str
     stop_name: str
-    date: str  # JST calendar date "YYYY-MM-DD" every row lands on
+    date: str  # service date "YYYY-MM-DD" every row lands on
     dow: int  # ISODOW of `date` (1=Mon..7=Sun)
     scheduled_time: str  # "HH:MM:SS"
     time_band: str  # matches api.range.time_band_case_sql's bucket for scheduled_time
@@ -161,22 +161,20 @@ def run_pattern(pattern: SyntheticPattern, tmp_path, pg_conn, agency_id, ch_clie
     analyze(agency_id, pg_conn, ch_client)
 
 
-# UTC 2026-05-31T15:00:00 == JST 2026-06-01T00:00:00 (JST = UTC+9) — deliberately
-# pinned to JST midnight, not an arbitrary UTC instant, so the full ~24h/86400s
-# JST day is available as headroom below (an earlier version of this constant
-# started mid-JST-day and only had ~14h of real headroom despite a comment
-# claiming 23h — verified by hand against the UTC+9 offset, not re-derived by
-# code under test).
-_TS_BASE = datetime(2026, 5, 31, 15, 0, 0, tzinfo=timezone.utc)
+# UTC 2026-05-31T19:00:00 == JST 2026-06-01T04:00:00 (JST = UTC+9), the moment
+# service day 2026-06-01 begins (`pipeline.service_day`). Pinned to that instant
+# so the whole 86400s of the service day is available as headroom below.
+_TS_BASE = datetime(2026, 5, 31, 19, 0, 0, tzinfo=timezone.utc)
 
 
 def _ts(offset: int) -> str:
     """captured_at string for the *offset*-th synthetic row (offset in seconds).
 
-    All patterns share the same UTC base instant (`_TS_BASE`, JST midnight),
+    All patterns share the same UTC base instant (`_TS_BASE`, 04:00 JST: the
+    moment the service day turns over, see `pipeline.service_day`),
     each row `offset` seconds after it, so every row gets a distinct, ordered
-    `captured_at`. `offset` must stay under 86400 (24h) so the JST calendar
-    date never rolls over past `_TS_BASE`'s day (which would split a pattern's
+    `captured_at`. `offset` must stay under 86400 (24h) so the service date
+    never rolls over past `_TS_BASE`'s day (which would split a pattern's
     rows across two `date` values and break its hand-computed expectations) —
     comfortably above any pattern size in practice, unlike a hardcoded 2-digit
     seconds field, which would silently produce malformed ISO-8601 past 60 rows.

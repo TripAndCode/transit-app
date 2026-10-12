@@ -175,6 +175,30 @@ describe("AdminAskOpsPage", () => {
     queriesReturn = { data: undefined, isLoading: false, error: new Error("boom") };
     wrap(<AdminAskOpsPage />);
     expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.queryByText(i18n.t("admin.ask_ops.empty"))).toBeNull();
+  });
+
+  it("does not claim the query log is empty while it is loading", () => {
+    queriesReturn = { data: undefined, isLoading: true, error: null };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(i18n.t("admin.ask_ops.empty"))).toBeNull();
+  });
+
+  it("shows neither a zero funnel nor 'not run' while those queries are loading", () => {
+    funnelReturn = { data: undefined, isLoading: true, error: null };
+    evalReturn = { data: undefined, isLoading: true, error: null };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(/total/i)).toBeNull();
+    expect(screen.queryByText(i18n.t("admin.ask_ops.eval.not_run"))).toBeNull();
+  });
+
+  it("shows an error, not a zero funnel or 'not run', when those queries failed", () => {
+    funnelReturn = { data: undefined, isLoading: false, error: new Error("boom") };
+    evalReturn = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(screen.queryByText(/total/i)).toBeNull();
+    expect(screen.queryByText(i18n.t("admin.ask_ops.eval.not_run"))).toBeNull();
   });
 
   it("shows the eval result as not-run when null", () => {

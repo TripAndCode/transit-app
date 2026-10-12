@@ -193,8 +193,12 @@ function ServiceSplitDailyChart({
     if (d.weekday != null) allVals.push(d.weekday);
     if (d.weekend != null) allVals.push(d.weekend);
   }
-  const yMax = allVals.length > 0 ? Math.max(...allVals) || 1 : 1;
-  const toY = (v: number) => DC_PAD_TOP + (1 - v / yMax) * innerH;
+  // The axis always spans zero: early-running (negative) means draw below it
+  // rather than outside the plot, and an all-negative series keeps its
+  // ordering instead of inverting the scale.
+  const yMin = Math.min(0, ...allVals);
+  const yMax = Math.max(0, ...allVals) || 1;
+  const toY = (v: number) => DC_PAD_TOP + ((yMax - v) / (yMax - yMin)) * innerH;
 
   const wd: { x: number; y: number; v: number }[] = [];
   const we: { x: number; y: number; v: number }[] = [];
@@ -232,12 +236,7 @@ function ServiceSplitDailyChart({
       }
     });
     const row = daily[best];
-    const refY =
-      row.weekday != null
-        ? DC_PAD_TOP + (1 - row.weekday / yMax) * (DC_H - DC_PAD_TOP - DC_PAD_BOTTOM)
-        : row.weekend != null
-        ? DC_PAD_TOP + (1 - row.weekend / yMax) * (DC_H - DC_PAD_TOP - DC_PAD_BOTTOM)
-        : DC_PAD_TOP;
+    const refY = row.weekday != null ? toY(row.weekday) : row.weekend != null ? toY(row.weekend) : DC_PAD_TOP;
     setHover({
       visible: true,
       svgX: xs[best],
@@ -251,8 +250,8 @@ function ServiceSplitDailyChart({
 
   if (xs.length === 0) return null;
 
-  // Y axis ticks at 0, mid, max.
-  const yTicks = [0, yMax / 2, yMax];
+  // Y axis ticks at the axis minimum, middle and maximum.
+  const yTicks = [yMin, (yMin + yMax) / 2, yMax];
 
   return (
     <div className="ov-svc-daily-wrap">
@@ -284,7 +283,7 @@ function ServiceSplitDailyChart({
       >
         {/* Y gridlines */}
         {yTicks.map((v, i) => {
-          const y = DC_PAD_TOP + (1 - v / yMax) * innerH;
+          const y = toY(v);
           return (
             <g key={`yg-${i}`}>
               <line
@@ -334,7 +333,7 @@ function ServiceSplitDailyChart({
           key={`yt-${i}`}
           className="ov-svc-daily-label ov-svc-daily-label--y num"
           style={{
-            top: `${((DC_PAD_TOP + (1 - v / yMax) * innerH) / DC_H) * 100}%`,
+            top: `${(toY(v) / DC_H) * 100}%`,
             left: `${((DC_PAD_LEFT - 6) / DC_W) * 100}%`,
           }}
         >
