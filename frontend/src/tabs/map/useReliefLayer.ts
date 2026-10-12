@@ -15,14 +15,14 @@ import {
   type ReliefCollection,
   type ReliefPoint,
 } from "./reliefLayer";
-import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import { TIMELINE_LAYER } from "./useTimelineLayers";
 
 /** The live and playback layers, bottom first. The columns go under the
  *  lowest one present so the vehicle dots, clusters, labels and playback dots
  *  draw over them and keep every click and hover they had: the columns
  *  themselves are not interactive. */
-const MARK_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, TIMELINE_LAYER];
+const MARK_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, TIMELINE_LAYER];
 
 /** `setData` writes per tween. Enough for the eye to read a rise rather than
  *  a jump; few enough that the per-write cost -- serialising every column to

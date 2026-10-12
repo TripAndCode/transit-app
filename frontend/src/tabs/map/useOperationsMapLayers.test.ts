@@ -7,12 +7,9 @@ import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorReso
 import { applyTheme } from "../../styles/theme";
 import {
   ACTIVE_ROUTE_FLOW_LAYER,
-  CLUSTER_RADIUS,
   FLOW_DASH,
   FLOW_CYCLE_MS,
   FLOW_PAINT_INTERVAL_MS,
-  LIVE_TRIPS_CLUSTER_LAYER,
-  LIVE_TRIPS_CLUSTER_PROPERTIES,
   LIVE_TRIPS_LABEL_LAYER,
   LIVE_TRIPS_LAYER,
   LIVE_TRIPS_SOURCE,
@@ -21,8 +18,6 @@ import {
   buildRouteLineGradient,
   flowDashArrayAtPhase,
   labelPaint,
-  clusterCirclePaint,
-  clusterCountPaint,
   useOperationsMapLayers,
   vehicleCirclePaint,
 } from "./useOperationsMapLayers";
@@ -144,14 +139,13 @@ describe("useOperationsMapLayers", () => {
     expect(ids.indexOf("active-route-flow")).toBeLessThan(ids.indexOf("trip-progress-line"));
   });
 
-  it("clusters overlapping active trips and draws the selected trip report trail", () => {
+  it("draws the selected trip's report trail", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
     });
 
-    expect((map.getSource(LIVE_TRIPS_SOURCE) as { cluster: boolean }).cluster).toBe(true);
     const progress = map.getSource("trip-progress") as { data: GeoJSON.FeatureCollection };
     expect(progress.data.features).toHaveLength(3);
     expect(map.getLayer("trip-progress-line")).toBeDefined();
@@ -212,39 +206,6 @@ describe("operations-map mark paint (pure builders)", () => {
     expect(paint["circle-stroke-color"]).not.toContain("var(");
   });
 
-  it("sizes clusters by point_count with a step expression", () => {
-    const radius = clusterCirclePaint()["circle-radius"] as unknown[];
-    expect(radius[0]).toBe("step");
-    expect(radius[1]).toEqual(["get", "point_count"]);
-    expect(radius.slice(2)).toEqual([
-      CLUSTER_RADIUS.small,
-      10, CLUSTER_RADIUS.medium,
-      50, CLUSTER_RADIUS.large,
-    ]);
-    // Even the largest cluster stays below a flat 24px puck.
-    expect(CLUSTER_RADIUS.large).toBeLessThan(24);
-  });
-
-  it("colours clusters by their members' MEAN delay, via the aggregated sum", () => {
-    expect(LIVE_TRIPS_CLUSTER_PROPERTIES).toEqual({ delay_sum: ["+", ["get", "delay_sec"]] });
-    expect(clusterCirclePaint()["circle-color"]).toEqual([
-      "step",
-      ["/", ["/", ["get", "delay_sum"], ["get", "point_count"]], 60],
-      ...severityStepColors(),
-    ]);
-  });
-
-  it("picks a cluster count ink that stays readable on every band of the ramp", () => {
-    const stops = severityStepColors();
-    expect(clusterCountPaint()["text-color"]).toEqual([
-      "step",
-      ["/", ["/", ["get", "delay_sum"], ["get", "point_count"]], 60],
-      readableInkOn(stops[0]),
-      stops[1], readableInkOn(stops[2]),
-      stops[3], readableInkOn(stops[4]),
-      stops[5], readableInkOn(stops[6]),
-    ]);
-  });
 });
 
 describe("operations-map layers use resolved tokens, never literal hexes", () => {
@@ -255,9 +216,6 @@ describe("operations-map layers use resolved tokens, never literal hexes", () =>
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
     });
 
-    expect((map.getSource(LIVE_TRIPS_SOURCE) as { clusterProperties: unknown }).clusterProperties)
-      .toEqual(LIVE_TRIPS_CLUSTER_PROPERTIES);
-    expect((map.getLayer(LIVE_TRIPS_CLUSTER_LAYER) as MockLayer).paint).toEqual(clusterCirclePaint());
     expect((map.getLayer(LIVE_TRIPS_LAYER) as MockLayer).paint).toEqual(vehicleCirclePaint());
     // No heavy dark casing ring under each vehicle: the thin
     // surface-coloured stroke on the mark itself is what separates it.
@@ -561,11 +519,9 @@ describe("a theme toggle repaints layers whose source already exists", () => {
     expect(map.getPaintProperty("trip-progress-labels", "text-halo-color")).toBe(DARK["--bg-surface"]);
   });
 
-  it("recolours the live vehicle marks, clusters and labels", () => {
+  it("recolours the live vehicle marks and labels", () => {
     const map = mountThenToggleToDark();
 
-    expectRepainted(map, LIVE_TRIPS_CLUSTER_LAYER, clusterCirclePaint());
-    expectRepainted(map, "live-trip-cluster-count", clusterCountPaint());
     expectRepainted(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
     expectRepainted(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
     expect(map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
