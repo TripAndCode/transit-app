@@ -55,3 +55,51 @@ describe("ServiceSplit modal chart", () => {
     expect(screen.getByText("9/6")).toBeInTheDocument();
   });
 });
+
+describe("ServiceSplit modal chart with early-running days", () => {
+  function plotted(daily: { date: string; weekday: number | null; weekend: number | null }[]) {
+    const { container } = renderWithProviders(
+      <ServiceSplit variant="modal" service_split={{ 平日: 2.0, 土日祝: 1.0 }} daily={daily} />,
+    );
+    const gridYs = [...container.querySelectorAll(".ov-chart-plot svg line")].map((l) => Number(l.getAttribute("y1")));
+    const pathYs = [...container.querySelectorAll(".ov-chart-plot svg path")].flatMap((p) =>
+      [...(p.getAttribute("d") ?? "").matchAll(/,(-?[\d.]+)/g)].map((m) => Number(m[1])),
+    );
+    const ticks = [...container.querySelectorAll(".ov-svc-daily-label--y")].map((e) => e.textContent);
+    return { top: Math.min(...gridYs), bottom: Math.max(...gridYs), pathYs, ticks };
+  }
+
+  it("keeps negative means inside the plot, with the axis reaching below zero", () => {
+    const { top, bottom, pathYs, ticks } = plotted([
+      { date: "2026-09-05", weekday: 2.0, weekend: -1.0 },
+      { date: "2026-09-06", weekday: -3.0, weekend: 1.0 },
+    ]);
+    expect(pathYs.length).toBe(4);
+    for (const y of pathYs) {
+      expect(y).toBeGreaterThanOrEqual(top - 0.05);
+      expect(y).toBeLessThanOrEqual(bottom + 0.05);
+    }
+    expect(ticks[0]).toBe("-3.0");
+    expect(ticks.at(-1)).toBe("2.0");
+  });
+
+  it("does not invert the axis when every mean is negative", () => {
+    const { top, bottom, pathYs, ticks } = plotted([
+      { date: "2026-09-05", weekday: -2.0, weekend: -1.0 },
+      { date: "2026-09-06", weekday: -4.0, weekend: -0.5 },
+    ]);
+    for (const y of pathYs) {
+      expect(y).toBeGreaterThanOrEqual(top - 0.05);
+      expect(y).toBeLessThanOrEqual(bottom + 0.05);
+    }
+    expect(Number(ticks[0])).toBeLessThan(Number(ticks.at(-1)));
+  });
+
+  it("leaves the zero-based axis alone when nothing is negative", () => {
+    const { ticks } = plotted([
+      { date: "2026-09-05", weekday: 2.0, weekend: 1.0 },
+      { date: "2026-09-06", weekday: 4.0, weekend: 1.0 },
+    ]);
+    expect(ticks).toEqual(["0.0", "2.0", "4.0"]);
+  });
+});

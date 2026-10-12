@@ -51,7 +51,8 @@ const CELLS: HourlyCell[] = [MON, TUE, MON2].flatMap((date) => [8, 9].map((hour)
 function grid(): ForecastOverviewGridCell[] {
   const out: ForecastOverviewGridCell[] = [];
   for (let dow = 1; dow <= 7; dow++) {
-    for (const band of BAND_ORDER) out.push({ dow, band, expected_avg_min: 2, samples: 200, low_confidence: false });
+    for (const band of BAND_ORDER)
+      out.push({ dow, band, expected_avg_min: 2, samples: 200, low_confidence: false, source: "baseline" });
   }
   return out;
 }

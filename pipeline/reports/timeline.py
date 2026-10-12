@@ -236,7 +236,7 @@ async def _stop_positions(
     """``(trip_id, stop_sequence) -> stop_id`` plus each stop's name and position.
 
     Scoped to the observed trips rather than the whole agency: a day touches a
-    fraction of `static_stop_times`, and `idx_sst_trip` serves exactly this
+    fraction of `static_stop_times`, and its primary key (agency_id, trip_id, ...) serves exactly this
     shape. Stops with no geometry are omitted from both maps, so a visit that
     cannot be drawn never reaches a frame.
     """
@@ -275,13 +275,16 @@ async def compute_delay_timeline(
     ch,
     *,
     table: str = UPDATES_TABLE,
+    routes: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
-    """Playback frames for one agency-day. Cached per (agency, day, step, table).
+    """Playback frames for one agency-day. Cached per (agency, day, step, table, routes).
 
-    A finished service day never changes, so the TTL only bounds how long a
-    still-accumulating day (today) can be served stale.
+    ``routes`` limits the frames to those routes' stop events; empty means the
+    whole agency. The TTL bounds how long a still-accumulating day can be served
+    stale; a day that has ended is read from `updates`, which receives its
+    after-midnight tail only when the following calendar day is promoted.
     """
-    ctx = RangeCtx(from_date=day, to_date=day)
+    ctx = RangeCtx(from_date=day, to_date=day, routes=routes)
     sql, params = build_timeline_ch_sql(ctx, step_minutes, table=table)
     result = await ch.query(sql, parameters={**params, "agency_id": agency_id})
     rows = _ch_rows(result)

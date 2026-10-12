@@ -15,6 +15,7 @@ from pipeline.histogram import (
     percentile_from_hist,
 )
 from pipeline.reports.filters import _MIN, _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter, _round2
+from pipeline.service_day import service_date_ch
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
@@ -66,9 +67,10 @@ def _round1(x: float) -> Decimal:
 
 
 def _weighted_avg_min(days: list[dict]) -> float | None:
-    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+    """Sample-weighted mean delay across trend buckets — the pooled mean (approximate).
 
-    Each `days` entry is already a per-bucket sample-weighted mean with a
+    Each `days` entry is already a per-bucket sample-weighted mean (rounded to
+    2 dp, so the pooled figure is approximate) with a
     `samples` weight, so a plain mean-of-means would overweight thin days (one
     sparse outlier day could dominate the headline). Null-`avg_min` days are
     skipped (not counted as 0). Returns None when there are no measured samples.
@@ -272,7 +274,7 @@ async def compute_on_time(
     """On-time percentage per route-service.
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
-    ``sort_order='asc'`` returns worst routes first (lowest %) for BUG-3.
+    ``sort_order='asc'`` returns worst routes first (lowest %).
 
     ``early_tolerance_sec``/``late_tolerance_sec`` generalize the on-time
     window to ``-early_tolerance_sec <= dep_delay <= late_tolerance_sec`` (an
@@ -697,10 +699,9 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
     """Per-route (wd_avg_min, wd_n, we_avg_min, we_n) from ClickHouse `updates`,
     computed with ONE query via conditional aggregates instead of two separate
     queries (weekday ctx + weekend ctx) plus a Python-side mean/count/HAVING
-    reduction over every raw deduped row. The old shape shipped hundreds of
-    thousands of raw rows over HTTP for a 30-day window on agency 8 — this
-    moves the aggregation (and the >10-sample HAVING gate) into ClickHouse, so
-    only one row per qualifying route crosses the wire.
+    reduction over every raw deduped row. The aggregation (and the >10-sample
+    HAVING gate) runs in ClickHouse, so only one row per qualifying route
+    crosses the wire rather than every raw deduped row.
 
     Deduped on a narrower key than `build_dedup_ch_sql` (no service_type/
     scheduled_time — the weekday-vs-weekend rollup doesn't need them; assumes
@@ -734,11 +735,11 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
         FROM (
             SELECT u.route_code AS route_code,
                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                   toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo')) AS dow
+                   toDayOfWeek({service_date_ch("u.captured_at")}) AS dow
             FROM updates AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where_frag}
-            GROUP BY u.route_code, u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence,
-                     toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo'))
+            GROUP BY u.route_code, u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence,
+                     toDayOfWeek({service_date_ch("u.captured_at")})
         )
         GROUP BY route_code
         HAVING wd_n > 10 AND we_n > 10
@@ -897,6 +898,8 @@ async def compute_trend_series(
     ``None`` there.
     """
     _SMOOTH_WINDOW = 7
+    # A route-service group needs more samples than this to be named an offender.
+    _OFFENDER_MIN_SAMPLES = 5
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
@@ -925,14 +928,12 @@ async def compute_trend_series(
             "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
-            "GROUP BY bucket, route_code, service_type\n"
-            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5"
+            "GROUP BY bucket, route_code, service_type"
         )
         per_day = await conn.fetch(sql, agency_id, *params)
     else:
         # time_band filter needs the hour-of-day, only on raw updates
-        # (ClickHouse). Every group here has > 5 rows (the HAVING gate), so
-        # avg() is never NaN.
+        # (ClickHouse). Every group has at least one row, so avg() is never NaN.
         if ch is None:
             raise RuntimeError("compute_trend_series's time_band-filtered live fallback requires a ClickHouse client")
         _CH_BUCKET_EXPR = {"day": "date", "week": "toStartOfWeek(date, 1)", "month": "toStartOfMonth(date)"}
@@ -945,8 +946,7 @@ async def compute_trend_series(
             "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
-            "GROUP BY bucket, route_code, service_type\n"
-            "HAVING count(*) > 5",
+            "GROUP BY bucket, route_code, service_type",
             parameters={"agency_id": agency_id, **ch_params},
         )
         per_day = _ch_rows(result)
@@ -969,17 +969,24 @@ async def compute_trend_series(
         # a group whose samples counted here but whose delay total didn't
         # (matches pipeline/reports/overview.py's identical FILTER rationale
         # applied at the SQL layer for other queries).
-        if sum_sec is not None:
-            by_date_samples[d] = by_date_samples.get(d, 0) + n
-            by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
-        by_date.setdefault(d, []).append(
-            {
-                "route_code": r["route_code"],
-                "service_type": r["service_type"],
-                "avg_min": avg,
-                "samples": n,
-            }
-        )
+        if sum_sec is None:
+            continue
+        by_date_samples[d] = by_date_samples.get(d, 0) + n
+        by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
+        # Every group counts toward its bucket's average and sample total, as
+        # in Overview's pooling of agg_daily_trend. Only the worst-route
+        # attribution applies a floor: a handful of trips is too noisy to
+        # name a worst route.
+        by_date.setdefault(d, [])
+        if n > _OFFENDER_MIN_SAMPLES:
+            by_date[d].append(
+                {
+                    "route_code": r["route_code"],
+                    "service_type": r["service_type"],
+                    "avg_min": avg,
+                    "samples": n,
+                }
+            )
 
     daily = []
     for d in sorted(by_date.keys()):

@@ -4,6 +4,7 @@ import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import "../../styles/scrubber.css";
+import { formatDate } from "../../utils/format";
 import { StopRibbon } from "./StopRibbon";
 import { defaultScrubSec, positionsAt, scrubBounds, tripsCrossing } from "./mareyScrub";
 import {
@@ -157,8 +158,8 @@ export function MareyDiagram({
     <div className={scrubSec != null && active === null ? "marey marey--scrubbing" : "marey"}>
       <p className="focus-muted marey__caption">
         {t("mareyWindow", { from: formatClock(viewWindow.startSec), to: formatClock(viewWindow.endSec) })} ·{" "}
-        {t("mareyTripCount", { n: drawn.length })}
-        {date ? ` · ${date}` : ""}
+        {t("mareyTripCount", { count: drawn.length })}
+        {date ? ` · ${formatDate(date)}` : ""}
         {peak ? ` · ${t("mareyPeak")} ${formatClock(peak.startSec)}–${formatClock(peak.endSec)}` : ""}
       </p>
       {truncated && (
@@ -225,7 +226,7 @@ export function MareyDiagram({
                 viewBox={`0 0 780 ${VIEW_HEIGHT}`}
                 role="img"
                 aria-label={t("mareyChartLabel", {
-                  n: drawn.length,
+                  count: drawn.length,
                   from: formatClock(viewWindow.startSec),
                   to: formatClock(viewWindow.endSec),
                 })}

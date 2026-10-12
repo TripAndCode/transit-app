@@ -46,15 +46,14 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
 
     assert config["version"] == 2
     updates = config["updates"]
-    # "docker" appears once per directory that holds a Dockerfile/compose
-    # file (three, below), so ecosystems are grouped by name here rather
-    # than assumed unique per entry.
+    # "docker" appears once per directory that holds a Dockerfile, so
+    # ecosystems are grouped by name here rather than assumed unique per entry.
     ecosystems = {entry["package-ecosystem"] for entry in updates}
-    assert ecosystems == {"npm", "pip", "github-actions", "docker"}
+    assert ecosystems == {"npm", "pip", "github-actions", "docker", "docker-compose"}
 
     for entry in updates:
         ecosystem = entry["package-ecosystem"]
-        assert entry["directory"].startswith("/"), ecosystem
+        assert all(d.startswith("/") for d in _directories(entry)), ecosystem
         assert entry["schedule"]["interval"] == "weekly", ecosystem
         # Every group must actually select something; an empty group is
         # accepted by the parser and silently does nothing.
@@ -65,10 +64,65 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
     assert len(npm_entries) == 1
     assert npm_entries[0]["directory"] == "/frontend", "npm manifests live in frontend/"
 
-    docker_dirs = {entry["directory"] for entry in updates if entry["package-ecosystem"] == "docker"}
-    assert docker_dirs == {"/", "/db", "/tools/geosql"}, (
-        "docker ecosystem should cover every directory with a Dockerfile/compose file"
-    )
+    docker_dirs = {d for entry in updates if entry["package-ecosystem"] == "docker" for d in _directories(entry)}
+    assert docker_dirs == {"/", "/db"}, "docker ecosystem should cover every directory with a Dockerfile"
+
+
+def _directories(entry: dict) -> list[str]:
+    return entry["directories"] if "directories" in entry else [entry["directory"]]
+
+
+def test_dependabot_docker_compose_covers_every_compose_file():
+    """The `docker` ecosystem never reads a compose file, so a compose file's
+    image pins are updated only if its directory is listed under
+    `docker-compose`."""
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    covered = {
+        d for entry in config["updates"] if entry["package-ecosystem"] == "docker-compose" for d in _directories(entry)
+    }
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", ":(glob)**/compose.yml"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    parents = {Path(path).parent.as_posix() for path in tracked}
+    directories = {"/" if parent == "." else f"/{parent}" for parent in parents}
+    assert tracked
+    assert directories <= covered, f"compose files outside dependabot's docker-compose scan: {directories - covered}"
+
+
+def test_clickhouse_server_pins_agree():
+    """Dependabot bumps only the compose files; the workflow service images and
+    the script literals are edited by hand, so a bump that misses one runs CI
+    against a different server than the one deployed."""
+    pin = re.compile(r"clickhouse/clickhouse-server:([\w.\-]+)")
+    files = [
+        "compose.yml",
+        "deploy/vps/compose.yml",
+        "Makefile",
+        "scripts/run_full_ci.sh",
+        *(f".github/workflows/{p.name}" for p in (REPO_ROOT / ".github" / "workflows").glob("*.y*ml")),
+    ]
+    found = {f: set(pin.findall((REPO_ROOT / f).read_text())) for f in files if pin.search((REPO_ROOT / f).read_text())}
+    assert {"compose.yml", "deploy/vps/compose.yml", "Makefile", "scripts/run_full_ci.sh"} <= set(found)
+    tags = {tag for pins in found.values() for tag in pins}
+    assert len(tags) == 1, f"clickhouse-server pins disagree: {found}"
+
+
+def test_dependabot_github_actions_scans_the_composite_actions():
+    """`directory: /` reads only the workflows. Each composite action pins its
+    own `uses:` versions, so its directory has to be matched by a listed glob
+    or those pins drift from the workflows' unnoticed."""
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    entry = next(e for e in config["updates"] if e["package-ecosystem"] == "github-actions")
+    globs = entry["directories"]
+    actions = sorted((REPO_ROOT / ".github" / "actions").glob("*/action.y*ml"))
+    assert actions, "no composite actions found; the scan no longer guards anything"
+    for action in actions:
+        directory = "/" + action.parent.relative_to(REPO_ROOT).as_posix()
+        assert any(fnmatch(directory, pattern) for pattern in globs), f"{directory} is not scanned"
 
 
 def test_dependabot_cannot_swamp_the_single_ci_runner():

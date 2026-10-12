@@ -5,15 +5,22 @@ latest observation per stop event, with implausible delays clamped out."""
 from __future__ import annotations
 
 from pipeline.db import build_dedup_ch_sql
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS, service_date_ch
 
-# Every stop event's rows share one JST date (the dedup groups by it), so a
+# Every stop event's rows share one service date (the dedup groups by it), so a
 # date range splits the work with no group cut in two. `u.` because the dedup
 # query's own SELECT aliases would otherwise capture a bare column name.
-_DATE_RANGE = "toDate(u.captured_at, 'Asia/Tokyo') BETWEEN {start:Date} AND {end:Date}"
+_DATE_RANGE = f"{service_date_ch('u.captured_at')} BETWEEN {{start:Date}} AND {{end:Date}}"
+
+
+# The hour of the schedule string of a run's first stop, for feeds that store no
+# scheduled_sec. A clock before the cutover is an after-midnight hour of the
+# service day, which scheduled_sec would give as 24 or more.
+_CLOCK_HOUR = "toUInt8OrNull(substring(argMin(scheduled_time, stop_sequence), 1, 2))"
 
 
 def runs_sql() -> str:
-    """One row per trip run (trip × JST capture date): the mean of its stops'
+    """One row per trip run (trip × service date): the mean of its stops'
     departure delays in minutes, and the hour of its first observed stop's
     scheduled departure. The hour comes from scheduled_sec, so a run after
     midnight on its service day keeps an hour of 24 or more. A strategy that
@@ -33,7 +40,7 @@ SELECT
     date AS service_date,
     coalesce(
         intDiv(argMin(scheduled_sec, stop_sequence), 3600),
-        toUInt8OrNull(substring(argMin(scheduled_time, stop_sequence), 1, 2))
+        {_CLOCK_HOUR} + if({_CLOCK_HOUR} < {SERVICE_DAY_CUTOVER_HOURS}, 24, 0)
     ) AS hour,
     avg(dep_delay) / 60 AS mean_delay_min,
     any(service_type) AS service,

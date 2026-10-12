@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiError, apiErrorDetail } from "./client";
+import { classifyError } from "./errorClass";
 
 /** Detail the API returns with a 401 when a request needs a signed-in caller.
  *  Mirrors api/security.py::require_user and the login gate. */
@@ -22,8 +23,15 @@ export function refreshAuthStateOn401(queryClient: QueryClient): (err: unknown) 
   };
 }
 
-/** One retry for a failed query, none for an auth-required 401: repeating it
- *  cannot succeed until the visitor signs in. */
-export function retryUnlessAuthRequired(failureCount: number, err: unknown): boolean {
-  return !isAuthRequired(err) && failureCount < 1;
+/** One retry for a failed query, and only when repeating it can plausibly
+ *  succeed: a dropped connection or a 5xx. Never for a 4xx (the same request
+ *  is refused again), a 429 (a retry spends more of the rate-limit budget),
+ *  an auth-required 401, or the standing conditions (not approved, aggregates
+ *  not built), which `classifyError` sorts out of the "server" class. A
+ *  timeout is not retried either: the request has already waited the full
+ *  limit, and a second wait doubles the time to any message. */
+export function retryTransientOnce(failureCount: number, err: unknown): boolean {
+  if (failureCount >= 1 || isAuthRequired(err)) return false;
+  const cls = classifyError(err);
+  return cls === "network" || cls === "server";
 }

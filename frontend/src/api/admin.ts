@@ -662,8 +662,12 @@ export function useAdminAudit(filters: AdminAuditFilters, cursor: string | null)
 
 /** Fetches every page matching `filters` for CSV export, up to `maxPages`
  * (an internal audit log can be very long; this keeps a click from firing
- * an unbounded number of requests). */
-export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 40): Promise<AdminAuditItem[]> {
+ * an unbounded number of requests). `truncated` is true when the cap was hit
+ * while older rows remained, so the caller can say the export is partial. */
+export async function fetchAllAdminAudit(
+  filters: AdminAuditFilters,
+  maxPages = 40,
+): Promise<{ items: AdminAuditItem[]; truncated: boolean }> {
   const items: AdminAuditItem[] = [];
   let cursor: string | null = null;
   for (let i = 0; i < maxPages; i++) {
@@ -671,10 +675,10 @@ export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 
       `/api/admin/audit?${auditQueryString(filters, cursor)}`,
     );
     items.push(...result.items);
-    if (!result.next_cursor) break;
     cursor = result.next_cursor;
+    if (!cursor) break;
   }
-  return items;
+  return { items, truncated: cursor != null };
 }
 
 // ── Feature flags ────────────────────────────────────────────────────────

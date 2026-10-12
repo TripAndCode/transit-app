@@ -544,6 +544,7 @@ export function AdminUsersPage() {
         activeView={activeView}
         onSelectView={(id) => selectView(id as SavedView)}
         emptyLabel={t("admin.users.empty")}
+        settled={data != null}
       />
       {(patch.error || del.error || bulkPatch.error) && (
         <ErrorBanner error={patch.error || del.error || bulkPatch.error} />

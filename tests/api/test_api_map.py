@@ -928,7 +928,9 @@ async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
     assert body == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
 
 
-async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
+async def _seed_route(
+    pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None, seeded_at=None
+):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats,
     for tests that need a baseline row present even though these drilldowns
@@ -951,7 +953,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
     separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
-    seeded_at = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
+    seeded_at = seeded_at or datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
     async with pool.acquire() as conn:
         for i, (trip_id, seq, delay, sched) in enumerate(day_rows):
             # scheduled_time column is TIME WITHOUT TIME ZONE; asyncpg needs a
@@ -1127,6 +1129,35 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, 
     assert r["baseline_avg_sec"] == 120  # route-grain 2.0 min, not no_baseline
     assert r["baseline_samples"] == 500  # pooled SUM(samples) across service_types
     assert r["bucket"] == "anomaly"
+
+
+@pytest.mark.asyncio
+async def test_route_grain_baseline_samples_exclude_rows_the_average_skips(map_app_ch, ch_client):
+    """A pre-backfill row with NULL sum_delay_sec adds nothing to the pooled
+    average, so its samples must not inflate the evidence count either."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    await _seed_live_route(
+        pool,
+        ch_client,
+        agency_id,
+        "R_NULLSUM",
+        "",
+        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
+        baseline=None,
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
+            "samples, sum_delay_sec) VALUES ($1, 'R_NULLSUM', '平日', 2.0, 6.0, 500, 60000), "
+            "($1, 'R_NULLSUM', '休日', 2.0, 6.0, 300, NULL)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSUM"]
+    assert r["baseline_avg_sec"] == 120
+    assert r["baseline_samples"] == 500
 
 
 @pytest.mark.asyncio
@@ -1390,6 +1421,31 @@ async def test_route_trips_reads_the_requested_jst_day(map_app_ch, ch_client):
     assert [t["trip_id"] for t in same_day.json()["trips"]] == ["A"]
     assert day_before.json()["date"] == "2026-06-08"
     assert day_before.json()["trips"] == []
+
+
+@pytest.mark.asyncio
+async def test_route_trips_default_day_is_the_service_day_of_a_post_midnight_observation(map_app_ch, ch_client):
+    """A route last seen at 00:40 JST is still running the previous service day,
+    so the default day is that day and its trips come back rather than an empty
+    page for a calendar day that has no 04:00 start yet."""
+    from datetime import datetime, timezone
+
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_NIGHT",
+        "平日",
+        [("N1", 1, 120, "23:50")],
+        ch_client=ch_client,
+        seeded_at=datetime(2026, 6, 9, 15, 40, 0, tzinfo=timezone.utc),  # 00:40 JST on 06-10
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        trips = await client.get(f"/api/{agency_id}/today/route/R_NIGHT/trips")
+        profile = await client.get(f"/api/{agency_id}/today/route/R_NIGHT/stop-profile")
+    assert trips.json()["date"] == "2026-06-09"
+    assert [t["trip_id"] for t in trips.json()["trips"]] == ["N1"]
+    assert profile.json()["date"] == "2026-06-09"
 
 
 @pytest.mark.asyncio

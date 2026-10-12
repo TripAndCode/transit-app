@@ -10,6 +10,26 @@ from psycopg2 import sql
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
 from tests.sharding import assign_shards, shard_from_env
 
+# Host ports the dev Postgres is published on (see .claude/hooks/guard_dev_db.py).
+_DEV_POSTGRES_PORTS = frozenset({"5433", "5543"})
+
+
+def _refuse_dev_postgres_port(url: str, var: str) -> None:
+    """Raise ``pytest.UsageError`` when ``url`` targets a dev Postgres port.
+
+    Renaming the database does not move the suite off the dev server: the
+    ``CREATE DATABASE``, the migrations and the per-test table reset would all
+    run on it. Runs before any connection is opened.
+    """
+    port = urlsplit(url).port
+    if str(port) in _DEV_POSTGRES_PORTS:
+        raise pytest.UsageError(
+            f"{var} points at the dev Postgres port {port}; the suite "
+            "writes to its database and must only run against a throwaway instance. "
+            "Use scripts/run_integration_tests.sh, or point DATABASE_URL (or "
+            "TEST_DATABASE_URL) at the throwaway Postgres."
+        )
+
 
 def _redirect_to_test_db() -> None:
     """Auto-redirect pytest to a sibling ``<dbname>_test`` database.
@@ -25,7 +45,8 @@ def _redirect_to_test_db() -> None:
     dev DB; create the sibling on first run if it's missing.
 
     Opt-out: set ``DATABASE_URL`` to a name already ending in ``_test``,
-    or set ``TEST_DATABASE_URL`` explicitly.
+    or set ``TEST_DATABASE_URL`` explicitly. Either variable on a dev Postgres
+    port is refused outright.
 
     Robustness notes (review feedback):
     - Parsing via ``urllib.parse.urlsplit`` instead of a hand-rolled regex
@@ -42,6 +63,7 @@ def _redirect_to_test_db() -> None:
     os.environ.setdefault("ALLOW_TEST_ORIGIN", "1")
     explicit = os.environ.get("TEST_DATABASE_URL")
     if explicit:
+        _refuse_dev_postgres_port(explicit, "TEST_DATABASE_URL")
         os.environ["DATABASE_URL"] = explicit
         return
 
@@ -50,6 +72,7 @@ def _redirect_to_test_db() -> None:
         return  # downstream code raises a clearer error
 
     parts = urlsplit(current)
+    _refuse_dev_postgres_port(current, "DATABASE_URL")
     db_name = parts.path.lstrip("/").rstrip("/")
     if not db_name or db_name.endswith("_test"):
         return  # already pointing at a test DB or no path component
@@ -398,12 +421,21 @@ async def aconn(apply_schema, reset_sql):
     # tests use the same JST civil calendar as production.
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
     yield conn
-    # clean up
+    # A test can leave its connection unusable (closed, cancelled mid-query,
+    # or inside a failed transaction). The reset then runs on a fresh
+    # connection, and a failure there propagates: swallowing it would leave
+    # this test's rows for the next one to trip over.
     try:
         await conn.execute(reset_sql)
     except Exception:
-        pass
-    await conn.close()
+        conn.terminate()
+        fresh = await asyncpg.connect(os.environ["DATABASE_URL"])
+        try:
+            await fresh.execute(reset_sql)
+        finally:
+            await fresh.close()
+    else:
+        await conn.close()
 
 
 @pytest.fixture
@@ -464,9 +496,23 @@ async def _test_pool(*, min_size=1, **kw):
     more than one connection at once still can. Centralized so a future test
     author copying an existing fixture doesn't reintroduce the slow default
     by hand-rolling `asyncpg.create_pool(...)` again.
+
+    Carries `api.main`'s own `server_settings` (the `aconn`/`pg_conn` fixtures
+    mirror the timezone half of it) so SQL that reads `now()` sees the same
+    Asia/Tokyo civil date the app's production pool would, rather than the
+    Postgres container's own default timezone -- otherwise a test seeding
+    JST-dated fixtures disagrees with a handler's `now()::date` for the hours
+    each day where the UTC and JST calendar dates differ. A caller passing
+    its own `server_settings` through `**kw` (to add a setting beyond this
+    pair) is merged onto this default rather than overriding it outright, so
+    that caller still gets the timezone/timeout pair it would otherwise have
+    to repeat by hand.
     """
     import asyncpg
 
+    from api.main import PG_SESSION_SETTINGS
+
+    kw["server_settings"] = {**PG_SESSION_SETTINGS, **kw.get("server_settings", {})}
     return await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=min_size, **kw)
 
 

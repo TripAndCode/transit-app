@@ -117,12 +117,11 @@ export function fitAll(map: MLMap, bounds: LngLatBoundsLike, restPitch: number):
   map.fitBounds(bounds, { padding: FIT_ALL_PADDING, maxZoom: FIT_ALL_MAX_ZOOM, pitch: restPitch, ...timing(MOTION.move) });
 }
 
-/** Steps in on one reported position. `zoom` is for callers with their own
- *  target — a cluster expanding by a fixed step rather than to a floor. */
-export function inspectTrip(map: MLMap, lngLat: LngLatLike, { zoom, pitch }: { zoom?: number; pitch: number }): void {
+/** Steps in on one reported position. */
+export function inspectTrip(map: MLMap, lngLat: LngLatLike, { pitch }: { pitch: number }): void {
   map.easeTo({
     center: lngLat,
-    zoom: zoom ?? Math.max(map.getZoom(), INSPECT_ZOOM),
+    zoom: Math.max(map.getZoom(), INSPECT_ZOOM),
     pitch,
     ...timing(MOTION.move),
   });

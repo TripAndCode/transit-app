@@ -21,7 +21,7 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     RangeCtx,
@@ -38,7 +38,7 @@ from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
 from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
-from pipeline.query.tools import dispatch, render_tool_result
+from pipeline.query.tools import _summary, dispatch, render_tool_result
 
 _log = logging.getLogger(__name__)
 
@@ -145,7 +145,9 @@ async def ask(
     request: Request,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
+    # Per-statement borrowing: the LLM wait below can last tens of seconds and
+    # must not pin one of the pool's connections while it does.
+    conn: asyncpg.Connection = Depends(get_pooled_conn),
     ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     user: User | None = Depends(get_current_user_optional),
@@ -198,11 +200,7 @@ async def ask(
     # falls to the open LLM with no examples, which hallucinates a page the
     # user never asked for (e.g. describe_data(routes, offset=100)).
     if history_enabled and not history and is_follow_up(body.question):
-        msg = (
-            "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
-            if locale != "en"
-            else "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
-        )
+        msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
         if log_enabled:
             await log_query(conn, agency_id, body.question, "no_history", None, False)

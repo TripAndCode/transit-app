@@ -60,8 +60,12 @@ updates:
           - "minor"
           - "patch"
 
+  # `/` covers .github/workflows; the composite actions under .github/actions/
+  # carry their own `uses:` pins and are scanned only when listed.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
       day: "saturday"
@@ -75,8 +79,7 @@ updates:
           - "minor"
           - "patch"
 
-  # Base-image bumps for the app image + `compose.yml` (the node and python
-  # bases, clickhouse/clickhouse-server).
+  # Base-image bumps for the root Dockerfile (the node and python bases).
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
@@ -93,7 +96,7 @@ updates:
           - "patch"
 
   # db/Dockerfile (the postgres base) -- kept separate from "/" above so a
-  # bump here doesn't get grouped with the app image/compose bumps, which
+  # bump here doesn't get grouped with the app image bumps, which
   # have an unrelated release cadence.
   - package-ecosystem: "docker"
     directory: "/db"
@@ -118,10 +121,15 @@ updates:
         update-types:
           - "version-update:semver-major"
 
-  # tools/geosql/compose.yml (dekartxyz/dekart) -- a standalone local tool,
-  # not part of the deployed app.
-  - package-ecosystem: "docker"
-    directory: "/tools/geosql"
+  # Compose files: the `docker` ecosystem reads Dockerfiles only, so image pins
+  # in compose.yml (clickhouse/clickhouse-server, dekartxyz/dekart) need this
+  # one. Pins that live in workflows and scripts stay manual; a unit test keeps
+  # the clickhouse-server ones in agreement.
+  - package-ecosystem: "docker-compose"
+    directories:
+      - "/"
+      - "/tools/geosql"
+      - "/deploy/vps"
     schedule:
       interval: "weekly"
       day: "saturday"
@@ -130,7 +138,7 @@ updates:
     open-pull-requests-limit: 3
     rebase-strategy: "disabled"
     groups:
-      docker-minor-and-patch:
+      docker-compose-minor-and-patch:
         update-types:
           - "minor"
           - "patch"

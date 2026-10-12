@@ -22,17 +22,17 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
 
+from pipeline.service_day import service_date_ch
+
 _JST = ZoneInfo("Asia/Tokyo")
 
 
 def jst_today() -> date:
     """Today's date in Asia/Tokyo.
 
-    Every agg_*/analyze query is bucketed against the JST civil calendar
-    (api/main.py pins the DB session to the same zone). Using the
-    server's local date here caused a real ~20%-of-rows mis-bucketing bug
-    in analyze() before (UTC-vs-JST) - this avoids the same class of bug
-    for the request-side default date-range window.
+    Requests and aggregates both bucket on the JST civil day (api/main.py
+    pins the DB session to the same zone), so the default date-range window
+    must be derived from that calendar too, never the server's local date.
     """
     return datetime.now(_JST).date()
 
@@ -42,6 +42,11 @@ def last_closed_jst_day() -> date:
 
     `updates` and every aggregate receive a day only once it has closed
     (pipeline/promote.py), so this, not today, ends the default report period.
+
+    Promotion moves whole Japan-time calendar days, while a day's data is filed
+    by service date (:mod:`pipeline.service_day`): the after-midnight tail of
+    the newest service day is still in the live table, and reaches `updates`
+    with the next promotion, which rebuilds that date's aggregates.
     """
     return jst_today() - timedelta(days=1)
 
@@ -248,8 +253,8 @@ def clamp_range_ctx(
     a request body, and a conversation's persisted ``filter_ctx`` — because
     a persisted filter is still client input: it was accepted from a client,
     stored verbatim, and can be replayed long after the code that wrote it
-    changed. Hand-copied variants of this logic drifted apart before, each
-    enforcing a different subset of the rules below.
+    changed. Keeping one implementation means every source enforces the same
+    rules below.
 
     Rules, in order:
 
@@ -442,16 +447,16 @@ def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse-dialect counterpart of :func:`date_range_clause` for the
     live `updates` table (ClickHouse's own ``captured_at`` column).
 
-    Buckets by the JST civil day, not UTC — analyze dates every agg_* row on
-    the JST calendar, so the same window must select the same days whether it
-    is served from an aggregate (`date_range_clause`) or from `updates`.
-    ``toDate(captured_at, 'Asia/Tokyo')`` (never a bare ``toDate(captured_at)``)
-    matches the same JST-not-UTC translation already proven in
-    ``pipeline/db.py::build_dedup_ch_sql``.
+    Buckets by the service date (:mod:`pipeline.service_day`), not the UTC day:
+    analyze dates every agg_* row on that same day, so the same window must
+    select the same days whether it is served from an aggregate
+    (`date_range_clause`) or from `updates`. It is the expression
+    ``pipeline/db.py::build_dedup_ch_sql`` groups by, so the filter and the
+    dedup cannot disagree about which day an observation belongs to.
     """
+    service_date = service_date_ch()
     return (
-        "toDate(captured_at, 'Asia/Tokyo') >= {ch_from_date:Date} "
-        "AND toDate(captured_at, 'Asia/Tokyo') <= {ch_to_date:Date}",
+        f"{service_date} >= {{ch_from_date:Date}} AND {service_date} <= {{ch_to_date:Date}}",
         {"ch_from_date": ctx.from_date, "ch_to_date": ctx.to_date},
     )
 
@@ -459,14 +464,15 @@ def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse-dialect counterpart of :func:`dow_clause`.
 
-    ``toDayOfWeek`` on a JST-shifted ``Date`` (mode 0, the default) returns
+    ``toDayOfWeek`` on the service ``Date`` (mode 0, the default) returns
     1=Monday..7=Sunday — the same ISODOW numbering Postgres's
     ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
+    A 00:15 Friday-night departure is Friday's service, so it counts as Friday.
     """
     days = dow_isodays(ctx.dow)
     if days is None:
         return "1", {}
-    day_expr = "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo'))"
+    day_expr = f"toDayOfWeek({service_date_ch()})"
     if ctx.dow == "weekday":
         return f"{day_expr} BETWEEN 1 AND 5", {}
     listed = ", ".join(str(day) for day in sorted(days))

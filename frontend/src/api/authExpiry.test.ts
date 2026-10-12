@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { ApiError } from "./client";
-import { isAuthRequired, refreshAuthStateOn401, retryUnlessAuthRequired } from "./authExpiry";
+import { isAuthRequired, refreshAuthStateOn401, retryTransientOnce } from "./authExpiry";
 
 const authRequired = () => new ApiError(401, JSON.stringify({ detail: "auth required" }));
 
@@ -34,10 +34,37 @@ describe("refreshAuthStateOn401", () => {
   });
 });
 
-describe("retryUnlessAuthRequired", () => {
-  it("never retries an auth-required 401 and retries anything else once", () => {
-    expect(retryUnlessAuthRequired(0, authRequired())).toBe(false);
-    expect(retryUnlessAuthRequired(0, new ApiError(500, ""))).toBe(true);
-    expect(retryUnlessAuthRequired(1, new ApiError(500, ""))).toBe(false);
+describe("retryTransientOnce", () => {
+  const body = (detail: string) => JSON.stringify({ detail });
+
+  it("retries a transient failure once: a 5xx or a dropped connection", () => {
+    expect(retryTransientOnce(0, new ApiError(500, ""))).toBe(true);
+    expect(retryTransientOnce(0, new ApiError(502, "<html>Bad Gateway</html>"))).toBe(true);
+    expect(retryTransientOnce(0, new TypeError("Failed to fetch"))).toBe(true);
+    expect(retryTransientOnce(1, new ApiError(500, ""))).toBe(false);
+    expect(retryTransientOnce(1, new TypeError("Failed to fetch"))).toBe(false);
+  });
+
+  it("never retries an auth-required 401", () => {
+    expect(retryTransientOnce(0, authRequired())).toBe(false);
+  });
+
+  it("never retries a client error, a 404 or a 429", () => {
+    expect(retryTransientOnce(0, new ApiError(400, body("bad")))).toBe(false);
+    expect(retryTransientOnce(0, new ApiError(403, body("forbidden")))).toBe(false);
+    expect(retryTransientOnce(0, new ApiError(404, ""))).toBe(false);
+    expect(retryTransientOnce(0, new ApiError(422, ""))).toBe(false);
+    expect(retryTransientOnce(0, new ApiError(429, ""))).toBe(false);
+  });
+
+  it("never retries a standing condition: not approved, aggregates not ready", () => {
+    expect(retryTransientOnce(0, new ApiError(403, body("llm_not_approved")))).toBe(false);
+    expect(
+      retryTransientOnce(0, new ApiError(503, JSON.stringify({ detail: "x", code: "aggregate_not_ready" }))),
+    ).toBe(false);
+  });
+
+  it("does not repeat a request that already waited out the full request timeout", () => {
+    expect(retryTransientOnce(0, new DOMException("timed out", "TimeoutError"))).toBe(false);
   });
 });

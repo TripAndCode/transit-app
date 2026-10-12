@@ -92,6 +92,7 @@ async def _seed_visit(
     delays,
     day=_DAY,
     table="updates",
+    route_code="R1",
 ):
     """One trip visit: the static mapping plus `delays` observations of it."""
     await pool_exec(
@@ -113,7 +114,7 @@ async def _seed_visit(
                 trip_id,
                 "平日",
                 f"{scheduled_sec // 3600:02d}:{scheduled_sec % 3600 // 60:02d}:00",
-                "R1",
+                route_code,
                 stop_sequence,
                 delay,
                 scheduled_sec,
@@ -187,6 +188,37 @@ async def test_timeline_places_an_observed_stop_in_its_scheduled_bucket(timeline
     assert point["lon"] == 140.7 and point["lat"] == 40.8
     assert frames["08:00"]["mean_delay_min"] == 2.0
     assert frames["09:00"]["points"] == []
+
+
+@pytest.mark.asyncio
+async def test_timeline_routes_param_keeps_only_those_routes_stops(timeline_client, timeline_app):
+    client, agency_id, ch_client = timeline_client
+    pool = timeline_app[0].state.pool
+    # Route R1 serves S1 and route R2 serves S2, each with enough trips to clear
+    # the three-sample floor in the 08:00 bucket.
+    for route_code, stop_id in (("R1", "S1"), ("R2", "S2")):
+        for n, sched in enumerate([8 * 3600, 8 * 3600 + 900, 8 * 3600 + 1800]):
+            await _seed_visit(
+                pool.execute,
+                ch_client,
+                agency_id,
+                trip_id=f"{route_code}-T{n}",
+                stop_sequence=1,
+                stop_id=stop_id,
+                scheduled_sec=sched,
+                delays=[120],
+                route_code=route_code,
+            )
+
+    async def stops_at_eight(query: str) -> list[str]:
+        resp = await client.get(f"/api/{agency_id}/delays/timeline?date={_DAY.isoformat()}{query}")
+        assert resp.status_code == 200
+        return sorted(p["stop_id"] for p in {f["t"]: f for f in resp.json()["frames"]}["08:00"]["points"])
+
+    assert await stops_at_eight("") == ["S1", "S2"]
+    assert await stops_at_eight("&routes=R1") == ["S1"]
+    assert await stops_at_eight("&routes=R2") == ["S2"]
+    assert await stops_at_eight("&routes=R1,R2") == ["S1", "S2"]
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,16 @@ describe("PeakHourModal", () => {
     expect(screen.getByText("K37")).toBeInTheDocument();
   });
 
+  it("shows the request's failure and a retry instead of an empty body", () => {
+    const onRetry = vi.fn();
+    render(
+      <PeakHourModal data={null} loading={false} error={new Error("boom")} onRetry={onRetry} onClose={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("common.retry") }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("peak-hour-modal-empty")).not.toBeInTheDocument();
+  });
+
   it("calls onClose when backdrop clicked", () => {
     const onClose = vi.fn();
     render(
@@ -73,6 +83,17 @@ describe("PeakHourModal", () => {
     expect(screen.getByText("-3.2min")).toBeInTheDocument();
     // The positive route's sign is still explicit, not omitted.
     expect(screen.getByText("+6.5min")).toBeInTheDocument();
+  });
+
+  it("shows a delay that rounds to zero as +0.0min, never -0.0min", () => {
+    const tiny: PeakHourBreakdown = {
+      hour: 8,
+      dow: 5,
+      routes: [{ route_code: "K31", service_type: "平日", avg_min: -0.04, samples: 50 }],
+    };
+    render(<PeakHourModal data={tiny} loading={false} onClose={() => {}} />);
+    expect(screen.getByText("+0.0min")).toBeInTheDocument();
+    expect(screen.queryByText("-0.0min")).not.toBeInTheDocument();
   });
 
   it("does not render a NaN width when every route has avg_min of exactly 0", () => {

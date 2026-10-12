@@ -158,6 +158,30 @@ describe("NetworkTab", () => {
     expect(aomoriCard2).toHaveTextContent("—");
   });
 
+  it("leaves the route and stop filter off the agency links, since their codes belong to one agency", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [row({ agency_id: 8, agency_name: "Aomori" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/7/network?from=2026-04-01&to=2026-04-07&dow=weekday&routes=50&stop=S1"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const href = screen.getByRole("link", { name: "Aomori" }).getAttribute("href") ?? "";
+    const query = new URLSearchParams(href.split("?")[1]);
+    expect(href.startsWith("/agencies/8/live?")).toBe(true);
+    expect(query.has("routes")).toBe(false);
+    expect(query.has("stop")).toBe(false);
+    expect(query.get("from")).toBe("2026-04-01");
+    expect(query.get("dow")).toBe("weekday");
+  });
+
   it("links each agency name to its operations view, carrying the current range", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {

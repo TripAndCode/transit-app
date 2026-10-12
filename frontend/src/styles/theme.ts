@@ -40,12 +40,15 @@ export function readThemePref(): Theme {
   return DEFAULT_THEME;
 }
 
-/** Persist the chosen preference. No-ops if localStorage is unavailable. */
-export function writeThemePref(theme: Theme): void {
+/** Persist the chosen preference. Returns whether it was stored: `false` when
+ *  localStorage is unavailable, in which case the choice lasts only as long as
+ *  the caller keeps it. */
+export function writeThemePref(theme: Theme): boolean {
   try {
     localStorage.setItem(PREF_KEY, theme);
+    return true;
   } catch {
-    /* ignore */
+    return false;
   }
 }
 

@@ -183,6 +183,7 @@ export function RoutesPicker({
                 <input
                   type="checkbox"
                   checked={allOn}
+                  aria-label={g.name}
                   ref={(el) => {
                     if (el) el.indeterminate = someOn;
                   }}

@@ -27,6 +27,16 @@ def test_scheduled_departure_at_combines_date_and_time_in_jst():
     assert offset.total_seconds() == 9 * 3600
 
 
+def test_a_post_midnight_departure_of_a_service_day_is_on_the_next_calendar_day():
+    """The stop event's date is its service day, so a 00:05 departure on service
+    day 04-01 leaves in the early hours of 04-02, not at 00:05 on 04-01."""
+    dep = scheduled_departure_at(date(2026, 4, 1), time(0, 5, 0))
+    assert dep == datetime(2026, 4, 1, 15, 5, 0, tzinfo=timezone.utc)  # 00:05 JST on 04-02
+    assert scheduled_departure_at(date(2026, 4, 1), "03:59") == datetime(2026, 4, 1, 18, 59, tzinfo=timezone.utc)
+    # The cutover hour itself belongs to the morning of the service day.
+    assert scheduled_departure_at(date(2026, 4, 1), "04:00") == datetime(2026, 3, 31, 19, 0, tzinfo=timezone.utc)
+
+
 def test_scheduled_departure_at_accepts_raw_ch_string_form():
     """`scheduled_time` arrives from ClickHouse as a bare string, not a
     `datetime.time` -- both the aomori_regex ("HH:MM") and static_join

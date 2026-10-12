@@ -59,6 +59,20 @@ afterEach(() => {
 });
 
 describe("MareyDiagram", () => {
+  it("counts a single trip in the singular, in the caption and the chart's name", () => {
+    const { container } = show({ trips: [trip("T1", 7 * 3600, [0, 60, 120])], date: "2026-10-08" });
+    expect(container.querySelector(".marey__caption")?.textContent).toContain("1 trip");
+    expect(container.querySelector(".marey__caption")?.textContent).not.toContain("1 trips");
+    expect(screen.getByRole("img", { name: /^Trips over time: 1 trip from/ })).toBeInTheDocument();
+  });
+
+  it("writes the date in the language's date style, not as the raw API string", () => {
+    const { container } = show({ date: "2026-10-08" });
+    const caption = container.querySelector(".marey__caption")?.textContent ?? "";
+    expect(caption).not.toContain("2026-10-08");
+    expect(caption).toContain("Oct 8, 2026");
+  });
+
   it("draws one polyline per trip", () => {
     const { container } = show();
     expect(container.querySelectorAll("[data-trip-id]")).toHaveLength(3);

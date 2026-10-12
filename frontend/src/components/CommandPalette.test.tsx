@@ -216,6 +216,33 @@ describe("CommandPalette", () => {
     expect(search.has("from")).toBe(false);
   });
 
+  it("applying a time band keeps the screen's own URL state (sub tab, map style, focus)", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/map?style=satellite&route_focus=42&trip=T9&sub_tab=hotspots&dow=weekday");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Evening");
+    await user.click(screen.getByText(/^Evening/));
+    const params = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/map");
+    expect(params.get("time_band")).toBe("evening");
+    expect(params.get("style")).toBe("satellite");
+    expect(params.get("route_focus")).toBe("42");
+    expect(params.get("trip")).toBe("T9");
+    expect(params.get("sub_tab")).toBe("hotspots");
+    expect(params.get("dow")).toBe("weekday");
+  });
+
+  it("applying a time band replaces an hour filter, which would otherwise win over it", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/overview?hour=8");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Evening");
+    await user.click(screen.getByText(/^Evening/));
+    const params = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(params.get("time_band")).toBe("evening");
+    expect(params.has("hour")).toBe(false);
+  });
+
   it("selecting a time band updates the current page's query string", async () => {
     const user = userEvent.setup();
     renderPalette();
