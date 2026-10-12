@@ -184,6 +184,22 @@ def sanitize_next(value: str | None) -> str:
     return path
 
 
+def _frontend_url(path: str) -> str:
+    """Prefix a relative path from :func:`sanitize_next` (or a literal
+    ``/login?...``) with the SPA's origin. Production serves the SPA from
+    this API's own origin, so FRONTEND_BASE_URL defaults to PUBLIC_BASE_URL;
+    local dev runs it on Vite's separate port.
+
+    Both are read from the environment at call time, falling back to the
+    module-level PUBLIC_BASE_URL only when unset: that constant freezes at
+    first import, which in the full test suite happens before any per-test
+    ``monkeypatch.setenv``.
+    """
+    public_base = os.environ.get("PUBLIC_BASE_URL", PUBLIC_BASE_URL)
+    base = os.environ.get("FRONTEND_BASE_URL", public_base).rstrip("/")
+    return f"{base}{path}"
+
+
 @router.get("/{provider}/login")
 async def login(provider: str, request: Request, next: str = "/") -> RedirectResponse:
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
@@ -464,7 +480,7 @@ async def _fail_login(
     url = f"/login?error={reason}"
     if next_url:
         url += f"&next={quote(sanitize_next(next_url), safe='')}"
-    return RedirectResponse(url=url, status_code=302)
+    return RedirectResponse(url=_frontend_url(url), status_code=302)
 
 
 @router.get("/{provider}/callback")
@@ -525,7 +541,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         return await _fail_login(conn, request, provider, "local_account_conflict", tx.get("next"))
 
     next_url = sanitize_next(tx.get("next"))
-    resp = RedirectResponse(url=next_url, status_code=302)
+    resp = RedirectResponse(url=_frontend_url(next_url), status_code=302)
     _set_session_cookie(resp, sid)
     resp.delete_cookie(TX_COOKIE, path="/")
     return resp

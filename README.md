@@ -39,7 +39,9 @@ make frontend-dev   # Vite on :5173
 ```
 
 The Vite server proxies API requests to FastAPI. OAuth callbacks still use
-`:8000`, as configured by `PUBLIC_BASE_URL`.
+`:8000`, as configured by `PUBLIC_BASE_URL`. To sign in through Vite, set
+`FRONTEND_BASE_URL=http://localhost:5173` in `.env` so the post-login redirect
+returns to `:5173` instead of `:8000`.
 
 ## Load Data
 
@@ -230,7 +232,8 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   not start.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
-  `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
+  `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional
+  authentication and admin setup.
 - `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
   account, seeded (and re-seeded on every boot) only when both are set.
   Rotating it is editing `.env` and restarting — the same mental model as

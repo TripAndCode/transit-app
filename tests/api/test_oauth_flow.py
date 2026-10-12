@@ -46,6 +46,7 @@ def _set_oauth_env(monkeypatch):
     monkeypatch.setenv("GITHUB_CLIENT_ID", "h")
     monkeypatch.setenv("GITHUB_CLIENT_SECRET", "hs")
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://test")
+    monkeypatch.delenv("FRONTEND_BASE_URL", raising=False)
     monkeypatch.setenv("ADMIN_EMAILS", "")
     monkeypatch.setenv("SESSION_SIGNING_KEY", "test-signing-key")
     yield
@@ -126,7 +127,7 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
             follow_redirects=False,
         )
     assert resp.status_code == 302
-    assert resp.headers["location"] == "/"
+    assert resp.headers["location"] == "http://test/"
     assert "sid=" in resp.headers.get("set-cookie", "")
 
     row = await aconn.fetchrow("SELECT user_id, email, role FROM users WHERE email='yo@x'")
@@ -134,6 +135,56 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
     assert row["role"] == "user"
     s = await aconn.fetchrow("SELECT sid_hash FROM sessions WHERE user_id=$1", row["user_id"])
     assert s is not None
+
+
+@pytest.mark.asyncio
+async def test_successful_login_redirects_to_the_frontend_origin_when_it_differs(auth_client, monkeypatch):
+    """In local dev the SPA runs on Vite's own dev-server port, separate from
+    this API, so the post-login Location header must name that origin; a
+    bare relative path would resolve against this API and land on a route
+    only the SPA serves."""
+    from api.routers import auth as auth_mod
+
+    monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
+    async def fake_userinfo(client, token, provider):
+        return {
+            "sub": "google-sub-dev",
+            "email": "dev@x",
+            "email_verified": True,
+            "name": "Dev",
+            "avatar_url": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps(
+        {"state": "s", "verifier": "v", "next": "/agencies/1/ask", "provider": "google"}
+    )
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "http://localhost:5173/agencies/1/ask"
+
+
+@pytest.mark.asyncio
+async def test_failed_login_redirects_to_the_frontend_origin_when_it_differs(auth_client, monkeypatch):
+    """Failure redirects back to ``/login`` carry the frontend origin too, or
+    a failed dev sign-in strands the browser on the backend."""
+    monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
+    resp = await auth_client.get(
+        "/api/auth/google/callback?code=abc&state=mismatch",
+        cookies={"oauth_tx": "garbage"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "http://localhost:5173/login?error=state"
 
 
 @pytest.mark.asyncio
@@ -538,7 +589,7 @@ async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(a
         follow_redirects=False,
     )
     assert resp.status_code == 302
-    assert resp.headers["location"] == "/"
+    assert resp.headers["location"] == "http://test/"
     assert "error=" not in resp.headers["location"]
 
 
@@ -562,7 +613,7 @@ async def test_a_github_error_body_fails_the_login_like_a_provider_outage(auth_c
             follow_redirects=False,
         )
     assert resp.status_code == 302
-    assert resp.headers["location"].startswith("/login?error=provider_down")
+    assert resp.headers["location"].startswith("http://test/login?error=provider_down")
     row = await aconn.fetchrow(
         "SELECT provider, meta::text AS meta FROM login_events WHERE kind='login_failed' ORDER BY event_id DESC LIMIT 1"
     )
@@ -589,5 +640,5 @@ async def test_provider_failure_keeps_next_for_the_retry(auth_client):
         )
     assert resp.status_code == 302
     location = resp.headers["location"]
-    assert location.startswith("/login?error=provider_down&next=")
+    assert location.startswith("http://test/login?error=provider_down&next=")
     assert location.endswith(quote(destination, safe=""))
