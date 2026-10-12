@@ -184,6 +184,28 @@ def sanitize_next(value: str | None) -> str:
     return path
 
 
+def _frontend_url(path: str) -> str:
+    """Prefix a same-origin relative path (from :func:`sanitize_next` or a
+    literal ``/login?...``) with the SPA's own origin, so the redirect's
+    Location header resolves there instead of wherever this API happens to
+    be running.
+
+    Both vars are read live (like ``_require_sso_configured``), not frozen
+    at import time like the module-level ``PUBLIC_BASE_URL`` above: in the
+    full test suite, some other test module imports ``api.routers.auth``
+    (and so freezes that constant to its real-environment default) before
+    this file's own fixture ever runs, and a frozen read here would silently
+    ignore a test's ``monkeypatch.setenv("PUBLIC_BASE_URL", ...)``.
+    FRONTEND_BASE_URL defaults to PUBLIC_BASE_URL (a no-op there) because
+    production serves the built SPA from this same API process, so the two
+    origins coincide; local dev is the one case they differ, since the SPA
+    runs on Vite's own dev-server port, separate from this API.
+    """
+    public_base = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+    base = os.environ.get("FRONTEND_BASE_URL", public_base).rstrip("/")
+    return f"{base}{path}"
+
+
 @router.get("/{provider}/login")
 async def login(provider: str, request: Request, next: str = "/") -> RedirectResponse:
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
@@ -464,7 +486,7 @@ async def _fail_login(
     url = f"/login?error={reason}"
     if next_url:
         url += f"&next={quote(sanitize_next(next_url), safe='')}"
-    return RedirectResponse(url=url, status_code=302)
+    return RedirectResponse(url=_frontend_url(url), status_code=302)
 
 
 @router.get("/{provider}/callback")
@@ -525,7 +547,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         return await _fail_login(conn, request, provider, "local_account_conflict", tx.get("next"))
 
     next_url = sanitize_next(tx.get("next"))
-    resp = RedirectResponse(url=next_url, status_code=302)
+    resp = RedirectResponse(url=_frontend_url(next_url), status_code=302)
     _set_session_cookie(resp, sid)
     resp.delete_cookie(TX_COOKIE, path="/")
     return resp
