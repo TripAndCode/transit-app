@@ -7,8 +7,10 @@ inputs:
   container-name:
     description: >-
       Prefix identifying the caller. The pull request (or ref) is appended, so
-      concurrent jobs get separate containers while successive runs of one
-      pull request keep reusing — and reclaiming — the same one.
+      successive runs of one pull request keep reusing — and reclaiming — the
+      same container. Concurrent jobs only get separate containers if they
+      pass distinct prefixes; a matrix job must vary this input per shard
+      (see container-name.sh), since every shard otherwise shares one scope.
     required: true
 
 outputs:
