@@ -185,21 +185,14 @@ def sanitize_next(value: str | None) -> str:
 
 
 def _frontend_url(path: str) -> str:
-    """Prefix a same-origin relative path (from :func:`sanitize_next` or a
-    literal ``/login?...``) with the SPA's own origin, so the redirect's
-    Location header resolves there instead of wherever this API happens to
-    be running.
+    """Prefix a relative path from :func:`sanitize_next` (or a literal
+    ``/login?...``) with the SPA's origin. Production serves the SPA from
+    this API's own origin, so FRONTEND_BASE_URL defaults to PUBLIC_BASE_URL;
+    local dev runs it on Vite's separate port.
 
-    Both vars are read live (like ``_require_sso_configured``), not frozen
-    at import time like the module-level ``PUBLIC_BASE_URL`` above: in the
-    full test suite, some other test module imports ``api.routers.auth``
-    (and so freezes that constant to its real-environment default) before
-    this file's own fixture ever runs, and a frozen read here would silently
-    ignore a test's ``monkeypatch.setenv("PUBLIC_BASE_URL", ...)``.
-    FRONTEND_BASE_URL defaults to PUBLIC_BASE_URL (a no-op there) because
-    production serves the built SPA from this same API process, so the two
-    origins coincide; local dev is the one case they differ, since the SPA
-    runs on Vite's own dev-server port, separate from this API.
+    Both are read live rather than from the module-level PUBLIC_BASE_URL,
+    which freezes at first import -- in the full test suite that import
+    happens before any per-test ``monkeypatch.setenv``.
     """
     public_base = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
     base = os.environ.get("FRONTEND_BASE_URL", public_base).rstrip("/")

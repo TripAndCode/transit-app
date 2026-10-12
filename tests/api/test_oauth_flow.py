@@ -139,12 +139,9 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
 @pytest.mark.asyncio
 async def test_successful_login_redirects_to_the_frontend_origin_when_it_differs(auth_client, monkeypatch):
     """In local dev the SPA runs on Vite's own dev-server port, separate from
-    this API. A bare relative Location header would resolve against this
-    API's own origin instead, stranding the browser on a route only the SPA
-    serves (https://github.com/TripAndCode/transit-app -- reported as a raw
-    FastAPI 404 after Google SSO). FRONTEND_BASE_URL fixes that by giving the
-    redirect an explicit origin to resolve against when it differs from
-    PUBLIC_BASE_URL."""
+    this API, so the post-login Location header must name that origin; a
+    bare relative path would resolve against this API and land on a route
+    only the SPA serves."""
     from api.routers import auth as auth_mod
 
     monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
