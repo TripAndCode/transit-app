@@ -171,20 +171,49 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
     "analyze conn must pin JST" hit for real: a UTC-pinned connection
     mis-bucketed ~20% of rows relative to the JST-pinned API).
 
-    2026-01-01T16:30:00Z is 2026-01-02 01:30 JST - a different calendar day
-    in each timezone. agg_route_daily is seeded at exactly the UTC date
-    (2026-01-01); if check_agg_freshness's cutoff ever regressed from
-    `latest.astimezone(_JST).date()` back to a bare UTC `.date()`, live_max
-    would equal agg_max (both 2026-01-01) and the agency would NOT be
-    flagged stale. The JST-correct answer is one day ahead of the seeded
-    agg (2026-01-02), so this only passes with the JST conversion intact.
+    2026-01-01T20:30:00Z is 2026-01-02 05:30 JST - a different calendar day
+    in each timezone, and past the service-day cutover so it is service day
+    2026-01-02. agg_route_daily is seeded at exactly the UTC date
+    (2026-01-01); if check_agg_freshness's cutoff ever regressed to a bare UTC
+    `.date()`, live_max would equal agg_max (both 2026-01-01) and the agency
+    would NOT be flagged stale. The correct answer is one day ahead of the
+    seeded agg (2026-01-02), so this only passes with the JST conversion intact.
     """
     from pipeline.clickhouse import insert_updates
 
     insert_updates(
         ch_client,
         agency_id,
-        [("boundary.pb", "2026-01-01T16:30:00Z", "T1", "平日", "01:30", "44372", 1, 60)],
+        [("boundary.pb", "2026-01-01T20:30:00Z", "T1", "平日", "05:30", "44372", 1, 60)],
+    )
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES (%s, %s, %s, '平日', 60, 120, 1, 1, %s, 60)",
+            (agency_id, date(2026, 1, 1), "44372", "2026-01-01T20:30:00+00:00"),
+        )
+    pg_conn.commit()
+
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(stale) == 1
+    assert stale[0].agency_id == agency_id
+    assert stale[0].agg_max_day == date(2026, 1, 1)
+    assert stale[0].live_max_completed_day == date(2026, 1, 2)  # JST date, not the UTC 2026-01-01
+
+
+def test_check_agg_freshness_files_a_post_midnight_capture_under_its_service_day(pg_conn, ch_client, agency_id):
+    """A feed that stops at 01:30 JST on 01-02 has delivered service day 01-01
+    in full; its aggregates end on 01-01 and are current. Comparing the capture's
+    calendar date (01-02) to the aggregate's service date would call them stale
+    on every run."""
+    from pipeline.clickhouse import insert_updates
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("late.pb", "2026-01-01T16:30:00Z", "T1", "平日", "01:30", "44372", 1, 60)],  # 01:30 JST on 01-02
     )
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -195,12 +224,7 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
         )
     pg_conn.commit()
 
-    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
-
-    assert len(stale) == 1
-    assert stale[0].agency_id == agency_id
-    assert stale[0].agg_max_day == date(2026, 1, 1)
-    assert stale[0].live_max_completed_day == date(2026, 1, 2)  # JST date, not the UTC 2026-01-01
+    assert check_agg_freshness(pg_conn, ch_client, [agency_id]) == []
 
 
 def test_check_agg_freshness_falls_back_to_latest_completed_day_when_today_has_rows(pg_conn, ch_client, agency_id):

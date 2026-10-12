@@ -12,6 +12,7 @@ import {
   type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
@@ -229,6 +230,10 @@ export function AdminAgenciesPage() {
   // null = closed; undefined = new; AdminAgency = editing
   const [editing, setEditing] = useState<AdminAgency | undefined | null>(null);
 
+  /** The name a mutation was run for; the id stands in if the row is gone. */
+  const agencyLabel = (id: number | undefined) =>
+    agencies?.find((a) => a.agency_id === id)?.agency_name ?? `#${id}`;
+
   const healthById = new Map((health ?? []).map((h) => [h.agency_id, h]));
 
   const filtered = (agencies ?? []).filter((a) => {
@@ -310,6 +315,8 @@ export function AdminAgenciesPage() {
         <span style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} role="presentation">
           <AdminButton
             variant="secondary"
+            disabled={a.deleted_at != null}
+            title={a.deleted_at == null ? undefined : t("admin.agencies.action_edit_disabled_hint")}
             onClick={() => {
               create.reset();
               patch.reset();
@@ -373,6 +380,20 @@ export function AdminAgenciesPage() {
       {!!healthError && (
         <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{t("admin.agencies.health_error")}</div>
       )}
+      {/* The drawer closes as soon as disable/restore is confirmed, so a
+          failed mutation has to surface here or it is never seen. */}
+      {del.error != null && (
+        <ErrorBanner
+          error={del.error}
+          prefix={t("admin.agencies.disable_failed", { name: agencyLabel(del.variables) })}
+        />
+      )}
+      {restore.error != null && (
+        <ErrorBanner
+          error={restore.error}
+          prefix={t("admin.agencies.restore_failed", { name: agencyLabel(restore.variables) })}
+        />
+      )}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
 
       <DataTable
@@ -382,6 +403,7 @@ export function AdminAgenciesPage() {
         rowLabel={(a) => a.agency_name}
         caption={t("admin.agencies.table_label")}
         emptyLabel={t("admin.agencies.empty")}
+        settled={agencies != null}
         onOpen={(a) => setOpenedId(a.agency_id)}
         activeRowKey={openedId == null ? null : String(openedId)}
         savedViews={[
@@ -403,10 +425,14 @@ export function AdminAgenciesPage() {
             onClose={() => setOpenedId(null)}
             disablePending={del.isPending && del.variables === opened.agency_id}
             onDisable={(id) => {
+              // One failure banner at a time: starting either action drops
+              // the other's earlier failure (the same action resets itself).
+              restore.reset();
               del.mutate(id);
               setOpenedId(null);
             }}
             onRestore={(id) => {
+              del.reset();
               restore.mutate(id);
               setOpenedId(null);
             }}

@@ -27,6 +27,20 @@ import "../styles/overview.css";
 
 type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 
+/** The hour (0-23) and optional ISO weekday (1-7) the breakdown query accepts.
+ *  A URL value outside those ranges (hand-edited, or from a stale link) is no
+ *  selection at all: the request would be rejected and the modal would have
+ *  nothing to show. */
+function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; dow: number | null } | null {
+  if (!/^\d+$/.test(hourParam)) return null;
+  const hour = Number(hourParam);
+  if (hour > 23) return null;
+  if (dowParam === "") return { hour, dow: null };
+  if (!/^\d+$/.test(dowParam)) return null;
+  const dow = Number(dowParam);
+  return dow >= 1 && dow <= 7 ? { hour, dow } : null;
+}
+
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
@@ -44,9 +58,7 @@ export function OverviewTab() {
   const [peakHourParam] = useUrlState<string>("peak_hour", "");
   const [peakDowParam] = useUrlState<string>("peak_dow", "");
   const patchUrl = useUrlPatch();
-  const peakHourSel = peakHourParam
-    ? { hour: Number(peakHourParam), dow: peakDowParam ? Number(peakDowParam) : null }
-    : null;
+  const peakHourSel = parsePeakHourSel(peakHourParam, peakDowParam);
   function setPeakHourSel(next: { hour: number; dow: number | null } | null) {
     patchUrl({
       peak_hour: next ? String(next.hour) : null,
@@ -231,6 +243,8 @@ export function OverviewTab() {
         <PeakHourModal
           data={peakBreakdown.data ?? null}
           loading={peakBreakdown.isLoading}
+          error={peakBreakdown.error}
+          onRetry={() => void peakBreakdown.refetch()}
           onClose={() => setPeakHourSel(null)}
         />
       )}

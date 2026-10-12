@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import "../i18n";
 import { PeakHourRibbon } from "./PeakHourRibbon";
@@ -108,5 +108,35 @@ describe("PeakHourRibbon", () => {
     const { getByText } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 17, peak_avg_min: 3.3 }} />);
     expect(getByText("Peak 17:00–18:00 (3.3 min average)")).toBeTruthy();
     expect(getByText("Shaded: hours above the day's average")).toBeTruthy();
+  });
+
+  describe("bar clicks inside a clickable card", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 8 ? 6 : h === 3 ? null : 2));
+    function setup() {
+      const onClick = vi.fn();
+      const onHourClick = vi.fn();
+      const { container } = render(
+        <PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} onClick={onClick} onHourClick={onHourClick} />,
+      );
+      const svg = container.querySelector("svg")!;
+      svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: W, height: H, right: W, bottom: H, x: 0, y: 0, toJSON: () => ({}) });
+      return { svg, onClick, onHourClick, container };
+    }
+    const xOfHour = (h: number) => h * CELL_W + CELL_W / 2;
+
+    it("opens the hour breakdown only, not the card's own detail as well", () => {
+      const { svg, onClick, onHourClick } = setup();
+      fireEvent.click(svg, { clientX: xOfHour(8), clientY: 60 });
+      expect(onHourClick).toHaveBeenCalledTimes(1);
+      expect(onHourClick).toHaveBeenCalledWith(8);
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it("still opens the card's detail when the click lands on an hour with no data", () => {
+      const { svg, onClick, onHourClick } = setup();
+      fireEvent.click(svg, { clientX: xOfHour(3), clientY: 60 });
+      expect(onHourClick).not.toHaveBeenCalled();
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
   });
 });

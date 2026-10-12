@@ -26,7 +26,9 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "top_n": {
         "n": 10,
         "best_first": lambda out: out.get("metric", "avg_delay") == "on_time_rate",
-        "service_type": "all",
+        # No service_type: leaving it out keeps the request's own service filter,
+        # while an explicit "all" overrides that filter, so "all" is not the
+        # handler's default and must survive canonicalization.
     },
     "describe_data": {"limit": 50, "offset": 0, "order": "desc"},
     "time_series": {"granularity": "day"},

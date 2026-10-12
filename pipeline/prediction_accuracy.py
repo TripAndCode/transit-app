@@ -28,10 +28,10 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from pipeline.histogram import bucketize, n_buckets_for
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
 
-# Every `updates` timestamp/date this codebase buckets by civil day uses
-# Asia/Tokyo (see pipeline.db.build_dedup_ch_sql's own `toDate(..., 'Asia/
-# Tokyo')` note) -- the static schedule's `scheduled_time` is a JST
+# Every `updates` timestamp/date this codebase buckets by day uses Asia/Tokyo
+# (see pipeline.service_day) -- the static schedule's `scheduled_time` is a JST
 # service-day-local time, so combining it with `date` needs the same zone to
 # produce a correct absolute instant.
 _JST = ZoneInfo("Asia/Tokyo")
@@ -67,10 +67,9 @@ def _parse_scheduled_time(value: _time | str) -> _time:
     typed time value; a caller that already has a real `datetime.time` (a
     test fixture, or a future caller reading Postgres's typed
     `_analyze_deduped.scheduled_time` instead) is passed through unchanged.
-    Extended-hour GTFS notation (">=24:00:00") never reaches `updates` at
-    all -- see `pipeline.strategies._time.normalize_departure_time`'s
-    docstring -- so every string this sees parses as a plain "H:MM[:SS]"
-    time-of-day.
+    Stop events with a NULL `scheduled_time` (extended-hour GTFS notation
+    ">=24:00:00", or no static match) are filtered out of the query, so every
+    string this sees parses as a plain "H:MM[:SS]" time-of-day.
     """
     if isinstance(value, _time):
         return value
@@ -80,13 +79,19 @@ def _parse_scheduled_time(value: _time | str) -> _time:
 
 def scheduled_departure_at(service_date: _date, scheduled_time: _time | str) -> datetime:
     """Absolute scheduled-departure instant for a stop event: the static
-    schedule's `scheduled_time` combined with its JST service `date` (the
-    same pair `pipeline.db.build_dedup_ch_sql`'s dedup groups by), made
+    schedule's `scheduled_time` combined with its service `date` (the same
+    pair `pipeline.db.build_dedup_ch_sql`'s dedup groups by), made
     timezone-aware in Asia/Tokyo so it can be diffed directly against a
     (UTC) `captured_at`. `scheduled_time` may be a `datetime.time` or the
     raw ClickHouse string form -- see :func:`_parse_scheduled_time`.
+
+    A service day runs past midnight (:mod:`pipeline.service_day`), so a
+    departure whose clock time is before the cutover hour leaves on the next
+    calendar day of its service date.
     """
-    return datetime.combine(service_date, _parse_scheduled_time(scheduled_time), tzinfo=_JST)
+    clock = _parse_scheduled_time(scheduled_time)
+    day = service_date + timedelta(days=1) if clock.hour < SERVICE_DAY_CUTOVER_HOURS else service_date
+    return datetime.combine(day, clock, tzinfo=_JST)
 
 
 def prediction_error(

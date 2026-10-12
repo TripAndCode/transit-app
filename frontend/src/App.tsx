@@ -12,6 +12,7 @@ import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { Sidebar } from "./components/Sidebar";
 import { NavPendingProvider } from "./components/navPending";
+import { PrintFrame } from "./components/PrintFrame";
 import "./styles/viewTransitions.css";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
@@ -42,6 +43,7 @@ export default function App() {
       <NavPendingProvider>
         <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
           <CommandPalette />
+          <PrintFrame />
           <Sidebar />
           <main ref={mainRef} className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
             {agencyIdNum != null && <TopBar />}

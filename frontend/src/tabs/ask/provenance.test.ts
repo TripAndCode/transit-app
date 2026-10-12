@@ -4,7 +4,7 @@ import {
   conditionsLabel,
   formatWindow,
   provenancePath,
-  sampleCount,
+  resultRowCount,
   toolLabel,
 } from "./provenance";
 
@@ -59,21 +59,21 @@ describe("formatWindow", () => {
   });
 });
 
-describe("sampleCount", () => {
+describe("resultRowCount", () => {
   it("returns null for a null result", () => {
-    expect(sampleCount(null)).toBeNull();
+    expect(resultRowCount(null)).toBeNull();
   });
 
   it("counts table rows", () => {
-    expect(sampleCount({ rows: [[1], [2], [3]] })).toBe(3);
+    expect(resultRowCount({ rows: [[1], [2], [3]] })).toBe(3);
   });
 
   it("counts series points when there are no rows", () => {
-    expect(sampleCount({ series: [{ date: "2026-01-01" }, { date: "2026-01-02" }] })).toBe(2);
+    expect(resultRowCount({ series: [{ date: "2026-01-01" }, { date: "2026-01-02" }] })).toBe(2);
   });
 
   it("returns null for a kv/text result with neither", () => {
-    expect(sampleCount({})).toBeNull();
+    expect(resultRowCount({})).toBeNull();
   });
 });
 

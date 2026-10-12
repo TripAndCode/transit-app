@@ -92,3 +92,77 @@ def test_a_real_trailing_comment_is_still_stripped():
     or kana parked in a trailing comment starts failing the lint."""
     lines = ["<div>{label}</div>  // 日本語のコメント"]
     assert lint.find_violations(lines) == []
+
+
+def test_a_file_that_is_not_utf8_is_a_violation(tmp_path):
+    """Shift_JIS source is the file most likely to hold hardcoded Japanese;
+    skipping it silently would exempt exactly what the lint exists to catch."""
+    bad = tmp_path / "Legacy.tsx"
+    bad.write_bytes('const label = "曜日";\n'.encode("shift_jis"))
+    assert rules(lint.lint_file(bad)) == [(0, "unreadable")]
+
+
+def test_a_missing_file_is_a_violation(tmp_path):
+    assert rules(lint.lint_file(tmp_path / "gone.tsx")) == [(0, "unreadable")]
+
+
+def test_a_utf8_file_is_linted_normally(tmp_path):
+    ok = tmp_path / "Fine.tsx"
+    ok.write_text('const label = "曜日";\n', encoding="utf-8")
+    assert rules(lint.lint_file(ok)) == [(1, "kana")]
+
+
+def test_flags_string_literal_inside_braces():
+    lines = [
+        '<button aria-label={"Close dialog"}>\n',
+        "<button title={`Open`}>\n",
+        "<input placeholder={'Search'} />\n",
+        '<button aria-label={ "Close dialog" }>\n',
+    ]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-attribute") for i in range(1, 5)]
+
+
+def test_flags_other_aria_text_attributes():
+    lines = [
+        '<div aria-description="Details" />\n',
+        '<div aria-roledescription="Slide" />\n',
+        '<div aria-valuetext="Half full" />\n',
+        '<div aria-placeholder="Pick one" />\n',
+    ]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-attribute") for i in range(1, 5)]
+
+
+def test_allows_template_with_interpolation_and_call_expressions():
+    lines = [
+        "<button title={`${t(a)} ${b}`}>\n",
+        '<button aria-label={cond ? t("a") : t("b")}>\n',
+        "<button aria-label={label}>\n",
+    ]
+    assert lint.find_violations(lines) == []
+
+
+def test_non_text_aria_attributes_are_not_flagged():
+    lines = ['<div aria-live="polite" aria-hidden="true" aria-orientation="vertical" />\n']
+    assert lint.find_violations(lines) == []
+
+
+def test_flags_capitalised_english_jsx_text():
+    lines = ["<button>Save</button>\n", "<p>No results found.</p>\n", "<span>Open dialog</span>\n"]
+    assert rules(lint.find_violations(lines)) == [(i, "jsx-text") for i in range(1, 4)]
+
+
+def test_allows_jsx_text_that_is_not_prose():
+    lines = [
+        "<span>{t('a')}</span>\n",
+        "<span>42%</span>\n",
+        "<span>{count} items</span>\n",
+        "<span>·</span>\n",
+        "const x = useState<string>('A');\n",
+        "type P = Array<Foo>;\n",
+    ]
+    assert lint.find_violations(lines) == []
+
+
+def test_jsx_text_with_i18n_ignore_marker_is_ignored():
+    lines = ["<option>Gemini</option> {/* i18n-ignore: brand name */}\n"]
+    assert lint.find_violations(lines) == []

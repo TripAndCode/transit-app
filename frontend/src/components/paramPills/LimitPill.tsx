@@ -49,6 +49,9 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
   function commit(next: number) {
     if (!Number.isFinite(next)) return;
     const clamped = Math.max(min, Math.min(max, Math.round(next)));
+    // The parent value may not change (already at the bound), so the
+    // render-time re-sync would never run; show the committed value here.
+    setDraft(String(clamped));
     onChange(clamped);
   }
 

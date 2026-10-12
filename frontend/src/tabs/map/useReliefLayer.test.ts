@@ -4,19 +4,18 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { makeMockMap, type MockMap } from "../../test/mockMap";
 import { RELIEF_LAYER, RELIEF_SOURCE, reliefHeight, reliefScale, type ReliefPoint } from "./reliefLayer";
 import { useReliefLayer } from "./useReliefLayer";
-import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import { TIMELINE_LAYER } from "./useTimelineLayers";
 
 const POINTS: ReliefPoint[] = [{ stop_id: "S1", lon: 132.4, lat: 34.4, delay_min: 2 }];
 const LATER: ReliefPoint[] = [{ ...POINTS[0], delay_min: 6 }];
-const LIVE = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
+const LIVE = [LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
 
 type Source = { data: GeoJSON.FeatureCollection; setData: (d: unknown) => void };
 
 function liveMap(): MockMap {
   return makeMockMap([
     { id: "basemap", type: "raster" },
-    { id: LIVE_TRIPS_CLUSTER_LAYER, type: "circle" },
     { id: LIVE_TRIPS_LAYER, type: "circle" },
     { id: LIVE_TRIPS_LABEL_LAYER, type: "symbol" },
   ]);

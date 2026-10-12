@@ -58,7 +58,8 @@ but are not plotted.
   back to `trip_headsign` when older static data has no direction field.
 - Selecting a trip emphasizes its latest report and reported stop trail.
 - Selecting **All routes** removes the route line and retains all trip markers.
-- Trips at the same map position cluster into a count marker until zoomed in.
+- Trips reported at the exact same stop show as one marker labelled with the
+  overlap count; the selected trip (if any) is always the one drawn on top.
 - Clicking a marker shows route, delay, reported stop, and update age.
 - The right panel shows stop-by-stop delay values, a trend chart, and the
   largest delay growth/recovery insight for the selected trip.
@@ -84,7 +85,7 @@ observations to a replay of one whole service day, one hour at a time
   time rather than incrementing per tick, so a delayed timer tick lands on the
   frame the clock says it is instead of drifting behind.
 - With no `date` given, the endpoint resolves to the agency's latest observed
-  JST day. Frames cover the 05:00–24:00 service window in 60-minute buckets
+  service day. Frames cover the 05:00–24:00 service window in 60-minute buckets
   (the endpoint also accepts a 15-minute step; the UI does not yet expose
   choosing it); each bucket needs at least 3 observations at a stop before
   that stop is drawn, and a frame is capped at 400 points.
@@ -128,8 +129,8 @@ than hardcoding `updates`.
 | File | Role |
 |---|---|
 | `frontend/src/tabs/MapTab.tsx` | Operations workspace, MapLibre lifecycle, marker interactions, freshness, and route selection |
-| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Clustered trip markers, selected-route shape, and selected-trip report trail |
-| `frontend/src/tabs/map/currentRouteStatus.ts` | Current route aggregation and baseline classification |
+| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Trip markers (stacked by exact reported stop), selected-route shape, and selected-trip report trail |
+| `frontend/src/tabs/map/selectedRouteDelay.ts` | Mean live delay of the selected route, which keys the route overlay's severity colour |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
 | `frontend/src/tabs/map/FilterDock.tsx` | Route/pattern filter control and the day-playback toggle |
@@ -154,8 +155,8 @@ Automated coverage:
   compaction, schedule-time normalization, and static stop enrichment.
 - `frontend/src/tabs/map/useOperationsMapLayers.test.ts` verifies marker
   filtering, delay labels, route coloring, and overlay removal.
-- `frontend/src/tabs/map/currentRouteStatus.test.ts` verifies baseline and
-  no-baseline classification, including service-type matching.
+- `frontend/src/tabs/map/selectedRouteDelay.test.ts` verifies the selected
+  route's mean delay, including the no-route and no-rows cases.
 - `frontend/src/tabs/map/OperationsTripPanel.test.tsx` verifies direction,
   concurrent-trip selection, and stop progression.
 - `frontend/src/routes/legacyRedirects.test.tsx` verifies the `operations`,

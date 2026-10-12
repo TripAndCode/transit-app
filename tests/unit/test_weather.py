@@ -686,6 +686,30 @@ def test_ingest_weather_off_switch_touches_neither_the_source_nor_the_db(monkeyp
     assert weather.ingest_weather(_RefusingConn(), days=3, today=date(2026, 4, 4)) == (0, 0, [])
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [("override", "source=override"), ("env", "source=env (WEATHER_INGEST_ENABLED)")],
+)
+def test_ingest_weather_off_log_names_the_source_that_disabled_it(monkeypatch, caplog, source, expected):
+    """An admin override outranks the env var, so the skip log must point the
+    operator at whichever control actually switched ingest off."""
+    import pipeline.weather as weather
+    from pipeline.flags import FlagState
+
+    monkeypatch.setattr(
+        weather,
+        "get_flag_state",
+        lambda key: FlagState(
+            key=key, value=False, source=source, env_default=True, updated_by=None, updated_at=None, reason=None
+        ),
+    )
+    with caplog.at_level("INFO", logger=weather.logger.name):
+        assert weather.ingest_weather(object(), days=3, today=date(2026, 4, 4)) == (0, 0, [])
+
+    assert expected in caplog.text
+    assert "is not set" not in caplog.text
+
+
 class _JSONResp:
     def __init__(self, body: bytes):
         self._body = body

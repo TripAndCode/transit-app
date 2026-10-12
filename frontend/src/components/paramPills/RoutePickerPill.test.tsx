@@ -75,6 +75,22 @@ describe("RoutePickerPill popover direction", () => {
   });
 });
 
+describe("RoutePickerPill accessible name", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is the label alone when nothing is selected", () => {
+    mockRoutes();
+    setup();
+    expect(screen.getByRole("button", { name: "Route" })).toBeInTheDocument();
+  });
+
+  it("includes the selected route so a screen reader announces the choice", () => {
+    mockRoutes();
+    setup({ value: "J20" });
+    expect(screen.getByRole("button", { name: "Route: 中筒井線" })).toBeInTheDocument();
+  });
+});
+
 describe("RoutePickerPill options", () => {
   afterEach(() => vi.restoreAllMocks());
 

@@ -59,9 +59,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
 - `run_full_ci.sh` mirrors only the backend jobs (`backend-static`, and the `test`
-  shards run as one unsharded suite) and does not measure pytest coverage by default, matching `ci.yml`, which measures backend coverage on `main`
-  pushes only since nothing gates on that number. Pass `COVERAGE=1` when the number
-  itself is what you want. The instrumentation adds minutes per run, and this gate is
+  shards run as one unsharded suite) and does not measure pytest coverage by default, matching `ci.yml`, whose backend `coverage` job runs only on
+  `main` pushes; the squash-merge's CI-skip trailer suppresses that run, so the number
+  exists only when you pass `COVERAGE=1` here. Nothing gates on it. The instrumentation adds minutes per run, and this gate is
   often paid more than once per branch. Frontend coverage does gate: CI's `frontend`
   job runs `npm run test:coverage` against `vitest.config.ts`'s thresholds on every PR.
 

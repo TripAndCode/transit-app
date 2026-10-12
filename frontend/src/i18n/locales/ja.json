@@ -36,7 +36,7 @@
     "station_figure_unusual": "要注意 {{n}}"
   },
   "compare": {
-    "mode_periods": "平日と土日祝",
+    "mode_periods": "平日と土日",
     "mode_agencies": "事業者どうし",
     "bars": {
       "period_label": "期間",
@@ -179,6 +179,7 @@
     "band_night": "夜",
     "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
+    "detail_hide_grid": "曜日×時間帯の詳細を閉じる",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
     "no_data": "この路線の計測記録がまだありません。",
@@ -197,6 +198,7 @@
     "dow_sat": "土",
     "dow_sun": "日",
     "expand": "詳しく",
+    "expand_named": "{{title}}を拡大",
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",
@@ -392,10 +394,12 @@
     "no": "いいえ",
     "unit_min": "分",
     "unit_sec": "秒",
+    "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
     "range_separator": "〜",
     "list_separator": "・",
+    "label_value": "{{label}}：{{value}}",
     "language_aria": "言語",
     "language_switch_error": "言語を切り替えられませんでした。接続を確認して再度お試しください。",
     "theme_aria": "外観",
@@ -470,7 +474,9 @@
       "input_label": "APIキー",
       "remove": "削除",
       "rejected": "キーが拒否されました。確認して再度お試しください。",
-      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
+      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。",
+      "save_error": "キーを保存できませんでした。接続を確認して再度お試しください。",
+      "status_unavailable": "キーの状態を読み込めませんでした。"
     },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
@@ -526,6 +532,7 @@
     "this_device": "この端末",
     "session_sign_out": "サインアウト",
     "session_sign_out_aria": "このセッションをサインアウト",
+    "sessions_load_error": "セッションを読み込めませんでした。",
     "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
@@ -743,7 +750,8 @@
         "sql": "確定（集計から直接算出）",
         "llm": "生成AIによる要約（既存の取得結果のみを参照）"
       },
-      "sample_count": "観測 {{count}}件"
+      "row_count_one": "{{count}}行",
+      "row_count_other": "{{count}}行"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -788,7 +796,7 @@
       "on_time_pct": "定時率",
       "late5_count": "5分超回数",
       "heijitsu_min": "平日(分)",
-      "kyujitsu_min": "土日祝(分)",
+      "kyujitsu_min": "土日(分)",
       "abs_delta": "遅延差（絶対値）",
       "signed_delta": "遅延差（符号付き）",
       "stop_sequence": "停留所順",
@@ -964,7 +972,7 @@
       "on_time": "定時率",
       "worst_5min": "5分超の遅延",
       "trend": "トレンド",
-      "compare_ranking": "平日・土日祝の差",
+      "compare_ranking": "平日・土日の差",
       "dow_weekday": "平日の系統別遅延",
       "dow_weekend": "土日祝の系統別遅延",
       "dwell_run": "滞留・走行時間",
@@ -992,8 +1000,8 @@
     },
     "confidence_low_mark": "データ少",
     "direction": {
-      "weekend_higher": "土日祝>平日",
-      "weekday_higher": "平日>土日祝"
+      "weekend_higher": "土日>平日",
+      "weekday_higher": "平日>土日"
     },
     "hint": {
       "title": "レポートの読み分け",
@@ -1023,6 +1031,8 @@
       "delay_label": "遅延:",
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
+      "hour_filter_aria": "{{hour}}時で絞り込む",
+      "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
       "ramp_max": "{{min}}分以上",
@@ -1060,6 +1070,13 @@
       "brush_aria": "日次チャートの期間選択。矢印キーでカーソル移動、Shift+矢印キーで範囲を拡張、Enterで適用します。",
       "brush_range": "{{from}} 〜 {{to}}",
       "severe_band_label": "重大 ({{min}}分以上)",
+      "svg_aria_week": "週次平均遅延チャート",
+      "svg_aria_month": "月次平均遅延チャート",
+      "worst_day_label_week": "最も遅い週",
+      "worst_day_label_month": "最も遅い月",
+      "bucket_date": "{{date}}",
+      "bucket_date_week": "{{date}}の週",
+      "bucket_date_month": "{{date}}始まりの月",
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
@@ -1077,7 +1094,7 @@
       },
       "needs_arrivals": "遅れの内訳には到着時刻が必要です",
       "see_when": "いつ遅れるかを見る",
-      "compare_day_types": "平日と土日祝を比べる"
+      "compare_day_types": "平日と土日を比べる"
     },
     "headway_quality": {
       "title": "運行間隔の質",
@@ -1145,7 +1162,7 @@
       "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
       "worst_5min": "5分を超える遅れが多い系統を抽出します。",
       "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
-      "compare_ranking": "路線ごとの平日または土日祝の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。",
+      "compare_ranking": "路線ごとの平日または土日の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。",
       "dow_weekday": "平日の系統ごとの平均遅延です。",
       "dow_weekend": "土日祝の系統ごとの平均遅延です。",
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
@@ -1372,9 +1389,12 @@
       "add_button": "事業者を追加",
       "search_placeholder": "事業者名で検索",
       "empty": "該当する事業者がありません。",
+      "disable_failed": "{{name}}を無効化できませんでした。",
+      "restore_failed": "{{name}}を復元できませんでした。",
       "col_name": "事業者名",
       "status_deleted": "削除済",
       "action_edit": "編集",
+      "action_edit_disabled_hint": "編集するには、先に事業者を復元してください。",
       "form_title_add": "事業者を追加",
       "form_title_edit": "事業者を編集",
       "form_name": "事業者名",
@@ -1492,7 +1512,8 @@
       },
       "export": {
         "csv": "CSVエクスポート",
-        "loading": "エクスポート中…"
+        "loading": "エクスポート中…",
+        "truncated": "エクスポートには新しい順に{{count}}件のみが含まれ、それより古い該当分は含まれていません。期間を絞って再度エクスポートしてください。"
       }
     },
     "flags": {
@@ -1526,7 +1547,8 @@
         "weatherIngestEnabled": "気象: 観測データ取り込み",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
-        "loginRequired": "アクセス: ログイン必須"
+        "loginRequired": "アクセス: ログイン必須",
+        "mlForecast": "ML予測"
       }
     },
     "table": {
@@ -1607,6 +1629,7 @@
       "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
       "alerts_title": "アラート",
       "alerts_none": "対応が必要な項目はありません。",
+      "section_unavailable": "このセクションを読み込めませんでした。",
       "alert_open": "開く",
       "alert": {
         "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",
@@ -1718,7 +1741,7 @@
     "nav_routes_sublabel": "どの路線が、どの時間帯に",
     "nav_time_sublabel": "ネットワーク全体で、いつ遅れるか",
     "nav_why_sublabel": "データで説明できること・できないこと",
-    "nav_compare_sublabel": "平日と土日祝、事業者どうしを比べる",
+    "nav_compare_sublabel": "平日と土日、事業者どうしを比べる",
     "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
     "group": {
@@ -1836,5 +1859,9 @@
     },
     "unapplied_note": "この画面では使いません：{{list}}",
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
+  },
+  "print": {
+    "generated_at": "作成日時 {{time}}",
+    "routes": "路線: {{names}}"
   }
 }

@@ -29,38 +29,27 @@ def test_aomori_parse_pb_matches_golden():
     )
 
 
-def test_aomori_strategy_matches_golden():
+def test_aomori_strategy_matches_golden(pg_conn):
     """The aomori_regex strategy must produce the same effective rows the
     legacy parse_pb does (modulo dropped fields the strategy never emits).
     """
-    # The strategy needs a DB connection only to look up trip_id_pattern;
-    # use the same conftest-managed test DB.
-    import os
-    import time
-
-    import psycopg2
-
+    # The strategy needs a DB connection only to look up trip_id_pattern.
+    # `pg_conn` resets every table when the test ends, so the agency row
+    # committed here does not outlive it.
     from pipeline.strategies import aomori_regex
     from pipeline.strategies._pb import decode_feed_timestamp
 
-    conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    try:
-        with conn.cursor() as cur:
-            # Use unique feed_url to avoid conflicts when tests run sequentially
-            feed_url = f"http://aomori-test-{int(time.time())}.example.com/feed.pb"
-            cur.execute(
-                "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
-                ("青森市バス_test", feed_url),
-            )
-            aid = cur.fetchone()[0]
-        conn.commit()
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+            ("青森市バス_test", "http://aomori-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
 
-        raw = (FIX_DIR / "aomori_sample.pb").read_bytes()
-        captured_at = _ts("20260509", "TripUpdate_120000.pb")
-        rows = aomori_regex.parse_feed(raw, captured_at, "20260509/TripUpdate_120000.pb", aid, conn)
-    finally:
-        conn.rollback()
-        conn.close()
+    raw = (FIX_DIR / "aomori_sample.pb").read_bytes()
+    captured_at = _ts("20260509", "TripUpdate_120000.pb")
+    rows = aomori_regex.parse_feed(raw, captured_at, "20260509/TripUpdate_120000.pb", aid, pg_conn)
 
     expected_full = json.loads((FIX_DIR / "aomori_golden.json").read_text())
     feed_timestamp = decode_feed_timestamp(raw)

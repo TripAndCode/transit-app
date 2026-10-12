@@ -188,6 +188,18 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dash", "en"): "—",
     ("unsupported_tool", "ja"): "未対応のツール: {name}",
     ("unsupported_tool", "en"): "Unsupported tool: {name}",
+    ("follow_up_no_history", "ja"): (
+        "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+    ),
+    ("follow_up_no_history", "en"): (
+        "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+    ),
+    ("aggregate_not_ready", "ja"): (
+        "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"
+    ),
+    ("aggregate_not_ready", "en"): (
+        "Data for this view hasn't been prepared in this environment yet. Please try again later."
+    ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",
@@ -276,9 +288,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     # {route} is the route's display name, or route_code_fallback below.
     ("suggest_reason_anomaly", "ja"): "{route}の本日の平均遅延が普段より大幅に悪化しています（平均{avg_min}分）。",
     ("suggest_reason_anomaly", "en"): ("Average delay on {route} today is much worse than usual (avg {avg_min} min)."),
-    ("suggest_reason_trend_shift", "ja"): "{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_shift", "en"): (
-        "The delay pattern on {route} shifted partway through this week ({delta_min} min change)."
+    ("suggest_reason_trend_worsened", "ja"): "{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
+    ("suggest_reason_trend_worsened", "en"): (
+        "Delays on {route} worsened partway through this week ({delta_min} min change)."
+    ),
+    ("suggest_reason_trend_improved", "ja"): "{route}の遅延が今週の途中から改善しています（{delta_min}分の変化）。",
+    ("suggest_reason_trend_improved", "en"): (
+        "Delays on {route} improved partway through this week ({delta_min} min change)."
     ),
     ("suggest_reason_on_time_fallback", "ja"): "{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
     ("suggest_reason_on_time_fallback", "en"): "{route} has the worst on-time rate this week ({pct}% on time).",
@@ -1021,14 +1037,14 @@ _SERVICE_TYPE_MAP: dict[str, ServiceType] = {
 
 async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     metric = args.get("metric", "avg_delay")
-    # BUG-2 fix: card chips send "k" (matches gold eval canonical form); LLM
-    # direct calls use "n" (matches the TOOLS JSON schema).  Accept both, with
-    # "k" taking precedence so the user's slider value is always honoured.
+    # Card chips send "k" (the gold eval's canonical form); LLM direct calls
+    # use "n" (the TOOLS JSON schema). Accept both, with "k" taking precedence
+    # so the user's slider value is always honoured.
     n = int(args.get("k", args.get("n", 10)))
     best_first = bool(args.get("best_first", metric == "on_time_rate"))
 
-    # BUG-1 fix: if the chip/LLM supplies service_type, narrow ctx.service so
-    # compute_ranking / compute_worst_5min honour the filter.
+    # A chip/LLM-supplied service_type narrows ctx.service so compute_ranking /
+    # compute_worst_5min honour the filter.
     raw_service = args.get("service_type")
     if raw_service and raw_service in _SERVICE_TYPE_MAP:
         ctx = replace(ctx, service=_SERVICE_TYPE_MAP[raw_service])
@@ -1042,7 +1058,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
             lang=locale,
         )
     elif metric == "on_time_rate":
-        # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
+        # sort_order makes best_first=False yield the worst routes (ascending).
         sort_order = "desc" if best_first else "asc"
         rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
         # Display-only annotation (pipeline/stats.py) — does not change
@@ -1122,7 +1138,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     # ignores it (compute_trend_series doesn't take a route arg directly).
     route = args.get("route")
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-    # BUG-4 fix: read granularity from args (default "day") and forward it.
+    # Granularity comes from args (default "day") and is forwarded to the series.
     granularity = args.get("granularity", "day")
     series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity, ch=ch)
     days = series.get("days") or []
@@ -1371,12 +1387,12 @@ async def dispatch(
     human-readable ``summary`` field on the returned :class:`ToolResult`.
 
     ``ch`` is the ClickHouse client for handlers that read the live
-    `updates` table (Task 8) — ``route_stats``/``describe_data``'s
+    `updates` table — ``route_stats``/``describe_data``'s
     ClickHouse-backed kinds. Defaults to ``None`` so callers/tests that never
     exercise those specific paths don't need to construct a client; real
     request-serving callers always pass the real one.
     """
-    # BUG-1 fix: card-alias tools sent by the frontend map to canonical handler
+    # Card-alias tools sent by the frontend map to canonical handler
     # names. Keep aliases explicit here so the eval gold file can use the short
     # card names (on_time / trend / cmp_service) and live dispatch still works.
     _TOOL_ALIASES: dict[str, str] = {
@@ -1399,8 +1415,7 @@ async def dispatch(
     async with perf.timed_block(f"ask.tool.{tool_name}"):
         # Card templates use "route_code" as the arg name (matches the param
         # definition), but all handlers read "route".  Normalise before dispatch.
-        # "k" → "n" remapping is intentionally NOT done here — handlers accept both
-        # (BUG-2 fix).
+        # "k" → "n" remapping is intentionally NOT done here — handlers accept both.
         if "route_code" in arguments and "route" not in arguments:
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}

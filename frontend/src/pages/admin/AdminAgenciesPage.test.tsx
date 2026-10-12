@@ -13,6 +13,8 @@ const createReset = vi.fn();
 const patchReset = vi.fn();
 const delMutate = vi.fn();
 const restoreMutate = vi.fn();
+const delReset = vi.fn();
+const restoreReset = vi.fn();
 const probeMutate = vi.fn();
 const reanalyzeMutate = vi.fn();
 
@@ -68,8 +70,17 @@ const DIAGNOSTICS = {
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
 };
 
-let delState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
-let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
+/** Overrides fields of the agencies list query result; `null` keeps the fixture. */
+let agenciesOverride: { data?: undefined; isLoading?: boolean; error?: Error | null } | null = null;
+
+let delState: { isPending: boolean; variables: number | undefined; error?: Error } = {
+  isPending: false,
+  variables: undefined,
+};
+let restoreState: { isPending: boolean; variables: number | undefined; error?: Error } = {
+  isPending: false,
+  variables: undefined,
+};
 
 // Mock the admin API module
 vi.mock("../../api/admin", () => ({
@@ -96,11 +107,12 @@ vi.mock("../../api/admin", () => ({
     ],
     isLoading: false,
     error: null,
+    ...agenciesOverride,
   }),
   useCreateAgencyAdmin: () => ({ mutateAsync: createMutateAsync, isPending: false, error: null, reset: createReset }),
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
-  useDeleteAgency: () => ({ mutate: delMutate, ...delState }),
-  useRestoreAgency: () => ({ mutate: restoreMutate, ...restoreState }),
+  useDeleteAgency: () => ({ mutate: delMutate, reset: delReset, error: null, ...delState }),
+  useRestoreAgency: () => ({ mutate: restoreMutate, reset: restoreReset, error: null, ...restoreState }),
   useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
   useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
   useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
@@ -123,6 +135,7 @@ function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
 describe("AdminAgenciesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    agenciesOverride = null;
     createMutateAsync.mockResolvedValue({});
     patchMutateAsync.mockResolvedValue({});
     delState = { isPending: false, variables: undefined };
@@ -133,6 +146,18 @@ describe("AdminAgenciesPage", () => {
     wrap(<AdminAgenciesPage />);
     expect(screen.getByText("Aomori Bus")).toBeTruthy();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("disables Edit on a disabled agency, whose PATCH would 404, and keeps it on an active one", () => {
+    wrap(<AdminAgenciesPage />);
+    const editFor = (name: string) => {
+      const row = screen.getByText(name).closest("tr") as HTMLElement;
+      return within(row).getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    };
+    expect(editFor("Aomori Bus").disabled).toBe(false);
+    const deletedEdit = editFor("Deleted Bus");
+    expect(deletedEdit.disabled).toBe(true);
+    expect(deletedEdit.title).toMatch(/restore/i);
   });
 
   it("shows Add agency button", () => {
@@ -218,6 +243,51 @@ describe("AdminAgenciesPage", () => {
     expect(restoreMutate).toHaveBeenCalledWith(2);
   });
 
+  it("shows a failed disable on the page after its drawer has closed", () => {
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+  });
+
+  it("shows a failed restore on the page after its drawer has closed", () => {
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+  });
+
+  it("names the agency a failed disable was for", () => {
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.agencies.disable_failed", { name: "Aomori Bus" }));
+  });
+
+  it("names the agency a failed restore was for", () => {
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.agencies.restore_failed", { name: "Deleted Bus" }));
+  });
+
+  it("clears an earlier disable failure when a restore is started", async () => {
+    const user = userEvent.setup();
+    delState = { isPending: false, variables: 1, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Deleted Bus"));
+    await user.click(within(screen.getByLabelText("Agency details")).getByRole("button", { name: /^Restore$/ }));
+    expect(restoreMutate).toHaveBeenCalledWith(2);
+    expect(delReset).toHaveBeenCalled();
+  });
+
+  it("clears an earlier restore failure when a disable is started", async () => {
+    const user = userEvent.setup();
+    restoreState = { isPending: false, variables: 2, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    await user.type(drawer.getByLabelText(/type the agency name to confirm/i), "Aomori Bus");
+    await user.click(drawer.getByRole("button", { name: /^Disable$/ }));
+    expect(restoreReset).toHaveBeenCalled();
+  });
+
   it("narrows the list to behind-schedule agencies via the saved view", async () => {
     const user = userEvent.setup();
     wrap(<AdminAgenciesPage />);
@@ -239,6 +309,16 @@ describe("AdminAgenciesPage", () => {
     await user.type(screen.getByPlaceholderText("Search by name"), "Deleted");
     expect(screen.queryByText("Aomori Bus")).toBeNull();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("does not claim there are no agencies while loading or after a failed load", () => {
+    agenciesOverride = { data: undefined, isLoading: true, error: null };
+    const { unmount } = wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
+    unmount();
+    agenciesOverride = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAgenciesPage />);
+    expect(screen.queryByText(i18n.t("admin.agencies.empty"))).toBeNull();
   });
 
   it("shows an empty-state row when the search matches nothing", async () => {

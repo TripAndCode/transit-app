@@ -35,17 +35,13 @@ import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } fro
 import { useBasemapDim } from "./map/useBasemapDim";
 import { QueueResizer } from "./map/QueueResizer";
 import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
-import {
-  LIVE_TRIPS_CLUSTER_LAYER,
-  LIVE_TRIPS_LABEL_LAYER,
-  LIVE_TRIPS_LAYER,
-  useOperationsMapLayers,
-} from "./map/useOperationsMapLayers";
-import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER, useOperationsMapLayers } from "./map/useOperationsMapLayers";
+import { meanRouteDelaySec } from "./map/selectedRouteDelay";
 import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../utils/clockSkew";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
@@ -67,11 +63,6 @@ const DELAYED_TRIPS_CAP = 200;
 // sooner (e.g. an idle map with no live rows, or a system clock jump) --
 // scheduling only ever exact boundaries would otherwise never re-check.
 const STALENESS_SAFETY_TICK_MS = 60_000;
-
-/** Clusters stop expanding here: past it MapLibre's own clusterMaxZoom has
- *  already broken them into individual vehicles, so a further step would move
- *  the camera for nothing. */
-const CLUSTER_STEP_MAX_ZOOM = 16;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -102,7 +93,9 @@ function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation
 function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
   const age = now - new Date(timestamp).getTime();
-  if (!Number.isFinite(age) || age < 0) return "unknown";
+  // Rows this far ahead of the client clock are still drawn as live
+  // (filterLiveRows), so the badge judges them by the same allowance.
+  if (!Number.isFinite(age) || age < CLOCK_SKEW_ALLOWANCE_MS) return "unknown";
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
@@ -156,8 +149,8 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   // `route_focus_agency` guards against a stale `route_focus` value matching
-  // a different agency's route code after an agency switch, the same way
-  // the old `RouteSelection.agencyId` field did.
+  // a different agency's route code after an agency switch; it is carried as
+  // `RouteSelection.agencyId` and compared with the current agency below.
   const [routeFocusAgencyParam] = useUrlState<string>("route_focus_agency", "");
   const [routeFocusParam] = useUrlState<string>("route_focus", "");
   const patchUrl = useUrlPatch();
@@ -271,7 +264,6 @@ export function MapTab() {
     { header: "captured_at", value: (r) => r.captured_at },
   ];
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
-  const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
   // effectiveRoute only highlights matching markers and loads that route's shape.
   // It's independent of ctx.routes, which already scoped liveRows (and so every
@@ -280,7 +272,6 @@ export function MapTab() {
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;
-  const selectedSummary = activeSummaries.find((route) => route.route_code === effectiveRoute);
   const routeTrips = effectiveRoute
     ? liveRows.filter((trip) => trip.route_code === effectiveRoute)
     : [];
@@ -326,19 +317,6 @@ export function MapTab() {
 
   const onTripHoverEnd = useEffectEvent(() => setHoveredTripId(null));
 
-  const onClusterClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
-    const coordinates = event.features?.[0]?.geometry;
-    if (!mapRef.current || coordinates?.type !== "Point") return;
-    // A cluster steps in by a fixed amount rather than to the trip-inspect
-    // floor: the operator is asking "what is inside this puck", and jumping
-    // straight to street level would lose the surrounding clusters they are
-    // comparing it against.
-    inspectTrip(mapRef.current, coordinates.coordinates as [number, number], {
-      zoom: Math.min(mapRef.current.getZoom() + 2, CLUSTER_STEP_MAX_ZOOM),
-      pitch: restPitch,
-    });
-  });
-
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
     const created = createSafeMap(
@@ -352,21 +330,18 @@ export function MapTab() {
     );
     if (!created.map) return created.cleanup;
     const map: MLMap = created.map;
-    // top-right, not the default top-left: the legend now occupies top-left
-    // (see .ops-map-legend) and the two used to be squeezed into the same
-    // corner, forcing the legend to offset itself around the zoom buttons.
+    // top-right, not the default top-left: top-left holds the filter dock
+    // (.ops-dock) and the reference chip (.ops-map-ref), which would otherwise
+    // have to offset themselves around the zoom buttons.
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
     map.on("click", LIVE_TRIPS_LAYER, onTripClick);
     map.on("click", LIVE_TRIPS_LABEL_LAYER, onTripClick);
-    map.on("click", LIVE_TRIPS_CLUSTER_LAYER, onClusterClick);
     map.on("mouseenter", LIVE_TRIPS_LAYER, onEnter);
     map.on("mouseenter", LIVE_TRIPS_LABEL_LAYER, onEnter);
-    map.on("mouseenter", LIVE_TRIPS_CLUSTER_LAYER, onEnter);
     map.on("mouseleave", LIVE_TRIPS_LAYER, onLeave);
     map.on("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
-    map.on("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
     // mousemove, not mouseenter: crossing from one vehicle straight onto
     // another inside the same layer fires no new enter, so the card would
     // keep previewing the vehicle the pointer already left.
@@ -378,13 +353,10 @@ export function MapTab() {
     return () => {
       map.off("click", LIVE_TRIPS_LAYER, onTripClick);
       map.off("click", LIVE_TRIPS_LABEL_LAYER, onTripClick);
-      map.off("click", LIVE_TRIPS_CLUSTER_LAYER, onClusterClick);
       map.off("mouseenter", LIVE_TRIPS_LAYER, onEnter);
       map.off("mouseenter", LIVE_TRIPS_LABEL_LAYER, onEnter);
-      map.off("mouseenter", LIVE_TRIPS_CLUSTER_LAYER, onEnter);
       map.off("mouseleave", LIVE_TRIPS_LAYER, onLeave);
       map.off("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
-      map.off("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
       map.off("mousemove", LIVE_TRIPS_LAYER, onTripHover);
       map.off("mousemove", LIVE_TRIPS_LABEL_LAYER, onTripHover);
       map.off("mouseleave", LIVE_TRIPS_LAYER, onTripHoverEnd);
@@ -440,20 +412,20 @@ export function MapTab() {
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
-  const playback = useDayPlayback(id, playbackOn);
+  const playback = useDayPlayback(id, playbackOn, ctx.routes);
 
   // The light follows the hour of the frame on screen; outside playback the
   // view is "now" and carries no tint. steppingOnly is the reduced-motion
   // signal: no tint, and any change steps rather than fades.
   const playbackFrame = playbackOn ? playback.frames[playback.index] : undefined;
   const light = lightFor(playbackFrame ? frameHour(playbackFrame.t) : null, lightOn && !playback.steppingOnly);
-  useBasemapDim(mapRef, styleEpoch, true, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  useBasemapDim(mapRef, styleEpoch, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useOperationsMapLayers(
     mapRef,
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
     shapeQuery.data,
     effectiveRoute,
-    selectedSummary?.avg_delay_sec ?? 0,
+    meanRouteDelaySec(liveRows, effectiveRoute),
     id,
     styleEpoch,
     effectiveTrip?.trip_id ?? null,

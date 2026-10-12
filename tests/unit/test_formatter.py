@@ -93,12 +93,25 @@ def test_fmt_worst_5min_says_over_in_english_too():
 
 def test_fmt_compare_ranking_signs_direction():
     """Sign of the delta determines the Japanese direction label."""
-    # signed > 0 → 土日祝>平日
+    # signed > 0 → 土日>平日
     pos_rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
-    assert "土日祝>平日" in format_result("compare_ranking", pos_rows, {})
-    # signed < 0 → 平日>土日祝
+    assert "土日>平日" in format_result("compare_ranking", pos_rows, {})
+    # signed < 0 → 平日>土日
     neg_rows = [("56041", 4.1, 0.8, 3.3, -3.3)]
-    assert "平日>土日祝" in format_result("compare_ranking", neg_rows, {})
+    assert "平日>土日" in format_result("compare_ranking", neg_rows, {})
+
+
+def test_fmt_compare_ranking_labels_the_calendar_weekend_split_not_holidays():
+    """The two sides split on the calendar day of week (Mon-Fri vs Sat-Sun), so
+    a weekday public holiday sits on the weekday side. The text must not say
+    holidays belong to the weekend side."""
+    rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
+    ja = format_result("compare_ranking", rows, {})
+    en = format_result("compare_ranking", rows, {}, locale="en")
+    assert "土日祝" not in ja
+    assert "平日・土日" in ja and "土日8.2分" in ja
+    assert "holiday" not in en.lower()
+    assert "Weekday vs weekend" in en
 
 
 def test_fmt_ranking_no_service_uses_p50_p90_labels():

@@ -1,11 +1,18 @@
-"""Run the gold-set eval; exit nonzero if builder coverage < 100%.
+"""Check that every gold entry's stored signature survives canonicalization.
+
+Each gold entry holds a tool, its canonical args and the signature hash of
+both. The check re-canonicalizes the stored args and requires the same hash, so
+it fails when `canonicalize` or `signature_hash` changes output for inputs the
+gold set already pins. It opens no database and calls no router, builder or LLM.
+Regenerate the gold set with `scripts/_gen_phase35_gold.py` after an intended
+change.
 
 Usage:
     poetry run python scripts/ask_eval.py
 
 Exit codes:
-    0 — builder_coverage 100% (chip gate skipped — catalog removed in Phase ③.5)
-    1 — at least one CI-gate metric failed
+    0 — builder_coverage 100%
+    1 — a hash differs, an entry has an unknown `via`, or the set is too small
     2 — gold JSONL not found
 """
 
@@ -19,6 +26,7 @@ from pathlib import Path
 from pipeline.query.intent import canonicalize, signature_hash
 
 EVAL_CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
+_MIN_BUILDER_ENTRIES = 20
 
 
 def _hash(tool: str, args: dict) -> str:
@@ -33,41 +41,25 @@ def main() -> int:
 
     entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    chip_pass = chip_total = 0
     builder_pass = builder_total = 0
-    paraphrase_pass = paraphrase_total = 0
     misses: list[str] = []
 
     for e in entries:
-        via = e["via"]
+        if e["via"] != "builder":
+            misses.append(f"{e['id']}: unknown via {e['via']!r}")
+            continue
         expected_tool = e["expected_tool"]
         expected_args = e["expected_args_canonical"]
         expected_hash = signature_hash(expected_tool, expected_args)
+        builder_total += 1
+        actual = _hash(expected_tool, expected_args)
+        if actual == expected_hash:
+            builder_pass += 1
+        else:
+            misses.append(f"{e['id']}: builder hash {actual} != expected {expected_hash}")
 
-        if via == "chip":
-            chip_total += 1
-            print(f"  WARN: skipping chip entry {e['id']!r} (catalog removed)", file=sys.stderr)
-            continue
-
-        elif via == "builder":
-            builder_total += 1
-            actual = _hash(expected_tool, expected_args)
-            if actual == expected_hash:
-                builder_pass += 1
-            else:
-                misses.append(f"{e['id']}: builder hash {actual} != expected {expected_hash}")
-
-        elif via == "paraphrase-reachable":
-            paraphrase_total += 1
-            print(f"  WARN: skipping paraphrase entry {e['id']!r} (chip catalog removed)", file=sys.stderr)
-            continue
-
-    def pct(p: int, t: int) -> str:
-        return f"{p}/{t} ({100 * p / t:.1f}%)" if t else "0/0"
-
-    print(f"chip_coverage:        {pct(chip_pass, chip_total)}")
-    print(f"builder_coverage:     {pct(builder_pass, builder_total)}")
-    print(f"paraphrase_reachable: {pct(paraphrase_pass, paraphrase_total)}")
+    pct = f"{builder_pass}/{builder_total} ({100 * builder_pass / builder_total:.1f}%)" if builder_total else "0/0"
+    print(f"builder_coverage:     {pct}")
 
     if misses:
         print("\nMISSES:")
@@ -76,21 +68,11 @@ def main() -> int:
         if len(misses) > 20:
             print(f"  ... and {len(misses) - 20} more")
 
-    _MIN_CHIP_ENTRIES = 0
-    _MIN_BUILDER_ENTRIES = 20
-    if chip_total > 0 and chip_total < _MIN_CHIP_ENTRIES:
-        msg = f"gold set has {chip_total} chip entries; expected >= {_MIN_CHIP_ENTRIES}"
-        print(f"\nERROR: {msg}", file=sys.stderr)
-        return 1
     if builder_total < _MIN_BUILDER_ENTRIES:
         msg = f"gold set has {builder_total} builder entries; expected >= {_MIN_BUILDER_ENTRIES}"
         print(f"\nERROR: {msg}", file=sys.stderr)
         return 1
-    if chip_total > 0 and chip_pass < chip_total:
-        return 1
-    if builder_pass < builder_total:
-        return 1
-    return 0
+    return 1 if misses else 0
 
 
 if __name__ == "__main__":

@@ -27,10 +27,10 @@ def entry(eid: str, tool: str, args: dict) -> dict:
 
 ENTRIES = [
     # top_delay (tool=top_n, fixed_args={metric:"avg_delay"})
-    entry("top_delay_k5_all", "top_n", {"metric": "avg_delay", "k": 5, "service_type": "all"}),
+    entry("top_delay_k5_all", "top_n", {"metric": "avg_delay", "k": 5}),
     entry("top_delay_k10_weekday", "top_n", {"metric": "avg_delay", "k": 10, "service_type": "weekday"}),
     entry("top_delay_k3_weekend", "top_n", {"metric": "avg_delay", "k": 3, "service_type": "weekend"}),
-    entry("top_delay_k20_all", "top_n", {"metric": "avg_delay", "k": 20, "service_type": "all"}),
+    entry("top_delay_k20_all", "top_n", {"metric": "avg_delay", "k": 20}),
     # ontime_rank (tool=on_time)
     entry("ontime_top5_worst", "on_time", {"k": 5, "best_first": False}),
     entry("ontime_top5_best", "on_time", {"k": 5, "best_first": True}),

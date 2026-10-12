@@ -12,6 +12,9 @@ type Props = {
    *  more than "server error" -- so that such a case can still use this
    *  banner instead of hand-rolling one beside it. */
   message?: string;
+  /** Names what failed, ahead of the class-derived reason ("Could not disable
+   *  X. Connection dropped..."), where `message` would replace the reason. */
+  prefix?: string;
 };
 
 // Machine-readable detail codes from the Ask follow-up endpoint (see
@@ -115,7 +118,7 @@ function Alert({ children, onRetry }: { children: ReactNode; onRetry?: () => voi
   );
 }
 
-export function ErrorBanner({ error, onRetry, message }: Props) {
+export function ErrorBanner({ error, onRetry, message, prefix }: Props) {
   const { t } = useTranslation();
   const cls = classifyError(error);
 
@@ -134,5 +137,6 @@ export function ErrorBanner({ error, onRetry, message }: Props) {
   // in a neutral tone and offer no retry (retrying can't build the data).
   if (cls === "not_ready") return <CalmStatus>{t("errors.aggregate_not_ready")}</CalmStatus>;
 
-  return <Alert onRetry={onRetry}>{messageFor(error, cls, t)}</Alert>;
+  const reason = messageFor(error, cls, t);
+  return <Alert onRetry={onRetry}>{prefix ? `${prefix} ${reason}` : reason}</Alert>;
 }

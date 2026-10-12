@@ -1,6 +1,6 @@
 services:
   dekart:
-    image: dekartxyz/dekart:0.23.2
+    image: dekartxyz/dekart:0.26.0
     container_name: geosql-dekart
     ports:
       - "127.0.0.1:8080:8080"

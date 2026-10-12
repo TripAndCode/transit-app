@@ -163,13 +163,6 @@ describe("the framing moves", () => {
 
     expect(map.easeTo.mock.calls[0][0]).toMatchObject({ zoom: 15 });
   });
-
-  it("accepts an explicit zoom, for stepping into a cluster", () => {
-    const map = fakeMap();
-    inspectTrip(asMap(map), [140.8, 40.85], { zoom: 13.5, pitch: 0 });
-
-    expect(map.easeTo.mock.calls[0][0]).toMatchObject({ zoom: 13.5 });
-  });
 });
 
 describe("reduced motion", () => {

@@ -6,7 +6,7 @@ import { useThemeSignal } from "../../styles/theme";
 import { CROSS_FADE_MS, GHOST_OPACITY, timelineFeatures } from "./playbackFrames";
 import { whenStyleReady } from "./styleReady";
 import { repaintLayer } from "./repaintLayer";
-import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 
 export const TIMELINE_SOURCE = "timeline";
 export const TIMELINE_LAYER = "timeline-stops";
@@ -20,7 +20,7 @@ type TimelinePaint = CirclePaint & { "circle-opacity-transition": { duration: nu
 /** The live layers playback stands in for. Hidden rather than removed: they are
  *  owned by another hook, which keeps feeding them, and a removed layer would
  *  have to be rebuilt from scratch on the way back. */
-const LIVE_LAYERS = [LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_CLUSTER_LAYER];
+const LIVE_LAYERS = [LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
 
 /**
  * Paint for the playback layer.
