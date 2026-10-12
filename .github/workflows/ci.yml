@@ -151,6 +151,23 @@ jobs:
           docker run --rm --network none transit-app:ci test -f api/static/index.html
           docker run --rm --network none transit-app:ci test -f tests/ask_eval/golden_set.jsonl
 
+  # Wired into this workflow's own pull_request trigger, so a change to
+  # oracle_cloud/v3/bin, oracle_cloud/v3/tests, or scripts/run_oracle_tests.sh
+  # is checked before it merges, not only on nightly-extended.yml's schedule.
+  # The collector's bash suites run against shimmed curl/aws, so they need no
+  # network, browser, model download, Docker or database -- hosted, like
+  # `frontend`, rather than queueing on the one VPS runner.
+  oracle-bash-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run Oracle-collector bash suites
+        run: bash scripts/run_oracle_tests.sh
+
   # The backend jobs run where `vars.CI_BACKEND_RUNNER` says, GitHub-hosted
   # while it is unset: standard hosted runners cost nothing for a public
   # repository. The day hosted minutes start counting, register a runner on
@@ -219,7 +236,9 @@ jobs:
         id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
-          container-name: transit-ci-db
+          # Per shard: the shards of one run overlap and share a scope, so a
+          # shared prefix would have each shard remove the others' database.
+          container-name: transit-ci-db-${{ matrix.shard }}
 
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
