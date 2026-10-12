@@ -1,9 +1,12 @@
 name: Nightly extended
 
 # Runs suites `ci.yml` deliberately skips on every push/PR because they're
-# either slow (RUN_SLOW's ~120MB model download), need a real browser
-# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN), or the 15 Oracle-collector bash
-# suites under oracle_cloud/v3/tests/, which nothing else runs at all.
+# either slow (RUN_SLOW's ~120MB model download) or need a real browser
+# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
+# bash suites under oracle_cloud/v3/tests/, which `ci.yml` already runs on
+# every pull request and every push to `main` -- kept here too to catch drift
+# in the runner's own bash/coreutils between pushes, not to recheck code that
+# has not changed.
 on:
   schedule:
     - cron: "0 2 * * *"
