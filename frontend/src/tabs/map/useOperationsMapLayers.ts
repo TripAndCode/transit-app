@@ -191,9 +191,21 @@ export function useOperationsMapLayers(
     const map = mapRef.current;
     if (!map || !live) return;
 
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = live.rows
-      .filter((trip) => trip.stop_lon != null && trip.stop_lat != null)
-      .map((trip) => ({
+    const located = live.rows.filter((trip) => trip.stop_lon != null && trip.stop_lat != null);
+    // No radius-based clustering (see below), but two trips can share the
+    // exact same reported stop -- a terminus, a transfer hub -- and render
+    // on the same pixel regardless of zoom. Counting by exact coordinate,
+    // not proximity, only changes when a trip's own reported stop changes,
+    // never from a neighbour's independent jitter, so it carries none of
+    // Supercluster's per-poll flicker.
+    const stackCounts = new Map<string, number>();
+    for (const trip of located) {
+      const key = `${trip.stop_lon},${trip.stop_lat}`;
+      stackCounts.set(key, (stackCounts.get(key) ?? 0) + 1);
+    }
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = located.map((trip) => {
+      const stackCount = stackCounts.get(`${trip.stop_lon},${trip.stop_lat}`)!;
+      return {
         type: "Feature",
         geometry: { type: "Point", coordinates: [trip.stop_lon!, trip.stop_lat!] },
         properties: {
@@ -201,11 +213,13 @@ export function useOperationsMapLayers(
           route_code: trip.route_code ?? "",
           delay_sec: trip.dep_delay,
           delay_label: delayLabel(trip.dep_delay),
-          trip_label: `${hhmm(trip)}  ${delayLabel(trip.dep_delay)}`,
+          trip_label: `${hhmm(trip)}  ${delayLabel(trip.dep_delay)}${stackCount > 1 ? ` ×${stackCount}` : ""}`,
+          stack_count: stackCount,
           route_selected: trip.route_code != null && trip.route_code === selectedRoute,
           selected: selectedTripId ? trip.trip_id === selectedTripId : trip.route_code != null && trip.route_code === selectedRoute,
         },
-      }));
+      };
+    });
     const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
 
     return whenStyleReady(map, () => {
@@ -215,16 +229,23 @@ export function useOperationsMapLayers(
         repaintLayer(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
         repaintLayer(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
       } else {
-        // No clustering: at the live feed's own scale (a few dozen vehicles
-        // at most), clustering bought grouping at the cost of Supercluster
-        // recomputing membership on every poll, which flips a vehicle near
-        // another one between its own mark and a cluster puck tick to tick
-        // -- a visible flicker on every refresh, not an occasional edge case.
+        // No radius-based clustering: Supercluster recomputes membership
+        // from scratch on every setData, so any two points within the
+        // radius of each other flip between their own marks and a cluster
+        // puck the moment either one's position updates -- a visible
+        // flicker on every poll, not an occasional edge case, at any feed
+        // size. Two trips reported at the exact same stop (see stack_count
+        // above) are the one case worth showing as grouped; that still
+        // needs the selected trip drawn on top so it stays the one a click
+        // or hover reaches.
         map.addSource(LIVE_TRIPS_SOURCE, { type: "geojson", data: collection });
         map.addLayer({
           id: LIVE_TRIPS_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
+          layout: {
+            "circle-sort-key": ["case", ["boolean", ["get", "selected"], false], 1, 0],
+          },
           paint: vehicleCirclePaint(),
         });
         map.addLayer({

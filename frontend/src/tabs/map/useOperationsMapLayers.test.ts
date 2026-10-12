@@ -139,6 +139,51 @@ describe("useOperationsMapLayers", () => {
     expect(ids.indexOf("active-route-flow")).toBeLessThan(ids.indexOf("trip-progress-line"));
   });
 
+  it("marks two trips sharing one reported stop as a stack, both ways round", () => {
+    const map = makeMockMap();
+    const stacked: LiveTripsResponse = {
+      latest_captured_at: "2026-09-11T01:00:00Z",
+      rows: [
+        liveTrip({ trip_id: "trip-1" }),
+        liveTrip({ trip_id: "trip-2", route_code: "8" }),
+      ],
+      truncated: false,
+    };
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, stacked, SHAPE, null, 0, 1, 0);
+    });
+
+    const source = map.getSource(LIVE_TRIPS_SOURCE) as { data: GeoJSON.FeatureCollection<GeoJSON.Point> };
+    for (const feature of source.data.features) {
+      expect(feature.properties!.stack_count).toBe(2);
+      expect(feature.properties!.trip_label).toContain("×2");
+    }
+  });
+
+  it("does not mark a trip alone at its reported stop as a stack", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+
+    const source = map.getSource(LIVE_TRIPS_SOURCE) as { data: GeoJSON.FeatureCollection<GeoJSON.Point> };
+    expect(source.data.features[0].properties!.stack_count).toBe(1);
+    expect(source.data.features[0].properties!.trip_label).not.toContain("×");
+  });
+
+  it("draws the selected trip on top of any other trip sharing its reported stop", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1");
+    });
+
+    const layer = map.getLayer(LIVE_TRIPS_LAYER) as MockLayer;
+    expect(layer.layout?.["circle-sort-key"]).toEqual(["case", ["boolean", ["get", "selected"], false], 1, 0]);
+  });
+
   it("draws the selected trip's report trail", () => {
     const map = makeMockMap();
     renderHook(() => {
