@@ -2,7 +2,11 @@
 
 The name decides whether two CI jobs sharing one Docker daemon destroy each
 other's database, so the properties below are executed rather than read off
-the action's YAML.
+the action's YAML. The one exception is the matrix-wiring check, which reads
+every workflow's job definitions because the property it pins (a matrix job's
+prefix is scoped per shard) is about what each workflow passes in, not about
+container-name.sh's own behaviour -- that behaviour is proven separately, by
+execution, in the same test.
 """
 
 from __future__ import annotations
@@ -10,6 +14,8 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".github" / "actions" / "start-test-postgres" / "container-name.sh"
@@ -95,3 +101,37 @@ def test_prefix_is_required():
     result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True)
     assert result.returncode != 0
     assert "usage: container-name.sh" in result.stderr, result.stderr
+
+
+def test_matrix_shards_of_one_run_get_distinct_containers():
+    """Shards of one run share a scope and overlap, so the prefix any matrix
+    job passes must differ per shard; otherwise one shard's start or teardown
+    removes another shard's live database.
+
+    Checked two ways: every matrix job that calls the action is wired to a
+    per-shard prefix (so a future matrix job cannot reintroduce this by
+    passing a static one), and the script itself is proven to give two such
+    prefixes distinct containers under the same scope.
+    """
+    workflows_dir = ROOT / ".github" / "workflows"
+    checked_any = False
+    for workflow_path in sorted(workflows_dir.glob("*.yml")):
+        doc = yaml.safe_load(workflow_path.read_text())
+        for job in doc.get("jobs", {}).values():
+            if "matrix" not in job.get("strategy", {}):
+                continue
+            step = next(
+                (s for s in job.get("steps", []) if str(s.get("uses", "")).endswith("start-test-postgres")),
+                None,
+            )
+            if step is None:
+                continue
+            checked_any = True
+            prefix_expr = step["with"]["container-name"]
+            assert "matrix." in prefix_expr, (
+                f"{workflow_path.name} runs a matrix job calling start-test-postgres with a static "
+                f"prefix {prefix_expr!r}; its shards would collide on one container"
+            )
+    assert checked_any, "no matrix job calling start-test-postgres was found to check"
+
+    assert _name("536", "transit-ci-db-0") != _name("536", "transit-ci-db-1")
