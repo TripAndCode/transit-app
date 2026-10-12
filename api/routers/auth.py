@@ -190,9 +190,10 @@ def _frontend_url(path: str) -> str:
     this API's own origin, so FRONTEND_BASE_URL defaults to PUBLIC_BASE_URL;
     local dev runs it on Vite's separate port.
 
-    Both are read live rather than from the module-level PUBLIC_BASE_URL,
-    which freezes at first import -- in the full test suite that import
-    happens before any per-test ``monkeypatch.setenv``.
+    Both are read from the environment at call time, falling back to the
+    module-level PUBLIC_BASE_URL only when unset: that constant freezes at
+    first import, which in the full test suite happens before any per-test
+    ``monkeypatch.setenv``.
     """
     public_base = os.environ.get("PUBLIC_BASE_URL", PUBLIC_BASE_URL)
     base = os.environ.get("FRONTEND_BASE_URL", public_base).rstrip("/")
