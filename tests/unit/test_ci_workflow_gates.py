@@ -500,9 +500,16 @@ def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart
 
 def test_oracle_collector_bash_suites_gate_every_pull_request() -> None:
     """The production collector's suites need no network, browser or model, so
-    they run in the PR workflow rather than only after a merge."""
+    they run in the PR workflow rather than only after a merge.
+
+    `ci.yml`'s top-level `on:` already covers `pull_request` for every job that
+    carries no restriction of its own, so a job-level `if:` is the only thing
+    that could narrow this one back to merges only -- which is exactly the gap
+    issue #892 found, so it is checked explicitly rather than assumed absent.
+    """
     job = _workflow_yaml()["jobs"]["oracle-bash-tests"]
     assert any("scripts/run_oracle_tests.sh" in step.get("run", "") for step in job["steps"])
+    assert "if" not in job, "a job-level `if:` would narrow this back to running only on some events"
 
 
 def test_each_i18n_gate_has_one_home() -> None:

@@ -150,9 +150,12 @@ jobs:
           docker run --rm --network none transit-app:ci python -c "import api.main"
           docker run --rm --network none transit-app:ci test -f api/static/index.html
 
+  # Wired into this workflow's own pull_request trigger, so a change to
+  # oracle_cloud/v3/bin, oracle_cloud/v3/tests, or scripts/run_oracle_tests.sh
+  # is checked before it merges, not only on nightly-extended.yml's schedule.
   # The collector's bash suites run against shimmed curl/aws, so they need no
-  # network, browser, model download, Docker or database. Hosted, like
-  # `frontend`, so a change to oracle_cloud/v3/bin is checked before it merges.
+  # network, browser, model download, Docker or database -- hosted, like
+  # `frontend`, rather than queueing on the one VPS runner.
   oracle-bash-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
