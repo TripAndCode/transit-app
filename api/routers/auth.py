@@ -194,7 +194,7 @@ def _frontend_url(path: str) -> str:
     which freezes at first import -- in the full test suite that import
     happens before any per-test ``monkeypatch.setenv``.
     """
-    public_base = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+    public_base = os.environ.get("PUBLIC_BASE_URL", PUBLIC_BASE_URL)
     base = os.environ.get("FRONTEND_BASE_URL", public_base).rstrip("/")
     return f"{base}{path}"
 

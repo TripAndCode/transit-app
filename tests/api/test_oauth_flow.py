@@ -46,6 +46,7 @@ def _set_oauth_env(monkeypatch):
     monkeypatch.setenv("GITHUB_CLIENT_ID", "h")
     monkeypatch.setenv("GITHUB_CLIENT_SECRET", "hs")
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://test")
+    monkeypatch.delenv("FRONTEND_BASE_URL", raising=False)
     monkeypatch.setenv("ADMIN_EMAILS", "")
     monkeypatch.setenv("SESSION_SIGNING_KEY", "test-signing-key")
     yield
@@ -173,9 +174,8 @@ async def test_successful_login_redirects_to_the_frontend_origin_when_it_differs
 
 @pytest.mark.asyncio
 async def test_failed_login_redirects_to_the_frontend_origin_when_it_differs(auth_client, monkeypatch):
-    """The failure path (_fail_login) builds its own relative ``/login?...``
-    Location header, so it needs the same origin-aware fix as the success
-    path or a failed dev login would strand the browser on the backend too."""
+    """Failure redirects back to ``/login`` carry the frontend origin too, or
+    a failed dev sign-in strands the browser on the backend."""
     monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
 
     resp = await auth_client.get(
