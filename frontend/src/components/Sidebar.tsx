@@ -1,13 +1,10 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
   HelpCircle,
   Info,
-  Clock,
-  CircleSlash,
-  SquareDashed,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
@@ -17,7 +14,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { useScreenQuery, withQuery } from "../api/screenScope";
-import { clearLastAgency } from "../api/lastAgency";
 import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
@@ -141,7 +137,6 @@ export function Sidebar() {
   const { t } = useTranslation();
   const agencyId = useRailAgencyId();
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const isAdmin = useIsAdmin();
   // Each screen opens with its own last filters (see api/screenScope), so
   // nothing set on the screen being left follows the visitor elsewhere.
@@ -178,8 +173,8 @@ export function Sidebar() {
     setMoreOpen(false);
   }
 
-  // The destinations, the Other group, the dev-only prototype section, and
-  // the account menu — everything below the brand block. Shared by the
+  // The destinations, the Other group, and the account menu — everything
+  // below the brand block. Shared by the
   // desktop rail (collapsedFlag reflects the persisted rail preference) and
   // the mobile "more" sheet (always rendered expanded; onNavigate closes the
   // sheet after a link is followed, mirroring ThreadSidebar's onSelect-
@@ -273,90 +268,6 @@ export function Sidebar() {
           )}
         </nav>
         <div style={{ flex: 1 }} />
-        {!agencyId ? null : (
-          <>
-            {!collapsedFlag && import.meta.env.DEV && (
-              <div style={{ marginTop: 12 }}>
-                {/* Visually quarantined from the real account controls below
-                    (SidebarUserMenu) — a divider plus reduced opacity, so a
-                    dev-only debug link never sits flush against sign-in/
-                    settings the way it used to. */}
-                <div style={{ height: 1, background: "var(--border-soft)", margin: "0 14px 12px" }} />
-                <div style={{ opacity: 0.75 }}>
-                <div
-                  style={{
-                    padding: "0 22px",
-                    marginBottom: 6,
-                    fontSize: "var(--text-xs)",
-                    fontWeight: 600,
-                    letterSpacing: "0.07em",
-                    textTransform: "uppercase",
-                    color: "var(--text-tertiary)",
-                  }}
-                >
-                  {t("nav.prototype_section_label")}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearLastAgency();
-                    navigate("/");
-                    onNavigate?.();
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    width: "100%",
-                    padding: "8px 22px",
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    background: "transparent",
-                    border: "none",
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Clock size={15} strokeWidth={1.5} aria-hidden="true" />
-                  {t("nav.prototype_onboarding")}
-                </button>
-                <NavLink
-                  to={screenHref("live")}
-                  onClick={() => onNavigate?.()}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 22px",
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    textDecoration: "none",
-                  }}
-                >
-                  <CircleSlash size={15} strokeWidth={1.5} aria-hidden="true" />
-                  {t("nav.prototype_stale_feed")}
-                </NavLink>
-                <NavLink
-                  to={`/agencies/${agencyId}/pulse?from=2030-01-01&to=2030-01-07`}
-                  onClick={() => onNavigate?.()}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 22px",
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    textDecoration: "none",
-                  }}
-                >
-                  <SquareDashed size={15} strokeWidth={1.5} aria-hidden="true" />
-                  {t("nav.prototype_no_data")}
-                </NavLink>
-                </div>
-              </div>
-            )}
-          </>
-        )}
         {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );

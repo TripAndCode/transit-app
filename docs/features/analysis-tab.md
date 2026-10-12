@@ -90,9 +90,8 @@ What the user sees/does:
   `frontend/src/components/InsightPanel.tsx`: a single proactive suggestion
   ("this route's trend just shifted", "on-time rate dropped", etc.),
   dismissible per-suggestion (persisted to `sessionStorage`, keyed by
-  agency) and toggleable off entirely; defaults on in dev builds, opt-in in
-  production (same `import.meta.env.DEV` default pattern as the rail's
-  prototype section).
+  agency) and toggleable off entirely; defaults on in dev builds
+  (`import.meta.env.DEV`), opt-in in production.
 - Below ~640px (`MOBILE_BREAKPOINT_PX`,
   `frontend/src/hooks/useMediaQuery.ts`) the three columns stack vertically
   instead of side-by-side — this tab otherwise stays desktop-oriented by
