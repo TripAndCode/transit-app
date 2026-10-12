@@ -278,9 +278,10 @@ def test_no_caller_removes_the_container_by_the_prefix_it_passed_in() -> None:
 def test_every_caller_removes_its_container() -> None:
     """A run-unique name means no later run reclaims it by name.
 
-    The action's label reaper is the backstop, but it waits out a three-hour
-    cutoff; without an explicit teardown a weekly workflow would hold a
-    volume for that long after every run.
+    The action's label reaper is the backstop for a caller running on a
+    persistent runner, but it only reaps once a container is older than a
+    job-timeout-derived cutoff; without an explicit teardown, such a caller
+    would hold that container's volume until then.
     """
     for workflow in _postgres_consumers():
         text = workflow.read_text()
