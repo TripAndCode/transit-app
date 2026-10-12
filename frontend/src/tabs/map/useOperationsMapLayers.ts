@@ -20,8 +20,6 @@ import { hhmm } from "./format";
 export const LIVE_TRIPS_SOURCE = "live-trips";
 export const LIVE_TRIPS_LAYER = "live-trip-markers";
 export const LIVE_TRIPS_LABEL_LAYER = "live-trip-labels";
-export const LIVE_TRIPS_CLUSTER_LAYER = "live-trip-clusters";
-const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
 const ACTIVE_ROUTE_SOURCE = "active-route";
 const ACTIVE_ROUTE_CASING_LAYER = "active-route-casing";
 const ACTIVE_ROUTE_LAYER = "active-route-line";
@@ -37,31 +35,12 @@ const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
 type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
 type SymbolPaint = NonNullable<Extract<LayerSpecification, { type: "symbol" }>["paint"]>;
 type LinePaint = NonNullable<Extract<LayerSpecification, { type: "line" }>["paint"]>;
-/** MapLibre's `ExpressionSpecification` is not re-exported from the bundle's
- *  public types, so it is recovered from a property that accepts one. */
-type NumericExpression = Extract<CirclePaint["circle-radius"], unknown[]>;
-
-/** MapLibre aggregates cluster properties additively only, so a cluster's mean
- *  delay is the summed member delay divided by point_count, evaluated at paint
- *  time. In minutes, to match the ramp's thresholds. */
-function clusterMeanDelayMin(): NumericExpression {
-  return ["/", ["/", ["get", "delay_sum"], ["get", "point_count"]], 60];
-}
-
-/** Aggregation the live-trips source has to carry for a cluster to know
- *  anything about its members' delay. Without it a cluster can only be sized,
- *  not coloured, and 30 identical pucks say nothing about where to look. */
-export const LIVE_TRIPS_CLUSTER_PROPERTIES = { delay_sum: ["+", ["get", "delay_sec"]] } as const;
 
 /** One vehicle is one reading, not a headline: the mark is small enough that a
  *  screenful of them reads as a field rather than a wall of alarms, and only
  *  the severe tier and the selected trip earn extra area. Size therefore
  *  encodes severity, never volume. */
 export const VEHICLE_RADIUS = { base: 6, severe: 9, selected: 11 } as const;
-
-/** Clusters are sized by how many readings they stand for — that is the one
- *  place on this map where count IS the quantity being shown. */
-export const CLUSTER_RADIUS = { small: 12, medium: 16, large: 22 } as const;
 
 const MARK_STROKE_WIDTH = 1.5;
 
@@ -79,35 +58,6 @@ export function vehicleCirclePaint(): CirclePaint {
     // without giving every reading the weight of an incident.
     "circle-stroke-color": surfaceColorResolved(),
     "circle-stroke-width": MARK_STROKE_WIDTH,
-  };
-}
-
-export function clusterCirclePaint(): CirclePaint {
-  return {
-    "circle-radius": [
-      "step", ["get", "point_count"],
-      CLUSTER_RADIUS.small,
-      10, CLUSTER_RADIUS.medium,
-      50, CLUSTER_RADIUS.large,
-    ],
-    "circle-color": ["step", clusterMeanDelayMin(), ...severityStepColors()],
-    "circle-stroke-color": surfaceColorResolved(),
-    "circle-stroke-width": MARK_STROKE_WIDTH,
-  };
-}
-
-export function clusterCountPaint(): SymbolPaint {
-  const stops = severityStepColors();
-  // The count sits on the cluster's own fill, which is a ramp colour rather
-  // than a theme surface — so the ink is chosen per band, not per theme.
-  return {
-    "text-color": [
-      "step", clusterMeanDelayMin(),
-      readableInkOn(stops[0]),
-      stops[1], readableInkOn(stops[2]),
-      stops[3], readableInkOn(stops[4]),
-      stops[5], readableInkOn(stops[6]),
-    ],
   };
 }
 
@@ -241,9 +191,21 @@ export function useOperationsMapLayers(
     const map = mapRef.current;
     if (!map || !live) return;
 
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = live.rows
-      .filter((trip) => trip.stop_lon != null && trip.stop_lat != null)
-      .map((trip) => ({
+    const located = live.rows.filter((trip) => trip.stop_lon != null && trip.stop_lat != null);
+    // No radius-based clustering (see below), but two trips can share the
+    // exact same reported stop -- a terminus, a transfer hub -- and render
+    // on the same pixel regardless of zoom. Counting by exact coordinate,
+    // not proximity, only changes when a trip's own reported stop changes,
+    // never from a neighbour's independent jitter, so it carries none of
+    // Supercluster's per-poll flicker.
+    const stackCounts = new Map<string, number>();
+    for (const trip of located) {
+      const key = `${trip.stop_lon},${trip.stop_lat}`;
+      stackCounts.set(key, (stackCounts.get(key) ?? 0) + 1);
+    }
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = located.map((trip) => {
+      const stackCount = stackCounts.get(`${trip.stop_lon},${trip.stop_lat}`)!;
+      return {
         type: "Feature",
         geometry: { type: "Point", coordinates: [trip.stop_lon!, trip.stop_lat!] },
         properties: {
@@ -251,57 +213,45 @@ export function useOperationsMapLayers(
           route_code: trip.route_code ?? "",
           delay_sec: trip.dep_delay,
           delay_label: delayLabel(trip.dep_delay),
-          trip_label: `${hhmm(trip)}  ${delayLabel(trip.dep_delay)}`,
+          trip_label: `${hhmm(trip)}  ${delayLabel(trip.dep_delay)}${stackCount > 1 ? ` ×${stackCount}` : ""}`,
+          stack_count: stackCount,
           route_selected: trip.route_code != null && trip.route_code === selectedRoute,
           selected: selectedTripId ? trip.trip_id === selectedTripId : trip.route_code != null && trip.route_code === selectedRoute,
         },
-      }));
+      };
+    });
     const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
 
     return whenStyleReady(map, () => {
       const existing = map.getSource(LIVE_TRIPS_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(collection);
-        repaintLayer(map, LIVE_TRIPS_CLUSTER_LAYER, clusterCirclePaint());
-        repaintLayer(map, LIVE_TRIPS_CLUSTER_COUNT_LAYER, clusterCountPaint());
         repaintLayer(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
         repaintLayer(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
       } else {
-        map.addSource(LIVE_TRIPS_SOURCE, {
-          type: "geojson",
-          data: collection,
-          cluster: true,
-          clusterMaxZoom: 15,
-          clusterRadius: 28,
-          clusterProperties: LIVE_TRIPS_CLUSTER_PROPERTIES,
-        });
-        map.addLayer({
-          id: LIVE_TRIPS_CLUSTER_LAYER,
-          type: "circle",
-          source: LIVE_TRIPS_SOURCE,
-          filter: ["has", "point_count"],
-          paint: clusterCirclePaint(),
-        });
-        map.addLayer({
-          id: LIVE_TRIPS_CLUSTER_COUNT_LAYER,
-          type: "symbol",
-          source: LIVE_TRIPS_SOURCE,
-          filter: ["has", "point_count"],
-          layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 },
-          paint: clusterCountPaint(),
-        });
+        // No radius-based clustering: Supercluster recomputes membership
+        // from scratch on every setData, so any two points within the
+        // radius of each other flip between their own marks and a cluster
+        // puck the moment either one's position updates -- a visible
+        // flicker on every poll, not an occasional edge case, at any feed
+        // size. Two trips reported at the exact same stop (see stack_count
+        // above) are the one case worth showing as grouped; that still
+        // needs the selected trip drawn on top so it stays the one a click
+        // or hover reaches.
+        map.addSource(LIVE_TRIPS_SOURCE, { type: "geojson", data: collection });
         map.addLayer({
           id: LIVE_TRIPS_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
-          filter: ["!", ["has", "point_count"]],
+          layout: {
+            "circle-sort-key": ["case", ["boolean", ["get", "selected"], false], 1, 0],
+          },
           paint: vehicleCirclePaint(),
         });
         map.addLayer({
           id: LIVE_TRIPS_LABEL_LAYER,
           type: "symbol",
           source: LIVE_TRIPS_SOURCE,
-          filter: ["!", ["has", "point_count"]],
           layout: {
             "text-field": ["get", "trip_label"],
             "text-font": ["Noto Sans Regular"],
