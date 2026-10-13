@@ -13,11 +13,13 @@ export function ScopePopover({
   label,
   onClose,
   returnFocusTo,
+  className,
   children,
 }: {
   label: string;
   onClose: () => void;
   returnFocusTo: RefObject<HTMLElement | null>;
+  className?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -46,7 +48,7 @@ export function ScopePopover({
   }, [returnFocusTo]);
 
   return (
-    <div ref={ref} role="dialog" aria-label={label} tabIndex={-1} className="scope-popover">
+    <div ref={ref} role="dialog" aria-label={label} tabIndex={-1} className={className ? `scope-popover ${className}` : "scope-popover"}>
       {children}
     </div>
   );

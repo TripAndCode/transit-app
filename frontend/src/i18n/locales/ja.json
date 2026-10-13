@@ -534,10 +534,14 @@
   "presets": {
     "login_to_save_tooltip": "ログインで保存",
     "label": "保存したビュー",
-    "save_current": "このビューを保存…",
-    "empty": "保存したビューはまだありません",
-    "save_title": "このビューを保存",
-    "name_label": "名前",
+    "count_one": "{{count}}件",
+    "count_other": "{{count}}件",
+    "intro": "よく見る条件に名前を付けて保存すると、次からここで選ぶだけで戻れます。",
+    "current": "現在の条件",
+    "save_current": "現在の条件を保存",
+    "name_label": "ビュー名",
+    "name_taken": "この名前のビューはすでにあります。別の名前を付けてください。",
+    "delete": "{{name}}を削除",
     "load_error": "保存したビューを読み込めませんでした。"
   },
   "filters": {
@@ -1842,6 +1846,9 @@
     },
     "pin": "すべての条件を表示",
     "reset": "条件をリセット",
+    "reset_short": "リセット",
+    "period_days_one": "{{count}}日",
+    "period_days_other": "{{count}}日",
     "popover": {
       "routes": "対象の路線",
       "period": "期間",

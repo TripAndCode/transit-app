@@ -71,7 +71,7 @@
   flex: 1 1 420px;
   margin: 0;
   font-size: var(--text-base);
-  line-height: 1.9;
+  line-height: 2.3;
   color: var(--text-secondary);
 }
 
@@ -85,27 +85,78 @@
   white-space: normal;
 }
 
+/* A condition is a chip with a caret, so it reads as a control. The caret is
+   drawn, not typed, so it stays out of the button's name and the text. */
 .scope-token {
-  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0 2px;
+  padding: 1px 9px;
   font: inherit;
   font-weight: 700;
+  line-height: 1.6;
+  text-align: start;
   color: var(--text-primary);
-  background: none;
-  border: 0;
-  border-bottom: 1.5px dashed var(--accent);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   cursor: pointer;
 }
 
+.scope-token::after {
+  content: "";
+  flex: none;
+  border-top: 5px solid var(--text-tertiary);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.scope-token:hover,
 .scope-token[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+/* Changed from the default, so a narrowed view shows at a glance. */
+.scope-token--on {
   color: var(--accent-strong);
   background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.scope-token--on::after {
+  border-top-color: var(--accent);
 }
 
 .scope-token--off {
   color: var(--text-tertiary);
+  border-style: dashed;
+}
+
+.scope-token--off .scope-token__label {
   text-decoration: line-through;
-  border-bottom-style: dotted;
-  border-bottom-color: var(--text-tertiary);
+}
+
+.scope-token__hint {
+  font-family: var(--font-num);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.scope-reset {
+  margin-left: var(--space-2);
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 .scope-popover {
@@ -129,6 +180,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* The heading whose row holds the sentence's actions: their popovers measure
+   and place themselves against this row, which is as wide as the page. */
+.scope-page-head {
+  position: relative;
 }
 
 .scope-strip {
@@ -285,5 +342,212 @@
   color: var(--text-secondary);
 }
 
-/* Saved views in the Saved views popover: a plain column of pills. */
-.preset-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+/* Saved views: a heading with the count, the views or a word on what they
+   are for, and the form that names the current scope, in one popover. */
+.preset-popover {
+  width: min(340px, 100%);
+  padding: 0;
+}
+
+.preset-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.preset-head:focus {
+  outline: none;
+}
+
+.preset-head__title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.preset-head__count {
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.preset-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4) 0;
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.preset-list {
+  display: grid;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+
+.preset-row {
+  display: flex;
+  align-items: flex-start;
+  border-radius: 8px;
+}
+
+.preset-row--active {
+  background: var(--accent-soft);
+}
+
+.preset-row__pick {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) 10px;
+  font: inherit;
+  text-align: start;
+  color: var(--text-primary);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.preset-row__pick:hover {
+  background: var(--bg-soft);
+}
+
+.preset-row--active .preset-row__pick:hover {
+  background: none;
+}
+
+.preset-row__check {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--accent);
+}
+
+.preset-row__text {
+  display: grid;
+  min-width: 0;
+}
+
+.preset-row__name {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.preset-row__sum {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.preset-row__delete {
+  flex: none;
+  margin: 6px 4px 0 0;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--text-base);
+  line-height: 1.2;
+  color: var(--text-tertiary);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.preset-row__delete:hover {
+  color: var(--text-primary);
+  background: var(--bg-soft);
+}
+
+.preset-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.preset-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) 14px;
+}
+
+.preset-list + .preset-form,
+.preset-list + .preset-error {
+  border-top: 1px solid var(--border-soft);
+}
+
+.preset-current {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.preset-current b {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.preset-save {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.preset-save__name {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.preset-save__button {
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.preset-save__button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.preset-foot {
+  display: block;
+  width: 100%;
+  padding: 10px var(--space-4);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: start;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  cursor: pointer;
+}
+
+.preset-foot:hover {
+  background: var(--bg-soft);
+}
