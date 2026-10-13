@@ -1,5 +1,6 @@
 /* frontend/src/styles/overview.css
-   KPI hero row up top, everything else a borderless soft-shadow card.
+   A verdict line and the KPI hero up top; the hero and everything below it
+   are borderless soft-shadow cards.
    Calm-UI compliant: no alarm reds, no tilts/parallax, animations
    ≤800 ms behind reduced-motion. */
 
@@ -451,11 +452,12 @@
 
 /* ---------- Story hero ----------
    A one-line verdict (a neutral status chip and one sentence) above the
-   hero: one primary number over a full-bleed area sparkline (left column),
-   and the period's findings as a short list of rows (right column). Two
-   columns even inside the 880px .ov-page column -- this collapses to one
-   only below the shared 640px breakpoint (BP.sm), not at a wider off-scale
-   breakpoint, since 880px already reads fine as two columns. */
+   hero card: one primary number over its background charts (left column),
+   and the period's findings as a short list of rows on the plain surface
+   (right column). Two columns even inside the 880px .ov-page column -- this
+   collapses to one only below the shared 640px breakpoint (BP.sm), not at a
+   wider off-scale breakpoint, since 880px already reads fine as two
+   columns. */
 .ov-hero-verdict {
   display: flex;
   flex-wrap: wrap;
@@ -475,25 +477,28 @@
   font-weight: 700;
   white-space: nowrap;
 }
+/* No overflow clip here: it would cut off the fact buttons' focus ring.
+   The figure column clips its own charts instead. */
 .ov-hero {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 20px 40px;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: stretch;
   margin-bottom: 24px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--el-1);
 }
-/* The day's hourly profile across both hero columns, bottom-anchored. It
-   takes no pointer and no grid cell (absolutely positioned). It is the
-   hero's first child and both columns are positioned, so they paint over it
-   by DOM order -- no z-index rung needed. */
+/* The day's hourly profile along the figure column's bottom edge. It takes
+   no pointer and no flex slot (absolutely positioned), and the figure's
+   text comes after it and is positioned, so the text paints over it by DOM
+   order -- no z-index rung needed. */
 .ov-pulse-ribbon {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   width: 100%;
-  height: 160px;
+  height: 120px;
   display: block;
   pointer-events: none;
 }
@@ -502,21 +507,29 @@
 .ov-pulse-ribbon path {
   transition: d var(--dur-3) var(--ease-out);
 }
-/* Positioned only so it paints over the ribbon (see .ov-pulse-ribbon). */
 .ov-hero-text {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 16px;
 }
+/* Clips both background charts to this column, inside the card's rounded
+   corners: the left ones here, the top ones on a phone (below). */
 .ov-hero-figure {
   position: relative;
+  overflow: hidden;
   min-height: 190px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  padding: 24px;
+  border-right: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
 }
-/* The sparkline fades to a faint texture under the figures, which sit at
-   the figure's left edge, so its line never runs across their glyphs.
-   Measured in px rather than %: the text keeps its width while the figure
-   narrows, and on a phone it spans most of the box. */
+/* Both charts fade to a faint texture under the figures, which sit at the
+   figure's left edge, so their lines never run across the glyphs. Measured
+   in px rather than %: the text keeps its width while the figure narrows,
+   and on a phone it spans most of the box. */
 .ov-hero-figure > svg {
   -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
   mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
@@ -674,8 +687,13 @@
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
 @media (max-width: 640px) {
-  .ov-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .ov-hero-figure { min-height: 150px; }
+  .ov-hero { grid-template-columns: minmax(0, 1fr); }
+  .ov-hero-figure {
+    min-height: 150px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out

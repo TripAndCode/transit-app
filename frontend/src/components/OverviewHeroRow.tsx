@@ -157,7 +157,8 @@ export function OverviewHeroRow({
         />
       </div>
       <div className="ov-hero">
-        {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
+        {/* Both charts live in the figure column, which clips them: the fact
+            list beside it stays on a plain surface. */}
         <div className="ov-hero-figure">
           <InlineSparkline
             points={sparklinePoints}
@@ -168,6 +169,7 @@ export function OverviewHeroRow({
             baseline={sparklineMean ?? undefined}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
           />
+          {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
           <div className="ov-hero-label">
             {t("overview.hero_row.avg_delay_label", { range })}
           </div>

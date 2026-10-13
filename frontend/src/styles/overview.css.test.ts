@@ -62,16 +62,24 @@ describe("overview.css living hero", () => {
   it("the ribbon's path transitions its geometry on --dur-3 only", () => {
     expect(decl(ruleBody(css, ".ov-pulse-ribbon path {"), "transition")).toBe("d var(--dur-3) var(--ease-out)");
   });
-  it("the ribbon takes no pointer and both hero columns paint over it", () => {
+  it("the ribbon takes no pointer, and the figure column clips both charts under its text", () => {
     const ribbon = ruleBody(css, ".ov-pulse-ribbon {");
     expect(decl(ribbon, "pointer-events")).toBe("none");
     expect(decl(ribbon, "position")).toBe("absolute");
     expect(decl(ribbon, "z-index")).toBeNull();
-    expect(decl(ruleBody(css, ".ov-hero {"), "position")).toBe("relative");
-    expect(decl(ruleBody(css, ".ov-hero-figure {"), "position")).toBe("relative");
-    expect(decl(ruleBody(css, ".ov-hero-text {"), "position")).toBe("relative");
-    // A non-positioned child would paint under the absolutely-filled sparkline.
+    const figure = ruleBody(css, ".ov-hero-figure {");
+    expect(decl(figure, "position")).toBe("relative");
+    expect(decl(figure, "overflow")).toBe("hidden");
+    // A non-positioned child would paint under the absolutely-filled charts.
     expect(decl(ruleBody(css, ".ov-hero-feed {"), "position")).toBe("relative");
+  });
+  it("the fact list sits on the card's plain surface, which does not clip the rows' focus ring", () => {
+    const hero = ruleBody(css, ".ov-hero {");
+    expect(decl(hero, "background")).toBe("var(--bg-surface)");
+    expect(decl(hero, "overflow")).toBeNull();
+    const text = ruleBody(css, ".ov-hero-text {");
+    expect(decl(text, "background")).toBeNull();
+    expect(decl(text, "overflow")).toBeNull();
   });
 });
 

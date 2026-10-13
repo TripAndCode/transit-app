@@ -328,13 +328,16 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByText(/Selected period's average/)).toBeNull();
   });
 
-  it("draws the day-pulse ribbon behind the hero from peak_hour.by_hour", () => {
+  it("draws the day-pulse ribbon inside the figure column, never behind the facts", () => {
     mockHooks(38, 0.1);
     renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
-    // First child: the two columns after it are positioned, so they paint
-    // over it by DOM order.
-    expect(document.querySelector(".ov-hero > .ov-pulse-ribbon:first-child")).not.toBeNull();
-    expect(document.querySelector(".ov-hero > .ov-hero-text")).not.toBeNull();
+    expect(document.querySelector(".ov-hero-figure > .ov-pulse-ribbon")).not.toBeNull();
+    // The figure's text follows both charts in DOM order, so it paints over them.
+    const figure = [...(document.querySelector(".ov-hero-figure")?.children ?? [])];
+    expect(figure.findIndex((el) => el.matches(".ov-pulse-ribbon"))).toBeLessThan(
+      figure.findIndex((el) => el.matches(".ov-hero-label")),
+    );
+    expect(document.querySelector(".ov-hero-text svg")).toBeNull();
   });
 
   it("draws no ribbon without an hourly profile", () => {
