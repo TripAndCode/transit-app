@@ -910,23 +910,33 @@ async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, 
 
 @pytest.mark.asyncio
 async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
-    """Caps at 5 routes even with more seeded; an empty dataset returns no
-    routes and a zero count (with its threshold), not an error."""
+    """Caps the list at 5 routes even with more seeded, while both counts
+    cover every route; an empty dataset returns no routes and zero counts
+    (with their thresholds), not an error."""
     from pipeline.reports import compute_overview_summary
 
+    # 5.0 .. 11.0 min: every route is over the severe bound, R_0 exactly on it.
     for i in range(7):
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", 3.0 + i, 10)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", 5.0 + i, 10)
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     routes = out["top_delayed"]["routes"]
     assert len(routes) == 5
-    assert routes[0]["route_code"] == "R_6"  # highest avg_min (3.0 + 6)
+    assert routes[0]["route_code"] == "R_6"  # highest avg_min (5.0 + 6)
+    assert out["top_delayed"]["severe_count"] == 7
+    assert out["top_delayed"]["delayed_count"] == 7
 
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
     empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn, "ja")
-    assert empty_out["top_delayed"] == {"routes": [], "delayed_count": 0, "delayed_threshold_min": 2.0}
+    assert empty_out["top_delayed"] == {
+        "routes": [],
+        "delayed_count": 0,
+        "delayed_threshold_min": 2.0,
+        "severe_count": 0,
+        "severe_threshold_min": 5.0,
+    }
 
 
 @pytest.mark.asyncio
