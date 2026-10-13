@@ -500,6 +500,11 @@ export function useAgencyDiagnostics(agencyId: number | null, runFinishedAt: str
     queryFn: ({ signal }) =>
       apiGet<AgencyDiagnostics>(`/api/admin/agencies/${agencyId}/diagnostics`, { signal }),
     enabled: agencyId != null,
+    // The same agency's previous bundle stays up while the re-read is in
+    // flight, so a run ending does not blank the drawer; another agency's
+    // never stands in for this one's.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === agencyId ? previous : undefined,
     staleTime: 30_000,
   });
 }

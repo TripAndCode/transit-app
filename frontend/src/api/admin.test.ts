@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   fetchAllAdminAudit,
   healthRefetchInterval,
   useAckBoardAlert,
+  useAgencyDiagnostics,
   usePatchUser,
   useRefreshAgencyStatic,
   useUpdateAgency,
@@ -184,5 +185,30 @@ describe.each([
 
     expect(mockApiPost).toHaveBeenCalledWith(path, {});
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminAgenciesHealth"] });
+  });
+});
+
+describe("useAgencyDiagnostics", () => {
+  afterEach(() => mockApiGet.mockReset());
+
+  it("re-reads when the agency's run ends, keeping the bundle up meanwhile, but never another agency's", async () => {
+    mockApiGet.mockResolvedValueOnce({ agency_id: 1, version: "before" });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ id, finished }: { id: number; finished: string | null }) => useAgencyDiagnostics(id, finished),
+      {
+        initialProps: { id: 1, finished: null as string | null },
+        wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+      },
+    );
+    await waitFor(() => expect(result.current.data).toEqual({ agency_id: 1, version: "before" }));
+
+    mockApiGet.mockReturnValue(new Promise(() => {}));
+    rerender({ id: 1, finished: "2026-10-13T05:04:28Z" });
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(result.current.data).toEqual({ agency_id: 1, version: "before" });
+
+    rerender({ id: 2, finished: "2026-10-13T05:04:28Z" });
+    expect(result.current.data).toBeUndefined();
   });
 });
