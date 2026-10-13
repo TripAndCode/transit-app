@@ -122,11 +122,11 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 
 ![Pulse](./02-pulse.en.png)
 
-- The sentence at the top compares the period with the same number of days just before it. The tag in front of it says “About the same as the period before”, “Worse than the period before” or “Better than the period before”; the ⓘ icon explains the comparison.
+- The sentence at the top compares the period with the same number of days just before it. The tag in front of it says “About the same as the period before”, “Worse than the period before, +… min” or “Better than the period before”; the ⓘ icon explains the comparison.
 - “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values.
 - The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
-- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging over … min late” (how many routes sit in the most delayed group of **Routes to check now** below, out of all routes). Click a row to open the card that explains it; “Averaging over … min late” takes you to **Routes to check now**.
-- **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
+- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging over … min late” (how many routes averaged more than a set number of minutes late, out of all routes: the same number as the first heading of **Routes to check now** below). Click a row to open the card that explains it; “Averaging over … min late” takes you to **Routes to check now**.
+- **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Only the top routes are listed; when the most delayed group holds more, its heading gives the full count and says how many are shown (“top … shown”). Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
 - **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how weekdays compare with weekends and holidays. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.

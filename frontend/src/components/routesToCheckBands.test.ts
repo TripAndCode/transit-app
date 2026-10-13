@@ -1,11 +1,21 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { groupBySeverityBand } from "./routesToCheckBands";
+import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 function route(avg_min: number, route_code = "R"): OverviewTopDelayedRoute {
   return { route_code, route_short_name: null, avg_min };
 }
+
+describe("BAND_BOUNDS", () => {
+  // The payload's severe_count is counted on the server against
+  // SEVERE_ROUTE_MIN (pipeline/reports/overview.py), and printed beside this
+  // band; tests/unit/test_overview_top_delayed.py pins the same 5, so moving
+  // either side alone fails a test.
+  it("puts the top band's bound at 5 minutes, the server's severe threshold", () => {
+    expect(BAND_BOUNDS.severe.min).toBe(5);
+  });
+});
 
 describe("groupBySeverityBand", () => {
   it("groups routes into worst-first bands, omitting empty ones", () => {

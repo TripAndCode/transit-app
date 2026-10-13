@@ -839,6 +839,11 @@ type OverviewTopDelayed = {
   delayed_count: number;
   /** The average delay (minutes) at or above which a route was counted. */
   delayed_threshold_min: number;
+  /** Routes in the routes-to-check list's top band, over every route rather
+   *  than only the listed ones. */
+  severe_count: number;
+  /** That band's bound (minutes), the one `severe_count` was counted at. */
+  severe_threshold_min: number;
 };
 
 export type OverviewPeakHour = {

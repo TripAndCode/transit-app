@@ -708,12 +708,22 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 #: states the threshold it was counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
 
+#: A route averaging at least this late (minutes) sits in the routes-to-check
+#: list's top band. The client bands the listed routes itself, with
+#: DELAY_THRESHOLDS.severe (BAND_BOUNDS.severe.min in
+#: frontend/src/components/routesToCheckBands.ts); a test on each side pins
+#: the value, so neither side can move alone. The count carries it, as
+#: ``delayed_threshold_min`` does for its count.
+SEVERE_ROUTE_MIN = 5.0
+
 
 async def _top_delayed_routes(
     agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``.
+    now"), plus counts of routes at/above ``DELAYED_ROUTE_MIN`` and
+    ``SEVERE_ROUTE_MIN``, each over every route rather than the ``limit``
+    listed: the list is truncated, the counts are not.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -763,9 +773,18 @@ async def _top_delayed_routes(
         ]
 
     if not rows:
-        return {"routes": [], "delayed_count": 0, "delayed_threshold_min": DELAYED_ROUTE_MIN}
+        return {
+            "routes": [],
+            "delayed_count": 0,
+            "delayed_threshold_min": DELAYED_ROUTE_MIN,
+            "severe_count": 0,
+            "severe_threshold_min": SEVERE_ROUTE_MIN,
+        }
 
     delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
+    # Banded on the rounded average each listed route carries, the value the
+    # client bands it on, so a route listed at 5.0 is always counted here.
+    severe_count = sum(1 for r in rows if r["avg_min"] is not None and float(_round2(r["avg_min"])) >= SEVERE_ROUTE_MIN)
     top_n = rows[:limit]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
@@ -780,6 +799,8 @@ async def _top_delayed_routes(
         ],
         "delayed_count": delayed_count,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
+        "severe_count": severe_count,
+        "severe_threshold_min": SEVERE_ROUTE_MIN,
     }
 
 

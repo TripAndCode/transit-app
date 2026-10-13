@@ -5,7 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow, type HeroFact } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, OverviewTopDelayedRoute } from "../api/types";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
 import { formatDateRange } from "../utils/format";
 
 function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
@@ -27,13 +27,6 @@ const concentration: OverviewConcentration = {
   rest_share_pct: 40,
 };
 const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
-
-function delayedRoute(route_code: string, avg_min: number): OverviewTopDelayedRoute {
-  return { route_code, route_short_name: null, avg_min };
-}
-// Three in the routes-to-check list's top band (5.0 sits on its boundary) and
-// one below it.
-const topDelayed = [delayedRoute("A", 7.2), delayedRoute("B", 5.0), delayedRoute("C", 6.1), delayedRoute("D", 4.2)];
 
 function mockHooks(routeCount: number, feedAgeHours: number | null) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
@@ -66,7 +59,7 @@ function mockFeedSummary(capturedAt: string | null) {
 
 function renderHero(overrides: {
   headline?: OverviewHeadline;
-  topDelayedRoutes?: OverviewTopDelayedRoute[];
+  severeCount?: number;
   sparklinePoints?: number[];
   peakHour?: OverviewPeakHour | null;
   concentration?: OverviewConcentration;
@@ -75,7 +68,8 @@ function renderHero(overrides: {
   return renderWithProviders(
     <OverviewHeroRow
       headline={overrides.headline ?? headline()}
-      topDelayedRoutes={overrides.topDelayedRoutes ?? topDelayed}
+      severeCount={overrides.severeCount ?? 3}
+      severeThresholdMin={5}
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
@@ -181,7 +175,7 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByRole("button", { name: /Share of delay in the top 3 routes/ })).toHaveTextContent("60%");
   });
 
-  it("lists the routes-to-check list's top-band count, out of the total, with that band's threshold", async () => {
+  it("lists the count of routes over the severe threshold, out of the total, with that threshold", async () => {
     mockHooks(38, 0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });
@@ -201,9 +195,17 @@ describe("OverviewHeroRow", () => {
 
   it("keeps the late-route count neutral when no route is in the top band", () => {
     mockHooks(38, 0.1);
-    const { container } = renderHero({ topDelayedRoutes: [delayedRoute("D", 4.9), delayedRoute("E", 3.2)] });
+    const { container } = renderHero({ severeCount: 0 });
     expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toHaveTextContent("0/ 38 routes");
     expect(container.querySelector(".ov-hero-fact--attn")).toBeNull();
+  });
+
+  // The routes-to-check list holds five routes; the count is the server's,
+  // over every route.
+  it("prints a count past the five routes the list holds", () => {
+    mockHooks(38, 0.1);
+    renderHero({ severeCount: 12 });
+    expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toHaveTextContent("12/ 38 routes");
   });
 
   it("drops the total, not the count, while the route list is unknown", () => {

@@ -123,13 +123,16 @@ class TopDelayedRoute(BaseModel):
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay + a count of routes averaging at
-    least ``delayed_threshold_min`` late, both over the same window the
-    headline covers."""
+    """Top-5 routes by absolute avg delay, plus counts of routes averaging at
+    least ``delayed_threshold_min`` and ``severe_threshold_min`` late, all over
+    the same window the headline covers. The counts cover every route, not
+    only the five listed."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
     delayed_threshold_min: float
+    severe_count: int
+    severe_threshold_min: float
 
 
 class PeakHour(BaseModel):

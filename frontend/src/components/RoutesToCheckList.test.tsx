@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
+import { groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as flipModule from "../hooks/useFlipRows";
@@ -19,18 +20,24 @@ function route(code: string, avgMin: number): OverviewTopDelayedRoute {
   return { route_code: code, route_short_name: null, avg_min: avgMin };
 }
 
-function list(rs: OverviewTopDelayedRoute[]) {
+/** The server's uncapped top-band count; by default, a list that holds every
+ *  route in that band. */
+function listedSevere(rs: OverviewTopDelayedRoute[]) {
+  return groupBySeverityBand(rs).find((g) => g.band === "severe")?.routes.length ?? 0;
+}
+
+function list(rs: OverviewTopDelayedRoute[], severeCount = listedSevere(rs)) {
   return (
     <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} />} />
+        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} severeCount={severeCount} />} />
       </Routes>
     </MemoryRouter>
   );
 }
 
-function renderList(rs: OverviewTopDelayedRoute[]) {
-  return renderWithProviders(list(rs));
+function renderList(rs: OverviewTopDelayedRoute[], severeCount?: number) {
+  return renderWithProviders(list(rs, severeCount));
 }
 
 describe("RoutesToCheckList", () => {
@@ -43,6 +50,16 @@ describe("RoutesToCheckList", () => {
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual(["2 routes averaging more than 5 min late", "1 route averaging 1.5–3 min late"]);
+  });
+
+  // The list holds the worst five routes only, so its top band can hold
+  // fewer routes than the agency has over the threshold. The header counts
+  // them all, and says how many it lists.
+  it("counts every route over the top band's bound and says how many it lists, when the list is truncated", () => {
+    renderList([route("A", 9.1), route("B", 8.4), route("C", 7.7), route("D", 6.2), route("E", 5.3)], 12);
+    const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
+    expect(headers).toEqual(["12 routes averaging more than 5 min late (top 5 shown)"]);
+    expect(document.querySelectorAll(".ov-check-row")).toHaveLength(5);
   });
 
   it("gives each route's average its unit", () => {

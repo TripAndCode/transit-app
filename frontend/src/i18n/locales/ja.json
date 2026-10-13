@@ -314,6 +314,8 @@
       "empty": "確認が必要な路線はありません",
       "band_severe_one": "平均{{min}}分超の遅れ：{{count}}路線",
       "band_severe_other": "平均{{min}}分超の遅れ：{{count}}路線",
+      "band_severe_truncated_one": "平均{{min}}分超の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
+      "band_severe_truncated_other": "平均{{min}}分超の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
       "band_moderate_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
       "band_moderate_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
       "band_mild_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",

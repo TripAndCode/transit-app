@@ -14,6 +14,9 @@ import type { OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
+  /** Routes in the top band over every route, not only the listed ones: the
+   *  list is the worst few, so its top band can be truncated. */
+  severeCount: number;
 };
 
 /** A row's figure: printed as it is on first paint, travelling from the
@@ -25,7 +28,7 @@ function CheckValue({ value }: { value: number }) {
   return <span className="ov-check-value num">{formatMinutes(shown)}</span>;
 }
 
-export function RoutesToCheckList({ routes }: Props) {
+export function RoutesToCheckList({ routes, severeCount }: Props) {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
   const { search } = useLocation();
@@ -56,7 +59,13 @@ export function RoutesToCheckList({ routes }: Props) {
         // figure counts and its bar slides instead of remounting.
         groups.flatMap((g) => [
           <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
-            {t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
+            {g.band === "severe" && severeCount > g.routes.length
+              ? t("overview.routes_to_check.band_severe_truncated", {
+                  count: severeCount,
+                  shown: g.routes.length,
+                  ...BAND_BOUNDS.severe,
+                })
+              : t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
           </div>,
           ...g.routes.map((r) => (
             <Link

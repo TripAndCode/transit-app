@@ -314,6 +314,8 @@
       "empty": "No routes need attention",
       "band_severe_one": "{{count}} route averaging more than {{min}} min late",
       "band_severe_other": "{{count}} routes averaging more than {{min}} min late",
+      "band_severe_truncated_one": "{{count}} route averaging more than {{min}} min late (top {{shown}} shown)",
+      "band_severe_truncated_other": "{{count}} routes averaging more than {{min}} min late (top {{shown}} shown)",
       "band_moderate_one": "{{count}} route averaging {{min}}–{{max}} min late",
       "band_moderate_other": "{{count}} routes averaging {{min}}–{{max}} min late",
       "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
