@@ -7,21 +7,27 @@ agency from the static rows currently in place, so a display needs no per-reques
 work. GTFS-JP ``routes_jp.txt``, when the zip has it, names all three stops;
 an origin or destination it leaves empty (or every one, for a feed without
 the file) takes the route's dominant pair: the (first stop, last stop) name
-pair most of its trips run. Only ``routes_jp.txt`` names a via point.
+pair most of its trips run. Only ``routes_jp.txt`` names a via point. A
+routes_jp.txt that cannot be read is ignored for that load, so the trips name
+every route rather than the whole static load failing.
 
 The derivation reads each static table on its own and joins in Python. It
 runs inside ``load_static``'s transaction, before the planner statistics for
 the just-replaced rows are refreshed, and a multi-way join planned on those
-stale statistics can take minutes where these single-table reads take
-milliseconds.
+stale statistics can pick a plan far slower than single-table reads, which
+have no join to misestimate.
 """
 
 import csv
 import io
+import logging
 import re
 import zipfile
+import zlib
 from collections import Counter, defaultdict
 from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
 
 ROUTES_JP = "routes_jp.txt"
 
@@ -65,8 +71,14 @@ def derive_route_terminals(
     """One route's terminals from its routes_jp row and its trips' end pairs.
 
     ``trip_pairs`` counts trips by their (first, last) normalized stop names.
-    The dominant pair is the most counted one; a tie goes to the pair that
-    sorts first, so reloading the same feed always picks the same one.
+    Pairs rank by trip count; a tie goes to the pair that sorts first, so
+    reloading the same feed always ranks them the same way. The top one is the
+    dominant pair.
+
+    With neither end from routes_jp, the dominant pair names both. With one,
+    the other end comes from the top-ranked pair that contains the known
+    name, whichever way that pair runs; no such pair leaves it None rather
+    than guessing.
 
     ``is_loop`` means the stored origin and destination are the same name.
     ``bidirectional`` means the trips also run the dominant pair's exact
@@ -74,11 +86,15 @@ def derive_route_terminals(
     reverse is itself.
     """
     jp_origin, jp_via, jp_destination = (normalize_stop_name(v) for v in routes_jp or (None, None, None))
-    dominant: Pair | None = None
-    if trip_pairs:
-        dominant = min(trip_pairs, key=lambda pair: (-trip_pairs[pair], pair))
-    origin = jp_origin or (dominant[0] if dominant else None)
-    destination = jp_destination or (dominant[1] if dominant else None)
+    ranked = sorted((pair for pair, n in trip_pairs.items() if n > 0), key=lambda pair: (-trip_pairs[pair], pair))
+    dominant = ranked[0] if ranked else None
+    origin, destination = jp_origin, jp_destination
+    if jp_origin is not None and jp_destination is None:
+        destination = _other_end(jp_origin, ranked)
+    elif jp_origin is None and jp_destination is not None:
+        origin = _other_end(jp_destination, ranked)
+    elif jp_origin is None and dominant is not None:
+        origin, destination = dominant
     is_loop = origin is not None and origin == destination
     bidirectional = False
     if dominant is not None and not is_loop and dominant[0] != dominant[1]:
@@ -86,6 +102,15 @@ def derive_route_terminals(
         share_num, share_den = _REVERSE_SHARE
         bidirectional = share_den * reverse >= share_num * trip_pairs[dominant]
     return RouteTerminals(origin, jp_via, destination, is_loop, bidirectional)
+
+
+def _other_end(known: str, ranked: list[Pair]) -> str | None:
+    for first, last in ranked:
+        if first == known:
+            return last
+        if last == known:
+            return first
+    return None
 
 
 def _blank_to_none(value: str | None) -> str | None:
@@ -156,7 +181,12 @@ def load_route_terminals(zf: zipfile.ZipFile, names_in_zip: set[str], cur, agenc
     load whose zip omits routes.txt (keeping the old route rows) still ends up
     with exactly what this feed's files say. The caller commits.
     """
-    routes_jp = _read_routes_jp(zf) if ROUTES_JP in names_in_zip else {}
+    routes_jp: dict[str, tuple[str | None, str | None, str | None]] = {}
+    if ROUTES_JP in names_in_zip:
+        try:
+            routes_jp = _read_routes_jp(zf)
+        except (UnicodeDecodeError, csv.Error, zipfile.BadZipFile, zlib.error) as exc:
+            logger.warning(f"  {ROUTES_JP} unreadable, naming every route from its trips: {exc}")
     cur.execute(
         "SELECT route_id, origin_name, via_name, destination_name, is_loop, bidirectional "
         "FROM static_routes WHERE agency_id = %s",

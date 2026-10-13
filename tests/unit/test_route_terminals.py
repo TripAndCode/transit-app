@@ -45,8 +45,25 @@ def test_without_routes_jp_the_dominant_trip_pair_names_the_route():
 
 
 def test_routes_jp_fills_what_it_names_and_the_trips_fill_the_rest():
-    pairs = Counter({("A", "B"): 5})
+    pairs = Counter({("A", "X"): 5})
     assert derive_route_terminals((None, "経由", " X "), pairs) == RouteTerminals("A", "経由", "X", False, False)
+
+
+@pytest.mark.parametrize(
+    ("routes_jp", "pairs", "expected"),
+    [
+        (("A", None, None), Counter({("A", "B"): 3}), ("A", None, "B")),
+        (("A", None, None), Counter({("B", "A"): 3}), ("A", None, "B")),
+        ((None, None, "A"), Counter({("A", "B"): 3}), ("B", None, "A")),
+        ((None, None, "A"), Counter({("B", "A"): 3}), ("B", None, "A")),
+        (("A", None, None), Counter({("B", "C"): 5, ("C", "A"): 2}), ("A", None, "C")),
+        (("A", None, None), Counter({("B", "C"): 5}), ("A", None, None)),
+    ],
+)
+def test_one_routes_jp_end_takes_the_other_from_the_top_pair_that_contains_it(routes_jp, pairs, expected):
+    terminals = derive_route_terminals(routes_jp, pairs)
+    assert terminals[:3] == expected
+    assert terminals.is_loop is False
 
 
 def test_a_tie_between_pairs_goes_to_the_pair_that_sorts_first():
