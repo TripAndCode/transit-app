@@ -14,8 +14,8 @@ from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
+from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
-from pipeline.service_day import DayType
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
@@ -142,16 +142,18 @@ class PeakHour(BaseModel):
 
 
 class ServiceSplitEntry(BaseModel):
-    """Mean delay over the dates of one day type (平日 / 土曜 / 日祝).
+    """Mean delay over the dates of one day-type bucket (平日 / 土曜 / 日祝 / 土日祝).
 
-    ``avg_min`` is None when the type has no data in the range; ``days`` and
-    ``samples`` count the same rows the mean is taken over.
+    ``avg_min`` is None when the bucket has no data in the range; ``days`` and
+    ``samples`` count the same rows the mean is taken over. ``insufficient``
+    marks a bucket with too few days or samples to compare.
     """
 
     day_type: DayType
     avg_min: float | None
     days: int
     samples: int
+    insufficient: bool
 
 
 class ServiceSplitDay(BaseModel):
@@ -177,7 +179,8 @@ class OverviewSummary(BaseModel):
     peak_hour: PeakHour | None
     peak_hour_weekday: PeakHour | None = None
     peak_hour_weekend: PeakHour | None = None
-    # Always all three day types, in display order.
+    # Every bucket the agency is split into, in display order: 平日 / 土曜 /
+    # 日祝, or 平日 / 土日祝 for a feed with one weekend timetable.
     service_split: list[ServiceSplitEntry]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]

@@ -251,8 +251,13 @@
   color: var(--text-tertiary);
   margin-bottom: 10px;
 }
-.ov-svc-row--empty .ov-svc-label,
-.ov-svc-row--empty .ov-svc-num { color: var(--text-tertiary); }
+.ov-svc-row--muted .ov-svc-label,
+.ov-svc-row--muted .ov-svc-num { color: var(--text-tertiary); }
+/* Stands in the bar's place for a day type too thin to compare. */
+.ov-svc-insufficient {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
 .ov-svc-track {
   position: relative;
   height: 10px;

@@ -55,9 +55,9 @@ from typing import Iterable, Iterator
 from api.range import RangeCtx, dow_isodays
 from pipeline import perf
 from pipeline.cache import async_lru_cache
+from pipeline.day_types import load_day_types
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 from pipeline.reports.rankings import _round1
-from pipeline.service_day import DAY_TYPES, day_type, public_holidays_between
 
 _log = logging.getLogger(__name__)
 
@@ -970,46 +970,52 @@ def _peak_from_hour_rows(rows) -> dict | None:
     }
 
 
-async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
-    """Per-date avg delay over ``ctx``, each date tagged with its day type.
+async def _daily_totals(agency_id: int, ctx: RangeCtx, conn, grain: _Grain | None) -> list[tuple[date, int, int]]:
+    """``(date, samples, sum_delay_sec)`` for each date in ``ctx`` with samples, oldest first.
 
-    Every service_type of a date pools into that date's one row, and the day
-    type comes from the date itself (:func:`pipeline.service_day.day_type`),
-    so each date belongs to exactly one of 平日 / 土曜 / 日祝.
-
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with a
-    sample-weighted per-date average. Slow path reads the shared grain
-    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
-
-    Returns ``{date: ISO str, day_type, avg_min: float}`` rows sorted by date,
-    one per date with samples.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``; slow path
+    reads the shared grain (:func:`_fetch_grain`) so the hour-of-day filter is
+    honored. Every service_type of a date pools together: the day-type split
+    files dates, not services (see :mod:`pipeline.day_types`).
     """
-    holidays = frozenset(public_holidays_between(ctx.from_date, ctx.to_date))
-    if ctx.time_band == "all":
-        where, params, _ = _agg_filter(ctx, next_param=2)
-        where_clause = f" AND ({where})" if where else ""
-        sql = (
-            "SELECT date,\n"
-            "       SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0 AS avg\n"
-            "FROM agg_daily_trend\n"
-            # The same row population as _service_split's (see there).
-            f"WHERE agency_id=$1{where_clause} AND sum_delay_sec IS NOT NULL AND samples > 0\n"
-            "GROUP BY date\n"
-            "ORDER BY date"
-        )
-        rows = await conn.fetch(sql, agency_id, *params)
-    else:
+    if ctx.time_band != "all":
         by_day = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=0)
-        rows = [{"date": d, "avg": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items())]
+        return [(d, n, total) for d, (n, total) in sorted(by_day.items())]
+    where, params, _ = _agg_filter(ctx, next_param=2)
+    where_clause = f" AND ({where})" if where else ""
+    rows = await conn.fetch(
+        "SELECT date, SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec\n"
+        "FROM agg_daily_trend\n"
+        # sum_delay_sec is nullable (unlike samples): a pre-backfill or
+        # hand-seeded row can carry samples without it. Excluding such rows
+        # keeps every figure the split reports (mean, days, samples) over one
+        # row population, matching pipeline/digest/build.py's
+        # _ROUTE_BASELINE_SQL.
+        f"WHERE agency_id=$1{where_clause} AND sum_delay_sec IS NOT NULL AND samples > 0\n"
+        "GROUP BY date\n"
+        "ORDER BY date",
+        agency_id,
+        *params,
+    )
+    return [(r["date"], int(r["samples"]), int(r["sum_delay_sec"])) for r in rows]
+
+
+def _avg_min(samples: int, sum_delay_sec: int) -> float:
+    """Sample-weighted mean delay in minutes, 2dp half-up, from exact integer sums."""
+    return float(_round2((sum_delay_sec / samples) / 60.0))
+
+
+async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
+    """Per-date avg delay over ``ctx``, each date tagged with its day-type bucket.
+
+    Returns ``{date: ISO str, day_type, avg_min}`` rows sorted by date, one per
+    date with samples. ``day_type`` is the same bucket :func:`_service_split`
+    files the date under, so the modal's series match the card's rows.
+    """
+    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
     return [
-        {
-            "date": r["date"].isoformat(),
-            "day_type": day_type(r["date"], holidays),
-            # 2dp, half-up: the precision _service_split reports the same metric at.
-            "avg_min": float(_round2(r["avg"])),
-        }
-        for r in rows
-        if r["avg"] is not None
+        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total)}
+        for d, n, total in await _daily_totals(agency_id, ctx, conn, grain)
     ]
 
 
@@ -1104,80 +1110,47 @@ async def _movers(
     }
 
 
-def _day_type_sql(holidays_param: int) -> str:
-    """SQL counterpart of :func:`pipeline.service_day.day_type` over a DATE ``date`` column.
-
-    The public holidays arrive as the bound ``date[]`` parameter
-    ``$holidays_param``, computed in Python for the query window, so both paths
-    classify against the same calendar.
-    """
-    return (
-        f"CASE WHEN EXTRACT(ISODOW FROM date) = 7 OR date = ANY(${holidays_param}::date[]) THEN 'sunday_holiday'"
-        " WHEN EXTRACT(ISODOW FROM date) = 6 THEN 'saturday'"
-        " ELSE 'weekday' END"
-    )
+# Below either floor a day type's mean is too thin to compare against the
+# others: one odd day, or a handful of trips, would decide it.
+SPLIT_MIN_DAYS = 3
+SPLIT_MIN_SAMPLES = 1000
 
 
 async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
-    """Mean delay per day type (平日 / 土曜 / 日祝) over ``ctx``.
+    """Mean delay per day type over ``ctx``.
 
-    Each observation is classified by its own service date
-    (:func:`pipeline.service_day.day_type`), not by the feed's
-    ``service_type``: that is a raw GTFS ``service_id`` whose naming differs per
-    agency (some combine a route group with the day type) and is empty for
-    observations that never matched a scheduled trip, which can be most of
-    them.
+    Each date is filed under the timetable class the agency's calendar runs
+    that day (:func:`pipeline.day_types.load_day_types`), never under the
+    observation's own ``service_type``: that is a raw GTFS ``service_id`` whose
+    naming differs per agency (some combine a route group with the day type)
+    and is empty for observations that never matched a scheduled trip, which
+    can be most of them.
 
-    Returns all three day types in :data:`pipeline.service_day.DAY_TYPES`
-    order as ``{day_type, avg_min, days, samples}``: ``avg_min`` is the
-    sample-weighted mean (``None`` for a type with no data), ``days`` the
-    number of dates with samples and ``samples`` the observation count, all
-    over the same rows.
-
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``. Slow
-    path reads the shared grain (:func:`_fetch_grain`) so the hour-of-day
-    filter is honored.
+    Returns one ``{day_type, avg_min, days, samples, insufficient}`` per bucket
+    the agency is split into, in display order: 平日 / 土曜 / 日祝, or 平日 /
+    土日祝 for a feed with one weekend timetable. ``avg_min`` is the
+    sample-weighted mean (None for a bucket with no data), ``days`` the dates
+    with samples and ``samples`` the observation count, all over the same rows.
+    ``insufficient`` marks a bucket under :data:`SPLIT_MIN_DAYS` days or
+    :data:`SPLIT_MIN_SAMPLES` samples.
     """
-    holidays = public_holidays_between(ctx.from_date, ctx.to_date)
-    by_type: dict[str, tuple[float, int, int]] = {}
-    if ctx.time_band == "all":
-        where, params, n = _agg_filter(ctx, next_param=2)
-        where_clause = f" AND ({where})" if where else ""
-        rows = await conn.fetch(
-            f"SELECT {_day_type_sql(n)} AS day_type,\n"
-            "       SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0 AS avg_min,\n"
-            "       COUNT(DISTINCT date) AS days,\n"
-            "       SUM(samples) AS samples\n"
-            "FROM agg_daily_trend\n"
-            # sum_delay_sec is nullable (unlike samples): a pre-backfill or
-            # hand-seeded row can carry samples without it. Excluding such rows
-            # here keeps the mean, the day count and the sample count over one
-            # row population, matching pipeline/digest/build.py's
-            # _ROUTE_BASELINE_SQL.
-            f"WHERE agency_id=$1{where_clause} AND sum_delay_sec IS NOT NULL AND samples > 0\n"
-            "GROUP BY 1",
-            agency_id,
-            *params,
-            holidays,
-        )
-        for r in rows:
-            if r["avg_min"] is not None:
-                by_type[r["day_type"]] = (float(_round2(r["avg_min"])), int(r["days"]), int(r["samples"]))
-    else:
-        holiday_set = frozenset(holidays)
-        acc: dict[str, list] = {}
-        for row in _grain_window(_require_grain(grain), ctx):
-            slot = acc.setdefault(day_type(row[0], holiday_set), [0, 0, set()])
-            slot[0] += row[4]
-            slot[1] += row[5]
-            slot[2].add(row[0])
-        for name, (samples, total, dates) in acc.items():
-            by_type[name] = (float(_round2((total / samples) / 60.0)), len(dates), samples)
-    out = []
-    for name in DAY_TYPES:
-        avg_min, days, samples = by_type.get(name, (None, 0, 0))
-        out.append({"day_type": name, "avg_min": avg_min, "days": days, "samples": samples})
-    return out
+    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    acc = {bucket: [0, 0, 0] for bucket in day_types.buckets}  # samples, sum_delay_sec, days
+    for d, n, total in await _daily_totals(agency_id, ctx, conn, grain):
+        slot = acc[day_types.of(d)]
+        slot[0] += n
+        slot[1] += total
+        slot[2] += 1
+    return [
+        {
+            "day_type": bucket,
+            "avg_min": _avg_min(n, total) if n else None,
+            "days": days,
+            "samples": n,
+            "insufficient": days < SPLIT_MIN_DAYS or n < SPLIT_MIN_SAMPLES,
+        }
+        for bucket, (n, total, days) in acc.items()
+    ]
 
 
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:

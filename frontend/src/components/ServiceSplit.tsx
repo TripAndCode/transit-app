@@ -8,7 +8,7 @@ import { niceAxis } from "./charts/niceAxis";
 import { showsLabel } from "./analysis/axisLabels";
 
 type Props = {
-  /** All three day types, in display order. */
+  /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];
   /** One row per date with data, used by the modal line chart. */
   daily?: OverviewServiceSplitDay[];
@@ -20,13 +20,20 @@ const DAY_TYPE_KEY: Record<OverviewDayType, string> = {
   weekday: "overview.service_split.type.weekday",
   saturday: "overview.service_split.type.saturday",
   sunday_holiday: "overview.service_split.type.sunday_holiday",
+  weekend_holiday: "overview.service_split.type.weekend_holiday",
 };
+
+/** A bucket whose mean is drawn and compared: it has data, and enough of it. */
+function comparable(entry: OverviewServiceSplitEntry): entry is OverviewServiceSplitEntry & { avg_min: number } {
+  return entry.avg_min != null && !entry.insufficient;
+}
 
 function dayTypeLabel(type: OverviewDayType, t: LabelT): string {
   return t(DAY_TYPE_KEY[type]);
 }
 
-/** Two tied day types read as one subject ("Weekdays and Saturdays"). */
+/** Two tied day types read as one subject ("Weekdays and Saturdays"). Three
+ *  can never tie for one end without the ends meeting. */
 function joinLabels(types: OverviewDayType[], t: LabelT): string {
   const labels = types.map((type) => dayTypeLabel(type, t));
   return labels.length === 2 ? t("overview.service_split.pair", { a: labels[0], b: labels[1] }) : labels[0];
@@ -34,9 +41,9 @@ function joinLabels(types: OverviewDayType[], t: LabelT): string {
 
 /** The slowest day type against the fastest, judged on the one-decimal means
  *  the rows show so the sentence never disagrees with them. Null when fewer
- *  than two day types have data. */
+ *  than two day types have enough data to compare. */
 function story(entries: OverviewServiceSplitEntry[], t: LabelT): string | null {
-  const shown = entries.flatMap((e) => (e.avg_min == null ? [] : [{ type: e.day_type, v: roundTenth(e.avg_min) }]));
+  const shown = entries.filter(comparable).map((e) => ({ type: e.day_type, v: roundTenth(e.avg_min) }));
   if (shown.length < 2) return null;
   const hi = Math.max(...shown.map((s) => s.v));
   const lo = Math.min(...shown.map((s) => s.v));
@@ -51,7 +58,7 @@ function story(entries: OverviewServiceSplitEntry[], t: LabelT): string | null {
 /** The shared bar scale: always spans zero, so an early-running (negative)
  *  mean draws leftward from it rather than off the track. */
 function barAxis(entries: OverviewServiceSplitEntry[]) {
-  const values = entries.flatMap((e) => (e.avg_min == null ? [] : [e.avg_min]));
+  const values = entries.filter(comparable).map((e) => e.avg_min);
   const low = Math.min(0, ...values);
   const high = Math.max(0, ...values);
   return high > low ? niceAxis(low, high, 4) : niceAxis(0, 1, 4);
@@ -115,28 +122,34 @@ export function ServiceSplit({
       <div className="ov-svc-list">
         {service_split.map((entry) => {
           const v = entry.avg_min;
+          const drawn = comparable(entry);
           return (
             <div
-              className={`ov-svc-row${v == null ? " ov-svc-row--empty" : ""}`}
+              className={`ov-svc-row${drawn ? "" : " ov-svc-row--muted"}`}
               key={entry.day_type}
             >
               <span className="ov-svc-label">{dayTypeLabel(entry.day_type, t)}</span>
-              <span className="ov-svc-track" aria-hidden="true">
-                {v != null && (
-                  <span
-                    className="ov-svc-fill"
-                    style={{
-                      left: `${pctOf(Math.min(0, v))}%`,
-                      width: `${(Math.abs(v) / span) * 100}%`,
-                    }}
-                  />
-                )}
-              </span>
+              {v != null && entry.insufficient ? (
+                <span className="ov-svc-insufficient">{t("overview.service_split.insufficient")}</span>
+              ) : (
+                <span className="ov-svc-track" aria-hidden="true">
+                  {drawn && (
+                    <span
+                      className="ov-svc-fill"
+                      style={{
+                        left: `${pctOf(Math.min(0, entry.avg_min))}%`,
+                        width: `${(Math.abs(entry.avg_min) / span) * 100}%`,
+                      }}
+                    />
+                  )}
+                </span>
+              )}
               <span className="ov-svc-num num">{formatMinutes(v)}</span>
               <span className="ov-svc-meta num">{metaText(entry, t)}</span>
             </div>
           );
         })}
+        {service_split.some(comparable) && (
         <div className="ov-svc-scale" aria-hidden="true">
           {axis.ticks.map((tick, i) => {
             const last = i === axis.ticks.length - 1;
@@ -152,16 +165,17 @@ export function ServiceSplit({
             );
           })}
         </div>
+        )}
       </div>
       {variant === "modal" && daily && daily.length > 0 && (
-        <ServiceSplitDailyChart daily={daily} />
+        <ServiceSplitDailyChart daily={daily} types={service_split.map((e) => e.day_type)} />
       )}
     </div>
   );
 }
 
 // --------------------------------------------------------------------------
-// Daily line chart (modal only): one series per day type over time.
+// Daily line chart (modal only): one series per day-type bucket over time.
 // Every date belongs to exactly one day type, so each series joins only its
 // own dates; marks keep a series with a single date (one Saturday in range)
 // visible. Hover tooltip, no chart library.
@@ -174,11 +188,12 @@ const DC_PAD_RIGHT = 16;
 const DC_PAD_TOP = 16;
 const DC_PAD_BOTTOM = 32;
 
-const SERIES: { type: OverviewDayType; stroke: string; dash: string }[] = [
-  { type: "weekday", stroke: "var(--trend-neutral)", dash: "0" },
-  { type: "saturday", stroke: "var(--accent)", dash: "6 3" },
-  { type: "sunday_holiday", stroke: "var(--text-tertiary)", dash: "2 3" },
-];
+const SERIES_STYLE: Record<OverviewDayType, { stroke: string; dash: string }> = {
+  weekday: { stroke: "var(--trend-neutral)", dash: "0" },
+  saturday: { stroke: "var(--accent)", dash: "6 3" },
+  sunday_holiday: { stroke: "var(--text-tertiary)", dash: "2 3" },
+  weekend_holiday: { stroke: "var(--text-tertiary)", dash: "4 3" },
+};
 
 type DailyHover = {
   visible: boolean;
@@ -190,8 +205,11 @@ type DailyHover = {
 
 function ServiceSplitDailyChart({
   daily,
+  types,
 }: {
   daily: OverviewServiceSplitDay[];
+  /** The buckets the card shows, in its order: one series each. */
+  types: OverviewDayType[];
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<DailyHover>({
@@ -252,11 +270,12 @@ function ServiceSplitDailyChart({
   // Y axis ticks at the axis minimum, middle and maximum.
   const yTicks = [yMin, (yMin + yMax) / 2, yMax];
   const hovered = hover.visible ? daily[hover.index] : null;
+  const series = types.map((type) => ({ type, ...SERIES_STYLE[type] }));
 
   return (
     <div className="ov-svc-daily-wrap">
       <div className="ov-svc-daily-legend">
-        {SERIES.map((s) => (
+        {series.map((s) => (
           <span key={s.type}>
             <svg className="ov-svc-daily-legend-swatch" width="18" height="4" aria-hidden="true">
               <line x1="1" y1="2" x2="17" y2="2" style={{ stroke: s.stroke }} strokeWidth="2" strokeDasharray={s.dash} />
@@ -292,7 +311,7 @@ function ServiceSplitDailyChart({
             </g>
           );
         })}
-        {SERIES.map((s) => {
+        {series.map((s) => {
           const own = points.filter((p) => p.type === s.type);
           return (
             <g key={s.type}>

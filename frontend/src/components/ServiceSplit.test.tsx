@@ -2,19 +2,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
-import type { OverviewServiceSplitDay, OverviewServiceSplitEntry } from "../api/types";
+import type { OverviewDayType, OverviewServiceSplitDay, OverviewServiceSplitEntry } from "../api/types";
 import { ServiceSplit } from "./ServiceSplit";
 
-type Figures = [avg_min: number | null, days: number, samples: number];
+type Figures = [avg_min: number | null, days: number, samples: number, insufficient?: boolean];
+
+function entry(day_type: OverviewDayType, [avg_min, days, samples, insufficient = samples === 0]: Figures) {
+  return { day_type, avg_min, days, samples, insufficient };
+}
 
 function split(weekday: Figures, saturday: Figures, sunday_holiday: Figures): OverviewServiceSplitEntry[] {
-  return (
-    [
-      ["weekday", weekday],
-      ["saturday", saturday],
-      ["sunday_holiday", sunday_holiday],
-    ] as const
-  ).map(([day_type, [avg_min, days, samples]]) => ({ day_type, avg_min, days, samples }));
+  return [entry("weekday", weekday), entry("saturday", saturday), entry("sunday_holiday", sunday_holiday)];
 }
 
 const TYPICAL = split([3.2, 18, 1_712_345], [3.0, 4, 234_567], [2.0, 4, 230_001]);
@@ -85,6 +83,43 @@ describe("ServiceSplit card", () => {
     ).toBeInTheDocument();
   });
 
+  it("splits a feed with one weekend timetable into weekdays and weekends", () => {
+    const { container } = renderWithProviders(
+      <ServiceSplit service_split={[entry("weekday", [3.0, 18, 5000]), entry("weekend_holiday", [2.5, 8, 2000])]} />,
+    );
+    expect(rows(container).map((r) => r.label)).toEqual(["Weekdays", "Weekends & holidays"]);
+    expect(
+      screen.getByText("Weekdays run the latest, 0.5 min longer on average than Weekends & holidays."),
+    ).toBeInTheDocument();
+  });
+
+  it("marks a day type with too little data instead of drawing it, and leaves it out of the comparison", () => {
+    const { container } = renderWithProviders(
+      <ServiceSplit service_split={split([3.2, 18, 5000], [6.0, 1, 900, true], [2.0, 4, 2000])} />,
+    );
+    const saturday = container.querySelectorAll(".ov-svc-row")[1];
+    expect(saturday.querySelector(".ov-svc-insufficient")?.textContent).toBe("Not enough data");
+    expect(saturday.querySelector(".ov-svc-track")).toBeNull();
+    expect(rows(container)[1]).toMatchObject({ value: "6.0 min", meta: "1 day · 900 obs." });
+    // The 6.0 neither stretches the scale nor counts as the slowest.
+    expect(rows(container).map((r) => r.width)).toEqual(["80%", undefined, "50%"]);
+    expect(
+      screen.getByText("Weekdays run the latest, 1.2 min longer on average than Sundays & holidays."),
+    ).toBeInTheDocument();
+  });
+
+  it("tells no story when only one day type has enough data", () => {
+    renderWithProviders(<ServiceSplit service_split={split([3.2, 18, 5000], [3.0, 2, 800, true], [null, 0, 0])} />);
+    expect(screen.queryByText(/run the latest|about the same/)).toBeNull();
+  });
+
+  it("draws no scale when no day type has enough data for a bar", () => {
+    const { container } = renderWithProviders(
+      <ServiceSplit service_split={split([3.2, 2, 500, true], [null, 0, 0], [null, 0, 0])} />,
+    );
+    expect(container.querySelector(".ov-svc-scale")).toBeNull();
+  });
+
   it("tells no story when only one day type has data", () => {
     const { container } = renderWithProviders(
       <ServiceSplit service_split={split([3.2, 18, 100], [null, 0, 0], [null, 0, 0])} />,
@@ -132,6 +167,22 @@ function daily(n: number, start = 1): OverviewServiceSplitDay[] {
 }
 
 describe("ServiceSplit modal chart", () => {
+  it("draws one series per bucket the card shows", () => {
+    const { container } = renderWithProviders(
+      <ServiceSplit
+        variant="modal"
+        service_split={[entry("weekday", [3.0, 18, 5000]), entry("weekend_holiday", [2.5, 8, 2000])]}
+        daily={[
+          { date: "2026-09-04", day_type: "weekday", avg_min: 3.0 },
+          { date: "2026-09-05", day_type: "weekend_holiday", avg_min: 2.0 },
+        ]}
+      />,
+    );
+    const legend = container.querySelector(".ov-svc-daily-legend") as HTMLElement;
+    expect([...legend.children].map((e) => e.textContent)).toEqual(["Weekdays", "Weekends & holidays"]);
+    expect(container.querySelectorAll('.ov-chart-plot svg circle[data-day-type="weekend_holiday"]')).toHaveLength(1);
+  });
+
   it("draws one series per day type, each with its own legend entry", () => {
     const { container } = renderWithProviders(
       <ServiceSplit variant="modal" service_split={TYPICAL} daily={daily(7)} />,

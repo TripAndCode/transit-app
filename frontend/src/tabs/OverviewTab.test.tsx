@@ -15,9 +15,9 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2 },
     peak_hour: null,
     service_split: [
-      { day_type: "weekday", avg_min: null, days: 0, samples: 0 },
-      { day_type: "saturday", avg_min: null, days: 0, samples: 0 },
-      { day_type: "sunday_holiday", avg_min: null, days: 0, samples: 0 },
+      { day_type: "weekday", avg_min: null, days: 0, samples: 0, insufficient: true },
+      { day_type: "saturday", avg_min: null, days: 0, samples: 0, insufficient: true },
+      { day_type: "sunday_holiday", avg_min: null, days: 0, samples: 0, insufficient: true },
     ],
     sparkline_points: [],
     ...partial,
@@ -149,9 +149,9 @@ describe("OverviewTab", () => {
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
         service_split: [
-          { day_type: "weekday", avg_min: 3.1, days: 5, samples: 40 },
-          { day_type: "saturday", avg_min: null, days: 0, samples: 0 },
-          { day_type: "sunday_holiday", avg_min: 2.0, days: 2, samples: 10 },
+          { day_type: "weekday", avg_min: 3.1, days: 5, samples: 4000, insufficient: false },
+          { day_type: "saturday", avg_min: null, days: 0, samples: 0, insufficient: true },
+          { day_type: "sunday_holiday", avg_min: 2.0, days: 2, samples: 10, insufficient: true },
         ],
       }),
     );

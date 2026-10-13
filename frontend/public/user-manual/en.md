@@ -126,7 +126,7 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 - “… of … routes”: how many routes averaged a set number of minutes late or more.
 - The feed’s status: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
 - **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
-- **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how weekdays compare with weekends and holidays. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
+- **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how the day types compare: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. A day’s type is the timetable the agency’s schedule ran that day. A day type with too few days or observations shows “Not enough data” and is left out of the comparison. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.
 

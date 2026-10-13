@@ -847,17 +847,22 @@ export type OverviewPeakHour = {
   peak_avg_min: number;
 };
 
-/** Which timetable a service date ran, read from the date: Sunday or a
- *  public holiday is `sunday_holiday`, Saturday `saturday`, else `weekday`. */
-export type OverviewDayType = "weekday" | "saturday" | "sunday_holiday";
+/** The timetable class a service date ran, from the agency's own calendar
+ *  (the weekday and public holidays where the calendar is silent).
+ *  `weekend_holiday` (土日祝) is the bucket of a feed with one timetable for
+ *  Saturday and Sunday alike, which is split 平日 / 土日祝 instead of
+ *  平日 / 土曜 / 日祝. */ // i18n-ignore: JSDoc examples
+export type OverviewDayType = "weekday" | "saturday" | "sunday_holiday" | "weekend_holiday";
 
 export type OverviewServiceSplitEntry = {
   day_type: OverviewDayType;
-  /** Sample-weighted mean delay (minutes); null when the type has no data in the range. */
+  /** Sample-weighted mean delay (minutes); null when the bucket has no data in the range. */
   avg_min: number | null;
   /** Dates with data, over the same rows as the mean. */
   days: number;
   samples: number;
+  /** Too few days or samples for the mean to be compared with the others. */
+  insufficient: boolean;
 };
 
 export type OverviewServiceSplitDay = {
@@ -877,7 +882,7 @@ export type OverviewSummary = {
   peak_hour_weekday?: OverviewPeakHour | null;
   /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
   peak_hour_weekend?: OverviewPeakHour | null;
-  /** Every day type, always all three, in display order. */
+  /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];
   /** One row per date with data, tagged with its day type; used by the service-split modal. */
   service_split_daily?: OverviewServiceSplitDay[];
