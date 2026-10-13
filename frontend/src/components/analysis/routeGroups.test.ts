@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { routeGroups, selectedGroup } from "./routeGroups";
+import { routeLabelPartsByCode } from "../../api/routeDisplayName";
 import type { Route } from "../../api/types";
 
 function route(route_code: string, route_long_name: string): Route {
@@ -47,6 +48,31 @@ describe("routeGroups", () => {
     const routes = [route("a", "14 共立ハイツ線"), route("b", "共立ハイツ線")];
     expect(selectedGroup(routes, ["a"])).toBe("共立ハイツ線");
     expect(selectedGroup(routes, ["a", "b"])).toBe("共立ハイツ線");
+  });
+
+  it("groups by the label's line name, once a code has been split off whichever field held it and the agency name taken off", () => {
+    const routes: Route[] = [
+      { route_id: "a", route_code: "a", route_short_name: "A1 国道・古川線", route_long_name: "", trip_headsigns: [] },
+      { route_id: "b", route_code: "b", route_short_name: "A2 国道・古川線", route_long_name: "", trip_headsigns: [] },
+      { route_id: "c", route_code: "c", route_short_name: "", route_long_name: "17-1 五月が丘・ジアウトレット広島線", trip_headsigns: [] },
+      { route_id: "d", route_code: "d", route_short_name: "904-14-01", route_long_name: "呉市生活バス 阿賀音戸の瀬戸線", trip_headsigns: [] },
+    ];
+    const labels = routeLabelPartsByCode(routes, "呉市生活バス");
+    expect(routeGroups(routes, labels).map(([name, entries]) => [name, entries.map((r) => r.route_code)])).toEqual([
+      ["五月が丘・ジアウトレット広島線", ["c"]],
+      ["国道・古川線", ["a", "b"]],
+      ["阿賀音戸の瀬戸線", ["d"]],
+    ]);
+    expect(selectedGroup(routes, ["a", "b"], labels)).toBe("国道・古川線");
+  });
+
+  it("reproduces agency 13's grouping from the labels as well", () => {
+    const routes = [
+      route("1673796142", "11-19 共立ハイツ線"), route("2613312916", "14H 共立ハイツ線"),
+      route("3581531211", "14 共立ハイツ線"), route("583208004", "共立ハイツ線"), route("a", "14-5"),
+    ];
+    const groups = routeGroups(routes, routeLabelPartsByCode(routes));
+    expect(groups.map(([name, entries]) => [name, entries.length])).toEqual([["14-5", 1], ["共立ハイツ線", 4]]);
   });
 
   it("skips routes without a route_code", () => {

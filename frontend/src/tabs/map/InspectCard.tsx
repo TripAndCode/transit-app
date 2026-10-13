@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { Pin, PinOff } from "lucide-react";
 import { InlineSparkline } from "../../components/InlineSparkline";
@@ -68,7 +69,8 @@ function worstSegment(progress: LiveTripProgressResponse | undefined): { from: s
  */
 export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin, onUnpin, t }: {
   trip: LiveTrip;
-  routeName: string;
+  /** The route's label, compact: its plate stands where a badge would. */
+  routeName: ReactNode;
   /** Vehicles currently running this route, the card's one piece of context
    *  that is about the route rather than this trip. */
   vehicles: number;
@@ -93,7 +95,6 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
           card exists to end. */}
       <div className="ops-inspect__body" key={trip.trip_id}>
         <div className="ops-inspect__head">
-          {trip.route_code && <span className="ops-inspect__badge">{trip.route_code}</span>}
           <div className="ops-inspect__name">
             <b>{routeName}</b>
             {trip.headsign && <small>{trip.headsign}</small>}

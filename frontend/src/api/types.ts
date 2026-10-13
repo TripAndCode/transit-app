@@ -696,6 +696,16 @@ export type Route = {
   route_long_name: string | null;
   route_code: string | null;
   trip_headsigns: string[];
+  /** The route's terminals and main via point, from the feed's routes_jp.txt
+   *  (or its most common first and last stop). Absent until the server sends
+   *  them, so every label must read well without them. */
+  origin_name?: string | null;
+  via_name?: string | null;
+  destination_name?: string | null;
+  /** The route returns to its origin, so it has no destination to name. */
+  is_loop?: boolean | null;
+  /** The route runs both ways between its terminals. */
+  bidirectional?: boolean | null;
 };
 
 /** GET /:agency/routes. Collection endpoints answer with an object, not a bare

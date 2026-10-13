@@ -155,10 +155,13 @@
   color: var(--accent-strong);
   font-weight: 600;
 }
-.rp-opt-code {
-  font-family: var(--font-mono);
+.rp-opt-where {
+  max-width: 14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-xs);
-  color: var(--text-tertiary, #999);
+  color: var(--text-tertiary);
 }
 /* avg-delay chip — only rendered when delay data is supplied via the `delays` prop */
 .rp-opt-delay {

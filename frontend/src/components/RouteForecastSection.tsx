@@ -20,6 +20,7 @@ import { useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
 import { RouteLabel } from "./RouteLabel";
+import { distinctRouteTexts } from "../api/routeDisplayName";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -117,7 +118,7 @@ function RankedRoutes({
           {...clickable(() => onPick(r.route_code))}
           style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
-          <span className="clamp-2" style={{ fontSize: "var(--text-sm)" }}>
+          <span style={{ fontSize: "var(--text-sm)", minWidth: 0 }}>
             <RouteLabel code={r.route_code} names={names} fallbackName={r.route_name} />
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
@@ -539,11 +540,14 @@ function RoutePicker({
 }) {
   const { t } = useTranslation();
   const routes = useForecastOverview(aid).data?.routes ?? [];
-  // An option holds plain text, so RouteLabel's muted code becomes a
-  // parenthesis, added only where two routes would otherwise read the same.
-  const labelOf = (r: ForecastOverviewRoute) => names.data.get(r.route_code) ?? r.route_name;
-  const labelCount = new Map<string, number>();
-  for (const r of routes) labelCount.set(labelOf(r), (labelCount.get(labelOf(r)) ?? 0) + 1);
+  // An option holds plain text, so where the route runs, and failing that
+  // its route_id, is added only where two routes would otherwise read the same.
+  const optionTexts = distinctRouteTexts(routes.map((r) => ({
+    key: r.route_code,
+    name: names.data.get(r.route_code) ?? r.route_name,
+    full: names.parts.has(r.route_code) ? names.describe(r.route_code) : r.route_name,
+    id: names.parts.get(r.route_code)?.id ?? r.route_code,
+  })));
   const listed = focusedRoute == null || routes.some((r) => r.route_code === focusedRoute);
   return (
     <label className="forecast-route-picker">
@@ -552,10 +556,10 @@ function RoutePicker({
         <option value="">{t("forecast.route_picker_all")}</option>
         {routes.map((r) => (
           <option key={r.route_code} value={r.route_code}>
-            {(labelCount.get(labelOf(r)) ?? 0) > 1 ? `${labelOf(r)} (${r.route_code})` : labelOf(r)}
+            {optionTexts.get(r.route_code)}
           </option>
         ))}
-        {!listed && <option value={focusedRoute}>{focusedRoute}</option>}
+        {!listed && <option value={focusedRoute}>{names.data.get(focusedRoute) ?? focusedRoute}</option>}
       </select>
     </label>
   );

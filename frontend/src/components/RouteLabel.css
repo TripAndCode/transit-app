@@ -1,6 +1,71 @@
-.route-label__code {
-  color: var(--text-tertiary);
-  font-size: 0.85em;
-  font-weight: 400;
+/* A route's label (see RouteLabel.tsx). Sized in em so one label serves a
+   page title, a list row and a table cell alike. */
+.route-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+/* The short code, drawn like the number plate on the bus. */
+.route-label__plate {
+  display: inline-block;
+  min-width: 2.6em;
+  padding: 0.28em 0.4em 0.22em;
+  border: 1.5px solid currentColor;
+  border-radius: 5px;
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.route-label--full {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.6em;
+  row-gap: 2px;
+}
+
+.route-label--full.route-label--plated {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.route-label--plated.route-label--has-ends .route-label__plate {
+  grid-row: span 2;
+  align-self: start;
+}
+
+.route-label--full .route-label__line {
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.route-label--plated .route-label__ends {
+  grid-column: 2;
+}
+
+.route-label__ends {
+  color: var(--text-tertiary);
+  font-size: 0.8em;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.route-label__via {
+  color: var(--text-secondary);
+}
+
+.route-label--compact .route-label__plate {
+  min-width: 2.2em;
+  padding: 0.18em 0.32em 0.12em;
+  border-radius: 4px;
+  font-size: 0.92em;
+}
+
+.route-label__aside {
+  color: var(--text-tertiary);
+  font-size: 0.9em;
 }

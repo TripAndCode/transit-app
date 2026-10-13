@@ -29,11 +29,11 @@ describe("two-line CJK clamp", () => {
     expect(decl(body, "-webkit-line-clamp")).toBeNull();
   });
 
+  // A route list's name clamps inside the shared label, line by line, so the
+  // plate and the terminals line stay in view.
   it.each([
-    "components/RouteForecastSection.tsx",
+    "components/RouteLabel.tsx",
     "components/ThreadSidebar.tsx",
-    "components/ConcentrationBar.tsx",
-    "components/RoutesToCheckList.tsx",
     "tabs/ask/InvestigationCanvas.tsx",
   ])(
     "%s uses .clamp-2 rather than an inline ellipsis",

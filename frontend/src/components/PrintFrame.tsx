@@ -50,7 +50,7 @@ export function PrintFrame() {
         <span>{conditions}</span>
         {named && (
           <span data-testid="print-frame-routes">
-            {t("print.routes", { names: scope.routes.map(names.format).join(t("common.list_separator")) })}
+            {t("print.routes", { names: scope.routes.map((code) => names.format(code)).join(t("common.list_separator")) })}
           </span>
         )}
       </header>

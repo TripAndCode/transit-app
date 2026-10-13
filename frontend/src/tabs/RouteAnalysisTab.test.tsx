@@ -4,6 +4,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { ScopeRouteContext } from "../api/scope";
@@ -27,8 +28,7 @@ vi.mock("../components/analysis/AnalysisMap", () => ({
 function mockSupportHooks() {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({
-    data: new Map(),
-    isLoading: false,
+    ...useRouteNamesModule.buildRouteNames([], i18n.t),
     format: (code: string | null | undefined) => code ?? "—",
   });
 }
@@ -119,11 +119,12 @@ describe("RouteAnalysisTab", () => {
 
   it("titles the page by its route, asks its question beneath, and leads back to Routes", () => {
     mockSupportHooks();
-    vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({
-      data: new Map([["R1", "W54 沖舘・新田線 · for 新田"]]),
-      isLoading: false,
-      format: (code: string | null | undefined) => (code === "R1" ? "W54 沖舘・新田線 · for 新田" : (code ?? "—")),
-    });
+    vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue(
+      useRouteNamesModule.buildRouteNames(
+        [{ route_id: "沖舘・新田線(R1)", route_short_name: "W54", route_long_name: "沖舘・新田線", route_code: "R1", trip_headsigns: [], origin_name: "沖舘", destination_name: "新田" }],
+        i18n.t,
+      ),
+    );
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({
       data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
       isPending: false,
@@ -131,11 +132,15 @@ describe("RouteAnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderTab("/agencies/1/route-analysis?routes=R1");
-    expect(screen.getByRole("heading", { level: 1, name: "W54 沖舘・新田線 · for 新田" })).toBeInTheDocument();
-    expect(screen.getByText("Where does delay build up?")).toBeInTheDocument();
+    const title = screen.getByRole("heading", { level: 1 });
+    expect(title).toHaveTextContent(/^W54 沖舘・新田線 沖舘 → 新田$/);
+    expect(title.querySelector(".route-label__plate")).toHaveTextContent("W54");
+    expect(screen.getByText("Where does delay build up?", { exact: false })).toBeInTheDocument();
+    // Lists drop the route_id; the route's own page keeps it.
+    expect(screen.getByText("Route ID 沖舘・新田線(R1)")).toBeInTheDocument();
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumbs).getByRole("link", { name: "Routes" })).toHaveAttribute("href", expect.stringMatching(/^\/agencies\/1\/routes/));
-    expect(crumbs).toHaveTextContent("W54 沖舘・新田線 · for 新田");
+    expect(crumbs).toHaveTextContent("W54 沖舘・新田線");
   });
 
   it("writes the chart's periods the way the rest of the page writes dates", () => {
