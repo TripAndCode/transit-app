@@ -122,9 +122,10 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 
 ![Pulse](./02-pulse.en.png)
 
-- “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values. A sentence beside it compares the period with the same number of days just before it; the ⓘ icon explains the comparison.
-- “… of … routes”: how many routes averaged a set number of minutes late or more.
-- The feed’s status: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
+- The sentence at the top compares the period with the same number of days just before it. The tag in front of it says “About the same as the period before”, “Worse than the period before” or “Better than the period before”; the ⓘ icon explains the comparison.
+- “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values.
+- The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
+- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged a set number of minutes late or more, out of all routes). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check now** below.
 - **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
 - **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how weekdays compare with weekends and holidays. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 

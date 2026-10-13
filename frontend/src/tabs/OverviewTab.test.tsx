@@ -155,6 +155,46 @@ describe("OverviewTab", () => {
     expect(document.querySelector("summary")).not.toBeInTheDocument();
   });
 
+  describe("the hero's fact rows", () => {
+    const withFacts = () =>
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.9, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
+        top_delayed: { routes: [], delayed_count: 2, delayed_threshold_min: 2 },
+      });
+
+    it("opens the peak-hour card's modal from the heaviest-hour row", async () => {
+      renderOverview(withFacts());
+      await userEvent.click(screen.getByRole("button", { name: /Heaviest hour/ }));
+      expect(screen.getByRole("dialog", { name: "Worst hour (Weekday vs Weekend)" })).toBeInTheDocument();
+    });
+
+    it("opens the concentration card's modal from the share row", async () => {
+      renderOverview(withFacts());
+      await userEvent.click(screen.getByRole("button", { name: /Share of delay in the top route/ }));
+      expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
+    });
+
+    // The routes-to-check list is inline, with no modal of its own: the row
+    // takes the reader, and keyboard focus, to it.
+    it("brings the routes-to-check list into view from the late-routes row", async () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        renderOverview(withFacts());
+        await userEvent.click(screen.getByRole("button", { name: /Averaging 2 min or more late/ }));
+        const list = screen.getByText("Routes to check now").closest(".ov-routes-anchor");
+        expect(list).not.toBeNull();
+        expect(scrollIntoView.mock.contexts).toEqual([list]);
+        expect(document.activeElement).toBe(list);
+        expect(screen.queryByRole("dialog")).toBeNull();
+      } finally {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    });
+  });
+
   it("offers a clear-routes recovery when the empty result is scoped to specific routes", () => {
     renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&routes=A05");
     expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();

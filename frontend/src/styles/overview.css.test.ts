@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ruleBody, decl } from "../test/cssRules";
+import { contrastRatio } from "./tokens";
 
 const css = readFileSync(resolve(__dirname, "./overview.css"), "utf-8");
 const uiCss = readFileSync(resolve(__dirname, "../components/ui/ui.css"), "utf-8");
@@ -69,6 +70,39 @@ describe("overview.css living hero", () => {
     expect(decl(ruleBody(css, ".ov-hero {"), "position")).toBe("relative");
     expect(decl(ruleBody(css, ".ov-hero-figure {"), "position")).toBe("relative");
     expect(decl(ruleBody(css, ".ov-hero-text {"), "position")).toBe("relative");
+    // A non-positioned child would paint under the absolutely-filled sparkline.
+    expect(decl(ruleBody(css, ".ov-hero-feed {"), "position")).toBe("relative");
+  });
+});
+
+describe("overview.css hero facts", () => {
+  const globalCss = readFileSync(resolve(__dirname, "./global.css"), "utf-8");
+  const token = (block: string, prop: string) => decl(ruleBody(globalCss, block), prop)!;
+
+  it("the verdict chip stays neutral, whatever the direction", () => {
+    const chip = ruleBody(css, ".ov-hero-state {");
+    expect(decl(chip, "color")).toBe("var(--text-secondary)");
+    expect(decl(chip, "background")).toBe("var(--bg-soft)");
+  });
+
+  it("only the late-routes value takes the warm tone, and only as large text it can carry", () => {
+    expect(decl(ruleBody(css, ".ov-hero-fact--attn .ov-hero-fact-value {"), "color")).toBe("var(--d4)");
+    expect(decl(ruleBody(css, ".ov-hero-fact-value {"), "color")).toBe("var(--text-primary)");
+    expect(css.match(/var\(--d4\)/g)).toHaveLength(1);
+    // --text-xl is 26px, past WCAG's 24px large-text line, where 3:1 is AA.
+    expect(decl(ruleBody(css, ".ov-hero-fact-value {"), "font-size")).toBe("var(--text-xl)");
+    expect(token(":root {", "--text-xl")).toBe("26px");
+    expect(contrastRatio(token(":root {", "--d4"), token(":root {", "--bg-surface"))).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrastRatio(token(':root[data-theme="dark"] {', "--d4"), token(':root[data-theme="dark"] {', "--bg-surface")),
+    ).toBeGreaterThanOrEqual(3);
+    // The unit beside the count keeps its own neutral tone.
+    expect(decl(ruleBody(css, ".ov-hero-fact-unit {"), "color")).toBe("var(--text-tertiary)");
+  });
+
+  it("stacks the figure above the facts at the phone breakpoint", () => {
+    const phone = css.match(/@media \(max-width: 640px\) \{\s*\.ov-hero \{([^}]*)\}/)?.[1] ?? "";
+    expect(decl(phone, "grid-template-columns")).toBe("minmax(0, 1fr)");
   });
 });
 
