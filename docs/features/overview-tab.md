@@ -22,10 +22,6 @@ rail's first destination, while the rail's Live entry opens the realtime map
 - Rail nav link: the Pulse entry, first in
   `frontend/src/components/sidebarNavItems.ts`'s `SIDEBAR_NAV_ITEMS`
   (`nav.pulse` — "Pulse" / "概況"). On a phone, Pulse is the first bottom tab.
-- In development builds the rail also carries a dev-only prototype-preview
-  link (`t("nav.prototype_no_data")`, rendered only under
-  `import.meta.env.DEV`) that opens Pulse with a fixed
-  `?from=2030-01-01&to=2030-01-07` no-data window.
 - Top-level component: `frontend/src/tabs/OverviewTab.tsx` — owns which
   module's modal is open (`OpenCard` state) and the peak-hour-breakdown
   drill-down selection; filtering comes from the shared `useScope`.

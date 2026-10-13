@@ -7,7 +7,7 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { ToastProvider } from "./ui/Toast";
-import { clearLastAgency, readLastAgency, writeLastAgency } from "../api/lastAgency";
+import { clearLastAgency, writeLastAgency } from "../api/lastAgency";
 import * as auth from "../api/auth";
 import * as config from "../api/config";
 import { rememberScreenScope } from "../api/screenScope";
@@ -181,44 +181,15 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Live")).toBeNull();
   });
 
-  it("renders the dev-only PROTOTYPE section with all three state links", () => {
-    renderSidebar();
-    expect(screen.getByText("PROTOTYPE")).toBeTruthy();
-    expect(screen.getByText("First-time login screen")).toBeTruthy();
-    expect(screen.getByText("Feed-stale state")).toBeTruthy();
-    expect(screen.getByText("No-data state")).toBeTruthy();
-  });
-
-  it("clears the remembered agency and navigates to / when the onboarding prototype link is clicked", async () => {
-    const user = userEvent.setup();
-    writeLastAgency(1);
-    renderSidebar();
-    await user.click(screen.getByText("First-time login screen"));
-    expect(readLastAgency()).toBeNull();
-  });
-
-  it("points the no-data prototype link at a far-future date range on the current agency", () => {
-    renderSidebar("/agencies/8/live");
-    const link = screen.getByRole("link", { name: "No-data state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/pulse?from=2030-01-01&to=2030-01-07");
-  });
-
-  it("points the feed-stale prototype link at the current agency's live view, preserving the active filter", () => {
-    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Feed-stale state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
-  });
-
   describe("collapse", () => {
     beforeEach(() => localStorage.clear());
 
-    it("hides nav labels/subtitles and the PROTOTYPE section, but keeps the nav links, after collapsing", async () => {
+    it("hides nav labels/subtitles, but keeps the nav links, after collapsing", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       expect(screen.queryByText("Live")).toBeNull();
       expect(screen.queryByText("What's happening right now")).toBeNull();
-      expect(screen.queryByText("PROTOTYPE")).toBeNull();
       expect(screen.getByRole("link", { name: "Live" })).toBeTruthy();
     });
 
@@ -604,11 +575,11 @@ describe("Sidebar", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
-    it("closes when a nav link inside it (e.g. the onboarding prototype link) is clicked", async () => {
+    it("closes when a nav link inside it is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "More" }));
-      await user.click(screen.getByText("First-time login screen"));
+      await user.click(within(screen.getByRole("dialog")).getByRole("link", { name: "Time" }));
       expect(screen.queryByRole("dialog")).toBeNull();
     });
   });

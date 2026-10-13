@@ -8,10 +8,10 @@ indefinitely otherwise.
 Requires, in order:
   1. A production build served at --base (default http://localhost:8000,
      i.e. `cd frontend && npm run build && cd .. && make bake`, then a
-     running `make serve`/uvicorn backend). The dev server mounts a
-     dev-only sidebar section (`import.meta.env.DEV`) that a production
-     build never shows -- capturing against it would document a debug
-     shortcut menu as if it were part of the real end-user sidebar.
+     running `make serve`/uvicorn backend). Dev builds differ from what
+     an end user sees (`import.meta.env.DEV` turns the Analysis tab's
+     Insight Panel on by default, for one), so capturing against the dev
+     server would document dev-only defaults as the real product.
   2. Agency 1 holding real data.
   3. `login_required` off for the run -- the manual is captured as a guest,
      matching how a first-time visitor actually sees it. Toggling that
