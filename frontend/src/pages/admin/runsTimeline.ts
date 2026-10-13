@@ -32,8 +32,9 @@ const HOURS_PER_DAY = 24;
 const MS_PER_HOUR = 3_600_000;
 
 /** Reading order down the chart: the order the pipeline actually runs in, so
- *  a morning sweep reads top to bottom as well as left to right. */
-const KIND_ORDER: readonly PipelineRun["kind"][] = ["ingest", "promote", "analyze", "weather", "static"];
+ *  a morning sweep reads top to bottom as well as left to right. A chained
+ *  update's umbrella leads, above the steps it spans. */
+const KIND_ORDER: readonly PipelineRun["kind"][] = ["update", "ingest", "promote", "analyze", "weather", "static"];
 
 function hoursFrom(dayStart: Date, iso: string | null, fallback: Date): number {
   const at = iso == null ? fallback : new Date(iso);

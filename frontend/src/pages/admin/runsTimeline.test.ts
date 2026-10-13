@@ -57,6 +57,15 @@ describe("runsToBars", () => {
     expect(lanes.map((l) => l.key)).toEqual(["ingest:all", "ingest:2", "analyze:2", "weather:all"]);
   });
 
+  it("draws a chained update's umbrella above the steps it spans", () => {
+    const lanes = runsToBars(
+      [run({ run_id: 1, kind: "static" }), run({ run_id: 2, kind: "ingest" }), run({ run_id: 3, kind: "update" })],
+      DAY_START,
+      DAY_START,
+    );
+    expect(lanes.map((l) => l.kind)).toEqual(["update", "ingest", "static"]);
+  });
+
   it("draws promotion between the ingest and analyze stages it runs between", () => {
     const lanes = runsToBars(
       [
