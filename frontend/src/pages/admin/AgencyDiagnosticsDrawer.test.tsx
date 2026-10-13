@@ -116,6 +116,7 @@ const AGENCY = {
   agency_name: "Hokuriku Transit",
   feed_url: "https://feed.example.jp/tu.bin",
   static_url: null,
+  static_strategy: null,
   ingest_strategy: "static_join",
   trip_id_pattern: null,
   deleted_at: null,

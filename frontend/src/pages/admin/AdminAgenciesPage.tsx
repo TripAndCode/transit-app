@@ -7,7 +7,10 @@ import {
   useCreateAgencyAdmin,
   useDeleteAgency,
   usePatchAgency,
+  useReanalyzeAgency,
+  useRefreshAgencyStatic,
   useRestoreAgency,
+  useUpdateAgency,
   type AdminAgency,
   type AgencyHealthRow,
 } from "../../api/admin";
@@ -20,9 +23,17 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { Drawer } from "../../components/admin/Drawer";
 import { AgencyDiagnosticsDrawer } from "./AgencyDiagnosticsDrawer";
+import { AgencyRunCard, DataStage, RunChain, TimetableStage } from "./AgencyRuns";
 import { ClampSparkline } from "./ClampSparkline";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
+
+/** The strategies that can fetch a timetable; mirrors the server's allow-list. */
+const STATIC_STRATEGIES = ["direct_url", "aomori_index_scrape"] as const;
+
+/** The fetch method a newly entered timetable URL starts with: the one every
+ *  plain zip URL uses. */
+const DEFAULT_STATIC_STRATEGY = "direct_url";
 
 /** URL search param backing the saved-view chips, so a view survives a reload
  *  and can be linked to. */
@@ -35,6 +46,7 @@ type FormState = {
   agency_name: string;
   feed_url: string;
   static_url: string;
+  static_strategy: string;
   ingest_strategy: string;
   trip_id_pattern: string;
 };
@@ -43,6 +55,7 @@ const EMPTY_FORM: FormState = {
   agency_name: "",
   feed_url: "",
   static_url: "",
+  static_strategy: "",
   ingest_strategy: "",
   trip_id_pattern: "",
 };
@@ -52,10 +65,15 @@ function agencyToForm(a: AdminAgency): FormState {
     agency_name: a.agency_name,
     feed_url: a.feed_url,
     static_url: a.static_url ?? "",
+    static_strategy: a.static_strategy ?? "",
     ingest_strategy: a.ingest_strategy ?? "",
     trip_id_pattern: a.trip_id_pattern ?? "",
   };
 }
+
+/** What the form asks for after saving: nothing more, or the chained update
+ *  that takes a new agency from saved to aggregated. */
+type SubmitIntent = { setup: boolean };
 
 function AgencyFormModal({
   initial,
@@ -68,16 +86,33 @@ function AgencyFormModal({
   initial: FormState;
   isEdit: boolean;
   onClose: () => void;
-  onSubmit: (f: FormState) => void;
+  onSubmit: (f: FormState, intent: SubmitIntent) => void;
   isPending: boolean;
   error: unknown;
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(initial);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const canSetUp = form.static_url.trim() !== "" && form.static_strategy !== "";
 
   function set(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function setStaticUrl(value: string) {
+    setForm((f) => ({
+      ...f,
+      static_url: value,
+      static_strategy: f.static_strategy === "" && value.trim() !== "" ? DEFAULT_STATIC_STRATEGY : f.static_strategy,
+    }));
+  }
+
+  function saveAndSetUp() {
+    // A type="button" press skips the browser's own `required`/`type=url`
+    // checks, which a submit would have run first.
+    if (!formRef.current?.reportValidity()) return;
+    onSubmit(form, { setup: true });
   }
 
   return (
@@ -92,7 +127,8 @@ function AgencyFormModal({
       }}
     >
       <form
-        onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}
+        ref={formRef}
+        onSubmit={(e) => { e.preventDefault(); onSubmit(form, { setup: false }); }}
         style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         <h3 id="agency-form-title" style={{ margin: 0, fontSize: 18 }}>
@@ -128,9 +164,22 @@ function AgencyFormModal({
             id="af-static"
             type="url"
             value={form.static_url}
-            onChange={(e) => set("static_url", e.target.value)}
+            onChange={(e) => setStaticUrl(e.target.value)}
             style={{ width: "100%" }}
           />
+        </Field>
+        <Field label={t("admin.agencies.form_static_strategy")} htmlFor="af-static-strategy">
+          <select
+            id="af-static-strategy"
+            value={form.static_strategy}
+            onChange={(e) => set("static_strategy", e.target.value)}
+            style={{ width: "100%" }}
+          >
+            <option value="">{t("admin.agencies.form_static_strategy_none")}</option>
+            {STATIC_STRATEGIES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
         </Field>
         <Field label={t("admin.agencies.form_strategy")} htmlFor="af-strategy">
           <select
@@ -158,18 +207,35 @@ function AgencyFormModal({
             {formatApiError(error)}
           </div>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
           <AdminButton variant="secondary" onClick={onClose}>
             {t("common.cancel")}
           </AdminButton>
-          <AdminButton variant="primary" type="submit" disabled={isPending}>
-            {isPending
-              ? t("admin.agencies.form_submitting")
-              : isEdit
-              ? t("admin.agencies.form_submit_edit")
-              : t("admin.agencies.form_submit_add")}
-          </AdminButton>
+          {isEdit ? (
+            <AdminButton variant="primary" type="submit" disabled={isPending}>
+              {isPending ? t("admin.agencies.form_submitting") : t("admin.agencies.form_submit_edit")}
+            </AdminButton>
+          ) : (
+            <>
+              <AdminButton variant="secondary" type="submit" disabled={isPending}>
+                {isPending ? t("admin.agencies.form_submitting") : t("admin.agencies.form_save_only")}
+              </AdminButton>
+              <AdminButton
+                variant="primary"
+                disabled={isPending || !canSetUp}
+                title={canSetUp ? undefined : t("admin.agencies.form_setup_needs_static")}
+                onClick={saveAndSetUp}
+              >
+                {t("admin.agencies.form_save_setup")}
+              </AdminButton>
+            </>
+          )}
         </div>
+        {!isEdit && (
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+            {canSetUp ? t("admin.agencies.form_setup_note") : t("admin.agencies.form_setup_needs_static")}
+          </div>
+        )}
       </form>
     </Modal>
   );
@@ -185,13 +251,6 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor: string; c
 }
 
 // ── Health cells ─────────────────────────────────────────────────────────
-
-function FreshnessCell({ health }: { health?: AgencyHealthRow }) {
-  const { t } = useTranslation();
-  if (!health) return <span style={{ color: "var(--text-tertiary)" }}>{EM_DASH}</span>;
-  const tone = health.freshness === "fresh" ? "good" : health.freshness === "stale" ? "warn" : "neutral";
-  return <StatusChip tone={tone}>{t(`admin.agencies.freshness_${health.freshness}`)}</StatusChip>;
-}
 
 /** A whole-registry summary rather than a per-field list: the row has to stay
  *  scannable, and the field-by-field verdicts are one click away in the drawer. */
@@ -222,6 +281,9 @@ export function AdminAgenciesPage() {
   const patch = usePatchAgency();
   const del = useDeleteAgency();
   const restore = useRestoreAgency();
+  const update = useUpdateAgency();
+  const refreshStatic = useRefreshAgencyStatic();
+  const reanalyze = useReanalyzeAgency();
 
   const [search, setSearch] = useState("");
   const view = useSearchParams()[0].get(VIEW_PARAM) ?? DEFAULT_VIEW;
@@ -251,6 +313,42 @@ export function AdminAgenciesPage() {
   // agency that leaves the list (filtered out, or disabled) must not leave a
   // drawer describing it open.
   const opened = filtered.find((a) => a.agency_id === openedId) ?? null;
+  const openedHealth = opened ? healthById.get(opened.agency_id) : undefined;
+
+  const runMutations = [update, refreshStatic, reanalyze];
+  const startFailure = runMutations.find((m) => m.error != null);
+
+  /** A run is working on this agency, or one is being started for it. */
+  function isBusy(a: AdminAgency): boolean {
+    const h = healthById.get(a.agency_id);
+    if (h?.in_flight || h?.latest_run?.status === "running") return true;
+    return runMutations.some((m) => m.isPending && m.variables === a.agency_id);
+  }
+
+  /** Why a run cannot start for this agency right now, or null when it can.
+   *  `needsStatic`: the run begins with a timetable reload. */
+  function runBlocker(a: AdminAgency, needsStatic: boolean): string | null {
+    if (a.deleted_at != null) return t("admin.agency_run.disabled_hint");
+    if (isBusy(a)) return t("admin.agency_run.busy_hint");
+    if (needsStatic && !(a.static_url && a.static_strategy)) return t("admin.agency_run.no_static_hint");
+    return null;
+  }
+
+  /** Whether a run of this kind starts with a timetable reload. */
+  const reloadsTimetable = (kind: string) => kind === "update" || kind === "static";
+
+  /** Run again what the agency's latest run was. */
+  function retry(a: AdminAgency, kind: string) {
+    if (kind === "update") update.mutate(a.agency_id);
+    else if (kind === "static") refreshStatic.mutate(a.agency_id);
+    else reanalyze.mutate(a.agency_id);
+  }
+
+  function openEditor(a: AdminAgency) {
+    create.reset();
+    patch.reset();
+    setEditing(a);
+  }
 
   const columns: DataTableColumn<AdminAgency>[] = [
     {
@@ -268,9 +366,36 @@ export function AdminAgenciesPage() {
       ),
     },
     {
-      key: "freshness",
-      header: t("admin.agencies.col_freshness"),
-      render: (a) => <FreshnessCell health={healthById.get(a.agency_id)} />,
+      key: "timetable",
+      header: t("admin.agency_run.col_timetable"),
+      render: (a) => {
+        const h = healthById.get(a.agency_id);
+        // A run in flight takes this cell over with its step chain: the
+        // buttons it replaces could not start anything until it ends.
+        if (h?.latest_run?.status === "running") return <RunChain run={h.latest_run} />;
+        return (
+          <span onClick={(e) => e.stopPropagation()} role="presentation">
+            <TimetableStage
+              health={h}
+              blocker={runBlocker(a, true)}
+              onRun={() => refreshStatic.mutate(a.agency_id)}
+            />
+          </span>
+        );
+      },
+    },
+    {
+      key: "data",
+      header: t("admin.agency_run.col_data"),
+      render: (a) => (
+        <span onClick={(e) => e.stopPropagation()} role="presentation">
+          <DataStage
+            health={healthById.get(a.agency_id)}
+            blocker={runBlocker(a, false)}
+            onRun={() => reanalyze.mutate(a.agency_id)}
+          />
+        </span>
+      ),
     },
     {
       key: "last_capture",
@@ -299,48 +424,48 @@ export function AdminAgenciesPage() {
       },
     },
     {
-      key: "static",
-      header: t("admin.agencies.col_static_version"),
-      render: (a) => (
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-          {healthById.get(a.agency_id)?.static_version?.version ?? EM_DASH}
-        </span>
-      ),
-    },
-    {
       key: "actions",
       header: "",
       align: "right",
-      render: (a) => (
-        <span style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} role="presentation">
-          <AdminButton
-            variant="secondary"
-            disabled={a.deleted_at != null}
-            title={a.deleted_at == null ? undefined : t("admin.agencies.action_edit_disabled_hint")}
-            onClick={() => {
-              create.reset();
-              patch.reset();
-              setEditing(a);
-            }}
-          >
-            {t("admin.agencies.action_edit")}
-          </AdminButton>
-        </span>
-      ),
+      render: (a) => {
+        const blocker = runBlocker(a, true);
+        return (
+          <span className="agency-row-actions" onClick={(e) => e.stopPropagation()} role="presentation">
+            <AdminButton
+              variant="primary"
+              disabled={blocker != null}
+              title={blocker ?? undefined}
+              onClick={() => update.mutate(a.agency_id)}
+            >
+              {isBusy(a) ? t("admin.agency_run.running") : t("admin.agency_run.update_all")}
+            </AdminButton>
+            <AdminButton
+              variant="secondary"
+              disabled={a.deleted_at != null}
+              title={a.deleted_at == null ? undefined : t("admin.agencies.action_edit_disabled_hint")}
+              onClick={() => openEditor(a)}
+            >
+              {t("admin.agencies.action_edit")}
+            </AdminButton>
+          </span>
+        );
+      },
     },
   ];
 
-  async function handleSubmit(form: FormState) {
+  async function handleSubmit(form: FormState, { setup }: SubmitIntent) {
     const body = {
       agency_name: form.agency_name,
       feed_url: form.feed_url,
       static_url: form.static_url || null,
+      static_strategy: form.static_strategy || null,
       ingest_strategy: form.ingest_strategy || null,
       trip_id_pattern: form.trip_id_pattern || null,
     };
     try {
       if (editing === undefined) {
-        await create.mutateAsync(body);
+        const created = await create.mutateAsync(body);
+        if (setup) update.mutate(created.agency_id);
       } else if (editing) {
         await patch.mutateAsync({ id: editing.agency_id, body });
       }
@@ -394,6 +519,12 @@ export function AdminAgenciesPage() {
           prefix={t("admin.agencies.restore_failed", { name: agencyLabel(restore.variables) })}
         />
       )}
+      {startFailure != null && (
+        <ErrorBanner
+          error={startFailure.error}
+          prefix={t("admin.agency_run.start_failed", { name: agencyLabel(startFailure.variables) })}
+        />
+      )}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
 
       <DataTable
@@ -422,6 +553,24 @@ export function AdminAgenciesPage() {
         {opened && (
           <AgencyDiagnosticsDrawer
             agency={opened}
+            busy={runBlocker(opened, false) != null}
+            runFinishedAt={openedHealth?.latest_run?.finished_at ?? null}
+            runCard={
+              openedHealth?.latest_run && (
+                <AgencyRunCard
+                  agencyId={opened.agency_id}
+                  agencyName={opened.agency_name}
+                  run={openedHealth.latest_run}
+                  latestDataDate={openedHealth.latest_data_date}
+                  retryBlocked={runBlocker(opened, reloadsTimetable(openedHealth.latest_run.kind)) != null}
+                  onRetry={() => retry(opened, openedHealth.latest_run?.kind ?? "")}
+                  onEditUrl={() => {
+                    setOpenedId(null);
+                    openEditor(opened);
+                  }}
+                />
+              )
+            }
             onClose={() => setOpenedId(null)}
             disablePending={del.isPending && del.variables === opened.agency_id}
             onDisable={(id) => {
