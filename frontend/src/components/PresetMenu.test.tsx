@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../api/scope";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as client from "../api/client";
 import i18n from "../i18n";
@@ -19,13 +19,16 @@ type PresetRow = { preset_id: number; agency_id: number; name: string; range_ctx
 function renderMenu(current: Scope = SCOPE) {
   const onSelect = vi.fn();
   renderWithProviders(
-    <PresetMenu
-      agencyId={1}
-      currentRangeCtx={current}
-      phrases={PHRASES}
-      defaultPeriod={DEFAULT_PERIOD}
-      onSelect={onSelect}
-    />,
+    <>
+      <PresetMenu
+        agencyId={1}
+        currentRangeCtx={current}
+        phrases={PHRASES}
+        defaultPeriod={DEFAULT_PERIOD}
+        onSelect={onSelect}
+      />
+      <button type="button">next control</button>
+    </>,
   );
   return onSelect;
 }
@@ -40,6 +43,8 @@ function signedIn(presets: PresetRow[], current: Scope = SCOPE) {
 }
 
 const open = () => userEvent.click(screen.getByRole("button", { name: "Saved views" }));
+const VIEW: PresetRow = { preset_id: 1, agency_id: 1, name: "Weekday mornings", range_ctx: SAVED };
+const taken = () => new client.ApiError(409, JSON.stringify({ detail: "name already used" }));
 const menu = () => screen.getByRole("dialog", { name: "Saved views" });
 
 describe("PresetMenu (anonymous)", () => {
@@ -190,5 +195,75 @@ describe("PresetMenu (signed in)", () => {
     await open();
     expect(await screen.findByText("Couldn't load your saved views.")).toBeInTheDocument();
     expect(screen.queryByText(/Save the conditions/)).toBeNull();
+  });
+
+  it("closes when Tab walks focus out of the menu", async () => {
+    signedIn([]);
+    await open();
+    await screen.findByRole("textbox", { name: "View name" });
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Save" })).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "next control" })).toHaveFocus();
+  });
+
+  it("clears a failed save's message once a delete succeeds", async () => {
+    signedIn([VIEW]);
+    vi.spyOn(client, "apiPost").mockRejectedValue(taken());
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Save current conditions" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete Weekday mornings" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("clears a failed delete's message once a save succeeds", async () => {
+    signedIn([VIEW]);
+    vi.spyOn(client, "apiDelete").mockRejectedValue(new client.ApiError(500, ""));
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Weekday mornings" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save current conditions" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("keeps focus on the pressed Save while it is pending and after it fails", async () => {
+    const { post } = signedIn([]);
+    let fail: (e: unknown) => void = () => {};
+    post.mockReturnValue(new Promise((_, reject) => (fail = reject)) as never);
+    const user = userEvent.setup();
+    await open();
+    await screen.findByRole("textbox", { name: "View name" });
+    const save = screen.getByRole("button", { name: "Save" });
+    await user.click(save);
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    expect(save).not.toBeDisabled();
+    expect(save).toHaveFocus();
+    await user.click(save);
+    expect(post).toHaveBeenCalledTimes(1);
+    await act(async () => fail(taken()));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(save).toHaveFocus();
+    expect(save).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("keeps focus on a pressed delete while it is pending and after it fails", async () => {
+    const { del } = signedIn([VIEW]);
+    let fail: (e: unknown) => void = () => {};
+    del.mockReturnValue(new Promise((_, reject) => (fail = reject)) as never);
+    const user = userEvent.setup();
+    await open();
+    const remove = await screen.findByRole("button", { name: "Delete Weekday mornings" });
+    await user.click(remove);
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    expect(remove).toHaveFocus();
+    await user.click(remove);
+    expect(del).toHaveBeenCalledTimes(1);
+    await act(async () => fail(new client.ApiError(500, "")));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(remove).toHaveFocus();
   });
 });

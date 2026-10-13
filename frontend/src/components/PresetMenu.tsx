@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type FocusEvent } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -54,13 +54,6 @@ export function PresetMenu({
     enabled: !!session,
   });
 
-  // A save or delete takes away the control that had focus; the heading
-  // keeps it inside the menu.
-  function settle() {
-    void qc.invalidateQueries({ queryKey: ["presets", agencyId] });
-    headRef.current?.focus();
-  }
-
   const create = useMutation({
     mutationFn: (n: string) =>
       apiPost<Preset>("/api/me/presets", { agency_id: agencyId, name: n, range_ctx: currentRangeCtx }),
@@ -72,8 +65,18 @@ export function PresetMenu({
 
   const remove = useMutation({
     mutationFn: (presetId: number) => apiDelete(`/api/me/presets/${presetId}`),
-    onSuccess: settle,
+    onSuccess: () => settle(),
   });
+
+  // A save or delete takes away the control that had focus; the heading
+  // keeps it inside the menu. Either one succeeding clears the other's
+  // error, which no longer describes the list on screen.
+  function settle() {
+    create.reset();
+    remove.reset();
+    void qc.invalidateQueries({ queryKey: ["presets", agencyId] });
+    headRef.current?.focus();
+  }
 
   if (!session) {
     return (
@@ -89,15 +92,17 @@ export function PresetMenu({
     );
   }
 
-  const suggested = suggestedViewName(currentRangeCtx, phrases, defaultPeriod).slice(0, NAME_MAX);
   const currentQuery = scopeToQueryString(currentRangeCtx);
   const showForm = formOpen || presets?.length === 0;
-  const saveDisabled = !name.trim() || create.isPending;
   const error = create.error ?? remove.error;
+
+  function suggestName() {
+    setName(suggestedViewName(currentRangeCtx, phrases, defaultPeriod).slice(0, NAME_MAX));
+  }
 
   function toggleMenu() {
     if (!menuOpen) {
-      setName(suggested);
+      suggestName();
       setFormOpen(false);
       create.reset();
       remove.reset();
@@ -106,13 +111,23 @@ export function PresetMenu({
   }
 
   function openForm() {
-    setName(suggested);
+    suggestName();
     flushSync(() => setFormOpen(true));
     nameRef.current?.focus();
   }
 
+  // Tab walking off the menu's last control leaves it behind; close it so it
+  // does not cover what focus moves on to.
+  function onBlur(e: FocusEvent<HTMLSpanElement>) {
+    if (!menuOpen) return;
+    const next = e.relatedTarget;
+    if (next == null) return;
+    if (next instanceof Node && e.currentTarget.contains(next)) return;
+    setMenuOpen(false);
+  }
+
   return (
-    <span className="scope-token-wrap">
+    <span className="scope-token-wrap" onBlur={onBlur}>
       <button
         ref={triggerRef}
         type="button"
@@ -176,8 +191,10 @@ export function PresetMenu({
                       type="button"
                       className="preset-row__delete"
                       aria-label={t("presets.delete", { name: p.name })}
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate(p.preset_id)}
+                      aria-disabled={remove.isPending || undefined}
+                      onClick={() => {
+                        if (!remove.isPending) remove.mutate(p.preset_id);
+                      }}
                     >
                       <span aria-hidden="true">×</span>
                     </button>
@@ -198,7 +215,7 @@ export function PresetMenu({
               className="preset-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!saveDisabled) create.mutate(name.trim());
+                if (name.trim() && !create.isPending) create.mutate(name.trim());
               }}
             >
               <div className="preset-current">
@@ -217,7 +234,15 @@ export function PresetMenu({
                   maxLength={NAME_MAX}
                   onChange={(e) => setName(e.target.value)}
                 />
-                <button type="submit" className="preset-save__button" disabled={saveDisabled}>
+                {/* A pending save or delete is aria-disabled, not disabled:
+                    disabling the pressed button would drop focus to the
+                    page, and a failure would leave it there. */}
+                <button
+                  type="submit"
+                  className="preset-save__button"
+                  disabled={!name.trim()}
+                  aria-disabled={create.isPending || undefined}
+                >
                   {t("common.save")}
                 </button>
               </div>

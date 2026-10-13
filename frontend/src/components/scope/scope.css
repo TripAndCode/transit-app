@@ -101,7 +101,7 @@
   color: var(--text-primary);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -392,7 +392,7 @@
 .preset-row {
   display: flex;
   align-items: flex-start;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .preset-row--active {
@@ -411,7 +411,7 @@
   color: var(--text-primary);
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -449,9 +449,14 @@
 }
 
 .preset-row__delete {
+  display: inline-flex;
   flex: none;
-  margin: 6px 4px 0 0;
-  padding: 2px 8px;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  margin: 4px 4px 0 0;
+  padding: 0 6px;
   font: inherit;
   font-size: var(--text-base);
   line-height: 1.2;
@@ -460,6 +465,11 @@
   border: 0;
   border-radius: var(--radius);
   cursor: pointer;
+}
+
+.preset-row__delete[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .preset-row__delete:hover {
@@ -512,7 +522,7 @@
   color: var(--text-primary);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .preset-save__button {
@@ -523,11 +533,12 @@
   color: var(--on-accent);
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
-.preset-save__button:disabled {
+.preset-save__button:disabled,
+.preset-save__button[aria-disabled="true"] {
   cursor: default;
   opacity: 0.5;
 }
