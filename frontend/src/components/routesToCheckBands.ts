@@ -14,8 +14,16 @@
  * app's own severity ramp considers fine — showing one there would
  * contradict the section's whole purpose.
  */
-import { delayBand } from "../styles/tokens";
+import { DELAY_THRESHOLDS, delayBand } from "../styles/tokens";
 import type { OverviewTopDelayedRoute } from "../api/types";
+
+/** Each band's bounds, read from the same thresholds the colour ramp uses so
+ *  a label can't state a range the band does not hold. */
+export const BAND_BOUNDS = {
+  severe: { min: DELAY_THRESHOLDS.severe },
+  moderate: { min: DELAY_THRESHOLDS.moderate, max: DELAY_THRESHOLDS.severe },
+  mild: { min: DELAY_THRESHOLDS.mild, max: DELAY_THRESHOLDS.moderate },
+} as const;
 
 const BAND_ORDER = ["severe", "moderate", "mild"] as const;
 

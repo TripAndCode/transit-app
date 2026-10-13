@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
+import { delayColor } from "../styles/tokens";
 import { useAgencyId } from "../api/useAgencyId";
 import { useCountUp } from "../hooks/useCountUp";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -9,20 +9,12 @@ import { useRouteNames } from "../api/useRouteNames";
 import { routeHref } from "../routes/destinations";
 import { formatMinutes } from "../utils/format";
 import { RouteLabel } from "./RouteLabel";
-import { groupBySeverityBand } from "./routesToCheckBands";
+import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
 };
-
-/** Each band's bounds, read from the same thresholds the colour ramp uses so
- *  the header can't state a range the band does not hold. */
-const BAND_BOUNDS = {
-  severe: { min: DELAY_THRESHOLDS.severe },
-  moderate: { min: DELAY_THRESHOLDS.moderate, max: DELAY_THRESHOLDS.severe },
-  mild: { min: DELAY_THRESHOLDS.mild, max: DELAY_THRESHOLDS.moderate },
-} as const;
 
 /** A row's figure: printed as it is on first paint, travelling from the
  *  previous value when the data changes while the list stays mounted (a

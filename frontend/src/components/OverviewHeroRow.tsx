@@ -2,12 +2,19 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, RouteSummaryResponse } from "../api/types";
+import type {
+  OverviewConcentration,
+  OverviewHeadline,
+  OverviewPeakHour,
+  OverviewTopDelayedRoute,
+  RouteSummaryResponse,
+} from "../api/types";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
 import { periodMean } from "./periodMean";
 import { storyVerdict, topRoutesShare } from "./overview/storySentence";
+import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
@@ -19,9 +26,9 @@ export type HeroFact = "peak_hour" | "concentration" | "late_routes";
 
 type Props = {
   headline: OverviewHeadline;
-  delayedCount: number;
-  /** The average delay at or above which a route counts as delayed. */
-  delayedThresholdMin: number;
+  /** The routes-to-check list's own routes: the late-routes row counts that
+   *  list's top band, so its figure is the one the reader finds there. */
+  topDelayedRoutes: OverviewTopDelayedRoute[];
   agencyId: number;
   sparklinePoints: number[];
   peakHour: OverviewPeakHour | null;
@@ -79,8 +86,7 @@ function describeFeedStatus(feed: FeedState, t: TFunction): string {
 
 export function OverviewHeroRow({
   headline,
-  delayedCount,
-  delayedThresholdMin,
+  topDelayedRoutes,
   agencyId,
   sparklinePoints,
   peakHour,
@@ -129,7 +135,8 @@ export function OverviewHeroRow({
   // nullability) -- the "—" fallback below still renders in place of it when
   // there is nothing to display.
   const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
-  const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
+  const lateCount = groupBySeverityBand(topDelayedRoutes).find((g) => g.band === "severe")?.routes.length ?? 0;
+  const lateCountDisplay = useCountUp(lateCount, { decimals: 0 });
 
   // A verdict needs a real delta to pick a direction -- with no baseline at
   // all there's nothing to compare against, so this keeps the plain "no
@@ -202,20 +209,20 @@ export function OverviewHeroRow({
                 <span className="ov-hero-fact-unit">{t("overview.hero_row.fact_share_unit")}</span>
               </FactRow>
             )}
-            {/* The hero's only warm value, and only while a route is
-                actually late: it is the finding that asks for action. Gated
+            {/* The hero's only warm value, and only while the list's top band
+                holds a route: it is the finding that asks for action. Gated
                 on the real count, not the counting-up display, which starts
                 from 0. */}
             <FactRow
-              label={t("overview.hero_row.fact_late_routes", { min: delayedThresholdMin })}
+              label={t("overview.hero_row.fact_late_routes", { min: BAND_BOUNDS.severe.min })}
               onClick={() => onOpenFact("late_routes")}
-              attention={delayedCount > 0}
+              attention={lateCount > 0}
             >
-              {delayedCountDisplay}
+              {lateCountDisplay}
               <span className="ov-hero-fact-unit">
                 {totalRoutes != null
                   ? t("overview.hero_row.fact_late_routes_of", { count: totalRoutes })
-                  : t("overview.hero_row.fact_late_routes_unit", { count: delayedCount })}
+                  : t("overview.hero_row.fact_late_routes_unit", { count: lateCount })}
               </span>
             </FactRow>
           </ul>

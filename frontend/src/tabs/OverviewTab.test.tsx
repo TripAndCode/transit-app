@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -156,13 +156,16 @@ describe("OverviewTab", () => {
   });
 
   describe("the hero's fact rows", () => {
-    const withFacts = () =>
+    const delayed = (route_code: string, avg_min: number) => ({ route_code, route_short_name: null, avg_min });
+    const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)]) =>
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.9, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
-        top_delayed: { routes: [], delayed_count: 2, delayed_threshold_min: 2 },
+        // delayed_count counts a different, lower threshold; the hero must not read it.
+        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2 },
       });
+    const lateRow = () => screen.getByRole("button", { name: /Averaging over 5 min late/ });
 
     it("opens the peak-hour card's modal from the heaviest-hour row", async () => {
       renderOverview(withFacts());
@@ -176,6 +179,23 @@ describe("OverviewTab", () => {
       expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
     });
 
+    // The row scrolls to the routes-to-check list, so its count is the one
+    // the reader finds there: the list's top band, a route at exactly 5.0
+    // included, and not the payload's delayed_count.
+    it("counts exactly the routes in the routes-to-check list's top band", () => {
+      renderOverview(withFacts());
+      expect(screen.getByText("2 routes averaging more than 5 min late")).toBeInTheDocument();
+      expect(within(lateRow()).getByText("2")).toBeInTheDocument();
+      expect(lateRow()).toHaveClass("ov-hero-fact--attn");
+    });
+
+    it("shows a neutral zero when no route reaches the top band, while the list still lists the rest", () => {
+      renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)]));
+      expect(screen.getByText("1 route averaging 3–5 min late")).toBeInTheDocument();
+      expect(within(lateRow()).getByText("0")).toBeInTheDocument();
+      expect(lateRow()).not.toHaveClass("ov-hero-fact--attn");
+    });
+
     // The routes-to-check list is inline, with no modal of its own: the row
     // takes the reader, and keyboard focus, to it.
     it("brings the routes-to-check list into view from the late-routes row", async () => {
@@ -183,7 +203,7 @@ describe("OverviewTab", () => {
       Element.prototype.scrollIntoView = scrollIntoView;
       try {
         renderOverview(withFacts());
-        await userEvent.click(screen.getByRole("button", { name: /Averaging 2 min or more late/ }));
+        await userEvent.click(lateRow());
         const list = screen.getByText("Routes to check now").closest(".ov-routes-anchor");
         expect(list).not.toBeNull();
         expect(scrollIntoView.mock.contexts).toEqual([list]);

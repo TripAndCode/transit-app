@@ -166,8 +166,7 @@ export function OverviewTab() {
           <>
             <OverviewHeroRow
               headline={data.headline}
-              delayedCount={data.top_delayed.delayed_count}
-              delayedThresholdMin={data.top_delayed.delayed_threshold_min}
+              topDelayedRoutes={data.top_delayed.routes}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}

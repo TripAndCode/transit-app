@@ -290,7 +290,7 @@
       "fact_concentration_one": "上位{{count}}路線への遅延の集中",
       "fact_concentration_other": "上位{{count}}路線への遅延の集中",
       "fact_share_unit": "%",
-      "fact_late_routes": "平均{{min}}分以上の遅れ",
+      "fact_late_routes": "平均{{min}}分超の遅れ",
       "fact_late_routes_of_one": "/ {{count}}路線",
       "fact_late_routes_of_other": "/ {{count}}路線",
       "fact_late_routes_unit_one": "路線",
