@@ -157,6 +157,7 @@ export function PresetMenu({
                       onClick={() => {
                         onSelect(p.range_ctx);
                         setMenuOpen(false);
+                        triggerRef.current?.focus();
                       }}
                     >
                       <span className="preset-row__check" aria-hidden="true">

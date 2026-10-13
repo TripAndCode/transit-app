@@ -131,6 +131,7 @@ describe("PresetMenu (signed in)", () => {
     await userEvent.click(weekday);
     expect(onSelect).toHaveBeenCalledWith(SAVED);
     expect(screen.queryByRole("button", { name: "Weekday mornings" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Saved views" })).toHaveFocus();
   });
 
   it("describes a view saved before some conditions existed as picking it would apply it", async () => {

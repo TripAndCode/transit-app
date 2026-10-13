@@ -7,8 +7,9 @@ import { popoverLeft } from "./popoverPosition";
  *  opened over it takes the Escape instead. A click outside also closes it;
  *  focus leaving it is handled by the token's wrapper.
  *
- *  It is positioned against the scope section rather than its token, so a
- *  token near the right edge opens a popover that still fits the screen. */
+ *  It is positioned against its positioned ancestor (the scope section, or
+ *  the page heading's row for the saved views) rather than its trigger, so a
+ *  trigger near the right edge opens a popover that still fits the screen. */
 export function ScopePopover({
   label,
   onClose,
