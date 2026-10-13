@@ -380,6 +380,56 @@ async def test_patch_unknown_ingest_strategy(agencies_client):
     assert resp.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_create_and_patch_carry_the_static_strategy(agencies_client):
+    """A timetable reload needs a strategy as well as a URL: an agency created
+    without one could never load its timetable from the admin page."""
+    client, sid = agencies_client
+    created = await client.post(
+        "/api/agencies",
+        json={
+            "agency_name": "Static Strategy",
+            "feed_url": "http://ss.example.com",
+            "static_url": "http://ss.example.com/gtfs.zip",
+            "static_strategy": "direct_url",
+        },
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert created.status_code == 201
+    assert created.json()["static_strategy"] == "direct_url"
+    aid = created.json()["agency_id"]
+
+    patched = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"static_strategy": "aomori_index_scrape"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["static_strategy"] == "aomori_index_scrape"
+
+    listed = await client.get("/api/admin/agencies", cookies={"sid": sid})
+    assert next(a for a in listed.json() if a["agency_id"] == aid)["static_strategy"] == "aomori_index_scrape"
+    public = await client.get(f"/api/agencies/{aid}")
+    assert "static_strategy" not in public.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["nonexistent", "static_join"])
+async def test_a_static_strategy_that_cannot_fetch_a_timetable_is_rejected(agencies_client, strategy):
+    """`static_join` is an ingest strategy: it has no `fetch`, so a reload
+    through it would fail on every run rather than at the form."""
+    client, sid = agencies_client
+    resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "Bad Static", "feed_url": "http://bs.example.com", "static_strategy": strategy},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 422
+
+
 async def _audit_count(agency_id: int, kind: str) -> int:
     from api.main import app
 

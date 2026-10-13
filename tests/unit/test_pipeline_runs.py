@@ -77,7 +77,7 @@ class _Conn:
 
 
 def test_kind_and_status_vocabularies_match_the_table_constraints():
-    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static")
+    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update")
     assert RUN_STATUSES == ("running", "ok", "skipped", "error")
 
 
@@ -87,7 +87,7 @@ def test_start_run_inserts_a_running_row_and_returns_its_id():
     sql, params = conn.statements[0]
     assert sql.startswith("INSERT INTO pipeline_runs")
     assert "RETURNING run_id" in sql
-    assert params == ("analyze", 3, "running", None, 9)
+    assert params == ("analyze", 3, "running", None, 9, None)
     assert conn.events == ["commit"]
 
 
@@ -95,7 +95,7 @@ def test_a_skipped_run_is_recorded_whole_with_its_lock_wait():
     conn = _Conn()
     assert start_run(conn, "ingest", agency_id=None, lock_wait_ms=12, status="skipped") == 7
     _, params = conn.statements[0]
-    assert params == ("ingest", None, "skipped", 12, None)
+    assert params == ("ingest", None, "skipped", 12, None, None)
 
 
 def test_start_run_rejects_a_kind_the_table_would_reject():
@@ -140,9 +140,18 @@ def test_record_run_marks_a_completed_job_ok_with_the_rows_it_reported():
     with record_run(conn, "ingest", agency_id=1) as run:
         run.rows = 99
     assert [params for _, params in conn.statements] == [
-        ("ingest", 1, "running", None, None),
+        ("ingest", 1, "running", None, None, None),
         ("ok", 99, None, 5),
     ]
+
+
+def test_record_run_files_a_step_under_the_umbrella_it_belongs_to():
+    """The admin pages read an operator's run through this link: without it a
+    step is indistinguishable from the cron sweep's row of the same kind."""
+    conn = _Conn(run_id=5)
+    with record_run(conn, "static", agency_id=1, requested_by=9, parent_run_id=77):
+        pass
+    assert conn.statements[0][1] == ("static", 1, "running", None, 9, 77)
 
 
 def test_record_run_marks_a_failed_job_error_and_re_raises():
@@ -193,7 +202,7 @@ def test_the_reaper_spares_the_locked_kinds_while_the_lock_is_held():
     sql, params = conn.statements[0]
     assert "FROM pg_locks" in sql
     assert params[2:] == (
-        ["ingest", "promote", "analyze"],
+        ["ingest", "promote", "analyze", "update"],
         INGEST_ANALYZE_LOCK_KEY >> 32,
         INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
     )

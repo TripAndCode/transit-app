@@ -72,9 +72,16 @@ class _Conn:
             return None if self.insert_unrecordable else dict(_RUN_ROW)
         return self._row
 
+    async def fetchval(self, sql: str, *args: Any) -> Any:
+        """The in-flight check: nothing is running for this agency."""
+        assert "status = 'running'" in sql, f"unexpected fetchval: {sql}"
+        return None
+
     async def execute(self, sql: str, *args: Any) -> str:
         """The audit seam writes a real row now; capture it rather than
-        running it."""
+        running it. The per-agency request lock has nothing to model here."""
+        if "pg_advisory_xact_lock" in sql:
+            return "SELECT 1"
         assert "INSERT INTO admin_audit" in sql, f"unexpected execute: {sql}"
         self.audit.append(args)
         return "INSERT 1"

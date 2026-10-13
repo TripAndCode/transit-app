@@ -16,7 +16,7 @@ from typing import Any
 # frequently hit, and the correlated form takes an index-backed backward scan
 # per agency instead of a full-table scan.
 _LIST_SQL = """
-SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url,
+SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, a.static_strategy,
        a.ingest_strategy, a.trip_id_pattern, a.deleted_at,
        (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date
 FROM agencies a

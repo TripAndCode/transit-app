@@ -13,6 +13,11 @@ from pipeline.strategies import get_static_strategy
 
 logger = logging.getLogger(__name__)
 
+#: Where fetched zips and each strategy's change manifest live, relative to
+#: the working directory. The command line's default and the admin page's
+#: reload share it, so both compare against the same manifest.
+DEFAULT_STATIC_DEST = "raw_archives_static"
+
 
 def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]:
     """Refresh static GTFS for one agency. Returns the loaded zip path or None."""

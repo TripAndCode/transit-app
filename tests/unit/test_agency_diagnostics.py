@@ -427,6 +427,45 @@ def test_agency_health_never_mixes_two_agencies_rows():
     assert second["static_version"]["version"] == "v2"
 
 
+def _health(*, header=None, versions=(), static_loads=()):
+    return ad.build_agency_health(
+        headers=[header or _header()],
+        probes=[],
+        clamps=[],
+        versions=list(versions),
+        static_loads=list(static_loads),
+        today=date(2026, 9, 20),
+        now=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+    )[0]
+
+
+def test_a_timetable_source_needs_both_a_url_and_a_strategy():
+    assert _health()["static_configured"] is False
+    configured = dict(_header(), static_url="https://x.test/gtfs.zip", static_strategy="direct_url")
+    assert _health(header=configured)["static_configured"] is True
+    assert _health(header=dict(configured, static_strategy=None))["static_configured"] is False
+
+
+def test_the_timetable_load_date_is_the_last_successful_static_runs_jst_day():
+    """`agg_static_version_summary.computed_at` cannot say this: analyze
+    restamps it on every run, so it dates the last analysis, not the load."""
+    row = _health(
+        versions=[{"agency_id": 1, "version": "gtfs_static_20260901", "loaded_at": datetime(2026, 9, 19, tzinfo=UTC)}],
+        static_loads=[{"agency_id": 1, "finished_at": datetime(2026, 9, 17, 16, 30, tzinfo=UTC)}],
+    )
+    assert row["static_loaded_on"] == "2026-09-18"
+
+
+def test_without_a_recorded_load_the_date_comes_from_the_loaded_zips_name():
+    """Timetables loaded before loads were recorded still say when their zip
+    was fetched: the fetchers name it `gtfs_static_YYYYMMDD`."""
+    versions = [{"agency_id": 1, "version": "gtfs_static_20260918", "loaded_at": None}]
+    assert _health(versions=versions)["static_loaded_on"] == "2026-09-18"
+    named = [{"agency_id": 1, "version": "hiroden_static", "loaded_at": None}]
+    assert _health(versions=named)["static_loaded_on"] is None
+    assert _health()["static_loaded_on"] is None
+
+
 def test_standard_edits_reject_a_non_finite_threshold():
     # DOUBLE PRECISION stores NaN/Infinity happily, and every figure derived
     # from the threshold afterwards would be NaN.

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update")
 
 #: Mirrors the ``status`` CHECK constraint.
 RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
@@ -55,8 +55,8 @@ RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
 MAX_ERROR_CHARS = 2000
 
 _INSERT_RUN_SQL = """
-    INSERT INTO pipeline_runs (kind, agency_id, started_at, status, lock_wait_ms, requested_by)
-    VALUES (%s, %s, now(), %s, %s, %s)
+    INSERT INTO pipeline_runs (kind, agency_id, started_at, status, lock_wait_ms, requested_by, parent_run_id)
+    VALUES (%s, %s, now(), %s, %s, %s, %s)
     RETURNING run_id
 """
 
@@ -69,8 +69,10 @@ _FINISH_RUN_SQL = """
 #: The job kinds that run holding the ingest/analyze advisory lock
 #: (pipeline/locks.py). The lock is session-level, so it dies with the process
 #: that took it: while it is held, its holder is alive and may still be the
-#: one working on an old ``running`` row of one of these kinds.
-_LOCKED_RUN_KINDS = ("ingest", "promote", "analyze")
+#: one working on an old ``running`` row of one of these kinds. An ``update``
+#: umbrella spends most of its life inside the ingest + analyze sweep, so it
+#: is spared on the same terms as the steps it is waiting on.
+_LOCKED_RUN_KINDS = ("ingest", "promote", "analyze", "update")
 
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given
@@ -136,12 +138,16 @@ def start_run(
     requested_by: int | None = None,
     lock_wait_ms: int | None = None,
     status: str = "running",
+    parent_run_id: int | None = None,
 ) -> int | None:
     """Open a run row and return its id, or ``None`` if it could not be written.
 
     ``status`` is ``running`` for a job about to start; a job that never
     started -- one displaced by the advisory lock -- is recorded whole here
     instead, as ``skipped``, since it has no later moment to be finished at.
+
+    ``parent_run_id`` makes this row a step of an operator's umbrella run,
+    which is how the admin pages read that run step by step.
     """
     if kind not in RUN_KINDS:
         raise ValueError(f"unknown run kind {kind!r}")
@@ -149,7 +155,7 @@ def start_run(
         raise ValueError(f"unknown run status {status!r}")
     try:
         with conn.cursor() as cur:
-            cur.execute(_INSERT_RUN_SQL, (kind, agency_id, status, lock_wait_ms, requested_by))
+            cur.execute(_INSERT_RUN_SQL, (kind, agency_id, status, lock_wait_ms, requested_by, parent_run_id))
             row = cur.fetchone()
         conn.commit()
         return row[0] if row else None
@@ -187,6 +193,7 @@ def record_run(
     kind: str,
     agency_id: int | None = None,
     requested_by: int | None = None,
+    parent_run_id: int | None = None,
 ) -> Iterator[RunHandle]:
     """Bracket one job with its run row: ``running`` -> ``ok`` or ``error``.
 
@@ -194,7 +201,9 @@ def record_run(
     (the per-agency loops' log-and-continue, the single-agency commands'
     propagate-and-exit) stays exactly as it was.
     """
-    handle = RunHandle(run_id=start_run(conn, kind, agency_id=agency_id, requested_by=requested_by))
+    handle = RunHandle(
+        run_id=start_run(conn, kind, agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id)
+    )
     try:
         yield handle
     except BaseException as exc:

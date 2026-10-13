@@ -16,9 +16,11 @@ cannot answer for.
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
+from api.admin_runs import jst_date
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
 __all__ = [
@@ -62,7 +64,7 @@ CLAMP_HISTORY_DAYS = 14
 
 
 AGENCY_HEADER_SQL = """
-    SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url,
+    SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, a.static_strategy,
            a.ingest_strategy, a.deleted_at,
            m.analyzed_at, m.max_updates_captured_at,
            (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date
@@ -132,6 +134,7 @@ AGENCIES_HEALTH_SQL = """
         GROUP BY agency_id
     )
     SELECT a.agency_id, a.agency_name, a.feed_url, a.ingest_strategy, a.deleted_at,
+           a.static_url, a.static_strategy,
            m.analyzed_at, m.max_updates_captured_at, g.latest_data_date
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
@@ -422,6 +425,22 @@ def _group_by_agency(rows: Sequence[Mapping[str, Any]]) -> dict[int, list[Mappin
     return grouped
 
 
+#: The fetchers name each zip they persist ``gtfs_static_YYYYMMDD`` after the
+#: day it was fetched, and the loader stamps that stem on every trip as its
+#: static version.
+_VERSION_DATE_RE = re.compile(r"(\d{4})(\d{2})(\d{2})$")
+
+
+def _version_date(version: str | None) -> str | None:
+    match = _VERSION_DATE_RE.search(version or "")
+    if match is None:
+        return None
+    try:
+        return date(int(match[1]), int(match[2]), int(match[3])).isoformat()
+    except ValueError:
+        return None
+
+
 def build_agency_health(
     *,
     headers: Sequence[Mapping[str, Any]],
@@ -430,18 +449,26 @@ def build_agency_health(
     versions: Sequence[Mapping[str, Any]],
     today: date,
     now: datetime,
+    static_loads: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """One row per agency for the list view's health columns.
 
-    Takes four already-fetched fleet-wide result sets and pivots them by
-    agency here, so the endpoint stays at four queries no matter how many
-    agencies exist. An agency missing from any of the three diagnostic sets
-    still gets a row -- a newly onboarded agency has no probes, no clamp
-    history and no static version, and must appear in the table saying so.
+    Takes already-fetched fleet-wide result sets and pivots them by agency
+    here, so the endpoint's query count does not grow with the roster. An
+    agency missing from any of the diagnostic sets still gets a row -- a
+    newly onboarded agency has no probes, no clamp history and no static
+    version, and must appear in the table saying so.
+
+    ``static_loaded_on`` is the JST day of the agency's last successful
+    timetable load (``static_loads``), falling back to the fetch day in the
+    loaded zip's name for a timetable loaded before loads were recorded.
+    ``static_version.loaded_at`` cannot stand in for it: analyze restamps
+    that on every run.
     """
     probes_by_agency = _group_by_agency(probes)
     clamps_by_agency = _group_by_agency(clamps)
     versions_by_agency = {v["agency_id"]: v for v in versions}
+    loads_by_agency = {load["agency_id"]: load["finished_at"] for load in static_loads}
 
     out: list[dict[str, Any]] = []
     for header in headers:
@@ -474,6 +501,10 @@ def build_agency_health(
                     None
                     if version is None
                     else {"version": version["version"], "loaded_at": _iso(version.get("loaded_at"))}
+                ),
+                "static_configured": bool(header.get("static_url") and header.get("static_strategy")),
+                "static_loaded_on": (
+                    jst_date(loads_by_agency.get(aid)) or _version_date(version["version"] if version else None)
                 ),
             }
         )

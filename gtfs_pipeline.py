@@ -384,7 +384,9 @@ def cmd_refresh_static(args):
     conn = _get_conn()
     dest = pathlib.Path(args.dest)
     if args.agency_id:
-        result = refresh_static(int(args.agency_id), conn, dest)
+        agency_id = int(args.agency_id)
+        with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
+            result = refresh_static(agency_id, conn, dest)
         if result is None:
             logger.info("No change.")
     else:
@@ -832,6 +834,8 @@ def cmd_ingest_weather(args):
 
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
+    from pipeline.static_fetcher import DEFAULT_STATIC_DEST
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
@@ -858,7 +862,7 @@ def main():
         help="Conditionally fetch + load static GTFS via the agency's static_strategy",
     )
     p_refresh.add_argument("--agency-id", default=None, help="Specific agency (default: all configured)")
-    p_refresh.add_argument("--dest", default="raw_archives_static", help="Local destination directory for fetched zips")
+    p_refresh.add_argument("--dest", default=DEFAULT_STATIC_DEST, help="Local destination directory for fetched zips")
 
     full_help = "Rebuild every date, not only the ones whose row counts changed"
     p_analyze = sub.add_parser("analyze")

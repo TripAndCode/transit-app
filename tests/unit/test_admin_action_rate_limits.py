@@ -24,3 +24,11 @@ def test_probe_agency_feed_is_rate_limited():
 
 def test_reanalyze_agency_is_rate_limited():
     assert hasattr(admin_agencies_mod.reanalyze_agency, "__wrapped__")
+
+
+def test_refresh_agency_static_is_rate_limited():
+    assert hasattr(admin_agencies_mod.refresh_agency_static, "__wrapped__")
+
+
+def test_update_agency_is_rate_limited():
+    assert hasattr(admin_agencies_mod.update_agency, "__wrapped__")

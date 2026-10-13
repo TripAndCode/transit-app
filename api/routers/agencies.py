@@ -18,11 +18,17 @@ router = APIRouter(prefix="/api/agencies", tags=["agencies"])
 # Allow-list of valid ingest strategy names (keys accepted by get_ingest_strategy).
 VALID_INGEST_STRATEGIES = frozenset({"aomori_regex", "direct_url", "aomori_index_scrape", "static_join"})
 
+# The strategy modules that can fetch a timetable (they expose ``fetch`` and
+# ``record_loaded``, see pipeline/strategies/__init__.py). Any other name
+# would be accepted here and fail on every reload.
+VALID_STATIC_STRATEGIES = frozenset({"direct_url", "aomori_index_scrape"})
+
 
 class AgencyCreate(BaseModel):
     agency_name: str
     feed_url: str
     static_url: str | None = None
+    static_strategy: str | None = None
     ingest_strategy: str | None = None
     trip_id_pattern: str | None = None
 
@@ -31,8 +37,15 @@ class AgencyPatch(BaseModel):
     agency_name: str | None = None
     feed_url: str | None = None
     static_url: str | None = None
+    static_strategy: str | None = None
     ingest_strategy: str | None = None
     trip_id_pattern: str | None = None
+
+
+#: The columns every admin write answers with, matching ``AdminAgencyOut``.
+_ADMIN_COLS = (
+    "agency_id, agency_name, feed_url, static_url, static_strategy, ingest_strategy, trip_id_pattern, deleted_at"
+)
 
 
 class AgencyOut(BaseModel):
@@ -53,6 +66,7 @@ class AdminAgencyOut(BaseModel):
     agency_name: str
     feed_url: str
     static_url: str | None
+    static_strategy: str | None
     ingest_strategy: str | None
     trip_id_pattern: str | None
     deleted_at: Any  # datetime | None — Any avoids asyncpg datetime serialization issues
@@ -77,6 +91,13 @@ async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn
     return _agencies.agency_row_to_dict(row)
 
 
+def _check_strategies(body: AgencyCreate | AgencyPatch) -> None:
+    if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
+        raise HTTPException(status_code=422, detail=f"Unknown ingest_strategy: {body.ingest_strategy!r}")
+    if body.static_strategy is not None and body.static_strategy not in VALID_STATIC_STRATEGIES:
+        raise HTTPException(status_code=422, detail=f"Unknown static_strategy: {body.static_strategy!r}")
+
+
 @router.post("", response_model=AdminAgencyOut, status_code=201)
 async def create_agency(
     body: AgencyCreate,
@@ -86,22 +107,22 @@ async def create_agency(
 ) -> dict[str, Any]:
     """Create an agency. Admin-only (feed_url is a server-side fetch sink). Validates feed_url."""
     csrf_guard(request)
-    if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
-        raise HTTPException(status_code=422, detail=f"Unknown ingest_strategy: {body.ingest_strategy!r}")
+    _check_strategies(body)
     try:
         validate_feed_url(body.feed_url)
     except FeedURLError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     async with conn.transaction():
         row = await conn.fetchrow(
-            """
-            INSERT INTO agencies (agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at
+            f"""
+            INSERT INTO agencies (agency_name, feed_url, static_url, static_strategy, ingest_strategy, trip_id_pattern)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING {_ADMIN_COLS}
             """,
             body.agency_name,
             body.feed_url,
             body.static_url,
+            body.static_strategy,
             body.ingest_strategy,
             body.trip_id_pattern,
         )
@@ -123,6 +144,7 @@ async def create_agency(
                 "agency_name": body.agency_name,
                 "feed_url": body.feed_url,
                 "static_url": body.static_url,
+                "static_strategy": body.static_strategy,
                 "ingest_strategy": body.ingest_strategy,
                 "trip_id_pattern": body.trip_id_pattern,
             },
@@ -146,14 +168,12 @@ async def patch_agency(
     if "feed_url" in body.model_fields_set and body.feed_url is None:
         raise HTTPException(status_code=422, detail="feed_url cannot be null")
     row = await conn.fetchrow(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL",
+        f"SELECT {_ADMIN_COLS} FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL",
         agency_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
-        raise HTTPException(status_code=422, detail=f"Unknown ingest_strategy: {body.ingest_strategy!r}")
+    _check_strategies(body)
     if body.feed_url is not None:
         try:
             validate_feed_url(body.feed_url)
@@ -169,10 +189,7 @@ async def patch_agency(
         return dict(row)
 
     set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
-    sql = (
-        f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1 "
-        "RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
-    )
+    sql = f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1 RETURNING {_ADMIN_COLS}"
     async with conn.transaction():
         out = await conn.fetchrow(sql, agency_id, *updates.values())
         if not out:
@@ -251,7 +268,6 @@ async def restore_agency(
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
-    _COLS = "agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     async with conn.transaction():
         # The `deleted_at IS NOT NULL` guard stays part of the write rather
         # than a preceding read: exactly one concurrent caller can match a
@@ -259,7 +275,8 @@ async def restore_agency(
         # audit event. Deciding that from a separate SELECT would let two
         # simultaneous restores both observe "was deleted" and both record it.
         out = await conn.fetchrow(
-            f"UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL RETURNING {_COLS}",
+            f"UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL "
+            f"RETURNING {_ADMIN_COLS}",
             agency_id,
         )
         if out is not None:
@@ -281,7 +298,7 @@ async def restore_agency(
             )
         else:
             # Already active, or gone. Either way this call restored nothing.
-            out = await conn.fetchrow(f"SELECT {_COLS} FROM agencies WHERE agency_id=$1", agency_id)
+            out = await conn.fetchrow(f"SELECT {_ADMIN_COLS} FROM agencies WHERE agency_id=$1", agency_id)
             if out is None:
                 raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     invalidate_agency(agency_id)

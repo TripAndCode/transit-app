@@ -19,6 +19,7 @@ import hmac
 import logging
 import os
 import re
+from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
 
@@ -202,6 +203,7 @@ def _run_ingest_and_analyze(
     requested_by: int | None = None,
     run_weather: bool = True,
     run_id: int | None = None,
+    stop_on_failure: bool = False,
 ) -> None:
     """Run the sweep and close the operator's umbrella run row after it.
 
@@ -226,6 +228,7 @@ def _run_ingest_and_analyze(
             requested_by=requested_by,
             run_weather=run_weather,
             run_id=run_id,
+            stop_on_failure=stop_on_failure,
         )
     except Exception as exc:
         _log.exception("cron: ingest+analyze run failed")
@@ -245,6 +248,7 @@ def _ingest_and_analyze_sweep(
     requested_by: int | None = None,
     run_weather: bool = True,
     run_id: int | None = None,
+    stop_on_failure: bool = False,
 ) -> SweepOutcome:
     """Pull live GTFS-RT for every agency, promote closed days, then refresh
     aggregations.
@@ -277,9 +281,15 @@ def _ingest_and_analyze_sweep(
     it at ``True``.
 
     ``run_id`` is the caller's own umbrella row, already open and closed by
-    the caller. It is passed in only so this function knows not to open a
-    second row for the same action when the advisory lock turns the sweep
-    away.
+    the caller. Every stage row is filed under it (``parent_run_id``), which
+    is how the admin pages read the operator's run step by step, and this
+    function knows not to open a second row for the same action when the
+    advisory lock turns the sweep away.
+
+    ``stop_on_failure`` ends an agency's stages at the first one that fails,
+    for the agencies page's chained update, which promises exactly that. The
+    default keeps going: analyzing what is already stored is still worth
+    doing after a feed fetch failed.
     """
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
@@ -349,26 +359,34 @@ def _ingest_and_analyze_sweep(
             _log.warning("cron: no agencies to ingest (scope=%s)", requested_agency_ids or "all")
             return SweepOutcome("skipped", "no active agency in scope")
 
+        def _stage(stage: str, aid: int) -> AbstractContextManager[pipeline_runs.RunHandle]:
+            return pipeline_runs.record_run(conn, stage, agency_id=aid, requested_by=requested_by, parent_run_id=run_id)
+
         for aid in agency_ids:
+            stopped = False
             if kind == "ingest":
                 try:
-                    with pipeline_runs.record_run(conn, "ingest", agency_id=aid, requested_by=requested_by) as run:
+                    with _stage("ingest", aid) as run:
                         run.rows = ingest_live(aid, conn, ch_client)
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
                     failed.append(f"ingest agency {aid}")
+                    stopped = stop_on_failure
+                if not stopped:
+                    try:
+                        with _stage("promote", aid) as run:
+                            run.rows = promote_closed_days(aid, conn, ch_client)
+                    except Exception:
+                        _log.exception("cron: promotion failed for agency %s", aid)
+                        failed.append(f"promote agency {aid}")
+                        stopped = stop_on_failure
+            if not stopped:
                 try:
-                    with pipeline_runs.record_run(conn, "promote", agency_id=aid, requested_by=requested_by) as run:
-                        run.rows = promote_closed_days(aid, conn, ch_client)
+                    with _stage("analyze", aid):
+                        analyze(aid, conn, ch_client)
                 except Exception:
-                    _log.exception("cron: promotion failed for agency %s", aid)
-                    failed.append(f"promote agency {aid}")
-            try:
-                with pipeline_runs.record_run(conn, "analyze", agency_id=aid, requested_by=requested_by):
-                    analyze(aid, conn, ch_client)
-            except Exception:
-                _log.exception("cron: analyze failed for agency %s", aid)
-                failed.append(f"analyze agency {aid}")
+                    _log.exception("cron: analyze failed for agency %s", aid)
+                    failed.append(f"analyze agency {aid}")
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
@@ -436,6 +454,97 @@ def _ingest_and_analyze_sweep(
     if failed:
         return SweepOutcome("error", "failed: " + ", ".join(failed))
     return SweepOutcome("ok")
+
+
+class StaticRefreshFailed(RuntimeError):
+    """A timetable reload that left the agency with no timetable at all."""
+
+
+def _refresh_static_step(db_url: str, agency_id: int, *, requested_by: int | None, parent_run_id: int | None) -> None:
+    """Reload one agency's timetable as a step of an operator's run, raising
+    if the step failed.
+
+    The reload itself is ``refresh_static``, the function behind
+    ``gtfs_pipeline.py refresh-static``, writing into the same directory, so
+    the button and the command compare against the same change manifest and
+    cannot drift apart.
+
+    ``refresh_static`` returns None both for "nothing newer to load" and for
+    a fetch its strategy gave up on (the strategies log and swallow HTTP and
+    network errors), so the two cannot be told apart from here. An agency
+    that still has a timetable loaded is then in a good state either way and
+    the step succeeds; one with no timetable at all has nothing for "no
+    change" to mean, and the step fails rather than letting a chain go on to
+    ingest against an empty schedule. The step's row count is the loaded
+    timetable's route count in both successful cases.
+    """
+    import pathlib
+
+    import psycopg2
+
+    from pipeline import static_fetcher
+    from pipeline.db import _static_loaded
+
+    conn = psycopg2.connect(db_url)
+    try:
+        with pipeline_runs.record_run(
+            conn, "static", agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id
+        ) as run:
+            loaded = static_fetcher.refresh_static(agency_id, conn, pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST))
+            if loaded is None and not _static_loaded(conn, agency_id):
+                raise StaticRefreshFailed("no timetable could be fetched from the agency's static URL")
+            with conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (agency_id,))
+                run.rows = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _run_agency_update(
+    *,
+    agency_id: int,
+    requested_by: int | None,
+    run_id: int | None,
+    then_ingest_and_analyze: bool,
+) -> None:
+    """The agencies page's timetable reload, optionally chained into the
+    ingest + analyze sweep, closing the operator's umbrella row on every path.
+
+    Steps run in order and a failed step stops the chain: a timetable that
+    did not load leaves the umbrella ``error`` and the sweep never starts.
+    The sweep is :func:`_run_ingest_and_analyze` itself, scoped to this one
+    agency and asked to stop at its own first failure, so the lock, the JST
+    pin and the freshness check are the cron job's own. It closes the
+    umbrella from there; a sweep the advisory lock turns away leaves it
+    ``skipped``, which the page reads as a stop, not a success.
+
+    The timetable step runs outside the ingest/analyze lock, as the
+    command-line reload does: holding that lock across a third-party
+    download would turn every cron poke away for as long as the download
+    takes. ``pipeline.locks`` covers why ``load_static`` is safe beside a
+    running analyze.
+    """
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        _log.error("admin: DATABASE_URL not set; skipping the timetable reload")
+        return
+    try:
+        _refresh_static_step(db_url, agency_id, requested_by=requested_by, parent_run_id=run_id)
+    except Exception as exc:
+        _log.exception("admin: timetable reload failed for agency %s", agency_id)
+        _finish_manual_run(db_url, run_id, "error", error=redact_urls_in_text(f"{type(exc).__name__}: {exc}"))
+        return
+    if not then_ingest_and_analyze:
+        _finish_manual_run(db_url, run_id, "ok")
+        return
+    _run_ingest_and_analyze(
+        kind="ingest",
+        agency_ids=[agency_id],
+        requested_by=requested_by,
+        run_weather=False,
+        run_id=run_id,
+        stop_on_failure=True,
+    )
 
 
 def _ingest_ml_forecast(conn: Any) -> None:

@@ -1,0 +1,507 @@
+"""The agencies page's timetable reload and chained update, end to end.
+
+Two halves:
+
+- The endpoints, through ``api.main`` with a real session, the CSRF check and
+  the test database: who may press, what a press records, and when a press is
+  refused. The background runner is stubbed here -- it would download a
+  timetable and run the sweep.
+- The runner itself against the test database, with only the network fetch
+  (the static strategy's ``fetch``) and the ingest/analyze work mocked, so
+  the rows the page reads are the rows a real run writes.
+"""
+
+from __future__ import annotations
+
+import os
+import zipfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import httpx
+import psycopg2
+import pytest
+from httpx import ASGITransport
+
+from api.middleware.ratelimit import limiter
+from api.security import token_hash
+from tests.conftest import TEST_ORIGIN, _test_pool
+
+_ORIGIN = {"Origin": TEST_ORIGIN}
+
+
+async def _seed_session(conn, *, role: str = "admin") -> tuple[str, int]:
+    uid = (
+        await conn.fetchrow(
+            "INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id",
+            f"u{datetime.now().timestamp()}@x",
+            role,
+        )
+    )["user_id"]
+    sid = f"sid-{uid}-{datetime.now().timestamp()}"
+    await conn.execute(
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    return sid, uid
+
+
+async def _seed_agency(conn, *, static: bool = True, deleted: bool = False) -> int:
+    return await conn.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url, static_url, static_strategy, deleted_at) "
+        "VALUES ($1, $2, $3, $4, $5) RETURNING agency_id",
+        "広島バス",
+        f"https://example.test/{datetime.now().timestamp()}/feed.pb",
+        "https://example.test/gtfs/current_data.zip" if static else None,
+        "direct_url" if static else None,
+        datetime.now(timezone.utc) if deleted else None,
+    )
+
+
+@pytest.fixture
+async def app_client(apply_schema):
+    from api.main import app
+
+    limiter.reset()
+    pool = await _test_pool()
+    app.state.pool = pool
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url=TEST_ORIGIN) as c:
+        yield c
+    await pool.close()
+    limiter.reset()
+
+
+@pytest.fixture
+def queued(monkeypatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr("api.routers.internal._run_agency_update", lambda **kw: calls.append(kw))
+    return calls
+
+
+_PATHS = ["refresh-static", "update"]
+
+
+# ── the endpoints ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _PATHS)
+async def test_a_member_who_is_not_an_admin_is_forbidden(app_client, aconn, queued, path):
+    sid, _ = await _seed_session(aconn, role="user")
+    aid = await _seed_agency(aconn)
+    r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
+    assert r.status_code == 403
+    assert queued == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _PATHS)
+async def test_a_press_without_a_same_site_origin_is_refused(app_client, aconn, queued, path):
+    sid, _ = await _seed_session(aconn)
+    aid = await _seed_agency(aconn)
+    r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid})
+    assert r.status_code == 403
+    assert await aconn.fetchval("SELECT count(*) FROM pipeline_runs") == 0
+    assert queued == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("path", "kind"), [("refresh-static", "static"), ("update", "update")])
+async def test_a_press_opens_an_umbrella_run_audits_it_and_answers_202(app_client, aconn, queued, path, kind):
+    sid, uid = await _seed_session(aconn)
+    aid = await _seed_agency(aconn)
+    r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
+
+    assert r.status_code == 202, r.text
+    run_id = r.json()["run_id"]
+    row = await aconn.fetchrow("SELECT * FROM pipeline_runs WHERE run_id = $1", run_id)
+    assert (row["kind"], row["agency_id"], row["status"], row["requested_by"], row["parent_run_id"]) == (
+        kind,
+        aid,
+        "running",
+        uid,
+        None,
+    )
+    audit = await aconn.fetchval("SELECT action FROM admin_audit WHERE target_id = $1", str(aid))
+    assert audit in {"agency.static_refresh_requested", "agency.update_requested"}
+    assert queued == [
+        {"agency_id": aid, "requested_by": uid, "run_id": run_id, "then_ingest_and_analyze": kind == "update"}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _PATHS)
+async def test_a_second_press_while_the_first_run_is_in_flight_is_409(app_client, aconn, queued, path):
+    sid, _ = await _seed_session(aconn)
+    aid = await _seed_agency(aconn)
+    first = await app_client.post(f"/api/admin/agencies/{aid}/update", cookies={"sid": sid}, headers=_ORIGIN)
+    assert first.status_code == 202
+    second = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
+    assert second.status_code == 409
+    assert await aconn.fetchval("SELECT count(*) FROM pipeline_runs WHERE agency_id = $1", aid) == 1
+    reanalyze = await app_client.post(f"/api/admin/agencies/{aid}/reanalyze", cookies={"sid": sid}, headers=_ORIGIN)
+    assert reanalyze.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_run_abandoned_past_the_reap_age_does_not_block_a_new_one(app_client, aconn, queued):
+    sid, uid = await _seed_session(aconn)
+    aid = await _seed_agency(aconn)
+    await aconn.execute(
+        "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by) "
+        "VALUES ('update', $1, now() - interval '3 hours', 'running', $2)",
+        aid,
+        uid,
+    )
+    r = await app_client.post(f"/api/admin/agencies/{aid}/update", cookies={"sid": sid}, headers=_ORIGIN)
+    assert r.status_code == 202
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _PATHS)
+async def test_a_disabled_agency_is_409(app_client, aconn, queued, path):
+    sid, _ = await _seed_session(aconn)
+    aid = await _seed_agency(aconn, deleted=True)
+    r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
+    assert r.status_code == 409
+    assert queued == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _PATHS)
+async def test_an_agency_with_no_timetable_source_is_409(app_client, aconn, queued, path):
+    sid, _ = await _seed_session(aconn)
+    aid = await _seed_agency(aconn, static=False)
+    r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
+    assert r.status_code == 409
+    assert queued == []
+
+
+@pytest.mark.asyncio
+async def test_health_reports_each_agencys_latest_run_step_by_step(app_client, aconn):
+    sid, uid = await _seed_session(aconn)
+    aid = await _seed_agency(aconn)
+    umbrella = await aconn.fetchval(
+        "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by) "
+        "VALUES ('update', $1, now() - interval '3 minutes', 'running', $2) RETURNING run_id",
+        aid,
+        uid,
+    )
+    await aconn.execute(
+        "INSERT INTO pipeline_runs "
+        "(kind, agency_id, started_at, finished_at, status, rows, requested_by, parent_run_id) "
+        "VALUES ('static', $1, now() - interval '3 minutes', now() - interval '2 minutes', 'ok', 27, $2, $3)",
+        aid,
+        uid,
+        umbrella,
+    )
+    await aconn.execute(
+        "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by, parent_run_id) "
+        "VALUES ('ingest', $1, now() - interval '2 minutes', 'running', $2, $3)",
+        aid,
+        uid,
+        umbrella,
+    )
+    # A cron sweep's row for the same agency is not part of the operator's run.
+    await aconn.execute(
+        "INSERT INTO pipeline_runs (kind, agency_id, started_at, finished_at, status) "
+        "VALUES ('analyze', $1, now() - interval '1 minute', now(), 'ok')",
+        aid,
+    )
+
+    r = await app_client.get("/api/admin/agencies/health", cookies={"sid": sid})
+    assert r.status_code == 200, r.text
+    row = next(h for h in r.json() if h["agency_id"] == aid)
+    assert row["in_flight"] is True
+    assert row["static_configured"] is True
+    static_finished = datetime.now(timezone.utc) - timedelta(minutes=2)
+    assert row["static_loaded_on"] == static_finished.astimezone(timezone(timedelta(hours=9))).date().isoformat()
+    run = row["latest_run"]
+    assert (run["run_id"], run["kind"], run["status"]) == (umbrella, "update", "running")
+    assert [(s["step"], s["status"], s["rows"]) for s in run["steps"]] == [
+        ("static", "ok", 27),
+        ("ingest", "running", None),
+        ("analyze", "pending", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_carries_no_run_for_an_agency_no_operator_has_run(app_client, aconn):
+    sid, _ = await _seed_session(aconn)
+    aid = await _seed_agency(aconn, static=False)
+    r = await app_client.get("/api/admin/agencies/health", cookies={"sid": sid})
+    row = next(h for h in r.json() if h["agency_id"] == aid)
+    assert row["latest_run"] is None
+    assert row["in_flight"] is False
+    assert row["static_configured"] is False
+    assert row["static_loaded_on"] is None
+
+
+# ── the runner ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def runner_env(pg_conn, monkeypatch, tmp_path):
+    """An agency, an admin, and an umbrella run opened the way the endpoint
+    opens it; the runner reads `DATABASE_URL` from the environment."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
+    monkeypatch.setattr("pipeline.static_fetcher.DEFAULT_STATIC_DEST", str(tmp_path / "static"))
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO users (email, role) VALUES ('runner@x', 'admin') RETURNING user_id")
+        uid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, static_url, static_strategy) "
+            "VALUES ('広島バス', 'https://example.test/feed.pb', 'https://example.test/gtfs/current_data.zip', "
+            "'direct_url') RETURNING agency_id"
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+
+    def open_run(kind: str) -> int:
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by) "
+                "VALUES (%s, %s, now(), 'running', %s) RETURNING run_id",
+                (kind, aid, uid),
+            )
+            run_id = cur.fetchone()[0]
+        pg_conn.commit()
+        return run_id
+
+    return {"agency_id": aid, "user_id": uid, "open_run": open_run, "tmp": tmp_path}
+
+
+def _gtfs_zip(path: Path, routes: int) -> Path:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("stops.txt", "stop_id,stop_name,stop_lat,stop_lon\nS1,Stop 1,34.39,132.45\n")
+        zf.writestr(
+            "routes.txt",
+            "route_id,route_short_name,route_long_name\n" + "".join(f"R{i},{i},Route {i}\n" for i in range(routes)),
+        )
+        zf.writestr("trips.txt", "trip_id,route_id,service_id\nT1,R0,WK\n")
+    return path
+
+
+def _rows(pg_conn, run_id: int) -> list[tuple[Any, ...]]:
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT run_id, kind, status, rows, error, parent_run_id FROM pipeline_runs "
+            "WHERE run_id = %s OR parent_run_id = %s ORDER BY run_id",
+            (run_id, run_id),
+        )
+        return cur.fetchall()
+
+
+def test_a_failed_timetable_step_stops_the_chain_with_its_error_recorded(runner_env, pg_conn):
+    from api.routers.internal import _run_agency_update
+
+    run_id = runner_env["open_run"]("update")
+
+    def _fetch(agency_id, static_url, dest_dir):
+        raise OSError("connection reset fetching https://example.test/gtfs/current_data.zip?key=SECRET")
+
+    with (
+        patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch),
+        patch("api.routers.internal._ingest_and_analyze_sweep") as sweep,
+    ):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=True,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert umbrella[1:3] == ("update", "error")
+    assert step[1:3] == ("static", "error")
+    assert step[5] == run_id
+    assert "connection reset" in step[4]
+    # A static URL routinely carries an API key; the row every admin reads
+    # must not.
+    assert "SECRET" not in step[4] and "SECRET" not in umbrella[4]
+
+
+def test_a_reload_that_fetched_nothing_for_an_agency_with_no_timetable_fails(runner_env, pg_conn):
+    """`refresh_static` returns None both for "no change" and for a fetch
+    the strategy gave up on; with no timetable loaded at all there is nothing
+    for "no change" to mean, and the chain must not go on to ingest against
+    an empty schedule."""
+    from api.routers.internal import _run_agency_update
+
+    run_id = runner_env["open_run"]("update")
+    with (
+        patch("pipeline.strategies.direct_url.fetch", return_value=None),
+        patch("api.routers.internal._ingest_and_analyze_sweep") as sweep,
+    ):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=True,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert (umbrella[2], step[2]) == ("error", "error")
+    assert "timetable" in step[4]
+
+
+def test_a_loaded_timetable_records_its_route_count_and_hands_over_to_the_sweep(runner_env, pg_conn):
+    from api.routers.internal import SweepOutcome, _run_agency_update
+
+    run_id = runner_env["open_run"]("update")
+    zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=3)
+    with (
+        patch("pipeline.strategies.direct_url.fetch", return_value=zip_path),
+        patch("api.routers.internal._ingest_and_analyze_sweep", return_value=SweepOutcome("ok")) as sweep,
+    ):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=True,
+        )
+
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert step[1:4] == ("static", "ok", 3)
+    assert umbrella[2] == "ok"
+    kwargs = sweep.call_args.kwargs
+    assert kwargs["agency_ids"] == [runner_env["agency_id"]]
+    assert kwargs["run_id"] == run_id
+    assert kwargs["run_weather"] is False
+    assert kwargs["stop_on_failure"] is True
+
+
+def test_no_newer_timetable_is_a_successful_step_reporting_the_current_one(runner_env, pg_conn):
+    from api.routers.internal import _run_agency_update
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop')",
+            (runner_env["agency_id"],),
+        )
+        cur.execute(
+            "INSERT INTO static_routes (agency_id, route_id) VALUES (%s, 'R1'), (%s, 'R2')",
+            (runner_env["agency_id"], runner_env["agency_id"]),
+        )
+    pg_conn.commit()
+    run_id = runner_env["open_run"]("static")
+    with (
+        patch("pipeline.strategies.direct_url.fetch", return_value=None),
+        patch("api.routers.internal._ingest_and_analyze_sweep") as sweep,
+    ):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=False,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert step[1:4] == ("static", "ok", 2)
+    assert umbrella[1:3] == ("static", "ok")
+
+
+def test_the_chained_sweep_stops_an_agency_at_its_first_failed_stage(runner_env, pg_conn):
+    """A reanalyze keeps going after a failed ingest -- re-aggregating what is
+    already stored is still worth doing there. The chained update says it
+    stops at the first failure, so it asks the sweep to."""
+    from api.routers.internal import _run_ingest_and_analyze
+
+    run_id = runner_env["open_run"]("update")
+    with (
+        patch("pipeline.ingest.ingest_live", side_effect=RuntimeError("feed down")),
+        patch("pipeline.promote.promote_closed_days") as promote,
+        patch("pipeline.analyze.analyze") as analyze,
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+    ):
+        _run_ingest_and_analyze(
+            agency_ids=[runner_env["agency_id"]],
+            requested_by=runner_env["user_id"],
+            run_weather=False,
+            run_id=run_id,
+            stop_on_failure=True,
+        )
+
+    promote.assert_not_called()
+    analyze.assert_not_called()
+    rows = _rows(pg_conn, run_id)
+    assert [(r[1], r[2]) for r in rows] == [("update", "error"), ("ingest", "error")]
+    assert rows[1][5] == run_id
+
+
+def test_the_sweep_files_its_stages_under_the_operators_run(runner_env, pg_conn):
+    from api.routers.internal import _run_ingest_and_analyze
+
+    run_id = runner_env["open_run"]("ingest")
+    with (
+        patch("pipeline.ingest.ingest_live", return_value=5),
+        patch("pipeline.promote.promote_closed_days", return_value=4),
+        patch("pipeline.analyze.analyze"),
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+    ):
+        _run_ingest_and_analyze(
+            agency_ids=[runner_env["agency_id"]],
+            requested_by=runner_env["user_id"],
+            run_weather=False,
+            run_id=run_id,
+        )
+
+    rows = _rows(pg_conn, run_id)
+    assert [(r[1], r[2], r[5]) for r in rows] == [
+        ("ingest", "ok", None),
+        ("ingest", "ok", run_id),
+        ("promote", "ok", run_id),
+        ("analyze", "ok", run_id),
+    ]
+
+
+def test_a_cron_sweep_files_its_stages_under_nothing(runner_env, pg_conn):
+    from api.routers.internal import _run_ingest_and_analyze
+
+    with (
+        patch("pipeline.ingest.ingest_live", return_value=0),
+        patch("pipeline.promote.promote_closed_days", return_value=0),
+        patch("pipeline.analyze.analyze"),
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("api.routers.internal._run_weather_ingest"),
+        patch("api.routers.internal._run_ml_forecast_ingest"),
+    ):
+        _run_ingest_and_analyze()
+
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM pipeline_runs WHERE parent_run_id IS NOT NULL")
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT count(*) FROM pipeline_runs WHERE agency_id = %s", (runner_env["agency_id"],))
+        assert cur.fetchone()[0] == 3
+
+
+def test_the_command_line_reload_records_a_static_run(runner_env, pg_conn, monkeypatch):
+    """The timetable column's "last loaded" date reads the latest successful
+    `static` run, so a reload from the terminal has to leave one too."""
+    import argparse
+
+    import gtfs_pipeline
+
+    zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=1)
+    monkeypatch.setattr(gtfs_pipeline, "_get_conn", lambda: psycopg2.connect(os.environ["DATABASE_URL"]))
+    with patch("pipeline.strategies.direct_url.fetch", return_value=zip_path):
+        gtfs_pipeline.cmd_refresh_static(
+            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]))
+        )
+
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT kind, status FROM pipeline_runs WHERE agency_id = %s", (runner_env["agency_id"],))
+        assert cur.fetchall() == [("static", "ok")]
