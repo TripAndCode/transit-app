@@ -1927,6 +1927,18 @@ cryptography = ">=45.0.1"
 drafts = ["pycryptodome"]
 
 [[package]]
+name = "jpholiday"
+version = "1.0.3"
+description = "Pure-Python Japan Public Holiday Generate"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "jpholiday-1.0.3-py3-none-any.whl", hash = "sha256:abe5f0191f27a88623a33aaaa7cd04035886b5d7adb41a42eaeba0e721dc1982"},
+    {file = "jpholiday-1.0.3.tar.gz", hash = "sha256:d5a56592fd6a7ceb76d49e1c5f1af806223e0d5d6b9e3bc5477860e6605f4cab"},
+]
+
+[[package]]
 name = "librt"
 version = "0.16.0"
 description = "Mypyc runtime library"
@@ -5429,4 +5441,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "de2eda683a12f0a92d5ee13d05f1c4b2f0f4f71e5963f081a429f3a6ccf96945"
+content-hash = "b6c5e35acb4711a04cddd0ac0f74da613b0af22422ed1abe1429fbcb40fe0e1d"

@@ -847,10 +847,23 @@ export type OverviewPeakHour = {
   peak_avg_min: number;
 };
 
+/** Which timetable a service date ran, read from the date: Sunday or a
+ *  public holiday is `sunday_holiday`, Saturday `saturday`, else `weekday`. */
+export type OverviewDayType = "weekday" | "saturday" | "sunday_holiday";
+
+export type OverviewServiceSplitEntry = {
+  day_type: OverviewDayType;
+  /** Sample-weighted mean delay (minutes); null when the type has no data in the range. */
+  avg_min: number | null;
+  /** Dates with data, over the same rows as the mean. */
+  days: number;
+  samples: number;
+};
+
 export type OverviewServiceSplitDay = {
   date: string;
-  weekday: number | null;
-  weekend: number | null;
+  day_type: OverviewDayType;
+  avg_min: number;
 };
 
 export type OverviewSummary = {
@@ -864,8 +877,9 @@ export type OverviewSummary = {
   peak_hour_weekday?: OverviewPeakHour | null;
   /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
   peak_hour_weekend?: OverviewPeakHour | null;
-  service_split: Record<string, number>;
-  /** Per-date weekday/weekend split, used by the service-split modal. */
+  /** Every day type, always all three, in display order. */
+  service_split: OverviewServiceSplitEntry[];
+  /** One row per date with data, tagged with its day type; used by the service-split modal. */
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
 };

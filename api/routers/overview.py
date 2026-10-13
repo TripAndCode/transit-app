@@ -15,6 +15,7 @@ from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.reports import compute_overview_summary
+from pipeline.service_day import DayType
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
@@ -140,12 +141,25 @@ class PeakHour(BaseModel):
     peak_avg_min: float
 
 
+class ServiceSplitEntry(BaseModel):
+    """Mean delay over the dates of one day type (平日 / 土曜 / 日祝).
+
+    ``avg_min`` is None when the type has no data in the range; ``days`` and
+    ``samples`` count the same rows the mean is taken over.
+    """
+
+    day_type: DayType
+    avg_min: float | None
+    days: int
+    samples: int
+
+
 class ServiceSplitDay(BaseModel):
-    """One day's weekday vs weekend avg_min split."""
+    """One date's mean delay and the day type that date ran as."""
 
     date: str  # ISO date
-    weekday: float | None
-    weekend: float | None
+    day_type: DayType
+    avg_min: float
 
 
 class OverviewSummary(BaseModel):
@@ -163,7 +177,8 @@ class OverviewSummary(BaseModel):
     peak_hour: PeakHour | None
     peak_hour_weekday: PeakHour | None = None
     peak_hour_weekend: PeakHour | None = None
-    service_split: dict[str, float]
+    # Always all three day types, in display order.
+    service_split: list[ServiceSplitEntry]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
     scope_applied: dict[str, bool]

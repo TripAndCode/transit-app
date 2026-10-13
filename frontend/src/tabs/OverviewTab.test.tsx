@@ -14,7 +14,11 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     concentration: { top_routes: [], rest_share_pct: 0 },
     top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2 },
     peak_hour: null,
-    service_split: {},
+    service_split: [
+      { day_type: "weekday", avg_min: null, days: 0, samples: 0 },
+      { day_type: "saturday", avg_min: null, days: 0, samples: 0 },
+      { day_type: "sunday_holiday", avg_min: null, days: 0, samples: 0 },
+    ],
     sparkline_points: [],
     ...partial,
   };
@@ -144,7 +148,11 @@ describe("OverviewTab", () => {
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
-        service_split: { "平日": 3.1, "土日祝": 2.0 },
+        service_split: [
+          { day_type: "weekday", avg_min: 3.1, days: 5, samples: 40 },
+          { day_type: "saturday", avg_min: null, days: 0, samples: 0 },
+          { day_type: "sunday_holiday", avg_min: 2.0, days: 2, samples: 10 },
+        ],
       }),
     );
     expect(screen.getByText("Delay concentration")).toBeInTheDocument();

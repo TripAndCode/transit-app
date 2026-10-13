@@ -17,12 +17,21 @@ cannot disagree at the edge of a day.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import date, datetime, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
+
+import jpholiday
 
 _JST = ZoneInfo("Asia/Tokyo")
 
 SERVICE_DAY_CUTOVER_HOURS = 4
+
+DayType = Literal["weekday", "saturday", "sunday_holiday"]
+
+# Display order: 平日, 土曜, 日祝.
+DAY_TYPES: tuple[DayType, ...] = ("weekday", "saturday", "sunday_holiday")
 
 
 def service_date_ch(column: str = "captured_at") -> str:
@@ -50,3 +59,30 @@ def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:
     """
     seconds = hour * 3600 + minute * 60 + second
     return seconds + 24 * 3600 if hour < SERVICE_DAY_CUTOVER_HOURS else seconds
+
+
+def public_holidays_between(from_date: date, to_date: date) -> list[date]:
+    """Japan's public holidays in ``[from_date, to_date]``, oldest first.
+
+    Includes substitute holidays (振替休日) and citizens' holidays (国民の休日).
+    """
+    return sorted(d for d, _name in jpholiday.between(from_date, to_date))
+
+
+def day_type(d: date, holidays: Collection[date] | None = None) -> DayType:
+    """Which timetable a service date runs: 平日, 土曜 or 日祝.
+
+    Read from the date alone rather than from the feed's ``service_id``, whose
+    naming differs per agency and is empty for observations that never matched
+    a scheduled trip. A public holiday counts as 日祝 whatever weekday it falls
+    on, a Saturday holiday included. ``holidays`` lets a caller that already
+    holds the window's holiday list (the one it sends to SQL) classify against
+    that same list; without it the calendar is consulted directly.
+    """
+    weekday = d.isoweekday()
+    is_holiday = d in holidays if holidays is not None else jpholiday.is_holiday(d)
+    if weekday == 7 or is_holiday:
+        return "sunday_holiday"
+    if weekday == 6:
+        return "saturday"
+    return "weekday"

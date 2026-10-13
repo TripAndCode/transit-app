@@ -44,9 +44,8 @@ def test_cap_admits_the_widest_payload_the_overview_tab_itself_posts():
     day = date(2026, 1, 1)
     view_payload = {
         "service_split_daily": [
-            {"date": (day + timedelta(days=i)).isoformat(), "service_type": st, "avg": 12.345678901}
+            {"date": (day + timedelta(days=i)).isoformat(), "day_type": "sunday_holiday", "avg_min": 12.345678901}
             for i in range(MAX_RANGE_DAYS)
-            for st in ("weekday", "weekend_holiday")
         ],
         "sparkline_points": [
             {"date": (day + timedelta(days=i)).isoformat(), "avg_min": 12.3456789, "samples": 123456}

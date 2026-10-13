@@ -221,40 +221,49 @@
 }
 
 /* ---------- Service split ---------- */
+/* One grid for every day type, so the label column takes the widest label
+   and every bar starts and ends at the same x: the bars share one scale. */
 .ov-svc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
 }
-.ov-svc-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ov-svc-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
+.ov-svc-row { display: contents; }
 .ov-svc-label {
-  font-size: 12px;
+  grid-column: 1;
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-secondary);
 }
 .ov-svc-num {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary);
+  text-align: right;
+  white-space: nowrap;
 }
+.ov-svc-meta {
+  grid-column: 2 / 4;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+}
+.ov-svc-row--empty .ov-svc-label,
+.ov-svc-row--empty .ov-svc-num { color: var(--text-tertiary); }
 .ov-svc-track {
-  height: 8px;
+  position: relative;
+  height: 10px;
   background: var(--track-bg);
   border-radius: var(--radius);
   overflow: hidden;
 }
 .ov-svc-fill {
-  height: 100%;
+  position: absolute;
+  top: 0;
+  bottom: 0;
   /* Plain fallback first: without color-mix() support, `background`
      would otherwise resolve to transparent, hiding the progress fill.
      The exact original literal, not a --trend-*-bg token — those are
@@ -263,16 +272,28 @@
   background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
   border-radius: var(--radius);
 }
+/* Tick labels under the bars' column, each centred on its value; the end
+   ticks align to the track's edges so neither spills past it. */
+.ov-svc-scale {
+  grid-column: 2;
+  position: relative;
+  height: 1.4em;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.ov-svc-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.ov-svc-tick--first { transform: none; }
+.ov-svc-tick--last { transform: translateX(-100%); }
 .ov-svc-story {
   font-size: 14px;
   color: var(--text-primary);
   font-weight: 500;
-  margin: 18px 0 0;
-}
-.ov-svc-diff {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin: 4px 0 0;
+  margin: 0 0 16px;
 }
 
 /* ---------- Tooltip (HTML, absolutely positioned) ---------- */
@@ -419,11 +440,8 @@
 .ov-lorenz-label--x { transform: translate(-50%, -50%); }
 .ov-svc-daily-legend-swatch {
   display: inline-block;
-  width: 14px;
-  height: 2px;
   vertical-align: middle;
   margin-right: 6px;
-  border-radius: 2px;
 }
 
 /* Lorenz curve overlay (concentration modal) */

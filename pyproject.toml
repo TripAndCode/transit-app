@@ -27,6 +27,8 @@ cryptography = ">=48,<51"
 clickhouse-connect = {version = "^1.6.0", extras = ["async"]}
 boto3 = "^1.35"
 pyarrow = "^22"
+# Japanese public holidays, for classifying a service date as 平日 / 土曜 / 日祝.
+jpholiday = "^1.0.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"

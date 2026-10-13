@@ -16,6 +16,18 @@ from api.range import RangeCtx
 from tests.conftest import _test_pool
 
 
+def _split(weekday=(None, 0, 0), saturday=(None, 0, 0), sunday_holiday=(None, 0, 0)) -> list[dict]:
+    """The ``service_split`` payload: every day type, in display order, as ``(avg_min, days, samples)``."""
+    return [
+        {"day_type": name, "avg_min": avg, "days": days, "samples": samples}
+        for name, (avg, days, samples) in (
+            ("weekday", weekday),
+            ("saturday", saturday),
+            ("sunday_holiday", sunday_holiday),
+        )
+    ]
+
+
 async def _seed_agg_daily(
     aconn,
     agency_id: int,
@@ -229,7 +241,8 @@ async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aage
     assert body["movers"]["better"] == []
     assert body["concentration"]["top_routes"] == []
     assert body["peak_hour"] is None
-    assert body["service_split"] == {}
+    assert body["service_split"] == _split()
+    assert body["service_split_daily"] == []
     assert body["sparkline_points"] == []
 
 
@@ -1032,9 +1045,10 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
-    """7 daily inserts alternating service_type; service_split has both,
-    sparkline returns 7 points oldest-first."""
+async def test_service_split_ignores_the_service_id_and_sparkline_7_points(aconn, aagency_id):
+    """7 daily inserts whose service_type alternates regardless of the day:
+    service_split files each one by its own date, and the sparkline returns 7
+    points oldest-first."""
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     for i in range(7):
         svc = "平日" if i % 2 == 0 else "土日祝"
@@ -1057,9 +1071,8 @@ async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
-    ss = out["service_split"]
-    assert set(ss.keys()) == {"平日", "土日祝"}
-    assert ss["平日"] > 0
+    # 05-18..05-22 are Mon..Fri at 1..5 min, 05-23 is Saturday, 05-24 Sunday.
+    assert out["service_split"] == _split(weekday=(3.0, 5, 5), saturday=(6.0, 1, 1), sunday_holiday=(7.0, 1, 1))
     assert len(out["sparkline_points"]) == 7
 
 
@@ -1268,43 +1281,72 @@ async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_
 
 
 @pytest.mark.asyncio
-async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
-    """``service_split_daily`` returns one row per date with weekday +
-    weekend slots populated independently."""
-    inserts = [
-        (date(2026, 5, 18), "平日", 60),  # 1 min weekday
-        (date(2026, 5, 19), "平日", 180),  # 3 min weekday
-        (date(2026, 5, 19), "土日祝", 300),  # 5 min weekend (same date)
-        (date(2026, 5, 20), "土日祝", 240),  # 4 min weekend
+async def test_service_split_daily_returns_one_row_per_date_with_its_day_type(aconn, aagency_id):
+    """``service_split_daily`` pools every service_type of a date into one row
+    tagged with that date's day type, whatever the feed called the service."""
+    seeds = [
+        (date(2026, 5, 18), "", 1.0),  # Monday, unmatched trip
+        (date(2026, 5, 19), "平日", 3.0),  # Tuesday: two services pool to 4 min
+        (date(2026, 5, 19), "土日祝", 5.0),
+        (date(2026, 5, 23), "土日祝", 4.0),  # Saturday
+        (date(2026, 5, 24), "", 2.0),  # Sunday
     ]
-    for i, (d, svc, dep) in enumerate(inserts):
-        when = datetime.combine(d, time(12, 0), tzinfo=timezone.utc)
-        await aconn.execute(
-            "INSERT INTO updates "
-            "(agency_id, file_name, captured_at, trip_id, service_type, "
-            " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_ssd_' || $4, $5, '10:00', 'R_SSD', 1, $6)",
-            aagency_id,
-            f"ssd_{i}",
-            when,
-            str(i),
-            svc,
-            dep,
-        )
-        await _seed_agg_daily(aconn, aagency_id, d, "R_SSD", svc, dep / 60.0, 1)
+    for d, svc, avg in seeds:
+        await _seed_agg_daily(aconn, aagency_id, d, "R_SSD", svc, avg, 1)
 
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
-    daily = out["service_split_daily"]
-    by_date = {row["date"]: row for row in daily}
-    assert by_date["2026-05-18"]["weekday"] == pytest.approx(1.0, abs=0.05)
-    assert by_date["2026-05-18"]["weekend"] is None
-    assert by_date["2026-05-19"]["weekday"] == pytest.approx(3.0, abs=0.05)
-    assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
-    assert by_date["2026-05-20"]["weekday"] is None
-    assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)
+    assert out["service_split_daily"] == [
+        {"date": "2026-05-18", "day_type": "weekday", "avg_min": 1.0},
+        {"date": "2026-05-19", "day_type": "weekday", "avg_min": 4.0},
+        {"date": "2026-05-23", "day_type": "saturday", "avg_min": 4.0},
+        {"date": "2026-05-24", "day_type": "sunday_holiday", "avg_min": 2.0},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_service_split_files_a_weekday_holiday_under_sundays_and_holidays(aconn, aagency_id):
+    """Each observation is classified by its own date: a public holiday on a
+    Monday (2026-09-21) counts with Sunday, and rows with an empty or
+    route-group-specific service id count the same as any other.
+
+    Days and samples come from the same rows as the sample-weighted mean.
+    """
+    seeds = [
+        (date(2026, 9, 15), "R1", "", 2.0, 10),  # Tuesday
+        (date(2026, 9, 15), "R2", "11_平日(共通)", 4.0, 10),
+        (date(2026, 9, 16), "R1", "", 1.0, 20),  # Wednesday
+        (date(2026, 9, 19), "R2", "11_土曜(共通)", 5.0, 4),  # Saturday
+        (date(2026, 9, 20), "R1", "", 3.0, 6),  # Sunday
+        (date(2026, 9, 21), "R1", "11_平日(共通)", 2.0, 6),  # Monday, Respect for the Aged Day
+    ]
+    for d, route, svc, avg, n in seeds:
+        await _seed_agg_daily(aconn, aagency_id, d, route, svc, avg, n)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    # weekday: (1200 + 2400 + 1200) s / 40 = 2.0 min; holiday: (1080 + 720) s / 12 = 2.5 min.
+    assert out["service_split"] == _split(weekday=(2.0, 2, 40), saturday=(5.0, 1, 4), sunday_holiday=(2.5, 2, 12))
+    assert [row["day_type"] for row in out["service_split_daily"]] == [
+        "weekday",
+        "weekday",
+        "saturday",
+        "sunday_holiday",
+        "sunday_holiday",
+    ]
+
+    # The holiday list is a bound parameter numbered after the route and DOW
+    # filters', and a Monday-to-Friday DOW filter still keeps the Monday holiday.
+    # (Called directly: under a route filter the payload's peak-hour stage
+    # needs ClickHouse, which this aggregate-only test has no use for.)
+    from pipeline.reports.overview import _service_split
+
+    scoped = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21), dow="weekday", routes=("R1",))
+    assert await _service_split(aagency_id, scoped, aconn) == _split(weekday=(1.33, 2, 30), sunday_holiday=(2.0, 1, 6))
 
 
 @pytest.mark.asyncio
@@ -1327,9 +1369,9 @@ async def test_service_split_daily_rounds_same_precision_as_service_split(aconn,
     ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     by_date = {row["date"]: row for row in out["service_split_daily"]}
-    daily_avg = by_date[d.isoformat()]["weekday"]
+    daily_avg = by_date[d.isoformat()]["avg_min"]
     assert daily_avg == pytest.approx(0.56, abs=1e-9)
-    assert daily_avg == out["service_split"]["平日"]
+    assert daily_avg == out["service_split"][0]["avg_min"]
 
 
 @pytest.mark.asyncio
@@ -1653,10 +1695,41 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
     assert out["headline"]["samples"] == 3
     assert out["headline"]["avg_min"] == pytest.approx(4.0, abs=0.01)  # (2+4+6)/3
     assert out["sparkline_points"] == [4.0]
-    assert out["service_split"] == {"平日": 4.0}
+    assert out["service_split"] == _split(weekday=(4.0, 1, 3))
     assert out["top_delayed"]["routes"][0]["route_code"] == "R_G1"
     assert out["concentration"]["top_routes"][0]["route_code"] == "R_G1"
     assert out["peak_hour_weekday"]["peak_hour"] == 8
+
+
+@pytest.mark.asyncio
+async def test_slow_path_service_split_classifies_by_date(aconn, aagency_id, ch_client, ch_async_client):
+    """The grain-derived split files observations by their own date, exactly
+    as the aggregate path does: a Monday public holiday counts with Sunday,
+    and an empty service id is counted rather than dropped."""
+    noon = time(12, 0)  # 21:00 JST, the same service date
+    seeds = [
+        (date(2026, 9, 18), "", 300, 1),  # Friday
+        (date(2026, 9, 19), "11_土曜(共通)", 60, 1),  # Saturday
+        (date(2026, 9, 21), "", 120, 1),  # Monday, Respect for the Aged Day
+        (date(2026, 9, 21), "11_平日(共通)", 240, 2),
+    ]
+    for d, svc, dep, seq in seeds:
+        when = datetime.combine(d, noon, tzinfo=timezone.utc)
+        await _seed_update(aconn, aagency_id, when, "R_GD", dep, service=svc, seq=seq)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    assert out["service_split"] == _split(weekday=(5.0, 1, 1), saturday=(1.0, 1, 1), sunday_holiday=(3.0, 1, 2))
+    assert out["service_split_daily"] == [
+        {"date": "2026-09-18", "day_type": "weekday", "avg_min": 5.0},
+        {"date": "2026-09-19", "day_type": "saturday", "avg_min": 1.0},
+        {"date": "2026-09-21", "day_type": "sunday_holiday", "avg_min": 3.0},
+    ]
 
 
 @pytest.mark.asyncio
@@ -2141,7 +2214,8 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     assert out["concentration"]["top_routes"][0]["route_code"] == "R_DEG"
     assert out["top_delayed"]["routes"][0]["route_code"] == "R_DEG"
     assert out["peak_hour"]["peak_hour"] == 8
-    assert out["service_split"] == {"平日": pytest.approx(3.5, abs=0.01)}
+    # 06-15 is a Monday: each type sees five days at 2.0 min and five at 5.0.
+    assert out["service_split"] == _split(weekday=(3.5, 10, 200), saturday=(3.5, 2, 40), sunday_holiday=(3.5, 2, 40))
     assert len(out["sparkline_points"]) == 14
 
 
