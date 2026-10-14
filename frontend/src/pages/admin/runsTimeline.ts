@@ -9,9 +9,10 @@ export type RunBar = {
   /** Where the bar ends: the run's finish, or "now" while it is still open. */
   endHour: number;
   status: PipelineRun["status"];
-  /** A run that did no work — displaced by the ingest/analyze advisory lock
-   *  — is drawn hollow so it cannot be mistaken for a fast successful one,
-   *  which a solid bar of the same width would look exactly like. */
+  /** A run that did no work — displaced by the ingest/analyze advisory lock,
+   *  or a check that found nothing newer — is drawn hollow so it cannot be
+   *  mistaken for a fast successful one, which a solid bar of the same width
+   *  would look exactly like. */
   dashed: boolean;
   rows: number | null;
   lockProbeMs: number | null;
@@ -32,8 +33,9 @@ const HOURS_PER_DAY = 24;
 const MS_PER_HOUR = 3_600_000;
 
 /** Reading order down the chart: the order the pipeline actually runs in, so
- *  a morning sweep reads top to bottom as well as left to right. */
-const KIND_ORDER: readonly PipelineRun["kind"][] = ["ingest", "promote", "analyze", "weather", "static"];
+ *  a morning sweep reads top to bottom as well as left to right. A chained
+ *  update's umbrella leads, above the steps it spans. */
+const KIND_ORDER: readonly PipelineRun["kind"][] = ["update", "ingest", "promote", "analyze", "weather", "static"];
 
 function hoursFrom(dayStart: Date, iso: string | null, fallback: Date): number {
   const at = iso == null ? fallback : new Date(iso);
@@ -82,7 +84,7 @@ export function runsToBars(runs: readonly PipelineRun[], dayStart: Date, now: Da
       startHour: clampToDay(rawStart),
       endHour: clampToDay(rawEnd),
       status: run.status,
-      dashed: run.status === "skipped",
+      dashed: run.status === "skipped" || run.status === "unchanged",
       rows: run.rows,
       lockProbeMs: run.lock_probe_ms,
       error: run.error,

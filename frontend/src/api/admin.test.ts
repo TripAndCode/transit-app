@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fetchAllAdminAudit, useAckBoardAlert, usePatchUser, type AdminBoard } from "./admin";
+import {
+  fetchAllAdminAudit,
+  healthRefetchInterval,
+  useAckBoardAlert,
+  useAgencyDiagnostics,
+  usePatchUser,
+  useRefreshAgencyStatic,
+  useUpdateAgency,
+  type AdminBoard,
+  type AgencyHealthRow,
+} from "./admin";
 
 const mockApiPatch = vi.fn();
 const mockApiPost = vi.fn();
@@ -129,5 +139,80 @@ describe("fetchAllAdminAudit", () => {
     mockApiGet.mockResolvedValue({ items: [item(1)], next_cursor: null });
     const result = await fetchAllAdminAudit({}, 1);
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe("healthRefetchInterval", () => {
+  const row = (over: Partial<AgencyHealthRow>) => ({ in_flight: false, latest_run: null, ...over }) as AgencyHealthRow;
+  const run = (status: "running" | "ok" | "error" | "skipped") => ({
+    run_id: 1,
+    kind: "update",
+    status,
+    started_at: "2026-10-13T05:00:00Z",
+    finished_at: status === "running" ? null : "2026-10-13T05:04:00Z",
+    error: null,
+    steps: [],
+  });
+
+  it("polls every few seconds while an operator's run is in flight", () => {
+    expect(healthRefetchInterval([row({}), row({ in_flight: true, latest_run: run("running") })])).toBe(3_000);
+  });
+
+  it("polls slowly while only another job, such as a cron sweep, holds an agency", () => {
+    expect(healthRefetchInterval([row({ in_flight: true, latest_run: run("ok") })])).toBe(30_000);
+  });
+
+  it("stops once nothing is in flight, even for a run row its dead process left running", () => {
+    expect(healthRefetchInterval([row({ latest_run: run("ok") }), row({ latest_run: run("error") })])).toBe(false);
+    expect(healthRefetchInterval([row({ in_flight: false, latest_run: run("running") })])).toBe(false);
+    expect(healthRefetchInterval(undefined)).toBe(false);
+  });
+});
+
+describe.each([
+  ["useUpdateAgency", useUpdateAgency, "/api/admin/agencies/8/update"],
+  ["useRefreshAgencyStatic", useRefreshAgencyStatic, "/api/admin/agencies/8/refresh-static"],
+] as const)("%s", (_name, hook, path) => {
+  afterEach(() => mockApiPost.mockReset());
+
+  it("starts the run and refetches the health snapshot so its progress shows at once", async () => {
+    mockApiPost.mockResolvedValue({ status: "started", run_id: 77 });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => hook(), {
+      wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(8);
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(path, {});
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminAgenciesHealth"] });
+  });
+});
+
+describe("useAgencyDiagnostics", () => {
+  afterEach(() => mockApiGet.mockReset());
+
+  it("re-reads when the agency's run ends, keeping the bundle up meanwhile, but never another agency's", async () => {
+    mockApiGet.mockResolvedValueOnce({ agency_id: 1, version: "before" });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ id, finished }: { id: number; finished: string | null }) => useAgencyDiagnostics(id, finished),
+      {
+        initialProps: { id: 1, finished: null as string | null },
+        wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+      },
+    );
+    await waitFor(() => expect(result.current.data).toEqual({ agency_id: 1, version: "before" }));
+
+    mockApiGet.mockReturnValue(new Promise(() => {}));
+    rerender({ id: 1, finished: "2026-10-13T05:04:28Z" });
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(result.current.data).toEqual({ agency_id: 1, version: "before" });
+
+    rerender({ id: 2, finished: "2026-10-13T05:04:28Z" });
+    expect(result.current.data).toBeUndefined();
   });
 });

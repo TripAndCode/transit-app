@@ -8,10 +8,16 @@ import logging
 import pathlib
 from typing import Optional
 
+from pipeline import runs as pipeline_runs
 from pipeline.static_loader import load_static
 from pipeline.strategies import get_static_strategy
 
 logger = logging.getLogger(__name__)
+
+#: Where fetched zips and each strategy's change manifest live, relative to
+#: the working directory. The command line's default and the admin page's
+#: reload share it, so both compare against the same manifest.
+DEFAULT_STATIC_DEST = "raw_archives_static"
 
 
 def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]:
@@ -49,6 +55,49 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
     return zip_path
 
 
+class StaticRefreshFailed(RuntimeError):
+    """A timetable reload that left the agency with no timetable at all."""
+
+
+def refresh_static_recorded(
+    agency_id: int,
+    conn,
+    dest_dir: pathlib.Path,
+    *,
+    requested_by: int | None = None,
+    parent_run_id: int | None = None,
+    require_timetable: bool = False,
+) -> Optional[pathlib.Path]:
+    """:func:`refresh_static`, recorded as a ``static`` run.
+
+    The row closes ``ok`` with the loaded timetable's route count when a zip
+    loaded, ``unchanged`` when none did, and ``error`` when the reload
+    raised, so "last loaded" (a successful ``static`` run) means a load.
+
+    ``unchanged`` covers more than "nothing newer": the strategies log and
+    swallow a fetch that failed (an HTTP error, a network error, a URL the
+    SSRF guard rejected) and return None for it exactly as for an unchanged
+    zip, so the two cannot be told apart from here. ``require_timetable``
+    turns that case into a failure when the agency has no timetable loaded
+    at all, where "nothing newer" has nothing to mean.
+    """
+    from pipeline.db import _static_loaded
+
+    with pipeline_runs.record_run(
+        conn, "static", agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id
+    ) as run:
+        loaded = refresh_static(agency_id, conn, dest_dir)
+        if loaded is None:
+            if require_timetable and not _static_loaded(conn, agency_id):
+                raise StaticRefreshFailed("no timetable could be fetched from the agency's static URL")
+            run.status = "unchanged"
+        else:
+            with conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (agency_id,))
+                run.rows = cur.fetchone()[0]
+    return loaded
+
+
 def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
     """Refresh static for every agency that has both static_url and static_strategy.
 
@@ -73,7 +122,7 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
     failed = []
     for aid in ids:
         try:
-            if refresh_static(aid, conn, dest_dir):
+            if refresh_static_recorded(aid, conn, dest_dir):
                 n_loaded += 1
         except Exception:
             logger.exception(f"[static_fetcher] refresh failed for agency {aid}")

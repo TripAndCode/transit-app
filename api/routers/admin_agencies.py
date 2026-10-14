@@ -8,8 +8,9 @@ ops view runs is deliberately not repeated per agency, so opening a drawer
 cannot be slowed (or failed) by the raw-updates store.
 
 Write side: the standards/weights editors, an on-demand RT coverage probe,
-and a single-agency re-run of the cron ingest path. Every mutation records
-an audit entry through :func:`api.admin_audit.record_admin_action`.
+a single-agency re-run of the cron ingest path, a timetable reload, and the
+two chained into one update. Every mutation records an audit entry through
+:func:`api.admin_audit.record_admin_action`.
 """
 
 from __future__ import annotations
@@ -25,11 +26,22 @@ from pydantic import BaseModel, Field
 
 from api import agency_diagnostics as ad
 from api.admin_audit import record_admin_action
-from api.admin_runs import INSERT_MANUAL_RUN_SQL, shape_run
+from api.admin_runs import (
+    AGENCIES_IN_FLIGHT_SQL,
+    AGENCY_RUN_IN_FLIGHT_SQL,
+    AGENCY_RUN_REQUEST_LOCK_SQL,
+    INSERT_MANUAL_RUN_SQL,
+    LAST_STATIC_LOAD_SQL,
+    LATEST_OPERATOR_RUNS_SQL,
+    build_latest_runs,
+    in_flight_args,
+    shape_run,
+)
 from api.deps import get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.range import jst_today
 from api.security import User, csrf_guard, require_admin
+from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
 from pipeline.reports.network import invalidate_network_summary
 
 router = APIRouter(prefix="/api/admin/agencies", tags=["admin"])
@@ -116,6 +128,34 @@ class AgencyStaticVersion(BaseModel):
     loaded_at: str | None
 
 
+class AgencyRunStep(BaseModel):
+    #: ``static`` (timetable), ``ingest`` (realtime, promotion included) or
+    #: ``analyze``.
+    step: str
+    #: ``pending`` (the run has not reached it), ``running``, ``ok``,
+    #: ``unchanged`` (a timetable check that loaded nothing newer),
+    #: ``skipped``, ``error``, or ``not_run`` (the run ended before it).
+    status: str
+    started_at: str | None
+    finished_at: str | None
+    #: Routes in the loaded timetable for ``static``, realtime rows ingested
+    #: for ``ingest``; no count for ``analyze``.
+    rows: int | None
+    error: str | None
+
+
+class AgencyRun(BaseModel):
+    """An agency's newest operator-triggered run, step by step."""
+
+    run_id: int
+    kind: str
+    status: str
+    started_at: str | None
+    finished_at: str | None
+    error: str | None
+    steps: list[AgencyRunStep]
+
+
 class AgencyHealthRow(BaseModel):
     agency_id: int
     agency_name: str
@@ -129,6 +169,11 @@ class AgencyHealthRow(BaseModel):
     rt_coverage: AgencyRtSummary
     clamp_history: list[ClampDay]
     static_version: AgencyStaticVersion | None
+    #: JST day the current timetable was loaded, when known.
+    static_loaded_on: str | None
+    #: A job is working on this agency now; a new run would be refused.
+    in_flight: bool
+    latest_run: AgencyRun | None
 
 
 class AgencyDiagnostics(BaseModel):
@@ -197,6 +242,22 @@ def _bad_request(exc: ValueError) -> HTTPException:
 # ── read ─────────────────────────────────────────────────────────────────
 
 
+async def _run_state(
+    conn: asyncpg.Connection, now: datetime
+) -> tuple[list[asyncpg.Record], dict[int, dict[str, Any]], set[int]]:
+    """Timetable loads, each agency's latest operator run, and which agencies
+    have a job in flight -- or nothing, when ``pipeline_runs`` cannot be
+    read: an environment whose schema predates it still gets its list."""
+    try:
+        loads = await conn.fetch(LAST_STATIC_LOAD_SQL)
+        runs = build_latest_runs(dict(r) for r in await conn.fetch(LATEST_OPERATOR_RUNS_SQL))
+        busy = {r["agency_id"] for r in await conn.fetch(AGENCIES_IN_FLIGHT_SQL, *in_flight_args(now))}
+    except asyncpg.PostgresError:
+        _log.warning("agencies health: pipeline_runs could not be read", exc_info=True)
+        return [], {}, set()
+    return list(loads), runs, busy
+
+
 @router.get("/health", response_model=list[AgencyHealthRow])
 async def agencies_health(
     _admin: User = Depends(require_admin),
@@ -204,26 +265,44 @@ async def agencies_health(
 ) -> list[AgencyHealthRow]:
     """Per-agency health for the list view's columns.
 
-    Four fleet-wide queries pivoted in memory rather than one diagnostics
-    bundle per row: the table renders every agency at once, so the cost must
-    not grow with the roster. Soft-deleted agencies are included (the admin
-    list shows them) and carry their ``deleted_at``.
+    Fleet-wide queries pivoted in memory rather than one diagnostics bundle
+    per row: the table renders every agency at once, so the cost must not
+    grow with the roster. Soft-deleted agencies are included (the admin list
+    shows them) and carry their ``deleted_at``.
+
+    Each row also carries the agency's latest operator run, step by step.
+    It lives here rather than behind its own endpoint because the table needs
+    every row's run state on load anyway (a row with a run in flight shows
+    it in place of its buttons), and because the stage dates beside it --
+    the timetable's load day, the data's last day -- are what a finished run
+    changes: one poll of this snapshot shows the run ending and the dates it
+    moved together.
     """
     today = jst_today()
+    now = datetime.now(timezone.utc)
     window_start = today - timedelta(days=ad.CLAMP_HISTORY_DAYS - 1)
     headers = await conn.fetch(ad.AGENCIES_HEALTH_SQL)
     probes = await conn.fetch(ad.ALL_RT_COVERAGE_SQL)
     clamps = await conn.fetch(ad.ALL_CLAMP_HISTORY_SQL, window_start, today)
     versions = await conn.fetch(ad.CURRENT_STATIC_VERSION_SQL)
+    loads, runs, busy = await _run_state(conn, now)
     rows = ad.build_agency_health(
         headers=[dict(r) for r in headers],
         probes=[dict(r) for r in probes],
         clamps=[dict(r) for r in clamps],
         versions=[dict(r) for r in versions],
+        static_loads=[dict(r) for r in loads],
         today=today,
-        now=datetime.now(timezone.utc),
+        now=now,
     )
-    return [AgencyHealthRow(**r) for r in rows]
+    return [
+        AgencyHealthRow(
+            **r,
+            in_flight=r["agency_id"] in busy,
+            latest_run=AgencyRun(**run) if (run := runs.get(r["agency_id"])) else None,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/{agency_id}/diagnostics", response_model=AgencyDiagnostics)
@@ -520,6 +599,65 @@ async def probe_agency_feed(
     }
 
 
+async def guard_agency_run(conn: asyncpg.Connection, agency_id: int) -> None:
+    """Refuse (409) a new run for an agency a job is already working on.
+
+    Call inside the transaction that then opens the run row: the check holds
+    the agency's request lock until that transaction ends, so two presses
+    arriving together cannot both see "nothing running" and both start.
+    """
+    await conn.execute(AGENCY_RUN_REQUEST_LOCK_SQL, AGENCY_RUN_REQUEST_LOCK_KEY, agency_id)
+    if await conn.fetchval(AGENCY_RUN_IN_FLIGHT_SQL, *in_flight_args(datetime.now(timezone.utc)), agency_id):
+        raise HTTPException(status_code=409, detail="A run for this agency is already in progress")
+
+
+async def _open_agency_run(
+    request: Request,
+    admin: User,
+    *,
+    agency_id: int,
+    kind: str,
+    action: str,
+    needs_static: bool,
+) -> dict[str, Any]:
+    """Open the umbrella row an operator's per-agency run is watched by, and
+    audit the press -- or refuse it before anything is queued.
+
+    Refused with 409 when the agency is disabled (the runners select on
+    ``deleted_at IS NULL``, so the work would find nothing and report
+    "started"), when a timetable step has no source to fetch from
+    (``refresh_static`` treats that as "nothing to do" and returns quietly),
+    and when a job is already working on the agency (:func:`guard_agency_run`).
+
+    Runs on a pool connection of its own, given back before the handler
+    queues the job: a ``Depends(get_conn)`` connection is released only once
+    the response's background tasks have finished, so it would stay checked
+    out for the whole fetch + ingest + analyze.
+    """
+    async with request.app.state.pool.acquire() as conn:
+        header = await _load_agency(conn, agency_id)
+        if header["deleted_at"] is not None:
+            raise HTTPException(status_code=409, detail="This agency is disabled")
+        if needs_static and not (header["static_url"] and header["static_strategy"]):
+            raise HTTPException(status_code=409, detail="This agency has no timetable (static GTFS) source configured")
+        async with conn.transaction():
+            await guard_agency_run(conn, agency_id)
+            row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, kind, agency_id, admin.user_id)
+            if row is None:
+                raise HTTPException(status_code=503, detail="pipeline runs are not recordable in this environment")
+            run = shape_run(row)
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action=action,
+                target_type="agency",
+                target_id=agency_id,
+                after={"run_id": run["run_id"]},
+                ip=request.client.host if request.client else None,
+            )
+    return run
+
+
 @router.post("/{agency_id}/reanalyze", status_code=202)
 @limiter.limit(ADMIN_ACTION_LIMIT)
 async def reanalyze_agency(
@@ -527,15 +665,14 @@ async def reanalyze_agency(
     request: Request,
     background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, str]:
     """Re-run ingest + analyze for this one agency, in the background.
 
     Runs the cron job's own function scoped to a single agency rather than a
     second implementation of the same work, so the advisory lock, the JST
     session pin, and the post-run freshness check all behave identically to a
-    scheduled run. Contention with a run already in flight is handled there
-    (the poke is skipped and logged), which is why this returns 202 without
+    scheduled run. A cron sweep that holds the lock when this starts turns it
+    away (the run closes ``skipped``), which is why this returns 202 without
     waiting.
 
     An umbrella run row is opened here first, the same way `POST
@@ -546,25 +683,13 @@ async def reanalyze_agency(
     from api.routers.internal import _run_ingest_and_analyze
 
     csrf_guard(request)
-    header = await _load_agency(conn, agency_id)
-    if header["deleted_at"] is not None:
-        # The runner selects on `deleted_at IS NULL`, so queueing this would
-        # report "started" for work that finds no agency and does nothing.
-        raise HTTPException(status_code=409, detail="This agency is disabled")
-
-    row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, "ingest", agency_id, admin.user_id)
-    if row is None:
-        raise HTTPException(status_code=503, detail="pipeline runs are not recordable in this environment")
-    run = shape_run(row)
-
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
+    run = await _open_agency_run(
+        request,
+        admin,
+        agency_id=agency_id,
+        kind="ingest",
         action="agency.reanalyze_requested",
-        target_type="agency",
-        target_id=agency_id,
-        after={"run_id": run["run_id"]},
-        ip=request.client.host if request.client else None,
+        needs_static=False,
     )
     background_tasks.add_task(
         _run_ingest_and_analyze,
@@ -573,3 +698,74 @@ async def reanalyze_agency(
         run_id=run["run_id"],
     )
     return {"status": "started"}
+
+
+@router.post("/{agency_id}/refresh-static", status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
+async def refresh_agency_static(
+    agency_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Reload this agency's timetable (static GTFS), in the background.
+
+    The same ``refresh_static`` that ``gtfs_pipeline.py refresh-static``
+    runs, so the button and the command cannot drift. The URL is the agency
+    row's own, never one the request names, for the same reason the probe
+    reads it from the row: the timetable loaded describes the feed that row
+    points at.
+    """
+    from api.routers.internal import _run_agency_update
+
+    csrf_guard(request)
+    run = await _open_agency_run(
+        request,
+        admin,
+        agency_id=agency_id,
+        kind="static",
+        action="agency.static_refresh_requested",
+        needs_static=True,
+    )
+    background_tasks.add_task(
+        _run_agency_update,
+        agency_id=agency_id,
+        requested_by=admin.user_id,
+        run_id=run["run_id"],
+        then_ingest_and_analyze=False,
+    )
+    return {"status": "started", "run_id": run["run_id"]}
+
+
+@router.post("/{agency_id}/update", status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
+async def update_agency(
+    agency_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Reload the timetable, then ingest and analyze, as one background job.
+
+    Each step is recorded under this run as it goes (``GET .../health``
+    reads it back step by step), and a failed step stops the chain.
+    """
+    from api.routers.internal import _run_agency_update
+
+    csrf_guard(request)
+    run = await _open_agency_run(
+        request,
+        admin,
+        agency_id=agency_id,
+        kind="update",
+        action="agency.update_requested",
+        needs_static=True,
+    )
+    background_tasks.add_task(
+        _run_agency_update,
+        agency_id=agency_id,
+        requested_by=admin.user_id,
+        run_id=run["run_id"],
+        then_ingest_and_analyze=True,
+    )
+    return {"status": "started", "run_id": run["run_id"]}

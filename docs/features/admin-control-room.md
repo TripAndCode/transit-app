@@ -43,13 +43,18 @@ day, a count that moves) gets a new key and reads as a new alert.
 
 ## Agencies health + diagnostics drawer
 
-Route: `/admin/agencies`, backed by `AdminAgenciesPage` and
-`AgencyDiagnosticsDrawer`.
+Route: `/admin/agencies`, backed by `AdminAgenciesPage`,
+`AgencyDiagnosticsDrawer` and `AgencyRuns` (the stage cells, the step chain
+and the run card).
 
 Endpoints:
 - `GET /api/admin/agencies` — every agency including soft-deleted, for the
   list.
-- `GET /api/admin/agencies/health` — fleet-wide health columns.
+- `GET /api/admin/agencies/health` — fleet-wide health columns, plus each
+  agency's timetable load day, whether a job is in flight for it, and its
+  latest operator run step by step (`latest_run`). The page polls it every
+  3s while an operator's run is in flight, every 30s while only another job
+  (usually the cron sweep) holds an agency, and not at all otherwise.
 - `GET /api/admin/agencies/{agency_id}/diagnostics` — the drawer's full
   bundle: freshness, RT field coverage, static version timeline, clamp
   history, weather station, and the two operator-edited policy tables.
@@ -59,8 +64,22 @@ Endpoints:
   probe.
 - `POST /api/admin/agencies/{agency_id}/reanalyze` — single-agency ingest +
   analyze re-run.
+- `POST /api/admin/agencies/{agency_id}/refresh-static` — reload the
+  agency's timetable (static GTFS) through `refresh_static`, the function
+  behind `gtfs_pipeline.py refresh-static`.
+- `POST /api/admin/agencies/{agency_id}/update` — timetable reload, then
+  ingest + analyze, as one background job that stops at its first failed
+  step. The add form's 保存してセットアップ saves and then starts it.
 
-Tables read: `agencies`, `agg_meta`, `agg_route_daily`,
+The three run actions open an umbrella `pipeline_runs` row (`ingest`,
+`static` or `update`) and file each step's row under it (`parent_run_id`).
+A timetable step closes `ok` when it loaded a zip and `unchanged` when it
+loaded none; only `ok` moves the load day. Each action answers 409 while any
+job is working on the agency, for a disabled agency, and (the two timetable
+actions) for an agency with no static URL or static strategy. The board's
+`POST /api/admin/runs` takes the same guard when scoped to one agency.
+
+Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
 `rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
 `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,

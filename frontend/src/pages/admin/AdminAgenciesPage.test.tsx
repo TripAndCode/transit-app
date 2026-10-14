@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminAgenciesPage } from "./AdminAgenciesPage";
+import type { AdminAgency, AgencyRun } from "../../api/admin";
 
 const createMutateAsync = vi.fn().mockResolvedValue({});
 const patchMutateAsync = vi.fn().mockResolvedValue({});
@@ -17,6 +18,8 @@ const delReset = vi.fn();
 const restoreReset = vi.fn();
 const probeMutate = vi.fn();
 const reanalyzeMutate = vi.fn();
+const updateMutate = vi.fn();
+const refreshMutate = vi.fn();
 
 const HEALTH = [
   {
@@ -32,6 +35,9 @@ const HEALTH = [
     rt_coverage: { complete: true, present_count: 4, field_count: 4, probed: true, last_probed_at: null },
     clamp_history: [{ date: "2026-09-19", clamp_pct: 0.4 }],
     static_version: { version: "v2026-09-01", loaded_at: null },
+    static_loaded_on: "2026-09-18",
+    in_flight: false,
+    latest_run: null as AgencyRun | null,
   },
   {
     agency_id: 2,
@@ -46,8 +52,28 @@ const HEALTH = [
     rt_coverage: { complete: false, present_count: 0, field_count: 4, probed: false, last_probed_at: null },
     clamp_history: [{ date: "2026-09-19", clamp_pct: null }],
     static_version: null,
+    static_loaded_on: null,
+    in_flight: false,
+    latest_run: null as AgencyRun | null,
   },
 ];
+
+const RUNNING_UPDATE: AgencyRun = {
+  run_id: 7,
+  kind: "update",
+  status: "running",
+  started_at: "2026-10-13T05:00:00Z",
+  finished_at: null,
+  error: null,
+  steps: [
+    { step: "static", status: "ok", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:00:48Z", rows: 27, error: null },
+    { step: "ingest", status: "running", started_at: "2026-10-13T05:00:48Z", finished_at: null, rows: null, error: null },
+    { step: "analyze", status: "pending", started_at: null, finished_at: null, rows: null, error: null },
+  ],
+};
+
+/** Replaces the health fixture's rows for one test; `null` keeps it. */
+let healthOverride: typeof HEALTH | null = null;
 
 const DIAGNOSTICS = {
   agency_id: 1,
@@ -71,7 +97,7 @@ const DIAGNOSTICS = {
 };
 
 /** Overrides fields of the agencies list query result; `null` keeps the fixture. */
-let agenciesOverride: { data?: undefined; isLoading?: boolean; error?: Error | null } | null = null;
+let agenciesOverride: { data?: AdminAgency[]; isLoading?: boolean; error?: Error | null } | null = null;
 
 let delState: { isPending: boolean; variables: number | undefined; error?: Error } = {
   isPending: false,
@@ -90,7 +116,8 @@ vi.mock("../../api/admin", () => ({
         agency_id: 1,
         agency_name: "Aomori Bus",
         feed_url: "http://feed.example.com",
-        static_url: null,
+        static_url: "http://feed.example.com/gtfs.zip",
+        static_strategy: "aomori_index_scrape",
         ingest_strategy: "aomori_regex",
         trip_id_pattern: null,
         deleted_at: null,
@@ -100,6 +127,7 @@ vi.mock("../../api/admin", () => ({
         agency_name: "Deleted Bus",
         feed_url: "http://del.example.com",
         static_url: null,
+        static_strategy: null,
         ingest_strategy: null,
         trip_id_pattern: null,
         deleted_at: "2026-06-01T00:00:00Z",
@@ -113,10 +141,12 @@ vi.mock("../../api/admin", () => ({
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
   useDeleteAgency: () => ({ mutate: delMutate, reset: delReset, error: null, ...delState }),
   useRestoreAgency: () => ({ mutate: restoreMutate, reset: restoreReset, error: null, ...restoreState }),
-  useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
+  useAgenciesHealth: () => ({ data: healthOverride ?? HEALTH, isLoading: false, error: null }),
   useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
   useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
   useReanalyzeAgency: () => ({ mutate: reanalyzeMutate, isPending: false, error: null, data: undefined }),
+  useUpdateAgency: () => ({ mutate: updateMutate, isPending: false, error: null, variables: undefined }),
+  useRefreshAgencyStatic: () => ({ mutate: refreshMutate, isPending: false, error: null, variables: undefined }),
   usePatchAgencyStandards: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
   usePatchAgencyWeights: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
 }));
@@ -136,6 +166,7 @@ describe("AdminAgenciesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     agenciesOverride = null;
+    healthOverride = null;
     createMutateAsync.mockResolvedValue({});
     patchMutateAsync.mockResolvedValue({});
     delState = { isPending: false, variables: undefined };
@@ -193,16 +224,69 @@ describe("AdminAgenciesPage", () => {
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText(/agency name/i), "New Co");
     await user.type(within(dialog).getByLabelText(/feed url/i), "http://new.example.com");
-    await user.click(within(dialog).getByRole("button", { name: /^add$/i }));
+    await user.click(within(dialog).getByRole("button", { name: /^save only$/i }));
     expect(createMutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         agency_name: "New Co",
         feed_url: "http://new.example.com",
         static_url: null,
+        static_strategy: null,
         ingest_strategy: null,
         trip_id_pattern: null,
       })
     );
+    expect(updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("offers set-up only once the new agency has a timetable source", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByRole("button", { name: /add agency/i }));
+    const dialog = within(screen.getByRole("dialog"));
+    const setup = dialog.getByRole("button", { name: "Save and set up" }) as HTMLButtonElement;
+    expect(setup.disabled).toBe(true);
+    await user.type(dialog.getByLabelText(/GTFS static URL/i), "http://new.example.com/gtfs.zip");
+    expect((dialog.getByLabelText(/timetable fetch method/i) as HTMLSelectElement).value).toBe("direct_url");
+    expect(setup.disabled).toBe(false);
+  });
+
+  it("saves the new agency, then starts its chained update", async () => {
+    const user = userEvent.setup();
+    createMutateAsync.mockResolvedValue({ agency_id: 31 });
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByRole("button", { name: /add agency/i }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText(/agency name/i), "New Co");
+    await user.type(dialog.getByLabelText(/feed url/i), "http://new.example.com");
+    await user.type(dialog.getByLabelText(/GTFS static URL/i), "http://new.example.com/gtfs.zip");
+    await user.click(dialog.getByRole("button", { name: "Save and set up" }));
+    expect(createMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ static_url: "http://new.example.com/gtfs.zip", static_strategy: "direct_url" })
+    );
+    expect(updateMutate).toHaveBeenCalledWith(31);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not save through set-up while a required field is empty", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByRole("button", { name: /add agency/i }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText(/GTFS static URL/i), "http://new.example.com/gtfs.zip");
+    await user.click(dialog.getByRole("button", { name: "Save and set up" }));
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a single update button in the edit form", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    const row = screen.getByText("Aomori Bus").closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.queryByRole("button", { name: "Save and set up" })).toBeNull();
+    expect(dialog.getByRole("button", { name: "Update" })).toBeTruthy();
+    expect((dialog.getByLabelText(/timetable fetch method/i) as HTMLSelectElement).value).toBe("aomori_index_scrape");
   });
 
   it("renders the health columns from the health query", () => {
@@ -211,7 +295,123 @@ describe("AdminAgenciesPage", () => {
     expect(screen.getByText("Behind")).toBeTruthy();
     expect(screen.getByText("4/4 fields")).toBeTruthy();
     expect(screen.getByText("Not probed")).toBeTruthy();
-    expect(screen.getByText("v2026-09-01")).toBeTruthy();
+  });
+
+  it("shows each agency's timetable and data stages with their own buttons", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.getByText(/^Loaded /)).toBeTruthy();
+    expect(row.getByText(/^Through /)).toBeTruthy();
+    await user.click(row.getByRole("button", { name: "Reload" }));
+    await user.click(row.getByRole("button", { name: "Re-aggregate" }));
+    await user.click(row.getByRole("button", { name: "Update all" }));
+    expect(refreshMutate).toHaveBeenCalledWith(1);
+    expect(reanalyzeMutate).toHaveBeenCalledWith(1);
+    expect(updateMutate).toHaveBeenCalledWith(1);
+    // The buttons sit inside the row, whose click opens the drawer.
+    expect(screen.queryByLabelText("Agency details")).toBeNull();
+  });
+
+  it("disables every run button of a disabled agency", () => {
+    wrap(<AdminAgenciesPage />);
+    const deleted = within(screen.getByText("Deleted Bus").closest("tr") as HTMLElement);
+    for (const name of ["Reload", "Re-aggregate", "Update all"]) {
+      expect((deleted.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  it("keeps re-aggregation but not the timetable runs for an agency with no timetable source", () => {
+    agenciesOverride = {
+      data: [
+        {
+          agency_id: 1,
+          agency_name: "Aomori Bus",
+          feed_url: "http://feed.example.com",
+          static_url: null,
+          static_strategy: null,
+          ingest_strategy: "aomori_regex",
+          trip_id_pattern: null,
+          deleted_at: null,
+        },
+      ],
+    };
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    const reload = row.getByRole("button", { name: "Reload" }) as HTMLButtonElement;
+    expect(reload.disabled).toBe(true);
+    expect(reload.title).toMatch(/timetable URL/);
+    expect((row.getByRole("button", { name: "Update all" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((row.getByRole("button", { name: "Re-aggregate" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("replaces a running agency's stage with its step chain and shows Running on its button", () => {
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: true, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.getByRole("list", { name: "Update in progress" })).toBeTruthy();
+    expect(row.queryByRole("button", { name: "Reload" })).toBeNull();
+    const running = row.getByRole("button", { name: "Running" }) as HTMLButtonElement;
+    expect(running.disabled).toBe(true);
+    expect((row.getByRole("button", { name: "Re-aggregate" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("frees a row whose run row was left running past the point the server still counts it", () => {
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: false, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.queryByRole("list", { name: "Update in progress" })).toBeNull();
+    expect((row.getByRole("button", { name: "Update all" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((row.getByRole("button", { name: "Reload" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows Running without a chain while another job, such as a cron sweep, holds the agency", () => {
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: true } : h));
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.queryByRole("list", { name: "Update in progress" })).toBeNull();
+    expect((row.getByRole("button", { name: "Running" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((row.getByRole("button", { name: "Reload" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens the agency's latest run at the top of its drawer", async () => {
+    const user = userEvent.setup();
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: true, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    expect(drawer.getByRole("region", { name: "Latest run" })).toBeTruthy();
+    expect(drawer.getByRole("img", { name: "Step 2 of 3 running" })).toBeTruthy();
+  });
+
+  it("offers a retry for a run whose process died, once the server no longer counts it", async () => {
+    const user = userEvent.setup();
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: false, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    expect(drawer.getByText("Stopped")).toBeTruthy();
+    await user.click(drawer.getByRole("button", { name: "Retry" }));
+    expect(updateMutate).toHaveBeenCalledWith(1);
+  });
+
+  it("retries a stopped update from its run card", async () => {
+    const user = userEvent.setup();
+    const stopped: AgencyRun = {
+      ...RUNNING_UPDATE,
+      status: "error",
+      finished_at: "2026-10-13T05:01:00Z",
+      steps: [
+        { ...RUNNING_UPDATE.steps[0], status: "error", error: "StaticRefreshFailed: no timetable" },
+        { ...RUNNING_UPDATE.steps[1], status: "not_run", started_at: null },
+        { ...RUNNING_UPDATE.steps[2], status: "not_run" },
+      ],
+    };
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, latest_run: stopped } : h));
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    await user.click(within(screen.getByLabelText("Agency details")).getByRole("button", { name: "Retry" }));
+    expect(updateMutate).toHaveBeenCalledWith(1);
   });
 
   it("opens the diagnostics drawer on a row click", async () => {

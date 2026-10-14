@@ -380,6 +380,91 @@ async def test_patch_unknown_ingest_strategy(agencies_client):
     assert resp.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_create_and_patch_carry_the_static_strategy(agencies_client):
+    """A timetable reload needs a strategy as well as a URL: an agency created
+    without one could never load its timetable from the admin page."""
+    client, sid = agencies_client
+    created = await client.post(
+        "/api/agencies",
+        json={
+            "agency_name": "Static Strategy",
+            "feed_url": "http://ss.example.com",
+            "static_url": "http://ss.example.com/gtfs.zip",
+            "static_strategy": "direct_url",
+        },
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert created.status_code == 201
+    assert created.json()["static_strategy"] == "direct_url"
+    aid = created.json()["agency_id"]
+
+    patched = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"static_strategy": "aomori_index_scrape"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["static_strategy"] == "aomori_index_scrape"
+
+    listed = await client.get("/api/admin/agencies", cookies={"sid": sid})
+    assert next(a for a in listed.json() if a["agency_id"] == aid)["static_strategy"] == "aomori_index_scrape"
+    public = await client.get(f"/api/agencies/{aid}")
+    assert "static_strategy" not in public.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["nonexistent", "static_join"])
+async def test_a_static_strategy_that_cannot_fetch_a_timetable_is_rejected(agencies_client, strategy):
+    """`static_join` is an ingest strategy: it has no `fetch`, so a reload
+    through it would fail on every run rather than at the form."""
+    client, sid = agencies_client
+    resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "Bad Static", "feed_url": "http://bs.example.com", "static_strategy": strategy},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_an_edit_resubmitting_a_stored_strategy_outside_the_allow_list_still_saves(agencies_client):
+    """The edit form sends every field back; a strategy stored before the
+    allow-list existed must not make the agency uneditable."""
+    from api.main import app
+
+    client, sid = agencies_client
+    created = await client.post(
+        "/api/agencies",
+        json={"agency_name": "Legacy Static", "feed_url": "http://ls.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = created.json()["agency_id"]
+    async with app.state.pool.acquire() as conn:
+        await conn.execute("UPDATE agencies SET static_strategy = 'legacy_scraper' WHERE agency_id = $1", aid)
+
+    resp = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"agency_name": "Legacy Static 2", "static_strategy": "legacy_scraper"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["agency_name"] == "Legacy Static 2"
+
+    changed = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"static_strategy": "another_unknown"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert changed.status_code == 422
+
+
 async def _audit_count(agency_id: int, kind: str) -> int:
     from api.main import app
 

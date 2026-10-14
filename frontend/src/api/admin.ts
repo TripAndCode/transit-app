@@ -107,6 +107,8 @@ export type AdminAgency = {
   agency_name: string;
   feed_url: string;
   static_url: string | null;
+  /** How the timetable is fetched from `static_url`; a reload needs both. */
+  static_strategy: string | null;
   ingest_strategy: string | null;
   trip_id_pattern: string | null;
   deleted_at: string | null;
@@ -116,6 +118,7 @@ type AgencyCreate = {
   agency_name: string;
   feed_url: string;
   static_url?: string | null;
+  static_strategy?: string | null;
   ingest_strategy?: string | null;
   trip_id_pattern?: string | null;
 };
@@ -292,7 +295,9 @@ export type BoardAlert = {
  *  displaced. */
 export type PipelineRun = {
   run_id: number;
-  kind: "ingest" | "promote" | "analyze" | "weather" | "static";
+  /** `update` is the agencies page's chained update: its steps are rows of
+   *  the other kinds. */
+  kind: "ingest" | "promote" | "analyze" | "weather" | "static" | "update";
   /** Null for a fleet-wide job, and for one displaced before it resolved
    *  which agency it was for. */
   agency_id: number | null;
@@ -300,7 +305,9 @@ export type PipelineRun = {
   started_at: string;
   /** Null while `status` is `running`. */
   finished_at: string | null;
-  status: "running" | "ok" | "skipped" | "error";
+  /** `unchanged`: the job ran and found nothing newer to do (a timetable
+   *  check that loaded no zip). */
+  status: "running" | "ok" | "skipped" | "error" | "unchanged";
   rows: number | null;
   /** What the non-blocking lock acquire cost, for a run displaced by it. A
    *  probe round trip, not time queued -- there is no queue. */
@@ -409,6 +416,33 @@ type AgencyDiagnostics = {
   weights_coverage: { routes_with_weights: number; routes_total: number };
 };
 
+/** One step of an operator's run, as the server reads it from the step rows
+ *  filed under the run. `pending`: the run has not reached it yet;
+ *  `not_run`: the run ended before it; `unchanged`: a timetable check that
+ *  loaded nothing newer. */
+export type AgencyRunStep = {
+  step: "static" | "ingest" | "analyze";
+  status: "pending" | "running" | "ok" | "unchanged" | "skipped" | "error" | "not_run";
+  started_at: string | null;
+  finished_at: string | null;
+  /** Routes in the loaded timetable for `static`; realtime rows for `ingest`. */
+  rows: number | null;
+  error: string | null;
+};
+
+/** An agency's newest operator-triggered run: a chained update (`update`), a
+ *  timetable reload (`static`), or a re-aggregation (`ingest`/`analyze`). */
+export type AgencyRun = {
+  run_id: number;
+  kind: string;
+  /** `unchanged`: a timetable reload on its own that loaded nothing newer. */
+  status: "running" | "ok" | "unchanged" | "skipped" | "error";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  steps: AgencyRunStep[];
+};
+
 export type AgencyHealthRow = {
   agency_id: number;
   agency_name: string;
@@ -428,26 +462,58 @@ export type AgencyHealthRow = {
   };
   clamp_history: AgencyClampDay[];
   static_version: { version: string; loaded_at: string | null } | null;
+  /** JST day (`YYYY-MM-DD`) the current timetable was loaded, when known. */
+  static_loaded_on: string | null;
+  /** A job is working on this agency; a new run would be refused. */
+  in_flight: boolean;
+  latest_run: AgencyRun | null;
 };
 
+/** How often the health snapshot is re-read while an operator's run is in
+ *  flight: often enough that a step finishing shows within a few seconds. */
+const RUN_POLL_MS = 3_000;
+
+/** How often it is re-read while only some other job (a cron sweep) is
+ *  working on an agency: just often enough to re-enable the buttons it holds. */
+const BUSY_POLL_MS = 30_000;
+
+/** The health query's poll interval, on only while some agency has a job in
+ *  flight, so an idle page makes no requests. `in_flight` is the server's own
+ *  rule (the one a press is refused by), so a run row left `running` by a
+ *  process that died stops counting when the server stops counting it. */
+export function healthRefetchInterval(rows: readonly AgencyHealthRow[] | undefined): number | false {
+  const inFlight = (rows ?? []).filter((row) => row.in_flight);
+  if (inFlight.length === 0) return false;
+  return inFlight.some((row) => row.latest_run?.status === "running") ? RUN_POLL_MS : BUSY_POLL_MS;
+}
+
 /** Health columns for every agency in one request — the list must not cost one
- *  diagnostics call per row. */
+ *  diagnostics call per row. Each row also carries the agency's latest run,
+ *  which is why the query polls while one is in flight. */
 export function useAgenciesHealth() {
   return useQuery({
     queryKey: ["adminAgenciesHealth"],
     queryFn: ({ signal }) => apiGet<AgencyHealthRow[]>("/api/admin/agencies/health", { signal }),
     staleTime: 30_000,
+    refetchInterval: (query) => healthRefetchInterval(query.state.data),
   });
 }
 
 /** The full diagnostics bundle for one agency, fetched only once its drawer
- *  is open. */
-export function useAgencyDiagnostics(agencyId: number | null) {
+ *  is open. `runFinishedAt` is the agency's latest run's end: a run that
+ *  finishes while the drawer is open changes what the bundle reports (the
+ *  timetable version, the data's last day), so it re-reads it. */
+export function useAgencyDiagnostics(agencyId: number | null, runFinishedAt: string | null = null) {
   return useQuery({
-    queryKey: ["adminAgencyDiagnostics", agencyId],
+    queryKey: ["adminAgencyDiagnostics", agencyId, runFinishedAt],
     queryFn: ({ signal }) =>
       apiGet<AgencyDiagnostics>(`/api/admin/agencies/${agencyId}/diagnostics`, { signal }),
     enabled: agencyId != null,
+    // The same agency's previous bundle stays up while the re-read is in
+    // flight, so a run ending does not blank the drawer; another agency's
+    // never stands in for this one's.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === agencyId ? previous : undefined,
     staleTime: 30_000,
   });
 }
@@ -493,10 +559,34 @@ export function useProbeAgencyFeed() {
   });
 }
 
-/** Mutation: re-run ingest + analyze for this agency alone, in the background. */
+/** Mutation: re-run ingest + analyze for this agency alone, in the background.
+ *  The health snapshot is re-read on success so the run shows at once. */
 export function useReanalyzeAgency() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiPost<{ status: string }>(`/api/admin/agencies/${id}/reanalyze`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] }),
+  });
+}
+
+type RunStarted = { status: string; run_id: number };
+
+/** Mutation: reload this agency's timetable (static GTFS), in the background. */
+export function useRefreshAgencyStatic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPost<RunStarted>(`/api/admin/agencies/${id}/refresh-static`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] }),
+  });
+}
+
+/** Mutation: reload the timetable, then ingest and analyze, as one
+ *  background job. */
+export function useUpdateAgency() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPost<RunStarted>(`/api/admin/agencies/${id}/update`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] }),
   });
 }
 

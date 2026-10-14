@@ -1508,7 +1508,6 @@ async def trigger_run(
     request: Request,
     background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> AdminRuns:
     """Start the cron ingest+analyze sweep on an operator's behalf.
 
@@ -1518,28 +1517,38 @@ async def trigger_run(
     appears on the timeline at once instead of at the next poll; the
     background sweep closes that row when it finishes, is displaced by the
     advisory lock, or fails.
+
+    A run scoped to one agency passes the agencies page's own one-run-per-
+    agency guard. The connection is the pool's, given back before the sweep
+    is queued: a `Depends(get_conn)` one is released only once the
+    response's background tasks have finished.
     """
+    from api.routers.admin_agencies import guard_agency_run
+
     csrf_guard(request)
     if body.kind not in TRIGGERABLE_KINDS:
         raise HTTPException(400, f"kind must be one of {', '.join(TRIGGERABLE_KINDS)}")
-    if body.agency_id is not None and await conn.fetchval(LIVE_AGENCY_SQL, body.agency_id) is None:
-        raise HTTPException(404, "agency not found")
 
-    async with conn.transaction():
-        row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
-        if row is None:
-            raise HTTPException(503, "pipeline runs are not recordable in this environment")
-        run = shape_run(row)
+    async with request.app.state.pool.acquire() as conn:
+        if body.agency_id is not None and await conn.fetchval(LIVE_AGENCY_SQL, body.agency_id) is None:
+            raise HTTPException(404, "agency not found")
+        async with conn.transaction():
+            if body.agency_id is not None:
+                await guard_agency_run(conn, body.agency_id)
+            row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
+            if row is None:
+                raise HTTPException(503, "pipeline runs are not recordable in this environment")
+            run = shape_run(row)
 
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="pipeline.run",
-            target_type="agency" if body.agency_id is not None else "system",
-            target_id=str(body.agency_id) if body.agency_id is not None else None,
-            after={"kind": body.kind, "run_id": run["run_id"]},
-            ip=request.client.host if request.client else None,
-        )
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="pipeline.run",
+                target_type="agency" if body.agency_id is not None else "system",
+                target_id=str(body.agency_id) if body.agency_id is not None else None,
+                after={"kind": body.kind, "run_id": run["run_id"]},
+                ip=request.client.host if request.client else None,
+            )
     _start_manual_run(
         background_tasks=background_tasks,
         kind=body.kind,

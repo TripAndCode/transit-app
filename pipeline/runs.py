@@ -44,10 +44,11 @@ logger = logging.getLogger(__name__)
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update")
 
-#: Mirrors the ``status`` CHECK constraint.
-RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
+#: Mirrors the ``status`` CHECK constraint. ``unchanged`` closes a job that
+#: ran and found nothing newer to do (a timetable check that loaded no zip).
+RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error", "unchanged")
 
 #: A stored error is a human-readable marker on a timeline bar, not a log
 #: replacement -- the traceback itself goes to the logger. Bounded so one
@@ -55,8 +56,8 @@ RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
 MAX_ERROR_CHARS = 2000
 
 _INSERT_RUN_SQL = """
-    INSERT INTO pipeline_runs (kind, agency_id, started_at, status, lock_wait_ms, requested_by)
-    VALUES (%s, %s, now(), %s, %s, %s)
+    INSERT INTO pipeline_runs (kind, agency_id, started_at, status, lock_wait_ms, requested_by, parent_run_id)
+    VALUES (%s, %s, now(), %s, %s, %s, %s)
     RETURNING run_id
 """
 
@@ -69,8 +70,10 @@ _FINISH_RUN_SQL = """
 #: The job kinds that run holding the ingest/analyze advisory lock
 #: (pipeline/locks.py). The lock is session-level, so it dies with the process
 #: that took it: while it is held, its holder is alive and may still be the
-#: one working on an old ``running`` row of one of these kinds.
-_LOCKED_RUN_KINDS = ("ingest", "promote", "analyze")
+#: one working on an old ``running`` row of one of these kinds. An ``update``
+#: umbrella spends most of its life inside the ingest + analyze sweep, so it
+#: is spared on the same terms as the steps it is waiting on.
+LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update")
 
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given
@@ -105,15 +108,18 @@ DEFAULT_REAP_AGE = timedelta(hours=2)
 
 @dataclass
 class RunHandle:
-    """The mutable half of :func:`record_run`: the job's reported row count.
+    """The mutable half of :func:`record_run`: what the job reports about itself.
 
     Set ``rows`` inside the block when the job returns one; left ``None`` the
     column stays NULL, which the board reads as "this job kind has no row
-    count", not as zero rows.
+    count", not as zero rows. ``status`` is what a block that exits normally
+    closes with: ``ok``, or ``unchanged`` for a job that found nothing newer
+    to do.
     """
 
     run_id: int | None
     rows: int | None = None
+    status: str = "ok"
 
 
 def _rollback(conn) -> None:
@@ -136,12 +142,16 @@ def start_run(
     requested_by: int | None = None,
     lock_wait_ms: int | None = None,
     status: str = "running",
+    parent_run_id: int | None = None,
 ) -> int | None:
     """Open a run row and return its id, or ``None`` if it could not be written.
 
     ``status`` is ``running`` for a job about to start; a job that never
     started -- one displaced by the advisory lock -- is recorded whole here
     instead, as ``skipped``, since it has no later moment to be finished at.
+
+    ``parent_run_id`` makes this row a step of an operator's umbrella run,
+    which is how the admin pages read that run step by step.
     """
     if kind not in RUN_KINDS:
         raise ValueError(f"unknown run kind {kind!r}")
@@ -149,7 +159,7 @@ def start_run(
         raise ValueError(f"unknown run status {status!r}")
     try:
         with conn.cursor() as cur:
-            cur.execute(_INSERT_RUN_SQL, (kind, agency_id, status, lock_wait_ms, requested_by))
+            cur.execute(_INSERT_RUN_SQL, (kind, agency_id, status, lock_wait_ms, requested_by, parent_run_id))
             row = cur.fetchone()
         conn.commit()
         return row[0] if row else None
@@ -187,14 +197,20 @@ def record_run(
     kind: str,
     agency_id: int | None = None,
     requested_by: int | None = None,
+    parent_run_id: int | None = None,
 ) -> Iterator[RunHandle]:
-    """Bracket one job with its run row: ``running`` -> ``ok`` or ``error``.
+    """Bracket one job with its run row: ``running``, then the status the
+    caller left on the handle (``ok`` by default, ``unchanged`` for a check
+    that found nothing newer) when the block exits normally, or ``error``
+    when it raises.
 
     The exception is always re-raised -- every caller's own failure handling
     (the per-agency loops' log-and-continue, the single-agency commands'
     propagate-and-exit) stays exactly as it was.
     """
-    handle = RunHandle(run_id=start_run(conn, kind, agency_id=agency_id, requested_by=requested_by))
+    handle = RunHandle(
+        run_id=start_run(conn, kind, agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id)
+    )
     try:
         yield handle
     except BaseException as exc:
@@ -203,7 +219,7 @@ def record_run(
         _rollback(conn)
         finish_run(conn, handle.run_id, "error", rows=handle.rows, error=_describe(exc))
         raise
-    finish_run(conn, handle.run_id, "ok", rows=handle.rows)
+    finish_run(conn, handle.run_id, handle.status, rows=handle.rows)
 
 
 def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: datetime | None = None) -> int:
@@ -226,7 +242,7 @@ def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: 
                 (
                     now,
                     now - older_than,
-                    list(_LOCKED_RUN_KINDS),
+                    list(LOCKED_RUN_KINDS),
                     INGEST_ANALYZE_LOCK_KEY >> 32,
                     INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
                 ),

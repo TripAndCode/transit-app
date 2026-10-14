@@ -411,15 +411,24 @@ export function AgencyDiagnosticsDrawer({
   onDisable,
   onRestore,
   disablePending = false,
+  busy = false,
+  runCard = null,
+  runFinishedAt = null,
 }: {
   agency: AdminAgency;
   onClose: () => void;
   onDisable: (id: number) => void;
   onRestore: (id: number) => void;
   disablePending?: boolean;
+  /** A run is working on this agency, so re-aggregating now would be refused. */
+  busy?: boolean;
+  /** The agency's latest run, shown above everything else. */
+  runCard?: ReactNode;
+  /** When that run ended: a run ending changes what the diagnostics report. */
+  runFinishedAt?: string | null;
 }) {
   const { t } = useTranslation();
-  const { data, isLoading, error } = useAgencyDiagnostics(agency.agency_id);
+  const { data, isLoading, error } = useAgencyDiagnostics(agency.agency_id, runFinishedAt);
   const probe = useProbeAgencyFeed();
   const reanalyze = useReanalyzeAgency();
   const [editing, setEditing] = useState<"standards" | "weights" | null>(null);
@@ -436,6 +445,8 @@ export function AgencyDiagnosticsDrawer({
           {t("common.close")}
         </AdminButton>
       </h4>
+
+      {runCard}
 
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
       {!!error && <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>{formatApiError(error)}</div>}
@@ -568,7 +579,7 @@ export function AgencyDiagnosticsDrawer({
         </AdminButton>
         <AdminButton
           variant="secondary"
-          disabled={reanalyze.isPending || agency.deleted_at != null}
+          disabled={reanalyze.isPending || busy || agency.deleted_at != null}
           title={agency.deleted_at == null ? undefined : t("admin.agency_diag.action_reanalyze_disabled_hint")}
           onClick={() => reanalyze.mutate(agency.agency_id)}
         >

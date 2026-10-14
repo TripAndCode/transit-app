@@ -12,15 +12,20 @@ scheduled sweep across two pages of the timeline.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any
 from zoneinfo import ZoneInfo
+
+from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
+from pipeline.runs import DEFAULT_REAP_AGE, LOCKED_RUN_KINDS
 
 _JST = ZoneInfo("Asia/Tokyo")
 
-#: Kinds the manual trigger can actually perform. ``weather`` and ``static``
-#: are recorded by the pipeline but have no admin-triggerable path, so
-#: accepting them would answer 202 for work that never happens.
+#: Kinds the board's manual trigger can actually perform. ``weather`` has no
+#: admin-triggerable path, and a timetable reload (``static``, ``update``) is
+#: per agency, from the agencies page, so accepting them here would answer
+#: 202 for work this trigger never does.
 TRIGGERABLE_KINDS: tuple[str, ...] = ("ingest", "analyze")
 
 RUNS_FOR_DAY_SQL = """
@@ -48,6 +53,100 @@ INSERT_MANUAL_RUN_SQL = """
 """
 
 LIVE_AGENCY_SQL = "SELECT agency_id FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL"
+
+#: The steps an operator's run is read as, in the order the job performs them,
+#: keyed by its umbrella row's kind. Promotion is not a step of its own: it is
+#: the second half of getting realtime data in, so ``promote`` rows count
+#: towards ``ingest`` (see ``_STEP_KINDS``).
+RUN_PLANS: dict[str, tuple[str, ...]] = {
+    "update": ("static", "ingest", "analyze"),
+    "static": ("static",),
+    "ingest": ("ingest", "analyze"),
+    "analyze": ("analyze",),
+}
+
+#: The row kinds each step is made of. A step is done only once every one of
+#: them has closed: between the ingest row closing and the promotion row
+#: opening, the step is still in progress.
+_STEP_KINDS: dict[str, tuple[str, ...]] = {
+    "static": ("static",),
+    "ingest": ("ingest", "promote"),
+    "analyze": ("analyze",),
+}
+
+#: Takes the per-agency request lock (``pipeline.locks``) for the rest of the
+#: caller's transaction.
+AGENCY_RUN_REQUEST_LOCK_SQL = "SELECT pg_advisory_xact_lock($1, $2)"
+
+#: Which ``running`` rows still count as work in progress: the ones the
+#: reaper would leave alone (``pipeline.runs.reap_abandoned_runs``). That is a
+#: row younger than :func:`in_flight_cutoff` (``$1``), or one of a locked kind
+#: (``$2``) while the ingest/analyze advisory lock is held -- its key's high
+#: and low halves are ``$3``/``$4``. Past that, a row is one whose process
+#: died, and it no longer blocks a new run.
+_STILL_RUNNING = """
+    status = 'running' AND finished_at IS NULL
+    AND (
+        started_at > $1
+        OR (
+            kind = ANY($2::text[])
+            AND EXISTS (
+                SELECT 1 FROM pg_locks
+                WHERE locktype = 'advisory' AND granted
+                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                  AND classid = $3 AND objid = $4 AND objsubid = 1
+            )
+        )
+    )
+"""
+
+#: Any job still working on this agency (``$5``) -- an operator's run, or a
+#: cron or command-line one -- counts: a second run started beside it would
+#: race it for the ingest/analyze lock, or reload the timetable under its
+#: analyze.
+AGENCY_RUN_IN_FLIGHT_SQL = f"""
+    SELECT 1 FROM pipeline_runs
+    WHERE agency_id = $5 AND {_STILL_RUNNING}
+    LIMIT 1
+"""
+
+AGENCIES_IN_FLIGHT_SQL = f"""
+    SELECT DISTINCT agency_id FROM pipeline_runs
+    WHERE agency_id IS NOT NULL AND {_STILL_RUNNING}
+"""
+
+#: Each agency's newest operator-triggered umbrella row, and every step row
+#: filed under it.
+LATEST_OPERATOR_RUNS_SQL = """
+    WITH latest AS (
+        SELECT DISTINCT ON (agency_id) run_id
+        FROM pipeline_runs
+        WHERE parent_run_id IS NULL AND requested_by IS NOT NULL AND agency_id IS NOT NULL
+        ORDER BY agency_id, started_at DESC, run_id DESC
+    )
+    SELECT r.run_id, r.parent_run_id, r.kind, r.agency_id, r.started_at, r.finished_at,
+           r.status, r.rows, r.error
+    FROM pipeline_runs r JOIN latest l ON r.run_id = l.run_id
+    UNION ALL
+    SELECT r.run_id, r.parent_run_id, r.kind, r.agency_id, r.started_at, r.finished_at,
+           r.status, r.rows, r.error
+    FROM pipeline_runs r JOIN latest l ON r.parent_run_id = l.run_id
+    ORDER BY started_at, run_id
+"""
+
+#: When each agency's timetable last loaded: its newest ``static`` run that
+#: loaded a zip (``ok``; a check that loaded none closes ``unchanged``), from
+#: the agencies page or the command line. An operator's reload is read from
+#: its step, not its umbrella: the umbrella of a reload-only run is a
+#: ``static`` row too, and closes ``ok`` whether or not its step loaded
+#: anything.
+LAST_STATIC_LOAD_SQL = """
+    SELECT DISTINCT ON (agency_id) agency_id, finished_at
+    FROM pipeline_runs
+    WHERE kind = 'static' AND status = 'ok' AND agency_id IS NOT NULL
+      AND (parent_run_id IS NOT NULL OR requested_by IS NULL)
+    ORDER BY agency_id, finished_at DESC
+"""
 
 
 def runs_day_bounds(day: date) -> tuple[datetime, datetime]:
@@ -97,4 +196,110 @@ def shape_run(row: Mapping[str, Any]) -> dict[str, Any]:
         "lock_probe_ms": row["lock_wait_ms"],
         "error": row["error"],
         "requested_by": row["requested_by"],
+    }
+
+
+def jst_date(value: Any) -> str | None:
+    """The JST civil day a timestamp falls on, as ``YYYY-MM-DD``."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_JST).date().isoformat()
+
+
+def in_flight_cutoff(now: datetime) -> datetime:
+    """Rows started before this count as in flight only while the
+    ingest/analyze lock is held (see ``_STILL_RUNNING``): the reaper's own age."""
+    return now - DEFAULT_REAP_AGE
+
+
+def in_flight_args(now: datetime) -> tuple[datetime, list[str], int, int]:
+    """The parameters ``_STILL_RUNNING`` takes, in order."""
+    return (
+        in_flight_cutoff(now),
+        list(LOCKED_RUN_KINDS),
+        INGEST_ANALYZE_LOCK_KEY >> 32,
+        INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
+    )
+
+
+def _step(step: str, umbrella: Mapping[str, Any], rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """One step's state, from the rows of its kinds filed under the run."""
+    if not rows:
+        return {
+            "step": step,
+            "status": "pending" if umbrella["status"] == "running" else "not_run",
+            "started_at": None,
+            "finished_at": None,
+            "rows": None,
+            "error": None,
+        }
+    statuses = [r["status"] for r in rows]
+    errors = [r["error"] for r in rows if r["status"] == "error"]
+    seen = {r["kind"] for r in rows}
+    incomplete = umbrella["status"] == "running" and not seen.issuperset(_STEP_KINDS[step])
+    if errors:
+        status = "error"
+    elif "running" in statuses or incomplete:
+        status = "running"
+    elif all(s == "skipped" for s in statuses):
+        status = "skipped"
+    elif all(s == "unchanged" for s in statuses):
+        status = "unchanged"
+    else:
+        status = "ok"
+    primary = next((r for r in rows if r["kind"] == _STEP_KINDS[step][0]), rows[0])
+    finished = [r["finished_at"] for r in rows if r["finished_at"] is not None]
+    return {
+        "step": step,
+        "status": status,
+        "started_at": _iso(min(r["started_at"] for r in rows)),
+        "finished_at": None if status == "running" or not finished else _iso(max(finished)),
+        "rows": primary["rows"],
+        "error": errors[0] if errors else None,
+    }
+
+
+def _shape_operator_run(umbrella: Mapping[str, Any], children: list[Mapping[str, Any]]) -> dict[str, Any]:
+    # A run with no step rows at all -- recorded before steps were linked to
+    # their run, or turned away before it wrote any -- is its own evidence:
+    # its row says what happened to the step of its own kind.
+    evidence = children or [umbrella]
+    steps = [
+        _step(step, umbrella, [r for r in evidence if r["kind"] in _STEP_KINDS[step]])
+        for step in RUN_PLANS.get(umbrella["kind"], ())
+    ]
+    return {
+        "run_id": umbrella["run_id"],
+        "kind": umbrella["kind"],
+        "status": umbrella["status"],
+        "started_at": _iso(umbrella["started_at"]),
+        "finished_at": _iso(umbrella["finished_at"]),
+        "error": umbrella["error"],
+        "steps": steps,
+    }
+
+
+def build_latest_runs(rows: Iterable[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Each agency's newest operator run, read step by step.
+
+    ``rows`` is :data:`LATEST_OPERATOR_RUNS_SQL`'s result: umbrella rows
+    (``parent_run_id`` NULL) and the step rows filed under them.
+    """
+    rows = list(rows)
+    children: dict[int, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if row["parent_run_id"] is not None:
+            children.setdefault(row["parent_run_id"], []).append(row)
+    newest: dict[int, Mapping[str, Any]] = {}
+    for row in rows:
+        if row["parent_run_id"] is not None:
+            continue
+        current = newest.get(row["agency_id"])
+        if current is None or (row["started_at"], row["run_id"]) > (current["started_at"], current["run_id"]):
+            newest[row["agency_id"]] = row
+    return {
+        agency_id: _shape_operator_run(umbrella, children.get(umbrella["run_id"], []))
+        for agency_id, umbrella in newest.items()
     }

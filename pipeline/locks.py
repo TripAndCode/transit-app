@@ -77,12 +77,20 @@ from contextlib import contextmanager
 
 from psycopg2.extensions import TRANSACTION_STATUS_INERROR
 
-# Arbitrary, fixed -- only needs to be distinct from any other advisory
-# lock this codebase takes, and there are none as of this writing. Reused as
-# the first argument of the two-argument per-agency key so both domains stay
-# traceable to one constant; the argument count, not the value, is what keeps
-# them in separate lock spaces.
+# Arbitrary, fixed -- only needs to be distinct from every other advisory
+# lock key this codebase takes. Reused as the first argument of the
+# two-argument per-agency key so both domains stay traceable to one constant;
+# the argument count, not the value, is what keeps them in separate lock
+# spaces.
 INGEST_ANALYZE_LOCK_KEY = 72710001
+
+# First argument of the two-argument key ``(this, agency_id)`` an admin
+# request holds, transaction-scoped, while it checks that the agency has no
+# run in flight and opens a new one -- so two presses arriving together cannot
+# both see "nothing running". It guards only that check-then-insert, never the
+# work, and so must not share a key with the per-agency lock above: analyze
+# holds that one for its whole run, and a press would wait for it.
+AGENCY_RUN_REQUEST_LOCK_KEY = 72710002
 
 
 def try_lock_ingest_analyze_timed(conn) -> tuple[bool, int]:
