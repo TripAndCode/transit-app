@@ -13,6 +13,10 @@ Two tables get geometry-aware handling: ``static_stops`` builds a
 ``ST_MakeLine``. Other tables use a plain ``execute_values`` bulk insert.
 Loading ``stops.txt`` also rebuilds ``stop_clusters`` (the heatmap's
 same-named-platform grouping) from the new rows in the same transaction.
+
+Every load then recomputes each route's terminal names and loop/both-ways
+flags from what is now in place, reading GTFS-JP ``routes_jp.txt`` when the
+zip has it (``pipeline.route_terminals``).
 """
 
 import csv
@@ -24,6 +28,7 @@ from collections import defaultdict
 
 from psycopg2.extras import execute_values
 
+from pipeline.route_terminals import load_route_terminals
 from pipeline.stop_clusters import rebuild_stop_clusters
 
 logger = logging.getLogger(__name__)
@@ -182,6 +187,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
                     logger.warning(f"  WARNING: {skipped} duplicate rows skipped in {table}")
 
             logger.info(f"  {table}: {len(raw_rows):,} rows")
+
+        changed = load_route_terminals(zf, names_in_zip, cur, agency_id)
+        logger.info(f"  route terminals: {changed:,} routes changed")
 
     # Commit once, after every table — a mid-load failure then rolls back the
     # whole static set rather than leaving a partial one (which `_static_loaded`,
