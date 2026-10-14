@@ -30,7 +30,6 @@ import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber, formatDateRange } from "../utils/format";
-import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
@@ -42,7 +41,6 @@ import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
-import { ServiceNote } from "../components/ServiceNote";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
@@ -478,7 +476,6 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>
             <th style={th()}>{t("common.route")}</th>
-            <th style={th()}>{t("reports.col.service")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p90")}</th>
@@ -491,10 +488,9 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
         </thead>
         <tbody>
           {cappedRoutes.visible.map((r, i) => (
-            <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+            <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
-              <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
@@ -507,7 +503,6 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           ))}
         </tbody>
       </table>
-      <ServiceNote />
       {cappedRoutes.remaining > 0 && (
         <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
           {t("common.show_more", { count: cappedRoutes.remaining })}

@@ -31,28 +31,24 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("ranking_header", "ja"): "【{label}遅延ランキング上位{limit}路線】",
     ("ranking_header", "en"): "[{label}Delay ranking — top {limit} routes]",
-    ("ranking_row", "ja"): "{rank}位: 路線{route}（{service}）平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
-    ("ranking_row", "en"): (
-        "#{rank} route {route} ({service}) mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)"
-    ),
+    ("ranking_row", "ja"): "{rank}位: 路線{route} 平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
+    ("ranking_row", "en"): "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)",
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
     ("on_time_header", "en"): "[{label}On-time rate ranking]",
-    ("on_time_row", "ja"): "{rank}位: 路線{route}（{service}）定時率{pct}%、平均{avg}分（{samples}件）",
-    ("on_time_row", "en"): "#{rank} route {route} ({service}) on-time {pct}%, mean {avg} min ({samples} samples)",
+    ("on_time_row", "ja"): "{rank}位: 路線{route} 定時率{pct}%、平均{avg}分（{samples}件）",
+    ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
     ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
-    ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超 {count}回、平均{avg}分（{samples}件）",
-    ("worst5_row", "en"): (
-        "#{rank} route {route} ({service}) over 5 min: {count} times, mean {avg} min ({samples} samples)"
-    ),
+    ("worst5_row", "ja"): "{rank}位: 路線{route} 5分超 {count}回、平均{avg}分（{samples}件）",
+    ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} samples)",
     ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_header_other", "ja"): "【{label}{dow}曜日遅延ランキング】",
     ("dow_header_other", "en"): "[{label}{dow} delay ranking]",
-    ("dow_row", "ja"): "{rank}位: 路線{route}（{service}）{dow_label}：平均{avg}分（{samples}件）",
-    ("dow_row", "en"): "#{rank} route {route} ({service}) {dow_label}: mean {avg} min ({samples} samples)",
+    ("dow_row", "ja"): "{rank}位: 路線{route} {dow_label}：平均{avg}分（{samples}件）",
+    ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} samples)",
     ("compare_header", "ja"): "【平日・土日 遅延差ランキング】",
     ("compare_header", "en"): "[Weekday vs weekend delay-delta ranking]",
     ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日{weekend}分（差：{delta}分、{direction}）",
@@ -74,10 +70,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_header", "ja"): "【滞留・走行時間の内訳】",
     ("dwell_run_header", "en"): "[Dwell/running time decomposition]",
     ("dwell_run_row", "ja"): (
-        "{rank}位: 路線{route}（{service}）滞留平均{dwell}分（{dwell_samples}件）、走行平均{run}分（{run_samples}件）"
+        "{rank}位: 路線{route} 滞留平均{dwell}分（{dwell_samples}件）、走行平均{run}分（{run_samples}件）"
     ),
     ("dwell_run_row", "en"): (
-        "#{rank} route {route} ({service}) dwell avg {dwell} min ({dwell_samples} samples), "
+        "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} samples), "
         "running avg {run} min ({run_samples} samples)"
     ),
     ("dwell_run_not_available", "ja"): (
@@ -170,7 +166,8 @@ def _fmt_ranking(rows: list, intent: dict, locale: str) -> str:
     """Render a ranking report (worst-delay routes) into locale text.
 
     Row shape from ``compute_ranking`` is
-    ``(route_code, service_type, avg_min, p50_min, p90_min, samples)``.
+    ``(route_code, service, avg_min, p50_min, p90_min, samples)``; ``service``
+    names the active filter, the same on every row, so rows leave it out.
     """
     label = _service_prefix(intent, locale)
     lines = [
@@ -179,7 +176,6 @@ def _fmt_ranking(rows: list, intent: dict, locale: str) -> str:
             locale,
             rank=i,
             route=r[0],
-            service=r[1],
             avg=_r(r[2]),
             p50=_r(r[3]),
             p90=_r(r[4]),
@@ -200,7 +196,6 @@ def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
             locale,
             rank=i,
             route=r[0],
-            service=r[1],
             pct=_r(r[2]),
             avg=_r(r[3]),
             samples=r[4],
@@ -219,7 +214,6 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
             locale,
             rank=i,
             route=r[0],
-            service=r[1],
             count=r[2],
             avg=_r(r[3]),
             samples=r[4],
@@ -232,7 +226,7 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
 def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
     """Render a DOW-filtered delay ranking.
 
-    Each row is ``(route_code, service_type, dow, avg_min, samples)``. ``dow``
+    Each row is ``(route_code, service, dow, avg_min, samples)``. ``dow``
     is an ISODOW int (1..7) or a rollup label string; ``dow_label`` handles
     both shapes and honours the requested locale.
     """
@@ -245,7 +239,6 @@ def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
             locale,
             rank=i,
             route=r[0],
-            service=r[1],
             dow_label=dow_label(r[2], lang=locale),
             avg=_r(r[3]),
             samples=r[4],
@@ -358,7 +351,6 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
             locale,
             rank=i,
             route=r["route_code"],
-            service=r.get("service_type") or "",
             dwell=_r(r["dwell_avg_sec"] / 60 if r.get("dwell_avg_sec") is not None else None),
             run=_r(r["run_avg_sec"] / 60 if r.get("run_avg_sec") is not None else None),
             dwell_samples=r.get("dwell_samples", 0),

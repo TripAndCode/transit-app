@@ -229,10 +229,10 @@ class ReportResponse(BaseModel):
     # instead of assuming it does.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
-    # How many groups (delay_certificate: trips) qualified before `limit` cut
+    # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (ranking, ranking_best, compare_ranking and delay_certificate;
     # None elsewhere), and, for ranking/ranking_best only, the observation
-    # count below which a group's average is too thin to trust.
+    # count below which a route's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
 
@@ -842,7 +842,7 @@ async def get_report(
     ),
     include_sparse: bool = Query(
         default=False,
-        description="ranking/ranking_best only: also rank groups observed fewer than "
+        description="ranking/ranking_best only: also rank routes observed fewer than "
         "reliable_min_samples times in the period.",
     ),
     agency_id: int = Depends(get_agency),

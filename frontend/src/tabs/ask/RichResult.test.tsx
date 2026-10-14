@@ -37,8 +37,8 @@ function Wrapper({ result, tool = "top_n", args = {}, conditions = null, onChip 
 const tableResult: ToolResult = {
   kind: "table",
   summary: "遅延ランキングの要約",
-  rows: [["39061", "平日", 5.2, 3.1, 8.4, 120]],
-  columns: ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"],
+  rows: [["39061", 5.2, 3.1, 8.4, 120]],
+  columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
 };
 
 const seriesResult: ToolResult = {
@@ -59,8 +59,8 @@ describe("RichResult on_time low_confidence column", () => {
         result={{
           kind: "table",
           summary: "On-time rate",
-          rows: [["39061", "平日", 80.0, 0.5, 25, true]],
-          columns: ["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"],
+          rows: [["39061", 80.0, 0.5, 25, true]],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
         }}
       />,
     );
@@ -73,8 +73,8 @@ describe("RichResult on_time low_confidence column", () => {
         result={{
           kind: "table",
           summary: "On-time rate",
-          rows: [["39061", "平日", 90.0, 0.5, 300, false]],
-          columns: ["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"],
+          rows: [["39061", 90.0, 0.5, 300, false]],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
         }}
       />,
     );
@@ -89,8 +89,8 @@ describe("RichResult on_time low_confidence column", () => {
         result={{
           kind: "table",
           summary: "Delay ranking",
-          rows: [["39061", "平日", 5.2, 3.1, 8.4, 120]],
-          columns: ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"],
+          rows: [["39061", 5.2, 3.1, 8.4, 120]],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
         }}
       />,
     );
@@ -112,7 +112,7 @@ describe("RichResult evidence card", () => {
   });
 
   it("pluralises the result row count", () => {
-    const rows = [...tableResult.rows!, ["39062", "平日", 4.0, 2.5, 7.1, 90]];
+    const rows = [...tableResult.rows!, ["39062", 4.0, 2.5, 7.1, 90]];
     renderWithProviders(<Wrapper result={{ ...tableResult, rows }} tool="top_n" />);
     expect(screen.getByText("2 rows")).toBeInTheDocument();
   });

@@ -181,16 +181,15 @@ If you are not sure where to start, open **Delay ranking** to see which routes a
 
 ### 5-4. Reading Delay ranking
 
-The columns:
+Each row is one route, over all of its observations in the period. The columns:
 
 - **Route**: click a name to open that route’s page (5-6).
-- **Service**: the timetable the trip ran on (weekday, weekend and holiday, or a special day).
 - **Avg (min)**: the average delay.
 - **Median (min)**: the middle value, a typical delay that a few extreme days cannot pull up.
 - **p90 (min)**: 90% of departures were no later than this; it shows how bad a bad day gets.
 - **Samples**: the number of observations behind the row. Fewer samples mean less certainty.
 
-**Delay ranking** and **Lowest average delay** leave out routes observed fewer than 100 times in the period, so a rarely run special-day variant cannot top them on a handful of trips. Tick “Include routes observed fewer than 100 times” to rank those routes too; their samples carry a “few data” badge. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest.
+**Delay ranking** and **Lowest average delay** leave out routes observed fewer than 100 times in the period, so a route seen on only a handful of trips cannot top them. Tick “Include routes observed fewer than 100 times” to rank those routes too; their samples carry a “few data” badge. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest.
 
 **Download CSV** at the top right of the report downloads the table.
 
