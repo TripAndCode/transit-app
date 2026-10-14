@@ -18,11 +18,10 @@ const SERVICE_OF_DAY_TYPE: Record<OverviewDayType, TimetableService> = {
 const DEFAULT_DAY_TYPES: readonly OverviewDayType[] = ["weekday", "saturday", "sunday_holiday"];
 
 /** The timetable choices for an agency whose calendar splits the period into
- *  `dayTypes`, and the choice `service` shows as among them. The URL value is
- *  never rewritten: on a feed split two ways, 土曜 and 日祝 each select its
- *  土日祝 (api/range.py's service_day_types) and show as that; 土日祝 on a feed
- *  split three ways selects both weekend buckets, so it keeps a choice of its
- *  own. */ // i18n-ignore: JSDoc examples
+ *  `dayTypes`, and the choice `service` shows as among them, without
+ *  rewriting the URL value. A value the feed lacks shows as what it selects
+ *  there (api/range.py's service_day_types owns that rule); one that selects
+ *  more than one of the feed's buckets keeps a choice of its own. */
 export function timetableChoices(
   service: ServiceFilter,
   dayTypes: readonly OverviewDayType[] = DEFAULT_DAY_TYPES,
