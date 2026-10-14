@@ -625,8 +625,9 @@ async def _open_agency_run(
 
     Refused with 409 when the agency is disabled (the runners select on
     ``deleted_at IS NULL``, so the work would find nothing and report
-    "started"), when a timetable step has no source to fetch from
-    (``refresh_static`` treats that as "nothing to do" and returns quietly),
+    "started"), when a timetable step has no source to fetch from (the run
+    could only end as "nothing to do", or as an error for an agency with no
+    timetable),
     and when a job is already working on the agency (:func:`guard_agency_run`).
 
     Runs on a pool connection of its own, given back before the handler

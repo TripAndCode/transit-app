@@ -83,9 +83,9 @@ def test_an_ingest_step_still_waiting_on_its_promotion_is_running_not_done():
 
 
 def test_a_failed_step_carries_its_error_and_the_steps_after_it_never_ran():
-    error = "StaticRefreshFailed: the source has nothing newer, but this agency has no timetable loaded"
+    error = "StaticFetchError: HTTP 404 Not Found from https://example.test/gtfs/current_data.zip"
     rows = [
-        _row(1, "update", "error", error="static: StaticRefreshFailed"),
+        _row(1, "update", "error", error=error),
         _row(2, "static", "error", parent=1, error=error),
     ]
     run = build_latest_runs(rows)[9]
