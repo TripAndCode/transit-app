@@ -72,7 +72,8 @@ ServiceType = Literal["all", "平日", "土曜", "日祝", "土日祝"]
 # A feed with one timetable for Saturday and Sunday alike is split 平日 /
 # 土日祝 (TWO_WAY) and files no date under 土曜 or 日祝, so on such a feed both
 # select its 土日祝 dates: a link shared across agencies never goes silently
-# empty. This is the one place that rule lives.
+# empty. This is the rule's home; frontend/src/api/serviceDays.ts mirrors it
+# only to show such a value as the bucket it selects.
 _SERVICE_DAY_TYPES: dict[str, frozenset[DayType]] = {
     "平日": frozenset({"weekday"}),
     "土曜": frozenset({"saturday"}),

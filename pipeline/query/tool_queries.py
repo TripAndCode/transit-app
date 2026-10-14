@@ -57,8 +57,8 @@ async def route_dow_breakdown(
     Not split by the observations' ``service_type``: that is a feed's raw
     ``service_id``, which can name a route group as well as a day type and
     is empty for observations that matched no trip, so it would fragment
-    one weekday into several rows. Every group has >= 1 row (no HAVING gate
-    here, matching the original query), so avg() is never NaN.
+    one weekday into several rows. Every ISODOW with an observation gets a
+    row, and only those, so avg() is never NaN.
     """
     if ch is None:
         return []

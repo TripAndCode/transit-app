@@ -967,11 +967,10 @@ async def _peak_hour_by_dow(
     # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse (not a
     # native TIME column) — see api.range.time_band_clause_ch's docstring —
     # so the hour is read off the first two characters rather than EXTRACT().
-    # OrNull, not a bare cast: ingest now zero-pads every scheduled_time's
-    # hour (pipeline/strategies/static_join.py), but this degrades any
-    # already-ingested pre-fix row out of the histogram instead of raising
-    # CANNOT_PARSE_TEXT — matching the same OrNull already used a few lines
-    # up in this file's time_band != 'all' branch and in rankings.py.
+    # OrNull, not a bare cast: a scheduled_time whose first two characters are
+    # not an hour drops out of the histogram instead of raising
+    # CANNOT_PARSE_TEXT and failing the payload, as in _fetch_grain and
+    # rankings.py.
     hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
     try:
         result = await ch.query(
