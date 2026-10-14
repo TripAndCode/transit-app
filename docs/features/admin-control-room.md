@@ -85,7 +85,7 @@ static URL or static strategy. The board's
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
 `rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
-`static_calendar_dates`, `agg_static_version_summary`,
+`static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
 and `ridership_weights`; every write additionally records an

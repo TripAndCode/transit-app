@@ -106,10 +106,10 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
     }
 
-    # planned_trips/executed_trips/service_delivered_pct come from a
-    # precomputed Postgres aggregate (agg_service_delivered_daily, built by
-    # pipeline.analyze.analyze()) summed over the range -- no ClickHouse scan
-    # on this request path; see compute_service_delivered_by_agency.
+    # planned_trips reads the loaded static schedule; executed_trips and
+    # service_delivered_pct also read the precomputed non-executed aggregate
+    # (agg_service_delivered_daily). No ClickHouse scan on this request path;
+    # see compute_service_delivered_by_agency.
     delivered = await compute_service_delivered_by_agency(conn, [a["agency_id"] for a in agencies], from_date, to_date)
 
     # static_version_id/planned_trip_count/planned_vehicle_km/
