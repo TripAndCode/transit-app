@@ -100,6 +100,8 @@ Each button with a ▼ is a condition. Click it to change it; the screen updates
 | Time of day | “All hours”, or a time band such as “Morning (05–09)” or “Evening (17–20)” |
 | On-time tolerance | How late a departure can leave and still count as on time (“Counted on time up to”): 1, 3 or 5 min, each shown with the on-time share it gives |
 
+The “Timetable type” choices follow the agency’s own timetable: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. Each day counts under the timetable the agency’s schedule ran that day, so a public holiday falls under the Sunday or weekend one.
+
 By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, and a stop, direction or early-departure allowance set by a link, join the sentence as extra conditions. On a screen that does not count on-time departures, the sentence ends before the on-time part.
 
 Once you change any condition from its default, **Reset** appears at the end of the sentence and returns every condition to its default.
