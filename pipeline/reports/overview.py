@@ -704,8 +704,9 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 
 
 #: A route averaging at least this late (minutes) over the current window
-#: counts as delayed in the headline's count. The count carries it, so the UI
-#: states the threshold it was counted against instead of keeping its own copy.
+#: counts as delayed in ``delayed_count``, which the Copilot overview insight
+#: reads. The count carries it, so a reader states the threshold it was
+#: counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
 
 #: A route averaging at least this late (minutes) sits in the routes-to-check
