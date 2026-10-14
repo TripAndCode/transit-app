@@ -534,10 +534,14 @@
   "presets": {
     "login_to_save_tooltip": "Sign in to save",
     "label": "Saved views",
-    "save_current": "Save this view…",
-    "empty": "No saved views yet",
-    "save_title": "Save this view",
-    "name_label": "Name",
+    "count_one": "{{count}} view",
+    "count_other": "{{count}} views",
+    "intro": "Save the conditions you look at often under a name, and next time you can come straight back to them from here.",
+    "current": "Current conditions",
+    "save_current": "Save current conditions",
+    "name_label": "View name",
+    "name_taken": "A view with this name already exists. Choose another name.",
+    "delete": "Delete {{name}}",
     "load_error": "Couldn't load your saved views."
   },
   "filters": {
@@ -1842,6 +1846,9 @@
     },
     "pin": "Show all filters",
     "reset": "Reset conditions",
+    "reset_short": "Reset",
+    "period_days_one": "{{count}} day",
+    "period_days_other": "{{count}} days",
     "popover": {
       "routes": "Routes",
       "period": "Period",
