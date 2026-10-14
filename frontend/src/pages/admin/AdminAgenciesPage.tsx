@@ -318,10 +318,11 @@ export function AdminAgenciesPage() {
   const runMutations = [update, refreshStatic, reanalyze];
   const startFailure = runMutations.find((m) => m.error != null);
 
-  /** A run is working on this agency, or one is being started for it. */
+  /** A job is working on this agency, or a run is being started for it.
+   *  `in_flight` is the server's own rule, so a run row a dead process left
+   *  `running` stops blocking the buttons when it stops blocking a press. */
   function isBusy(a: AdminAgency): boolean {
-    const h = healthById.get(a.agency_id);
-    if (h?.in_flight || h?.latest_run?.status === "running") return true;
+    if (healthById.get(a.agency_id)?.in_flight) return true;
     return runMutations.some((m) => m.isPending && m.variables === a.agency_id);
   }
 
@@ -372,7 +373,7 @@ export function AdminAgenciesPage() {
         const h = healthById.get(a.agency_id);
         // A run in flight takes this cell over with its step chain: the
         // buttons it replaces could not start anything until it ends.
-        if (h?.latest_run?.status === "running") return <RunChain run={h.latest_run} />;
+        if (h?.in_flight && h.latest_run?.status === "running") return <RunChain run={h.latest_run} />;
         return (
           <span onClick={(e) => e.stopPropagation()} role="presentation">
             <TimetableStage

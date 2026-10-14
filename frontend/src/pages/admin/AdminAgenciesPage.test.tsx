@@ -358,6 +358,24 @@ describe("AdminAgenciesPage", () => {
     expect((row.getByRole("button", { name: "Re-aggregate" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("frees a row whose run row was left running past the point the server still counts it", () => {
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: false, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.queryByRole("list", { name: "Update in progress" })).toBeNull();
+    expect((row.getByRole("button", { name: "Update all" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((row.getByRole("button", { name: "Reload" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows Running without a chain while another job, such as a cron sweep, holds the agency", () => {
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: true } : h));
+    wrap(<AdminAgenciesPage />);
+    const row = within(screen.getByText("Aomori Bus").closest("tr") as HTMLElement);
+    expect(row.queryByRole("list", { name: "Update in progress" })).toBeNull();
+    expect((row.getByRole("button", { name: "Running" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((row.getByRole("button", { name: "Reload" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("opens the agency's latest run at the top of its drawer", async () => {
     const user = userEvent.setup();
     healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: true, latest_run: RUNNING_UPDATE } : h));

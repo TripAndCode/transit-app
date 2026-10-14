@@ -467,15 +467,22 @@ export type AgencyHealthRow = {
   latest_run: AgencyRun | null;
 };
 
-/** How often the health snapshot is re-read while a run is in flight: often
- *  enough that a step finishing shows within a few seconds. */
+/** How often the health snapshot is re-read while an operator's run is in
+ *  flight: often enough that a step finishing shows within a few seconds. */
 const RUN_POLL_MS = 3_000;
 
-/** The health query's poll interval: on only while some agency has a run in
- *  flight, so an idle page makes no requests. */
+/** How often it is re-read while only some other job (a cron sweep) is
+ *  working on an agency: just often enough to re-enable the buttons it holds. */
+const BUSY_POLL_MS = 30_000;
+
+/** The health query's poll interval, on only while some agency has a job in
+ *  flight, so an idle page makes no requests. `in_flight` is the server's own
+ *  rule (the one a press is refused by), so a run row left `running` by a
+ *  process that died stops counting when the server stops counting it. */
 export function healthRefetchInterval(rows: readonly AgencyHealthRow[] | undefined): number | false {
-  const busy = (rows ?? []).some((row) => row.in_flight || row.latest_run?.status === "running");
-  return busy ? RUN_POLL_MS : false;
+  const inFlight = (rows ?? []).filter((row) => row.in_flight);
+  if (inFlight.length === 0) return false;
+  return inFlight.some((row) => row.latest_run?.status === "running") ? RUN_POLL_MS : BUSY_POLL_MS;
 }
 
 /** Health columns for every agency in one request — the list must not cost one

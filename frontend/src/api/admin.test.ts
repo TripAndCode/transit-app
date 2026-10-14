@@ -154,13 +154,17 @@ describe("healthRefetchInterval", () => {
     steps: [],
   });
 
-  it("polls only while some agency has a run in flight", () => {
-    expect(healthRefetchInterval([row({}), row({ in_flight: true })])).toBe(3_000);
-    expect(healthRefetchInterval([row({ latest_run: run("running") })])).toBe(3_000);
+  it("polls every few seconds while an operator's run is in flight", () => {
+    expect(healthRefetchInterval([row({}), row({ in_flight: true, latest_run: run("running") })])).toBe(3_000);
   });
 
-  it("stops polling once every run has finished, and before the first answer", () => {
+  it("polls slowly while only another job, such as a cron sweep, holds an agency", () => {
+    expect(healthRefetchInterval([row({ in_flight: true, latest_run: run("ok") })])).toBe(30_000);
+  });
+
+  it("stops once nothing is in flight, even for a run row its dead process left running", () => {
     expect(healthRefetchInterval([row({ latest_run: run("ok") }), row({ latest_run: run("error") })])).toBe(false);
+    expect(healthRefetchInterval([row({ in_flight: false, latest_run: run("running") })])).toBe(false);
     expect(healthRefetchInterval(undefined)).toBe(false);
   });
 });
