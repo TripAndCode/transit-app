@@ -60,13 +60,16 @@ What the user sees/does:
     under the observation's own `service_type`. A feed with one Saturday+Sunday
     timetable is split 平日 / 土日祝, every other 平日 / 土曜 / 日祝; a day type
     under 3 days or 1,000 samples is flagged `insufficient` and left out of the
-    comparison.
+    comparison. The day types are resolved once per payload, over the range
+    plus the four weeks before it that the movers and baseline read, and the
+    service filter uses the same resolution, so where a feed changes its
+    weekend timetables that whole span decides the split.
 
 ## Request path
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). **`peak_hour` is the one exception**: it always reads `agg_route_hour` (a fixed analyze-period rollup with no date column) regardless of `ctx`, so it can never reflect "no data in this range" — `OverviewTab.tsx` deliberately excludes it from the empty-state check for this reason. `peak_hour_by_dow` (used for the modal's weekday/weekend split) instead reads the per-day `agg_hour_daily`, filtering dates by day-of-week. |
+| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). **`peak_hour` is the one exception**: without a service filter it reads `agg_route_hour` (a fixed analyze-period rollup with no date column) regardless of the range, so it need not reflect "no data in this range" — `OverviewTab.tsx` deliberately excludes it from the empty-state check for this reason. A service filter is a set of dates, which that table cannot apply, so under one `peak_hour` reads what `peak_hour_by_dow` reads over the range instead. `peak_hour_by_dow` (used for the modal's weekday/weekend split) reads the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the live scan only under a `routes` or `time_band` filter. |
 | `usePeakHourBreakdown(agencyId, hour, dow)` (fires only once an hour is clicked on the ribbon) | `GET /api/{agency_id}/peak-hour-breakdown` (`api/routers/overview.py: peak_hour_breakdown`) | `agg_route_hour_dow`, pooled across DOWs when `dow` is omitted; routes with fewer than 3 samples are excluded. Returns up to 20 routes, worst avg delay first. |
 
 ## Key files

@@ -31,6 +31,8 @@ from typing import Literal
 
 import jpholiday
 
+from pipeline.cache import async_lru_cache
+
 DayType = Literal["weekday", "saturday", "sunday_holiday", "weekend_holiday"]
 
 # The buckets an agency is shown in, in display order.
@@ -99,6 +101,10 @@ class DayTypes:
 
     buckets: tuple[DayType, ...]
     by_date: Mapping[date, DayType]
+
+    def __hash__(self) -> int:
+        # By value, so a request context carrying day types can key a cache.
+        return hash((self.buckets, frozenset(self.by_date.items())))
 
     def of(self, d: date) -> DayType:
         return self.by_date[d]
@@ -207,8 +213,14 @@ def _gtfs_date(value: str) -> date | None:
         return None
 
 
+@async_lru_cache(maxsize=256, ttl_seconds=300)
 async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -> DayTypes:
-    """:func:`resolve_day_types` over the agency's loaded static calendar."""
+    """:func:`resolve_day_types` over the agency's loaded static calendar.
+
+    Cached for as long as the reports it feeds, so a repeated service-filtered
+    request does not read the calendar again. Callers share the result and must
+    not modify it.
+    """
     weekly_rows = await conn.fetch(
         "SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date, "
         "trips FROM static_calendar WHERE agency_id = $1",
@@ -238,3 +250,10 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
     # Only services with a weekly class vote, and those all have a calendar.txt row.
     trips = {r["service_id"]: r["trips"] for r in weekly_rows}
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)
+
+
+def invalidate_day_types() -> None:
+    """Forget every cached calendar read, after a load replaced an agency's
+    calendar, so the next report splits days by the new one instead of waiting
+    out the cache's TTL."""
+    load_day_types.cache_clear()  # type: ignore[attr-defined]

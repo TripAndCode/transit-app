@@ -1042,8 +1042,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # table never filtered them on their live paths. NULL is coalesced to ''
         # for the NOT NULL column; GROUP BY the same COALESCE (not the raw
         # column) so NULL and '' can't split into duplicate keys. Readers that
-        # surface service_type map '' back to None; the service-split panels
-        # naturally ignore '' (no 平日/土日祝 match).
+        # surface service_type map '' back to None.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
             SELECT

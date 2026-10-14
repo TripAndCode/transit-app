@@ -560,9 +560,9 @@ async def compute_dow_ranking(
     """Worst-delay routes restricted to weekday or weekend observations.
 
     Drops the user's ``service`` filter on purpose — pairing 'weekend' DOW
-    with service_type='平日' yields zero rows in the Aomori dataset because
-    weekday-schedule trips don't run on weekends. ``routes`` is preserved
-    so a user filtering to specific routes keeps that filter.
+    with the 平日 filter selects almost no dates, since the weekday
+    timetable rarely runs on a weekend. ``routes`` is preserved so a user
+    filtering to specific routes keeps that filter.
     """
     overridden = RangeCtx(
         from_date=ctx.from_date,
@@ -812,10 +812,10 @@ async def compute_hourly_heatmap(
     the general defect class).
     """
     # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
-    # a direct read. It has no service/route/hour-band dimension, so any of those
-    # filters fall back to the live dedup scan (ClickHouse). DOW (on the date
-    # column) is fine.
-    if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
+    # a direct read. It has no route/hour-band dimension, so either filter
+    # falls back to the live dedup scan (ClickHouse). DOW and the service
+    # filter (both on the date column) are fine.
+    if ctx.time_band == "all" and not ctx.routes:
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (
             "SELECT date, hour, avg_min, samples, sum_delay_sec\n"

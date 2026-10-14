@@ -20,9 +20,9 @@ Most helpers have two internal branches:
   hour-of-day filter is honoured.
 
 ``_peak_hour_by_dow`` reads the per-day ``agg_hour_daily`` (filtering dates by
-DOW) on the fast path; ``agg_route_hour`` can't serve it (no date column). It
-falls back to the live path under a ``service``/``routes`` filter, since that
-table aggregates across all routes/services.
+DOW, and by the service filter's dates) on the fast path; ``agg_route_hour``
+can't serve it (no date column). It falls back to the live path under a
+``routes`` filter, since that table aggregates across all routes.
 
 The shared slow-path grain
 --------------------------
@@ -48,14 +48,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Iterable, Iterator
 
-from api.range import RangeCtx, dow_isodays
+from api.range import (
+    RangeCtx,
+    day_types_for,
+    dow_clause,
+    dow_isodays,
+    resolve_service_dates,
+    service_date_clause,
+)
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.day_types import DayTypes, load_day_types
+from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 from pipeline.reports.rankings import _round1
 
@@ -72,6 +79,23 @@ _log = logging.getLogger(__name__)
 # worst case, not a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
+
+# How many weekly buckets ``_movers`` draws each route's sparkline from
+# (:func:`_route_weekly_history`), ending at the current window's last day.
+_MOVER_HISTORY_WEEKS = 4
+
+# How far before ``ctx.from_date`` the payload reads: the grain and base_ctx
+# reach _GRAIN_LOOKBACK_DAYS back, and the movers' sparkline
+# _MOVER_HISTORY_WEEKS weeks back from a current window that ends inside ctx.
+# The day types are resolved once over that whole span (api.range.ServiceDates),
+# so the service filter and the day-type split always agree.
+_CALENDAR_LOOKBACK_DAYS = max(_GRAIN_LOOKBACK_DAYS, 7 * _MOVER_HISTORY_WEEKS - 1)
+
+
+def _calendar_from(ctx: RangeCtx) -> date:
+    """The first day of the span the overview resolves its day types over."""
+    return ctx.from_date - timedelta(days=_CALENDAR_LOOKBACK_DAYS)
+
 
 # How many pooled connections one overview request may hold at once on its
 # pool-gather path. Ten stages fan out per request; unbounded, two
@@ -294,6 +318,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        service_dates=ctx.service_dates,
     )
     cte_sql, ch_params = _dedup_cte_ch(span_ctx)
     hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
@@ -506,6 +531,7 @@ async def _route_weekly_history(
                 time_band=ctx.time_band,
                 service=ctx.service,
                 routes=ctx.routes,
+                service_dates=ctx.service_dates,
             )
             where, params, n = _agg_filter(window_ctx, next_param=2)
             where_clause = f" AND ({where})" if where else ""
@@ -584,6 +610,7 @@ async def _route_weekly_history(
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        service_dates=ctx.service_dates,
     )
     cte_sql, ch_params = _dedup_cte_ch(span_ctx)
     result = await ch.query(
@@ -821,25 +848,21 @@ async def _top_delayed_routes(
 async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict | None:
     """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
 
-    ``ch`` and ``grain`` are accepted (and unused) only so callers can pass
-    them uniformly alongside the other stage helpers (e.g.
-    ``compute_overview_summary``'s pool-gather path's ``_own_conn``) — this
-    function has no live-fallback branch: ``agg_route_hour`` always applies
-    ``time_band`` itself, so there is nothing here for the ClickHouse dedup
-    path (or the shared grain) to serve.
-
     Reads from ``agg_route_hour``, which is a fixed analyze-period rollup
     (no date column). Consequence: the date range and DOW in ``ctx`` are
-    ignored — but ``service``, ``routes``, AND ``time_band`` all apply,
-    because ``agg_route_hour`` does carry a TIME column.
+    ignored — but ``routes`` and ``time_band`` apply, because
+    ``agg_route_hour`` does carry a TIME column.
+
+    A service filter is a set of dates (:func:`api.range.resolve_service_dates`),
+    which a table without a date column cannot apply. Under one this reads
+    the dated sources :func:`_peak_hour_by_dow` reads instead, over ``ctx``'s
+    own window and days of the week; ``ch`` and ``grain`` serve that branch.
     """
+    if ctx.service != "all":
+        return await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain)
     n = 2
     params: list = []
     parts: list[str] = []
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
     if ctx.routes:
         parts.append(f"route_code = ANY(${n}::text[])")
         params.append(list(ctx.routes))
@@ -867,30 +890,33 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
 async def _peak_hour_by_dow(
     agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
 ) -> dict | None:
-    """24-hour avg delay restricted to weekday (``'weekday'``) or weekend
-    (``'weekend'``) only.
+    """24-hour avg delay over the days of the week ``dow_group`` names —
+    ``'weekday'`` or ``'weekend'`` for the payload's pair, any canonical
+    ``dow`` for :func:`_peak_hour`'s service-filtered branch.
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
-    DOW), a sample-weighted average across the range — sub-second instead of
-    the raw dedup scan that used to dominate Overview's cold load. That table is
-    aggregated across all routes/services, so a ``service``/``routes`` filter,
-    or any ``time_band`` other than ``'all'``, has to leave it.
+    DOW and by the service filter's dates), a sample-weighted average across
+    the range — sub-second instead of the raw dedup scan that used to
+    dominate Overview's cold load. That table is aggregated across all routes,
+    so a ``routes`` filter, or any ``time_band`` other than ``'all'``, has to
+    leave it.
 
     ``time_band != 'all'`` (the case that also puts every other stage helper on
     its slow path) is served from the shared grain. The remaining case —
-    ``time_band == 'all'`` but a ``service``/``routes`` filter, where nothing
-    else in the payload needs live ``updates`` and so no grain was fetched —
-    still runs its own dedup scan. That scan is the only ClickHouse work in an
-    otherwise all-Postgres request, so it degrades to ``None`` on failure
-    instead of failing the whole payload (see the ``except`` below).
+    ``time_band == 'all'`` but a ``routes`` filter, where nothing else in the
+    payload needs live ``updates`` and so no grain was fetched — still runs its
+    own dedup scan. That scan is the only ClickHouse work in an otherwise
+    all-Postgres request, so it degrades to ``None`` on failure instead of
+    failing the whole payload (see the ``except`` below).
 
     Either way, ``dow_group`` REPLACES ``ctx.dow``: the question asked here is
     "weekday vs weekend", regardless of any day-of-week the user had already
     narrowed to. That is exactly why the grain carries no DOW filter of its own
     (see :func:`_fetch_grain`).
     """
-    if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
-        dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
+    if ctx.time_band == "all" and not ctx.routes:
+        dow_frag, _, n = dow_clause("date", replace(ctx, dow=dow_group), 4)
+        service_frag, service_params, _ = service_date_clause("date", ctx, n)
         sql = (
             "SELECT hour AS h,\n"
             # sum_delay_sec is nullable (unlike samples); FILTER both sides to
@@ -900,10 +926,10 @@ async def _peak_hour_by_dow(
             "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_hour_daily\n"
             "WHERE agency_id = $1 AND date >= ($2::text)::date AND date <= ($3::text)::date\n"
-            f"  AND EXTRACT(ISODOW FROM date) {dow_pred}\n"
+            f"  AND {dow_frag} AND {service_frag}\n"
             "GROUP BY hour"
         )
-        rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date))
+        rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date), *service_params)
         return _peak_from_hour_rows(rows)
 
     if grain is not None:
@@ -935,16 +961,16 @@ async def _peak_hour_by_dow(
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        service_dates=ctx.service_dates,
     )
     cte_sql, ch_params = _dedup_cte_ch(overridden)
     # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse (not a
     # native TIME column) — see api.range.time_band_clause_ch's docstring —
     # so the hour is read off the first two characters rather than EXTRACT().
-    # OrNull, not a bare cast: ingest now zero-pads every scheduled_time's
-    # hour (pipeline/strategies/static_join.py), but this degrades any
-    # already-ingested pre-fix row out of the histogram instead of raising
-    # CANNOT_PARSE_TEXT — matching the same OrNull already used a few lines
-    # up in this file's time_band != 'all' branch and in rankings.py.
+    # OrNull, not a bare cast: a scheduled_time whose first two characters are
+    # not an hour drops out of the histogram instead of raising
+    # CANNOT_PARSE_TEXT and failing the payload, as in _fetch_grain and
+    # rankings.py.
     hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
     try:
         result = await ch.query(
@@ -959,7 +985,7 @@ async def _peak_hour_by_dow(
         )
     except Exception:
         # This is the ONLY ClickHouse call the whole Overview payload makes in
-        # this request shape (``time_band == 'all'`` + a service/routes filter):
+        # this request shape (``time_band == 'all'`` + a routes filter):
         # headline, movers, concentration, top_delayed, service_split and the
         # sparkline are all served from Postgres ``agg_*`` tables here. So a
         # ClickHouse hiccup must degrade THIS field rather than 500 the whole
@@ -1118,7 +1144,9 @@ async def _movers(
     better = better_all[:10]  # most-negative first
     codes = [c for c, _, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
-    history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4, ch=ch, grain=grain)
+    history = await _route_weekly_history(
+        agency_id, codes, cur_ctx, conn, weeks_back=_MOVER_HISTORY_WEEKS, ch=ch, grain=grain
+    )
 
     def _entry(code, dm, dp, direction):
         """Serialize one mover row (deltas, absolute averages, streak, sparkline)."""
@@ -1152,8 +1180,12 @@ async def _service_day_split(
     agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
 ) -> tuple[list[dict], list[dict]]:
     """``(service_split, service_split_daily)`` over ``ctx``, from one day-type
-    resolution and one per-date read shared by both."""
-    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    resolution and one per-date read shared by both.
+
+    The day types are the payload's one resolution (:func:`_calendar_from`):
+    those the service filter carries when it is set, and a read over the same
+    span when it is not, so the split does not change with the filter."""
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=_calendar_from(ctx))
     totals = await _daily_totals(agency_id, ctx, conn, grain)
     return _service_split(day_types, totals), _service_split_daily(day_types, totals)
 
@@ -1287,6 +1319,14 @@ async def compute_overview_summary(
     path is unchanged: ``grain`` stays ``None`` and every helper reads its
     ``agg_*`` table exactly as before.
     """
+    if ctx.service != "all":
+        # Every window derived below starts at or after _calendar_from(ctx).
+        if pool is None:
+            ctx = await resolve_service_dates(ctx, conn, agency_id, from_date=_calendar_from(ctx))
+        else:
+            async with pool.acquire() as c:
+                ctx = await resolve_service_dates(ctx, c, agency_id, from_date=_calendar_from(ctx))
+
     grain: _Grain | None = None
     if ctx.time_band != "all":
         if ch is None:
@@ -1315,6 +1355,7 @@ async def compute_overview_summary(
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        service_dates=ctx.service_dates,
     )
     # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it — not
     # always a fixed 7 days. cur_ctx is 7 days wide whenever ctx reaches at
@@ -1336,6 +1377,7 @@ async def compute_overview_summary(
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        service_dates=ctx.service_dates,
     )
 
     if pool is None:
@@ -1357,7 +1399,7 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.top_delayed"):
             top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.peaks"):
-            peak = await _peak_hour(agency_id, ctx, conn)
+            peak = await _peak_hour(agency_id, ctx, conn, ch=ch, grain=grain)
             peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain)
             peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain)
         async with perf.timed_block("overview.service_split"):

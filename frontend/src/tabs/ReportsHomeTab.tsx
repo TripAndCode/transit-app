@@ -4,7 +4,7 @@ import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
-import { scopeToQueryString, useScope } from "../api/scope";
+import { isServiceFilter, scopeToQueryString, useScope } from "../api/scope";
 import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
@@ -108,7 +108,7 @@ export function ReportsHomeTab() {
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("service")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
           {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[1] ? <ServiceName value={String(row[1])} /> : "—"}</td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
-            <Link to={routeHref(String(id), String(row[0]), `?${(() => { const next = new URLSearchParams(queryString); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>{/* i18n-ignore: query contract */}
+            <Link to={routeHref(String(id), String(row[0]), `?${(() => { const next = new URLSearchParams(queryString); if (isServiceFilter(row[1]) && row[1] !== "all") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>
           </td></tr>)}
         </tbody></table></div>}
       </AsyncSection>

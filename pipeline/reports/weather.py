@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from api.range import RangeCtx, dow_clause
+from api.range import RangeCtx, dow_clause, service_date_clause
 from api.triage import LOW_CONFIDENCE_SAMPLES
 
 # A day counts as rainy at 1 mm or more of observed daily rainfall -- the
@@ -72,7 +72,7 @@ _STATION_SQL = """
 
 
 def _daily_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """WHERE fragment for `agg_route_daily.date` -- date range + DOW + service
+    """WHERE fragment for `agg_route_daily.date` -- date range + DOW + service dates
     + optional route filter.
 
     `d.date` is a native DATE column, so -- like
@@ -97,10 +97,10 @@ def _daily_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
         parts.append(frag)
         params.extend(p)
 
-    if ctx.service != "all":
-        parts.append(f"d.service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
+    frag, p, n = service_date_clause("d.date", ctx, n)
+    if frag != "TRUE":
+        parts.append(frag)
+        params.extend(p)
 
     if ctx.routes:
         parts.append(f"d.route_code = ANY(${n}::text[])")

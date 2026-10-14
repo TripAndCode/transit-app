@@ -1,7 +1,14 @@
 from datetime import date
 from typing import Any
 
-from api.range import TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, date_range_clause, time_band_case_sql
+from api.range import (
+    TIME_BAND_RANGES,
+    RangeCtx,
+    build_agg_stop_filter,
+    date_range_clause,
+    time_band_case_sql,
+)
+from tests.fixtures.service_dates import selecting
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -39,10 +46,15 @@ def test_build_agg_stop_filter_default_date_only():
     assert "service_type" not in frag and "time_band" not in frag
 
 
-def test_build_agg_stop_filter_adds_service_and_band():
-    frag, params, _n = build_agg_stop_filter(_ctx(service="平日", time_band="morning"), next_param=2)
-    assert "service_type = $" in frag and "time_band = $" in frag
-    assert "平日" in params and "morning" in params
+def test_build_agg_stop_filter_adds_service_dates_and_band():
+    dates = (date(2026, 5, 13), date(2026, 5, 14))
+    resolved = selecting("平日", date(2026, 5, 13), date(2026, 6, 11), *dates)
+    frag, params, _n = build_agg_stop_filter(
+        _ctx(service="平日", service_dates=resolved, time_band="morning"), next_param=2
+    )
+    assert "date = ANY($4::date[])" in frag and "time_band = $5" in frag
+    assert "service_type" not in frag
+    assert list(dates) in params and "morning" in params
 
 
 def test_build_agg_stop_filter_weekend_dow():

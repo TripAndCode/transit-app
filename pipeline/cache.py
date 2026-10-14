@@ -142,6 +142,8 @@ def _keyable(obj: Any) -> Any:
     """Asyncpg connection-like objects are POOLED and per-request — they hash
     by identity, which would make every request a cache miss. Replace them
     with a class-name token so the cache key reflects only the semantic args.
+    That includes :class:`pipeline.query.pooled_conn.PooledConnection`, the
+    per-request stand-in Ask passes for one.
 
     Any other unhashable argument (list, dict, ...) raises rather than being
     collapsed to a class-name-only token: two different requests passing
@@ -151,7 +153,7 @@ def _keyable(obj: Any) -> Any:
     frozenset(a_dict.items())) if a future cached function needs one.
     """
     cls = type(obj).__name__
-    if cls in {"Connection", "PoolConnectionProxy", "Pool"}:
+    if cls in {"Connection", "PoolConnectionProxy", "Pool", "PooledConnection"}:
         return f"<conn:{cls}>"
     try:
         hash(obj)

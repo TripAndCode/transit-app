@@ -1,8 +1,9 @@
 import time
 from typing import TYPE_CHECKING, cast
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
+from api.range import RangeCtx, get_range_ctx, resolve_service_dates
 from api.security import current_user, require_user
 from pipeline.cache import _REGISTERED_CLEARS
 from pipeline.query.pooled_conn import PooledConnection
@@ -113,6 +114,33 @@ async def get_agency(agency_id: int, request: Request):
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     _agency_cache[agency_id] = now + AGENCY_CACHE_TTL_SECONDS
     return agency_id
+
+
+async def get_agency_range_ctx(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_range_ctx),
+) -> RangeCtx:
+    """:func:`api.range.get_range_ctx` for an agency-scoped route, with its
+    service filter resolved to that agency's timetable days
+    (:func:`api.range.resolve_service_dates`).
+
+    Borrows a connection only when a service filter is set, and returns it
+    before the handler runs, for the reason :func:`get_agency` gives; routes
+    declare this ahead of any ``Depends(get_conn)``, so the two acquisitions
+    are sequential, not concurrent. The calendar read behind it is cached
+    (:func:`pipeline.day_types.load_day_types`), so a repeated request costs
+    no query here either.
+
+    A route whose compute resolves the filter itself, over the wider span its
+    response reads (``compute_overview_summary``, ``compute_scope_summary``),
+    takes plain ``get_range_ctx`` instead: a resolution of the bare window
+    would only be replaced.
+    """
+    if ctx.service == "all":
+        return ctx
+    async with request.app.state.pool.acquire() as conn:
+        return await resolve_service_dates(ctx, conn, agency_id)
 
 
 def get_locale(request: Request) -> str:

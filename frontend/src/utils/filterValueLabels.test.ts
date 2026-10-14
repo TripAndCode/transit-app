@@ -19,7 +19,10 @@ describe("filter value labels", () => {
 
   it("maps service wire values onto their display copy", () => {
     expect(serviceValueLabel("平日", t)).toBe("Weekday"); // i18n-ignore: query contract
+    expect(serviceValueLabel("土曜", t)).toBe("Saturday"); // i18n-ignore: query contract
+    expect(serviceValueLabel("日祝", t)).toBe("Sunday/Holiday"); // i18n-ignore: query contract
     expect(serviceValueLabel("土日祝", t)).toBe("Weekend/Holiday"); // i18n-ignore: query contract
+    expect(serviceValueLabel("日祝", i18n.getFixedT("ja"))).toBe("日祝"); // i18n-ignore: query contract
   });
 
   it("translates the calendar names agencies commonly give their services", () => {

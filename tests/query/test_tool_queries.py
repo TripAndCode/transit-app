@@ -42,8 +42,10 @@ async def _trust_schedule_padding(conn, *agency_ids):
 
 @pytest.mark.asyncio
 async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_client, ch_async_client):
-    """Three observations across two DOWs for one route. Helper should
-    collapse to one row per (service_type, DOW).
+    """Four observations across two DOWs for one route, under two raw
+    service_ids. Helper should collapse to one row per DOW: the raw
+    service_type is a feed's own service_id, so splitting by it fragments
+    the table.
 
     ``route_dow_breakdown`` always reads live ``updates`` from
     ClickHouse (there is no agg-table fast path for it), so this seeds
@@ -59,20 +61,23 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_cl
     monday = datetime.combine(monday_date, time(12, 0), tzinfo=timezone.utc)
     tuesday = monday + timedelta(days=1)
     rows = [
-        # (file_name, captured_at, dep_delay)
-        ("pb_mon_1", monday, 60),
-        ("pb_mon_2", monday + timedelta(hours=1), 120),
-        ("pb_tue_1", tuesday, 90),
+        # (file_name, captured_at, trip_id, service_type, dep_delay)
+        ("pb_mon_1", monday, "trip_x", "11_平日(共通)", 60),
+        ("pb_mon_2", monday + timedelta(hours=1), "trip_y", "", 120),
+        ("pb_tue_1", tuesday, "trip_x", "11_平日(共通)", 90),
+        ("pb_tue_2", tuesday + timedelta(hours=1), "trip_y", "", 150),
     ]
-    for fname, cap, dep in rows:
+    for fname, cap, trip, svc, dep in rows:
         await aconn.execute(
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R1', 1, $4)",
+            "VALUES ($1, $2, $3, $4, $5, '10:00', 'R1', 1, $6)",
             aagency_id,
             fname,
             cap,
+            trip,
+            svc,
             dep,
         )
     from tests.conftest import mirror_updates_to_ch
@@ -80,11 +85,8 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_cl
     mirror_updates_to_ch(ch_client, aagency_id)
     ctx = RangeCtx(from_date=monday_date - timedelta(days=1), to_date=today_utc + timedelta(days=1))
     result = await route_dow_breakdown(aagency_id, ctx, aconn, ch_async_client, route="R1")
-    # Expect 2 rows: one for Monday (DOW=1), one for Tuesday (DOW=2).
-    dows = {r[2] for r in result}
-    assert dows == {1, 2}, f"expected ISODOW set {{1, 2}}, got {dows}"
-    # Each row has shape (route_code, service_type, dow, avg_min, samples).
-    assert all(r[0] == "R1" for r in result)
+    # One row per ISODOW, shaped (route_code, dow, avg_min, samples), worst first.
+    assert [(r[0], r[1], str(r[2]), r[3]) for r in result] == [("R1", 2, "2.00", 2), ("R1", 1, "1.50", 2)]
 
 
 @pytest.mark.asyncio
@@ -122,7 +124,7 @@ async def test_route_dow_breakdown_half_up_rounding_at_exact_boundary(aconn, aag
     ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
     result = await route_dow_breakdown(aagency_id, ctx, aconn, ch_async_client, route="R_HALF")
     assert len(result) == 1
-    avg_min = result[0][3]
+    avg_min = result[0][2]
     assert str(avg_min) == "2.13"
 
 
@@ -169,34 +171,86 @@ async def test_route_dow_breakdown_returns_empty_without_ch(aconn, aagency_id):
     assert result == []
 
 
-@pytest.mark.asyncio
-async def test_route_compare_service_returns_per_service_type(aconn, aagency_id, ch_client, ch_async_client):
-    """One row per service_type for one route (live ClickHouse path)."""
-    now = datetime.now(timezone(timedelta(hours=9)))
-    rows = [
-        ("pb_h", now, "平日", 60),
-        ("pb_k", now, "土日祝", 180),
-    ]
-    for fname, cap, svc, dep in rows:
+async def _seed_observations(aconn, agency_id, route_code, seeds):
+    """One deduped observation per ``(service_date, raw service_type, dep_delay)``,
+    captured at noon Japan time so it files under that service date."""
+    jst = timezone(timedelta(hours=9))
+    for i, (day, svc, dep) in enumerate(seeds):
         await aconn.execute(
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, $4 || '_trip', $4, '10:00', 'R2', 1, $5)",
-            aagency_id,
-            fname,
-            cap,
+            "VALUES ($1, $2, $3, $4, $5, '10:00', $6, 1, $7)",
+            agency_id,
+            f"cmp_{i}",
+            datetime.combine(day, time(12, 0), tzinfo=jst),
+            f"cmp_trip_{i}",
             svc,
+            route_code,
             dep,
         )
+
+
+# Thursday 9/17 to Monday 9/21, a public holiday (敬老の日). The raw service
+# types are what the feeds actually send: a Hiroshima-style service_id, an
+# opaque id, or nothing at all for an observation that matched no trip.
+_CMP_SEEDS = [
+    (date(2026, 9, 17), "11_平日(共通)", 60),
+    (date(2026, 9, 18), "", 120),
+    (date(2026, 9, 19), "7f3c2a90-uuid", 180),
+    (date(2026, 9, 20), "", 240),
+    (date(2026, 9, 21), "", 300),
+]
+_CMP_CTX = RangeCtx(from_date=date(2026, 9, 14), to_date=date(2026, 9, 27))
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_files_dates_under_the_feed_day_types(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """One row per day-type bucket the route has samples in, in bucket order,
+    whatever service_type the observations carry. With no calendar loaded the
+    weekday rule decides, so the holiday Monday is 日祝."""
+    await _seed_observations(aconn, aagency_id, "R2", _CMP_SEEDS)
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
-    today = date.today()
-    ctx = RangeCtx(from_date=today - timedelta(days=1), to_date=today + timedelta(days=1))
-    result = await route_compare_service(aagency_id, ctx, aconn, ch_async_client, route="R2")
-    services = {r[0] for r in result}
-    assert services == {"平日", "土日祝"}
+    result = await route_compare_service(aagency_id, _CMP_CTX, aconn, ch_async_client, route="R2")
+    assert [(r[0], str(r[1]), r[2]) for r in result] == [
+        ("平日", "1.50", 2),
+        ("土曜", "3.00", 1),
+        ("日祝", "4.50", 2),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_uses_two_buckets_on_a_two_way_feed(aconn, aagency_id, ch_client, ch_async_client):
+    """A feed with one timetable for Saturday and Sunday alike compares 平日
+    against 土日祝; its calendar runs the weekend timetable on the holiday."""
+    for service_id, flags in (("平日", (True,) * 5 + (False, False)), ("土日祝", (False,) * 5 + (True, True))):
+        await aconn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 10)",
+            aagency_id,
+            service_id,
+            *flags,
+            date(2026, 4, 1),
+            date(2027, 3, 31),
+        )
+    for service_id, exception_type in (("土日祝", 1), ("平日", 2)):
+        await aconn.execute(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1, $2, $3, $4)",
+            aagency_id,
+            service_id,
+            "20260921",
+            exception_type,
+        )
+    await _seed_observations(aconn, aagency_id, "R2", _CMP_SEEDS)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    result = await route_compare_service(aagency_id, _CMP_CTX, aconn, ch_async_client, route="R2")
+    assert [(r[0], str(r[1]), r[2]) for r in result] == [("平日", "1.50", 2), ("土日祝", "4.00", 3)]
 
 
 @pytest.mark.asyncio
@@ -795,3 +849,49 @@ async def test_route_trend_shift_returns_none_without_data(aconn, aagency_id):
     ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
     result = await route_trend_shift(aagency_id, ctx, aconn, route="NOPE")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_ask_compare_by_service_type_honours_the_ui_service_filter(aconn, aagency_id, ch_client, ch_async_client):
+    """Through dispatch, compare_segments(dimension=service_type) answers in
+    day-type buckets, and a 平日 scope keeps only the weekday-dated rows."""
+    from pipeline.query.tools import dispatch
+
+    await _seed_observations(aconn, aagency_id, "R2", _CMP_SEEDS)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    args = {"dimension": "service_type", "route": "R2"}
+
+    everything = await dispatch("compare_segments", args, _CMP_CTX, aconn, aagency_id, ch=ch_async_client)
+    assert everything.columns == ["service_type", "avg_min", "samples"]
+    assert [r[0] for r in everything.rows] == ["平日", "土曜", "日祝"]
+
+    weekday_ctx = RangeCtx(from_date=_CMP_CTX.from_date, to_date=_CMP_CTX.to_date, service="平日")
+    weekdays = await dispatch("compare_segments", args, weekday_ctx, aconn, aagency_id, ch=ch_async_client)
+    assert [(r[0], str(r[1]), r[2]) for r in weekdays.rows] == [("平日", "1.50", 2)]
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_reads_the_day_types_the_filter_was_resolved_from(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """A ctx that already carries a resolution answers from it rather than
+    reading the calendar again: here a two-way one, where the agency has no
+    calendar loaded and a fresh read would split three ways."""
+    from api.range import ServiceDates
+    from pipeline.day_types import TWO_WAY, DayTypes
+
+    await _seed_observations(aconn, aagency_id, "R2", _CMP_SEEDS)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    by_date = {}
+    d = _CMP_CTX.from_date
+    while d <= _CMP_CTX.to_date:
+        by_date[d] = "weekday" if d.isoweekday() <= 5 and d != date(2026, 9, 21) else "weekend_holiday"
+        d += timedelta(days=1)
+    resolved = ServiceDates(service="土日祝", day_types=DayTypes(buckets=TWO_WAY, by_date=by_date))
+    ctx = RangeCtx(from_date=_CMP_CTX.from_date, to_date=_CMP_CTX.to_date, service="土日祝", service_dates=resolved)
+    result = await route_compare_service(aagency_id, ctx, aconn, ch_async_client, route="R2")
+    assert [(r[0], str(r[1]), r[2]) for r in result] == [("土日祝", "4.00", 3)]

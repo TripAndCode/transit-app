@@ -27,6 +27,7 @@ from api.range import (
     time_band_clause_ch,
 )
 from pipeline.service_day import service_date_ch
+from tests.fixtures.service_dates import selecting
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -120,19 +121,26 @@ def test_build_updates_filter_ch_default_date_only():
     assert set(params) == {"ch_from_date", "ch_to_date"}
 
 
-def test_build_updates_filter_ch_adds_service_and_routes():
-    frag, params = build_updates_filter_ch(_ctx(service="平日", routes=("R1", "R2")))
-    assert "service_type = {ch_service:String}" in frag
+def _resolved(service, *dates: date):
+    return selecting(service, date(2026, 5, 13), date(2026, 6, 11), *dates)
+
+
+def test_build_updates_filter_ch_adds_service_dates_and_routes():
+    resolved = _resolved("平日", date(2026, 5, 13), date(2026, 5, 14))
+    frag, params = build_updates_filter_ch(_ctx(service="平日", service_dates=resolved, routes=("R1", "R2")))
+    assert f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
+    assert "service_type" not in frag
     assert "route_code IN {ch_routes:Array(String)}" in frag
-    assert params["ch_service"] == "平日"
+    assert params["ch_service_dates"] == [date(2026, 5, 13), date(2026, 5, 14)]
     assert params["ch_routes"] == ["R1", "R2"]
 
 
 def test_build_updates_filter_ch_all_clauses_combined():
-    ctx = _ctx(dow="weekend", time_band="evening", service="土日祝", routes=("R9",))
+    resolved = _resolved("土日祝", date(2026, 5, 16), date(2026, 5, 17))
+    ctx = _ctx(dow="weekend", time_band="evening", service="土日祝", service_dates=resolved, routes=("R9",))
     frag, params = build_updates_filter_ch(ctx)
     assert " AND " in frag
-    for name in ("ch_from_date", "ch_to_date", "ch_tb_start", "ch_tb_end", "ch_service", "ch_routes"):
+    for name in ("ch_from_date", "ch_to_date", "ch_tb_start", "ch_tb_end", "ch_service_dates", "ch_routes"):
         assert name in params
 
 

@@ -963,7 +963,9 @@ export type NetworkSummary = {
 
 /** GET /:agency/scope/summary: the data the scope controls draw. `days`
  *  spans the last 90 days of data whatever the period; `weekdays` and
- *  `routes` cover the period but ignore their own filter. */
+ *  `routes` cover the period but ignore their own filter. `day_types` are
+ *  the buckets the agency's calendar splits the period and the `days` strip
+ *  into, the timetable control's choices. */
 export type ScopeSummary = {
   earliest: string | null;
   latest: string | null;
@@ -973,6 +975,7 @@ export type ScopeSummary = {
   weekdays: { dow: string; avg_min: number; samples: number }[];
   routes: { route_code: string; avg_min: number; samples: number }[];
   tolerance: { late_sec: number; on_time_pct: number }[];
+  day_types: OverviewDayType[];
   ctx: ResponseCtx;
   scope_applied?: ScopeApplied;
 };

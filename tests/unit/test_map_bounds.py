@@ -22,8 +22,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.deps import get_agency, get_ch, get_conn
-from api.range import get_range_ctx
+from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn
 from api.routers import map as map_router
 
 
@@ -65,14 +64,14 @@ def test_live_delays_accepts_limit_one():
 
 def test_route_shape_rejects_empty_route():
     app, client = _client()
-    app.dependency_overrides[get_range_ctx] = lambda: None
+    app.dependency_overrides[get_agency_range_ctx] = lambda: None
     response = client.get("/api/1/route-shape", params={"route": ""})
     assert response.status_code == 422
 
 
 def test_route_shape_rejects_route_over_300_chars():
     app, client = _client()
-    app.dependency_overrides[get_range_ctx] = lambda: None
+    app.dependency_overrides[get_agency_range_ctx] = lambda: None
     response = client.get("/api/1/route-shape", params={"route": "x" * 301})
     assert response.status_code == 422
 

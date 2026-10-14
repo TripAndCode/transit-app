@@ -15,6 +15,12 @@ Each section drops the one condition it exists to choose:
 - ``tolerance``: the whole scope, as the on-time share at each late
   tolerance: exact at the default one minute, a histogram estimate
   elsewhere.
+
+``day_types`` is not a section of figures: it lists the day-type buckets the
+agency's calendar splits the agency into, the choices the timetable control
+offers. Every section reads one day-type resolution, over the period and the
+``days`` strip together (:class:`api.range.ServiceDates`), so the choices, the
+strip and the period's sections never split the agency two ways.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
-from api.range import RangeCtx
+from api.range import RangeCtx, day_types_for, resolve_service_dates
 from pipeline.histogram import LEGACY_ON_TIME_LATE_TOLERANCE_SEC, N_BUCKETS, count_in_range
 from pipeline.reports.filters import _dist_filter
 
@@ -70,6 +76,7 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
     )
     earliest, latest = span["earliest"], span["latest"]
     if latest is None:
+        day_types = await day_types_for(ctx, conn, agency_id)
         return {
             "earliest": None,
             "latest": None,
@@ -78,9 +85,12 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
             "weekdays": [],
             "routes": [],
             "tolerance": [],
+            "day_types": list(day_types.buckets),
         }
 
     window_from = max(earliest, latest - timedelta(days=DAYS_WINDOW - 1))
+    ctx = await resolve_service_dates(ctx, conn, agency_id, from_date=window_from, to_date=latest)
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=window_from, to_date=latest)
     window = replace(ctx, from_date=window_from, to_date=latest, dow="all")
     days = [
         {"date": r["key"], "avg_min": _avg_min(r["sum_delay_sec"], r["samples"]), "samples": int(r["samples"])}
@@ -121,4 +131,5 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
         "weekdays": weekdays,
         "routes": routes,
         "tolerance": tolerance,
+        "day_types": list(day_types.buckets),
     }

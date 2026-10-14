@@ -4,7 +4,9 @@ import { useSearchParams } from "react-router-dom";
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 /** A legacy group, or a Monday-first comma list of weekdays (see canonicalDow). */
 export type DowFilter = "all" | "weekday" | "weekend" | Weekday | `${Weekday},${string}`;
-export type ServiceFilter = "all" | "平日" | "土日祝"; // i18n-ignore: query contract
+/** "all", or the timetable a date runs by the agency's own calendar (see
+ *  serviceDays.ts). */
+export type ServiceFilter = "all" | "平日" | "土曜" | "日祝" | "土日祝"; // i18n-ignore: query contract
 export type TimeBand = "all" | "morning" | "forenoon" | "noon" | "afternoon" | "evening" | "night" | "late_night";
 
 /** The shared scope every screen, link, share URL and saved analysis carries.
@@ -36,11 +38,16 @@ type ScopeParam = (typeof SCOPE_PARAMS)[number];
 
 export const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const TIME_BANDS: readonly string[] = ["all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"];
-const SERVICES: readonly string[] = ["all", "平日", "土日祝"]; // i18n-ignore: query contract
+const SERVICES: readonly string[] = ["all", "平日", "土曜", "日祝", "土日祝"]; // i18n-ignore: query contract
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_ROUTES = 100;
 const MAX_STOP_ID_LEN = 128;
 const MAX_TOLERANCE_SEC = 3600;
+
+/** Whether `value` is one of the service filter's values. */
+export function isServiceFilter(value: unknown): value is ServiceFilter {
+  return typeof value === "string" && SERVICES.includes(value);
+}
 
 function isDate(raw: string): boolean {
   return ISO_DATE.test(raw) && !Number.isNaN(Date.parse(`${raw}T00:00:00Z`)) && new Date(`${raw}T00:00:00Z`).toISOString().startsWith(raw);
@@ -81,7 +88,7 @@ function canon(key: ScopeParam, raw: string): string | null {
     case "time_band":
       return TIME_BANDS.includes(raw) && raw !== "all" ? raw : null;
     case "service":
-      return SERVICES.includes(raw) && raw !== "all" ? raw : null;
+      return isServiceFilter(raw) && raw !== "all" ? raw : null;
     case "routes": {
       const routes = [...new Set(raw.split(",").map((r) => r.trim()).filter(Boolean))].slice(0, MAX_ROUTES);
       return routes.length > 0 ? routes.join(",") : null;

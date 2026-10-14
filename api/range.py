@@ -14,14 +14,16 @@ boundaries to today and the window to 365 days to avoid runaway scans.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Collection, Iterable
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import cached_property
 from typing import Annotated, Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
 
+from pipeline.day_types import TWO_WAY, DayType, DayTypes, load_day_types
 from pipeline.service_day import service_date_ch
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -61,7 +63,41 @@ TimeBand = Literal[
     "night",
     "late_night",
 ]
-ServiceType = Literal["all", "平日", "土日祝"]
+ServiceType = Literal["all", "平日", "土曜", "日祝", "土日祝"]
+
+# The day types (pipeline.day_types) each service value selects; a date is in
+# the filter when the agency's own calendar files it under one of them. The
+# Japanese values are the URL contract, so saved links and views keep working.
+#
+# A feed with one timetable for Saturday and Sunday alike is split 平日 /
+# 土日祝 (TWO_WAY) and files no date under 土曜 or 日祝, so on such a feed both
+# select its 土日祝 dates: a link shared across agencies never goes silently
+# empty. This is the rule's home; frontend/src/api/serviceDays.ts mirrors it
+# only to show such a value as the bucket it selects.
+_SERVICE_DAY_TYPES: dict[str, frozenset[DayType]] = {
+    "平日": frozenset({"weekday"}),
+    "土曜": frozenset({"saturday"}),
+    "日祝": frozenset({"sunday_holiday"}),
+    "土日祝": frozenset({"saturday", "sunday_holiday", "weekend_holiday"}),
+}
+
+# The service value that names each day-type bucket, for output that labels a
+# bucket the way the filter spells it.
+DAY_TYPE_SERVICE: dict[DayType, ServiceType] = {
+    "weekday": "平日",
+    "saturday": "土曜",
+    "sunday_holiday": "日祝",
+    "weekend_holiday": "土日祝",
+}
+
+
+def service_day_types(service: str, buckets: Collection[DayType]) -> frozenset[DayType]:
+    """The day types ``service`` selects on a feed split into ``buckets``."""
+    selected = _SERVICE_DAY_TYPES[service]
+    if tuple(buckets) == TWO_WAY and selected <= {"saturday", "sunday_holiday"}:
+        return frozenset({"weekend_holiday"})
+    return selected
+
 
 WEEKDAY_NAMES: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -140,6 +176,43 @@ _HOUR_ERROR = "invalid hour: expected 0-23 or an inclusive range a-b"
 
 
 @dataclass(frozen=True)
+class ServiceDates:
+    """``service`` resolved against one agency's day types.
+
+    ``day_types`` is the request's one day-type resolution, made over the widest
+    span its response reads (:func:`resolve_service_dates`), and every section
+    of the response takes its day types from it (:func:`day_types_for`). So no
+    two sections can file a date, or split the agency into buckets, two ways;
+    where the agency's calendar changes its Saturday/Sunday split inside that
+    span, the whole span decides (:func:`pipeline.day_types.resolve_day_types`).
+    """
+
+    service: ServiceType
+    day_types: DayTypes
+
+    @cached_property
+    def from_date(self) -> date:
+        return min(self.day_types.by_date)
+
+    @cached_property
+    def to_date(self) -> date:
+        return max(self.day_types.by_date)
+
+    @cached_property
+    def dates(self) -> tuple[date, ...]:
+        """The dates of the span ``service`` selects, oldest first."""
+        selected = service_day_types(self.service, self.day_types.buckets)
+        return tuple(d for d, day_type in sorted(self.day_types.by_date.items()) if day_type in selected)
+
+    def covers(self, from_date: date, to_date: date) -> bool:
+        return self.from_date <= from_date and to_date <= self.to_date
+
+
+class UnresolvedServiceFilter(RuntimeError):
+    """A service filter reached a query without dates resolved for its window."""
+
+
+@dataclass(frozen=True)
 class RangeCtx:
     """Resolved request context — defaults applied, range clamped."""
 
@@ -155,10 +228,120 @@ class RangeCtx:
     stop: str | None = None
     # GTFS direction_id; the URL name is `dir`.
     direction: int | None = None
+    # The dates `service` selects for this agency, set by resolve_service_dates.
+    # Every query builder reads the filter through selected_service_dates.
+    service_dates: ServiceDates | None = None
 
     @property
     def days(self) -> int:
         return (self.to_date - self.from_date).days + 1
+
+
+def _span(ctx: RangeCtx, from_date: date | None, to_date: date | None) -> tuple[date, date]:
+    """``ctx``'s window, widened to ``[from_date, to_date]``."""
+    return min(from_date or ctx.from_date, ctx.from_date), max(to_date or ctx.to_date, ctx.to_date)
+
+
+async def day_types_for(
+    ctx: RangeCtx,
+    conn: Any,
+    agency_id: int,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> DayTypes:
+    """The agency's day types over ``ctx``'s window, widened to ``[from_date, to_date]``.
+
+    The ones ``ctx``'s service filter was resolved from whenever they cover that
+    span, so a section that reads day types agrees with the filter; otherwise one
+    calendar read (:func:`pipeline.day_types.load_day_types`, cached).
+    """
+    lo, hi = _span(ctx, from_date, to_date)
+    resolved = ctx.service_dates
+    if resolved is not None and resolved.covers(lo, hi):
+        return resolved.day_types
+    return await load_day_types(conn, agency_id, lo, hi)
+
+
+async def resolve_service_dates(
+    ctx: RangeCtx,
+    conn: Any,
+    agency_id: int,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> RangeCtx:
+    """``ctx`` with its service filter resolved to the agency's own timetable days.
+
+    Each date is filed under the day type the agency's calendar runs it
+    (:func:`pipeline.day_types.load_day_types`), and the filter keeps the dates
+    whose day type it selects (:func:`service_day_types`). The observations'
+    own ``service_type`` is never read: it is a raw GTFS ``service_id``, spelt
+    differently by every feed and empty for observations that matched no
+    scheduled trip.
+
+    The resolution covers ``ctx``'s window, widened to ``[from_date, to_date]``
+    by a caller whose response also reads windows around it: resolve once, over
+    the widest span the response reads, and every section shares it (see
+    :class:`ServiceDates`). Day types ``ctx`` already carries over that span are
+    reused, for another service too. A ``ctx`` without a service filter comes
+    back unchanged, as does one already resolved for its service over the span.
+    """
+    if ctx.service == "all":
+        return ctx if ctx.service_dates is None else replace(ctx, service_dates=None)
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=from_date, to_date=to_date)
+    resolved = ctx.service_dates
+    if resolved is not None and resolved.service == ctx.service and resolved.day_types is day_types:
+        return ctx
+    return replace(ctx, service_dates=ServiceDates(service=ctx.service, day_types=day_types))
+
+
+def selected_service_dates(ctx: RangeCtx) -> list[date] | None:
+    """The dates of ``ctx``'s window its service filter selects, or None for no filter.
+
+    Raises :class:`UnresolvedServiceFilter` when the filter was not resolved
+    for this service over a span covering this window, as happens when a
+    caller builds a ctx for another window or service without resolving it
+    again: a query would otherwise drop the filter, or the days outside the
+    span, without a trace.
+    """
+    if ctx.service == "all":
+        return None
+    resolved = ctx.service_dates
+    if resolved is None or resolved.service != ctx.service or not resolved.covers(ctx.from_date, ctx.to_date):
+        span = "none" if resolved is None else f"{resolved.service} [{resolved.from_date}..{resolved.to_date}]"
+        raise UnresolvedServiceFilter(
+            f"service filter {ctx.service} over [{ctx.from_date}..{ctx.to_date}] is not resolved (resolved: {span})"
+        )
+    return [d for d in resolved.dates if ctx.from_date <= d <= ctx.to_date]
+
+
+def service_date_clause(column: str, ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """Postgres WHERE fragment keeping the dates ``ctx``'s service filter selects.
+
+    ``("TRUE", [], next_param)`` without a filter, and a constant ``FALSE``
+    when the filter selects no date of the window.
+    """
+    dates = selected_service_dates(ctx)
+    if dates is None:
+        return "TRUE", [], next_param
+    if not dates:
+        return "FALSE", [], next_param
+    return f"{column} = ANY(${next_param}::date[])", [dates], next_param + 1
+
+
+def service_date_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """ClickHouse counterpart of :func:`service_date_clause` for ``updates``.
+
+    Keyed on the service date (:mod:`pipeline.service_day`), the day every
+    aggregate files an observation under.
+    """
+    dates = selected_service_dates(ctx)
+    if dates is None:
+        return "1", {}
+    if not dates:
+        return "0", {}
+    return f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}", {"ch_service_dates": dates}
 
 
 def _coerce_enum(value: str, allowed: tuple[str, ...], field: str) -> str:
@@ -572,9 +755,10 @@ def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
         parts.append(frag)
         params.update(p)
 
-    if ctx.service != "all":
-        parts.append("service_type = {ch_service:String}")
-        params["ch_service"] = ctx.service
+    frag, p = service_date_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
 
     if ctx.routes:
         parts.append("route_code IN {ch_routes:Array(String)}")
@@ -615,10 +799,10 @@ def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, in
         parts.append(frag)
         params.extend(p)
 
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
+    frag, p, n = service_date_clause("date", ctx, n)
+    if frag != "TRUE":
+        parts.append(frag)
+        params.extend(p)
 
     if ctx.time_band != "all":
         parts.append(f"time_band = ${n}")

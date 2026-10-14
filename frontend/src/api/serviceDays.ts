@@ -1,0 +1,33 @@
+import type { ServiceFilter } from "./scope";
+import type { OverviewDayType } from "./types";
+
+/** A service filter value that names a timetable, i.e. anything but "all". */
+type TimetableService = Exclude<ServiceFilter, "all">;
+
+/** The service filter value naming each day-type bucket; api/range.py's
+ *  DAY_TYPE_SERVICE is the backend side of the same table. */
+const SERVICE_OF_DAY_TYPE: Record<OverviewDayType, TimetableService> = {
+  weekday: "平日", // i18n-ignore: query contract
+  saturday: "土曜", // i18n-ignore: query contract
+  sunday_holiday: "日祝", // i18n-ignore: query contract
+  weekend_holiday: "土日祝", // i18n-ignore: query contract
+};
+
+/** The split the backend's weekday rule gives a feed whose calendar is not
+ *  known yet. */
+const DEFAULT_DAY_TYPES: readonly OverviewDayType[] = ["weekday", "saturday", "sunday_holiday"];
+
+/** The timetable choices for an agency whose calendar splits the period into
+ *  `dayTypes`, and the choice `service` shows as among them, without
+ *  rewriting the URL value. A value the feed lacks shows as what it selects
+ *  there (api/range.py's service_day_types owns that rule); one that selects
+ *  more than one of the feed's buckets keeps a choice of its own. */
+export function timetableChoices(
+  service: ServiceFilter,
+  dayTypes: readonly OverviewDayType[] = DEFAULT_DAY_TYPES,
+): { options: TimetableService[]; shown: ServiceFilter } {
+  const options = dayTypes.map((dayType) => SERVICE_OF_DAY_TYPE[dayType]);
+  if (service === "all" || options.includes(service)) return { options, shown: service };
+  if ((service === "土曜" || service === "日祝") && options.includes("土日祝")) return { options, shown: "土日祝" }; // i18n-ignore: query contract
+  return { options: [...options, service], shown: service };
+}

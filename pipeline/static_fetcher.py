@@ -8,6 +8,7 @@ import logging
 import pathlib
 from typing import Optional
 
+from pipeline import day_types
 from pipeline import runs as pipeline_runs
 from pipeline.static_loader import load_static
 from pipeline.strategies import get_static_strategy
@@ -67,6 +68,7 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool 
         return None
 
     load_static(str(zip_path), agency_id, conn)
+    day_types.invalidate_day_types()
     # load_static already committed, so the load itself succeeded; losing the
     # dedup marker only costs one harmless extra reload next run, which is
     # strictly better than this call raising and reporting a genuinely

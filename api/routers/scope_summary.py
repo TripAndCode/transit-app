@@ -18,6 +18,7 @@ from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.routers.reports import ReportCtx
 from api.scope_applied import scope_applied
+from pipeline.day_types import DayType
 from pipeline.reports.scope_summary import compute_scope_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["scope"])
@@ -61,6 +62,10 @@ class ScopeSummaryResponse(BaseModel):
     weekdays: list[ScopeWeekday]
     routes: list[ScopeRoute]
     tolerance: list[ScopeTolerance]
+    # The agency's day-type buckets over the period and the `days` strip
+    # together, in display order (pipeline.day_types):
+    # weekday / saturday / sunday_holiday, or weekday / weekend_holiday.
+    day_types: list[DayType]
     ctx: ReportCtx
     scope_applied: dict[str, bool]
 

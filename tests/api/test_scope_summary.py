@@ -134,12 +134,48 @@ async def test_tolerance_honours_an_early_bound(seeded):
 
 
 @pytest.mark.asyncio
-async def test_every_section_honours_the_timetable(seeded):
+async def test_every_section_honours_the_timetable_days(seeded):
+    """The 平日 filter keeps the dates the agency runs its weekday timetable
+    whatever service_type the rows carry; with no calendar loaded that is the
+    weekday rule, under which the public holidays 9/21-9/23 are 日祝."""
     conn, agency_id = seeded
-    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="土日祝")
+    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="")
     body = await compute_scope_summary(agency_id, _ctx(service="平日"), conn)
-    assert "R9" not in {r["route_code"] for r in body["routes"]}
-    assert {d["date"]: d for d in body["days"]}[date(2026, 9, 27)]["samples"] == 100
+    assert {r["route_code"] for r in body["routes"]} == {"R1"}
+    # 9/24 (Thu), 9/25 (Fri) and 9/28 (Mon) are the period's weekdays.
+    assert {w["dow"] for w in body["weekdays"]} == {"mon", "thu", "fri"}
+    days = {d["date"] for d in body["days"]}
+    assert date(2026, 9, 24) in days and date(2026, 9, 1) in days
+    assert not days & {date(2026, 9, 21), date(2026, 9, 26), date(2026, 9, 27)}
+    assert all(d.isoweekday() <= 5 for d in days)
+
+    weekend = await compute_scope_summary(agency_id, _ctx(service="土日祝"), conn)
+    assert {r["route_code"] for r in weekend["routes"]} == {"R1", "R2", "R9"}
+    assert {d["date"] for d in weekend["days"]} >= {date(2026, 9, 21), date(2026, 9, 26), date(2026, 9, 27)}
+
+
+@pytest.mark.asyncio
+async def test_day_types_are_the_buckets_the_calendar_splits_the_period_into(seeded):
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn)
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
+    for service_id, days in (("平日", "1111100"), ("土日祝", "0000011")):
+        await conn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)",
+            agency_id,
+            service_id,
+            *(flag == "1" for flag in days),
+            date(2026, 4, 1),
+            date(2027, 3, 31),
+        )
+    # The calendar is cached like the reports it feeds, so rows written behind
+    # the loader's back show only once the cache is cleared.
+    from pipeline.cache import clear_all
+
+    clear_all()
+    body = await compute_scope_summary(agency_id, _ctx(), conn)
+    assert body["day_types"] == ["weekday", "weekend_holiday"]
 
 
 @pytest.mark.asyncio
@@ -153,6 +189,7 @@ async def test_an_agency_without_aggregates_answers_empty(aconn, aagency_id):
         "weekdays": [],
         "routes": [],
         "tolerance": [],
+        "day_types": ["weekday", "saturday", "sunday_holiday"],
     }
 
 
@@ -176,6 +213,20 @@ async def test_the_endpoint_answers_with_the_summary_and_its_scope(client, seede
 
 
 @pytest.mark.asyncio
+async def test_the_endpoint_resolves_the_service_filter_to_the_agencys_days(client, seeded):
+    conn, agency_id = seeded
+    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="")
+    resp = await client.get(
+        f"/api/{agency_id}/scope/summary", params={"from": "2026-09-20", "to": "2026-09-28", "service": "日祝"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert {r["route_code"] for r in body["routes"]} == {"R1", "R9"}
+    assert body["ctx"]["service"] == "日祝"
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("early", "status"), [(0, 200), (3600, 200), (3601, 422), (-1, 422)])
 async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, status):
     _, agency_id = seeded
@@ -187,3 +238,42 @@ async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, st
 async def test_the_endpoint_404s_an_unknown_agency(client, aconn):
     resp = await client.get("/api/999999/scope/summary")
     assert resp.status_code == 404
+
+
+async def _seed_weekend_split_change(aconn, agency_id):
+    """土曜 and 日祝 timetables until Sunday 9/27, one 土日祝 timetable from 9/28.
+
+    The window 10/5-10/18 alone runs two ways; a span reaching back before
+    9/28 runs three ways, so the response must pick one split for every section.
+    """
+    services = [
+        ("平日", "1111100", date(2026, 4, 1), date(2027, 3, 31)),
+        ("土曜", "0000010", date(2026, 4, 1), date(2026, 9, 27)),
+        ("日祝", "0000001", date(2026, 4, 1), date(2026, 9, 27)),
+        ("土日祝", "0000011", date(2026, 9, 28), date(2027, 3, 31)),
+    ]
+    for service_id, days, start, end in services:
+        await aconn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)",
+            agency_id,
+            service_id,
+            *(flag == "1" for flag in days),
+            start,
+            end,
+        )
+
+
+@pytest.mark.asyncio
+async def test_every_section_reads_one_day_type_resolution(aconn, aagency_id):
+    """The 90-day strip reaches back into the three-way weeks, so the whole
+    summary splits the agency three ways: the control's choices, the strip and
+    the weekday section all file Sunday 10/11 outside 土曜."""
+    await _seed_weekend_split_change(aconn, aagency_id)
+    for day in (date(2026, 9, 12), date(2026, 10, 6), date(2026, 10, 10), date(2026, 10, 11)):
+        await _seed(aconn, aagency_id, "R1", day, 100, 6000, _hist(7, 100))
+    ctx = RangeCtx(from_date=date(2026, 10, 5), to_date=date(2026, 10, 18), service="土曜")
+    body = await compute_scope_summary(aagency_id, ctx, aconn)
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
+    assert {d["date"] for d in body["days"]} == {date(2026, 9, 12), date(2026, 10, 10)}
+    assert {w["dow"] for w in body["weekdays"]} == {"sat"}

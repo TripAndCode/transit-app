@@ -200,3 +200,10 @@ describe("defaultPeriod", () => {
     expect(defaultPeriod(null)).toEqual({ from: "2026-09-02", to: "2026-10-01" });
   });
 });
+
+describe("service filter values", () => {
+  it.each(["平日", "土曜", "日祝", "土日祝"])("keeps the timetable value %s from the URL", (value) => { // i18n-ignore: query contract
+    const s = parseScope(new URLSearchParams({ service: value }), { from: "2026-09-01", to: "2026-09-30" });
+    expect(s.service).toBe(value);
+  });
+});

@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day
+from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -122,8 +122,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("compare_service_needs_route", "en"): "dimension=service_type requires a route argument.",
     ("compare_route_no_data", "ja"): "路線{route} の比較データなし。",
     ("compare_route_no_data", "en"): "No comparison data for route {route}.",
-    ("compare_summary_service", "ja"): "路線{route} 種別比較",
-    ("compare_summary_service", "en"): "Service-type comparison for route {route}",
+    ("compare_summary_service", "ja"): "路線{route} 日種別比較",
+    ("compare_summary_service", "en"): "Day-type comparison for route {route}",
     ("unknown_dimension", "ja"): "未知の dimension: {dimension}",
     ("unknown_dimension", "en"): "Unknown dimension: {dimension}",
     ("trend_no_data", "ja"): "期間内に観測データがありません。",
@@ -404,7 +404,7 @@ TOOLS: list[dict] = [
                 "Aggregate delay statistics for ONE specific route over the request "
                 "window. Use when the user asks about how a particular bus route is "
                 "doing (e.g. '路線5の遅延', '44372はどう?'). Returns one row per "
-                "service type and day of week (average delay minutes + sample count)."
+                "day of week (average delay minutes + sample count)."
             ),
             "parameters": {
                 "type": "object",
@@ -472,8 +472,10 @@ TOOLS: list[dict] = [
                 "route to rank up to 50 routes by the absolute weekday/weekend gap, or set route to "
                 "compare that one route. Returns weekday and weekend average delay (minutes), the "
                 "absolute gap, and signed_delta = weekend minus weekday. dimension=service_type "
-                "requires route and returns that route's average delay and sample count per GTFS "
-                "service type (typically 平日 and 土日祝, where public holidays fall under 土日祝). "
+                "requires route and returns that route's average delay and sample count per day "
+                "type, filing each date under the timetable the agency's calendar ran that day: "
+                "平日, 土曜 and 日祝, or 平日 and 土日祝 for an agency with one timetable for "
+                "Saturday and Sunday alike (public holidays fall under 日祝 or 土日祝). "
                 "Use for '平日と土日祝の比較'."
             ),
             "parameters": {
@@ -485,8 +487,8 @@ TOOLS: list[dict] = [
                         "enum": ["dow", "service_type"],
                         "description": (
                             "dow = calendar Mon–Fri vs Sat–Sun (all routes, or one route); "
-                            "service_type = one route split by GTFS service type, holidays included "
-                            "in 土日祝 (requires route)."
+                            "service_type = one route split by the day types its agency's calendar "
+                            "runs, holidays included in 日祝 or 土日祝 (requires route)."
                         ),
                     },
                     **_DATE_OVERRIDE_PROPS,
@@ -716,7 +718,7 @@ SYSTEM_PROMPT = """\
 - top_n(metric, n?, best_first?, days_back?, from?, to?): 全路線ランキング
 - compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 週末の比較
   (dimension=dow: 暦の月〜金 vs 土日。route 省略で全路線の差ランキング /
-   dimension=service_type: 1路線の運行種別(平日・土日祝)別。route 必須)
+   dimension=service_type: 1路線の日種別(平日・土曜・日祝、または平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, best_first?, days_back?, from?, to?): 定時率ランキング
   (threshold_min で定時の閾値を変えられる。best_first=false で定時率の低い順)
@@ -1019,17 +1021,20 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             ),
         )
     # Render ISODOW int as locale-appropriate label so the LLM sees '月' / 'Mon' not '1'.
-    rendered = [[r[0], r[1], dow_label(r[2], lang=locale), r[3], r[4]] for r in rows]
+    rendered = [[r[0], dow_label(r[1], lang=locale), r[2], r[3]] for r in rows]
     return ToolResult(
         kind="table",
         summary=_summary("route_summary", lang=locale, route=route),
         rows=rendered,
-        columns=["route_code", "service_type", "dow", "avg_min", "samples"],
+        columns=["route_code", "dow", "avg_min", "samples"],
     )
 
 
+# A card chip's service_type, as the service filter value it stands for.
 _SERVICE_TYPE_MAP: dict[str, ServiceType] = {
     "weekday": "平日",
+    "saturday": "土曜",
+    "sunday_holiday": "日祝",
     "weekend": "土日祝",
     "all": "all",
 }
@@ -1043,11 +1048,11 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     n = int(args.get("k", args.get("n", 10)))
     best_first = bool(args.get("best_first", metric == "on_time_rate"))
 
-    # A chip/LLM-supplied service_type narrows ctx.service so compute_ranking /
-    # compute_worst_5min honour the filter.
+    # A chip/LLM-supplied service_type replaces ctx.service so compute_ranking /
+    # compute_worst_5min honour the filter; the new service needs its own dates.
     raw_service = args.get("service_type")
     if raw_service and raw_service in _SERVICE_TYPE_MAP:
-        ctx = replace(ctx, service=_SERVICE_TYPE_MAP[raw_service])
+        ctx = await resolve_service_dates(replace(ctx, service=_SERVICE_TYPE_MAP[raw_service]), conn, agency_id)
 
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
@@ -1383,7 +1388,8 @@ async def dispatch(
     Tool args may include ``days_back``/``from``/``to`` to override the UI
     range; ``_apply_date_overrides`` produces a derived ctx that all handlers
     consume. The original UI ctx is otherwise preserved (DOW / time_band /
-    routes / service still apply). ``locale`` selects the language for the
+    routes / service still apply, the service resolved to the agency's own
+    timetable days by :func:`api.range.resolve_service_dates`). ``locale`` selects the language for the
     human-readable ``summary`` field on the returned :class:`ToolResult`.
 
     ``ch`` is the ClickHouse client for handlers that read the live
@@ -1454,7 +1460,10 @@ async def dispatch(
                         ),
                     )
 
-        effective_ctx = _apply_date_overrides(ctx, arguments)
+        # Resolved after the date overrides, which rebuild the ctx for their
+        # own window; every handler then reads the scope's service filter as
+        # the agency's own timetable days.
+        effective_ctx = await resolve_service_dates(_apply_date_overrides(ctx, arguments), conn, agency_id)
         return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
 
 

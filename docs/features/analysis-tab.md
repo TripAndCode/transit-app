@@ -110,7 +110,7 @@ Every analysis screen reads and writes one shared scope in the URL through
 | `dow` | `all`, `weekday`, `weekend`, or a comma list of `mon`…`sun` |
 | `time_band` | the seven bands, or `all` |
 | `hour` | `0`–`23`, or an inclusive range `a-b` |
-| `service` | `all`, `平日`, `土日祝` |
+| `service` | `all`, `平日`, `土曜`, `日祝`, `土日祝` |
 | `routes` | comma list, at most 100 |
 | `stop` | a GTFS `stop_id` |
 | `dir` | `0` or `1` (`direction_id`) |
@@ -124,6 +124,15 @@ Rules the two sides share:
   `all`.
 - **`hour` excludes `time_band`.** In the browser, `hour` wins and
   `time_band` is dropped. The API answers 422 when a request carries both.
+- **`service` selects dates, not rows.** A value is the timetable a date runs
+  by the agency's own calendar (`pipeline/day_types.py`), never the
+  observations' raw `service_type`, which is a feed's own `service_id` and
+  often empty. `api/range.py`'s `resolve_service_dates` turns it into the
+  window's dates once per request, and every query filters on those dates.
+  `土日祝` selects every weekend and holiday date. On an agency split
+  平日 / 土日祝, `土曜` and `日祝` each select its 土日祝 dates, so a link shared
+  across agencies never comes back empty; the scope control offers each
+  agency's own buckets and shows such a value as the bucket it resolves to.
 - **Invalid values.** An invalid value in the page URL falls back to that
   condition's default instead of reaching the API. The API itself answers
   422 for an invalid value, as it does for the older fields.
