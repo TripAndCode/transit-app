@@ -118,7 +118,10 @@ def load_static(path: str, agency_id: int, conn) -> None:
     Files missing from the zip are skipped with a logged ``not in zip``
     line; this lets agencies without ``shapes.txt`` (or any other optional
     file) load successfully. Each loaded table is cleared for this
-    agency before insert, so the function is safe to re-run.
+    agency before insert, so the function is safe to re-run. The one
+    exception to "skipped" is ``static_calendar``: a missing
+    ``calendar.txt`` clears it, so an earlier feed's timetables cannot
+    classify this feed's dates.
     """
     p = pathlib.Path(path)
     if p.is_dir():
@@ -235,7 +238,10 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
             logger.info(f"  {table}: {len(raw_rows):,} rows")
 
-        _count_calendar_trips(cur, agency_id)
+        if "trips.txt" in names_in_zip:
+            # Without it static_trips still holds the previous feed's trips, so
+            # every service keeps the default weight rather than stale counts.
+            _count_calendar_trips(cur, agency_id)
         changed = load_route_terminals(zf, names_in_zip, cur, agency_id)
         logger.info(f"  route terminals: {changed:,} routes changed")
 
