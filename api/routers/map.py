@@ -55,7 +55,9 @@ from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
+from pipeline.day_types import load_day_types
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
+from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 from pipeline.service_day import service_date_ch, service_date_of, service_day_seconds
@@ -534,12 +536,13 @@ async def route_shape(
     return {**await compute_route_shape(conn, ch, agency_id, str(route), ctx), "scope_applied": _ROUTE_SHAPE_SCOPE}
 
 
-# Today's figures per (route, service): one observation per stop event via the
-# shared dedup, read from `updates_live` alone. `updates` and every aggregate
-# hold closed days only, so a day in progress exists nowhere else. NULL and ''
-# service_type fold into one '' key, as agg_route_daily's builder folds them.
+# Today's figures per route: one observation per stop event via the shared
+# dedup, read from `updates_live` alone. `updates` and every aggregate hold
+# closed days only, so a day in progress exists nowhere else. The observations'
+# own service_type is a raw GTFS service id, or empty for one that matched no
+# scheduled trip, so it splits nothing here: a route is one row.
 _TODAY_ROUTES_SQL = (
-    "SELECT route_code, ifNull(service_type, '') AS service_key, "
+    "SELECT route_code, "
     "sum(dep_delay) AS sum_delay_sec, max(dep_delay) AS worst_delay_sec, "
     "uniqExact(trip_id) AS trips_observed, count() AS samples, "
     "max(last_captured_at) AS last_seen_at FROM ("
@@ -548,91 +551,88 @@ _TODAY_ROUTES_SQL = (
         include_captured_at=True,
         extra_where="u.captured_at >= {day_start:DateTime64} AND u.captured_at < {day_end:DateTime64}",
     )
-    + ") AS deduped WHERE route_code IS NOT NULL GROUP BY route_code, service_key"
+    + ") AS deduped WHERE route_code IS NOT NULL GROUP BY route_code"
 )
 
-_TODAY_BASELINE_SQL = """
-    WITH today AS (
-        SELECT * FROM unnest($2::text[], $3::text[]) AS t(route_code, service_type)
-    ),
-    rb AS (
-        -- Route-grain baseline (across service_types), so a NULL-service daily
-        -- row (stored as '') still finds a baseline even though agg_route_stats
-        -- has no '' row. Mirrors the digest's route-grain baseline
-        -- (pipeline/digest/build.py's _ROUTE_BASELINE_SQL) for both columns.
-        -- base_avg_min is FILTERed the same way as base_p90_min below:
-        -- sum_delay_sec is nullable (unlike samples, unlike AVG()-backed
-        -- avg_min), so a pre-backfill NULL row's samples must not count in
-        -- the denominator without also contributing to the numerator, or
-        -- base_avg_min would be biased toward zero whenever any
-        -- contributing service_type hasn't been backfilled yet.
-        -- base_samples counts the same sum_delay_sec IS NOT NULL population
-        -- as base_avg_min, so it never overstates the evidence behind it.
-        -- base_p90_min's numerator/denominator are both FILTERed to the same
-        -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
-        -- produce a null p90_min alongside a non-null avg_min/samples for a
-        -- live group (dep_delay is filtered non-null upstream, and analyze()
-        -- wipes and rebuilds each agency's rows from scratch every run), but
-        -- this FILTER stays as defense-in-depth against a stale pre-rebuild
-        -- row or a non-analyze() writer (e.g. a test fixture) inserting one
-        -- directly -- SUM() silently
-        -- skips a null numerator term but NOT its row's sample count in the
-        -- denominator, which would otherwise bias base_p90_min down whenever
-        -- any contributing service_type's row is null this way.
-        -- base_p90_min itself is a samples-weighted average of each
-        -- service_type's already-computed p90_min, not a percentile
-        -- recomputed over the pooled raw delay observations across
-        -- service_types -- agg_route_stats stores only a per-group p90
-        -- and sample count, never the raw distribution, so an exact
-        -- pooled percentile isn't computable from it. Same defensible-
-        -- approximation shape as the heatmap's p90_delay_min elsewhere
-        -- in this file.
-        SELECT route_code,
-               SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
-                   / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
-               SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
-                   / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
-               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS base_samples
-        FROM agg_route_stats
-        WHERE agency_id = $1 AND samples IS NOT NULL AND route_code = ANY($2)
-        GROUP BY route_code
-    )
-    SELECT t.route_code, t.service_type,
-        -- All three baseline columns are picked from the SAME source
-        -- (b or rb) via one shared condition, never coalesced
-        -- independently per column -- b.avg_min IS NOT NULL is the
-        -- correct "does b have a matching row" test (AVG() over a real
-        -- joined row is never null). `analyze()`'s own SQL can no longer
-        -- produce a null b.p90_min alongside a non-null b.avg_min for a
-        -- live (route, service_type) group (dep_delay is filtered
-        -- non-null upstream, and analyze() wipes and rebuilds every row
-        -- each run), but a stale pre-rebuild row or a non-analyze()
-        -- writer could still leave one, so this guard stays; independently
-        -- coalescing each column would then silently mix b's exact-match
-        -- avg with rb's pooled-across-service_types p90 -- two different
-        -- statistical populations reported as one baseline. Picking all
-        -- three from the same side means baseline_p90_min can be null
-        -- even when baseline_avg_min isn't (classify_route already
-        -- treats any null baseline input as "no_baseline"), which is
-        -- correct: a missing same-source p90 must not be papered over
-        -- with a different population's figure.
-        CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
-        CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
-        -- baseline_samples backs whichever source above was actually used,
-        -- so the client can flag a thin baseline -- not folded into
-        -- classify_route/low_confidence, which judges TODAY's sample count.
-        CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
-        b.late5_pct
-    FROM today t
-    LEFT JOIN agg_route_stats b
-      ON b.agency_id = $1 AND b.route_code = t.route_code AND b.service_type = t.service_type
-    LEFT JOIN rb ON rb.route_code = t.route_code
+# Eight weeks hold eight of every weekday, so even the rarest timetable class
+# (a Saturday, or a Sunday or public holiday) has about eight days to pool,
+# while a timetable revision or a seasonal shift ages out of the baseline
+# within two months instead of weighing on it for good.
+TODAY_BASELINE_LOOKBACK_DAYS = 56
+# With fewer days of today's class than this in the lookback, one odd day
+# would carry the baseline, so the route is judged against its days of every
+# class in the lookback instead of being left without one.
+MIN_SAME_CLASS_BASELINE_DAYS = 3
+
+# Each asked-for route's closed days in [$4, $5), split into the days of
+# today's class ($3) and the rest. A route's rows for one date (one per service
+# id it ran under, '' among them) count as one day. The histograms merge by
+# summing each bucket position in the same GROUP BY pass, so p90 comes from the
+# pooled distribution rather than from an average of per-day percentiles,
+# without unnesting every row's histogram on each poll of the endpoint.
+_HIST_BUCKET_SUMS = ", ".join(f"SUM(hist[{i}])" for i in range(1, N_BUCKETS + 1))
+_TODAY_BASELINE_SQL = f"""
+    SELECT route_code, date = ANY($3::date[]) AS same_class, COUNT(DISTINCT date) AS days,
+           SUM(samples)::bigint AS samples, SUM(sum_delay_sec)::bigint AS sum_delay_sec,
+           SUM(late5_count)::bigint AS late5_count, ARRAY[{_HIST_BUCKET_SUMS}]::bigint[] AS hist
+    FROM agg_route_daily_dist
+    WHERE agency_id = $1 AND date >= $4 AND date < $5 AND route_code = ANY($2::text[])
+    GROUP BY route_code, same_class
 """
+
+
+def pool_today_baselines(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Each route's baseline from its same-class and other-class groups.
+
+    The same-class days alone when there are at least
+    MIN_SAME_CLASS_BASELINE_DAYS of them, else every day in the lookback. avg is
+    summed delay over summed samples, p90 interpolates the merged histogram,
+    and late5_pct is the share of those samples more than five minutes late,
+    the threshold agg_route_daily_dist's late5_count bakes in.
+    ``baseline_samples`` counts the pooled observations behind all three.
+    """
+    groups: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for r in rows:
+        groups[r["route_code"]].append(r)
+    baselines = {}
+    for route_code, route_groups in groups.items():
+        same = next((g for g in route_groups if g["same_class"]), None)
+        pool = [same] if same is not None and same["days"] >= MIN_SAME_CLASS_BASELINE_DAYS else route_groups
+        samples = sum(g["samples"] for g in pool)
+        hist = [sum(counts) for counts in zip(*(g["hist"] for g in pool), strict=True)]
+        p90 = percentile_from_hist(hist, 0.9)
+        late5_pct = Decimal(sum(g["late5_count"] for g in pool) * 100) / Decimal(samples)
+        baselines[route_code] = {
+            "baseline_avg_sec": _round_half_up_int(sum(g["sum_delay_sec"] for g in pool) / samples),
+            "baseline_p90_sec": _round_half_up_int(p90) if p90 is not None else None,
+            "baseline_samples": samples,
+            "late5_pct": float(late5_pct.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)),
+        }
+    return baselines
+
+
+async def fetch_today_baselines(
+    conn: asyncpg.Connection, agency_id: int, route_codes: Sequence[str], today: CalendarDate
+) -> dict[str, dict[str, Any]]:
+    """The routes' baselines for ``today``, from their closed days in the lookback.
+
+    Today's timetable class, and the class of every lookback date, come from
+    the agency's own calendar (:func:`pipeline.day_types.load_day_types`), the
+    same reading the service filter uses. So a Saturday is judged against past
+    Saturdays, and a public holiday the calendar runs on the Sunday timetable
+    against past Sundays and holidays.
+    """
+    lookback_from = today - timedelta(days=TODAY_BASELINE_LOOKBACK_DAYS)
+    day_types = await load_day_types(conn, agency_id, lookback_from, today)
+    today_class = day_types.of(today)
+    same_class = [d for d, cls in day_types.by_date.items() if cls == today_class and d < today]
+    rows = await conn.fetch(_TODAY_BASELINE_SQL, agency_id, list(route_codes), same_class, lookback_from, today)
+    return pool_today_baselines(rows)
 
 
 def build_today_routes(
     today_rows: Sequence[Mapping[str, Any]],
-    baselines: Mapping[tuple[str, str], Mapping[str, Any]],
+    baselines: Mapping[str, Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Classify today's live per-route figures against their closed-day baselines.
 
@@ -642,10 +642,10 @@ def build_today_routes(
     """
     routes = []
     for r in today_rows:
-        b = baselines.get((r["route_code"], r["service_key"]), {})
+        b = baselines.get(r["route_code"], {})
         avg_delay_sec = _round_half_up_int(r["sum_delay_sec"] / r["samples"])
-        baseline_avg_sec = round(b["baseline_avg_min"] * 60) if b.get("baseline_avg_min") is not None else None
-        baseline_p90_sec = round(b["baseline_p90_min"] * 60) if b.get("baseline_p90_min") is not None else None
+        baseline_avg_sec = b.get("baseline_avg_sec")
+        baseline_p90_sec = b.get("baseline_p90_sec")
         bucket, deviation_sec, low_confidence = classify_route(
             avg_delay_sec, baseline_avg_sec, baseline_p90_sec, r["samples"]
         )
@@ -653,7 +653,6 @@ def build_today_routes(
         routes.append(
             {
                 "route_code": r["route_code"],
-                "service_type": r["service_key"] or None,
                 "avg_delay_sec": avg_delay_sec,
                 "worst_delay_sec": r["worst_delay_sec"],
                 "trips_observed": r["trips_observed"],
@@ -665,11 +664,9 @@ def build_today_routes(
                 "deviation_sec": deviation_sec,
                 "bucket": bucket,
                 "low_confidence": low_confidence,
-                # bucket=="no_baseline" whenever classify_route treats any of
-                # avg/p90 as missing -- has_baseline must track that exactly
-                # (not just baseline_avg_sec) so a thin group with a real avg
-                # but a null p90 doesn't render as both "no baseline yet" and
-                # a concrete today-vs-baseline comparison at once.
+                # classify_route answers no_baseline whenever avg or p90 is
+                # missing, so has_baseline follows the bucket rather than
+                # baseline_avg_sec alone.
                 "has_baseline": bucket != "no_baseline",
                 "late5_pct": b.get("late5_pct"),
             }
@@ -688,24 +685,22 @@ async def today_route_summary(
 ) -> dict[str, Any]:
     """Per-route triage summary for today.
 
-    Powers the 最新観測 tab. Each row carries today's figures
-    (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
-    ``last_seen_at``, ``service_type``) joined to the historical baseline in
-    ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
-    classifier (:func:`api.triage.classify_route`) then assigns each route a
-    ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
-    (today vs baseline), and a ``low_confidence`` flag for thin TODAY samples.
-    ``baseline_samples`` is the separate, un-gated sample count backing the
-    baseline itself (``agg_route_stats`` no longer drops thin route/service
-    groups at insert time) — the client decides its own low-confidence
-    treatment for a thin baseline from this field. The client groups by
-    bucket, so :func:`build_today_routes`'s worst-first sort is only a
-    sensible default.
+    Powers the 最新観測 tab. Each row is one route, whatever service ids its
+    observations carry: today's figures (``avg_delay_sec``,
+    ``worst_delay_sec``, ``trips_observed``, ``samples``, ``last_seen_at``)
+    beside its baseline (``baseline_avg_sec``, ``baseline_p90_sec``,
+    ``late5_pct``), pooled from the route's closed days of today's timetable
+    class (:func:`fetch_today_baselines`). A pure classifier
+    (:func:`api.triage.classify_route`) then assigns each route a ``bucket``
+    (anomaly / watch / normal / no_baseline), a ``deviation_sec`` (today vs
+    baseline), and a ``low_confidence`` flag for thin TODAY samples.
+    ``baseline_samples`` is the observation count behind the baseline itself,
+    from which the client decides its own treatment of a thin one. The client
+    groups by bucket, so :func:`build_today_routes`'s worst-first sort is only
+    a sensible default.
 
-    Today's figures are computed live from `updates_live`; `agg_route_daily`
-    plays no part here (it feeds ``route_exists`` and the historical range
-    endpoints). The baseline comes from `agg_route_stats`, which holds
-    closed days only.
+    Today's figures are computed live from `updates_live`; the baseline comes
+    from `agg_route_daily_dist`, which holds closed days only.
     """
     today = jst_today()
     result = await ch.query(
@@ -717,15 +712,9 @@ async def today_route_summary(
         },
     )
     today_rows = [dict(zip(result.column_names, r, strict=True)) for r in result.result_rows]
-    baselines: dict[tuple[str, str], dict[str, Any]] = {}
+    baselines: dict[str, dict[str, Any]] = {}
     if today_rows:
-        rows = await conn.fetch(
-            _TODAY_BASELINE_SQL,
-            agency_id,
-            [r["route_code"] for r in today_rows],
-            [r["service_key"] for r in today_rows],
-        )
-        baselines = {(r["route_code"], r["service_type"]): dict(r) for r in rows}
+        baselines = await fetch_today_baselines(conn, agency_id, [r["route_code"] for r in today_rows], today)
     routes = build_today_routes(today_rows, baselines)
 
     # Freshness header: the newest live poll, else the newest history row. When

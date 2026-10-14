@@ -276,14 +276,13 @@ describe("Sidebar", () => {
       expect(within(mine).getByText("Pin a route on its page to open it from here.")).toBeTruthy();
     });
 
-    it("opens a pinned route's page with the Routes screen's filters, beside today's trip-weighted mean", () => {
+    it("opens a pinned route's page with the Routes screen's filters, beside today's mean", () => {
       togglePinnedRoute(8, "50");
       rememberScreenScope("8", "routes", "from=2026-06-01&to=2026-06-07");
       vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
         data: {
           routes: [
-            { route_code: "50", avg_delay_sec: 120, trips_observed: 10 },
-            { route_code: "50", avg_delay_sec: 240, trips_observed: 30 },
+            { route_code: "50", avg_delay_sec: 210, trips_observed: 40 },
             { route_code: "24", avg_delay_sec: 600, trips_observed: 5 },
           ],
         },

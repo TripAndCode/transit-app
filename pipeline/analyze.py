@@ -17,7 +17,8 @@ Aggregation tables produced:
 - agg_route_daily      — per-route, per-day summary (backs route_exists and
   latest_data_date; range-scoped reports). today/route-summary's own figures
   come live from `updates_live`, not from this table.
-- agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
+- agg_route_daily_dist — per-day delay distribution (powers range-scoped reports
+  and today/route-summary's same-day-type baseline)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
@@ -1076,8 +1077,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_route_daily (per-route, per-day; backs route_exists, latest_data_date,
         # and range-scoped reports) ──
-        # today/route-summary no longer reads this table: its own figures are
-        # computed live from `updates_live`, against `agg_route_stats` baselines.
+        # today/route-summary does not read this table: its figures are computed
+        # live from `updates_live`, against baselines from agg_route_daily_dist.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
             SELECT

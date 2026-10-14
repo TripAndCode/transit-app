@@ -10,9 +10,10 @@ export type Agency = {
 
 type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
 
+/** One route today, over every service id its observations carry, against
+ *  its closed days of today's timetable class. */
 export type RouteSummary = {
   route_code: string;
-  service_type: string | null;
   avg_delay_sec: number;
   worst_delay_sec: number;
   trips_observed: number;
@@ -20,9 +21,9 @@ export type RouteSummary = {
   last_seen_at: string | null;
   baseline_avg_sec: number | null;
   baseline_p90_sec: number | null;
-  // Sample count backing the baseline itself (agg_route_stats), independent
-  // of `samples` (today's count) and of `low_confidence` (which judges only
-  // today's count) — null when there is no baseline at all.
+  // Observation count behind the baseline itself, independent of `samples`
+  // (today's count) and of `low_confidence` (which judges only today's
+  // count) — null when there is no baseline at all.
   baseline_samples: number | null;
   deviation_sec: number | null;
   bucket: RouteBucket;

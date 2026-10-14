@@ -107,7 +107,7 @@ observations to a replay of one whole service day, one hour at a time
 |---|---|---|
 | `useLiveTrips` | `GET /api/{agency_id}/delays/live` | One latest report per trip from the feed's rolling five-minute window, enriched with static stop coordinates and headsign |
 | `useLiveTripProgress` | `GET /api/{agency_id}/delays/live-progress?trip_id=...` | Nearest reported stop per source snapshot for one trip, compacted to one report per sequence |
-| `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Today's per-route figures computed live from `updates_live` against `agg_route_stats` closed-day baselines |
+| `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Today's figures, one row per route, computed live from `updates_live` against a same-day-type baseline from `agg_route_daily_dist` |
 | `useRouteShape` | `GET /api/{agency_id}/route-shape` | Static GTFS geometry for the selected route |
 | `useTimeline` | `GET /api/{agency_id}/delays/timeline` | One service day's worth of per-stop delay frames, backing day playback |
 
@@ -116,6 +116,20 @@ agency's latest stored observation to one row per trip and returns at most 500
 rows. This remains useful for replayed or delayed feeds, so the UI always shows
 the observation age and calls the count "trips in latest observation" rather
 than claiming stale rows are physically operating now.
+
+`/today/route-summary` pools each route's observations into one row, whatever
+service ids they matched; many match none and carry an empty one. Its
+baseline is that route's closed days of today's timetable class over the
+previous eight weeks (`TODAY_BASELINE_LOOKBACK_DAYS` in `api/routers/map.py`).
+The class of today and of each past date comes from the agency's calendar
+through `pipeline.day_types.load_day_types`, as the service filter reads it.
+So a Saturday is compared with past Saturdays, and a holiday the calendar runs
+on the Sunday timetable with past Sundays and holidays. The baseline mean is
+summed delay over summed samples, p90 is interpolated from the merged delay
+histograms, and `late5_pct` is the share of the same samples more than five
+minutes late; `baseline_samples` counts them. A route with fewer than
+`MIN_SAME_CLASS_BASELINE_DAYS` such days is compared with all of its days in
+the window instead. The response does not say which of the two was used.
 
 Observations split across two ClickHouse tables: `updates_live` holds today
 and any later day, `updates` holds every closed day.
