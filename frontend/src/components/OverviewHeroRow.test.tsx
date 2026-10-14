@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { act, cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
-import { OverviewHeroRow } from "./OverviewHeroRow";
+import { OverviewHeroRow, type HeroFact } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
@@ -58,20 +59,22 @@ function mockFeedSummary(capturedAt: string | null) {
 
 function renderHero(overrides: {
   headline?: OverviewHeadline;
-  delayedCount?: number;
+  severeCount?: number;
   sparklinePoints?: number[];
   peakHour?: OverviewPeakHour | null;
   concentration?: OverviewConcentration;
+  onOpenFact?: (fact: HeroFact) => void;
 } = {}) {
   return renderWithProviders(
     <OverviewHeroRow
       headline={overrides.headline ?? headline()}
-      delayedCount={overrides.delayedCount ?? 3}
-      delayedThresholdMin={2}
+      severeCount={overrides.severeCount ?? 3}
+      severeThresholdMin={5}
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
+      onOpenFact={overrides.onOpenFact ?? (() => {})}
     />,
   );
 }
@@ -93,30 +96,72 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByText(/3\.3/)).toBeInTheDocument();
   });
 
-  it("states the delayed-route count, out of the total, with the threshold it was counted against", () => {
-    mockHooks(38, 0.1);
-    renderHero();
-    expect(screen.getByText("3 of 38 routes")).toBeInTheDocument();
-    expect(screen.getByText("averaged 2 min or more late")).toBeInTheDocument();
-  });
-
-  it("renders the behind-schedule story sentence with the delta, peak hour, and concentration share", () => {
+  it("states a worse period as a chip with its delta, then one short sentence", () => {
     mockHooks(38, 0.1);
     renderHero({ headline: headline({ delta_min: 0.9 }) });
-    expect(
-      screen.getByText(
-        /Delays are 0\.9 min longer than in the 7-day period before; 17:00–18:00 is the heaviest hour\. 60% of delay sits in the top route\./,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Worse than the period before, +0.9 min")).toBeInTheDocument();
+    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+  });
+
+  it("states a better period as a chip without repeating the delta", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }) });
+    expect(screen.getByText("Better than the period before")).toBeInTheDocument();
+    expect(screen.getByText("Delays are 1.2 min shorter than in the 7-day period before.")).toBeInTheDocument();
+  });
+
+  it("states a period within the noise threshold as about the same", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ delta_min: 0.2 }) });
+    expect(screen.getByText("About the same as the period before")).toBeInTheDocument();
+    expect(screen.getByText("Delay is about the same as in the 7-day period before.")).toBeInTheDocument();
+  });
+
+  // The findings have rows of their own, so the sentence carries the verdict
+  // alone and the eye lands on one claim before the numbers.
+  it("keeps the peak hour and the concentration share out of the sentence", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ headline: headline({ delta_min: 0.9 }) });
+    expect(container.querySelector(".ov-hero-story")?.textContent).toBe(
+      "Delays are 0.9 min longer than in the 7-day period before.",
+    );
+  });
+
+  it("shows 'no comparison data' and no chip when baseline_avg_min is null", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({
+      headline: headline({ baseline_avg_min: null, delta_min: null, delta_pct: null }),
+    });
+    expect(screen.getByText("No comparison data")).toBeInTheDocument();
+    expect(container.querySelector(".ov-hero-state")).toBeNull();
+  });
+
+  it("lists the heaviest hour as a fact row that opens the peak-hour card", async () => {
+    mockHooks(38, 0.1);
+    const onOpenFact = vi.fn();
+    renderHero({ onOpenFact });
+    const row = screen.getByRole("button", { name: /Heaviest hour/ });
+    expect(within(row).getByText("17:00–18:00")).toHaveClass("num");
+    await userEvent.click(row);
+    expect(onOpenFact).toHaveBeenCalledWith("peak_hour");
+  });
+
+  it("lists the top route's share of delay as a fact row that opens the concentration card", async () => {
+    mockHooks(38, 0.1);
+    const onOpenFact = vi.fn();
+    renderHero({ onOpenFact });
+    const row = screen.getByRole("button", { name: /Share of delay in the top route/ });
+    expect(row).toHaveTextContent("60%");
+    await userEvent.click(row);
+    expect(onOpenFact).toHaveBeenCalledWith("concentration");
   });
 
   // One dominant route is a real case, not an edge one: a small agency may
   // only have a single observed route. Both halves of the plural go through
   // i18next here, where the fake `t` in storySentence.test.ts cannot see them.
-  it("pluralises the concentration clause on the number of top routes", () => {
+  it("pluralises the concentration label on the number of top routes", () => {
     mockHooks(38, 0.1);
     renderHero({
-      headline: headline({ delta_min: 0.9 }),
       concentration: {
         top_routes: [
           { route_code: "42", route_short_name: null, share_pct: 30 },
@@ -127,35 +172,65 @@ describe("OverviewHeroRow", () => {
         rest_route_count: 5,
       },
     });
-    expect(screen.getByText(/60% of delay sits in the top 3 routes\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Share of delay in the top 3 routes/ })).toHaveTextContent("60%");
   });
 
-  it("renders the ahead-of-schedule story sentence for a negative delta", () => {
+  it("lists the count of routes over the severe threshold, out of the total, with that threshold", async () => {
     mockHooks(38, 0.1);
-    renderHero({
-      headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }),
-    });
-    expect(screen.getByText(/Delays are 1\.2 min shorter than in the 7-day period before/)).toBeInTheDocument();
+    const onOpenFact = vi.fn();
+    renderHero({ onOpenFact });
+    const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
+    expect(row).toHaveTextContent("3/ 38 routes");
+    await userEvent.click(row);
+    expect(onOpenFact).toHaveBeenCalledWith("late_routes");
   });
 
-  it("falls back to the short story template when peak-hour data is missing", () => {
+  it("gives the late-route count, and only it, the warm tone while any route is late", () => {
     mockHooks(38, 0.1);
-    renderHero({ headline: headline({ delta_min: 0.9 }), peakHour: null });
-    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+    const { container } = renderHero();
+    const warm = container.querySelectorAll(".ov-hero-fact--attn");
+    expect(warm).toHaveLength(1);
+    expect(warm[0]).toHaveAccessibleName(/Averaging 5 min or more late/);
   });
 
-  it("falls back to the short story template when concentration has no top routes", () => {
+  it("keeps the late-route count neutral when no route is in the top band", () => {
     mockHooks(38, 0.1);
-    renderHero({ headline: headline({ delta_min: 0.9 }), concentration: emptyConcentration });
-    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+    const { container } = renderHero({ severeCount: 0 });
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("0/ 38 routes");
+    expect(container.querySelector(".ov-hero-fact--attn")).toBeNull();
   });
 
-  it("shows 'no comparison data' instead of a story sentence when baseline_avg_min is null", () => {
+  // The routes-to-check list holds five routes; the count is the server's,
+  // over every route.
+  it("prints a count past the five routes the list holds", () => {
     mockHooks(38, 0.1);
-    renderHero({
-      headline: headline({ baseline_avg_min: null, delta_min: null, delta_pct: null }),
-    });
-    expect(screen.getByText("No comparison data")).toBeInTheDocument();
+    renderHero({ severeCount: 12 });
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");
+  });
+
+  it("drops the total, not the count, while the route list is unknown", () => {
+    mockHooks(38, 0.1);
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderHero();
+    const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
+    expect(row).toHaveTextContent("3routes");
+    expect(row).not.toHaveTextContent("/");
+  });
+
+  it("omits the heaviest-hour row without an hourly profile, keeping the others", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: null });
+    expect(screen.queryByRole("button", { name: /Heaviest hour/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Share of delay/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
+  });
+
+  it("omits the concentration row without top routes, keeping the others", () => {
+    mockHooks(38, 0.1);
+    renderHero({ concentration: emptyConcentration });
+    expect(screen.queryByRole("button", { name: /Share of delay/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
 
   it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
@@ -165,7 +240,7 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
-  it("renders an inline info hint next to the story sentence", () => {
+  it("renders an inline info hint next to the verdict", () => {
     mockHooks(38, 0.1);
     renderHero();
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
@@ -228,13 +303,15 @@ describe("OverviewHeroRow", () => {
     expect((container.querySelector(".ov-kpi-value") as HTMLElement).style.color).toBe("");
   });
 
-  it("sets the hero delay value and the delayed-route count in the numeral face", () => {
+  it("sets the hero delay value and every fact value in the numeral face", () => {
     mockHooks(38, 0.1);
     const { container } = renderHero();
     const value = container.querySelector(".ov-kpi-value");
     expect(value).not.toBeNull();
     expect(value).toHaveClass("num");
-    expect(container.querySelector(".ov-hero-sub-value")).toHaveClass("num");
+    const facts = container.querySelectorAll(".ov-hero-fact-value");
+    expect(facts).toHaveLength(3);
+    for (const fact of facts) expect(fact).toHaveClass("num");
   });
 
   it("anchors the sparkline on the period mean, labelled in words", () => {
@@ -253,13 +330,16 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByText(/Selected period's average/)).toBeNull();
   });
 
-  it("draws the day-pulse ribbon behind the hero from peak_hour.by_hour", () => {
+  it("draws the day-pulse ribbon inside the figure column, never behind the facts", () => {
     mockHooks(38, 0.1);
     renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
-    // First child: the two columns after it are positioned, so they paint
-    // over it by DOM order.
-    expect(document.querySelector(".ov-hero > .ov-pulse-ribbon:first-child")).not.toBeNull();
-    expect(document.querySelector(".ov-hero > .ov-hero-text")).not.toBeNull();
+    expect(document.querySelector(".ov-hero-figure > .ov-pulse-ribbon")).not.toBeNull();
+    // The figure's text follows both charts in DOM order, so it paints over them.
+    const figure = [...(document.querySelector(".ov-hero-figure")?.children ?? [])];
+    expect(figure.findIndex((el) => el.matches(".ov-pulse-ribbon"))).toBeLessThan(
+      figure.findIndex((el) => el.matches(".ov-hero-label")),
+    );
+    expect(document.querySelector(".ov-hero-text svg")).toBeNull();
   });
 
   it("draws no ribbon without an hourly profile", () => {
@@ -307,10 +387,10 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByText("Reporting live")).toBeNull();
   });
 
-  it("prints the delayed-route count in the numeric face", () => {
-    mockHooks(38, 0.1);
-    renderHero();
-    expect(screen.getByText("3 of 38 routes")).toHaveClass("num");
+  it("keeps the feed status under the figure", () => {
+    mockHooks(38, 0.05);
+    const { container } = renderHero();
+    expect(container.querySelector(".ov-hero-figure .ov-hero-feed")).toHaveTextContent(/Reporting live/);
   });
 
   it("stops breathing when the two-minute window closes, without a refetch", () => {

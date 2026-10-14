@@ -705,16 +705,43 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 
 
 #: A route averaging at least this late (minutes) over the current window
-#: counts as delayed in the headline's count. The count carries it, so the UI
-#: states the threshold it was counted against instead of keeping its own copy.
+#: counts as delayed in ``delayed_count``, which the Copilot overview insight
+#: reads. The count carries it, so a reader states the threshold it was
+#: counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
+
+#: The routes-to-check list's bands, worst first, each with its lower bound
+#: (minutes): a route belongs to the first band whose bound its average
+#: reaches, and to none below the last. The client bands the listed routes
+#: itself, with BAND_BOUNDS in frontend/src/components/routesToCheckBands.ts;
+#: a test on each side pins the same bounds, so neither side can move alone.
+#: Each count carries its bound, as ``delayed_threshold_min`` does.
+ROUTE_BAND_MIN = {"severe": 5.0, "moderate": 3.0, "mild": 1.5}
+
+
+def _route_band_counts(avgs: list[float]) -> dict[str, dict[str, float | int]]:
+    """How many of ``avgs`` fall in each of ``ROUTE_BAND_MIN``'s bands.
+
+    Banded on the 2-dp rounded average each listed route carries, the value
+    the client bands it on, so a route listed at exactly a bound is always
+    counted in that band.
+    """
+    counts = {band: 0 for band in ROUTE_BAND_MIN}
+    for avg in avgs:
+        rounded = float(_round2(avg))
+        band = next((b for b, lower in ROUTE_BAND_MIN.items() if rounded >= lower), None)
+        if band is not None:
+            counts[band] += 1
+    return {band: {"count": counts[band], "threshold_min": lower} for band, lower in ROUTE_BAND_MIN.items()}
 
 
 async def _top_delayed_routes(
     agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``.
+    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN`` and one per
+    ``ROUTE_BAND_MIN`` band, each over every route rather than the ``limit``
+    listed: the list is truncated, the counts are not.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -764,9 +791,15 @@ async def _top_delayed_routes(
         ]
 
     if not rows:
-        return {"routes": [], "delayed_count": 0, "delayed_threshold_min": DELAYED_ROUTE_MIN}
+        return {
+            "routes": [],
+            "delayed_count": 0,
+            "delayed_threshold_min": DELAYED_ROUTE_MIN,
+            "band_counts": _route_band_counts([]),
+        }
 
     delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
+    band_counts = _route_band_counts([r["avg_min"] for r in rows if r["avg_min"] is not None])
     top_n = rows[:limit]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
@@ -781,6 +814,7 @@ async def _top_delayed_routes(
         ],
         "delayed_count": delayed_count,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
+        "band_counts": band_counts,
     }
 
 

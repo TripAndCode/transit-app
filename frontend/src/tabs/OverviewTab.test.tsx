@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -7,12 +7,20 @@ import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
 import type { OverviewSummary } from "../api/types";
 
+function bandCounts(severe: number, moderate: number, mild: number) {
+  return {
+    severe: { count: severe, threshold_min: 5 },
+    moderate: { count: moderate, threshold_min: 3 },
+    mild: { count: mild, threshold_min: 1.5 },
+  };
+}
+
 function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
   return {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2 },
+    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, band_counts: bandCounts(0, 0, 0) },
     peak_hour: null,
     service_split: [
       { day_type: "weekday", avg_min: null, days: 0, samples: 0, insufficient: true },
@@ -92,7 +100,12 @@ describe("OverviewTab", () => {
     renderOverview(
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
-        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1, delayed_threshold_min: 2 },
+        top_delayed: {
+          routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }],
+          delayed_count: 1,
+          delayed_threshold_min: 2,
+          band_counts: bandCounts(1, 0, 0),
+        },
       }),
     );
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
@@ -168,6 +181,73 @@ describe("OverviewTab", () => {
     // Progressively revealed, not gated behind a disclosure widget.
     expect(document.querySelector("details")).not.toBeInTheDocument();
     expect(document.querySelector("summary")).not.toBeInTheDocument();
+  });
+
+  describe("the hero's fact rows", () => {
+    const delayed = (route_code: string, avg_min: number) => ({ route_code, route_short_name: null, avg_min });
+    const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)], bands = bandCounts(2, 1, 1)) =>
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.9, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
+        // delayed_count counts a different, lower threshold; the hero must not read it.
+        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands },
+      });
+    const lateRow = () => screen.getByRole("button", { name: /Averaging 5 min or more late/ });
+
+    it("opens the peak-hour card's modal from the heaviest-hour row", async () => {
+      renderOverview(withFacts());
+      await userEvent.click(screen.getByRole("button", { name: /Heaviest hour/ }));
+      expect(screen.getByRole("dialog", { name: "Worst hour (Weekday vs Weekend)" })).toBeInTheDocument();
+    });
+
+    it("opens the concentration card's modal from the share row", async () => {
+      renderOverview(withFacts());
+      await userEvent.click(screen.getByRole("button", { name: /Share of delay in the top route/ }));
+      expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
+    });
+
+    // The row scrolls to the routes-to-check list, so its count is the one
+    // the reader finds in that list's top-band header, and not the payload's
+    // delayed_count.
+    it("agrees with the routes-to-check list's top-band header", () => {
+      renderOverview(withFacts());
+      expect(screen.getByText("2 routes averaging 5 min or more late")).toBeInTheDocument();
+      expect(within(lateRow()).getByText("2")).toBeInTheDocument();
+      expect(lateRow()).toHaveClass("ov-hero-fact--attn");
+    });
+
+    it("agrees with that header past the five routes the list holds", () => {
+      const worst = [delayed("R1", 9.1), delayed("R2", 8.4), delayed("R3", 7.7), delayed("R4", 6.2), delayed("R5", 5.3)];
+      renderOverview(withFacts(worst, bandCounts(12, 3, 0)));
+      expect(screen.getByText("12 routes averaging 5 min or more late (top 5 shown)")).toBeInTheDocument();
+      expect(within(lateRow()).getByText("12")).toBeInTheDocument();
+    });
+
+    it("shows a neutral zero when no route reaches the top band, while the list still lists the rest", () => {
+      renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], bandCounts(0, 1, 1)));
+      expect(screen.getByText("1 route averaging 3–5 min late")).toBeInTheDocument();
+      expect(within(lateRow()).getByText("0")).toBeInTheDocument();
+      expect(lateRow()).not.toHaveClass("ov-hero-fact--attn");
+    });
+
+    // The routes-to-check list is inline, with no modal of its own: the row
+    // takes the reader, and keyboard focus, to it.
+    it("brings the routes-to-check list into view from the late-routes row", async () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        renderOverview(withFacts());
+        await userEvent.click(lateRow());
+        const list = screen.getByText("Routes to check now").closest(".ov-routes-anchor");
+        expect(list).not.toBeNull();
+        expect(scrollIntoView.mock.contexts).toEqual([list]);
+        expect(document.activeElement).toBe(list);
+        expect(screen.queryByRole("dialog")).toBeNull();
+      } finally {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    });
   });
 
   it("offers a clear-routes recovery when the empty result is scoped to specific routes", () => {
