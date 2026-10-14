@@ -38,14 +38,16 @@ def fetch(
     agency_id: int,
     index_url: str,
     dest_dir: pathlib.Path,
+    *,
+    force: bool = False,
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for Aomori.
 
     Returns the path of the zip ready for load_static, or None when the
-    download is byte-identical to the last zip that loaded. Raises
-    StaticFetchError when either URL is not a valid http(s) URL, the index
-    page or the zip could not be fetched, the page links no timetable, or
-    the download is not a zip.
+    download is byte-identical to the last zip that loaded and ``force`` is
+    not set. Raises StaticFetchError when either URL is not a valid http(s)
+    URL, the index page or the zip could not be fetched, the page links no
+    timetable, or the download is not a zip.
     Idempotent same-day overwrite (matches existing shell behaviour).
     """
     require_http_url(index_url, "the timetable URL")
@@ -76,9 +78,9 @@ def fetch(
         raise StaticFetchError(f"{redact_url(zip_url)} is not a zip file (no PK header)")
 
     # Reloading identical bytes would rewrite every static table and mint a
-    # new static_version_id for unchanged content.
+    # new static_version_id for unchanged content, so only a forced fetch does.
     sha = hashlib.sha256(data).hexdigest()
-    if sha == _loaded_sha(agency_dir):
+    if not force and sha == _loaded_sha(agency_dir):
         logger.info(f"[aomori_index_scrape] agency={agency_id} no change (sha256={sha[:12]})")
         return None
 

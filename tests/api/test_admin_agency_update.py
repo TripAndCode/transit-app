@@ -13,6 +13,8 @@ Two halves:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -307,6 +309,24 @@ def _upstream_answers(code: int):
     return patch("pipeline.strategies.direct_url.safe_urlopen", side_effect=_open)
 
 
+def _upstream_serving(body: bytes, etag: str):
+    """The timetable source serves ``body`` with ``etag``, answering 304 to a
+    request that already holds that tag; it publishes no latest.zip."""
+
+    def _open(req, **_kwargs):
+        if req.full_url.endswith("/latest.zip"):
+            raise HTTPError(req.full_url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+        if req.get_header("If-none-match") == etag:
+            raise HTTPError(req.full_url, 304, "Not Modified", {}, None)  # type: ignore[arg-type]
+        resp = MagicMock()
+        resp.read.return_value = body
+        resp.headers = {"ETag": etag}
+        resp.__enter__.return_value = resp
+        return resp
+
+    return patch("pipeline.strategies.direct_url.safe_urlopen", side_effect=_open)
+
+
 def _rows(pg_conn, run_id: int) -> list[tuple[Any, ...]]:
     pg_conn.rollback()
     with pg_conn.cursor() as cur:
@@ -323,7 +343,7 @@ def test_a_failed_timetable_step_stops_the_chain_with_its_error_recorded(runner_
 
     run_id = runner_env["open_run"]("update")
 
-    def _fetch(agency_id, static_url, dest_dir):
+    def _fetch(agency_id, static_url, dest_dir, *, force=False):
         raise OSError("connection reset fetching https://example.test/gtfs/current_data.zip?key=SECRET")
 
     with (
@@ -395,29 +415,49 @@ def test_a_source_that_answers_not_modified_closes_the_step_unchanged(runner_env
     assert (umbrella[2], step[2], step[4]) == ("unchanged", "unchanged", None)
 
 
-def test_a_reload_that_fetched_nothing_for_an_agency_with_no_timetable_fails(runner_env, pg_conn):
+def test_an_agency_with_no_timetable_reloads_the_zip_its_manifest_calls_unchanged(runner_env, pg_conn):
     """The change manifest on disk can outlive the timetable tables, so a
     source with nothing newer than the last zip that loaded can still leave
-    the agency with no timetable at all; the chain must not go on to ingest
-    against an empty schedule."""
-    from api.routers.internal import _run_agency_update
+    the agency with no timetable at all. The reload then fetches past the
+    manifest, the chain goes on with a timetable, and the next reload asks
+    the source for changes again."""
+    import pipeline.static_fetcher as static_fetcher
+    from api.routers.internal import SweepOutcome, _run_agency_update
+
+    aid = runner_env["agency_id"]
+    body = _gtfs_zip(runner_env["tmp"] / "upstream.zip", routes=2).read_bytes()
+    agency_dir = Path(static_fetcher.DEFAULT_STATIC_DEST) / str(aid)
+    agency_dir.mkdir(parents=True)
+    loaded = {"sha256": hashlib.sha256(body).hexdigest(), "etag": "et1"}
+    (agency_dir / "_manifest.json").write_text(json.dumps({"current": loaded, "latest": loaded}))
 
     run_id = runner_env["open_run"]("update")
     with (
-        patch("pipeline.strategies.direct_url.fetch", return_value=None),
-        patch("api.routers.internal._ingest_and_analyze_sweep") as sweep,
+        _upstream_serving(body, "et1"),
+        patch("api.routers.internal._ingest_and_analyze_sweep", return_value=SweepOutcome("ok")) as sweep,
     ):
         _run_agency_update(
-            agency_id=runner_env["agency_id"],
+            agency_id=aid,
             requested_by=runner_env["user_id"],
             run_id=run_id,
             then_ingest_and_analyze=True,
         )
 
-    sweep.assert_not_called()
+    sweep.assert_called_once()
     (umbrella, step) = _rows(pg_conn, run_id)
-    assert (umbrella[2], step[2]) == ("error", "error")
-    assert "timetable" in step[4]
+    assert step[1:4] == ("static", "ok", 2)
+    assert umbrella[2] == "ok"
+
+    again = runner_env["open_run"]("static")
+    with _upstream_serving(body, "et1"):
+        _run_agency_update(
+            agency_id=aid,
+            requested_by=runner_env["user_id"],
+            run_id=again,
+            then_ingest_and_analyze=False,
+        )
+    (umbrella, step) = _rows(pg_conn, again)
+    assert (umbrella[2], step[2]) == ("unchanged", "unchanged")
 
 
 def test_a_loaded_timetable_records_its_route_count_and_hands_over_to_the_sweep(runner_env, pg_conn):
@@ -595,7 +635,7 @@ def test_the_command_line_reload_records_a_static_run(runner_env, pg_conn, monke
     monkeypatch.setattr(gtfs_pipeline, "_get_conn", lambda: psycopg2.connect(os.environ["DATABASE_URL"]))
     with patch("pipeline.strategies.direct_url.fetch", return_value=zip_path):
         gtfs_pipeline.cmd_refresh_static(
-            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]))
+            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]), force=False)
         )
 
     pg_conn.rollback()
@@ -616,7 +656,7 @@ def test_the_command_line_reload_of_one_agency_fails_when_its_source_fails(runne
     monkeypatch.setattr(gtfs_pipeline, "_get_conn", lambda: psycopg2.connect(os.environ["DATABASE_URL"]))
     with _upstream_answers(500), pytest.raises(StaticFetchError):
         gtfs_pipeline.cmd_refresh_static(
-            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]))
+            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]), force=False)
         )
 
     pg_conn.rollback()
@@ -641,7 +681,7 @@ def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_
     pg_conn.commit()
     zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=2)
 
-    def _fetch(agency_id, static_url, dest_dir):
+    def _fetch(agency_id, static_url, dest_dir, *, force=False):
         if agency_id == runner_env["agency_id"]:
             raise StaticFetchError("HTTP 404 Not Found from https://example.test/gtfs/current_data.zip")
         return zip_path
@@ -676,9 +716,10 @@ def test_the_command_line_reload_of_every_agency_records_one_static_run_each(run
         )
         second = cur.fetchone()[0]
     pg_conn.commit()
+    _seed_timetable(pg_conn, second)
     zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=2)
 
-    def _fetch(agency_id, static_url, dest_dir):
+    def _fetch(agency_id, static_url, dest_dir, *, force=False):
         return zip_path if agency_id == runner_env["agency_id"] else None
 
     conn = psycopg2.connect(os.environ["DATABASE_URL"])

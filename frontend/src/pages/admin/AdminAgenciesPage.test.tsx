@@ -402,7 +402,7 @@ describe("AdminAgenciesPage", () => {
       status: "error",
       finished_at: "2026-10-13T05:01:00Z",
       steps: [
-        { ...RUNNING_UPDATE.steps[0], status: "error", error: "StaticRefreshFailed: no timetable" },
+        { ...RUNNING_UPDATE.steps[0], status: "error", error: "StaticFetchError: HTTP 404 Not Found" },
         { ...RUNNING_UPDATE.steps[1], status: "not_run", started_at: null },
         { ...RUNNING_UPDATE.steps[2], status: "not_run" },
       ],

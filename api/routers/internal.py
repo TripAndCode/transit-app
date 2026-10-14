@@ -465,9 +465,9 @@ def _refresh_static_step(
 
     ``refresh_static_recorded`` is the command line's own reload and record,
     writing into the same directory, so the button and the command compare
-    against the same change manifest and cannot drift apart. A reload that
-    loads nothing for an agency with no timetable at all fails, rather than
-    letting a chain go on to ingest against an empty schedule.
+    against the same change manifest and cannot drift apart. For an agency
+    with no timetable loaded it fetches past that manifest, so a chain does
+    not go on to ingest against an empty schedule because of a stale one.
     """
     import psycopg2
 
@@ -481,7 +481,6 @@ def _refresh_static_step(
             pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST),
             requested_by=requested_by,
             parent_run_id=parent_run_id,
-            require_timetable=True,
         )
     finally:
         conn.close()
