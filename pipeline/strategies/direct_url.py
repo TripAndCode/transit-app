@@ -7,7 +7,9 @@ For each agency:
   - Stage the updated manifest beside <dest_dir>/<agency_id>/_manifest.json, and
     promote it once that zip has loaded (record_loaded)
 
-Conditional GET via If-Modified-Since / If-None-Match. 304 → no-op.
+Conditional GET via If-Modified-Since / If-None-Match. 304 → no-op. A forced
+fetch sends neither and loads whatever a 200 returns, even the bytes that
+last loaded.
 
 static_url is the agency's configured source; latest.zip is a guess derived
 from it, which not every host publishes. A failed latest.zip is only logged,
@@ -121,12 +123,15 @@ def fetch(
     agency_id: int,
     static_url: str,
     dest_dir: pathlib.Path,
+    *,
+    force: bool = False,
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for this agency.
 
     Returns the path of the zip ready for load_static, or None when nothing
-    is newer. Raises StaticFetchError when static_url is not a valid
-    http(s) URL or the fetch failed.
+    is newer. With ``force``, every variant that answers 200 counts as newer.
+    Raises StaticFetchError when static_url is not a valid http(s) URL or the
+    fetch failed.
     """
     require_http_url(static_url, "the timetable URL")
     agency_dir = dest_dir / str(agency_id)
@@ -148,9 +153,12 @@ def fetch(
     base = parsed.path.rsplit("/", 1)[0]
     latest_url = parsed._replace(path=f"{base}/latest.zip").geturl()
 
+    # A forced fetch sends no validators: a source honouring them would
+    # answer 304 for the zip the manifest describes.
+    validators = {} if force else manifest
     with _run_temps(agency_dir) as (tmp_current, tmp_latest):
-        cur_got, cur_failed = _try_cond_get(static_url, manifest.get("current", {}), tmp_current)
-        lat_got, lat_failed = _try_cond_get(latest_url, manifest.get("latest", {}), tmp_latest)
+        cur_got, cur_failed = _try_cond_get(static_url, validators.get("current", {}), tmp_current)
+        lat_got, lat_failed = _try_cond_get(latest_url, validators.get("latest", {}), tmp_latest)
         if lat_failed is not None:
             logger.warning(f"[direct_url] agency={agency_id} latest.zip failed, going on without it: {lat_failed}")
         if cur_failed is not None and lat_got is None:
@@ -165,8 +173,9 @@ def fetch(
 
         prev_cur_sha = manifest.get("current", {}).get("sha256")
         prev_lat_sha = manifest.get("latest", {}).get("sha256")
-        nothing_changed = (cur_sha is None or cur_sha == prev_cur_sha) and (lat_sha is None or lat_sha == prev_lat_sha)
-        if nothing_changed:
+        cur_new = cur_got is not None and (force or cur_sha != prev_cur_sha)
+        lat_new = lat_got is not None and (force or lat_sha != prev_lat_sha)
+        if not (cur_new or lat_new):
             if cur_failed is not None:
                 # latest.zip answered, but only with what already loaded.
                 raise cur_failed

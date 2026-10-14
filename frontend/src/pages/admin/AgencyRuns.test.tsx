@@ -47,14 +47,14 @@ const DONE = run({
 const FAILED = run({
   status: "error",
   finished_at: "2026-10-13T05:00:10Z",
-  error: "StaticRefreshFailed: no timetable",
+  error: "StaticFetchError: HTTP 404 Not Found",
   steps: [
     step({
       step: "static",
       status: "error",
       started_at: "2026-10-13T05:00:00Z",
       finished_at: "2026-10-13T05:00:10Z",
-      error: "StaticRefreshFailed: the source has nothing newer, but this agency has no timetable loaded",
+      error: "StaticFetchError: HTTP 404 Not Found from https://example.test/gtfs/current_data.zip",
     }),
     step({ step: "ingest", status: "not_run" }),
     step({ step: "analyze", status: "not_run" }),
@@ -166,7 +166,7 @@ describe("AgencyRunCard", () => {
     expect(screen.getByRole("img", { name: "Stopped at step 1 of 3" })).toBeTruthy();
     expect(stepRows()).toEqual(["fail", "not_run", "not_run"]);
     expect(screen.getByText("Timetable could not be fetched")).toBeTruthy();
-    expect(screen.getByText(/the source has nothing newer, but this agency has no timetable loaded/)).toBeTruthy();
+    expect(screen.getByText(/HTTP 404 Not Found from https:\/\/example\.test\/gtfs\/current_data\.zip/)).toBeTruthy();
     expect(screen.getAllByText("Not run")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Edit URL" }));
     await user.click(screen.getByRole("button", { name: "Retry" }));

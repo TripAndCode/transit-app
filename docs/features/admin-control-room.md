@@ -83,6 +83,22 @@ a disabled agency, and (the two timetable actions) for an agency with no
 static URL or static strategy. The board's
 `POST /api/admin/runs` takes the same guard when scoped to one agency.
 
+"Nothing newer" means nothing newer than the zip that last loaded, as the
+strategy's change manifest records it (`raw_archives_static/<agency_id>/_manifest.json`:
+the loaded zip's sha256, and for `direct_url` the ETag/Last-Modified its
+conditional GET sends).
+That file can outlive the timetable tables, after a database restore or once
+an agency's static rows are cleared, so a reload for an agency with no
+timetable loaded sets the manifest aside and loads whatever the source serves.
+If that still loads nothing, because the source sent no zip or the agency's
+static URL or strategy was cleared after the press, the step closes `error`
+rather than `unchanged`, and a chained update stops there.
+For an agency that does have one, `gtfs_pipeline.py refresh-static --force`
+(with `--agency-id <id>` for one agency, or without it for every configured
+one) reloads it the same way. That is how a column the loader derives, such
+as one a migration adds to the static tables, reaches a timetable whose
+source has not changed. The page's buttons have no such option.
+
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
 `rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
 `static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,

@@ -46,7 +46,7 @@ def test_refresh_all_continues_past_one_agencys_failure(pg_conn, tmp_path):
             ids.append(cur.fetchone()[0])
     pg_conn.commit()
 
-    def fake_refresh_static(aid, conn, dest_dir):
+    def fake_refresh_static(aid, conn, dest_dir, *, force=False):
         if aid == ids[1]:
             raise ValueError("boom")
         return None

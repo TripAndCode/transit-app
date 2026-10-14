@@ -384,11 +384,11 @@ def cmd_refresh_static(args):
     conn = _get_conn()
     dest = pathlib.Path(args.dest)
     if args.agency_id:
-        result = refresh_static_recorded(int(args.agency_id), conn, dest)
+        result = refresh_static_recorded(int(args.agency_id), conn, dest, force=args.force)
         if result is None:
             logger.info("No change.")
     else:
-        n, total, failed = refresh_all(conn, dest)
+        n, total, failed = refresh_all(conn, dest, force=args.force)
         conn.close()
         if failed:
             logger.error(f"refresh-static: {len(failed)} of {total} agencies failed: {failed}")
@@ -861,6 +861,15 @@ def main():
     )
     p_refresh.add_argument("--agency-id", default=None, help="Specific agency (default: all configured)")
     p_refresh.add_argument("--dest", default=DEFAULT_STATIC_DEST, help="Local destination directory for fetched zips")
+    p_refresh.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Reload even when the source reports nothing newer than the zip that last loaded, "
+            "e.g. to fill a column a migration added to the static tables. An agency with no "
+            "timetable loaded is always reloaded this way"
+        ),
+    )
 
     full_help = "Rebuild every date, not only the ones whose row counts changed"
     p_analyze = sub.add_parser("analyze")

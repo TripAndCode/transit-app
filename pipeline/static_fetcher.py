@@ -21,9 +21,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_STATIC_DEST = "raw_archives_static"
 
 
-def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]:
+def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool = False) -> Optional[pathlib.Path]:
     """Refresh static GTFS for one agency. Returns the loaded zip path, or
-    None when nothing is newer; the strategy's StaticFetchError propagates."""
+    None when nothing is newer; the strategy's StaticFetchError propagates.
+
+    "Nothing newer" is measured against the strategy's change manifest on
+    disk, which can outlive the timetable tables (a restored or rebuilt
+    database, an agency's static rows cleared). The fetch is forced, setting
+    the manifest aside, when ``force`` asks for it and whenever the agency has
+    no timetable loaded, so a stale manifest cannot keep an agency without
+    one. Forcing is also how a column the loader derives reaches a timetable
+    whose source has not changed.
+
+    For an agency with no timetable loaded, "nothing newer" leaves nothing to
+    run against, so a reload that loads no zip for it -- the source sent
+    none, or the agency has no source configured -- raises StaticFetchError
+    rather than returning None.
+    """
+    from pipeline.db import _static_loaded
+
     with conn.cursor() as cur:
         cur.execute(
             "SELECT static_url, static_strategy FROM agencies WHERE agency_id = %s",
@@ -34,13 +50,20 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
         logger.warning(f"[static_fetcher] no agency {agency_id}")
         return None
     static_url, strategy_name = row
+    has_timetable = _static_loaded(conn, agency_id)
     if not static_url or not strategy_name:
+        if not has_timetable:
+            raise StaticFetchError("this agency has no timetable URL or fetch method configured")
         logger.warning(f"[static_fetcher] agency={agency_id} not configured for static refresh")
         return None
 
     strategy = get_static_strategy(strategy_name)
-    zip_path = strategy.fetch(agency_id, static_url, dest_dir)
+    if not has_timetable and not force:
+        logger.info(f"[static_fetcher] agency={agency_id} has no timetable loaded; fetching past the manifest")
+    zip_path = strategy.fetch(agency_id, static_url, dest_dir, force=force or not has_timetable)
     if zip_path is None:
+        if not has_timetable:
+            raise StaticFetchError("the source sent no timetable, though this agency has none loaded")
         return None
 
     load_static(str(zip_path), agency_id, conn)
@@ -57,10 +80,6 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
     return zip_path
 
 
-class StaticRefreshFailed(RuntimeError):
-    """A timetable reload that found nothing newer for an agency with no timetable at all."""
-
-
 def refresh_static_recorded(
     agency_id: int,
     conn,
@@ -68,7 +87,7 @@ def refresh_static_recorded(
     *,
     requested_by: int | None = None,
     parent_run_id: int | None = None,
-    require_timetable: bool = False,
+    force: bool = False,
 ) -> Optional[pathlib.Path]:
     """:func:`refresh_static`, recorded as a ``static`` run.
 
@@ -77,21 +96,12 @@ def refresh_static_recorded(
     when the reload raised, so "last loaded" (a successful ``static`` run)
     means a load. A fetch that failed raises :class:`StaticFetchError`, whose
     reason becomes the row's error.
-
-    "Nothing newer" is measured against the strategy's change manifest on
-    disk, which can outlive the timetable tables. ``require_timetable`` turns
-    it into a failure when the agency has no timetable loaded at all, where
-    "nothing newer" leaves nothing to run against.
     """
-    from pipeline.db import _static_loaded
-
     with pipeline_runs.record_run(
         conn, "static", agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id
     ) as run:
-        loaded = refresh_static(agency_id, conn, dest_dir)
+        loaded = refresh_static(agency_id, conn, dest_dir, force=force)
         if loaded is None:
-            if require_timetable and not _static_loaded(conn, agency_id):
-                raise StaticRefreshFailed("the source has nothing newer, but this agency has no timetable loaded")
             run.status = "unchanged"
         else:
             with conn.cursor() as cur:
@@ -100,8 +110,9 @@ def refresh_static_recorded(
     return loaded
 
 
-def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
-    """Refresh static for every agency that has both static_url and static_strategy.
+def refresh_all(conn, dest_dir: pathlib.Path, *, force: bool = False) -> tuple[int, int, list[int]]:
+    """Refresh static for every agency that has both static_url and static_strategy,
+    forcing each fetch when ``force`` is set (see :func:`refresh_static`).
 
     Run-all-then-report, matching cmd_analyze_all/cmd_ingest_live: one
     agency's failure (a source that could not be fetched, a corrupt zip)
@@ -124,7 +135,7 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
     failed = []
     for aid in ids:
         try:
-            if refresh_static_recorded(aid, conn, dest_dir):
+            if refresh_static_recorded(aid, conn, dest_dir, force=force):
                 n_loaded += 1
         except StaticFetchError as e:
             logger.error(f"[static_fetcher] refresh failed for agency {aid}: {e}")

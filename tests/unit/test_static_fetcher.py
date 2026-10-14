@@ -355,6 +355,65 @@ def test_direct_url_a_fetch_running_beside_this_one_does_not_take_its_download(t
     assert not list((tmp_path / "8").glob("_tmp_*"))
 
 
+def _seed_loaded_manifest(tmp_path, body: bytes) -> None:
+    """A manifest saying ``body`` is the zip that last loaded, with the
+    validators the source answered it with."""
+    agency_dir = tmp_path / "8"
+    agency_dir.mkdir(parents=True)
+    loaded = {"sha256": hashlib.sha256(body).hexdigest(), "etag": "et1", "last_modified": "lm1"}
+    (agency_dir / "_manifest.json").write_text(json.dumps({"current": loaded, "latest": loaded}))
+
+
+def _conditional_headers(opened) -> list[tuple[str | None, str | None]]:
+    return [
+        (call.args[0].get_header("If-none-match"), call.args[0].get_header("If-modified-since"))
+        for call in opened.call_args_list
+    ]
+
+
+def test_direct_url_force_fetches_the_bytes_that_last_loaded_without_asking_for_changes(tmp_path):
+    """The manifest can outlive the timetable it describes, so a forced fetch
+    neither asks the source for changes since it nor compares against it."""
+    body = b"PK\x03\x04loaded"
+    _seed_loaded_manifest(tmp_path, body)
+    with patch.object(_opener, "open", side_effect=[_mock_response(body), _mock_response(body)]) as opened:
+        assert direct_url.fetch(8, _CURRENT, tmp_path) is None
+    assert _conditional_headers(opened) == [("et1", "lm1"), ("et1", "lm1")]
+
+    with patch.object(
+        _opener, "open", side_effect=[_mock_response(body, {"ETag": "et2"}), _mock_response(body)]
+    ) as opened:
+        result = direct_url.fetch(8, _CURRENT, tmp_path, force=True)
+    assert _conditional_headers(opened) == [(None, None), (None, None)]
+    assert result is not None
+    assert result.read_bytes() == body
+
+    direct_url.record_loaded(8, tmp_path, result)
+    manifest = json.loads((tmp_path / "8" / "_manifest.json").read_text())
+    assert manifest["current"]["etag"] == "et2"
+    assert manifest["current"]["sha256"] == hashlib.sha256(body).hexdigest()
+
+
+def test_direct_url_force_loads_latest_when_the_configured_url_fails(tmp_path):
+    """Forced, a 200 is a zip to load even when it holds the bytes that last
+    loaded, so latest.zip answering stands in for a failed configured URL."""
+    body = b"PK\x03\x04loaded"
+    _seed_loaded_manifest(tmp_path, body)
+    with patch.object(_opener, "open", side_effect=[_http_error(500), _mock_response(body)]):
+        result = direct_url.fetch(8, _CURRENT, tmp_path, force=True)
+    assert result is not None
+    assert result.read_bytes() == body
+
+
+def test_direct_url_force_that_downloads_nothing_persists_nothing(tmp_path):
+    """A source that answers 304 to a request with no validators sent nothing
+    to load, and an empty temp file is never persisted as a zip."""
+    _seed_loaded_manifest(tmp_path, b"PK\x03\x04loaded")
+    with patch.object(_opener, "open", side_effect=[_http_error(304), _http_error(404)]):
+        assert direct_url.fetch(8, _CURRENT, tmp_path, force=True) is None
+    assert not list((tmp_path / "8").glob("gtfs_static_*.zip"))
+
+
 _NOT_HTTP_URLS = [
     "8.8.8.8/static/8/current_data.zip?key=SECRET123",
     "user:SECRET123@8.8.8.8/static/8/current_data.zip",
@@ -427,6 +486,26 @@ def test_aomori_scrape_reports_no_change_for_the_bytes_that_last_loaded(tmp_path
     assert fetch(b"PK\x03\x04SCHEDULE-A") is None
     assert (tmp_path / "1" / "fetch_history.csv").read_text().count("\n") == history_lines
     assert fetch(b"PK\x03\x04SCHEDULE-B") is not None
+
+
+def test_aomori_scrape_force_returns_the_bytes_that_last_loaded(tmp_path):
+    html = b'<html><a href="downloads/gtfs-aomoricitybus-202605.zip">x</a></html>'
+    body = b"PK\x03\x04SCHEDULE-A"
+    sha = hashlib.sha256(body).hexdigest()
+    agency_dir = tmp_path / "1"
+    agency_dir.mkdir()
+    (agency_dir / "_manifest.json").write_text(json.dumps({"sha256": sha}))
+
+    def fetch(**kwargs):
+        with patch.object(_opener, "open", side_effect=[_mock_response(html), _mock_response(body)]):
+            return aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path, **kwargs)
+
+    assert fetch() is None
+    result = fetch(force=True)
+    assert result is not None
+    assert result.read_bytes() == body
+    aomori_index_scrape.record_loaded(1, tmp_path, result)
+    assert json.loads((agency_dir / "_manifest.json").read_text()) == {"sha256": sha}
 
 
 def test_aomori_scrape_persisted_history_redacts_scraped_zip_url_query_string(tmp_path):
@@ -541,7 +620,7 @@ def test_refresh_static_records_a_zip_only_once_it_has_loaded(tmp_path, monkeypa
         recorded: list = []
 
         @staticmethod
-        def fetch(agency_id, url, dest_dir):
+        def fetch(agency_id, url, dest_dir, *, force=False):
             return tmp_path / "gtfs_static_20261001.zip"
 
         @staticmethod
@@ -576,7 +655,7 @@ def test_refresh_static_still_reports_success_when_recording_the_load_fails(tmp_
 
     class _Strategy:
         @staticmethod
-        def fetch(agency_id, url, dest_dir):
+        def fetch(agency_id, url, dest_dir, *, force=False):
             return tmp_path / "gtfs_static_20261001.zip"
 
         @staticmethod
@@ -590,3 +669,105 @@ def test_refresh_static_still_reports_success_when_recording_the_load_fails(tmp_
 
     result = static_fetcher.refresh_static(8, conn, tmp_path)
     assert result == tmp_path / "gtfs_static_20261001.zip"
+
+
+class _ManifestSaysUnchanged:
+    """A source whose bytes match the manifest: only a forced fetch returns a zip."""
+
+    def __init__(self, zip_path):
+        self.zip_path = zip_path
+        self.forced: list[bool] = []
+
+    def fetch(self, agency_id, url, dest_dir, *, force=False):
+        self.forced.append(force)
+        return self.zip_path if force else None
+
+    def record_loaded(self, agency_id, dest_dir, zip_path):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("has_timetable", "force", "loads"),
+    [
+        pytest.param(False, False, True, id="no timetable loaded forces the fetch"),
+        pytest.param(True, False, False, id="a loaded timetable keeps the manifest's answer"),
+        pytest.param(True, True, True, id="force=True forces the fetch"),
+    ],
+)
+def test_refresh_static_forces_the_fetch_when_asked_or_when_no_timetable_is_loaded(
+    tmp_path, monkeypatch, has_timetable, force, loads
+):
+    """The manifest can outlive the timetable tables, so its "nothing newer"
+    holds only for an agency that still has a timetable loaded."""
+    from pipeline import db, static_fetcher
+
+    strategy = _ManifestSaysUnchanged(tmp_path / "gtfs_static_20261015.zip")
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
+    loaded: list[str] = []
+    monkeypatch.setattr(static_fetcher, "load_static", lambda path, _agency_id, _conn: loaded.append(path))
+
+    result = static_fetcher.refresh_static(8, conn, tmp_path, force=force)
+
+    assert strategy.forced == [loads]
+    assert result == (strategy.zip_path if loads else None)
+    assert loaded == ([str(strategy.zip_path)] if loads else [])
+
+
+class _SourceSendsNothing:
+    """A source that answers 304 even to a request carrying no validators."""
+
+    def __init__(self):
+        self.forced: list[bool] = []
+
+    def fetch(self, agency_id, url, dest_dir, *, force=False):
+        self.forced.append(force)
+        return None
+
+    def record_loaded(self, agency_id, dest_dir, zip_path):
+        raise AssertionError("nothing loaded, so nothing is recorded")
+
+
+def _agency_conn(static_url, static_strategy):
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (static_url, static_strategy)
+    return conn
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_refresh_static_fails_when_an_agency_with_no_timetable_still_loads_none(tmp_path, monkeypatch, force):
+    """ "Nothing newer" for an agency with no timetable leaves it with nothing
+    to run against, which the run card has to show as a failure."""
+    from pipeline import db, static_fetcher
+
+    strategy = _SourceSendsNothing()
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: False)
+    monkeypatch.setattr(static_fetcher, "load_static", MagicMock(side_effect=AssertionError("nothing to load")))
+
+    with pytest.raises(StaticFetchError) as exc:
+        static_fetcher.refresh_static(8, _agency_conn("https://8.8.8.8/x.zip", "direct_url"), tmp_path, force=force)
+    assert strategy.forced == [True]
+    assert exc.value.reason == "the source sent no timetable, though this agency has none loaded"
+
+
+@pytest.mark.parametrize(("static_url", "static_strategy"), [(None, "direct_url"), ("https://8.8.8.8/x.zip", None)])
+def test_refresh_static_of_an_agency_with_no_source_fails_only_without_a_timetable(
+    tmp_path, monkeypatch, static_url, static_strategy
+):
+    """An agency whose source was cleared keeps the timetable it has, so a
+    reload is a no-op; with none loaded it is a failure, not "unchanged"."""
+    from pipeline import db, static_fetcher
+
+    has_timetable = {"value": True}
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable["value"])
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", MagicMock(side_effect=AssertionError("no fetch")))
+
+    assert static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path) is None
+
+    has_timetable["value"] = False
+    with pytest.raises(StaticFetchError) as exc:
+        static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path)
+    assert exc.value.reason == "this agency has no timetable URL or fetch method configured"

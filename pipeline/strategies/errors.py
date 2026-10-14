@@ -20,7 +20,8 @@ FETCH_ERRORS: tuple[type[BaseException], ...] = (OSError, http.client.HTTPExcept
 
 
 class StaticFetchError(RuntimeError):
-    """A timetable fetch that failed, so it cannot say whether anything is newer.
+    """A timetable fetch that failed, so it cannot say whether anything is newer,
+    or a reload that leaves an agency with no timetable loaded at all.
 
     ``reason`` is one operator-readable line. The run card and the logs show
     it as is, so every URL in it is redacted when it is built.
