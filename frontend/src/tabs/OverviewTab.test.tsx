@@ -71,6 +71,13 @@ describe("OverviewTab", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Pulse" })).toBeInTheDocument();
   });
 
+  it("puts the scope sentence in the heading's column, with its saved views and pin on the heading's row", () => {
+    renderOverview(summary());
+    const heading = screen.getByRole("heading", { level: 1, name: "Pulse" });
+    expect(heading.closest(".ov-page-head")).toContainElement(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(heading.closest("header")).toContainElement(screen.getByRole("button", { name: "Show all filters" }));
+  });
+
   it("states its scope as a sentence, greying what the summary did not use", () => {
     renderOverview(
       { ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary,

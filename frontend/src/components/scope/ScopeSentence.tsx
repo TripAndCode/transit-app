@@ -1,7 +1,16 @@
-import { useId, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { use, useId, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useScopeSummary } from "../../api/hooks";
-import { SCOPE_EXTRAS_NONE, presetScopePatch, useScope, type Scope, type ScopePatch } from "../../api/scope";
+import {
+  DataEndContext,
+  SCOPE_EXTRAS_NONE,
+  defaultPeriod,
+  presetScopePatch,
+  useScope,
+  type Scope,
+  type ScopePatch,
+} from "../../api/scope";
 import { useAgencyId } from "../../api/useAgencyId";
 import type { ScopeSummary } from "../../api/types";
 import { useRouteNames } from "../../api/useRouteNames";
@@ -9,7 +18,16 @@ import { PresetMenu } from "../PresetMenu";
 import { CONTROLS } from "./controlForToken";
 import { ScopePopover } from "./ScopePopover";
 import { readScopePinned, writeScopePinned } from "./scopePin";
-import { scopeTokens, sentenceParts, type ScopeField, type ScopeToken, type TokenKey } from "./scopePhrases";
+import {
+  periodDays,
+  scopeTokens,
+  sentenceParts,
+  tokenChanged,
+  type ScopeField,
+  type ScopeToken,
+  type TokenKey,
+} from "./scopePhrases";
+import { useScopeActionsSlot } from "./scopeSlot";
 import "./scope.css";
 
 /** Keyed by URL param name, as the API reports it (api/scope_applied.py). */
@@ -35,20 +53,6 @@ const DATA_KEYS: ReadonlySet<TokenKey> = new Set(["routes", "period", "days", "s
 
 /** Punctuation that must not start a line: it stays with the token before it. */
 const TRAILING_PUNCT = /^[、。・，,]+/; // i18n-ignore: punctuation set, not copy
-
-function differsFromDefault(scope: Scope): boolean {
-  return (
-    scope.dow !== "all" ||
-    scope.time_band !== "all" ||
-    scope.service !== "all" ||
-    scope.routes.length > 0 ||
-    scope.hour != null ||
-    scope.stop != null ||
-    scope.dir != null ||
-    scope.late != null ||
-    scope.early != null
-  );
-}
 
 /** Whether a condition narrows anything. A condition at its default filters
  *  nothing, so a screen ignoring it is not worth striking through. */
@@ -79,6 +83,8 @@ function removesOpen(open: ConditionKey | null, patch: ScopePatch): boolean {
 
 function Token({
   token,
+  hint,
+  on,
   off,
   describedBy,
   open,
@@ -89,6 +95,8 @@ function Token({
   summary,
 }: {
   token: ScopeToken & { key: ConditionKey };
+  hint: string | null;
+  on: boolean;
   off: boolean;
   describedBy: string;
   open: boolean;
@@ -115,14 +123,20 @@ function Token({
       <button
         ref={ref}
         type="button"
-        className={off ? "scope-token scope-token--off" : "scope-token"}
+        className={off ? "scope-token scope-token--off" : on ? "scope-token scope-token--on" : "scope-token"}
         aria-expanded={open}
         aria-haspopup="dialog"
         title={off ? t("scope.unapplied") : undefined}
         aria-describedby={off ? describedBy : undefined}
         onClick={onToggle}
       >
-        {token.label}
+        <span className="scope-token__label">{token.label}</span>
+        {hint != null && (
+          <>
+            {" "}
+            <span className="scope-token__hint">{hint}</span>
+          </>
+        )}
       </button>
       {open && (
         <ScopePopover label={t(`scope.popover.${token.key}`)} onClose={onClose} returnFocusTo={ref}>
@@ -133,27 +147,37 @@ function Token({
   );
 }
 
-/** The scope as one sentence. Each condition is a button that opens its own
- *  control; changes apply at once. A set condition the screen's data did not
- *  use (`applied[field] === false`) renders struck through; an absent
- *  `applied` means every condition was used. */
+/** The scope as one sentence. Each condition is a chip that opens its own
+ *  control; changes apply at once, and a chip changed from the default is
+ *  marked. A set condition the screen's data did not use
+ *  (`applied[field] === false`) renders struck through instead; an absent
+ *  `applied` means every condition was used. The saved views and the pin go
+ *  on the page heading's row when the page has a ScopePageHeader, and beside
+ *  the sentence otherwise. */
 export function ScopeSentence({ applied }: { applied?: Applied }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const [scope, update] = useScope();
   const { data: agencies } = useAgencies();
+  const dataEnd = use(DataEndContext);
+  const slot = useScopeActionsSlot();
   const names = useRouteNames(id);
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
   const [pinned, setPinned] = useState(readScopePinned);
   const sectionRef = useRef<HTMLElement>(null);
   const unappliedId = useId();
   const agencyName = agencies?.find((a) => a.agency_id === id)?.agency_name ?? "";
-  const tokens = scopeTokens(scope, {
+  const phrases = {
     t,
     agencyName,
     routeLabel: names.format,
-    routeGroup: (code) => names.data.get(code),
-  });
+    routeGroup: (code: string) => names.data.get(code),
+  };
+  const tokens = scopeTokens(scope, phrases);
+  // The data's last day, which ends the default period, arrives with the
+  // agencies; until then the period is not judged against a guess.
+  const resetPeriod = agencies ? defaultPeriod(dataEnd) : null;
+  const changed = tokens.some((tok) => tokenChanged(tok.key, scope, resetPeriod));
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
@@ -192,6 +216,8 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
       <span key={key} className="scope-nowrap">
         <Token
           token={token}
+          hint={key === "period" ? t("scope.period_days", { count: periodDays(scope) }) : null}
+          on={tokenChanged(key, scope, resetPeriod)}
           off={isOff(token)}
           describedBy={unappliedId}
           open={open === key}
@@ -234,6 +260,13 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
     if (punct && next && "text" in next) runs[i + 1] = { text: next.text.slice(punct.length) };
     nodes.push(renderToken(run.token, punct));
   }
+  if (changed) {
+    nodes.push(
+      <button key="reset" type="button" className="scope-reset" aria-label={t("scope.reset")} onClick={reset}>
+        {t("scope.reset_short")}
+      </button>,
+    );
+  }
 
   function togglePinned() {
     const next = !pinned;
@@ -248,6 +281,23 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
     (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && isOff({ ...tok, key: tok.key }),
   );
 
+  const actions = (
+    <>
+      {id != null && (
+        <PresetMenu
+          agencyId={id}
+          currentRangeCtx={scope}
+          phrases={phrases}
+          defaultPeriod={resetPeriod}
+          onSelect={(rc) => update(presetScopePatch(rc))}
+        />
+      )}
+      <button type="button" className="scope-pill" aria-pressed={pinned} onClick={togglePinned}>
+        {t("scope.pin")}
+      </button>
+    </>
+  );
+
   return (
     <section ref={sectionRef} tabIndex={-1} aria-label={t("scope.label")} className="scope">
       <div className="scope-row">
@@ -256,19 +306,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
         <span id={unappliedId} className="scope-sr-only">
           {t("scope.unapplied")}
         </span>
-        <div className="scope-actions">
-          {id != null && (
-            <PresetMenu agencyId={id} currentRangeCtx={scope} onSelect={(rc) => update(presetScopePatch(rc))} />
-          )}
-          {differsFromDefault(scope) && (
-            <button type="button" className="scope-pill" onClick={reset}>
-              {t("scope.reset")}
-            </button>
-          )}
-          <button type="button" className="scope-pill" aria-pressed={pinned} onClick={togglePinned}>
-            {t("scope.pin")}
-          </button>
-        </div>
+        {slot ? createPortal(actions, slot) : <div className="scope-actions">{actions}</div>}
       </div>
       {/* The struck-through tokens' reason, in words: a title tooltip alone
           never reaches touch screens. */}

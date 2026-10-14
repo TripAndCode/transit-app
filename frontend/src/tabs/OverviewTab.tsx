@@ -20,7 +20,7 @@ import { RevealSection } from "../components/overview/RevealSection";
 import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
-import { PageHeader } from "../components/ui/PageHeader";
+import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { prefersReducedMotion } from "../utils/motion";
 
@@ -144,9 +144,13 @@ export function OverviewTab() {
   };
 
   return (
-    <>
-      <div className="ov-page-head"><PageHeader title={t("nav.pulse")} /></div>
-      <ScopeSentence applied={query.data?.scope_applied} />
+    <ScopeHeaderProvider>
+      {/* The heading and the sentence share the page's column, so they line
+          up with each other and with the cards below. */}
+      <div className="ov-page-head">
+        <ScopePageHeader title={t("nav.pulse")} />
+        <ScopeSentence applied={query.data?.scope_applied} />
+      </div>
       <div className="ov-page">
         <AsyncSection
           loading={isPending}
@@ -267,6 +271,6 @@ export function OverviewTab() {
           onClose={() => setPeakHourSel(null)}
         />
       )}
-    </>
+    </ScopeHeaderProvider>
   );
 }

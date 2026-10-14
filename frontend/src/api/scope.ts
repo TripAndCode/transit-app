@@ -182,6 +182,14 @@ export function presetScopePatch(rangeCtx: Record<string, unknown>): ScopePatch 
   return { ...SCOPE_EXTRAS_NONE, ...rangeCtx } as ScopePatch;
 }
 
+/** The whole scope picking a stored preset leads to from `current`. A preset
+ *  stored before a field existed, or holding a value no longer valid, reads
+ *  back the way applying it would. */
+export function scopeAfterPreset(current: Scope, rangeCtx: Record<string, unknown>): Scope {
+  const next = applyScopePatch(new URLSearchParams(scopeToQueryString(current)), presetScopePatch(rangeCtx));
+  return parseScope(next, { from: current.from, to: current.to });
+}
+
 export const DEFAULT_RANGE_DAYS = 30;
 
 /** JST is the only timezone the server uses (see api/main.py _init_connection). */
