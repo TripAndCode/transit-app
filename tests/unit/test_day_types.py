@@ -153,6 +153,20 @@ def test_a_two_class_feed_folds_fallback_weekends_into_its_weekend_bucket():
     assert types.of(date(2026, 9, 21)) == "weekend_holiday"  # past end_date: a public holiday
 
 
+def test_a_window_outside_a_two_class_calendar_keeps_two_buckets():
+    """A window the loaded feed does not reach (before it starts, or history
+    after the next feed replaced it) still splits the agency the way its
+    calendar does."""
+    services = [
+        WeeklyService("平日", WEEKDAYS, CAL_START, CAL_END),
+        WeeklyService("土日祝", WEEKEND, CAL_START, CAL_END),
+    ]
+    types = resolve_day_types(date(2026, 6, 1), date(2026, 6, 7), services, [], {})
+    assert types.buckets == TWO_WAY
+    assert types.of(date(2026, 6, 6)) == "weekend_holiday"  # Saturday, by the weekday rule
+    assert types.of(date(2026, 6, 5)) == "weekday"
+
+
 def test_dates_the_calendar_does_not_cover_fall_back_to_the_weekday_rule():
     services = [WeeklyService(s.service_id, s.days, CAL_START, date(2026, 9, 15)) for s in _hiroshima_like()]
     types = resolve_day_types(date(2026, 9, 14), date(2026, 9, 21), services, [], TRIPS)

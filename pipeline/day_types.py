@@ -137,12 +137,14 @@ def resolve_day_types(
     and a removal wins over the weekly flags. ``trips`` is each service's trip
     count, the weight of its vote.
 
-    The buckets are 平日 / 土日祝 when the calendar's services overlapping the
-    window include a Saturday-and-Sunday class but no Saturday-only one, and
-    平日 / 土曜 / 日祝 otherwise, including when no calendar is loaded. They are
-    read from the services rather than from the dates the window resolved to,
-    so a window of weekdays alone, or dates outside the calendar's range,
-    cannot change how an agency is split. Under two buckets a 土曜 or 日祝 date
+    The buckets are 平日 / 土日祝 when the calendar's services include a
+    Saturday-and-Sunday class but no Saturday-only one, and 平日 / 土曜 / 日祝
+    otherwise, including when no calendar is loaded. The services read are
+    those overlapping the window, or every loaded one when none does (a window
+    before or after the loaded feed's range). They are read from the services
+    rather than from the dates the window resolved to, so a window of weekdays
+    alone, or dates outside the calendar's range, cannot change how an agency
+    is split. Under two buckets a 土曜 or 日祝 date
     (from the weekday rule, or a feed's Sunday-only service) folds into 土日祝;
     under three a 土日祝 date is 土曜 on a Saturday that is not a public holiday
     and 日祝 otherwise.
@@ -158,7 +160,7 @@ def resolve_day_types(
         elif exception_type == 2:
             removed[d].add(service_id)
 
-    window_classes = {classes[s.service_id] for s in in_window}
+    window_classes = {classes[s.service_id] for s in in_window or weekly}
     window_classes |= {classes.get(sid) for d, sids in added.items() if from_date <= d <= to_date for sid in sids}
     two_way = "weekend_holiday" in window_classes and "saturday" not in window_classes
 
