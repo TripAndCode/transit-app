@@ -11,6 +11,7 @@ from typing import Optional
 from pipeline import runs as pipeline_runs
 from pipeline.static_loader import load_static
 from pipeline.strategies import get_static_strategy
+from pipeline.strategies.errors import StaticFetchError
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,8 @@ DEFAULT_STATIC_DEST = "raw_archives_static"
 
 
 def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]:
-    """Refresh static GTFS for one agency. Returns the loaded zip path or None."""
+    """Refresh static GTFS for one agency. Returns the loaded zip path, or
+    None when nothing is newer; the strategy's StaticFetchError propagates."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT static_url, static_strategy FROM agencies WHERE agency_id = %s",
@@ -56,7 +58,7 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
 
 
 class StaticRefreshFailed(RuntimeError):
-    """A timetable reload that left the agency with no timetable at all."""
+    """A timetable reload that found nothing newer for an agency with no timetable at all."""
 
 
 def refresh_static_recorded(
@@ -71,15 +73,15 @@ def refresh_static_recorded(
     """:func:`refresh_static`, recorded as a ``static`` run.
 
     The row closes ``ok`` with the loaded timetable's route count when a zip
-    loaded, ``unchanged`` when none did, and ``error`` when the reload
-    raised, so "last loaded" (a successful ``static`` run) means a load.
+    loaded, ``unchanged`` when the source had nothing newer, and ``error``
+    when the reload raised, so "last loaded" (a successful ``static`` run)
+    means a load. A fetch that failed raises :class:`StaticFetchError`, whose
+    reason becomes the row's error.
 
-    ``unchanged`` covers more than "nothing newer": the strategies log and
-    swallow a fetch that failed (an HTTP error, a network error, a URL the
-    SSRF guard rejected) and return None for it exactly as for an unchanged
-    zip, so the two cannot be told apart from here. ``require_timetable``
-    turns that case into a failure when the agency has no timetable loaded
-    at all, where "nothing newer" has nothing to mean.
+    "Nothing newer" is measured against the strategy's change manifest on
+    disk, which can outlive the timetable tables. ``require_timetable`` turns
+    it into a failure when the agency has no timetable loaded at all, where
+    "nothing newer" leaves nothing to run against.
     """
     from pipeline.db import _static_loaded
 
@@ -89,7 +91,7 @@ def refresh_static_recorded(
         loaded = refresh_static(agency_id, conn, dest_dir)
         if loaded is None:
             if require_timetable and not _static_loaded(conn, agency_id):
-                raise StaticRefreshFailed("no timetable could be fetched from the agency's static URL")
+                raise StaticRefreshFailed("the source has nothing newer, but this agency has no timetable loaded")
             run.status = "unchanged"
         else:
             with conn.cursor() as cur:
@@ -102,7 +104,7 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
     """Refresh static for every agency that has both static_url and static_strategy.
 
     Run-all-then-report, matching cmd_analyze_all/cmd_ingest_live: one
-    agency's failure (network error, a rejected static_url, a corrupt zip)
+    agency's failure (a source that could not be fetched, a corrupt zip)
     does not abort the rest, and every failure is collected and returned
     (alongside the attempted total) so the caller can exit nonzero and log
     an "N of M failed" line instead of reporting a partial run as a full
@@ -124,6 +126,10 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, int, list[int]]:
         try:
             if refresh_static_recorded(aid, conn, dest_dir):
                 n_loaded += 1
+        except StaticFetchError as e:
+            logger.error(f"[static_fetcher] refresh failed for agency {aid}: {e}")
+            conn.rollback()
+            failed.append(aid)
         except Exception:
             logger.exception(f"[static_fetcher] refresh failed for agency {aid}")
             conn.rollback()

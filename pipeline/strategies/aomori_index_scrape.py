@@ -11,12 +11,12 @@ import json
 import logging
 import pathlib
 import re
-import urllib.error
 import urllib.parse
 from datetime import datetime
 from typing import Optional
 
-from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
+from pipeline.strategies.errors import FETCH_ERRORS, StaticFetchError, fetch_failed
+from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,10 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for Aomori.
 
-    Returns the path of the zip ready for load_static, or None on failure
-    or when the download is byte-identical to the last zip that loaded.
+    Returns the path of the zip ready for load_static, or None when the
+    download is byte-identical to the last zip that loaded. Raises
+    StaticFetchError when the index page or the zip could not be fetched,
+    the page links no timetable, or the download is not a zip.
     Idempotent same-day overwrite (matches existing shell behaviour).
     """
     agency_dir = dest_dir / str(agency_id)
@@ -51,21 +53,12 @@ def fetch(
     try:
         with safe_urlopen(index_url, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
-        logger.warning(f"[aomori_index_scrape] failed to fetch index {_redact_url(index_url)}: {e}")
-        return None
-    except FeedURLError as e:
-        # SSRF guard rejection (invalid scheme/host, or a redirect into a
-        # blocked host) — not a URLError, so it needs its own clause. Logged
-        # louder than a network blip since it's security-relevant, but still
-        # degrades to a no-op rather than aborting the caller's whole run.
-        logger.error(f"[aomori_index_scrape] SSRF guard rejected index {_redact_url(index_url)}: {e}")
-        return None
+    except FETCH_ERRORS as e:
+        raise fetch_failed(index_url, e) from e
 
     m = _HREF_RE.search(html)
     if not m:
-        logger.warning("[aomori_index_scrape] gtfs-aomoricitybus*.zip href not found")
-        return None
+        raise StaticFetchError(f"no gtfs-aomoricitybus*.zip link on the index page {_redact_url(index_url)}")
     zip_url = _resolve(m.group(1), index_url)
 
     day = datetime.now().strftime("%Y%m%d")
@@ -73,16 +66,11 @@ def fetch(
     try:
         with safe_urlopen(zip_url, timeout=60) as resp:
             data = resp.read()
-    except urllib.error.URLError as e:
-        logger.warning(f"[aomori_index_scrape] failed to fetch zip {_redact_url(zip_url)}: {e}")
-        return None
-    except FeedURLError as e:
-        logger.error(f"[aomori_index_scrape] SSRF guard rejected scraped zip_url {_redact_url(zip_url)}: {e}")
-        return None
+    except FETCH_ERRORS as e:
+        raise fetch_failed(zip_url, e) from e
 
     if data[:2] != b"PK":
-        logger.warning("[aomori_index_scrape] downloaded file is not a ZIP (missing PK header)")
-        return None
+        raise StaticFetchError(f"{_redact_url(zip_url)} is not a zip file (no PK header)")
 
     # Reloading identical bytes would rewrite every static table and mint a
     # new static_version_id for unchanged content.

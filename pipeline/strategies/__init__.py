@@ -15,7 +15,9 @@ Each ingest strategy module exposes:
 Each static strategy module exposes:
     fetch(agency_id: int, static_url: str, dest_dir: pathlib.Path) -> Optional[pathlib.Path]
         Returns the path of a freshly persisted GTFS zip ready for load_static,
-        or None on no change or failure.
+        or None when the source has nothing newer. Raises
+        pipeline.strategies.errors.StaticFetchError when the fetch failed, so
+        a dead source never reads as an unchanged one.
     record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path) -> None
         Called once load_static has committed the zip fetch() returned. "No
         change" means no change since the last zip that loaded, so a strategy

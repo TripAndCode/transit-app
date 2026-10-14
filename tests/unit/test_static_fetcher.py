@@ -11,11 +11,12 @@ style) so validate_feed_url's DNS resolution never leaves the sandbox.
 
 import json
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
 from pipeline.strategies import aomori_index_scrape, direct_url
+from pipeline.strategies.errors import StaticFetchError
 from pipeline.url_guard import FeedURLError, _opener
 
 # ── direct_url ────────────────────────────────────────────────────────────────
@@ -126,40 +127,132 @@ def test_direct_url_304_returns_none(tmp_path):
     assert result is None
 
 
-def test_direct_url_network_failure_returns_none(tmp_path):
-    from urllib.error import URLError
+_CURRENT = "https://8.8.8.8/static/8/current_data.zip"
 
+
+def _http_error(code: int) -> HTTPError:
+    return HTTPError("u", code, "status", {}, None)  # type: ignore[arg-type]
+
+
+def _seed_direct_url_manifest(tmp_path):
+    agency_dir = tmp_path / "8"
+    agency_dir.mkdir(parents=True)
+    (agency_dir / "_manifest.json").write_text(
+        json.dumps({"current": {"sha256": "x", "etag": "e"}, "latest": {"sha256": "x", "etag": "e"}})
+    )
+
+
+@pytest.mark.parametrize("code", [404, 500])
+def test_direct_url_http_error_on_both_variants_raises_with_the_status(tmp_path, code):
+    """A failed fetch is not "nothing newer": an agency with a timetable
+    already loaded would otherwise read a dead URL as an up-to-date one."""
+    _seed_direct_url_manifest(tmp_path)
+    with patch.object(_opener, "open", side_effect=[_http_error(code), _http_error(code)]):
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, _CURRENT, tmp_path)
+    assert f"HTTP {code}" in exc.value.reason
+    assert "current_data.zip" in exc.value.reason
+
+
+def test_direct_url_network_failure_raises(tmp_path):
     with patch.object(_opener, "open", side_effect=URLError("dns")):
-        result = direct_url.fetch(8, "https://8.8.8.8/static/8/current_data.zip", tmp_path)
-    assert result is None
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, _CURRENT, tmp_path)
+    assert "network error" in exc.value.reason
+    assert "dns" in exc.value.reason
 
 
-def test_direct_url_ssrf_rejection_degrades_gracefully(tmp_path):
-    """FeedURLError (e.g. a redirect into a blocked host, or the size cap)
-    must degrade like a network failure - log and return None - not
-    propagate and abort the whole agency's static refresh. FeedURLError is
-    a ValueError, not a URLError, so it needs its own except clause."""
+def test_direct_url_read_timeout_raises_as_a_network_error(tmp_path):
+    """A timeout or reset while the body is read surfaces as OSError, not
+    URLError, and is the same network failure."""
+    with patch.object(_opener, "open", side_effect=TimeoutError("timed out")):
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, _CURRENT, tmp_path)
+    assert "TimeoutError" in exc.value.reason
+
+
+def test_direct_url_ssrf_rejection_raises(tmp_path):
+    """FeedURLError (e.g. a redirect into a blocked host, or the size cap) is
+    a ValueError, not a URLError, so it needs its own clause to read as a
+    failed fetch rather than escaping as an unexplained crash."""
     with patch("pipeline.strategies.direct_url.safe_urlopen", side_effect=FeedURLError("blocked")):
-        result = direct_url.fetch(8, "https://8.8.8.8/static/8/current_data.zip", tmp_path)
-    assert result is None
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, _CURRENT, tmp_path)
+    assert "rejected" in exc.value.reason
+    assert "blocked" in exc.value.reason
 
 
 def test_direct_url_rejects_unsafe_static_url(tmp_path):
     """static_url must be SSRF-validated exactly like feed_url is: it is just
     as admin-supplied a fetch target. No opener mock here: a real blocked-host
-    rejection must happen before any fetch is attempted, and (like a
-    network failure) degrades to a no-op rather than raising out of fetch()."""
-    result = direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/", tmp_path)
-    assert result is None
+    rejection must happen before any fetch is attempted."""
+    with patch.object(_opener, "open") as opened:
+        with pytest.raises(StaticFetchError):
+            direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/", tmp_path)
+    opened.assert_not_called()
 
 
-def test_direct_url_ssrf_rejection_log_does_not_leak_query_string(tmp_path, caplog):
+def test_direct_url_ssrf_rejection_does_not_leak_query_string(tmp_path, caplog):
     """static_url routinely carries an API key in the query string (ODPT and
-    similar JP GTFS providers) - a rejected fetch must not write it to the
-    log at ERROR level."""
-    result = direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/?acl:consumerKey=SECRET123", tmp_path)
-    assert result is None
+    similar JP GTFS providers). The reason is logged and shown on the admin
+    run card, so it must not carry the key."""
+    with pytest.raises(StaticFetchError) as exc:
+        direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/?acl:consumerKey=SECRET123", tmp_path)
+    assert "SECRET123" not in str(exc.value)
     assert "SECRET123" not in caplog.text
+
+
+def test_direct_url_http_error_reason_does_not_leak_query_string(tmp_path):
+    with patch.object(_opener, "open", side_effect=[_http_error(403), _http_error(403)]):
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, f"{_CURRENT}?key=SECRET123", tmp_path)
+    assert "SECRET123" not in str(exc.value)
+
+
+def test_direct_url_latest_failing_beside_a_current_304_is_still_no_change(tmp_path, caplog):
+    """latest.zip is derived from the configured URL, and not every host
+    publishes one: its failure alone says nothing about the timetable."""
+    _seed_direct_url_manifest(tmp_path)
+    with patch.object(_opener, "open", side_effect=[_http_error(304), _http_error(404)]):
+        assert direct_url.fetch(8, _CURRENT, tmp_path) is None
+    assert "latest.zip" in caplog.text
+    assert "HTTP 404" in caplog.text
+
+
+def test_direct_url_latest_failing_beside_a_new_current_loads_current(tmp_path):
+    body = b"PK\x03\x04current"
+    with patch.object(_opener, "open", side_effect=[_mock_response(body), _http_error(404)]):
+        result = direct_url.fetch(8, _CURRENT, tmp_path)
+    assert result is not None
+    assert result.read_bytes() == body
+
+
+def test_direct_url_configured_url_failing_beside_a_latest_304_raises(tmp_path):
+    """The configured URL is the agency's timetable source: a dead one is a
+    failure even when the derived latest.zip has nothing newer."""
+    _seed_direct_url_manifest(tmp_path)
+    with patch.object(_opener, "open", side_effect=[_http_error(404), _http_error(304)]):
+        with pytest.raises(StaticFetchError) as exc:
+            direct_url.fetch(8, _CURRENT, tmp_path)
+    assert "HTTP 404" in exc.value.reason
+    assert "current_data.zip" in exc.value.reason
+
+
+def test_direct_url_configured_url_failing_beside_a_new_latest_loads_latest(tmp_path, caplog):
+    _seed_direct_url_manifest(tmp_path)
+    body = b"PK\x03\x04latest"
+    with patch.object(_opener, "open", side_effect=[_http_error(404), _mock_response(body)]):
+        result = direct_url.fetch(8, _CURRENT, tmp_path)
+    assert result is not None
+    assert result.read_bytes() == body
+    assert "current_data.zip" in caplog.text
+
+
+def test_direct_url_does_not_read_a_temp_file_left_by_an_earlier_run_as_a_download(tmp_path):
+    _seed_direct_url_manifest(tmp_path)
+    (tmp_path / "8" / "_tmp_current.zip").write_bytes(b"PK\x03\x04half-written")
+    with patch.object(_opener, "open", side_effect=[_http_error(304), _http_error(304)]):
+        assert direct_url.fetch(8, _CURRENT, tmp_path) is None
 
 
 # ── aomori_index_scrape ───────────────────────────────────────────────────────
@@ -230,16 +323,41 @@ def test_aomori_scrape_rejects_unsafe_index_url(tmp_path):
     """index_url itself must be SSRF-validated too, not just the scraped
     zip_url - symmetric with direct_url.py's coverage of both fetch legs.
     No opener mock: the rejection must happen before any fetch is attempted."""
-    assert aomori_index_scrape.fetch(1, "http://169.254.169.254/latest/meta-data/", tmp_path) is None
+    with pytest.raises(StaticFetchError) as exc:
+        aomori_index_scrape.fetch(1, "http://169.254.169.254/latest/meta-data/?key=SECRET123", tmp_path)
+    assert "rejected" in exc.value.reason
+    assert "SECRET123" not in str(exc.value)
 
 
-def test_aomori_scrape_no_href_returns_none(tmp_path):
+@pytest.mark.parametrize("code", [404, 500])
+def test_aomori_scrape_index_http_error_raises_with_the_status(tmp_path, code):
+    with patch.object(_opener, "open", side_effect=HTTPError("u", code, "status", {}, None)):  # type: ignore[arg-type]
+        with pytest.raises(StaticFetchError) as exc:
+            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert f"HTTP {code}" in exc.value.reason
+    assert "index.html" in exc.value.reason
+
+
+def test_aomori_scrape_zip_network_error_raises(tmp_path):
+    html = b'<html><a href="downloads/gtfs-aomoricitybus-202605.zip">x</a></html>'
+    with patch.object(_opener, "open", side_effect=[_mock_response(html), URLError("connection refused")]):
+        with pytest.raises(StaticFetchError) as exc:
+            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert "network error" in exc.value.reason
+    assert "gtfs-aomoricitybus-202605.zip" in exc.value.reason
+
+
+def test_aomori_scrape_index_page_without_a_timetable_link_raises(tmp_path):
+    """A page that no longer links the zip is a moved or redesigned source,
+    not a timetable that has not changed."""
     html = b"<html>no link</html>"
     with patch.object(_opener, "open", return_value=_mock_response(html)):
-        assert aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path) is None
+        with pytest.raises(StaticFetchError) as exc:
+            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert "link" in exc.value.reason
 
 
-def test_aomori_scrape_non_zip_body_returns_none(tmp_path):
+def test_aomori_scrape_non_zip_body_raises(tmp_path):
     html = b'<html><a href="downloads/gtfs-aomoricitybus.zip">x</a></html>'
     not_zip = b"<html>oops</html>"
     with patch.object(
@@ -250,18 +368,21 @@ def test_aomori_scrape_non_zip_body_returns_none(tmp_path):
             _mock_response(not_zip),
         ],
     ):
-        assert aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path) is None
+        with pytest.raises(StaticFetchError) as exc:
+            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert "not a zip" in exc.value.reason
 
 
 def test_aomori_scrape_rejects_zip_url_scraped_to_a_blocked_host(tmp_path):
     """The zip_url isn't admin-configured - it's scraped out of index_url's
     own HTML - so it must be validated exactly like any other fetch target,
-    scheme included, before anything is fetched from it. Degrades
-    gracefully (like a network failure) rather than raising out of fetch(),
-    matching the sibling except clauses in the same function."""
+    scheme included, before anything is fetched from it."""
     html = b'<html><a href="http://169.254.169.254/latest/meta-data/gtfs-aomoricitybus.zip">x</a></html>'
-    with patch.object(_opener, "open", return_value=_mock_response(html)):
-        assert aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path) is None
+    with patch.object(_opener, "open", return_value=_mock_response(html)) as opened:
+        with pytest.raises(StaticFetchError) as exc:
+            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert opened.call_count == 1
+    assert "rejected" in exc.value.reason
 
 
 # ── refresh_static ───────────────────────────────────────────────────────────

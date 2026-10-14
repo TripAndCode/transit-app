@@ -19,13 +19,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 import httpx
 import psycopg2
+import psycopg2.extras
 import pytest
 from httpx import ASGITransport
 
-from api.admin_runs import LAST_STATIC_LOAD_SQL
+from api.admin_runs import LAST_STATIC_LOAD_SQL, LATEST_OPERATOR_RUNS_SQL, build_latest_runs
 from api.middleware.ratelimit import limiter
 from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
@@ -285,6 +287,25 @@ def _gtfs_zip(path: Path, routes: int) -> Path:
     return path
 
 
+def _seed_timetable(pg_conn, agency_id: int) -> None:
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop')", (agency_id,))
+        cur.execute("INSERT INTO static_routes (agency_id, route_id) VALUES (%s, 'R1')", (agency_id,))
+    pg_conn.commit()
+
+
+def _upstream_answers(code: int):
+    """Every request the timetable source receives is answered with ``code``.
+
+    Patched at the strategy's own opener so the URL guard's DNS check never
+    runs against the test host, which does not resolve."""
+
+    def _open(req, **_kwargs):
+        raise HTTPError(req.full_url, code, "status", {}, None)  # type: ignore[arg-type]
+
+    return patch("pipeline.strategies.direct_url.safe_urlopen", side_effect=_open)
+
+
 def _rows(pg_conn, run_id: int) -> list[tuple[Any, ...]]:
     pg_conn.rollback()
     with pg_conn.cursor() as cur:
@@ -326,11 +347,58 @@ def test_a_failed_timetable_step_stops_the_chain_with_its_error_recorded(runner_
     assert "SECRET" not in step[4] and "SECRET" not in umbrella[4]
 
 
+@pytest.mark.parametrize("chained", [True, False])
+def test_a_timetable_source_that_fails_is_an_error_even_with_a_timetable_loaded(runner_env, pg_conn, chained):
+    """A dead source must not read as "no newer timetable" for an agency that
+    already has one: the step closes `error` with the reason the run card
+    shows, and the chain stops there."""
+    from api.routers.internal import _run_agency_update
+
+    _seed_timetable(pg_conn, runner_env["agency_id"])
+    run_id = runner_env["open_run"]("update" if chained else "static")
+    with _upstream_answers(404), patch("api.routers.internal._ingest_and_analyze_sweep") as sweep:
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=chained,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert (umbrella[2], step[1], step[2]) == ("error", "static", "error")
+    assert "HTTP 404" in step[4] and "current_data.zip" in step[4]
+    assert "HTTP 404" in umbrella[4]
+
+    with pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(LATEST_OPERATOR_RUNS_SQL)
+        card = build_latest_runs(cur.fetchall())[runner_env["agency_id"]]
+    assert card["steps"][0]["status"] == "error"
+    assert "HTTP 404" in card["steps"][0]["error"]
+
+
+def test_a_source_that_answers_not_modified_closes_the_step_unchanged(runner_env, pg_conn):
+    from api.routers.internal import _run_agency_update
+
+    _seed_timetable(pg_conn, runner_env["agency_id"])
+    run_id = runner_env["open_run"]("static")
+    with _upstream_answers(304):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=False,
+        )
+
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert (umbrella[2], step[2], step[4]) == ("unchanged", "unchanged", None)
+
+
 def test_a_reload_that_fetched_nothing_for_an_agency_with_no_timetable_fails(runner_env, pg_conn):
-    """`refresh_static` returns None both for "no change" and for a fetch
-    the strategy gave up on; with no timetable loaded at all there is nothing
-    for "no change" to mean, and the chain must not go on to ingest against
-    an empty schedule."""
+    """The change manifest on disk can outlive the timetable tables, so a
+    source with nothing newer than the last zip that loaded can still leave
+    the agency with no timetable at all; the chain must not go on to ingest
+    against an empty schedule."""
     from api.routers.internal import _run_agency_update
 
     run_id = runner_env["open_run"]("update")
@@ -533,6 +601,65 @@ def test_the_command_line_reload_records_a_static_run(runner_env, pg_conn, monke
     with pg_conn.cursor() as cur:
         cur.execute("SELECT kind, status FROM pipeline_runs WHERE agency_id = %s", (runner_env["agency_id"],))
         assert cur.fetchall() == [("static", "ok")]
+
+
+def test_the_command_line_reload_of_one_agency_fails_when_its_source_fails(runner_env, pg_conn, monkeypatch):
+    """The exception propagates, so the command exits nonzero, and the run
+    it recorded says why."""
+    import argparse
+
+    import gtfs_pipeline
+    from pipeline.strategies.errors import StaticFetchError
+
+    _seed_timetable(pg_conn, runner_env["agency_id"])
+    monkeypatch.setattr(gtfs_pipeline, "_get_conn", lambda: psycopg2.connect(os.environ["DATABASE_URL"]))
+    with _upstream_answers(500), pytest.raises(StaticFetchError):
+        gtfs_pipeline.cmd_refresh_static(
+            argparse.Namespace(agency_id=str(runner_env["agency_id"]), dest=str(runner_env["tmp"]))
+        )
+
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT kind, status, error FROM pipeline_runs WHERE agency_id = %s", (runner_env["agency_id"],))
+        ((kind, status, error),) = cur.fetchall()
+    assert (kind, status) == ("static", "error")
+    assert "HTTP 500" in error
+
+
+def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_env, pg_conn, caplog):
+    from pipeline.static_fetcher import refresh_all
+    from pipeline.strategies.errors import StaticFetchError
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, static_url, static_strategy) "
+            "VALUES ('second', 'https://example.test/2/feed.pb', 'https://example.test/2/gtfs.zip', 'direct_url') "
+            "RETURNING agency_id"
+        )
+        second = cur.fetchone()[0]
+    pg_conn.commit()
+    zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=2)
+
+    def _fetch(agency_id, static_url, dest_dir):
+        if agency_id == runner_env["agency_id"]:
+            raise StaticFetchError("HTTP 404 Not Found from https://example.test/gtfs/current_data.zip")
+        return zip_path
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
+            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [runner_env["agency_id"]])
+    finally:
+        conn.close()
+
+    assert "HTTP 404 Not Found" in caplog.text
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT agency_id, status, rows, error FROM pipeline_runs ORDER BY agency_id")
+        failed, loaded = cur.fetchall()
+    assert failed[:3] == (runner_env["agency_id"], "error", None)
+    assert "HTTP 404 Not Found" in failed[3]
+    assert loaded == (second, "ok", 2, None)
 
 
 def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn):
