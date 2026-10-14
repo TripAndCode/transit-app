@@ -4,10 +4,12 @@ it loops or runs both ways.
 ``load_route_terminals`` recomputes ``static_routes``' ``origin_name``,
 ``via_name``, ``destination_name``, ``is_loop`` and ``bidirectional`` for one
 agency from the static rows currently in place, so a display needs no per-request
-work. GTFS-JP ``routes_jp.txt``, when the zip has it, names all three stops;
-an origin or destination it leaves empty (or every one, for a feed without
-the file) takes the route's dominant pair: the (first stop, last stop) name
-pair most of its trips run. Only ``routes_jp.txt`` names a via point. A
+work. GTFS-JP ``routes_jp.txt``, when the zip has it, names all three stops.
+A route it leaves both ends of (or every route, for a feed without the file)
+takes its dominant pair: the (first stop, last stop) name pair most of its
+trips run. A route it names only one end of takes the other end of the
+most-run pair containing that name, whichever way that pair runs, or none if
+no pair contains it. Only ``routes_jp.txt`` names a via point. A
 routes_jp.txt that cannot be read is ignored for that load, so the trips name
 every route rather than the whole static load failing.
 
