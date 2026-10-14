@@ -910,23 +910,42 @@ async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, 
 
 @pytest.mark.asyncio
 async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
-    """Caps at 5 routes even with more seeded; an empty dataset returns no
-    routes and a zero count (with its threshold), not an error."""
+    """Caps the list at 5 routes even with more seeded, while every count
+    covers every route; an empty dataset returns no routes and zero counts
+    (with their thresholds), not an error."""
     from pipeline.reports import compute_overview_summary
 
-    for i in range(7):
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", 3.0 + i, 10)
+    # Bands, by lower bound: severe 5.0 (three routes), moderate 3.0 (three:
+    # the list's last two slots take two of them), mild 1.5 (two), and one
+    # route under every band. Each band has a route exactly on its bound.
+    avgs = [7.0, 6.0, 5.0, 4.0, 3.5, 3.0, 2.0, 1.5, 1.0]
+    for i, avg in enumerate(avgs):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", avg, 10)
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
-    routes = out["top_delayed"]["routes"]
-    assert len(routes) == 5
-    assert routes[0]["route_code"] == "R_6"  # highest avg_min (3.0 + 6)
+    top = out["top_delayed"]
+    assert [r["route_code"] for r in top["routes"]] == ["R_0", "R_1", "R_2", "R_3", "R_4"]
+    assert top["band_counts"] == {
+        "severe": {"count": 3, "threshold_min": 5.0},
+        "moderate": {"count": 3, "threshold_min": 3.0},
+        "mild": {"count": 2, "threshold_min": 1.5},
+    }
+    assert top["delayed_count"] == 7
 
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
     empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn, "ja")
-    assert empty_out["top_delayed"] == {"routes": [], "delayed_count": 0, "delayed_threshold_min": 2.0}
+    assert empty_out["top_delayed"] == {
+        "routes": [],
+        "delayed_count": 0,
+        "delayed_threshold_min": 2.0,
+        "band_counts": {
+            "severe": {"count": 0, "threshold_min": 5.0},
+            "moderate": {"count": 0, "threshold_min": 3.0},
+            "mild": {"count": 0, "threshold_min": 1.5},
+        },
+    }
 
 
 @pytest.mark.asyncio

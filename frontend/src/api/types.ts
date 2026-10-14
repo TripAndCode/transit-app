@@ -696,6 +696,17 @@ export type Route = {
   route_long_name: string | null;
   route_code: string | null;
   trip_headsigns: string[];
+  /** The route's terminals and main via point, from the feed's routes_jp.txt
+   *  or its most common first and last stop. The server always sends these,
+   *  null where a feed does not name them, so a label must read well without
+   *  them. They are optional only so partial test fixtures type-check. */
+  origin_name?: string | null;
+  via_name?: string | null;
+  destination_name?: string | null;
+  /** The route returns to its origin, so it has no destination to name. */
+  is_loop?: boolean | null;
+  /** The route runs both ways between its terminals. */
+  bidirectional?: boolean | null;
 };
 
 /** GET /:agency/routes. Collection endpoints answer with an object, not a bare
@@ -834,11 +845,26 @@ export type OverviewTopDelayedRoute = {
   avg_min: number;
 };
 
+type OverviewBandCount = {
+  count: number;
+  /** The band's lower bound, in minutes. */
+  threshold_min: number;
+};
+
+/** Routes in each routes-to-check band, over every route rather than only
+ *  the listed ones. */
+export type OverviewBandCounts = {
+  severe: OverviewBandCount;
+  moderate: OverviewBandCount;
+  mild: OverviewBandCount;
+};
+
 type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
   /** The average delay (minutes) at or above which a route was counted. */
   delayed_threshold_min: number;
+  band_counts: OverviewBandCounts;
 };
 
 export type OverviewPeakHour = {

@@ -1,8 +1,29 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "../i18n";
+import * as hooks from "../api/hooks";
 import { PeakHourModal } from "./PeakHourModal";
 import type { PeakHourBreakdown } from "../api/types";
+
+/** The modal names routes from the agency's static routes, so it renders
+ *  under an agency's path with a query client. */
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return rtlRender(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/pulse" element={ui} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+afterEach(() => vi.restoreAllMocks());
 
 const mockBreakdown: PeakHourBreakdown = {
   hour: 8,
@@ -22,8 +43,19 @@ describe("PeakHourModal", () => {
         onClose={() => {}}
       />
     );
-    expect(screen.getByText("K31")).toBeInTheDocument();
-    expect(screen.getByText("K37")).toBeInTheDocument();
+    expect(screen.getByText("Route K31")).toBeInTheDocument();
+    expect(screen.getByText("Route K37")).toBeInTheDocument();
+  });
+
+  it("names each route by its compact label, never its route_id", () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [{ route_id: "K31", route_code: "K31", route_short_name: "70-3", route_long_name: "あさひが丘線", trip_headsigns: [] }],
+      isLoading: false,
+    } as never);
+    render(<PeakHourModal data={mockBreakdown} loading={false} onClose={() => {}} />);
+    const label = screen.getByText("70-3").closest(".route-label")!;
+    expect(label).toHaveTextContent(/^70-3 あさひが丘線$/);
+    expect(label).toHaveAttribute("title", "K31");
   });
 
   it("shows the request's failure and a retry instead of an empty body", () => {

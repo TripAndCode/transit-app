@@ -1,9 +1,10 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
-import type { OverviewTopDelayedRoute } from "../api/types";
+import { groupBySeverityBand } from "./routesToCheckBands";
+import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as flipModule from "../hooks/useFlipRows";
 
@@ -19,18 +20,29 @@ function route(code: string, avgMin: number): OverviewTopDelayedRoute {
   return { route_code: code, route_short_name: null, avg_min: avgMin };
 }
 
-function list(rs: OverviewTopDelayedRoute[]) {
+/** The server's uncapped per-band counts; by default, those of a list that
+ *  holds every route in every band. */
+function listedBands(rs: OverviewTopDelayedRoute[]): OverviewBandCounts {
+  const listed = (band: string) => groupBySeverityBand(rs).find((g) => g.band === band)?.routes.length ?? 0;
+  return {
+    severe: { count: listed("severe"), threshold_min: 5 },
+    moderate: { count: listed("moderate"), threshold_min: 3 },
+    mild: { count: listed("mild"), threshold_min: 1.5 },
+  };
+}
+
+function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs)) {
   return (
     <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} />} />
+        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} bandCounts={bandCounts} />} />
       </Routes>
     </MemoryRouter>
   );
 }
 
-function renderList(rs: OverviewTopDelayedRoute[]) {
-  return renderWithProviders(list(rs));
+function renderList(rs: OverviewTopDelayedRoute[], bandCounts?: OverviewBandCounts) {
+  return renderWithProviders(list(rs, bandCounts));
 }
 
 describe("RoutesToCheckList", () => {
@@ -42,7 +54,48 @@ describe("RoutesToCheckList", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
-    expect(headers).toEqual(["2 routes averaging more than 5 min late", "1 route averaging 1.5–3 min late"]);
+    expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);
+  });
+
+  // The list holds the worst five routes only, so any band can hold fewer
+  // routes than the agency has in it: the last band to appear is cut off
+  // where the five run out. Each header counts its band in full, and says
+  // how many it lists only when it lists fewer.
+  it("counts every route in a truncated band and says how many it lists, band by band", () => {
+    const worst = [route("A", 9.1), route("B", 8.4), route("C", 6.2), route("D", 4.4), route("E", 3.1)];
+    renderList(worst, {
+      severe: { count: 3, threshold_min: 5 },
+      moderate: { count: 14, threshold_min: 3 },
+      mild: { count: 20, threshold_min: 1.5 },
+    });
+    const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
+    // Mild has routes but none listed, so it gets no header at all.
+    expect(headers).toEqual(["3 routes averaging 5 min or more late", "14 routes averaging 3–5 min late (top 2 shown)"]);
+    expect(document.querySelectorAll(".ov-check-row")).toHaveLength(5);
+  });
+
+  it("marks a truncated top band the same way", () => {
+    renderList([route("A", 9.1), route("B", 8.4), route("C", 7.7), route("D", 6.2), route("E", 5.3)], {
+      severe: { count: 12, threshold_min: 5 },
+      moderate: { count: 30, threshold_min: 3 },
+      mild: { count: 40, threshold_min: 1.5 },
+    });
+    const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
+    expect(headers).toEqual(["12 routes averaging 5 min or more late (top 5 shown)"]);
+  });
+
+  it("marks a truncated mild band the same way", () => {
+    renderList([route("A", 6.2), route("B", 3.4), route("C", 2.9), route("D", 2.3), route("E", 1.8)], {
+      severe: { count: 1, threshold_min: 5 },
+      moderate: { count: 1, threshold_min: 3 },
+      mild: { count: 9, threshold_min: 1.5 },
+    });
+    const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
+    expect(headers).toEqual([
+      "1 route averaging 5 min or more late",
+      "1 route averaging 3–5 min late",
+      "9 routes averaging 1.5–3 min late (top 3 shown)",
+    ]);
   });
 
   it("gives each route's average its unit", () => {
@@ -52,21 +105,29 @@ describe("RoutesToCheckList", () => {
 
   it("opens the route's own page, keeping the period", () => {
     renderList(routes());
-    const link = screen.getByText("K31").closest("a")!;
+    const link = screen.getAllByRole("link")[0];
     const url = new URL(link.getAttribute("href")!, "http://x");
     expect(url.pathname).toBe("/agencies/1/routes/K31");
     expect(url.searchParams.get("from")).toBe("2026-09-01");
   });
 
-  it("shows the route's name with its code de-emphasized, not as a separate raw-code column", () => {
-    renderList(routes());
-    // K31 and K37 share the same short_name -- both rows render it
-    expect(screen.getAllByText("観光通り線")).toHaveLength(2);
-    expect(screen.getByText("K31")).toHaveClass("route-label__code");
-    expect(screen.getByText("K37")).toHaveClass("route-label__code");
+  it("names each route by the shared label, keeping its route_id out of the row", () => {
+    renderList([
+      { route_code: "1471981638", route_short_name: "70-3", avg_min: 8.2 },
+      { route_code: "K31", route_short_name: "観光通り線", avg_min: 6.6 },
+      { route_code: "W53", route_short_name: null, avg_min: 5.1 },
+    ]);
+    const [hiroden, kanko, unnamed] = screen.getAllByRole("link");
+    // A short code reads as a plate; the id stays only in the tooltip.
+    expect(hiroden.querySelector(".route-label__plate")).toHaveTextContent("70-3");
+    expect(hiroden).not.toHaveTextContent("1471981638");
+    expect(hiroden.querySelector(".route-label")).toHaveAttribute("title", "1471981638");
+    // A short name that is a name, not a code, reads as the line name.
+    expect(kanko.querySelector(".route-label__plate")).toBeNull();
+    expect(within(kanko).getByText("観光通り線")).toHaveClass("route-label__line");
     // W53 has no name -- it reads as "Route W53", with the code only once
-    expect(screen.getAllByText(/W53/)).toHaveLength(1);
-    expect(screen.getByText("Route W53")).toBeInTheDocument();
+    expect(unnamed).toHaveTextContent("Route W53");
+    expect(within(unnamed).getAllByText(/W53/)).toHaveLength(1);
   });
 
   it("falls back to the code when route_short_name is an empty string, not just null", () => {

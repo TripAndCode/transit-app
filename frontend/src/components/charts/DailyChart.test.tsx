@@ -126,6 +126,17 @@ describe("DailyChart tooltip", () => {
     expect(screen.getByText("7-day avg 1.3 min")).toBeInTheDocument();
     expect(screen.getByText(/Route R1 \(4\.8 min\)/)).toBeInTheDocument();
   });
+
+  it("names a worst route by the caller's route label rather than its route_id", () => {
+    const { container } = renderChart(
+      <DailyChart
+        days={[day({ date: "2026-05-18", top_offenders: [{ route_code: "1471981638", service_type: "weekday", avg_min: 4.75, samples: 10 }] })]}
+        routeName={(code) => (code === "1471981638" ? "70-3 あさひが丘線" : code)}
+      />,
+    );
+    fireEvent.mouseEnter(dayRects(container)[0]);
+    expect(screen.getByText(/70-3 あさひが丘線 \(4\.8 min\)/)).toBeInTheDocument();
+  });
 });
 
 describe("DailyChart bars outside the stylesheet", () => {

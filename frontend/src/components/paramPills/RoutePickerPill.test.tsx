@@ -7,7 +7,7 @@ import * as hooks from "../../api/hooks";
 
 function mockRoutes() {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
-    data: [{ route_id: 1, route_code: "J20", route_short_name: "中筒井線", route_long_name: null }],
+    data: [{ route_id: "1", route_code: "J20", route_short_name: "中筒井線", route_long_name: null, trip_headsigns: [] }],
     isLoading: false,
   } as never);
 }
@@ -94,15 +94,47 @@ describe("RoutePickerPill accessible name", () => {
 describe("RoutePickerPill options", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("names a route and shows its code beside it", async () => {
-    mockRoutes();
+  it("names a route by its plate and line, with where it runs beside it and no route_id", async () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        {
+          route_id: "1471981638",
+          route_code: "1471981638",
+          route_short_name: "70-3",
+          route_long_name: "あさひが丘線",
+          trip_headsigns: [],
+          origin_name: "広島バスセンター",
+          destination_name: "あさひが丘下",
+        },
+      ],
+      isLoading: false,
+    } as never);
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Route" }));
-    const option = screen.getByRole("option", { name: /中筒井線/ });
-    expect(option.querySelector(".rp-opt-code")).toHaveTextContent("J20");
+    const option = screen.getByRole("option", { name: /あさひが丘線/ });
+    expect(option.querySelector(".route-label__plate")).toHaveTextContent("70-3");
+    expect(option.querySelector(".rp-opt-where")).toHaveTextContent("広島バスセンター → あさひが丘下");
+    expect(option).not.toHaveTextContent("1471981638");
   });
 
-  it("shows the code once for an unnamed route, whose label already carries it", async () => {
+  it("tells apart two routes that read the same and say nothing of where they run by their route_ids", async () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        { route_id: "111", route_code: "111", route_short_name: "12", route_long_name: "12号線", trip_headsigns: [] },
+        { route_id: "222", route_code: "222", route_short_name: "12", route_long_name: "12号線", trip_headsigns: [] },
+        { route_id: "333", route_code: "333", route_short_name: "70-3", route_long_name: "あさひが丘線", trip_headsigns: [] },
+      ],
+      isLoading: false,
+    } as never);
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Route" }));
+    const [a, b, c] = screen.getAllByRole("option");
+    expect(a.querySelector(".rp-opt-where")).toHaveTextContent("(111)");
+    expect(b.querySelector(".rp-opt-where")).toHaveTextContent("(222)");
+    expect(c.querySelector(".rp-opt-where")).toBeNull();
+  });
+
+  it("names an unnamed route by its route_id, with nothing beside it", async () => {
     vi.spyOn(hooks, "useRoutes").mockReturnValue({
       data: [{ route_id: "沖舘・新田線(47011)", route_code: "47011", route_short_name: "", route_long_name: "", trip_headsigns: [] }],
       isLoading: false,
@@ -110,6 +142,6 @@ describe("RoutePickerPill options", () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Route" }));
     const option = screen.getByRole("option", { name: /沖舘・新田線/ });
-    expect(option.querySelector(".rp-opt-code")).toBeNull();
+    expect(option.querySelector(".rp-opt-where")).toBeNull();
   });
 });

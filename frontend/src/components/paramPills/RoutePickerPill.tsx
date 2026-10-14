@@ -4,7 +4,7 @@
  * A field-like trigger (search glyph + selected route name, or a search-prompt
  * placeholder when unset) opens a popover: a live-search input filtering
  * routes by code / short name / long name, then a list where each option shows the
- * line name with the code as a muted monospace sub-label. When `delays` is supplied
+ * route's compact label with where it runs as a muted sub-label. When `delays` is supplied
  * (a per-route avg delay map), each row also shows a warm-ramp delay chip. Results
  * are capped at 50. Closes on outside click, Escape, or selection.
  *
@@ -16,7 +16,9 @@
 import { useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
-import { routeLabel } from "../../api/useRouteNames";
+import { routesAlike } from "../../api/routeDisplayName";
+import { routeWhereText, useRouteNames } from "../../api/useRouteNames";
+import { RoutePartsLabel } from "../RouteLabel";
 import { delayColor } from "../../styles/tokens";
 import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import "./RoutePickerPill.css";
@@ -62,6 +64,7 @@ export function RoutePickerPill({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { t } = useTranslation();
   const { data: routes = [], isLoading } = useRoutes(agencyId);
+  const names = useRouteNames(agencyId);
 
   function close(refocus = true) {
     setQ("");
@@ -92,9 +95,11 @@ export function RoutePickerPill({
     : routes
   ).filter((r) => r.route_code != null);
   const filtered = filteredList.slice(0, 50);
+  // Read across every route, not just the matches, so a row's text holds
+  // still while the search narrows the list.
+  const alike = routesAlike(routes.flatMap((r) => (r.route_code ? [{ key: r.route_code, full: names.describe(r.route_code) }] : [])));
 
-  const selected = value ? routes.find((r) => r.route_code === value) : undefined;
-  const display = value ? (selected ? routeLabel(selected, t) : value) : placeholder;
+  const display = value ? names.format(value) : placeholder;
 
   return (
     <div ref={ref} className="rp">
@@ -137,7 +142,12 @@ export function RoutePickerPill({
             {!isLoading && filtered.length === 0 && <div className="rp-msg">—</div>}
             {filtered.map((r) => {
               const code = r.route_code;
-              const name = routeLabel(r, t);
+              const parts = code != null ? names.parts.get(code) : undefined;
+              // Where the route runs has its own column, with the route_id
+              // added only where nothing else tells two routes apart.
+              const where = parts
+                ? [routeWhereText(parts, t), code != null && alike.has(code) ? `(${parts.id})` : null].filter(Boolean).join(" ") || null
+                : null;
               const delay = code != null ? delays?.[code] : null;
               return (
                 <button
@@ -151,9 +161,10 @@ export function RoutePickerPill({
                     close();
                   }}
                 >
-                  <span className="rp-opt-name">{name}</span>
-                  {/* An unnamed route is labelled by its route_id, which embeds the code. */}
-                  {code && !name.includes(code) ? <span className="rp-opt-code">{code}</span> : <span />}
+                  <span className="rp-opt-name">
+                    {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : names.format(code)}
+                  </span>
+                  {where ? <span className="rp-opt-where clamp-2">{where}</span> : <span />}
                   {delay != null ? (
                     <span className="rp-opt-delay">
                       <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />

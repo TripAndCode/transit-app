@@ -153,7 +153,7 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("detail-worst")).not.toHaveTextContent("+");
   });
 
-  it("tells same-named route variants apart by their code", () => {
+  it("keeps a route's code out of a ranked row, in its tooltip", () => {
     renderSection(
       overview({
         routes: [
@@ -163,18 +163,25 @@ describe("RouteForecastSection", () => {
       }),
     );
     const [first, second] = screen.getAllByTestId("ranked-route");
-    expect(within(first).getByText("C12a")).toHaveClass("route-label__code");
-    expect(within(second).getByText("C12b")).toHaveClass("route-label__code");
+    expect(first).not.toHaveTextContent("C12a");
+    expect(first.querySelector(".route-label")).toHaveAttribute("title", "C12a");
+    expect(second.querySelector(".route-label")).toHaveAttribute("title", "C12b");
   });
 
-  it("keeps a route's code beside a name that merely contains its digits", () => {
+  it("reads the payload's route name like a short name until the static routes load", () => {
     renderSection(
       overview({
-        routes: [{ route_code: "1", route_name: "Line 10", expected_avg_min: 6.8, samples: 250, low_confidence: false }],
+        routes: [
+          { route_code: "1471981638", route_name: "70-3", expected_avg_min: 6.8, samples: 250, low_confidence: false },
+          { route_code: "1", route_name: "Line 10", expected_avg_min: 5.1, samples: 250, low_confidence: false },
+        ],
       }),
     );
-    const [row] = screen.getAllByTestId("ranked-route");
-    expect(within(row).getByText("1")).toHaveClass("route-label__code");
+    const [coded, named] = screen.getAllByTestId("ranked-route");
+    expect(coded.querySelector(".route-label__plate")).toHaveTextContent("70-3");
+    expect(coded).not.toHaveTextContent("1471981638");
+    expect(named.querySelector(".route-label__plate")).toBeNull();
+    expect(within(named).getByText("Line 10")).toBeInTheDocument();
   });
 
   it("says what the small line beside each route shows", () => {
@@ -193,7 +200,7 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
   });
 
-  it("names a shared route name's code in the picker, and keeps a focused route without a forecast", () => {
+  it("tells alike names apart in the picker by their code only as a last resort, and keeps a focused route without a forecast", () => {
     renderSection(
       overview({
         routes: [

@@ -1,6 +1,7 @@
 import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { RouteTitleTransition } from "../components/RouteTitleTransition";
+import { RouteLabel } from "../components/RouteLabel";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
@@ -27,7 +28,7 @@ import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
-import { formatDateRange, formatNumber } from "../utils/format";
+import { FILTER_SEPARATOR, formatDateRange, formatNumber } from "../utils/format";
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
 // chunk, which the sidebar warms on hover, downloading a map nobody has asked
@@ -152,12 +153,20 @@ export function RouteAnalysisTab() {
           beneath. Without a route the question is all there is to say. */}
       {route ? (
         <RouteTitleTransition>
-          <h1>{names.format(route)}</h1>
+          <h1><RouteLabel code={route} names={names} /></h1>
         </RouteTitleTransition>
       ) : (
         <h1>{t("investigate")}</h1>
       )}
-      {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
+      {/* A list names a route without its route_id; its own page keeps it,
+          for anyone matching the page against the feed. */}
+      {route && (
+        <p className="focus-muted focus-subtitle">
+          {t("investigate")}
+          {FILTER_SEPARATOR}
+          <span className="focus-route-id">{t("routeId", { id: names.parts.get(route)?.id ?? route })}</span>
+        </p>
+      )}
     </div><div className="focus-actions">
       {route && <PinRouteButton agencyId={id} code={route} />}
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [

@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
+import { delayColor } from "../styles/tokens";
 import { useAgencyId } from "../api/useAgencyId";
 import { useCountUp } from "../hooks/useCountUp";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -9,20 +9,15 @@ import { useRouteNames } from "../api/useRouteNames";
 import { routeHref } from "../routes/destinations";
 import { formatMinutes } from "../utils/format";
 import { RouteLabel } from "./RouteLabel";
-import { groupBySeverityBand } from "./routesToCheckBands";
-import type { OverviewTopDelayedRoute } from "../api/types";
+import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
+import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
+  /** Each band's routes over every route, not only the listed ones: the list
+   *  is the worst few, so whichever band it runs out in is truncated. */
+  bandCounts: OverviewBandCounts;
 };
-
-/** Each band's bounds, read from the same thresholds the colour ramp uses so
- *  the header can't state a range the band does not hold. */
-const BAND_BOUNDS = {
-  severe: { min: DELAY_THRESHOLDS.severe },
-  moderate: { min: DELAY_THRESHOLDS.moderate, max: DELAY_THRESHOLDS.severe },
-  mild: { min: DELAY_THRESHOLDS.mild, max: DELAY_THRESHOLDS.moderate },
-} as const;
 
 /** A row's figure: printed as it is on first paint, travelling from the
  *  previous value when the data changes while the list stays mounted (a
@@ -33,7 +28,7 @@ function CheckValue({ value }: { value: number }) {
   return <span className="ov-check-value num">{formatMinutes(shown)}</span>;
 }
 
-export function RoutesToCheckList({ routes }: Props) {
+export function RoutesToCheckList({ routes, bandCounts }: Props) {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
   const { search } = useLocation();
@@ -64,7 +59,13 @@ export function RoutesToCheckList({ routes }: Props) {
         // figure counts and its bar slides instead of remounting.
         groups.flatMap((g) => [
           <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
-            {t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
+            {bandCounts[g.band].count > g.routes.length
+              ? t(`overview.routes_to_check.band_${g.band}_truncated`, {
+                  count: bandCounts[g.band].count,
+                  shown: g.routes.length,
+                  ...BAND_BOUNDS[g.band],
+                })
+              : t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
           </div>,
           ...g.routes.map((r) => (
             <Link
@@ -73,7 +74,7 @@ export function RoutesToCheckList({ routes }: Props) {
               data-flip-key={r.route_code}
               to={agencyId != null ? routeHref(agencyId, r.route_code, search) : "."}
             >
-              <span className="ov-check-name clamp-2">
+              <span className="ov-check-name">
                 <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
               </span>
               <span className="ov-check-track">

@@ -14,6 +14,11 @@ class StaticRoute(BaseModel):
     route_long_name: str | None
     route_code: str | None
     trip_headsigns: list[str]
+    origin_name: str | None
+    via_name: str | None
+    destination_name: str | None
+    is_loop: bool
+    bidirectional: bool
 
 
 class StaticStop(BaseModel):
@@ -56,6 +61,12 @@ async def list_routes(
     ``trip_headsigns`` aggregates distinct non-empty headsigns observed in
     ``static_trips`` for the route, so multi-direction keito numbers can
     expand into named direction options in the picker.
+    ``origin_name``/``via_name``/``destination_name`` are the stop names the
+    route runs from, through and to, each null when the feed gives no way to
+    name it. ``is_loop`` means the origin and destination are the same stop
+    name; ``bidirectional`` means the route's trips also run the way back. At
+    most one of the two is true. All five are computed when the static feed
+    loads (see ``pipeline.route_terminals``).
     """
     rows = await conn.fetch(
         "SELECT r.route_id, r.route_short_name, r.route_long_name, "
@@ -66,7 +77,8 @@ async def list_routes(
         "          AND t.route_id = r.route_id "
         "          AND t.trip_headsign IS NOT NULL "
         "          AND t.trip_headsign <> '' "
-        "        ORDER BY 1) AS trip_headsigns "
+        "        ORDER BY 1) AS trip_headsigns, "
+        "  r.origin_name, r.via_name, r.destination_name, r.is_loop, r.bidirectional "
         "FROM static_routes r "
         "WHERE r.agency_id=$1 ORDER BY r.route_id",
         agency_id,

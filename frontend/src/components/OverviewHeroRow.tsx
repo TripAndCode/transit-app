@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
@@ -7,22 +7,30 @@ import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
 import { periodMean } from "./periodMean";
-import { storySentence } from "./overview/storySentence";
+import { storyVerdict, topRoutesShare } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
-import { EM_DASH, formatDateRange, formatReportTime } from "../utils/format";
+import { EM_DASH, formatDateRange, formatHourRange, formatReportTime } from "../utils/format";
+
+/** A hero fact row, named for the card that explains it. */
+export type HeroFact = "peak_hour" | "concentration" | "late_routes";
 
 type Props = {
   headline: OverviewHeadline;
-  delayedCount: number;
-  /** The average delay at or above which a route counts as delayed. */
-  delayedThresholdMin: number;
+  /** Routes over the routes-to-check list's top-band bound, over every
+   *  route: the figure that list's top-band header prints. */
+  severeCount: number;
+  /** That bound, in minutes. */
+  severeThresholdMin: number;
   agencyId: number;
   sparklinePoints: number[];
   peakHour: OverviewPeakHour | null;
   concentration: OverviewConcentration;
+  /** Opens the card behind a fact row. Each row exists only while that card
+   *  has something to show. */
+  onOpenFact: (fact: HeroFact) => void;
 };
 
 // The Date.now() read lives in a top-level helper because an inline read in
@@ -73,16 +81,19 @@ function describeFeedStatus(feed: FeedState, t: TFunction): string {
 
 export function OverviewHeroRow({
   headline,
-  delayedCount,
-  delayedThresholdMin,
+  severeCount,
+  severeThresholdMin,
   agencyId,
   sparklinePoints,
   peakHour,
   concentration,
+  onOpenFact,
 }: Props) {
   const { t } = useTranslation();
   const { data: routes } = useRoutes(agencyId);
-  const totalRoutes = (routes ?? []).filter((r) => r.route_code != null).length;
+  // Unknown, not zero, until the route list arrives: "3 / 0 routes" would
+  // be a false claim.
+  const totalRoutes = routes ? routes.filter((r) => r.route_code != null).length : null;
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
@@ -120,76 +131,121 @@ export function OverviewHeroRow({
   // nullability) -- the "—" fallback below still renders in place of it when
   // there is nothing to display.
   const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
-  const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
+  const severeCountDisplay = useCountUp(severeCount, { decimals: 0 });
 
-  // storySentence needs a real delta to pick a direction -- with no
-  // baseline at all there's nothing to compare against, so this keeps the
-  // plain "no comparison data" text rather than feeding it a fabricated
-  // delta_min: null and letting the sentence's own "flat" fallback claim
-  // the period is "about the same" (a specific claim this case cannot back).
-  const story = hasBaseline
-    ? storySentence(headline, peakHour, concentration, t)
-    : t("overview.hero_row.avg_delay_no_baseline");
+  // A verdict needs a real delta to pick a direction -- with no baseline at
+  // all there's nothing to compare against, so this keeps the plain "no
+  // comparison data" text and no chip rather than letting the verdict's own
+  // "flat" fallback claim the period is "about the same" (a specific claim
+  // this case cannot back).
+  const verdict = hasBaseline ? storyVerdict(headline, t) : null;
+  const share = topRoutesShare(concentration);
 
   return (
-    <div className="ov-hero">
-      {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
-      <div className="ov-hero-figure">
-        <InlineSparkline
-          points={sparklinePoints}
-          width={400}
-          height={190}
-          preserveAspectRatio="none"
-          showEndDot={false}
-          baseline={sparklineMean ?? undefined}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+    <>
+      <div className="ov-hero-verdict">
+        {verdict && <span className="ov-hero-state">{verdict.state}</span>}
+        <p className="ov-hero-story">{verdict ? verdict.sentence : t("overview.hero_row.avg_delay_no_baseline")}</p>
+        <InsightHint
+          title={t("overview.hero_row.baseline_hint_title")}
+          body={t("overview.hero_row.baseline_hint_body", { range })}
         />
-        <div className="ov-hero-label">
-          {t("overview.hero_row.avg_delay_label", { range })}
-        </div>
-        <div className="ov-kpi-value num">
-          {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
-          <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
-        </div>
-        {sparklineMean != null && (
-          <div className="ov-hero-baseline">
-            {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
-          </div>
-        )}
       </div>
-      <div className="ov-hero-text">
-        {/* A div, not a <p>: InsightHint's root is a div, and a div is not
-            valid phrasing content inside a <p>. */}
-        <div className="ov-hero-story">
-          {story}
-          <InsightHint
-            title={t("overview.hero_row.baseline_hint_title")}
-            body={t("overview.hero_row.baseline_hint_body", { range })}
+      <div className="ov-hero">
+        {/* Both charts live in the figure column, which clips them: the fact
+            list beside it stays on a plain surface. */}
+        <div className="ov-hero-figure">
+          <InlineSparkline
+            points={sparklinePoints}
+            width={400}
+            height={190}
+            preserveAspectRatio="none"
+            showEndDot={false}
+            baseline={sparklineMean ?? undefined}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
           />
+          {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
+          <div className="ov-hero-label">
+            {t("overview.hero_row.avg_delay_label", { range })}
+          </div>
+          <div className="ov-kpi-value num">
+            {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
+            <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
+          </div>
+          {sparklineMean != null && (
+            <div className="ov-hero-baseline">
+              {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
+            </div>
+          )}
+          <div className="ov-hero-feed">
+            {/* Green only for a live feed; a quiet or never-reporting one
+                keeps a neutral dot, and an unread status shows none. */}
+            {feed.kind !== "unknown" && (
+              <i
+                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feed.kind === "live" ? "" : " ov-fresh-dot--stale"}`}
+                aria-hidden="true"
+              />
+            )}
+            <span className="ov-hero-feed-status">{feedStatus}</span>
+            {lastReport && <span>{t("overview.hero_row.feed_status_last", { time: lastReport })}</span>}
+          </div>
         </div>
-        <div className="ov-hero-sub">
-          <div className="ov-hero-sub-item">
-            <span className="ov-hero-sub-value num">
-              {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
-            </span>
-            {t("overview.hero_row.delayed_count_label", { min: delayedThresholdMin })}
-          </div>
-          <div className="ov-hero-sub-item">
-            <span className="ov-hero-sub-value">
-              {/* Green only for a live feed; a quiet or never-reporting one
-                  keeps a neutral dot, and an unread status shows none. */}
-              {feed.kind !== "unknown" && (
-                <i
-                  className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feed.kind === "live" ? "" : " ov-fresh-dot--stale"}`}
-                  aria-hidden="true"
-                />
-              )}
-              {feedStatus}
-            </span>
-            {lastReport && t("overview.hero_row.feed_status_last", { time: lastReport })}
-          </div>
+        <div className="ov-hero-text">
+          <ul className="ov-hero-facts">
+            {peakHour && (
+              <FactRow label={t("overview.hero_row.fact_peak_hour")} onClick={() => onOpenFact("peak_hour")}>
+                {formatHourRange(peakHour.peak_hour)}
+              </FactRow>
+            )}
+            {share && (
+              <FactRow
+                label={t("overview.hero_row.fact_concentration", { count: share.count })}
+                onClick={() => onOpenFact("concentration")}
+              >
+                {share.share}
+                <span className="ov-hero-fact-unit">{t("overview.hero_row.fact_share_unit")}</span>
+              </FactRow>
+            )}
+            {/* The hero's only warm value, and only while a route is over the
+                bound: it is the finding that asks for action. Gated on the
+                real count, not the counting-up display, which starts from 0. */}
+            <FactRow
+              label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
+              onClick={() => onOpenFact("late_routes")}
+              attention={severeCount > 0}
+            >
+              {severeCountDisplay}
+              <span className="ov-hero-fact-unit">
+                {totalRoutes != null
+                  ? t("overview.hero_row.fact_late_routes_of", { count: totalRoutes })
+                  : t("overview.hero_row.fact_late_routes_unit", { count: severeCount })}
+              </span>
+            </FactRow>
+          </ul>
         </div>
       </div>
-    </div>
+    </>
+  );
+}
+
+function FactRow({
+  label,
+  onClick,
+  attention = false,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  attention?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <li>
+      <button type="button" className={`ov-hero-fact${attention ? " ov-hero-fact--attn" : ""}`} onClick={onClick}>
+        <span className="ov-hero-fact-label">{label}</span>
+        <span className="ov-hero-fact-value num">{children}</span>
+        <span className="ov-hero-fact-go" aria-hidden="true">›</span>
+      </button>
+    </li>
   );
 }

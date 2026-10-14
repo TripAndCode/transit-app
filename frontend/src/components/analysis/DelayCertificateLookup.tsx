@@ -108,7 +108,7 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
         )}
         {rows !== undefined && <p className="cert-lookup__note">{t("reports.certificate.not_listed")}</p>}
       </div>
-      {row && <CertificateCard row={row} routeName={routeNames.format(row[1])} />}
+      {row && <CertificateCard row={row} routeName={routeNames.describe(row[1])} />}
     </div>
   );
 }

@@ -74,7 +74,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
             <tbody>
               {data.rows.map((r) => (
                 <tr key={`${r.route_code}-${r.metric_type}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
+                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
                   <td style={td()}>
                     {t(`reports.performance_standard.metric_label.${r.metric_type}`)}
                     {r.metric_scope === "agency" && (

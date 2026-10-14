@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
+import { distinctRouteTexts } from "../../api/routeDisplayName";
+import { useRouteNames } from "../../api/useRouteNames";
 import { useScope, type TimeBand, type DowFilter } from "../../api/scope";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
@@ -11,13 +13,17 @@ export function PatternFilters({ agencyId, codes, onChange }: {
 }) {
   const { t } = useTranslation("design");
   const query = useRoutes(agencyId);
+  const names = useRouteNames(agencyId);
   const routes = query.data ?? [];
-  const groups = routeGroups(routes);
+  const groups = routeGroups(routes, names.parts);
   const routesByGroup = new Map(groups);
   // Both `selectedGroup` and the line select name groups from this same list,
   // so a lookup misses only for "": no line selected, or "All lines" chosen.
-  const group = selectedGroup(routes, codes);
+  const group = selectedGroup(routes, codes, names.parts);
   const options = routesByGroup.get(group) ?? routes;
+  const optionTexts = distinctRouteTexts(options.flatMap((r) => r.route_code
+    ? [{ key: r.route_id, name: names.format(r.route_code), full: names.describe(r.route_code), id: r.route_id }]
+    : []));
   return <>
     <label>{t("line")}<select value={group} disabled={query.isPending} onChange={(e) => {
       onChange([...new Set((routesByGroup.get(e.target.value) ?? []).flatMap((r) => r.route_code ? [r.route_code] : []))]);
@@ -25,8 +31,8 @@ export function PatternFilters({ agencyId, codes, onChange }: {
     <label>{t("pattern")}<select value={codes.length === 1 ? codes[0] : ""} disabled={query.isPending} onChange={(e) => {
       onChange(e.target.value ? [e.target.value] : group ? options.flatMap((r) => r.route_code ? [r.route_code] : []) : []);
     }}><option value="">{t("allPatterns")}</option>
-      {codes.filter((code) => !options.some((r) => r.route_code === code)).map((code) => <option key={code} value={code}>{code}</option>)}
-      {options.map((r) => <option key={r.route_id} value={r.route_code ?? ""}>{r.route_code} · {r.route_short_name || r.route_long_name || r.route_id}</option>)}
+      {codes.filter((code) => !options.some((r) => r.route_code === code)).map((code) => <option key={code} value={code}>{names.data.get(code) ?? code}</option>)}
+      {options.map((r) => <option key={r.route_id} value={r.route_code ?? ""} title={r.route_id}>{optionTexts.get(r.route_id) ?? r.route_id}</option>)}
     </select></label>
     {query.error && <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />}
   </>;

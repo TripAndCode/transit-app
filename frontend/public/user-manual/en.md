@@ -90,7 +90,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ![The scope sentence with its period open](./03-scope-sentence.en.png)
 
-Each part with a dashed underline is a condition. Click it to change it; the screen updates at once.
+Each button with a ▼ is a condition. Click it to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers.
 
 | Condition | What you can choose |
 |---|---|
@@ -102,10 +102,11 @@ Each part with a dashed underline is a condition. Click it to change it; the scr
 
 By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, and a stop, direction or early-departure allowance set by a link, join the sentence as extra conditions. On a screen that does not count on-time departures, the sentence ends before the on-time part.
 
-To the right of the sentence:
+Once you change any condition from its default, **Reset** appears at the end of the sentence and returns every condition to its default.
 
-- **Saved views ▾** lists the views you have saved, and “Save this view…” stores the current conditions under a name. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
-- **Reset conditions** appears once you change something other than the period, and returns every condition to its default.
+To the right of the screen's heading:
+
+- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
 - **Show all filters** lays out the controls for every condition in a row under the sentence. It stays on until you turn it off.
 
 A condition the screen does not use is struck through, and a line under the sentence names it, for example “Not used on this screen: Days and timetable”. The weekday and weekend reports, for instance, choose their own days.
@@ -122,10 +123,11 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 
 ![Pulse](./02-pulse.en.png)
 
-- “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values. A sentence beside it compares the period with the same number of days just before it; the ⓘ icon explains the comparison.
-- “… of … routes”: how many routes averaged a set number of minutes late or more.
-- The feed’s status: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
-- **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
+- The sentence at the top compares the period with the same number of days just before it. The tag in front of it says “About the same as the period before”, “Worse than the period before, +… min” or “Better than the period before”; the ⓘ icon explains the comparison.
+- “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values.
+- The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
+- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of all routes: the same number as the “… averaging … min or more late” heading of **Routes to check now** below, when that heading appears). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check now**.
+- **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
 - **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how weekdays compare with weekends and holidays. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.

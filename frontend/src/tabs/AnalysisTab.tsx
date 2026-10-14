@@ -388,6 +388,7 @@ function TrendBlock({
   ctx: Scope;
 }) {
   const { t } = useTranslation();
+  const routeNames = useRouteNames(useAgencyId());
   const payload: TrendPayload = data[0] ?? {
     days: [],
     hourly: [],
@@ -410,7 +411,7 @@ function TrendBlock({
         ) : (
           <>
             <HeatSurface hourly={payload.hourly} grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-            <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+            <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} routeName={routeNames.format} />
           </>
         )}
         <HourlyHeatmap cells={payload.hourly} />
@@ -492,7 +493,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           {cappedRoutes.visible.map((r, i) => (
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
-              <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
+              <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
               <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>

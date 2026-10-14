@@ -5,6 +5,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import i18n from "../i18n";
 import * as client from "../api/client";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
@@ -36,8 +37,7 @@ function mockCommonHooks() {
   vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined } as never);
   vi.spyOn(hooks, "useLiveTripProgress").mockReturnValue({ data: undefined, isLoading: false } as never);
   vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({
-    data: new Map(),
-    isLoading: false,
+    ...useRouteNamesModule.buildRouteNames([], i18n.t),
     format: (code: string | null | undefined) => code ?? "—",
   });
 }

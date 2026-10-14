@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { SCOPE_EXTRAS_NONE } from "../../api/scope";
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -105,15 +105,15 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   // picker, and each pick applies at once.
   show("reports");
   const user = setupUser();
-  await user.click(screen.getByRole("button", { name: "1" }));
-  // The picker labels routes by display name, not code: "1 Coast" is 101 and
-  // "9 Coast" is 999 (short name + long name, per routeDisplayName). The
-  // space is optional because dom-accessibility-api trims each inline
-  // element's own text, dropping the space that opens the long-name span,
-  // where browsers keep it.
-  await user.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
+  await user.click(screen.getByRole("button", { name: "1 Coast" }));
+  // The picker labels routes by plate and line name, not code: "1 Coast" is
+  // 101 and "9 Coast" is 999. The space is optional because
+  // dom-accessibility-api trims each inline element's own text, dropping the
+  // space between the plate and the line name, where browsers keep it.
+  const picker = screen.getByRole("textbox", { name: "Search routes" }).parentElement!;
+  await user.click(within(picker).getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual([]);
-  await user.click(screen.getByRole("button", { name: /^9 ?Coast$/ }));
+  await user.click(within(picker).getByRole("button", { name: /^9 ?Coast$/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
   await user.keyboard("{Escape}");
   await user.click(screen.getAllByRole("button", { name: "Download CSV" })[0]);

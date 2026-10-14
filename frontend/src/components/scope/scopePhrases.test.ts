@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../../i18n";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
-import { scopeTitle, scopeTokens, sentenceParts } from "./scopePhrases";
+import { periodDays, scopeTitle, scopeTokens, sentenceParts, suggestedViewName, tokenChanged } from "./scopePhrases";
 
 const base: Scope = {
   ...SCOPE_EXTRAS_NONE,
@@ -134,5 +134,60 @@ describe("scopeTitle", () => {
     expect(scopeTitle({ ...base, routes: ["50"] }, { t, agencyName: "x", routeLabel: (c) => `R${c}` })).toBe(
       "R50・9/1〜9/28・すべての曜日・全時間帯・1分以内",
     );
+  });
+});
+
+describe("periodDays", () => {
+  it("counts both ends of the period", () => {
+    expect(periodDays(base)).toBe(28);
+    expect(periodDays({ from: "2026-09-16", to: "2026-09-16" })).toBe(1);
+    expect(periodDays({ from: "2026-12-30", to: "2027-01-02" })).toBe(4);
+  });
+});
+
+describe("tokenChanged", () => {
+  const period = { from: "2026-09-01", to: "2026-09-28" };
+  const changed = (scope: Partial<Scope>, p: { from: string; to: string } | null = period) =>
+    tokens("en", scope)
+      .filter((tok) => tokenChanged(tok.key, { ...base, ...scope }, p))
+      .map((tok) => tok.key);
+
+  it("marks nothing at the defaults", () => {
+    expect(changed({})).toEqual([]);
+  });
+
+  it("marks each condition that differs from what a reset gives back", () => {
+    expect(changed({ routes: ["50"], dow: "weekday", time_band: "morning" })).toEqual(["routes", "days", "time"]);
+    expect(changed({ hour: [7, 9] })).toEqual(["time"]);
+    expect(changed({ from: "2026-09-10" })).toEqual(["period"]);
+  });
+
+  it("marks the optional conditions whenever they show, since they show only when set", () => {
+    expect(changed({ service: "平日", stop: "S1", dir: 0, early: 60 })).toEqual(["service", "stop", "dir", "early"]);
+  });
+
+  it("marks a tolerance only when it differs from the one the server applies by default", () => {
+    expect(changed({ late: 60 })).toEqual([]);
+    expect(changed({ late: 180 })).toEqual(["tolerance"]);
+  });
+
+  it("leaves the period unmarked while the default period is unknown", () => {
+    expect(changed({ from: "2026-09-10" }, null)).toEqual([]);
+  });
+});
+
+describe("suggestedViewName", () => {
+  const period = { from: "2026-09-01", to: "2026-09-28" };
+  const ctx = (lng: "ja" | "en") => ({ t: i18n.getFixedT(lng), agencyName: "x", routeLabel: (c: string) => `R${c}` });
+
+  it("names a view after the conditions it changes", () => {
+    expect(suggestedViewName({ ...base, dow: "weekday", time_band: "morning" }, ctx("ja"), period)).toBe(
+      "平日・朝(05-09)",
+    );
+  });
+
+  it("falls back to the routes and the period when nothing is changed", () => {
+    expect(suggestedViewName(base, ctx("ja"), period)).toBe("全路線・9/1〜9/28");
+    expect(suggestedViewName(base, ctx("en"), period)).toBe("all routes, 9/1 – 9/28");
   });
 });
