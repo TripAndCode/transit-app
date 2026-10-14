@@ -2,10 +2,14 @@
 GTFS schedule.
 
 ``planned_trips`` is the number of (service day, trip_id) instances the
-static schedule says should run over the range — from Postgres
-``static_calendar_dates`` (``exception_type = 1`` rows only; this codebase's
-GTFS feeds enumerate running days via ``calendar_dates.txt`` explicitly,
-never a weekly ``calendar.txt``) joined to ``static_trips``.
+static schedule says should run over the range. A service runs on a date
+under the GTFS rule :mod:`pipeline.day_types` also applies: its
+``static_calendar`` (``calendar.txt``) range covers the date with that
+weekday's flag set and no ``static_calendar_dates`` removal
+(``exception_type = 2``) names the date, or a ``static_calendar_dates``
+addition (``exception_type = 1``) names it. A service both cases put on the
+same date runs once. Each running (service, date) contributes the number of
+``static_trips`` rows under that service.
 
 ``executed_trips`` is ``planned_trips`` minus the trip-days GTFS-RT reports
 as not executed — identified via ``schedule_relationship_trip = CANCELED``
@@ -33,13 +37,49 @@ from typing import Any
 
 from pipeline.strategies.static_join import rt_field_coverage_confirmed_agencies
 
+# static_calendar_dates.date is the feed's raw YYYYMMDD text and may hold a
+# malformed row, which a DATE cast would fail on for every agency. The
+# fixed-width text compares in calendar order, so BETWEEN bounds it, and
+# matching it to the generated series' text drops a malformed row the
+# lexicographic bounds would let through. Trips are counted once per service
+# and multiplied by its running days, never joined row-per-trip-per-day.
 _PLANNED_TRIPS_SQL = """
-    SELECT cd.agency_id, COUNT(*) AS planned
-    FROM static_calendar_dates cd
-    JOIN static_trips t ON t.agency_id = cd.agency_id AND t.service_id = cd.service_id
-    WHERE cd.exception_type = 1
-      AND cd.date BETWEEN $1 AND $2
-    GROUP BY cd.agency_id
+    WITH days AS (
+        SELECT day, to_char(day, 'YYYYMMDD') AS ymd, EXTRACT(ISODOW FROM day)::int AS isodow
+        FROM (SELECT $2::date + i AS day FROM generate_series(0, $3::date - $2::date) AS i) AS d
+    ),
+    trip_counts AS (
+        SELECT agency_id, service_id, COUNT(*) AS trips
+        FROM static_trips
+        WHERE agency_id = ANY($1::int[])
+        GROUP BY agency_id, service_id
+    ),
+    running AS (
+        SELECT c.agency_id, c.service_id, days.ymd
+        FROM static_calendar c
+        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
+        WHERE c.agency_id = ANY($1::int[])
+          AND (ARRAY[c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday])[days.isodow]
+          AND NOT EXISTS (
+              SELECT 1
+              FROM static_calendar_dates x
+              WHERE x.agency_id = c.agency_id
+                AND x.service_id = c.service_id
+                AND x.date = days.ymd
+                AND x.exception_type = 2
+          )
+        UNION
+        SELECT cd.agency_id, cd.service_id, days.ymd
+        FROM static_calendar_dates cd
+        JOIN days ON days.ymd = cd.date
+        WHERE cd.agency_id = ANY($1::int[])
+          AND cd.exception_type = 1
+          AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
+    )
+    SELECT r.agency_id, SUM(t.trips) AS planned
+    FROM running r
+    JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
+    GROUP BY r.agency_id
 """
 
 _NON_EXECUTED_TRIPS_SQL = """
@@ -60,18 +100,12 @@ async def compute_service_delivered_by_agency(
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     whenever the ratio isn't computable for this agency/range (see module
     docstring) — never silently 0 canceled / 100% delivered. Both queries
-    below are indexed range scans on precomputed Postgres aggregates — no
-    ClickHouse access on this read path.
+    below read the loaded static schedule and a precomputed aggregate in
+    Postgres — no ClickHouse access on this read path.
     """
     if not agency_ids:
         return {}
-    # static_calendar_dates.date is GTFS's raw calendar_dates.txt text, always
-    # YYYYMMDD (8 zero-padded digits) — lexicographic BETWEEN on that fixed
-    # width agrees with calendar ordering, so no cast to a Postgres DATE is
-    # needed (nor possible: some rows may have non-parseable garbage from a
-    # malformed feed, which a DATE cast would fail hard on for every agency).
-    from_str, to_str = from_date.strftime("%Y%m%d"), to_date.strftime("%Y%m%d")
-    planned_rows = await conn.fetch(_PLANNED_TRIPS_SQL, from_str, to_str)
+    planned_rows = await conn.fetch(_PLANNED_TRIPS_SQL, agency_ids, from_date, to_date)
     planned = {r["agency_id"]: int(r["planned"]) for r in planned_rows}
 
     # agg_service_delivered_daily only carries a row for a (agency, date) that

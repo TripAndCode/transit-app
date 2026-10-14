@@ -87,10 +87,10 @@ CLAMP_HISTORY_SQL = """
 """
 
 # `routes` and `calendar_until` are not columns of agg_static_version_summary
-# and cannot be: static_loader replaces static_trips/static_calendar_dates
-# wholesale on every load, so only the currently-loaded version still has
-# raw rows to count. Past versions therefore carry NULL for both, which a
-# reader must render as "not retained", never as zero.
+# and cannot be: static_loader replaces static_trips, static_calendar and
+# static_calendar_dates wholesale on every load, so only the currently-loaded
+# version still has raw rows to count. Past versions therefore carry NULL for
+# both, which a reader must render as "not retained", never as zero.
 STATIC_VERSIONS_SQL = """
     WITH current_version AS (
         SELECT t.static_version_id
@@ -104,10 +104,20 @@ STATIC_VERSIONS_SQL = """
         WHERE t.agency_id = $1 AND t.static_version_id IS NOT NULL
         GROUP BY t.static_version_id
     ),
+    -- The last date the calendar runs any service, as YYYYMMDD text: the later
+    -- of the last calendar.txt end_date of a row that runs some weekday and the
+    -- last calendar_dates.txt addition. A removal adds no running day, and a
+    -- malformed date would otherwise sort after every real one.
     calendar AS (
-        SELECT max(c.date) AS calendar_until
-        FROM static_calendar_dates c
-        WHERE c.agency_id = $1
+        SELECT GREATEST(
+            (SELECT max(c.date)
+             FROM static_calendar_dates c
+             WHERE c.agency_id = $1 AND c.exception_type = 1 AND c.date ~ '^[0-9]{8}$'),
+            (SELECT to_char(max(w.end_date), 'YYYYMMDD')
+             FROM static_calendar w
+             WHERE w.agency_id = $1
+               AND (w.monday OR w.tuesday OR w.wednesday OR w.thursday OR w.friday OR w.saturday OR w.sunday))
+        ) AS calendar_until
     )
     SELECT s.static_version_id AS version,
            s.computed_at       AS loaded_at,
@@ -331,8 +341,8 @@ def build_clamp_history(
 
 
 def _calendar_date(value: str | None) -> str | None:
-    """GTFS ``calendar_dates.date`` is stored as the feed's own ``YYYYMMDD``
-    text; render it as an ISO date so the UI never has to parse two shapes."""
+    """``calendar_until`` arrives as GTFS ``YYYYMMDD`` text; render it as an
+    ISO date so the UI never has to parse two shapes."""
     if not value:
         return None
     if len(value) == 8 and value.isdigit():

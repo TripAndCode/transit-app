@@ -194,7 +194,13 @@ def resolve_day_types(
 
 
 def _gtfs_date(value: str) -> date | None:
-    """A ``calendar_dates.txt`` ``YYYYMMDD`` value, None when malformed (stored as the feed's raw text)."""
+    """A ``calendar_dates.txt`` ``YYYYMMDD`` value, None when malformed (stored as the feed's raw text).
+
+    Only eight ASCII digits count: ``strptime`` alone would also read ``2026041``,
+    which the reports' SQL, matching the text as ``YYYYMMDD``, never does.
+    """
+    if not (isinstance(value, str) and len(value) == 8 and value.isascii() and value.isdigit()):
+        return None
     try:
         return datetime.strptime(value, "%Y%m%d").date()
     except (TypeError, ValueError):
