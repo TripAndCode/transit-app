@@ -34,7 +34,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import _redact_url, safe_urlopen
+from pipeline.url_guard import redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -582,7 +582,7 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     feed_url = row[0]
     strategy_name = _resolve_strategy_name(agency_id, conn)
 
-    logger.info(f"Fetching live feed from {_redact_url(feed_url)} (strategy={strategy_name})")
+    logger.info(f"Fetching live feed from {redact_url(feed_url)} (strategy={strategy_name})")
     with safe_urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 

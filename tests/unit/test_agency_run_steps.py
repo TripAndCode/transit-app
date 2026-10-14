@@ -83,9 +83,10 @@ def test_an_ingest_step_still_waiting_on_its_promotion_is_running_not_done():
 
 
 def test_a_failed_step_carries_its_error_and_the_steps_after_it_never_ran():
+    error = "StaticRefreshFailed: the source has nothing newer, but this agency has no timetable loaded"
     rows = [
         _row(1, "update", "error", error="static: StaticRefreshFailed"),
-        _row(2, "static", "error", parent=1, error="StaticRefreshFailed: no timetable could be fetched"),
+        _row(2, "static", "error", parent=1, error=error),
     ]
     run = build_latest_runs(rows)[9]
     assert [(s["step"], s["status"]) for s in run["steps"]] == [
@@ -93,7 +94,7 @@ def test_a_failed_step_carries_its_error_and_the_steps_after_it_never_ran():
         ("ingest", "not_run"),
         ("analyze", "not_run"),
     ]
-    assert run["steps"][0]["error"] == "StaticRefreshFailed: no timetable could be fetched"
+    assert run["steps"][0]["error"] == error
 
 
 def test_a_promotion_failure_is_the_ingest_steps_error():

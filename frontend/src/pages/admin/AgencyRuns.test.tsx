@@ -54,7 +54,7 @@ const FAILED = run({
       status: "error",
       started_at: "2026-10-13T05:00:00Z",
       finished_at: "2026-10-13T05:00:10Z",
-      error: "StaticRefreshFailed: no timetable could be fetched from the agency's static URL",
+      error: "StaticRefreshFailed: the source has nothing newer, but this agency has no timetable loaded",
     }),
     step({ step: "ingest", status: "not_run" }),
     step({ step: "analyze", status: "not_run" }),
@@ -166,7 +166,7 @@ describe("AgencyRunCard", () => {
     expect(screen.getByRole("img", { name: "Stopped at step 1 of 3" })).toBeTruthy();
     expect(stepRows()).toEqual(["fail", "not_run", "not_run"]);
     expect(screen.getByText("Timetable could not be fetched")).toBeTruthy();
-    expect(screen.getByText(/no timetable could be fetched from the agency's static URL/)).toBeTruthy();
+    expect(screen.getByText(/the source has nothing newer, but this agency has no timetable loaded/)).toBeTruthy();
     expect(screen.getAllByText("Not run")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Edit URL" }));
     await user.click(screen.getByRole("button", { name: "Retry" }));
