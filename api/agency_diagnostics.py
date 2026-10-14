@@ -91,11 +91,6 @@ CLAMP_HISTORY_SQL = """
 # static_calendar_dates wholesale on every load, so only the currently-loaded
 # version still has raw rows to count. Past versions therefore carry NULL for
 # both, which a reader must render as "not retained", never as zero.
-#
-# `calendar_until` is the last date the calendar runs any service: the later
-# of the last calendar.txt end_date and the last calendar_dates.txt addition,
-# as YYYYMMDD text. A removal adds no running day, and a malformed date would
-# otherwise sort after every real one.
 STATIC_VERSIONS_SQL = """
     WITH current_version AS (
         SELECT t.static_version_id
@@ -109,6 +104,10 @@ STATIC_VERSIONS_SQL = """
         WHERE t.agency_id = $1 AND t.static_version_id IS NOT NULL
         GROUP BY t.static_version_id
     ),
+    -- The last date the calendar runs any service, as YYYYMMDD text: the later
+    -- of the last calendar.txt end_date of a row that runs some weekday and the
+    -- last calendar_dates.txt addition. A removal adds no running day, and a
+    -- malformed date would otherwise sort after every real one.
     calendar AS (
         SELECT GREATEST(
             (SELECT max(c.date)
@@ -116,7 +115,8 @@ STATIC_VERSIONS_SQL = """
              WHERE c.agency_id = $1 AND c.exception_type = 1 AND c.date ~ '^[0-9]{8}$'),
             (SELECT to_char(max(w.end_date), 'YYYYMMDD')
              FROM static_calendar w
-             WHERE w.agency_id = $1)
+             WHERE w.agency_id = $1
+               AND (w.monday OR w.tuesday OR w.wednesday OR w.thursday OR w.friday OR w.saturday OR w.sunday))
         ) AS calendar_until
     )
     SELECT s.static_version_id AS version,

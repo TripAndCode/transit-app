@@ -78,6 +78,21 @@ async def test_calendar_until_of_a_mixed_feed_ignores_removals_and_malformed_dat
     assert await _calendar_until(aconn, a) == ("20270331", "2027-03-31")
 
 
+async def test_calendar_until_ignores_a_weekly_row_that_runs_no_day(aconn):
+    a = await _current_version(aconn)
+    await _weekly(aconn, a, "WD", date(2027, 3, 31))
+    await aconn.execute(
+        "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+        "saturday, sunday, start_date, end_date) VALUES ($1, 'ADDED_ONLY', false, false, false, false, false, "
+        "false, false, $2, $3)",
+        a,
+        date(2026, 4, 1),
+        date(2099, 12, 31),
+    )
+
+    assert await _calendar_until(aconn, a) == ("20270331", "2027-03-31")
+
+
 async def test_calendar_until_of_a_calendar_dates_only_feed_is_its_last_addition(aconn):
     a = await _current_version(aconn)
     await _exception(aconn, a, "WD", "20260401", 1)
