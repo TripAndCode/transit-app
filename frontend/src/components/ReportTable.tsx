@@ -39,8 +39,8 @@ type Schema = {
    *  the bare figure. */
   unit?: "min";
   format?: (v: unknown, t: TFunction) => string;
-  /** The cell holds a service (an agency's calendar name, or a weekday or
-   *  weekend group), shown in the UI's language where it has copy. */
+  /** The cell holds a service (an agency's calendar name), shown in the
+   *  UI's language where it has copy. */
   service?: true;
   /** The cell holds a route_code, shown as the route's label. */
   route?: true;

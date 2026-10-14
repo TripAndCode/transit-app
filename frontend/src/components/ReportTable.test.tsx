@@ -54,12 +54,12 @@ function TestNav({ go, children }: { go: (to: string) => void; children: React.R
   );
 }
 
-function renderWithNav(rows: unknown[][], go: (to: string) => void) {
+function renderWithNav(rows: unknown[][], go: (to: string) => void, reportType = "ranking") {
   return renderWithProviders(
     <TestNav go={go}>
       <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType="ranking" rows={rows} />} />
+          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
         </Routes>
       </MemoryRouter>
     </TestNav>,
@@ -100,7 +100,14 @@ describe("ReportTable route link travel", () => {
 
   it("a route on several rows still lends its name to only the clicked row", async () => {
     mockRoutes([]);
-    renderWithNav([["3", "weekday", 4.2, 3.1, 7.0, 120], ["3", "weekend", 3.9, 2.8, 6.0, 90]], vi.fn());
+    renderWithNav(
+      [
+        ["Agency A", "3", "平日", "2026-09-01", "08:00", "08:12", 720],
+        ["Agency A", "3", "平日", "2026-09-01", "09:00", "09:10", 600],
+      ],
+      vi.fn(),
+      "delay_certificate",
+    );
     await userEvent.click(screen.getAllByRole("link", { name: /Route 3/ })[1]);
     expect(screen.getAllByTestId("route-title-transition")).toHaveLength(1);
     expect(screen.getAllByRole("row")[2]).toContainElement(screen.getByTestId("route-title-transition"));

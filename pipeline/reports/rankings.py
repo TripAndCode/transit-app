@@ -1010,10 +1010,9 @@ async def compute_trend_series(
 
     daily = []
     for d in sorted(by_date.keys()):
-        # by_date always gets an entry per bucket (line above, unconditional);
-        # by_date_samples only gets one when at least one group's sum_delay_sec
-        # was populated (see the loop above) — a bucket where every group is
-        # still NULL has no by_date_samples entry at all, not just a zero one.
+        # by_date and by_date_samples share one population guard: a bucket
+        # where every route's sum_delay_sec is NULL has an entry in neither,
+        # so it is absent from the series rather than a zero row.
         n = by_date_samples.get(d, 0)
         # Whole-bucket total pooled from every route's exact
         # raw-seconds sum, dividing once at the end — NOT from re-weighting

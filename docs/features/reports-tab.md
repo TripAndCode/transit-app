@@ -43,9 +43,8 @@ What the user sees/does:
     (`frontend/src/components/analysis/PeriodChart.tsx`) with a CSV download.
   - **Routes-to-check section** — a ranked pattern table (route, days,
     mean delay, samples), each row linking to that route's dossier
-    (`/agencies/:agencyId/routes/<route_code>`) with the current filter (plus
-    `service`, when the row's service type is itself a `service` filter
-    value), plus its own CSV
+    (`/agencies/:agencyId/routes/<route_code>`) with the active scope's query
+    string, `service` included when one is set, plus its own CSV
     download.
   - A **definitions** `<details>` showing the active filter window and a
     `DefinitionMetaBlock` (on-time/late tolerance, measurement point, dedup
