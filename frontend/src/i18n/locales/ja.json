@@ -331,11 +331,21 @@
       "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占めています。"
     },
     "service_split": {
-      "diff": "差：{{diff}}分（{{pct}}%）",
-      "story_weekday_higher": "平日の遅延は土日祝の {{ratio}}倍です。",
-      "story_weekend_higher": "土日祝の遅延は平日の {{ratio}}倍です。",
-      "story_same": "平日と土日祝でほぼ差はありません。",
-      "daily_label": "平日 vs 土日祝の日次推移"
+      "type": {
+        "weekday": "平日",
+        "saturday": "土曜",
+        "sunday_holiday": "日祝",
+        "weekend_holiday": "土日祝"
+      },
+      "pair": "{{a}}と{{b}}",
+      "story_slowest": "{{slowest}}が最も遅れ、{{fastest}}より平均{{diff}}長い。",
+      "story_same": "日種別による遅れの差はほぼありません。",
+      "days_one": "{{count}}日",
+      "days_other": "{{count}}日",
+      "samples": "{{value}}件",
+      "no_data": "データなし",
+      "insufficient": "データ不足",
+      "daily_label": "日種別ごとの日次推移"
     },
     "peak_hour": {
       "max_label": "最大 {{avg}}分",
@@ -352,7 +362,7 @@
     "empty": "この期間の観測データがありません。期間を広げてください。",
     "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
-    "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。",
+    "service_split_explainer": "日種別（平日・土曜・日祝、または平日・土日祝）ごとの平均遅延です。日種別は事業者の時刻表がその日に走らせたダイヤで決まります。日数か観測数が少ない日種別は「データ不足」とし、比較から外します。下の日別推移から、差が恒常的か一時的かを確認できます。",
     "never_collected": "{{agency}}のデータはまだ収集していません。",
     "choose_another_agency": "別の事業者を選ぶ"
   },

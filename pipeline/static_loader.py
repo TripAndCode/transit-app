@@ -1,7 +1,7 @@
 """GTFS static loader.
 
 Reads a GTFS static zip (``stops.txt``, ``stop_times.txt``, ``trips.txt``,
-``routes.txt``, ``calendar_dates.txt``, ``shapes.txt``) and writes each file
+``routes.txt``, ``calendar_dates.txt``, ``shapes.txt``, ``calendar.txt``) and writes each file
 into its corresponding ``static_*`` table for one agency. The loader is
 idempotent: a per-table ``DELETE WHERE agency_id = ...`` runs before each
 file's rows are inserted, so re-running on the same agency replaces rather
@@ -25,6 +25,7 @@ import logging
 import pathlib
 import zipfile
 from collections import defaultdict
+from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
@@ -33,6 +34,9 @@ from pipeline.stop_clusters import rebuild_stop_clusters
 
 logger = logging.getLogger(__name__)
 
+# calendar.txt's weekly flags, Monday first (the order of ``date.weekday()``).
+WEEKDAY_COLUMNS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
 _STATIC_FILE_MAP = [
     ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),
     ("stop_times.txt", "static_stop_times", ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
@@ -40,6 +44,7 @@ _STATIC_FILE_MAP = [
     ("routes.txt", "static_routes", ["route_id", "route_short_name", "route_long_name"]),
     ("calendar_dates.txt", "static_calendar_dates", ["service_id", "date", "exception_type"]),
     ("shapes.txt", "static_shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]),
+    ("calendar.txt", "static_calendar", ["service_id", *WEEKDAY_COLUMNS, "start_date", "end_date"]),
 ]
 
 _DB_COLS = {
@@ -56,7 +61,44 @@ _DB_COLS = {
     ],
     "static_routes": ["agency_id", "route_id", "route_short_name", "route_long_name"],
     "static_calendar_dates": ["agency_id", "service_id", "date", "exception_type"],
+    "static_calendar": ["agency_id", "service_id", *WEEKDAY_COLUMNS, "start_date", "end_date"],
 }
+
+
+def _calendar_rows(raw_rows: list[list]) -> list[list]:
+    """calendar.txt rows typed for ``static_calendar``, malformed ones dropped.
+
+    Parsed here rather than cast by Postgres: the whole static set loads in one
+    transaction, so one unparseable row would otherwise abort every table.
+    """
+    rows: list[list] = []
+    for raw in raw_rows:
+        service_id, *flags, start, end = [(v or "").strip() for v in raw]
+        try:
+            if not service_id or any(f not in {"0", "1"} for f in flags):
+                raise ValueError
+            start_date: date = datetime.strptime(start, "%Y%m%d").date()
+            end_date: date = datetime.strptime(end, "%Y%m%d").date()
+        except ValueError:
+            continue
+        rows.append([service_id, *(f == "1" for f in flags), start_date, end_date])
+    if len(rows) < len(raw_rows):
+        logger.warning(f"  calendar.txt: skipped {len(raw_rows) - len(rows)} malformed row(s)")
+    return rows
+
+
+def _count_calendar_trips(cur, agency_id: int) -> None:
+    """Store each calendar service's trip count, the weight of its vote for a
+    date's timetable class (``pipeline.day_types``), so reports read it
+    instead of aggregating ``static_trips`` per request. Rows were just
+    inserted at the column's default of 0, so a service with no trips keeps it.
+    """
+    cur.execute(
+        "UPDATE static_calendar c SET trips = t.trips "
+        "FROM (SELECT service_id, COUNT(*) AS trips FROM static_trips WHERE agency_id = %s GROUP BY service_id) t "
+        "WHERE c.agency_id = %s AND c.service_id = t.service_id",
+        (agency_id, agency_id),
+    )
 
 
 def load_static(path: str, agency_id: int, conn) -> None:
@@ -76,7 +118,10 @@ def load_static(path: str, agency_id: int, conn) -> None:
     Files missing from the zip are skipped with a logged ``not in zip``
     line; this lets agencies without ``shapes.txt`` (or any other optional
     file) load successfully. Each loaded table is cleared for this
-    agency before insert, so the function is safe to re-run.
+    agency before insert, so the function is safe to re-run. The one
+    exception to "skipped" is ``static_calendar``: a missing
+    ``calendar.txt`` clears it, so an earlier feed's timetables cannot
+    classify this feed's dates.
     """
     p = pathlib.Path(path)
     if p.is_dir():
@@ -101,6 +146,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
         for filename, table, csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
+                if table == "static_calendar":
+                    # An earlier feed's calendar would file this feed's dates under its timetables.
+                    cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
                 continue
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
@@ -173,6 +221,8 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         direction = row[-1]
                         row[-1] = int(direction) if direction in {"0", "1"} else None
                     pg_rows = [[agency_id, *row, static_version_id] for row in raw_rows]
+                elif table == "static_calendar":
+                    pg_rows = [[agency_id, *row] for row in _calendar_rows(raw_rows)]
                 else:
                     pg_rows = [[agency_id, *row] for row in raw_rows]
                 # RETURNING lets us count how many rows actually landed vs were deduped
@@ -188,6 +238,10 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
             logger.info(f"  {table}: {len(raw_rows):,} rows")
 
+        if "trips.txt" in names_in_zip:
+            # Without it static_trips still holds the previous feed's trips, so
+            # every service keeps the default weight rather than stale counts.
+            _count_calendar_trips(cur, agency_id)
         changed = load_route_terminals(zf, names_in_zip, cur, agency_id)
         logger.info(f"  route terminals: {changed:,} routes changed")
 

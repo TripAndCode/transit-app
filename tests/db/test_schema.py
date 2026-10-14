@@ -8,6 +8,7 @@ EXPECTED_TABLES = [
     "static_trips",
     "static_routes",
     "static_shapes",
+    "static_calendar",
     "static_calendar_dates",
     "agg_route_stats",
     "agg_route_hour",

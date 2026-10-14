@@ -1,22 +1,77 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { serviceValueLabel } from "../utils/filterValueLabels";
 
-import type { OverviewServiceSplitDay } from "../api/types";
-import { ServiceName } from "./ServiceName";
-import { formatMinutes, formatShortDate } from "../utils/format";
+import type { OverviewDayType, OverviewServiceSplitDay, OverviewServiceSplitEntry } from "../api/types";
+import { FILTER_SEPARATOR, formatMinutes, formatNumber, formatShortDate, roundTenth } from "../utils/format";
+import type { LabelT } from "../utils/filterValueLabels";
+import { niceAxis } from "./charts/niceAxis";
 import { showsLabel } from "./analysis/axisLabels";
 
 type Props = {
-  service_split: Record<string, number>;
-  /** Per-date weekday/weekend rows used by the modal line chart. */
+  /** Every bucket the agency is split into, in display order. */
+  service_split: OverviewServiceSplitEntry[];
+  /** One row per date with data, used by the modal line chart. */
   daily?: OverviewServiceSplitDay[];
   variant?: "card" | "modal";
   onClick?: () => void;
 };
 
-const WEEKDAY_KEY = "平日"; // i18n-ignore: GTFS service-type key
-const WEEKEND_KEY = "土日祝"; // i18n-ignore: GTFS service-type key
+const DAY_TYPE_KEY: Record<OverviewDayType, string> = {
+  weekday: "overview.service_split.type.weekday",
+  saturday: "overview.service_split.type.saturday",
+  sunday_holiday: "overview.service_split.type.sunday_holiday",
+  weekend_holiday: "overview.service_split.type.weekend_holiday",
+};
+
+/** A bucket whose mean is drawn and compared: it has data, and enough of it. */
+function comparable(entry: OverviewServiceSplitEntry): entry is OverviewServiceSplitEntry & { avg_min: number } {
+  return entry.avg_min != null && !entry.insufficient;
+}
+
+function dayTypeLabel(type: OverviewDayType, t: LabelT): string {
+  return t(DAY_TYPE_KEY[type]);
+}
+
+/** Two tied day types read as one subject ("Weekdays and Saturdays"). Three
+ *  can never tie for one end without the ends meeting. */
+function joinLabels(types: OverviewDayType[], t: LabelT): string {
+  const labels = types.map((type) => dayTypeLabel(type, t));
+  return labels.length === 2 ? t("overview.service_split.pair", { a: labels[0], b: labels[1] }) : labels[0];
+}
+
+/** The slowest day type against the fastest, judged on the one-decimal means
+ *  the rows show so the sentence never disagrees with them. Null when fewer
+ *  than two day types have enough data to compare. */
+function story(entries: OverviewServiceSplitEntry[], t: LabelT): string | null {
+  const shown = entries.filter(comparable).map((e) => ({ type: e.day_type, v: roundTenth(e.avg_min) }));
+  if (shown.length < 2) return null;
+  const hi = Math.max(...shown.map((s) => s.v));
+  const lo = Math.min(...shown.map((s) => s.v));
+  if (hi === lo) return t("overview.service_split.story_same");
+  return t("overview.service_split.story_slowest", {
+    slowest: joinLabels(shown.filter((s) => s.v === hi).map((s) => s.type), t),
+    fastest: joinLabels(shown.filter((s) => s.v === lo).map((s) => s.type), t),
+    diff: formatMinutes(hi - lo),
+  });
+}
+
+/** The shared bar scale: always spans zero, so an early-running (negative)
+ *  mean draws leftward from it rather than off the track. */
+function barAxis(entries: OverviewServiceSplitEntry[]) {
+  const values = entries.filter(comparable).map((e) => e.avg_min);
+  const low = Math.min(0, ...values);
+  const high = Math.max(0, ...values);
+  return high > low ? niceAxis(low, high, 4) : niceAxis(0, 1, 4);
+}
+
+function metaText(entry: OverviewServiceSplitEntry, t: LabelT): string {
+  if (entry.samples === 0) return t("overview.service_split.no_data");
+  const samples = formatNumber(entry.samples, { notation: "compact" });
+  return [
+    t("overview.service_split.days", { count: entry.days }),
+    t("overview.service_split.samples", { value: samples }),
+  ].join(FILTER_SEPARATOR);
+}
 
 export function ServiceSplit({
   service_split,
@@ -25,62 +80,12 @@ export function ServiceSplit({
   onClick,
 }: Props) {
   const { t } = useTranslation();
-  const keys = Object.keys(service_split);
-  if (keys.length === 0) return null;
+  if (service_split.length === 0) return null;
 
-  const values = keys.map((k) => service_split[k]);
-  const maxVal = Math.max(...values, 0.0001); // avoid div-by-zero
-
-  // Story + diff annotation (computed only when we have two values).
-  let storyNode: React.ReactNode = null;
-  let diffNode: React.ReactNode = null;
-  if (keys.length >= 2) {
-    const weekday = service_split[WEEKDAY_KEY];
-    const weekend = service_split[WEEKEND_KEY];
-    const sorted = [...values].sort((a, b) => b - a);
-    const diff = sorted[0] - sorted[1];
-    const pct = sorted[1] > 0 ? (diff / sorted[1]) * 100 : 0;
-
-    if (weekday != null && weekend != null && Math.min(weekday, weekend) > 0) {
-      const hi = Math.max(weekday, weekend);
-      const lo = Math.min(weekday, weekend);
-      const ratio = hi / lo;
-      if (ratio < 1.15) {
-        storyNode = (
-          <p className="ov-svc-story">
-            {t("overview.service_split.story_same")}
-          </p>
-        );
-      } else if (weekday > weekend) {
-        storyNode = (
-          <p className="ov-svc-story">
-            {t("overview.service_split.story_weekday_higher", {
-              ratio: ratio.toFixed(1),
-            })}
-          </p>
-        );
-      } else {
-        storyNode = (
-          <p className="ov-svc-story">
-            {t("overview.service_split.story_weekend_higher", {
-              ratio: ratio.toFixed(1),
-            })}
-          </p>
-        );
-      }
-    }
-
-    if (diff > 0) {
-      diffNode = (
-        <p className="ov-svc-diff">
-          {t("overview.service_split.diff", {
-            diff: diff.toFixed(1),
-            pct: pct.toFixed(0),
-          })}
-        </p>
-      );
-    }
-  }
+  const axis = barAxis(service_split);
+  const span = axis.high - axis.low;
+  const pctOf = (v: number) => ((v - axis.low) / span) * 100;
+  const storyText = story(service_split, t);
 
   const clickable = !!onClick;
   const wrapperClass =
@@ -113,42 +118,67 @@ export function ServiceSplit({
           {t("overview.service_split_explainer")}
         </p>
       )}
+      {storyText && <p className="ov-svc-story">{storyText}</p>}
       <div className="ov-svc-list">
-        {keys.map((k) => {
-          const v = service_split[k];
-          const pctOfMax = Math.max(0, Math.min(100, (v / maxVal) * 100));
+        {service_split.map((entry) => {
+          const v = entry.avg_min;
+          const drawn = comparable(entry);
           return (
-            <div className="ov-svc-row" key={k}>
-              <div className="ov-svc-head">
-                <span className="ov-svc-label">
-                  <ServiceName value={k} />
+            <div
+              className={`ov-svc-row${drawn ? "" : " ov-svc-row--muted"}`}
+              key={entry.day_type}
+            >
+              <span className="ov-svc-label">{dayTypeLabel(entry.day_type, t)}</span>
+              {v != null && entry.insufficient ? (
+                <span className="ov-svc-insufficient">{t("overview.service_split.insufficient")}</span>
+              ) : (
+                <span className="ov-svc-track" aria-hidden="true">
+                  {drawn && (
+                    <span
+                      className="ov-svc-fill"
+                      style={{
+                        left: `${pctOf(Math.min(0, entry.avg_min))}%`,
+                        width: `${(Math.abs(entry.avg_min) / span) * 100}%`,
+                      }}
+                    />
+                  )}
                 </span>
-                <span className="ov-svc-num num">
-                  {formatMinutes(v)}
-                </span>
-              </div>
-              <div className="ov-svc-track">
-                <div
-                  className="ov-svc-fill"
-                  style={{ width: `${pctOfMax}%` }}
-                />
-              </div>
+              )}
+              <span className="ov-svc-num num">{formatMinutes(v)}</span>
+              <span className="ov-svc-meta num">{metaText(entry, t)}</span>
             </div>
           );
         })}
+        {service_split.some(comparable) && (
+        <div className="ov-svc-scale" aria-hidden="true">
+          {axis.ticks.map((tick, i) => {
+            const last = i === axis.ticks.length - 1;
+            const value = formatNumber(tick);
+            return (
+              <span
+                key={tick}
+                className={`ov-svc-tick${i === 0 ? " ov-svc-tick--first" : ""}${last ? " ov-svc-tick--last" : ""} num`}
+                style={{ left: `${pctOf(tick)}%` }}
+              >
+                {last ? t("common.minutes_value", { value }) : value}
+              </span>
+            );
+          })}
+        </div>
+        )}
       </div>
-      {storyNode}
-      {diffNode}
       {variant === "modal" && daily && daily.length > 0 && (
-        <ServiceSplitDailyChart daily={daily} />
+        <ServiceSplitDailyChart daily={daily} types={service_split.map((e) => e.day_type)} />
       )}
     </div>
   );
 }
 
 // --------------------------------------------------------------------------
-// Daily line chart (modal only): weekday + weekend over time.
-// Two lines, hover tooltip, no chart library.
+// Daily line chart (modal only): one series per day-type bucket over time.
+// Every date belongs to exactly one day type, so each series joins only its
+// own dates; marks keep a series with a single date (one Saturday in range)
+// visible. Hover tooltip, no chart library.
 // --------------------------------------------------------------------------
 
 const DC_W = 830;
@@ -158,20 +188,28 @@ const DC_PAD_RIGHT = 16;
 const DC_PAD_TOP = 16;
 const DC_PAD_BOTTOM = 32;
 
+const SERIES_STYLE: Record<OverviewDayType, { stroke: string; dash: string }> = {
+  weekday: { stroke: "var(--trend-neutral)", dash: "0" },
+  saturday: { stroke: "var(--accent)", dash: "6 3" },
+  sunday_holiday: { stroke: "var(--text-tertiary)", dash: "2 3" },
+  weekend_holiday: { stroke: "var(--text-tertiary)", dash: "4 3" },
+};
+
 type DailyHover = {
   visible: boolean;
   svgX: number;
   px: number;
   py: number;
-  label: string;
-  weekday: number | null;
-  weekend: number | null;
+  index: number;
 };
 
 function ServiceSplitDailyChart({
   daily,
+  types,
 }: {
   daily: OverviewServiceSplitDay[];
+  /** The buckets the card shows, in its order: one series each. */
+  types: OverviewDayType[];
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<DailyHover>({
@@ -179,20 +217,14 @@ function ServiceSplitDailyChart({
     svgX: 0,
     px: 0,
     py: 0,
-    label: "",
-    weekday: null,
-    weekend: null,
+    index: 0,
   });
 
   const innerW = DC_W - DC_PAD_LEFT - DC_PAD_RIGHT;
   const innerH = DC_H - DC_PAD_TOP - DC_PAD_BOTTOM;
   const stepX = daily.length > 1 ? innerW / (daily.length - 1) : 0;
   const toX = (i: number) => DC_PAD_LEFT + i * stepX;
-  const allVals: number[] = [];
-  for (const d of daily) {
-    if (d.weekday != null) allVals.push(d.weekday);
-    if (d.weekend != null) allVals.push(d.weekend);
-  }
+  const allVals = daily.map((d) => d.avg_min);
   // The axis always spans zero: early-running (negative) means draw below it
   // rather than outside the plot, and an all-negative series keeps its
   // ordering instead of inverting the scale.
@@ -200,25 +232,14 @@ function ServiceSplitDailyChart({
   const yMax = Math.max(0, ...allVals) || 1;
   const toY = (v: number) => DC_PAD_TOP + ((yMax - v) / (yMax - yMin)) * innerH;
 
-  const wd: { x: number; y: number; v: number }[] = [];
-  const we: { x: number; y: number; v: number }[] = [];
-  for (let i = 0; i < daily.length; i++) {
-    if (daily[i].weekday != null) {
-      wd.push({ x: toX(i), y: toY(daily[i].weekday as number), v: daily[i].weekday as number });
-    }
-    if (daily[i].weekend != null) {
-      we.push({ x: toX(i), y: toY(daily[i].weekend as number), v: daily[i].weekend as number });
-    }
-  }
+  const points = daily.map((d, i) => ({ x: toX(i), y: toY(d.avg_min), type: d.day_type }));
   const buildPath = (pts: { x: number; y: number }[]) =>
     pts
       .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(" ");
 
   const dateLabels = daily.map((d) => formatShortDate(d.date));
-  const xs = daily.map((_, i) => toX(i));
-  const weekdayPath = buildPath(wd);
-  const weekendPath = buildPath(we);
+  const xs = points.map((p) => p.x);
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = e.currentTarget;
@@ -235,16 +256,12 @@ function ServiceSplitDailyChart({
         best = i;
       }
     });
-    const row = daily[best];
-    const refY = row.weekday != null ? toY(row.weekday) : row.weekend != null ? toY(row.weekend) : DC_PAD_TOP;
     setHover({
       visible: true,
       svgX: xs[best],
       px: xs[best] * scaleX,
-      py: refY * scaleY,
-      label: dateLabels[best],
-      weekday: row.weekday,
-      weekend: row.weekend,
+      py: points[best].y * scaleY,
+      index: best,
     });
   }
 
@@ -252,24 +269,20 @@ function ServiceSplitDailyChart({
 
   // Y axis ticks at the axis minimum, middle and maximum.
   const yTicks = [yMin, (yMin + yMax) / 2, yMax];
+  const hovered = hover.visible ? daily[hover.index] : null;
+  const series = types.map((type) => ({ type, ...SERIES_STYLE[type] }));
 
   return (
     <div className="ov-svc-daily-wrap">
       <div className="ov-svc-daily-legend">
-        <span>
-          <span
-            className="ov-svc-daily-legend-swatch"
-            style={{ background: "var(--trend-neutral)" }}
-          />
-          {serviceValueLabel(WEEKDAY_KEY, t)}
-        </span>
-        <span>
-          <span
-            className="ov-svc-daily-legend-swatch"
-            style={{ background: "var(--text-tertiary)" }}
-          />
-          {serviceValueLabel(WEEKEND_KEY, t)}
-        </span>
+        {series.map((s) => (
+          <span key={s.type}>
+            <svg className="ov-svc-daily-legend-swatch" width="18" height="4" aria-hidden="true">
+              <line x1="1" y1="2" x2="17" y2="2" style={{ stroke: s.stroke }} strokeWidth="2" strokeDasharray={s.dash} />
+            </svg>
+            {dayTypeLabel(s.type, t)}
+          </span>
+        ))}
       </div>
       <div className="ov-chart-plot">
       <svg
@@ -298,24 +311,32 @@ function ServiceSplitDailyChart({
             </g>
           );
         })}
-        {/* Lines */}
-        <path
-          d={weekdayPath}
-          style={{ stroke: "var(--trend-neutral)" }}
-          strokeWidth="1.8"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d={weekendPath}
-          style={{ stroke: "var(--text-tertiary)" }}
-          strokeWidth="1.8"
-          strokeDasharray="4 3"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {series.map((s) => {
+          const own = points.filter((p) => p.type === s.type);
+          return (
+            <g key={s.type}>
+              <path
+                d={buildPath(own)}
+                style={{ stroke: s.stroke }}
+                strokeWidth="1.8"
+                strokeDasharray={s.dash}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              {own.map((p) => (
+                <circle
+                  key={p.x}
+                  cx={p.x}
+                  cy={p.y}
+                  r="2.5"
+                  data-day-type={s.type}
+                  style={{ fill: s.stroke }}
+                />
+              ))}
+            </g>
+          );
+        })}
         {hover.visible && (
           <line
             x1={hover.svgX}
@@ -356,18 +377,12 @@ function ServiceSplitDailyChart({
         );
       })}
       {/* Inside the plot box it is measured against. */}
-      {hover.visible && (
+      {hovered && (
         <div
           className="ov-tooltip"
           style={{ left: hover.px, top: hover.py }}
         >
-          {hover.label} —{" "}
-          {hover.weekday != null
-            ? `${serviceValueLabel(WEEKDAY_KEY, t)} ${formatMinutes(hover.weekday)}`
-            : "—"}
-          {hover.weekend != null
-            ? `, ${serviceValueLabel(WEEKEND_KEY, t)} ${formatMinutes(hover.weekend)}`
-            : ""}
+          {dateLabels[hover.index]} — {dayTypeLabel(hovered.day_type, t)} {formatMinutes(hovered.avg_min)}
         </div>
       )}
       </div>
