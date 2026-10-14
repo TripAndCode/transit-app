@@ -6,7 +6,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { REPORTS_VIEWS, SAVED_REPORT_TYPES, destHref, reportsView, savedTarget } from "../routes/destinations";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
 import { SCREEN_STRIP_STYLE, screenStripLinkStyle } from "../components/screenStrip";
-import { PageHeader } from "../components/ui/PageHeader";
+import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 
 const ReportsHomeTab = lazy(loadReportsHomeTab);
 const AnalysisTab = lazy(loadAnalysisTab);
@@ -27,32 +27,34 @@ export function SavedExportTab() {
   const doc = params.get("doc");
   const view = reportsView(doc, params.get("report"));
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* One heading for every document, above the strip that picks one; the
-          line under it says what the open document holds. */}
-      <PageHeader title={t("saved.title")} subtitle={t(`saved.subtitle_${view}`)} />
-      <nav aria-label={t("saved.title")} style={SCREEN_STRIP_STYLE}>
-        {REPORTS_VIEWS.map(({ view: v, labelKey, extra }) => (
-          <Link
-            key={v}
-            to={destHref(id, "reports", scopeToQueryString(ctx), extra)}
-            aria-current={v === view ? "page" : undefined}
-            style={screenStripLinkStyle(v === view)}
-          >
-            {t(labelKey)}
-          </Link>
-        ))}
-      </nav>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {view === "reports" ? (
-          <AnalysisTab
-            reportTypes={SAVED_REPORT_TYPES}
-            defaultReport={doc === "certificate" ? "delay_certificate" : "council_summary"}
-          />
-        ) : (
-          <ReportsHomeTab />
-        )}
+    <ScopeHeaderProvider>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        {/* One heading for every document, above the strip that picks one; the
+            line under it says what the open document holds. */}
+        <ScopePageHeader title={t("saved.title")} subtitle={t(`saved.subtitle_${view}`)} />
+        <nav aria-label={t("saved.title")} style={SCREEN_STRIP_STYLE}>
+          {REPORTS_VIEWS.map(({ view: v, labelKey, extra }) => (
+            <Link
+              key={v}
+              to={destHref(id, "reports", scopeToQueryString(ctx), extra)}
+              aria-current={v === view ? "page" : undefined}
+              style={screenStripLinkStyle(v === view)}
+            >
+              {t(labelKey)}
+            </Link>
+          ))}
+        </nav>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {view === "reports" ? (
+            <AnalysisTab
+              reportTypes={SAVED_REPORT_TYPES}
+              defaultReport={doc === "certificate" ? "delay_certificate" : "council_summary"}
+            />
+          ) : (
+            <ReportsHomeTab />
+          )}
+        </div>
       </div>
-    </div>
+    </ScopeHeaderProvider>
   );
 }

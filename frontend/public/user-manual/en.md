@@ -90,7 +90,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ![The scope sentence with its period open](./03-scope-sentence.en.png)
 
-Each part with a dashed underline is a condition. Click it to change it; the screen updates at once.
+Each button with a ▼ is a condition. Click it to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers.
 
 | Condition | What you can choose |
 |---|---|
@@ -102,10 +102,11 @@ Each part with a dashed underline is a condition. Click it to change it; the scr
 
 By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, and a stop, direction or early-departure allowance set by a link, join the sentence as extra conditions. On a screen that does not count on-time departures, the sentence ends before the on-time part.
 
-To the right of the sentence:
+Once you change any condition from its default, **Reset** appears at the end of the sentence and returns every condition to its default.
 
-- **Saved views ▾** lists the views you have saved, and “Save this view…” stores the current conditions under a name. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
-- **Reset conditions** appears once you change something other than the period, and returns every condition to its default.
+To the right of the screen's heading:
+
+- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
 - **Show all filters** lays out the controls for every condition in a row under the sentence. It stays on until you turn it off.
 
 A condition the screen does not use is struck through, and a line under the sentence names it, for example “Not used on this screen: Days and timetable”. The weekday and weekend reports, for instance, choose their own days.
