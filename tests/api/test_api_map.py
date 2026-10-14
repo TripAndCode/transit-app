@@ -1005,7 +1005,7 @@ async def _seed_route(
                 seq,
                 delay,
             )
-        # The route-summary endpoint reads agg_route_daily; mirror what analyze()
+        # route_exists reads agg_route_daily; mirror what analyze()
         # would compute for this day (rows are unique per (trip, stop) here).
         delays = [d for (_, _, d, _) in day_rows]
         await conn.execute(
@@ -1046,66 +1046,56 @@ async def _seed_route(
         mirror_updates_to_ch(ch_client, agency_id)
 
 
-async def _seed_live_route(pool, ch_client, agency_id, route_code, service_type, day_rows, baseline=None):
+async def _seed_live_route(pool, ch_client, agency_id, route_code, service_type, day_rows, history=None):
     """Today's live rows for one route, one poll file per row (day_rows:
-    (trip_id, stop_sequence, dep_delay_sec, scheduled_time)), plus its
-    agg_route_stats baseline row ((avg_min, p90_min, samples) or None)."""
+    (trip_id, stop_sequence, dep_delay_sec, scheduled_time)). ``history``,
+    when given, is the deduped delays of one closed day, seeded into
+    agg_route_daily_dist on each of the newest dates of today's class (the
+    weekday rule, as no calendar is loaded), enough of them for a same-class
+    baseline."""
     from api.range import jst_today
+    from api.routers.map import MIN_SAME_CLASS_BASELINE_DAYS
     from pipeline.clickhouse import LIVE_TABLE, insert_updates
+    from tests.fixtures.route_dist import recent_days_of_class, seed_route_dist_day
 
-    at = _jst_noon_utc(jst_today())
+    today = jst_today()
+    at = _jst_noon_utc(today)
     insert_updates(
         ch_client,
         agency_id,
         [
-            (f"live_{route_code}_{i}", at, trip, service_type, sched, route_code, seq, delay)
+            (f"live_{route_code}_{service_type}_{i}", at, trip, service_type, sched, route_code, seq, delay)
             for i, (trip, seq, delay, sched) in enumerate(day_rows)
         ],
         table=LIVE_TABLE,
     )
-    avg_min, p90_min, samples = baseline if baseline is not None else (None, None, None)
-    sum_delay_sec = round(avg_min * 60 * samples) if avg_min is not None else None
-    # agg_route_stats.service_type is NOT NULL (unlike ClickHouse's), so a
-    # None service_type (the NULL-service test case) folds to the same ''
-    # sentinel analyze() itself writes there -- not a behavior change, since
-    # these callers pass baseline=None anyway and _TODAY_ROUTES_SQL folds a
-    # NULL CH service_type to '' before ever looking a baseline up by it.
-    await pool.execute(
-        "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples, sum_delay_sec) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7)",
-        agency_id,
-        route_code,
-        service_type or "",
-        avg_min,
-        p90_min,
-        samples,
-        sum_delay_sec,
-    )
+    if history is not None:
+        for day in recent_days_of_class(today, MIN_SAME_CLASS_BASELINE_DAYS):
+            await seed_route_dist_day(pool, agency_id, route_code, day, history)
 
 
 @pytest.mark.asyncio
 async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
     app, agency_id = map_app_ch
     pool = app.state.pool
-    # Anomaly: today avg 420s, baseline avg 120s (2min) p90 360s (6min), 40 samples
+    # Anomaly: today avg 420s, all blank-service (no scheduled trip matched),
+    # against same-class days of 120s each (p90 interpolated to 174s).
     await _seed_live_route(
         pool,
         ch_client,
         agency_id,
         "R_ANOM",
-        "平日",
+        "",
         [(f"t{i}", 1, 420, "10:00") for i in range(40)],
-        baseline=(2.0, 6.0, 500),
+        history=[120] * 50,
     )
-    # No baseline route
     await _seed_live_route(
         pool,
         ch_client,
         agency_id,
         "R_NOBASE",
-        "平日",
+        "11_平日(共通)",
         [(f"n{i}", 1, 300, "11:00") for i in range(40)],
-        baseline=None,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -1116,8 +1106,8 @@ async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
     assert anom["bucket"] == "anomaly"
     assert anom["has_baseline"] is True
     assert anom["baseline_avg_sec"] == 120
-    assert anom["baseline_p90_sec"] == 360
-    assert anom["baseline_samples"] == 500
+    assert anom["baseline_p90_sec"] == 174
+    assert anom["baseline_samples"] == 150
     assert anom["deviation_sec"] == 300  # 420 - 120
     assert anom["low_confidence"] is False
 
@@ -1129,223 +1119,44 @@ async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, ch_client):
-    """A NULL-service daily row (stored as '') has no per-(route,service_type)
-    baseline, but the route has typed history — it should fall back to the
-    route-grain baseline instead of being stuck as no_baseline (Hiroshima case)."""
+async def test_route_summary_is_one_row_per_route_across_its_service_ids(map_app_ch, ch_client):
+    """Observations matched to two raw service ids, to none (''), or with no
+    service at all are one route: one row, its figures pooled, and no raw id
+    anywhere in the response."""
     app, agency_id = map_app_ch
     pool = app.state.pool
-    # Today's row is NULL-service ('') and clearly anomalous (420s vs 360s p90).
-    await _seed_live_route(
-        pool,
-        ch_client,
-        agency_id,
-        "R_NULLSVC",
-        "",
-        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
-        baseline=None,
-    )
-    # The route DOES have a typed (平日) baseline in agg_route_stats.
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_NULLSVC', '平日', 2.0, 6.0, 500, 60000)",
-            agency_id,
+    for service_type, rows in (
+        ("11_平日(共通)", [("a", 1, 60, "10:00"), ("a", 2, 120, "10:05")]),
+        ("12_平日(特)", [("b", 1, 180, "11:00")]),
+        ("", [("c", 1, 600, "12:00")]),
+        (None, [("d", 1, 0, "13:00")]),
+    ):
+        await _seed_live_route(
+            pool, ch_client, agency_id, "R1", service_type, rows, history=[100] * 10 if service_type == "" else None
         )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
-    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSVC"]
-    assert r["has_baseline"] is True
-    assert r["baseline_avg_sec"] == 120  # route-grain 2.0 min, not no_baseline
-    assert r["baseline_samples"] == 500  # pooled SUM(samples) across service_types
-    assert r["bucket"] == "anomaly"
-
-
-@pytest.mark.asyncio
-async def test_route_grain_baseline_samples_exclude_rows_the_average_skips(map_app_ch, ch_client):
-    """A pre-backfill row with NULL sum_delay_sec adds nothing to the pooled
-    average, so its samples must not inflate the evidence count either."""
-    app, agency_id = map_app_ch
-    pool = app.state.pool
-    await _seed_live_route(
-        pool,
-        ch_client,
-        agency_id,
-        "R_NULLSUM",
-        "",
-        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
-        baseline=None,
-    )
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_NULLSUM', '平日', 2.0, 6.0, 500, 60000), "
-            "($1, 'R_NULLSUM', '休日', 2.0, 6.0, 300, NULL)",
-            agency_id,
-        )
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/today/route-summary")
-    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSUM"]
-    assert r["baseline_avg_sec"] == 120
-    assert r["baseline_samples"] == 500
-
-
-@pytest.mark.asyncio
-async def test_route_summary_baseline_columns_stay_same_source(map_app_ch, ch_client):
-    """A group's p90_min can be null while avg_min isn't -- not something
-    `analyze()`'s own SQL can currently produce for a live group (dep_delay is
-    filtered non-null upstream, and analyze() wipes and rebuilds every row
-    each run), but a stale pre-rebuild row or, as here, a directly-seeded
-    fixture can still exercise this shape, and downstream readers must handle
-    it correctly regardless of cause. baseline_avg_min/baseline_p90_min/
-    baseline_samples must all come from the SAME source (the exact (route,
-    service_type) match, here) rather than independently falling back column-by-
-    column to the route-grain pooled baseline -- even though the route DOES have
-    a real, non-null p90 available from a different service_type's pooled figure,
-    it must not be silently substituted in."""
-    app, agency_id = map_app_ch
-    pool = app.state.pool
-    # Exact-match baseline for today's own service_type has a null p90 (thin
-    # group) but a real avg and sample count.
-    await _seed_live_route(
-        pool,
-        ch_client,
-        agency_id,
-        "R_THINP90",
-        "平日",
-        [(f"y{i}", 1, 420, "10:00") for i in range(40)],
-        baseline=(2.0, None, 1),
-    )
-    # A different service_type's baseline for the SAME route has a real,
-    # non-null p90 -- this populates the route-grain pooled fallback (rb) with
-    # a value that must NOT leak into baseline_p90_sec above.
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_THINP90', '土日', 2.0, 6.0, 500, 60000)",
-            agency_id,
-        )
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/today/route-summary")
-    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_THINP90"]
-    assert r["baseline_avg_sec"] == 120  # exact-match avg (b), not the pooled rb figure
-    assert r["baseline_p90_sec"] is None  # must stay null, not rb's pooled 360
-    assert r["baseline_samples"] == 1  # exact-match samples (b), not rb's pooled 501
-    assert r["bucket"] == "no_baseline"  # classify_route treats a null p90 as no baseline
-    # has_baseline must track the bucket, not just baseline_avg_sec: a thin
-    # group can have a real avg but a null p90 (no_baseline bucket) -- showing
-    # has_baseline=True here would render a contradictory "baseline pending"
-    # + concrete today-vs-baseline comparison for the same row.
-    assert r["has_baseline"] is False
-
-
-@pytest.mark.asyncio
-async def test_route_summary_pooled_p90_ignores_null_p90_rows(map_app_ch, ch_client):
-    """The route-grain pooled fallback (rb)'s base_p90_min must not be diluted
-    by a contributing service_type whose own p90_min is null. SUM(p90_min *
-    samples) silently skips a null numerator term, but the denominator must be
-    FILTERed the same way, or that row's samples still count against a p90 it
-    contributed nothing to -- biasing the pooled figure down."""
-    app, agency_id = map_app_ch
-    pool = app.state.pool
-    # NULL-service today row: no exact (route, service_type) match, so this
-    # must go through the rb pooled fallback.
-    await _seed_live_route(
-        pool,
-        ch_client,
-        agency_id,
-        "R_POOLMIX",
-        "",
-        [(f"z{i}", 1, 480, "10:00") for i in range(40)],
-        baseline=None,
-    )
-    async with pool.acquire() as conn:
-        # Thin/degenerate contributor: real avg, null p90, small samples.
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_POOLMIX', '平日', 2.0, NULL, 3, 360)",
-            agency_id,
-        )
-        # Healthy contributor: real avg and p90.
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_POOLMIX', '土日', 4.0, 10.0, 500, 120000)",
-            agency_id,
-        )
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/today/route-summary")
-    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_POOLMIX"]
-    # Must equal the healthy group's own p90 exactly (the only contributor) --
-    # NOT diluted to 10.0*500/503*60 ~= 596s by including the null-p90 row's
-    # samples in the denominator.
-    assert r["baseline_p90_sec"] == 600
-
-
-@pytest.mark.asyncio
-async def test_route_summary_route_grain_baseline_pools_exact_sum_delay_sec(map_app_ch, ch_client):
-    """The rb CTE's base_avg_min must pool via SUM(sum_delay_sec)/SUM(samples)
-    (exact), not SUM(avg_min * samples)/SUM(samples) (a sample-weighted mean
-    of already-rounded per-service_type avg_min values, biased away from the
-    true pooled mean -- migration 0028's rationale, mirrored here for the
-    route-grain baseline the same way pipeline/digest/build.py's
-    _ROUTE_BASELINE_SQL already does).
-
-    Two contributing service_types are seeded whose stored avg_min diverges
-    sharply from what sum_delay_sec/samples backs (500%: 5.0 vs the true 1.0),
-    so the two pooling methods land on unambiguously different results --
-    proving which one the endpoint actually uses, not just measuring a subtle
-    rounding-scale difference that could get lost in later second-rounding.
-    """
-    app, agency_id = map_app_ch
-    pool = app.state.pool
-    # NULL-service today row: no exact (route, service_type) match, so this
-    # must go through the rb pooled fallback.
-    await _seed_live_route(
-        pool,
-        ch_client,
-        agency_id,
-        "R_EXACTPOOL",
-        "",
-        [(f"e{i}", 1, 420, "10:00") for i in range(40)],
-        baseline=None,
-    )
-    async with pool.acquire() as conn:
-        # avg_min=1.0, samples=10 -> exact sum_delay_sec=600 (consistent).
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_EXACTPOOL', '平日', 1.0, 3.0, 10, 600)",
-            agency_id,
-        )
-        # avg_min=5.0 (stored), samples=1000, but sum_delay_sec=60000 -- the
-        # TRUE mean this row backs is 60000/1000/60 = 1.0 min, not 5.0.
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, "
-            "samples, sum_delay_sec) VALUES ($1, 'R_EXACTPOOL', '土日', 5.0, 3.0, 1000, 60000)",
-            agency_id,
-        )
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/today/route-summary")
-    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_EXACTPOOL"]
-    # Exact: (600 + 60000) / 60 / (10 + 1000) = 1010 / 1010 = 1.0 min = 60s.
-    # The biased avg_min*samples reweighting would give (1.0*10 + 5.0*1000) / 1010 =
-    # 4.9604 min ~= 298s -- an unambiguously different answer.
-    assert r["baseline_avg_sec"] == 60
-    assert r["baseline_samples"] == 1010
+    assert resp.status_code == 200
+    [r1] = [r for r in resp.json()["routes"] if r["route_code"] == "R1"]
+    assert (r1["samples"], r1["avg_delay_sec"], r1["worst_delay_sec"], r1["trips_observed"]) == (5, 192, 600, 4)
+    assert (r1["baseline_avg_sec"], r1["baseline_samples"]) == (100, 30)
+    assert "service_type" not in r1
+    assert "11_平日(共通)" not in resp.text and "12_平日(特)" not in resp.text
 
 
 @pytest.mark.asyncio
 async def test_route_summary_low_confidence_caps_anomaly(map_app_ch, ch_client):
     app, agency_id = map_app_ch
     pool = app.state.pool
-    # Would be anomaly (avg 420 > p90 360) but only 5 obs -> watch + low_confidence
+    # Would be anomaly (avg 420 > p90 174) but only 5 obs -> watch + low_confidence
     await _seed_live_route(
         pool,
         ch_client,
         agency_id,
         "R_THIN",
-        "平日",
+        "",
         [(f"thin{i}", 1, 420, "10:00") for i in range(5)],
-        baseline=(2.0, 6.0, 500),
+        history=[120] * 50,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -2017,7 +1828,6 @@ async def test_route_summary_freshness_probe_fails_degrades_only_the_header(map_
         "R1",
         "平日",
         [(f"t{i}", 1, 300, "10:00") for i in range(25)],
-        baseline=None,
     )
     app.state.ch_client = _FreshnessProbeDown(app.state.ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -2070,8 +1880,8 @@ async def test_route_summary_latest_captured_at_falls_back_to_history_when_live_
 
 @pytest.mark.asyncio
 async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_async_client):
-    """NULL service_type routes (no typed baseline) must still surface in triage —
-    the live query must not filter them out."""
+    """A route whose observations carry no service_type must still surface in
+    triage — the live query must not filter them out."""
     app, agency_id = map_app
     app.state.ch_client = ch_async_client
     pool = app.state.pool
@@ -2081,9 +1891,9 @@ async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_as
     assert resp.status_code == 200
     r = next((x for x in resp.json()["routes"] if x["route_code"] == "R_NULL"), None)
     assert r is not None, "NULL-service route was dropped from triage"
-    assert r["service_type"] is None  # '' sentinel mapped back to None
+    assert "service_type" not in r
     assert r["worst_delay_sec"] == 1680
-    assert r["bucket"] == "no_baseline"  # no typed baseline for NULL service
+    assert r["bucket"] == "no_baseline"  # no closed-day history yet
     assert r["has_baseline"] is False
 
 

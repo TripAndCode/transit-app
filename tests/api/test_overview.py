@@ -181,24 +181,6 @@ async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, 
     )
 
 
-async def _seed_agg_route_stats(aconn, agency_id, route_code, service_type, avg_min, p90_min, late5_pct, samples):
-    await aconn.execute(
-        "INSERT INTO agg_route_stats "
-        "(agency_id, route_code, service_type, avg_min, p90_min, late5_pct, samples) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7) "
-        "ON CONFLICT (agency_id, route_code, service_type) DO UPDATE "
-        "SET avg_min=EXCLUDED.avg_min, p90_min=EXCLUDED.p90_min, "
-        "    late5_pct=EXCLUDED.late5_pct, samples=EXCLUDED.samples",
-        agency_id,
-        route_code,
-        service_type,
-        float(avg_min),
-        float(p90_min),
-        float(late5_pct),
-        int(samples),
-    )
-
-
 async def _seed_agg_route_hour_dow(
     aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec=None
 ):
@@ -1628,7 +1610,12 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_cl
         [(f"live_k31_{i}", noon, f"t{i}", "平日", "12:00", "K31", 1, 360) for i in range(100)],
         table=LIVE_TABLE,
     )
-    await _seed_agg_route_stats(aconn, aagency_id, "K31", "平日", 6.0, 8.0, 23.5, 100)
+    from api.routers.map import MIN_SAME_CLASS_BASELINE_DAYS
+    from tests.fixtures.route_dist import recent_days_of_class, seed_route_dist_day
+
+    # 47 of each closed day's 200 observations run more than five minutes late.
+    for day in recent_days_of_class(jst_today(), MIN_SAME_CLASS_BASELINE_DAYS):
+        await seed_route_dist_day(aconn, aagency_id, "K31", day, [400] * 47 + [60] * 153, service_type="平日")
     r = await client.get(f"/api/{aagency_id}/today/route-summary")
     assert r.status_code == 200
     routes = r.json()["routes"]
@@ -1653,7 +1640,7 @@ async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency
         [(f"live_k99_{i}", noon, f"t{i}", "平日", "12:00", "K99", 1, 120) for i in range(5)],
         table=LIVE_TABLE,
     )
-    # No agg_route_stats row → late5_pct must be None
+    # No closed-day history → late5_pct must be None
     r = await client.get(f"/api/{aagency_id}/today/route-summary")
     assert r.status_code == 200
     routes = r.json()["routes"]

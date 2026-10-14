@@ -1,8 +1,7 @@
 import type { RouteSummary } from "./types";
 
-/** Today's mean delay in minutes, weighted by observed trips, over every
- *  route or over one route's rows (a route runs as one row per service
- *  type); null when no trip in scope was observed today. */
+/** Today's mean delay in minutes, over every route weighted by observed
+ *  trips, or one route's own; null when no trip in scope was observed today. */
 export function todayMeanMinutes(routes: readonly RouteSummary[] | undefined, code?: string): number | null {
   let trips = 0;
   let weighted = 0;
@@ -15,8 +14,7 @@ export function todayMeanMinutes(routes: readonly RouteSummary[] | undefined, co
 }
 
 /** How many routes run later than usual today: the triage's `anomaly`
- *  bucket, the same one the live map colours by, counted once per route
- *  however many service types it runs as. */
+ *  bucket, the same one the live map colours by. */
 export function unusualRouteCount(routes: readonly RouteSummary[] | undefined): number {
-  return new Set((routes ?? []).filter((row) => row.bucket === "anomaly").map((row) => row.route_code)).size;
+  return (routes ?? []).filter((row) => row.bucket === "anomaly").length;
 }
