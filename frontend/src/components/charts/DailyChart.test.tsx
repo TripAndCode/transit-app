@@ -117,7 +117,7 @@ describe("DailyChart tooltip", () => {
             date: "2026-05-18",
             avg_min: 2.5,
             avg_min_smoothed: 1.25,
-            top_offenders: [{ route_code: "R1", service_type: "weekday", avg_min: 4.75, samples: 10 }],
+            top_offenders: [{ route_code: "R1", avg_min: 4.75, samples: 10 }],
           }),
         ]}
       />,
@@ -130,7 +130,7 @@ describe("DailyChart tooltip", () => {
   it("names a worst route by the caller's route label rather than its route_id", () => {
     const { container } = renderChart(
       <DailyChart
-        days={[day({ date: "2026-05-18", top_offenders: [{ route_code: "1471981638", service_type: "weekday", avg_min: 4.75, samples: 10 }] })]}
+        days={[day({ date: "2026-05-18", top_offenders: [{ route_code: "1471981638", avg_min: 4.75, samples: 10 }] })]}
         routeName={(code) => (code === "1471981638" ? "70-3 あさひが丘線" : code)}
       />,
     );

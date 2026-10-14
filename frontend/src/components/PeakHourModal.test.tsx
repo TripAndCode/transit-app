@@ -29,8 +29,8 @@ const mockBreakdown: PeakHourBreakdown = {
   hour: 8,
   dow: 5,
   routes: [
-    { route_code: "K31", service_type: "平日", avg_min: 6.5, samples: 50 },
-    { route_code: "K37", service_type: "平日", avg_min: 5.2, samples: 30 },
+    { route_code: "K31", avg_min: 6.5, samples: 50 },
+    { route_code: "K37", avg_min: 5.2, samples: 30 },
   ],
 };
 
@@ -56,6 +56,20 @@ describe("PeakHourModal", () => {
     const label = screen.getByText("70-3").closest(".route-label")!;
     expect(label).toHaveTextContent(/^70-3 あさひが丘線$/);
     expect(label).toHaveAttribute("title", "K31");
+  });
+
+  it("lists each route once by its label, never printing a raw service id", () => {
+    // A response cached from before the breakdown pooled by route can still
+    // carry the GTFS service_id each row matched.
+    const stale = {
+      hour: 8,
+      dow: 5,
+      routes: [{ route_code: "K31", service_type: "11_平日(共通)", avg_min: 6.5, samples: 50 }], // i18n-ignore: GTFS service id
+    } as unknown as PeakHourBreakdown;
+    render(<PeakHourModal data={stale} loading={false} onClose={() => {}} />);
+    expect(screen.getByText("Route K31")).toBeInTheDocument();
+    expect(screen.queryByText(/11_/)).toBeNull();
+    expect(screen.getByTestId("peak-hour-modal-bar-K31")).toBeInTheDocument();
   });
 
   it("shows the request's failure and a retry instead of an empty body", () => {
@@ -102,12 +116,12 @@ describe("PeakHourModal", () => {
       hour: 8,
       dow: 5,
       routes: [
-        { route_code: "K31", service_type: "平日", avg_min: 6.5, samples: 50 },
-        { route_code: "K37", service_type: "平日", avg_min: -3.2, samples: 30 },
+        { route_code: "K31", avg_min: 6.5, samples: 50 },
+        { route_code: "K37", avg_min: -3.2, samples: 30 },
       ],
     };
     render(<PeakHourModal data={mixed} loading={false} onClose={() => {}} />);
-    const bar = screen.getByTestId("peak-hour-modal-bar-K37-平日");
+    const bar = screen.getByTestId("peak-hour-modal-bar-K37");
     expect(bar.style.width).toBe("0%");
     // The label still shows a single, correctly-signed negative value (not
     // a double sign like "+-3.2min") — exact match, since an unanchored
@@ -121,7 +135,7 @@ describe("PeakHourModal", () => {
     const tiny: PeakHourBreakdown = {
       hour: 8,
       dow: 5,
-      routes: [{ route_code: "K31", service_type: "平日", avg_min: -0.04, samples: 50 }],
+      routes: [{ route_code: "K31", avg_min: -0.04, samples: 50 }],
     };
     render(<PeakHourModal data={tiny} loading={false} onClose={() => {}} />);
     expect(screen.getByText("+0.0min")).toBeInTheDocument();
@@ -136,13 +150,13 @@ describe("PeakHourModal", () => {
       hour: 8,
       dow: 5,
       routes: [
-        { route_code: "K31", service_type: "平日", avg_min: 0, samples: 50 },
-        { route_code: "K37", service_type: "平日", avg_min: 0, samples: 30 },
+        { route_code: "K31", avg_min: 0, samples: 50 },
+        { route_code: "K37", avg_min: 0, samples: 30 },
       ],
     };
     render(<PeakHourModal data={allZero} loading={false} onClose={() => {}} />);
-    expect(screen.getByTestId("peak-hour-modal-bar-K31-平日").style.width).toBe("0%");
-    expect(screen.getByTestId("peak-hour-modal-bar-K37-平日").style.width).toBe("0%");
+    expect(screen.getByTestId("peak-hour-modal-bar-K31").style.width).toBe("0%");
+    expect(screen.getByTestId("peak-hour-modal-bar-K37").style.width).toBe("0%");
   });
 
   it("caps the bar width at 100 instead of overflowing when every route is early-running", () => {
@@ -153,12 +167,12 @@ describe("PeakHourModal", () => {
       hour: 8,
       dow: 5,
       routes: [
-        { route_code: "K31", service_type: "平日", avg_min: -0.5, samples: 50 },
-        { route_code: "K37", service_type: "平日", avg_min: -6.5, samples: 30 },
+        { route_code: "K31", avg_min: -0.5, samples: 50 },
+        { route_code: "K37", avg_min: -6.5, samples: 30 },
       ],
     };
     render(<PeakHourModal data={allNegative} loading={false} onClose={() => {}} />);
-    expect(screen.getByTestId("peak-hour-modal-bar-K37-平日").style.width).toBe("100%");
+    expect(screen.getByTestId("peak-hour-modal-bar-K37").style.width).toBe("100%");
   });
 
   describe("title grammar in Japanese", () => {

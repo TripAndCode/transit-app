@@ -86,7 +86,7 @@ export function PeakHourModal({
         {!loading &&
           data?.routes.map((r) => (
             <div
-              key={`${r.route_code}-${r.service_type}`}
+              key={r.route_code}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -100,15 +100,6 @@ export function PeakHourModal({
               >
                 <RouteLabel code={r.route_code} names={names} compact />
               </span>
-              <span
-                style={{
-                  fontSize: "var(--text-xs)",
-                  color: "var(--text-tertiary)",
-                  minWidth: 40,
-                }}
-              >
-                {r.service_type}
-              </span>
               <div
                 style={{
                   flex: 1,
@@ -119,7 +110,7 @@ export function PeakHourModal({
                 }}
               >
                 <div
-                  data-testid={`peak-hour-modal-bar-${r.route_code}-${r.service_type}`}
+                  data-testid={`peak-hour-modal-bar-${r.route_code}`}
                   style={{
                     height: "100%",
                     // avg_min can be negative for early-running routes, and

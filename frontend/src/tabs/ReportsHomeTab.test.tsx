@@ -77,12 +77,16 @@ describe("ReportsHomeTab", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
-  it("names the routes table's service column and shows its values and counts readably", () => {
-    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 12345] as unknown as RankingRow])); // i18n-ignore: GTFS service name
-    renderTab();
-    expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "Weekday" })).toBeInTheDocument();
+  it("lists one row per route with readable counts, leaving the service filter to the scope", () => {
+    mockReports(
+      trendResponse(),
+      rankingResponse([["101", "平日", 2, 1, 3, 12345] as RankingRow, ["102", "平日", 1, 1, 2, 400] as RankingRow]),
+    );
+    renderTab("/agencies/1/reports?service=平日");
+    expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(2);
     expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
+    expect(screen.queryByRole("cell", { name: "Weekday" })).toBeNull();
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {
@@ -115,8 +119,8 @@ describe("ReportsHomeTab", () => {
   });
 
   it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
-    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
-    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as RankingRow]));
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&service=平日");
     const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
     expect(open.pathname).toBe("/agencies/1/routes/101");
     expect(open.searchParams.has("routes")).toBe(false);

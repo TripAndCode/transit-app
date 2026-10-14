@@ -57,7 +57,7 @@ def test_peak_hour_sql_derives_avg_from_sums_in_both_branches():
         sql = _peak_hour_breakdown_sql(by_dow=by_dow)
         assert "SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)" in sql
         assert "NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)" in sql
-        assert "GROUP BY route_code, service_type" in sql
+        assert "GROUP BY route_code\n" in sql
         assert "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= 3" in sql
 
 

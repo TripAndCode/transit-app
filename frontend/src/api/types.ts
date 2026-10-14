@@ -155,9 +155,9 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
+/** One route at the hour, pooled across every service id it ran under. */
 type PeakHourBreakdownRoute = {
   route_code: string;
-  service_type: string;
   avg_min: number;
   samples: number;
 };
@@ -279,12 +279,17 @@ export type DefinitionMeta = {
  *  JSON numbers. Coerce with `Number()` before arithmetic or formatting. */
 type DecimalCell = number | string;
 
+/** The service slot of a per-route report row: the service filter every row
+ *  was computed under, or null without one. A row is one route over all of
+ *  its observations, never a slice of them under one timetable. */
+type RowService = string | null;
+
 /** `ranking` and `ranking_best` -- same columns, opposite sort order.
  *  `p50_min`/`p90_min` are null when the merged histogram can't resolve a
  *  percentile; `avg_min` always resolves (the >20-sample gate). */
 export type RankingRow = [
   route_code: string,
-  service_type: string | null,
+  service: RowService,
   avg_min: DecimalCell,
   p50_min: DecimalCell | null,
   p90_min: DecimalCell | null,
@@ -296,7 +301,7 @@ export type RankingRow = [
  *  caveat (95% Wilson interval too wide to trust `on_time_pct`). */
 type OnTimeRow = [
   route_code: string,
-  service_type: string | null,
+  service: RowService,
   on_time_pct: DecimalCell,
   avg_min: DecimalCell,
   samples: number,
@@ -306,7 +311,7 @@ type OnTimeRow = [
 /** `worst_5min` -- routes ranked by count of severely-late observations. */
 type Worst5MinRow = [
   route_code: string,
-  service_type: string | null,
+  service: RowService,
   late5_count: number,
   avg_min: DecimalCell,
   samples: number,
@@ -325,10 +330,11 @@ type CompareRankingRow = [
 ];
 
 /** `dow_weekday` and `dow_weekend`. `dow_label` is the backend's own
- *  Japanese group label for the half the rows were restricted to. */
+ *  Japanese group label for the half the rows were restricted to. These
+ *  reports drop the service filter, so `service` is always null. */
 type DowRankingRow = [
   route_code: string,
-  service_type: string | null,
+  service: RowService,
   dow_label: string,
   avg_min: DecimalCell,
   samples: number,
@@ -566,7 +572,8 @@ export type TrendDay = {
    *  for cached responses from before this field existed. */
   avg_min_smoothed?: number | null;
   samples: number;
-  top_offenders: { route_code: string; service_type: string; avg_min: number; samples: number }[];
+  /** The bucket's worst routes, each pooled across its service ids. */
+  top_offenders: { route_code: string; avg_min: number; samples: number }[];
 };
 
 /** ISO dates (within the trend's requested range) where the static feed
@@ -576,9 +583,11 @@ export type TrendDay = {
  *  service-quality change. */
 export type RevisionBoundaries = string[];
 
+/** One route over all of its observations. */
 type DwellRunRoute = {
   route_code: string;
-  service_type: string | null;
+  /** The service filter the report was computed under, null without one. */
+  service_type: RowService;
   dwell_samples: number;
   dwell_avg_sec: number | null;
   dwell_p50_sec: number | null;

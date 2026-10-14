@@ -54,12 +54,12 @@ function TestNav({ go, children }: { go: (to: string) => void; children: React.R
   );
 }
 
-function renderWithNav(rows: unknown[][], go: (to: string) => void) {
+function renderWithNav(rows: unknown[][], go: (to: string) => void, reportType = "ranking") {
   return renderWithProviders(
     <TestNav go={go}>
       <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType="ranking" rows={rows} />} />
+          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
         </Routes>
       </MemoryRouter>
     </TestNav>,
@@ -98,9 +98,16 @@ describe("ReportTable route link travel", () => {
     expect(screen.queryByTestId("route-title-transition")).toBeNull();
   });
 
-  it("a route listed once per service still lends its name to only the clicked row", async () => {
+  it("a route on several rows still lends its name to only the clicked row", async () => {
     mockRoutes([]);
-    renderWithNav([["3", "weekday", 4.2, 3.1, 7.0, 120], ["3", "weekend", 3.9, 2.8, 6.0, 90]], vi.fn());
+    renderWithNav(
+      [
+        ["Agency A", "3", "平日", "2026-09-01", "08:00", "08:12", 720],
+        ["Agency A", "3", "平日", "2026-09-01", "09:00", "09:10", 600],
+      ],
+      vi.fn(),
+      "delay_certificate",
+    );
     await userEvent.click(screen.getAllByRole("link", { name: /Route 3/ })[1]);
     expect(screen.getAllByTestId("route-title-transition")).toHaveLength(1);
     expect(screen.getAllByRole("row")[2]).toContainElement(screen.getByTestId("route-title-transition"));
@@ -284,14 +291,36 @@ describe("ReportTable route links", () => {
 describe("ReportTable service column", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("names services in the UI's language, and marks an untranslated one as Japanese", () => {
+  it("names a certificate's services in the UI's language, and marks an untranslated one as Japanese", () => {
     mockRoutes([]);
-    renderTable([
-      ["39061", "秋彼岸", 5.2, 3.1, 8.4, 120], // i18n-ignore: GTFS service name
-      ["39061", "お盆臨時　20日", 4.0, 3.0, 7.0, 90], // i18n-ignore: GTFS service name
-    ]);
+    renderTable(
+      [
+        ["Agency A", "39061", "秋彼岸", "2026-09-22", "08:00", "08:12", 720], // i18n-ignore: GTFS service name
+        ["Agency A", "39061", "お盆臨時　20日", "2026-08-20", "08:00", "08:12", 720], // i18n-ignore: GTFS service name
+      ],
+      "delay_certificate",
+    );
     expect(screen.getByText("Autumn equinox (Higan)")).toBeInTheDocument();
     expect(screen.getByText("お盆臨時 20日")).toHaveAttribute("lang", "ja"); // i18n-ignore: GTFS service name
+    expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
+    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
+  });
+
+  // One row per route over all its observations: the row's service slot is
+  // the active filter, the same on every row, which the scope already names.
+  it.each([
+    ["ranking", ["39061", "平日", 5.2, 3.1, 8.4, 120]],
+    ["ranking_best", ["39061", "平日", 5.2, 3.1, 8.4, 120]],
+    ["on_time", ["39061", "平日", 80.0, 0.5, 300, false]],
+    ["worst_5min", ["39061", "平日", 12, 3.4, 300]],
+    ["dow_weekday", ["39061", null, "平日", 3.4, 120]],
+    ["dow_weekend", ["39061", null, "週末", 3.4, 120]],
+  ])("gives the per-route %s report no service column or note", (reportType, row) => {
+    mockRoutes([]);
+    renderTable([row], reportType);
+    expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
+    expect(screen.queryByText("Weekday")).toBeNull();
+    expect(screen.queryByText(/Service: the timetable the trip ran on/)).toBeNull();
   });
 });
 
@@ -317,7 +346,7 @@ describe("ReportTable on a phone", () => {
     renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const [item] = screen.getAllByRole("listitem");
-    for (const text of ["1", "T50", "石江・新城線", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
+    for (const text of ["1", "T50", "石江・新城線", "Avg", "5.2 min", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
     expect(within(item).queryByText("39061")).toBeNull();
@@ -346,7 +375,7 @@ describe("ReportTable on a phone", () => {
   });
 
   it("shows a missing service as a dash, not as the word null", () => {
-    renderTable([["39061", null, 5.2, 3.1, 8.4, 120]]);
+    renderTable([["Agency A", "39061", null, "2026-09-01", "08:00", "08:12", 720]], "delay_certificate");
     const [item] = screen.getAllByRole("listitem");
     expect(item).not.toHaveTextContent(/null/);
     expect(within(item).getByText("—")).toBeInTheDocument();
@@ -393,11 +422,6 @@ describe("ReportTable day-group reports", () => {
     expect(screen.getByText("3.4")).toBeInTheDocument();
   });
 
-  it("says under the table what the service column means", () => {
-    mockRoutes([]);
-    renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
-    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
-  });
 });
 
 describe("ReportTable thinly observed rows", () => {

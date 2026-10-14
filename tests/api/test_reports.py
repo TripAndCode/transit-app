@@ -167,7 +167,7 @@ async def test_ranking_agg_values_exact_avg_and_approx_pct(reports_client, ch_cl
     rows = await compute_ranking_rows(client, agency_id, day)
     r = next(x for x in rows if x[0] == "R1")
     # (route, service, avg_min, p50_min, p90_min, samples)
-    assert r[1] == "平日"
+    assert r[1] is None  # the active service filter, and there is none
     assert float(r[2]) == 2.0  # exact mean
     assert r[5] == 30  # exact samples
     # 120s falls in the [120,180) bucket -> interpolated p50/p90 in [2.0, 3.0) min
@@ -468,15 +468,16 @@ async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, 
 
 @pytest.mark.asyncio
 async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
-    """NULL service_type routes must still rank (the '' sentinel maps back to
-    None) rather than being filtered out."""
+    """A route whose observations matched no scheduled trip (NULL
+    service_type, stored as the '' sentinel) must still rank rather than be
+    filtered out."""
     client, agency_id, pool = reports_client
     day = "2026-05-04"
     await _seed_route(pool, agency_id, "R_NULL", None, day, [200] * 25)
     _run_analyze(agency_id, ch_client)
     rows = await compute_ranking_rows(client, agency_id, day)
     r = next(x for x in rows if x[0] == "R_NULL")
-    assert r[1] is None  # '' sentinel -> None
+    assert r[1] is None  # no service filter
 
 
 async def compute_ranking_rows(client, agency_id, day):
@@ -756,7 +757,7 @@ async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     assert resp.status_code == 200
     r = next((x for x in resp.json()["rows"] if x[0] == "R_NULL"), None)
     assert r is not None, "NULL-service route dropped from dow report"
-    assert r[1] is None  # '' sentinel mapped back to None
+    assert r[1] is None  # dow reports drop the service filter
 
 
 async def _seed_route_at(pool, agency_id, route_code, service_type, day, sched, delays):
@@ -902,6 +903,187 @@ async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_cli
     assert float(r_agg[2]) == 2.13
 
 
+# Raw GTFS service ids as a feed spells them; None is an observation that
+# matched no scheduled trip. A ranking row is a route whichever of these its
+# observations carry.
+_RAW_SERVICE_IDS = ("11_平日(共通)", "1_土曜(共通)", None)
+# Three morning slices, each above every per-row floor on its own.
+_ROUTE_SLICES = (
+    ("06:00", [30] * 25),
+    ("07:00", [400] * 25),
+    ("08:00", list(range(100, 350, 10))),
+)
+
+
+async def _seed_split_and_whole(pool, agency_id, day):
+    """R_SPLIT carries each slice under a different raw service id; R_WHOLE
+    carries the same observations under one, so its row is the computation
+    over all of R_SPLIT's observations."""
+    for (sched, delays), service_id in zip(_ROUTE_SLICES, _RAW_SERVICE_IDS, strict=True):
+        await _seed_route_at(pool, agency_id, "R_SPLIT", service_id, day, sched, delays)
+        await _seed_route_at(pool, agency_id, "R_WHOLE", _RAW_SERVICE_IDS[0], day, sched, delays)
+
+
+async def _load_for_path(path, agency_id, ch_client, ch_async_client):
+    """Build the aggregates (agg path) or point the API at ClickHouse and
+    return the time_band that forces the live scan (live path)."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    app.state.ch_client = ch_async_client
+    if path == "agg":
+        _run_analyze(agency_id, ch_client)
+        return ""
+    mirror_updates_to_ch(ch_client, agency_id)
+    return "&time_band=morning"
+
+
+def _ranking_query(report, day, band, extra=""):
+    sparse = "&include_sparse=1" if report in ("ranking", "ranking_best") else ""
+    return f"{report}?from={day}&to={day}{sparse}{band}{extra}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize("report", ["ranking", "on_time", "worst_5min", "dow_weekday"])
+async def test_a_route_split_across_raw_service_ids_ranks_as_one_row(
+    reports_client, ch_client, ch_async_client, report, path
+):
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"  # a Thursday, so dow_weekday keeps it
+    await _seed_split_and_whole(pool, agency_id, day)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/{_ranking_query(report, day, band)}")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    split = [r for r in rows if r[0] == "R_SPLIT"]
+    whole = next(r for r in rows if r[0] == "R_WHOLE")
+    assert len(split) == 1, split
+    # Index 1 names the active service filter, and there is none here.
+    assert split[0][1] is None and whole[1] is None
+    assert split[0][2:] == whole[2:]
+    assert "11_平日(共通)" not in resp.text and "1_土曜(共通)" not in resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_a_split_route_ranks_on_all_its_observations(reports_client, ch_client, ch_async_client, path):
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_split_and_whole(pool, agency_id, day)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+    all_delays = [d for _sched, delays in _ROUTE_SLICES for d in delays]
+
+    ranking = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('ranking', day, band)}")).json()
+    r = next(x for x in ranking["rows"] if x[0] == "R_SPLIT")
+    assert r[5] == len(all_delays)
+    assert float(r[2]) == round(sum(all_delays) / len(all_delays) / 60, 2)
+
+    on_time = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('on_time', day, band)}")).json()
+    r = next(x for x in on_time["rows"] if x[0] == "R_SPLIT")
+    assert float(r[2]) == round(100 * sum(d <= 60 for d in all_delays) / len(all_delays), 1)
+    assert r[4] == len(all_delays)
+
+    worst = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('worst_5min', day, band)}")).json()
+    r = next(x for x in worst["rows"] if x[0] == "R_SPLIT")
+    assert r[2] == sum(d > 300 for d in all_delays)
+    assert r[4] == len(all_delays)
+
+
+# Per report: seeds (route, raw service id, scheduled time, delays) where one
+# route's fragment would lead a per-fragment ranking, and the route that
+# leads once each route's observations are pooled.
+_LIMIT_CASES = {
+    "ranking": (
+        [
+            ("R_FRAG", "1_土曜(共通)", "06:00", [900] * 25),
+            ("R_FRAG", None, "07:00", [0] * 200),
+            ("R_STEADY", "11_平日(共通)", "08:00", [300] * 30),
+        ],
+        "R_STEADY",
+    ),
+    "on_time": (
+        [
+            ("R_FRAG", "1_土曜(共通)", "06:00", [0] * 25),
+            ("R_FRAG", None, "07:00", [600] * 100),
+            ("R_STEADY", "11_平日(共通)", "08:00", [0] * 20 + [600] * 5),
+        ],
+        "R_STEADY",
+    ),
+    "worst_5min": (
+        [
+            ("R_FRAG", "1_土曜(共通)", "06:00", [600] * 15 + [0] * 10),
+            ("R_FRAG", None, "07:00", [600] * 15 + [0] * 10),
+            ("R_STEADY", "11_平日(共通)", "08:00", [600] * 20 + [0] * 5),
+        ],
+        "R_FRAG",
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize("report", sorted(_LIMIT_CASES))
+async def test_ranking_limit_cuts_routes_not_fragments(reports_client, ch_client, ch_async_client, report, path):
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    seeds, leader = _LIMIT_CASES[report]
+    for route_code, service_id, sched, delays in seeds:
+        await _seed_route_at(pool, agency_id, route_code, service_id, day, sched, delays)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/{_ranking_query(report, day, band, '&limit=1')}")
+    assert resp.status_code == 200
+    assert [r[0] for r in resp.json()["rows"]] == [leader]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("service", "label"), [("平日", "平日"), (None, "")])
+async def test_ranking_csv_service_column_holds_the_active_filter(reports_client, ch_client, service, label):
+    """The CSV keeps its 種別 column; it names the service filter the rows
+    were computed under (blank without one), never a raw service id."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_split_and_whole(pool, agency_id, day)
+    _run_analyze(agency_id, ch_client)
+    service_q = f"&service={service}" if service else ""
+
+    json_rows = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('ranking', day, '', service_q)}")).json()
+    assert {r[1] for r in json_rows["rows"]} == {service}
+
+    resp = await client.get(f"/api/{agency_id}/reports/{_ranking_query('ranking', day, '', service_q + '&format=csv')}")
+    assert resp.status_code == 200
+    header, *data_rows = list(csv.reader(io.StringIO(resp.text)))[1:]
+    assert header == ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"]
+    assert sorted(r[0] for r in data_rows) == ["R_SPLIT", "R_WHOLE"]
+    assert {r[1] for r in data_rows} == {label}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_trend_names_a_split_route_once_on_all_its_observations(reports_client, ch_client, ch_async_client, path):
+    """Each slice alone is too thin to name a worst route; pooled, the route
+    is the day's worst, and it is named once."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    for (sched, _delays), service_id in zip(_ROUTE_SLICES, _RAW_SERVICE_IDS, strict=True):
+        await _seed_route_at(pool, agency_id, "R_SPLIT", service_id, day, sched, [600] * 4)
+    await _seed_route_at(pool, agency_id, "R_OTHER", _RAW_SERVICE_IDS[0], day, "06:00", [300] * 10)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}{band}")
+    assert resp.status_code == 200
+    (bucket,) = resp.json()["rows"][0]["days"]
+    assert bucket["top_offenders"] == [
+        {"route_code": "R_SPLIT", "avg_min": 10.0, "samples": 12},
+        {"route_code": "R_OTHER", "avg_min": 5.0, "samples": 10},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
     """Trend's daily series (compute_trend_series) and hourly
@@ -940,7 +1122,7 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
 async def test_reports_trend_live_bucket_totals_include_thin_groups_but_offenders_do_not(
     reports_client, ch_client, ch_async_client
 ):
-    """Under a time_band the trend reads ClickHouse, and a route-service group
+    """Under a time_band the trend reads ClickHouse, and a route
     with 5 or fewer samples still counts toward its day's average and sample
     total; only the top-offenders attribution ignores it. Mirrors the
     agg_daily_trend path's test of the same name."""
@@ -1158,7 +1340,7 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
 
 @pytest.mark.asyncio
 async def test_compute_trend_series_bucket_totals_include_thin_groups_but_offenders_do_not(aconn, aagency_id):
-    """A route-service group with 5 or fewer samples still counts toward its
+    """A route with 5 or fewer samples still counts toward its
     day's average and sample total (the same pooling Overview applies to
     agg_daily_trend); only the top-offenders attribution ignores it, because a
     handful of trips is too noisy to name a worst route."""
@@ -1598,6 +1780,56 @@ async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, c
     assert r["dwell_avg_sec"] == pytest.approx(45.0)  # (90 + 0) / 2
     assert r["run_samples"] == 2
     assert r["run_avg_sec"] == pytest.approx(245.0)  # (290 + 200) / 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("service", "label"), [(None, None), ("平日", "平日")])
+async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_client, ch_client, service, label):
+    """Two runs of route 44, one matched to a raw service id and one matched
+    to none, are one route: one entry over both runs, whose service names the
+    active filter (none without one), never a raw id."""
+    from datetime import datetime, timezone
+
+    from pipeline.clickhouse import insert_updates
+
+    client, agency_id, pool = reports_client
+    await _trust_dwell_run(pool, agency_id)
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await pool.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", agency_id
+    )
+    for trip_id in ("T1", "T2"):
+        for seq, arr, dep in [(1, "10:00:00", "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:10:00", "10:10:00")]:
+            await pool.execute(
+                "INSERT INTO static_stop_times "
+                "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+                "VALUES ($1, $2, $3, 'S1', $4, $5)",
+                agency_id,
+                trip_id,
+                seq,
+                arr,
+                dep,
+            )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # Wednesday 2026-04-01 11:00 JST
+    rows = [
+        ("f.pb", day, trip_id, service_id, "10:00:00", "44", seq, dep_delay, "S1", arr_delay, None, None, None)
+        for trip_id, service_id in (("T1", "11_平日(共通)"), ("T2", None))
+        for seq, dep_delay, arr_delay in ((1, 30, None), (2, 50, 20), (3, 10, 10))
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    _run_analyze_from_ch(agency_id, ch_client)
+
+    service_q = f"&service={service}" if service else ""
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01{service_q}")
+    assert resp.status_code == 200
+    (r,) = resp.json()["rows"][0]["routes"]
+    assert r["route_code"] == "44"
+    assert r["service_type"] == label
+    assert r["dwell_samples"] == 4
+    assert r["dwell_avg_sec"] == pytest.approx(45.0)
+    assert r["run_samples"] == 4
+    assert r["run_avg_sec"] == pytest.approx(245.0)
 
 
 # ---------------------------------------------------------------------------
