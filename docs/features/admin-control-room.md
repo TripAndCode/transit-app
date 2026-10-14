@@ -85,7 +85,8 @@ static URL or static strategy. The board's
 
 "Nothing newer" means nothing newer than the zip that last loaded, as the
 strategy's change manifest records it (`raw_archives_static/<agency_id>/_manifest.json`:
-the ETag/Last-Modified a conditional GET sends, and the loaded zip's sha256).
+the loaded zip's sha256, and for `direct_url` the ETag/Last-Modified its
+conditional GET sends).
 That file can outlive the timetable tables, after a database restore or once
 an agency's static rows are cleared, so a reload for an agency with no
 timetable loaded sets the manifest aside and loads whatever the source serves.
