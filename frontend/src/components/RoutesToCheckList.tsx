@@ -10,13 +10,13 @@ import { routeHref } from "../routes/destinations";
 import { formatMinutes } from "../utils/format";
 import { RouteLabel } from "./RouteLabel";
 import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
-import type { OverviewTopDelayedRoute } from "../api/types";
+import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
-  /** Routes in the top band over every route, not only the listed ones: the
-   *  list is the worst few, so its top band can be truncated. */
-  severeCount: number;
+  /** Each band's routes over every route, not only the listed ones: the list
+   *  is the worst few, so whichever band it runs out in is truncated. */
+  bandCounts: OverviewBandCounts;
 };
 
 /** A row's figure: printed as it is on first paint, travelling from the
@@ -28,7 +28,7 @@ function CheckValue({ value }: { value: number }) {
   return <span className="ov-check-value num">{formatMinutes(shown)}</span>;
 }
 
-export function RoutesToCheckList({ routes, severeCount }: Props) {
+export function RoutesToCheckList({ routes, bandCounts }: Props) {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
   const { search } = useLocation();
@@ -59,11 +59,11 @@ export function RoutesToCheckList({ routes, severeCount }: Props) {
         // figure counts and its bar slides instead of remounting.
         groups.flatMap((g) => [
           <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
-            {g.band === "severe" && severeCount > g.routes.length
-              ? t("overview.routes_to_check.band_severe_truncated", {
-                  count: severeCount,
+            {bandCounts[g.band].count > g.routes.length
+              ? t(`overview.routes_to_check.band_${g.band}_truncated`, {
+                  count: bandCounts[g.band].count,
                   shown: g.routes.length,
-                  ...BAND_BOUNDS.severe,
+                  ...BAND_BOUNDS[g.band],
                 })
               : t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
           </div>,

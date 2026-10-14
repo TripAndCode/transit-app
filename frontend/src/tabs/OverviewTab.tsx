@@ -166,8 +166,8 @@ export function OverviewTab() {
           <>
             <OverviewHeroRow
               headline={data.headline}
-              severeCount={data.top_delayed.severe_count}
-              severeThresholdMin={data.top_delayed.severe_threshold_min}
+              severeCount={data.top_delayed.band_counts.severe.count}
+              severeThresholdMin={data.top_delayed.band_counts.severe.threshold_min}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}
@@ -175,7 +175,7 @@ export function OverviewTab() {
               onOpenFact={openFact}
             />
             <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
-              <RoutesToCheckList routes={data.top_delayed.routes} severeCount={data.top_delayed.severe_count} />
+              <RoutesToCheckList routes={data.top_delayed.routes} bandCounts={data.top_delayed.band_counts} />
             </div>
             {/* The stagger index counts the sections that actually render.
                 Any of these can be absent for an agency, and a fixed index

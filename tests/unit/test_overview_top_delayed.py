@@ -6,7 +6,7 @@ A fake connection answers the two reads, so no database is involved.
 from datetime import date
 
 from api.range import RangeCtx
-from pipeline.reports.overview import DELAYED_ROUTE_MIN, SEVERE_ROUTE_MIN, _top_delayed_routes
+from pipeline.reports.overview import DELAYED_ROUTE_MIN, ROUTE_BAND_MIN, _top_delayed_routes
 
 
 class _Conn:
@@ -33,38 +33,54 @@ async def test_the_count_comes_with_the_threshold_it_used():
     assert out["delayed_threshold_min"] == DELAYED_ROUTE_MIN
 
 
+def _bands(severe: int, moderate: int, mild: int) -> dict:
+    return {
+        "severe": {"count": severe, "threshold_min": 5.0},
+        "moderate": {"count": moderate, "threshold_min": 3.0},
+        "mild": {"count": mild, "threshold_min": 1.5},
+    }
+
+
 async def test_no_routes_still_states_the_thresholds():
     out = await _top_delayed_routes(1, _CTX, _Conn([]))
     assert out == {
         "routes": [],
         "delayed_count": 0,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
-        "severe_count": 0,
-        "severe_threshold_min": SEVERE_ROUTE_MIN,
+        "band_counts": _bands(0, 0, 0),
     }
 
 
-def test_the_severe_threshold_is_the_frontends_top_band_bound():
-    # The routes-to-check list bands its routes on the client with
-    # DELAY_THRESHOLDS.severe (BAND_BOUNDS.severe.min), and the Pulse hero and
-    # that list's header print this count beside those bands.
-    # frontend/src/components/routesToCheckBands.test.ts pins the same 5, so
-    # moving either side alone fails a test.
-    assert SEVERE_ROUTE_MIN == 5.0
+def test_the_band_bounds_are_the_frontends():
+    # The routes-to-check list bands its listed routes on the client with
+    # BAND_BOUNDS (frontend/src/components/routesToCheckBands.ts), and its
+    # headers, and the Pulse hero, print these counts beside those bands.
+    # routesToCheckBands.test.ts pins the same bounds, so moving either side
+    # alone fails a test.
+    assert ROUTE_BAND_MIN == {"severe": 5.0, "moderate": 3.0, "mild": 1.5}
+    assert list(ROUTE_BAND_MIN) == ["severe", "moderate", "mild"]  # worst first
 
 
-async def test_the_severe_count_covers_every_route_not_only_the_listed_ones():
-    rows = [{"route_code": str(i), "avg_min": 9.0 - i * 0.5} for i in range(10)]  # 9.0 .. 4.5
+async def test_the_band_counts_cover_every_route_not_only_the_listed_ones():
+    # 9.0 .. 0.5 in half-minute steps: the list stops at five, the counts don't.
+    rows = [{"route_code": str(i), "avg_min": 9.0 - i * 0.5} for i in range(18)]
     out = await _top_delayed_routes(1, _CTX, _Conn(rows))
     assert len(out["routes"]) == 5
-    assert out["severe_count"] == 9
-    assert out["severe_threshold_min"] == SEVERE_ROUTE_MIN
+    # severe 9.0..5.0, moderate 4.5..3.0, mild 2.5..1.5; 1.0 and 0.5 fall in no band.
+    assert out["band_counts"] == _bands(9, 4, 3)
 
 
-async def test_the_severe_count_bands_the_rounded_average_the_list_carries():
+async def test_the_band_counts_band_the_rounded_average_the_list_carries():
     # The client bands each listed route on its rounded avg_min, so a route
-    # listed at 5.0 must be counted, and one listed at 4.99 must not.
-    rows = [{"route_code": "1", "avg_min": 4.996}, {"route_code": "2", "avg_min": 4.994}]
+    # listed at 5.0 is severe, one listed at 4.99 is moderate, and the same
+    # holds at each lower bound.
+    rows = [
+        {"route_code": "1", "avg_min": 4.996},
+        {"route_code": "2", "avg_min": 4.994},
+        {"route_code": "3", "avg_min": 2.996},
+        {"route_code": "4", "avg_min": 1.496},
+        {"route_code": "5", "avg_min": 1.494},
+    ]
     out = await _top_delayed_routes(1, _CTX, _Conn(rows))
-    assert [r["avg_min"] for r in out["routes"]] == [5.0, 4.99]
-    assert out["severe_count"] == 1
+    assert [r["avg_min"] for r in out["routes"]] == [5.0, 4.99, 3.0, 1.5, 1.49]
+    assert out["band_counts"] == _bands(1, 2, 1)

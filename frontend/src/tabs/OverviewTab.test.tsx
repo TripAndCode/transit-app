@@ -7,12 +7,20 @@ import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
 import type { OverviewSummary } from "../api/types";
 
+function bandCounts(severe: number, moderate: number, mild: number) {
+  return {
+    severe: { count: severe, threshold_min: 5 },
+    moderate: { count: moderate, threshold_min: 3 },
+    mild: { count: mild, threshold_min: 1.5 },
+  };
+}
+
 function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
   return {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, severe_count: 0, severe_threshold_min: 5 },
+    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, band_counts: bandCounts(0, 0, 0) },
     peak_hour: null,
     service_split: {},
     sparkline_points: [],
@@ -85,8 +93,7 @@ describe("OverviewTab", () => {
           routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }],
           delayed_count: 1,
           delayed_threshold_min: 2,
-          severe_count: 1,
-          severe_threshold_min: 5,
+          band_counts: bandCounts(1, 0, 0),
         },
       }),
     );
@@ -163,13 +170,13 @@ describe("OverviewTab", () => {
 
   describe("the hero's fact rows", () => {
     const delayed = (route_code: string, avg_min: number) => ({ route_code, route_short_name: null, avg_min });
-    const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)], severe_count = 2) =>
+    const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)], bands = bandCounts(2, 1, 1)) =>
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.9, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
         // delayed_count counts a different, lower threshold; the hero must not read it.
-        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, severe_count, severe_threshold_min: 5 },
+        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands },
       });
     const lateRow = () => screen.getByRole("button", { name: /Averaging over 5 min late/ });
 
@@ -197,13 +204,13 @@ describe("OverviewTab", () => {
 
     it("agrees with that header past the five routes the list holds", () => {
       const worst = [delayed("R1", 9.1), delayed("R2", 8.4), delayed("R3", 7.7), delayed("R4", 6.2), delayed("R5", 5.3)];
-      renderOverview(withFacts(worst, 12));
+      renderOverview(withFacts(worst, bandCounts(12, 3, 0)));
       expect(screen.getByText("12 routes averaging more than 5 min late (top 5 shown)")).toBeInTheDocument();
       expect(within(lateRow()).getByText("12")).toBeInTheDocument();
     });
 
     it("shows a neutral zero when no route reaches the top band, while the list still lists the rest", () => {
-      renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], 0));
+      renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], bandCounts(0, 1, 1)));
       expect(screen.getByText("1 route averaging 3–5 min late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("0")).toBeInTheDocument();
       expect(lateRow()).not.toHaveClass("ov-hero-fact--attn");

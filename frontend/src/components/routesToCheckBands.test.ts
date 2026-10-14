@@ -8,12 +8,16 @@ function route(avg_min: number, route_code = "R"): OverviewTopDelayedRoute {
 }
 
 describe("BAND_BOUNDS", () => {
-  // The payload's severe_count is counted on the server against
-  // SEVERE_ROUTE_MIN (pipeline/reports/overview.py), and printed beside this
-  // band; tests/unit/test_overview_top_delayed.py pins the same 5, so moving
-  // either side alone fails a test.
-  it("puts the top band's bound at 5 minutes, the server's severe threshold", () => {
-    expect(BAND_BOUNDS.severe.min).toBe(5);
+  // The payload's band_counts are counted on the server against
+  // ROUTE_BAND_MIN (pipeline/reports/overview.py) and printed in these bands'
+  // headers; tests/unit/test_overview_top_delayed.py pins the same bounds, so
+  // moving either side alone fails a test.
+  it("bounds each band where the server's ROUTE_BAND_MIN does", () => {
+    expect(BAND_BOUNDS).toEqual({
+      severe: { min: 5 },
+      moderate: { min: 3, max: 5 },
+      mild: { min: 1.5, max: 3 },
+    });
   });
 });
 

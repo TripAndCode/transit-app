@@ -318,8 +318,12 @@
       "band_severe_truncated_other": "{{count}} routes averaging more than {{min}} min late (top {{shown}} shown)",
       "band_moderate_one": "{{count}} route averaging {{min}}–{{max}} min late",
       "band_moderate_other": "{{count}} routes averaging {{min}}–{{max}} min late",
+      "band_moderate_truncated_one": "{{count}} route averaging {{min}}–{{max}} min late (top {{shown}} shown)",
+      "band_moderate_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)",
       "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
-      "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late"
+      "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late",
+      "band_mild_truncated_one": "{{count}} route averaging {{min}}–{{max}} min late (top {{shown}} shown)",
+      "band_mild_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",

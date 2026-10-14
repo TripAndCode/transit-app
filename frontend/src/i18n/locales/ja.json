@@ -318,8 +318,12 @@
       "band_severe_truncated_other": "平均{{min}}分超の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
       "band_moderate_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
       "band_moderate_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_moderate_truncated_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
+      "band_moderate_truncated_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
       "band_mild_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
-      "band_mild_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線"
+      "band_mild_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_mild_truncated_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線（上位{{shown}}路線を表示）",
+      "band_mild_truncated_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線（上位{{shown}}路線を表示）"
     },
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
