@@ -132,9 +132,9 @@ histograms, and `late5_pct` is the share of the same samples more than five
 minutes late; `baseline_samples` counts them. A route with fewer than
 `MIN_SAME_CLASS_BASELINE_DAYS` such days is compared with all of its days in
 the window instead. The response does not say which of the two was used.
-Every route's baseline for the day is read once and kept for five minutes,
-the report caches' lifetime. A timetable load that changes the class of any
-date in the window takes effect on the next request.
+Every route's baseline for the day is read at most once every five minutes
+per agency, the report caches' lifetime. A timetable load that changes the
+class of any date in the window takes effect on the next request.
 
 Observations split across two ClickHouse tables: `updates_live` holds today
 and any later day, `updates` holds every closed day.
