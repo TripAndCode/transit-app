@@ -136,11 +136,15 @@ LATEST_OPERATOR_RUNS_SQL = """
 
 #: When each agency's timetable last loaded: its newest ``static`` run that
 #: loaded a zip (``ok``; a check that loaded none closes ``unchanged``), from
-#: the agencies page or the command line.
+#: the agencies page or the command line. An operator's reload is read from
+#: its step, not its umbrella: the umbrella of a reload-only run is a
+#: ``static`` row too, and closes ``ok`` whether or not its step loaded
+#: anything.
 LAST_STATIC_LOAD_SQL = """
     SELECT DISTINCT ON (agency_id) agency_id, finished_at
     FROM pipeline_runs
     WHERE kind = 'static' AND status = 'ok' AND agency_id IS NOT NULL
+      AND (parent_run_id IS NOT NULL OR requested_by IS NULL)
     ORDER BY agency_id, finished_at DESC
 """
 
