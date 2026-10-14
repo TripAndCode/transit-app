@@ -384,6 +384,17 @@ describe("AdminAgenciesPage", () => {
     expect(drawer.getByRole("img", { name: "Step 2 of 3 running" })).toBeTruthy();
   });
 
+  it("offers a retry for a run whose process died, once the server no longer counts it", async () => {
+    const user = userEvent.setup();
+    healthOverride = HEALTH.map((h) => (h.agency_id === 1 ? { ...h, in_flight: false, latest_run: RUNNING_UPDATE } : h));
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    expect(drawer.getByText("Stopped")).toBeTruthy();
+    await user.click(drawer.getByRole("button", { name: "Retry" }));
+    expect(updateMutate).toHaveBeenCalledWith(1);
+  });
+
   it("retries a stopped update from its run card", async () => {
     const user = userEvent.setup();
     const stopped: AgencyRun = {

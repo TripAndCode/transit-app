@@ -1488,6 +1488,7 @@
       "res_waiting": "Waiting",
       "res_not_run": "Not run",
       "res_unchanged": "No newer timetable found",
+      "res_abandoned": "Did not finish",
       "res_failed": {
         "static": "Timetable could not be fetched",
         "ingest": "Ingest failed",
@@ -1501,6 +1502,7 @@
       "foot_failed": "The run stopped here; the steps after it did not run.",
       "foot_failed_continued": "This step failed; the run still went on to the steps after it.",
       "foot_skipped": "Another ingest or aggregation run (usually the scheduled one) was using the pipeline, so this one stopped here.",
+      "foot_abandoned": "This run stopped reporting before it finished, so it is shown as stopped.",
       "edit_url": "Edit URL",
       "retry": "Retry"
     },

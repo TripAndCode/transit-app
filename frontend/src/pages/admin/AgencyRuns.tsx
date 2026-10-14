@@ -6,7 +6,7 @@ import { useNow } from "../../hooks/useNow";
 import { destHref } from "../../routes/destinations";
 import { EM_DASH, formatDateTime, formatDuration, formatShortDate } from "../../utils/format";
 import { AdminButton } from "./adminControls";
-import { currentStepIndex, runState, type RunState } from "./agencyRunState";
+import { currentStepIndex, isAbandoned, runState, stoppedStepIndex, type RunState } from "./agencyRunState";
 import "./agencyRuns.css";
 
 /** How a step is drawn: finished, the one the run is on, stopped there,
@@ -160,18 +160,22 @@ function StepResult({
   step,
   index,
   view,
+  abandoned,
   latestDataDate,
 }: {
   run: AgencyRun;
   step: AgencyRunStep;
   index: number;
   view: StepView;
+  /** The run's process died while on this step. */
+  abandoned: boolean;
   latestDataDate: string | null;
 }) {
   const { t } = useTranslation();
   if (view === "now") return <Elapsed since={currentSince(run, index)} />;
   if (view === "pending") return <>{t("admin.agency_run.res_waiting")}</>;
   if (view === "not_run") return <>{t("admin.agency_run.res_not_run")}</>;
+  if (view === "fail" && abandoned) return <>{t("admin.agency_run.res_abandoned")}</>;
   if (view === "fail") {
     return (
       <>
@@ -192,12 +196,16 @@ function StepResult({
   return <>{parts.join(" · ")}</>; // i18n-ignore: locale-neutral separator
 }
 
-function segLabel(t: (key: string, opts?: Record<string, unknown>) => string, run: AgencyRun, state: RunState) {
+function segLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  run: AgencyRun,
+  state: RunState,
+  stoppedAt: number,
+) {
   const total = run.steps.length;
   if (state === "done") return t("admin.agency_run.seg_done", { total });
   if (state === "running") return t("admin.agency_run.seg_running", { total, current: currentStepIndex(run) + 1 });
-  const stoppedAt = run.steps.findIndex((s) => s.status !== "ok");
-  return t("admin.agency_run.seg_stopped", { total, current: (stoppedAt === -1 ? total - 1 : stoppedAt) + 1 });
+  return t("admin.agency_run.seg_stopped", { total, current: stoppedAt + 1 });
 }
 
 /** An agency's latest run, step by step: a segment per step, then each
@@ -207,6 +215,7 @@ export function AgencyRunCard({
   agencyId,
   agencyName,
   run,
+  inFlight,
   latestDataDate,
   onRetry,
   retryBlocked,
@@ -215,18 +224,29 @@ export function AgencyRunCard({
   agencyId: number;
   agencyName: string;
   run: AgencyRun;
+  /** The server counts a job as working on this agency. */
+  inFlight: boolean;
   latestDataDate: string | null;
   onRetry: () => void;
   retryBlocked: boolean;
   onEditUrl: () => void;
 }) {
   const { t } = useTranslation();
-  const state = runState(run);
-  const current = currentStepIndex(run);
-  const views = run.steps.map((step, i) => stepView(step, i === current));
+  const state = runState(run, inFlight);
+  const abandoned = isAbandoned(run, inFlight);
+  // An abandoned run's row still says where it was; that step is where it
+  // stopped, and the ones after it never ran.
+  const abandonedAt = abandoned ? currentStepIndex(run) : -1;
+  const current = state === "running" ? currentStepIndex(run) : -1;
+  const views = run.steps.map((step, i): StepView => {
+    if (i === abandonedAt) return "fail";
+    if (abandoned && (step.status === "pending" || step.status === "running")) return "not_run";
+    return stepView(step, i === current);
+  });
   const failedIndex = run.steps.findIndex((s) => s.status === "error" || s.status === "skipped");
   const failedStep = run.steps[failedIndex] as AgencyRunStep | undefined;
-  const detail = failedStep?.error ?? (state === "stopped" ? run.error : null);
+  const stoppedAt = abandoned ? Math.max(abandonedAt, 0) : stoppedStepIndex(run);
+  const detail = failedStep?.error ?? (state === "stopped" && !abandoned ? run.error : null);
   const skipped = run.status === "skipped" || failedStep?.status === "skipped";
   // A re-aggregation keeps going after a failed ingest, so whether the
   // steps after a failure ran is read off the steps, not assumed.
@@ -239,7 +259,7 @@ export function AgencyRunCard({
         <b>{agencyName}</b>
         <span className={`agency-run-state agency-run-state--${state}`}>{t(`admin.agency_run.state_${state}`)}</span>
       </div>
-      <div className="agency-run-segbar" role="img" aria-label={segLabel(t, run, state)}>
+      <div className="agency-run-segbar" role="img" aria-label={segLabel(t, run, state, stoppedAt)}>
         {views.map((view, i) => (
           <span
             key={run.steps[i].step}
@@ -255,7 +275,14 @@ export function AgencyRunCard({
             </span>
             <span>{t(`admin.agency_run.step.${step.step}`)}</span>
             <span className="agency-run-step-res">
-              <StepResult run={run} step={step} index={i} view={views[i]} latestDataDate={latestDataDate} />
+              <StepResult
+                run={run}
+                step={step}
+                index={i}
+                view={views[i]}
+                abandoned={i === abandonedAt}
+                latestDataDate={latestDataDate}
+              />
             </span>
           </li>
         ))}
@@ -278,7 +305,9 @@ export function AgencyRunCard({
       {state === "stopped" && (
         <p className="agency-run-foot">
           <span>
-            {skipped
+            {abandoned
+              ? t("admin.agency_run.foot_abandoned")
+              : skipped
               ? t("admin.agency_run.foot_skipped")
               : failedStep?.step === "static"
                 ? t("admin.agency_run.foot_static_failed")
@@ -286,7 +315,7 @@ export function AgencyRunCard({
                   ? t("admin.agency_run.foot_failed_continued")
                   : t("admin.agency_run.foot_failed")}
           </span>
-          {failedStep?.step === "static" && !skipped && (
+          {failedStep?.step === "static" && !skipped && !abandoned && (
             <button type="button" className="agency-run-link" onClick={onEditUrl}>
               {t("admin.agency_run.edit_url")}
             </button>

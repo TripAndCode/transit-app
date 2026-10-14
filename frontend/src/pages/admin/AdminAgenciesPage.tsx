@@ -562,6 +562,7 @@ export function AdminAgenciesPage() {
                   agencyId={opened.agency_id}
                   agencyName={opened.agency_name}
                   run={openedHealth.latest_run}
+                  inFlight={openedHealth.in_flight}
                   latestDataDate={openedHealth.latest_data_date}
                   retryBlocked={runBlocker(opened, reloadsTimetable(openedHealth.latest_run.kind)) != null}
                   onRetry={() => retry(opened, openedHealth.latest_run?.kind ?? "")}

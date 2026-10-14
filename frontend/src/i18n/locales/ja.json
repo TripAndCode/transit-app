@@ -1488,6 +1488,7 @@
       "res_waiting": "待機",
       "res_not_run": "実行せず",
       "res_unchanged": "新しい時刻表は見つかりません",
+      "res_abandoned": "完了せず",
       "res_failed": {
         "static": "時刻表を取得できません",
         "ingest": "取込できません",
@@ -1501,6 +1502,7 @@
       "foot_failed": "ここで止まり、後の段階は実行していません。",
       "foot_failed_continued": "この段階は失敗しましたが、後の段階は実行しました。",
       "foot_skipped": "別の取込・集計（通常は定期実行）が動いていたため、ここで止まりました。",
+      "foot_abandoned": "この実行は完了を報告しないまま止まったため、停止として表示しています。",
       "edit_url": "URL を編集",
       "retry": "再試行"
     },

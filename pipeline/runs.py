@@ -199,7 +199,10 @@ def record_run(
     requested_by: int | None = None,
     parent_run_id: int | None = None,
 ) -> Iterator[RunHandle]:
-    """Bracket one job with its run row: ``running`` -> ``ok`` or ``error``.
+    """Bracket one job with its run row: ``running``, then the status the
+    caller left on the handle (``ok`` by default, ``unchanged`` for a check
+    that found nothing newer) when the block exits normally, or ``error``
+    when it raises.
 
     The exception is always re-raised -- every caller's own failure handling
     (the per-agency loops' log-and-continue, the single-agency commands'

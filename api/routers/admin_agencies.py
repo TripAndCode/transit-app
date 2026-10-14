@@ -133,6 +133,7 @@ class AgencyRunStep(BaseModel):
     #: ``analyze``.
     step: str
     #: ``pending`` (the run has not reached it), ``running``, ``ok``,
+    #: ``unchanged`` (a timetable check that loaded nothing newer),
     #: ``skipped``, ``error``, or ``not_run`` (the run ended before it).
     status: str
     started_at: str | None

@@ -435,7 +435,8 @@ export type AgencyRunStep = {
 export type AgencyRun = {
   run_id: number;
   kind: string;
-  status: "running" | "ok" | "skipped" | "error";
+  /** `unchanged`: a timetable reload on its own that loaded nothing newer. */
+  status: "running" | "ok" | "unchanged" | "skipped" | "error";
   started_at: string | null;
   finished_at: string | null;
   error: string | null;

@@ -407,10 +407,34 @@ def test_no_newer_timetable_closes_the_step_unchanged_and_moves_no_load_date(run
     sweep.assert_not_called()
     (umbrella, step) = _rows(pg_conn, run_id)
     assert step[1:4] == ("static", "unchanged", None)
-    assert umbrella[1:3] == ("static", "ok")
+    # The reload-only umbrella closes with its step's outcome: the board
+    # draws both rows of one no-op check the same way.
+    assert umbrella[1:3] == ("static", "unchanged")
     with pg_conn.cursor() as cur:
         cur.execute(LAST_STATIC_LOAD_SQL)
         assert cur.fetchall() == []
+
+
+def test_a_reload_on_its_own_that_loaded_a_zip_closes_its_umbrella_ok(runner_env, pg_conn):
+    from api.routers.internal import _run_agency_update
+
+    run_id = runner_env["open_run"]("static")
+    zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=2)
+    with (
+        patch("pipeline.strategies.direct_url.fetch", return_value=zip_path),
+        patch("api.routers.internal._ingest_and_analyze_sweep") as sweep,
+    ):
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=False,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert step[1:4] == ("static", "ok", 2)
+    assert umbrella[1:3] == ("static", "ok")
 
 
 def test_the_chained_sweep_stops_an_agency_at_its_first_failed_stage(runner_env, pg_conn):

@@ -18,6 +18,7 @@ import asyncio
 import hmac
 import logging
 import os
+import pathlib
 import re
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
@@ -456,9 +457,11 @@ def _ingest_and_analyze_sweep(
     return SweepOutcome("ok")
 
 
-def _refresh_static_step(db_url: str, agency_id: int, *, requested_by: int | None, parent_run_id: int | None) -> None:
-    """Reload one agency's timetable as a step of an operator's run, raising
-    if the step failed.
+def _refresh_static_step(
+    db_url: str, agency_id: int, *, requested_by: int | None, parent_run_id: int | None
+) -> pathlib.Path | None:
+    """Reload one agency's timetable as a step of an operator's run: the zip
+    it loaded, None when it loaded nothing newer, raising if the step failed.
 
     ``refresh_static_recorded`` is the command line's own reload and record,
     writing into the same directory, so the button and the command compare
@@ -466,15 +469,13 @@ def _refresh_static_step(db_url: str, agency_id: int, *, requested_by: int | Non
     loads nothing for an agency with no timetable at all fails, rather than
     letting a chain go on to ingest against an empty schedule.
     """
-    import pathlib
-
     import psycopg2
 
     from pipeline import static_fetcher
 
     conn = psycopg2.connect(db_url)
     try:
-        static_fetcher.refresh_static_recorded(
+        return static_fetcher.refresh_static_recorded(
             agency_id,
             conn,
             pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST),
@@ -497,7 +498,9 @@ def _run_agency_update(
     ingest + analyze sweep, closing the operator's umbrella row on every path.
 
     Steps run in order and a failed step stops the chain: a timetable that
-    did not load leaves the umbrella ``error`` and the sweep never starts.
+    did not load leaves the umbrella ``error`` and the sweep never starts. A
+    reload on its own closes its umbrella with its step's outcome, ``ok`` or
+    ``unchanged``, so the board draws the two rows of one no-op check alike.
     The sweep is :func:`_run_ingest_and_analyze` itself, scoped to this one
     agency and asked to stop at its own first failure, so the lock, the JST
     pin and the freshness check are the cron job's own. It closes the
@@ -515,13 +518,13 @@ def _run_agency_update(
         _log.error("admin: DATABASE_URL not set; skipping the timetable reload")
         return
     try:
-        _refresh_static_step(db_url, agency_id, requested_by=requested_by, parent_run_id=run_id)
+        loaded = _refresh_static_step(db_url, agency_id, requested_by=requested_by, parent_run_id=run_id)
     except Exception as exc:
         _log.exception("admin: timetable reload failed for agency %s", agency_id)
         _finish_manual_run(db_url, run_id, "error", error=redact_urls_in_text(f"{type(exc).__name__}: {exc}"))
         return
     if not then_ingest_and_analyze:
-        _finish_manual_run(db_url, run_id, "ok")
+        _finish_manual_run(db_url, run_id, "ok" if loaded is not None else "unchanged")
         return
     _run_ingest_and_analyze(
         kind="ingest",

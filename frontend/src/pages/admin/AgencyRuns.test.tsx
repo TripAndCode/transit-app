@@ -7,7 +7,7 @@ import i18n from "../../i18n";
 import type { AgencyHealthRow, AgencyRun, AgencyRunStep } from "../../api/admin";
 import { formatShortDate } from "../../utils/format";
 import { AgencyRunCard, DataStage, RunChain, TimetableStage } from "./AgencyRuns";
-import { currentStepIndex, runState } from "./agencyRunState";
+import { currentStepIndex, runState, stoppedStepIndex } from "./agencyRunState";
 
 function step(over: Partial<AgencyRunStep> & Pick<AgencyRunStep, "step" | "status">): AgencyRunStep {
   return { started_at: null, finished_at: null, rows: null, error: null, ...over };
@@ -69,12 +69,17 @@ function wrap(ui: React.ReactElement) {
   );
 }
 
-function card(r: AgencyRun, handlers: { onRetry?: () => void; onEditUrl?: () => void } = {}) {
+function card(
+  r: AgencyRun,
+  handlers: { onRetry?: () => void; onEditUrl?: () => void } = {},
+  inFlight = r.status === "running",
+) {
   return wrap(
     <AgencyRunCard
       agencyId={9}
       agencyName="Hiroshima Bus"
       run={r}
+      inFlight={inFlight}
       latestDataDate="2026-10-12"
       retryBlocked={false}
       onRetry={handlers.onRetry ?? vi.fn()}
@@ -99,11 +104,28 @@ describe("run state helpers", () => {
     expect(currentStepIndex(DONE)).toBe(-1);
   });
 
-  it("reads an ok run as done and anything else that ended as stopped", () => {
-    expect(runState(RUNNING)).toBe("running");
-    expect(runState(DONE)).toBe("done");
-    expect(runState(FAILED)).toBe("stopped");
-    expect(runState(run({ status: "skipped" }))).toBe("stopped");
+  it("reads an ok or unchanged run as done and anything else that ended as stopped", () => {
+    expect(runState(RUNNING, true)).toBe("running");
+    expect(runState(DONE, false)).toBe("done");
+    expect(runState(run({ status: "unchanged" }), false)).toBe("done");
+    expect(runState(FAILED, false)).toBe("stopped");
+    expect(runState(run({ status: "skipped" }), false)).toBe("stopped");
+  });
+
+  it("reads a run row still open but no longer in flight as stopped", () => {
+    expect(runState(RUNNING, false)).toBe("stopped");
+  });
+
+  it("finds where a run stopped past a step that found nothing newer", () => {
+    const stopped = run({
+      status: "error",
+      steps: [
+        step({ step: "static", status: "unchanged" }),
+        step({ step: "ingest", status: "error" }),
+        step({ step: "analyze", status: "not_run" }),
+      ],
+    });
+    expect(stoppedStepIndex(stopped)).toBe(1);
   });
 });
 
@@ -198,6 +220,48 @@ describe("AgencyRunCard", () => {
     expect(stepRows()).toEqual(["fail", "done"]);
     expect(screen.getByText(/still went on to the steps after it/)).toBeTruthy();
     expect(screen.queryByText(/did not run/)).toBeNull();
+  });
+
+  it("names the step a run stopped at even after an unchanged timetable check", () => {
+    card(
+      run({
+        status: "error",
+        finished_at: "2026-10-13T05:02:00Z",
+        steps: [
+          step({ step: "static", status: "unchanged", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:00:03Z" }),
+          step({ step: "ingest", status: "error", started_at: "2026-10-13T05:00:03Z", finished_at: "2026-10-13T05:02:00Z", error: "RuntimeError: feed down" }),
+          step({ step: "analyze", status: "not_run" }),
+        ],
+      }),
+    );
+    expect(screen.getByRole("img", { name: "Stopped at step 2 of 3" })).toBeTruthy();
+  });
+
+  it("shows a run whose process died as stopped where it was, with a retry and no ticking timer", async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    card(RUNNING, { onRetry }, false);
+    expect(screen.getByText("Stopped")).toBeTruthy();
+    expect(screen.queryByText(/elapsed$/)).toBeNull();
+    expect(stepRows()).toEqual(["done", "fail", "not_run"]);
+    expect(screen.getByText("Did not finish")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Stopped at step 2 of 3" })).toBeTruthy();
+    expect(screen.getByText(/stopped reporting before it finished/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("reads a reload on its own that found nothing newer as done", () => {
+    card(
+      run({
+        kind: "static",
+        status: "unchanged",
+        finished_at: "2026-10-13T05:00:03Z",
+        steps: [step({ step: "static", status: "unchanged", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:00:03Z" })],
+      }),
+    );
+    expect(screen.getByText("Done")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "All 1 steps done" })).toBeTruthy();
   });
 
   it("explains a run another job turned away, without blaming the timetable URL", () => {
