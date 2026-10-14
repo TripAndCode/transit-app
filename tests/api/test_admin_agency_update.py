@@ -297,8 +297,9 @@ def _seed_timetable(pg_conn, agency_id: int) -> None:
 def _upstream_answers(code: int):
     """Every request the timetable source receives is answered with ``code``.
 
-    Patched at the strategy's own opener so the URL guard's DNS check never
-    runs against the test host, which does not resolve."""
+    Patches ``direct_url.safe_urlopen`` itself, not ``url_guard._opener``, so
+    the URL guard's DNS check never runs against the test host, which does
+    not resolve."""
 
     def _open(req, **_kwargs):
         raise HTTPError(req.full_url, code, "status", {}, None)  # type: ignore[arg-type]

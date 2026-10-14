@@ -8,8 +8,9 @@ so a dead source is never recorded as an up-to-date one.
 import http
 import http.client
 import urllib.error
+import urllib.parse
 
-from pipeline.url_guard import FeedURLError, _redact_url, redact_urls_in_text
+from pipeline.url_guard import FeedURLError, redact_url, redact_urls_in_text
 
 #: What a fetch through ``safe_urlopen`` raises when the request failed: an
 #: HTTP error status or a network error (``URLError``, and the timeouts and
@@ -30,9 +31,30 @@ class StaticFetchError(RuntimeError):
         self.reason = reason
 
 
+def require_http_url(url: str, what: str) -> None:
+    """Raise :class:`StaticFetchError` unless ``url`` is an http(s) URL with a host.
+
+    Call it before anything is fetched from ``url``. A value that is not one
+    makes ``urllib`` or :func:`redact_url` raise a bare ``ValueError``, some
+    quoting the raw value, or redacts to text that still shows a credential,
+    so the reason names the URL as ``what`` and never quotes it.
+    """
+    if not _is_http_url(url):
+        raise StaticFetchError(f"{what} is not a valid http(s) URL")
+
+
+def _is_http_url(url: str) -> bool:
+    try:
+        parts = urllib.parse.urlsplit(url)
+        _ = parts.port  # a port that is not a number in range raises here
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
+
+
 def fetch_failed(url: str, exc: BaseException) -> StaticFetchError:
     """The :class:`StaticFetchError` for one of :data:`FETCH_ERRORS` raised fetching ``url``."""
-    where = _redact_url(url)
+    where = redact_url(url)
     if isinstance(exc, urllib.error.HTTPError):
         try:
             status = f"{exc.code} {http.HTTPStatus(exc.code).phrase}"

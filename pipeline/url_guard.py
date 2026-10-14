@@ -34,14 +34,16 @@ class FeedURLError(ValueError):
     """Raised when a ``feed_url`` is unsafe to fetch."""
 
 
-def _redact_url(url: str) -> str:
+def redact_url(url: str) -> str:
     """Strip userinfo and query string from ``url`` for safe logging.
 
     GTFS/GTFS-RT feeds (ODPT and similar providers) routinely carry an API
-    key in the query string or a ``user:pass@`` userinfo segment. Every
-    place this module puts a URL into an exception message or log line goes
-    through here first, so a rejected/oversized/over-redirected fetch never
-    writes a credential to the application log.
+    key in the query string or a ``user:pass@`` userinfo segment. This is the
+    one redaction every feed and static fetch puts a URL through before it
+    goes into an exception message, a log line or a persisted record, so a
+    rejected, oversized or failed fetch never writes a credential anywhere
+    durable. ``url`` must parse: a malformed host or port raises
+    ``ValueError``.
     """
     parts = urlsplit(url)
     netloc = parts.hostname or ""
@@ -57,15 +59,15 @@ _URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"']*[^\s<>\"'.,;:!?)\]}]")
 
 
 def redact_urls_in_text(text: str) -> str:
-    """``text`` with every embedded URL put through :func:`_redact_url`.
+    """``text`` with every embedded URL put through :func:`redact_url`.
 
     Anything a feed fetch raises can end up somewhere durable — an operator's
     timeline row, an application log — and the URL inside it routinely
     carries an API key in its query string or a ``user:pass@`` segment. This
-    is the message-shaped entry point to that redaction; :func:`_redact_url`
+    is the message-shaped entry point to that redaction; :func:`redact_url`
     itself takes a bare URL and would mangle a sentence.
     """
-    return _URL_IN_TEXT_RE.sub(lambda match: _redact_url(match.group(0)), text)
+    return _URL_IN_TEXT_RE.sub(lambda match: redact_url(match.group(0)), text)
 
 
 _SIXTOFOUR_NET = ipaddress.ip_network("2002::/16")
@@ -246,7 +248,7 @@ def safe_urlopen(
                 raise
             location = exc.headers.get("Location") if exc.headers else None
             if not location:
-                raise FeedURLError(f"redirect from {_redact_url(current)} ({exc.code}) has no Location header") from exc
+                raise FeedURLError(f"redirect from {redact_url(current)} ({exc.code}) has no Location header") from exc
             current = urljoin(current, location)
             new_parts = urlsplit(current)
             if exc.code in (301, 302, 303):
@@ -273,7 +275,7 @@ def safe_urlopen(
         with resp:
             body = resp.read(max_bytes + 1)
             if len(body) > max_bytes:
-                raise FeedURLError(f"response from {_redact_url(current)} exceeded the {max_bytes}-byte cap")
+                raise FeedURLError(f"response from {redact_url(current)} exceeded the {max_bytes}-byte cap")
             status = resp.status if hasattr(resp, "status") else resp.getcode()
             return _CappedResponse(body, resp.headers, status)
-    raise FeedURLError(f"too many redirects fetching {_redact_url(current)}")
+    raise FeedURLError(f"too many redirects fetching {redact_url(current)}")

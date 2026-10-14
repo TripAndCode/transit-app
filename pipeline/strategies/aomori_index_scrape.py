@@ -15,8 +15,8 @@ import urllib.parse
 from datetime import datetime
 from typing import Optional
 
-from pipeline.strategies.errors import FETCH_ERRORS, StaticFetchError, fetch_failed
-from pipeline.url_guard import _redact_url, safe_urlopen
+from pipeline.strategies.errors import FETCH_ERRORS, StaticFetchError, fetch_failed, require_http_url
+from pipeline.url_guard import redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +43,12 @@ def fetch(
 
     Returns the path of the zip ready for load_static, or None when the
     download is byte-identical to the last zip that loaded. Raises
-    StaticFetchError when the index page or the zip could not be fetched,
-    the page links no timetable, or the download is not a zip.
+    StaticFetchError when either URL is not a valid http(s) URL, the index
+    page or the zip could not be fetched, the page links no timetable, or
+    the download is not a zip.
     Idempotent same-day overwrite (matches existing shell behaviour).
     """
+    require_http_url(index_url, "the timetable URL")
     agency_dir = dest_dir / str(agency_id)
     agency_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,8 +60,9 @@ def fetch(
 
     m = _HREF_RE.search(html)
     if not m:
-        raise StaticFetchError(f"no gtfs-aomoricitybus*.zip link on the index page {_redact_url(index_url)}")
+        raise StaticFetchError(f"no gtfs-aomoricitybus*.zip link on the index page {redact_url(index_url)}")
     zip_url = _resolve(m.group(1), index_url)
+    require_http_url(zip_url, "the timetable link on the index page")
 
     day = datetime.now().strftime("%Y%m%d")
     final = agency_dir / f"gtfs_static_{day}.zip"
@@ -70,7 +73,7 @@ def fetch(
         raise fetch_failed(zip_url, e) from e
 
     if data[:2] != b"PK":
-        raise StaticFetchError(f"{_redact_url(zip_url)} is not a zip file (no PK header)")
+        raise StaticFetchError(f"{redact_url(zip_url)} is not a zip file (no PK header)")
 
     # Reloading identical bytes would rewrite every static table and mint a
     # new static_version_id for unchanged content.
@@ -92,7 +95,7 @@ def fetch(
         # compromised/spoofed index page could embed credentials in its
         # userinfo or query string — redact before persisting, matching
         # direct_url.py's manifest redaction of static_url/latest_url.
-        f.write(f"{datetime.now().isoformat()},{_redact_url(zip_url)},{sha},{len(data)},{final}\n")
+        f.write(f"{datetime.now().isoformat()},{redact_url(zip_url)},{sha},{len(data)},{final}\n")
 
     logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final

@@ -75,8 +75,9 @@ The three run actions open an umbrella `pipeline_runs` row (`ingest`,
 `static` or `update`) and file each step's row under it (`parent_run_id`).
 A timetable step closes `ok` when it loaded a zip, `unchanged` when the
 source had nothing newer, and `error` when the source could not be fetched
-(an HTTP error, a network error, a URL the guard rejected, an index page with
-no timetable link), with that reason on the run card; only `ok` moves the
+(an HTTP error, a network error, a URL that is not a valid http(s) URL or that
+the guard rejected, an index page with no timetable link, a download that is
+not a zip), with that reason on the run card; only `ok` moves the
 load day. Each action answers 409 while any job is working on the agency, for
 a disabled agency, and (the two timetable actions) for an agency with no
 static URL or static strategy. The board's
