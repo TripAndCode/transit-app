@@ -36,6 +36,7 @@ const SUMMARY: ScopeSummary = {
     { late_sec: 300, on_time_pct: 75 },
     { late_sec: 600, on_time_pct: 92 },
   ],
+  day_types: ["weekday", "saturday", "sunday_holiday"],
 };
 
 function Harness({ C, summary }: { C: ComponentType<ControlProps>; summary?: ScopeSummary }) {
@@ -93,6 +94,42 @@ describe("scope controls", () => {
       expect(params().get("dow")).toBe("weekday");
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable type" }), "平日");
       expect(params().get("service")).toBe("平日");
+    });
+
+    it("offers the timetables the agency's calendar splits the period into", () => {
+      mount(DaysControl, "", { ...SUMMARY, day_types: ["weekday", "weekend_holiday"] });
+      const select = screen.getByRole("combobox", { name: "Timetable type" });
+      expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+        "All services",
+        "Weekday",
+        "Weekend/Holiday",
+      ]);
+    });
+
+    it("offers weekday, Saturday and Sunday/holiday on a three-way feed", async () => {
+      mount(DaysControl, "", SUMMARY);
+      const select = screen.getByRole("combobox", { name: "Timetable type" });
+      expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+        "All services",
+        "Weekday",
+        "Saturday",
+        "Sunday/Holiday",
+      ]);
+      await userEvent.selectOptions(select, "土曜"); // i18n-ignore: query contract
+      expect(params().get("service")).toBe("土曜"); // i18n-ignore: query contract
+    });
+
+    it("shows a Saturday link on a two-way feed as the weekend timetable, leaving the URL alone", () => {
+      mount(DaysControl, "?service=%E5%9C%9F%E6%9B%9C", { ...SUMMARY, day_types: ["weekday", "weekend_holiday"] });
+      expect(screen.getByRole("combobox", { name: "Timetable type" })).toHaveDisplayValue("Weekend/Holiday");
+      expect(params().get("service")).toBe("土曜"); // i18n-ignore: query contract
+    });
+
+    it("keeps a legacy weekend-and-holiday link working on a three-way feed", () => {
+      mount(DaysControl, "?service=%E5%9C%9F%E6%97%A5%E7%A5%9D", SUMMARY);
+      const select = screen.getByRole("combobox", { name: "Timetable type" });
+      expect(select).toHaveDisplayValue("Weekend/Holiday");
+      expect(params().get("service")).toBe("土日祝"); // i18n-ignore: query contract
     });
 
     it("shows each weekday's mean delay once the data is in", () => {

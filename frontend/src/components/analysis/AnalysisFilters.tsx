@@ -7,6 +7,7 @@ import { useScope, type TimeBand, type DowFilter } from "../../api/scope";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
 import { sameCodes } from "../../utils/sameCodes";
+import { serviceValueLabel } from "../../utils/filterValueLabels";
 
 export function PatternFilters({ agencyId, codes, onChange }: {
   agencyId: number | null; codes: string[]; onChange: (codes: string[]) => void;
@@ -102,7 +103,7 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       {/* Clearing the service chip commits immediately: it is a discard, not
           a selection being built up, and leaving it pending would mean
           pressing Apply to undo something. */}
-      {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{t(ctx.service === "平日" ? "weekday" : "weekend")} ×</button>} {/* i18n-ignore: query contract */}
+      {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{serviceValueLabel(ctx.service, t)} ×</button>}
       {dirty && (
         <>
           <button type="submit" className="focus-filters__apply">{t("apply")}</button>

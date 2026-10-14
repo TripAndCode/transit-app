@@ -2,7 +2,9 @@ import { use, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayRampVar } from "../../styles/tokens";
 import { DataEndContext, WEEKDAYS, defaultPeriod, isoDaysBefore, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
+import { timetableChoices } from "../../api/serviceDays";
 import type { ScopeSummary } from "../../api/types";
+import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { sinceStart } from "./brushMath";
@@ -111,6 +113,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
   const serviceId = useId();
   const on = selectedDays(scope.dow);
   const weekdayMeans = new Map(summary?.weekdays.map((w) => [w.dow, w.avg_min]) ?? []);
+  const timetable = timetableChoices(scope.service, summary?.day_types);
   function toggle(day: Weekday) {
     const next = new Set(on);
     if (next.has(day)) next.delete(day);
@@ -147,10 +150,13 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
       <label htmlFor={serviceId} className="scope-field">
         {t("scope.control.service")}
       </label>
-      <select id={serviceId} value={scope.service} onChange={(e) => update({ service: e.target.value as Scope["service"] })}>
+      <select id={serviceId} value={timetable.shown} onChange={(e) => update({ service: e.target.value as Scope["service"] })}>
         <option value="all">{t("filters.service.all")}</option>
-        <option value="平日">{t("common.service_value.平日")}</option>{/* i18n-ignore: query contract */}
-        <option value="土日祝">{t("common.service_value.土日祝")}</option>{/* i18n-ignore: query contract */}
+        {timetable.options.map((service) => (
+          <option key={service} value={service}>
+            {serviceValueLabel(service, t)}
+          </option>
+        ))}
       </select>
       <WholeDayNote scope={scope} update={update} summary={summary} />
     </div>
