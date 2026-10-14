@@ -8,19 +8,30 @@ For each agency:
     promote it once that zip has loaded (record_loaded)
 
 Conditional GET via If-Modified-Since / If-None-Match. 304 → no-op.
+
+static_url is the agency's configured source; latest.zip is a guess derived
+from it, which not every host publishes. A failed latest.zip is only logged,
+while a failed static_url raises StaticFetchError unless latest.zip delivered
+a newer zip to load: reporting "no change" then would vouch for a source
+nothing has heard from.
 """
 
+import contextlib
 import hashlib
 import json
 import logging
 import pathlib
+import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Optional
 
-from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
+from pipeline.strategies.errors import FETCH_ERRORS, StaticFetchError, fetch_failed, require_http_url
+from pipeline.url_guard import redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +45,11 @@ def _sha256(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
-def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optional[str], Optional[str]]:
+def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> Optional[tuple[Optional[str], Optional[str]]]:
     """GET url with If-Modified-Since/If-None-Match from manifest_entry.
 
-    Returns (last_modified, etag) on 200 (and writes dest), or (None, None) on
-    304 / network failure.
+    Returns (last_modified, etag) on 200, once the body is written to dest,
+    or None on 304. Raises StaticFetchError when the fetch failed.
     """
     req = urllib.request.Request(url)
     if manifest_entry.get("last_modified"):
@@ -48,25 +59,62 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     try:
         with safe_urlopen(req, timeout=30) as resp:
             data = resp.read()
-            with dest.open("wb") as f:
-                f.write(data)
-            return resp.headers.get("Last-Modified"), resp.headers.get("ETag")
+            headers = resp.headers
     except urllib.error.HTTPError as e:
         if e.code == 304:
-            return None, None
-        logger.warning(f"[direct_url] HTTP {e.code} for {_redact_url(url)}: {e.reason}")
-        return None, None
-    except urllib.error.URLError as e:
-        logger.warning(f"[direct_url] network error for {_redact_url(url)}: {e}")
-        return None, None
-    except FeedURLError as e:
-        # SSRF guard rejection (invalid scheme/host, or a redirect into a
-        # blocked host) — not a URLError, so it needs its own clause. Logged
-        # louder than a network blip since it's security-relevant, but still
-        # degrades to (None, None) rather than aborting fetch()'s other
-        # variant (current_data.zip vs latest.zip) or the caller's whole run.
-        logger.error(f"[direct_url] SSRF guard rejected {_redact_url(url)}: {e}")
-        return None, None
+            return None
+        raise fetch_failed(url, e) from e
+    except FETCH_ERRORS as e:
+        raise fetch_failed(url, e) from e
+    dest.write_bytes(data)
+    return headers.get("Last-Modified"), headers.get("ETag")
+
+
+def _try_cond_get(
+    url: str, manifest_entry: dict, dest: pathlib.Path
+) -> tuple[Optional[tuple[Optional[str], Optional[str]]], Optional[StaticFetchError]]:
+    """:func:`_cond_get`, with its failure returned rather than raised, so
+    one variant failing still lets the other be fetched."""
+    try:
+        return _cond_get(url, manifest_entry, dest), None
+    except StaticFetchError as e:
+        return None, e
+
+
+#: A temp file older than this is a killed run's: a fetch is bounded by the
+#: URL guard's timeout and byte cap, so a live one never lasts this long.
+STALE_TEMP_AGE_S = 24 * 60 * 60
+
+
+def _sweep_stale_temps(agency_dir: pathlib.Path) -> None:
+    cutoff = time.time() - STALE_TEMP_AGE_S
+    for path in agency_dir.glob("_tmp_*.zip"):
+        with contextlib.suppress(OSError):
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+
+
+@contextlib.contextmanager
+def _run_temps(agency_dir: pathlib.Path) -> Iterator[tuple[pathlib.Path, pathlib.Path]]:
+    """Temp files for this run's current and latest downloads, removed when it ends.
+
+    Unique to the run: two fetches of one agency that nothing serializes (two
+    command-line runs, or one beside an admin press) share the agency
+    directory, and neither may read, move or delete the other's download. A
+    temp file a killed run left behind is never taken for a fresh download,
+    and is swept once it is older than any fetch can run.
+    """
+    _sweep_stale_temps(agency_dir)
+    made: list[pathlib.Path] = []
+    try:
+        for variant in ("current", "latest"):
+            path = agency_dir / f"_tmp_{variant}_{secrets.token_hex(8)}.zip"
+            path.touch(exist_ok=False)
+            made.append(path)
+        yield made[0], made[1]
+    finally:
+        for path in made:
+            path.unlink(missing_ok=True)
 
 
 def fetch(
@@ -76,9 +124,11 @@ def fetch(
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for this agency.
 
-    Returns the path of the zip ready for load_static, or None on no change
-    or failure.
+    Returns the path of the zip ready for load_static, or None when nothing
+    is newer. Raises StaticFetchError when static_url is not a valid
+    http(s) URL or the fetch failed.
     """
+    require_http_url(static_url, "the timetable URL")
     agency_dir = dest_dir / str(agency_id)
     agency_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = _manifest_path(agency_dir)
@@ -98,53 +148,55 @@ def fetch(
     base = parsed.path.rsplit("/", 1)[0]
     latest_url = parsed._replace(path=f"{base}/latest.zip").geturl()
 
-    tmp_current = agency_dir / "_tmp_current.zip"
-    tmp_latest = agency_dir / "_tmp_latest.zip"
+    with _run_temps(agency_dir) as (tmp_current, tmp_latest):
+        cur_got, cur_failed = _try_cond_get(static_url, manifest.get("current", {}), tmp_current)
+        lat_got, lat_failed = _try_cond_get(latest_url, manifest.get("latest", {}), tmp_latest)
+        if lat_failed is not None:
+            logger.warning(f"[direct_url] agency={agency_id} latest.zip failed, going on without it: {lat_failed}")
+        if cur_failed is not None and lat_got is None:
+            raise StaticFetchError("; ".join(str(e) for e in (cur_failed, lat_failed) if e is not None))
+        cur_lm, cur_et = cur_got or (None, None)
+        lat_lm, lat_et = lat_got or (None, None)
 
-    cur_lm, cur_et = _cond_get(static_url, manifest.get("current", {}), tmp_current)
-    lat_lm, lat_et = _cond_get(latest_url, manifest.get("latest", {}), tmp_latest)
+        # A variant's temp file holds a download only when that variant
+        # answered 200; otherwise it is the empty file _run_temps made.
+        cur_sha = _sha256(tmp_current) if cur_got is not None else manifest.get("current", {}).get("sha256")
+        lat_sha = _sha256(tmp_latest) if lat_got is not None else manifest.get("latest", {}).get("sha256")
 
-    cur_sha = _sha256(tmp_current) if tmp_current.exists() else manifest.get("current", {}).get("sha256")
-    lat_sha = _sha256(tmp_latest) if tmp_latest.exists() else manifest.get("latest", {}).get("sha256")
+        prev_cur_sha = manifest.get("current", {}).get("sha256")
+        prev_lat_sha = manifest.get("latest", {}).get("sha256")
+        nothing_changed = (cur_sha is None or cur_sha == prev_cur_sha) and (lat_sha is None or lat_sha == prev_lat_sha)
+        if nothing_changed:
+            if cur_failed is not None:
+                # latest.zip answered, but only with what already loaded.
+                raise cur_failed
+            logger.info(f"[direct_url] agency={agency_id} no change")
+            return None
+        if cur_failed is not None:
+            logger.warning(f"[direct_url] agency={agency_id} static URL failed, loading latest.zip: {cur_failed}")
 
-    prev_cur_sha = manifest.get("current", {}).get("sha256")
-    prev_lat_sha = manifest.get("latest", {}).get("sha256")
-    nothing_changed = (cur_sha is None or cur_sha == prev_cur_sha) and (lat_sha is None or lat_sha == prev_lat_sha)
-    if nothing_changed:
-        for tmp in (tmp_current, tmp_latest):
-            tmp.unlink(missing_ok=True)
-        logger.info(f"[direct_url] agency={agency_id} no change")
-        return None
+        # Something changed, so at least one variant downloaded this run.
+        # latest.zip wins when it downloaded and differs from current
+        # (pre-cutover), or when it is the only one that downloaded.
+        prefer_latest = lat_got is not None and (cur_got is None or lat_sha != cur_sha)
+        chosen_tmp = tmp_latest if prefer_latest else tmp_current
 
-    # Pick which to load: prefer latest if it differs from current
-    chosen_tmp = tmp_latest if (lat_sha and cur_sha and lat_sha != cur_sha) else tmp_current
-    if not chosen_tmp.exists():
-        # one variant 304'd, fall back to whichever did download
-        chosen_tmp = tmp_current if tmp_current.exists() else tmp_latest
-
-    if not chosen_tmp.exists():
-        logger.warning(f"[direct_url] agency={agency_id} both variants 304/failed — keeping prior state")
-        return None
-
-    day = datetime.now(timezone.utc).strftime("%Y%m%d")
-    final = agency_dir / f"gtfs_static_{day}.zip"
-    chosen_tmp.replace(final)
-    # Clean up the other tmp if it still exists
-    for tmp in (tmp_current, tmp_latest):
-        tmp.unlink(missing_ok=True)
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        final = agency_dir / f"gtfs_static_{day}.zip"
+        chosen_tmp.replace(final)
 
     manifest["current"] = {
         # Redacted: static_url routinely carries an API key in the query
         # string (ODPT and similar JP GTFS providers). The manifest only
         # needs this for logging/identity, not re-fetching — re-fetch
         # always reads the live static_url from the DB.
-        "url": _redact_url(static_url),
+        "url": redact_url(static_url),
         "last_modified": cur_lm or manifest.get("current", {}).get("last_modified"),
         "etag": cur_et or manifest.get("current", {}).get("etag"),
         "sha256": cur_sha,
     }
     manifest["latest"] = {
-        "url": _redact_url(latest_url),
+        "url": redact_url(latest_url),
         "last_modified": lat_lm or manifest.get("latest", {}).get("last_modified"),
         "etag": lat_et or manifest.get("latest", {}).get("etag"),
         "sha256": lat_sha,

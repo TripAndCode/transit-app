@@ -1498,7 +1498,7 @@
       "foot_running": "This keeps going if you leave the page; the result shows here when you come back.",
       "foot_done": "Finished {{time}} · {{duration}} in total",
       "open_pulse": "Open Pulse ›",
-      "foot_static_failed": "The timetable URL may have changed.",
+      "foot_static_failed": "The reason is shown above. Retry if it looks temporary, such as a timeout or a server error; edit the URL if the source has moved.",
       "foot_failed": "The run stopped here; the steps after it did not run.",
       "foot_failed_continued": "This step failed; the run still went on to the steps after it.",
       "foot_skipped": "Another ingest or aggregation run (usually the scheduled one) was using the pipeline, so this one stopped here.",

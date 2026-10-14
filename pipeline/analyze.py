@@ -1943,7 +1943,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # before/after change in planned trips/vehicle-km.
         #
         # trip_count is a plain COUNT of static_trips rows (mirrors
-        # trips.txt) — deliberately NOT scaled by calendar_dates service
+        # trips.txt) — deliberately NOT scaled by the calendar's service
         # days (unlike pipeline.reports.service_delivered's date-range
         # planned_trips): this table describes the schedule DEFINITION
         # itself, comparable across versions independent of any date range.

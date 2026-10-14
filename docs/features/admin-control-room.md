@@ -73,15 +73,19 @@ Endpoints:
 
 The three run actions open an umbrella `pipeline_runs` row (`ingest`,
 `static` or `update`) and file each step's row under it (`parent_run_id`).
-A timetable step closes `ok` when it loaded a zip and `unchanged` when it
-loaded none; only `ok` moves the load day. Each action answers 409 while any
-job is working on the agency, for a disabled agency, and (the two timetable
-actions) for an agency with no static URL or static strategy. The board's
+A timetable step closes `ok` when it loaded a zip, `unchanged` when the
+source had nothing newer, and `error` when the source could not be fetched
+(an HTTP error, a network error, a URL that is not a valid http(s) URL or that
+the guard rejected, an index page with no timetable link, a download that is
+not a zip), with that reason on the run card; only `ok` moves the
+load day. Each action answers 409 while any job is working on the agency, for
+a disabled agency, and (the two timetable actions) for an agency with no
+static URL or static strategy. The board's
 `POST /api/admin/runs` takes the same guard when scoped to one agency.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
 `rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
-`static_calendar_dates`, `agg_static_version_summary`,
+`static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
 and `ridership_weights`; every write additionally records an
