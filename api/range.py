@@ -17,12 +17,13 @@ import re
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import cached_property
 from typing import Annotated, Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
 
-from pipeline.day_types import TWO_WAY, DayType, load_day_types
+from pipeline.day_types import TWO_WAY, DayType, DayTypes, load_day_types
 from pipeline.service_day import service_date_ch
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -175,12 +176,35 @@ _HOUR_ERROR = "invalid hour: expected 0-23 or an inclusive range a-b"
 
 @dataclass(frozen=True)
 class ServiceDates:
-    """The dates of ``[from_date, to_date]`` one agency's calendar files under ``service``."""
+    """``service`` resolved against one agency's day types.
+
+    ``day_types`` is the request's one day-type resolution, made over the widest
+    span its response reads (:func:`resolve_service_dates`), and every section
+    of the response takes its day types from it (:func:`day_types_for`). So no
+    two sections can file a date, or split the agency into buckets, two ways;
+    where the agency's calendar changes its Saturday/Sunday split inside that
+    span, the whole span decides (:func:`pipeline.day_types.resolve_day_types`).
+    """
 
     service: ServiceType
-    from_date: date
-    to_date: date
-    dates: tuple[date, ...]
+    day_types: DayTypes
+
+    @cached_property
+    def from_date(self) -> date:
+        return min(self.day_types.by_date)
+
+    @cached_property
+    def to_date(self) -> date:
+        return max(self.day_types.by_date)
+
+    @cached_property
+    def dates(self) -> tuple[date, ...]:
+        """The dates of the span ``service`` selects, oldest first."""
+        selected = service_day_types(self.service, self.day_types.buckets)
+        return tuple(d for d, day_type in sorted(self.day_types.by_date.items()) if day_type in selected)
+
+    def covers(self, from_date: date, to_date: date) -> bool:
+        return self.from_date <= from_date and to_date <= self.to_date
 
 
 class UnresolvedServiceFilter(RuntimeError):
@@ -212,6 +236,32 @@ class RangeCtx:
         return (self.to_date - self.from_date).days + 1
 
 
+def _span(ctx: RangeCtx, from_date: date | None, to_date: date | None) -> tuple[date, date]:
+    """``ctx``'s window, widened to ``[from_date, to_date]``."""
+    return min(from_date or ctx.from_date, ctx.from_date), max(to_date or ctx.to_date, ctx.to_date)
+
+
+async def day_types_for(
+    ctx: RangeCtx,
+    conn: Any,
+    agency_id: int,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> DayTypes:
+    """The agency's day types over ``ctx``'s window, widened to ``[from_date, to_date]``.
+
+    The ones ``ctx``'s service filter was resolved from whenever they cover that
+    span, so a section that reads day types agrees with the filter; otherwise one
+    calendar read (:func:`pipeline.day_types.load_day_types`, cached).
+    """
+    lo, hi = _span(ctx, from_date, to_date)
+    resolved = ctx.service_dates
+    if resolved is not None and resolved.covers(lo, hi):
+        return resolved.day_types
+    return await load_day_types(conn, agency_id, lo, hi)
+
+
 async def resolve_service_dates(
     ctx: RangeCtx,
     conn: Any,
@@ -229,21 +279,20 @@ async def resolve_service_dates(
     differently by every feed and empty for observations that matched no
     scheduled trip.
 
-    The dates cover ``ctx``'s window, widened to ``[from_date, to_date]`` for
-    a caller that also queries windows around it. A ``ctx`` without a service
-    filter, or already resolved over that span, comes back unchanged.
+    The resolution covers ``ctx``'s window, widened to ``[from_date, to_date]``
+    by a caller whose response also reads windows around it: resolve once, over
+    the widest span the response reads, and every section shares it (see
+    :class:`ServiceDates`). Day types ``ctx`` already carries over that span are
+    reused, for another service too. A ``ctx`` without a service filter comes
+    back unchanged, as does one already resolved for its service over the span.
     """
     if ctx.service == "all":
         return ctx if ctx.service_dates is None else replace(ctx, service_dates=None)
-    lo = min(from_date or ctx.from_date, ctx.from_date)
-    hi = max(to_date or ctx.to_date, ctx.to_date)
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=from_date, to_date=to_date)
     resolved = ctx.service_dates
-    if resolved is not None and resolved.service == ctx.service and resolved.from_date <= lo and hi <= resolved.to_date:
+    if resolved is not None and resolved.service == ctx.service and resolved.day_types is day_types:
         return ctx
-    day_types = await load_day_types(conn, agency_id, lo, hi)
-    selected = service_day_types(ctx.service, day_types.buckets)
-    dates = tuple(d for d, day_type in sorted(day_types.by_date.items()) if day_type in selected)
-    return replace(ctx, service_dates=ServiceDates(service=ctx.service, from_date=lo, to_date=hi, dates=dates))
+    return replace(ctx, service_dates=ServiceDates(service=ctx.service, day_types=day_types))
 
 
 def selected_service_dates(ctx: RangeCtx) -> list[date] | None:
@@ -258,12 +307,7 @@ def selected_service_dates(ctx: RangeCtx) -> list[date] | None:
     if ctx.service == "all":
         return None
     resolved = ctx.service_dates
-    if (
-        resolved is None
-        or resolved.service != ctx.service
-        or resolved.from_date > ctx.from_date
-        or resolved.to_date < ctx.to_date
-    ):
+    if resolved is None or resolved.service != ctx.service or not resolved.covers(ctx.from_date, ctx.to_date):
         span = "none" if resolved is None else f"{resolved.service} [{resolved.from_date}..{resolved.to_date}]"
         raise UnresolvedServiceFilter(
             f"service filter {ctx.service} over [{ctx.from_date}..{ctx.to_date}] is not resolved (resolved: {span})"

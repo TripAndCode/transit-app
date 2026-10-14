@@ -128,7 +128,14 @@ async def get_agency_range_ctx(
     Borrows a connection only when a service filter is set, and returns it
     before the handler runs, for the reason :func:`get_agency` gives; routes
     declare this ahead of any ``Depends(get_conn)``, so the two acquisitions
-    are sequential, not concurrent.
+    are sequential, not concurrent. The calendar read behind it is cached
+    (:func:`pipeline.day_types.load_day_types`), so a repeated request costs
+    no query here either.
+
+    A route whose compute resolves the filter itself, over the wider span its
+    response reads (``compute_overview_summary``, ``compute_scope_summary``),
+    takes plain ``get_range_ctx`` instead: a resolution of the bare window
+    would only be replaced.
     """
     if ctx.service == "all":
         return ctx

@@ -52,10 +52,17 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Iterable, Iterator
 
-from api.range import RangeCtx, dow_clause, dow_isodays, resolve_service_dates, service_date_clause
+from api.range import (
+    RangeCtx,
+    day_types_for,
+    dow_clause,
+    dow_isodays,
+    resolve_service_dates,
+    service_date_clause,
+)
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.day_types import DayTypes, load_day_types
+from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 from pipeline.reports.rankings import _round1
 
@@ -76,6 +83,19 @@ _GRAIN_LOOKBACK_DAYS = 7
 # How many weekly buckets ``_movers`` draws each route's sparkline from
 # (:func:`_route_weekly_history`), ending at the current window's last day.
 _MOVER_HISTORY_WEEKS = 4
+
+# How far before ``ctx.from_date`` the payload reads: the grain and base_ctx
+# reach _GRAIN_LOOKBACK_DAYS back, and the movers' sparkline
+# _MOVER_HISTORY_WEEKS weeks back from a current window that ends inside ctx.
+# The day types are resolved once over that whole span (api.range.ServiceDates),
+# so the service filter and the day-type split always agree.
+_CALENDAR_LOOKBACK_DAYS = max(_GRAIN_LOOKBACK_DAYS, 7 * _MOVER_HISTORY_WEEKS - 1)
+
+
+def _calendar_from(ctx: RangeCtx) -> date:
+    """The first day of the span the overview resolves its day types over."""
+    return ctx.from_date - timedelta(days=_CALENDAR_LOOKBACK_DAYS)
+
 
 # How many pooled connections one overview request may hold at once on its
 # pool-gather path. Ten stages fan out per request; unbounded, two
@@ -1161,8 +1181,12 @@ async def _service_day_split(
     agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
 ) -> tuple[list[dict], list[dict]]:
     """``(service_split, service_split_daily)`` over ``ctx``, from one day-type
-    resolution and one per-date read shared by both."""
-    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    resolution and one per-date read shared by both.
+
+    The day types are the payload's one resolution (:func:`_calendar_from`):
+    those the service filter carries when it is set, and a read over the same
+    span when it is not, so the split does not change with the filter."""
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=_calendar_from(ctx))
     totals = await _daily_totals(agency_id, ctx, conn, grain)
     return _service_split(day_types, totals), _service_split_daily(day_types, totals)
 
@@ -1297,16 +1321,12 @@ async def compute_overview_summary(
     ``agg_*`` table exactly as before.
     """
     if ctx.service != "all":
-        # Every window derived below starts at or after this: the grain and
-        # base_ctx reach _GRAIN_LOOKBACK_DAYS before ctx, and the movers'
-        # sparkline _MOVER_HISTORY_WEEKS weeks before a current window that
-        # ends inside ctx.
-        span_from = ctx.from_date - timedelta(days=max(_GRAIN_LOOKBACK_DAYS, 7 * _MOVER_HISTORY_WEEKS - 1))
+        # Every window derived below starts at or after _calendar_from(ctx).
         if pool is None:
-            ctx = await resolve_service_dates(ctx, conn, agency_id, from_date=span_from)
+            ctx = await resolve_service_dates(ctx, conn, agency_id, from_date=_calendar_from(ctx))
         else:
             async with pool.acquire() as c:
-                ctx = await resolve_service_dates(ctx, c, agency_id, from_date=span_from)
+                ctx = await resolve_service_dates(ctx, c, agency_id, from_date=_calendar_from(ctx))
 
     grain: _Grain | None = None
     if ctx.time_band != "all":

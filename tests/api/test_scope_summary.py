@@ -169,6 +169,10 @@ async def test_day_types_are_the_buckets_the_calendar_splits_the_period_into(see
             date(2026, 4, 1),
             date(2027, 3, 31),
         )
+    # The calendar is cached like the reports it feeds; a reload outlives it.
+    from pipeline.cache import clear_all
+
+    clear_all()
     body = await compute_scope_summary(agency_id, _ctx(), conn)
     assert body["day_types"] == ["weekday", "weekend_holiday"]
 
@@ -233,3 +237,42 @@ async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, st
 async def test_the_endpoint_404s_an_unknown_agency(client, aconn):
     resp = await client.get("/api/999999/scope/summary")
     assert resp.status_code == 404
+
+
+async def _seed_weekend_split_change(aconn, agency_id):
+    """土曜 and 日祝 timetables until Sunday 9/27, one 土日祝 timetable from 9/28.
+
+    The window 10/5-10/18 alone runs two ways; a span reaching back before
+    9/28 runs three ways, so the response must pick one split for every section.
+    """
+    services = [
+        ("平日", "1111100", date(2026, 4, 1), date(2027, 3, 31)),
+        ("土曜", "0000010", date(2026, 4, 1), date(2026, 9, 27)),
+        ("日祝", "0000001", date(2026, 4, 1), date(2026, 9, 27)),
+        ("土日祝", "0000011", date(2026, 9, 28), date(2027, 3, 31)),
+    ]
+    for service_id, days, start, end in services:
+        await aconn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)",
+            agency_id,
+            service_id,
+            *(flag == "1" for flag in days),
+            start,
+            end,
+        )
+
+
+@pytest.mark.asyncio
+async def test_every_section_reads_one_day_type_resolution(aconn, aagency_id):
+    """The 90-day strip reaches back into the three-way weeks, so the whole
+    summary splits the agency three ways: the control's choices, the strip and
+    the weekday section all file Sunday 10/11 outside 土曜."""
+    await _seed_weekend_split_change(aconn, aagency_id)
+    for day in (date(2026, 9, 12), date(2026, 10, 6), date(2026, 10, 10), date(2026, 10, 11)):
+        await _seed(aconn, aagency_id, "R1", day, 100, 6000, _hist(7, 100))
+    ctx = RangeCtx(from_date=date(2026, 10, 5), to_date=date(2026, 10, 18), service="土曜")
+    body = await compute_scope_summary(aagency_id, ctx, aconn)
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
+    assert {d["date"] for d in body["days"]} == {date(2026, 9, 12), date(2026, 10, 10)}
+    assert {w["dow"] for w in body["weekdays"]} == {"sat"}

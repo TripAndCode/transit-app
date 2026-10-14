@@ -60,7 +60,10 @@ What the user sees/does:
     under the observation's own `service_type`. A feed with one Saturday+Sunday
     timetable is split 平日 / 土日祝, every other 平日 / 土曜 / 日祝; a day type
     under 3 days or 1,000 samples is flagged `insufficient` and left out of the
-    comparison.
+    comparison. The day types are resolved once per payload, over the range
+    plus the four weeks before it that the movers and baseline read, and the
+    service filter uses the same resolution, so where a feed changes its
+    weekend timetables that whole span decides the split.
 
 ## Request path
 

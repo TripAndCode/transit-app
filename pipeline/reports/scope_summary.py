@@ -17,8 +17,10 @@ Each section drops the one condition it exists to choose:
   elsewhere.
 
 ``day_types`` is not a section of figures: it lists the day-type buckets the
-agency's calendar splits the period into (:func:`pipeline.day_types.load_day_types`),
-the choices the timetable control offers.
+agency's calendar splits the agency into, the choices the timetable control
+offers. Every section reads one day-type resolution, over the period and the
+``days`` strip together (:class:`api.range.ServiceDates`), so the choices, the
+strip and the period's sections never split the agency two ways.
 """
 
 from __future__ import annotations
@@ -27,8 +29,7 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
-from api.range import RangeCtx, resolve_service_dates
-from pipeline.day_types import load_day_types
+from api.range import RangeCtx, day_types_for, resolve_service_dates
 from pipeline.histogram import LEGACY_ON_TIME_LATE_TOLERANCE_SEC, N_BUCKETS, count_in_range
 from pipeline.reports.filters import _dist_filter
 
@@ -74,8 +75,8 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
         agency_id,
     )
     earliest, latest = span["earliest"], span["latest"]
-    day_types = list((await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)).buckets)
     if latest is None:
+        day_types = await day_types_for(ctx, conn, agency_id)
         return {
             "earliest": None,
             "latest": None,
@@ -84,14 +85,13 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
             "weekdays": [],
             "routes": [],
             "tolerance": [],
-            "day_types": day_types,
+            "day_types": list(day_types.buckets),
         }
 
-    ctx = await resolve_service_dates(ctx, conn, agency_id)
     window_from = max(earliest, latest - timedelta(days=DAYS_WINDOW - 1))
-    window = await resolve_service_dates(
-        replace(ctx, from_date=window_from, to_date=latest, dow="all"), conn, agency_id
-    )
+    ctx = await resolve_service_dates(ctx, conn, agency_id, from_date=window_from, to_date=latest)
+    day_types = await day_types_for(ctx, conn, agency_id, from_date=window_from, to_date=latest)
+    window = replace(ctx, from_date=window_from, to_date=latest, dow="all")
     days = [
         {"date": r["key"], "avg_min": _avg_min(r["sum_delay_sec"], r["samples"]), "samples": int(r["samples"])}
         for r in await _grouped(agency_id, window, conn, "date")
@@ -131,5 +131,5 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
         "weekdays": weekdays,
         "routes": routes,
         "tolerance": tolerance,
-        "day_types": day_types,
+        "day_types": list(day_types.buckets),
     }

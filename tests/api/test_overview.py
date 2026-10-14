@@ -2548,3 +2548,44 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
         pytest.approx(1.0, abs=1e-9),
         pytest.approx(10.0, abs=1e-9),
     ]
+
+
+async def _seed_weekend_split_change(aconn, agency_id):
+    """土曜 and 日祝 timetables until Sunday 9/27, one 土日祝 timetable from 9/28.
+
+    The window 10/5-10/18 alone runs two ways; a span reaching back before
+    9/28 runs three ways, so the response must pick one split for every section.
+    """
+    services = [
+        ("平日", "1111100", date(2026, 4, 1), date(2027, 3, 31)),
+        ("土曜", "0000010", date(2026, 4, 1), date(2026, 9, 27)),
+        ("日祝", "0000001", date(2026, 4, 1), date(2026, 9, 27)),
+        ("土日祝", "0000011", date(2026, 9, 28), date(2027, 3, 31)),
+    ]
+    for service_id, days, start, end in services:
+        await aconn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)",
+            agency_id,
+            service_id,
+            *(flag == "1" for flag in days),
+            start,
+            end,
+        )
+
+
+@pytest.mark.asyncio
+async def test_one_day_type_resolution_serves_the_filter_and_the_split(aconn, aagency_id):
+    """The 土曜 filter reaches back into the three-way weeks, so the split
+    panel files the same dates the same way: Saturday 10/10 under 土曜, not a
+    two-way 土日祝 bucket the request window alone would give."""
+    await _seed_weekend_split_change(aconn, aagency_id)
+    for day, avg in ((date(2026, 10, 6), 2.0), (date(2026, 10, 10), 5.0), (date(2026, 10, 11), 8.0)):
+        await _seed_agg_daily(aconn, aagency_id, day, "R_CAL", "", avg, 20)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 10, 5), to_date=date(2026, 10, 18), service="土曜")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    assert out["service_split"] == _split(saturday=(5.0, 1, 20))
+    assert out["service_split_daily"] == [{"date": "2026-10-10", "day_type": "saturday", "avg_min": 5.0}]

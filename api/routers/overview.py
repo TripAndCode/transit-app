@@ -10,9 +10,9 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
-from api.range import RangeCtx
+from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
@@ -262,7 +262,7 @@ async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
     ch: AsyncClient = Depends(get_ch),
-    ctx: RangeCtx = Depends(get_agency_range_ctx),
+    ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> OverviewSummary:
     """Return the 概況 magazine payload for one agency over ``ctx``.

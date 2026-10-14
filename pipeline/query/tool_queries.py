@@ -31,8 +31,7 @@ wiring a client at all.
 from collections import defaultdict
 from dataclasses import replace
 
-from api.range import DAY_TYPE_SERVICE, RangeCtx
-from pipeline.day_types import load_day_types
+from api.range import DAY_TYPE_SERVICE, RangeCtx, day_types_for
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
@@ -95,11 +94,12 @@ async def route_compare_service(
     the route has samples in, in the agency's bucket order and labelled the
     way the service filter spells it (:data:`api.range.DAY_TYPE_SERVICE`):
     平日 / 土曜 / 日祝, or 平日 / 土日祝 for a feed with one weekend timetable.
-    Each date is filed under the timetable the agency's calendar ran it
-    (:func:`pipeline.day_types.load_day_types`), never under the
-    observations' own ``service_type``, a raw ``service_id`` that most
-    observations leave empty. Backs tools._tool_compare_segments
-    (dimension='service_type').
+    Each date is filed under the timetable the agency's calendar ran it, never
+    under the observations' own ``service_type``, a raw ``service_id`` that
+    most observations leave empty. The day types are the ones ``ctx``'s
+    service filter was resolved from when it has one
+    (:func:`api.range.day_types_for`), so the buckets agree with the filter.
+    Backs tools._tool_compare_segments (dimension='service_type').
 
     The per-date sums are exact integer seconds, so each bucket's
     ``(sum / n) / 60.0`` is the ``avg(dep_delay) / 60.0`` of its rows.
@@ -117,7 +117,7 @@ async def route_compare_service(
         "GROUP BY date",
         parameters={"agency_id": agency_id, "rcs_route": str(route), **ch_params},
     )
-    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    day_types = await day_types_for(ctx, conn, agency_id)
     acc = {bucket: [0, 0] for bucket in day_types.buckets}
     for d, sum_delay, samples in result.result_rows:
         slot = acc[day_types.of(d)]

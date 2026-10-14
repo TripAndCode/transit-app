@@ -870,3 +870,28 @@ async def test_ask_compare_by_service_type_honours_the_ui_service_filter(aconn, 
     weekday_ctx = RangeCtx(from_date=_CMP_CTX.from_date, to_date=_CMP_CTX.to_date, service="平日")
     weekdays = await dispatch("compare_segments", args, weekday_ctx, aconn, aagency_id, ch=ch_async_client)
     assert [(r[0], str(r[1]), r[2]) for r in weekdays.rows] == [("平日", "1.50", 2)]
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_reads_the_day_types_the_filter_was_resolved_from(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """A ctx that already carries a resolution answers from it rather than
+    reading the calendar again: here a two-way one, where the agency has no
+    calendar loaded and a fresh read would split three ways."""
+    from api.range import ServiceDates
+    from pipeline.day_types import TWO_WAY, DayTypes
+
+    await _seed_observations(aconn, aagency_id, "R2", _CMP_SEEDS)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    by_date = {}
+    d = _CMP_CTX.from_date
+    while d <= _CMP_CTX.to_date:
+        by_date[d] = "weekday" if d.isoweekday() <= 5 and d != date(2026, 9, 21) else "weekend_holiday"
+        d += timedelta(days=1)
+    resolved = ServiceDates(service="土日祝", day_types=DayTypes(buckets=TWO_WAY, by_date=by_date))
+    ctx = RangeCtx(from_date=_CMP_CTX.from_date, to_date=_CMP_CTX.to_date, service="土日祝", service_dates=resolved)
+    result = await route_compare_service(aagency_id, ctx, aconn, ch_async_client, route="R2")
+    assert [(r[0], str(r[1]), r[2]) for r in result] == [("土日祝", "4.00", 3)]

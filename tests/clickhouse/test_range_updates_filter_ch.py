@@ -21,14 +21,13 @@ import pytest
 
 from api.range import (
     RangeCtx,
-    ServiceDates,
-    ServiceType,
     build_updates_filter_ch,
     date_range_clause_ch,
     dow_clause_ch,
     time_band_clause_ch,
 )
 from pipeline.service_day import service_date_ch
+from tests.fixtures.service_dates import selecting
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -122,8 +121,8 @@ def test_build_updates_filter_ch_default_date_only():
     assert set(params) == {"ch_from_date", "ch_to_date"}
 
 
-def _resolved(service: ServiceType, *dates: date) -> ServiceDates:
-    return ServiceDates(service=service, from_date=date(2026, 5, 13), to_date=date(2026, 6, 11), dates=dates)
+def _resolved(service, *dates: date):
+    return selecting(service, date(2026, 5, 13), date(2026, 6, 11), *dates)
 
 
 def test_build_updates_filter_ch_adds_service_dates_and_routes():

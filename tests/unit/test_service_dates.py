@@ -13,17 +13,20 @@ import pytest
 
 from api.range import (
     RangeCtx,
-    ServiceDates,
     UnresolvedServiceFilter,
     build_agg_stop_filter,
     build_updates_filter_ch,
+    day_types_for,
     resolve_service_dates,
     selected_service_dates,
 )
-from pipeline.day_types import public_holidays_between
+from pipeline.cache import _keyable
+from pipeline.day_types import TWO_WAY, load_day_types, public_holidays_between
+from pipeline.query.pooled_conn import PooledConnection
 from pipeline.reports.filters import _agg_filter, _dist_filter
 from pipeline.reports.weather import _daily_filter
 from pipeline.service_day import service_date_ch
+from tests.fixtures.service_dates import selecting
 
 WEEKDAYS = (True, True, True, True, True, False, False)
 SATURDAY = (False, False, False, False, False, True, False)
@@ -176,13 +179,124 @@ async def test_an_explicit_span_widens_the_resolution_to_cover_it():
     assert selected_service_dates(replace(ctx, from_date=FROM)) == WEEKDAY_DATES
 
 
+@pytest.mark.asyncio
+async def test_a_repeated_resolution_reads_the_calendar_once():
+    """Day types are cached like the reports they feed, so a repeated
+    service-filtered request does not read the calendar again."""
+    conn = _three_way_conn()
+    await resolve_service_dates(RangeCtx(from_date=FROM, to_date=TO, service="平日"), conn, 7)
+    reads = conn.reads
+    again = await resolve_service_dates(RangeCtx(from_date=FROM, to_date=TO, service="平日"), conn, 7)
+    assert conn.reads == reads
+    assert again.service_dates is not None and list(again.service_dates.dates) == WEEKDAY_DATES
+
+
+class _CountingPool:
+    """A pool that lends one in-memory calendar, as Ask's PooledConnection borrows it."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def acquire(self):
+        pool = self
+
+        class _Lease:
+            async def __aenter__(self):
+                return pool.conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return _Lease()
+
+
+@pytest.mark.asyncio
+async def test_ask_connections_share_the_calendar_cache():
+    """Ask wraps the pool in a new PooledConnection per request, which must
+    not make every request a cache miss."""
+    assert _keyable(PooledConnection(object())) == _keyable(PooledConnection(object()))
+    load_day_types.cache_clear()  # type: ignore[attr-defined]
+    calendar = _two_way_conn()
+    for _ in range(2):
+        ctx = RangeCtx(from_date=FROM, to_date=TO, service="土曜")
+        resolved = await resolve_service_dates(ctx, PooledConnection(_CountingPool(calendar)), 4242)
+        assert resolved.service_dates is not None and list(resolved.service_dates.dates) == WEEKEND_HOLIDAY_DATES
+    assert calendar.reads == 2
+    load_day_types.cache_clear()  # type: ignore[attr-defined]
+
+
+class PoolConnectionProxy:
+    """Named as asyncpg's pooled connection is, which the cache key reads."""
+
+    def __init__(self, calendar):
+        self.calendar = calendar
+
+    async def fetch(self, sql, *args):
+        return await self.calendar.fetch(sql, *args)
+
+
+@pytest.mark.asyncio
+async def test_the_request_dependency_does_not_read_the_calendar_again_for_a_repeated_request():
+    """Each request borrows its own pooled connection, and a repeat of a
+    service-filtered request is served from the cache, calendar included."""
+    from types import SimpleNamespace
+
+    from api.deps import get_agency_range_ctx
+
+    calendar = _three_way_conn()
+
+    class _Pool:
+        def acquire(self):
+            class _Lease:
+                async def __aenter__(self):
+                    return PoolConnectionProxy(calendar)
+
+                async def __aexit__(self, *_exc):
+                    return False
+
+            return _Lease()
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=_Pool())))
+    load_day_types.cache_clear()  # type: ignore[attr-defined]
+    for _ in range(2):
+        ctx = RangeCtx(from_date=FROM, to_date=TO, service="平日")
+        resolved = await get_agency_range_ctx(request, agency_id=4343, ctx=ctx)  # type: ignore[arg-type]
+        assert selected_service_dates(resolved) == WEEKDAY_DATES
+    assert calendar.reads == 2
+    load_day_types.cache_clear()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_swapping_the_service_reuses_the_resolved_day_types():
+    conn = _two_way_conn()
+    ctx = await resolve_service_dates(RangeCtx(from_date=FROM, to_date=TO, service="平日"), conn, 7)
+    reads = conn.reads
+    swapped = await resolve_service_dates(replace(ctx, service="日祝"), conn, 7)
+    assert conn.reads == reads
+    assert swapped.service_dates is not None and ctx.service_dates is not None
+    assert swapped.service_dates.day_types is ctx.service_dates.day_types
+    assert selected_service_dates(swapped) == WEEKEND_HOLIDAY_DATES
+
+
+@pytest.mark.asyncio
+async def test_day_types_for_reads_the_filter_resolution_when_it_covers_the_span():
+    """Every section of a response takes its day types from the one
+    resolution the filter carries, so none can split the agency differently."""
+    conn = _two_way_conn()
+    ctx = await resolve_service_dates(RangeCtx(from_date=FROM, to_date=TO, service="平日"), conn, 7)
+    reads = conn.reads
+    assert ctx.service_dates is not None
+    assert await day_types_for(ctx, conn, 7) is ctx.service_dates.day_types
+    assert await day_types_for(replace(ctx, from_date=date(2025, 5, 1)), conn, 7) is ctx.service_dates.day_types
+    assert conn.reads == reads
+    # A span the resolution does not cover is read afresh.
+    wider = await day_types_for(ctx, conn, 7, from_date=FROM - timedelta(days=7))
+    assert conn.reads > reads
+    assert wider.buckets == TWO_WAY and min(wider.by_date) == FROM - timedelta(days=7)
+
+
 def _resolved(service="平日", dates=(date(2025, 4, 28), date(2025, 4, 30))) -> RangeCtx:
-    return RangeCtx(
-        from_date=FROM,
-        to_date=TO,
-        service=service,
-        service_dates=ServiceDates(service=service, from_date=FROM, to_date=TO, dates=tuple(dates)),
-    )
+    return RangeCtx(from_date=FROM, to_date=TO, service=service, service_dates=selecting(service, FROM, TO, *dates))
 
 
 def test_selected_dates_refuse_a_filter_that_was_never_resolved():
