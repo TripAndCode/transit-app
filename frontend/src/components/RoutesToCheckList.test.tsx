@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
@@ -105,21 +105,29 @@ describe("RoutesToCheckList", () => {
 
   it("opens the route's own page, keeping the period", () => {
     renderList(routes());
-    const link = screen.getByText("K31").closest("a")!;
+    const link = screen.getAllByRole("link")[0];
     const url = new URL(link.getAttribute("href")!, "http://x");
     expect(url.pathname).toBe("/agencies/1/routes/K31");
     expect(url.searchParams.get("from")).toBe("2026-09-01");
   });
 
-  it("shows the route's name with its code de-emphasized, not as a separate raw-code column", () => {
-    renderList(routes());
-    // K31 and K37 share the same short_name -- both rows render it
-    expect(screen.getAllByText("観光通り線")).toHaveLength(2);
-    expect(screen.getByText("K31")).toHaveClass("route-label__code");
-    expect(screen.getByText("K37")).toHaveClass("route-label__code");
+  it("names each route by the shared label, keeping its route_id out of the row", () => {
+    renderList([
+      { route_code: "1471981638", route_short_name: "70-3", avg_min: 8.2 },
+      { route_code: "K31", route_short_name: "観光通り線", avg_min: 6.6 },
+      { route_code: "W53", route_short_name: null, avg_min: 5.1 },
+    ]);
+    const [hiroden, kanko, unnamed] = screen.getAllByRole("link");
+    // A short code reads as a plate; the id stays only in the tooltip.
+    expect(hiroden.querySelector(".route-label__plate")).toHaveTextContent("70-3");
+    expect(hiroden).not.toHaveTextContent("1471981638");
+    expect(hiroden.querySelector(".route-label")).toHaveAttribute("title", "1471981638");
+    // A short name that is a name, not a code, reads as the line name.
+    expect(kanko.querySelector(".route-label__plate")).toBeNull();
+    expect(within(kanko).getByText("観光通り線")).toHaveClass("route-label__line");
     // W53 has no name -- it reads as "Route W53", with the code only once
-    expect(screen.getAllByText(/W53/)).toHaveLength(1);
-    expect(screen.getByText("Route W53")).toBeInTheDocument();
+    expect(unnamed).toHaveTextContent("Route W53");
+    expect(within(unnamed).getAllByText(/W53/)).toHaveLength(1);
   });
 
   it("falls back to the code when route_short_name is an empty string, not just null", () => {

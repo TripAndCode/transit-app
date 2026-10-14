@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { renderWithProviders } from "../../test/renderWithProviders";
+import i18n from "../../i18n";
 import { stubReducedMotion } from "../../test/reducedMotion";
 import * as useRouteNamesModule from "../../api/useRouteNames";
 import * as useAgencyIdModule from "../../api/useAgencyId";
@@ -12,7 +13,7 @@ const ROWS = [["3", 3.4, 2.7, 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7], ["2", 2.2, 
 beforeEach(() => {
   stubReducedMotion();
   vi.spyOn(useAgencyIdModule, "useAgencyId").mockReturnValue(1);
-  vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({ data: new Map(), isLoading: false, format: (c) => c ?? "—" });
+  vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({ ...useRouteNamesModule.buildRouteNames([], i18n.t), format: (c) => c ?? "—" });
 });
 afterEach(() => vi.restoreAllMocks());
 const mount = (search = "", rows: unknown[][] = ROWS) =>

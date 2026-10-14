@@ -1,9 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useRoutes } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
-import { routeDisplayName } from "../api/routeDisplayName";
+import { distinctRouteTexts, routeDisplayName, routeNameText, type RouteLabelParts } from "../api/routeDisplayName";
+import { routeWhereText, useRouteNames } from "../api/useRouteNames";
 import type { Route } from "../api/types";
+import { FILTER_SEPARATOR } from "../utils/format";
+import { RoutePartsLabel } from "./RouteLabel";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
 type RouteGroup = {
@@ -12,20 +16,33 @@ type RouteGroup = {
   shared_long_name: string | null;
 };
 
-function variantLabel(v: RouteVariant): string {
-  const long = v.long_name?.trim();
+/** What sets a variant apart within its line: its own line name, unless the
+ *  line's row already shows it, and where it runs, or its headsigns while
+ *  the feed names no terminals. */
+function variantText(v: RouteVariant, parts: RouteLabelParts | undefined, shownLine: string | null, t: TFunction): string {
+  const where = parts ? routeWhereText(parts, t) : null;
   const heads = v.headsigns.filter((h) => h.trim() !== "");
-  const headsuffix = heads.length > 0 ? ` (${heads.join(" / ")})` : "";
-  if (long) return long + headsuffix;
-  if (heads.length > 0) return heads.join(" / ");
-  return v.code;
+  const line = parts ? parts.line : v.long_name?.trim() || null;
+  const detail = where ?? heads.join(" / ");
+  return [line === shownLine ? null : line, detail].filter(Boolean).join(FILTER_SEPARATOR) || (parts ? routeNameText(parts) : v.code);
 }
 
-// Module-scope pure function rather than an in-render IIFE: an ordinary
-// CallExpression with an Identifier callee is unambiguously memoized by the
-// React Compiler the same way as any other function call in these
-// components, closing the "does the compiler memoize an inline IIFE the
-// same way" question this ban's residual-risk note used to leave open.
+/** Each variant's row text, with its route_id added only where two rows of
+ *  one line would otherwise read the same. */
+function variantTexts(
+  variants: RouteVariant[],
+  parts: ReadonlyMap<string, RouteLabelParts>,
+  shownLine: string | null,
+  t: TFunction,
+): Map<string, string> {
+  return distinctRouteTexts(variants.map((v) => {
+    const text = variantText(v, parts.get(v.code), shownLine, t);
+    return { key: v.code, name: text, full: text, id: parts.get(v.code)?.id ?? v.code };
+  }));
+}
+
+// A module-scope function, not an in-render IIFE: the React Compiler memoizes
+// a plain call like this one as it does any other.
 function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
   if (!data) return [];
   const m = new Map<string, RouteVariant[]>();
@@ -81,6 +98,7 @@ export function RoutesPicker({
   const { t } = useTranslation();
   const id = useAgencyId();
   const { data, isPending, refetch } = useRoutes(id);
+  const names = useRouteNames(id);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Render cap keeps the first paint cheap for huge agencies; "show more"
@@ -160,9 +178,15 @@ export function RoutesPicker({
           const isOpen = expanded.has(g.name);
           const multi = g.variants.length > 1;
           const mean = renderDelay ? groupMean(g.variants, delays) : null;
-          const topSuffix = !multi
-            ? g.variants[0].long_name?.trim() || ""
-            : g.shared_long_name?.trim() || "";
+          // The line reads by its first variant's label, its line name kept
+          // only when every variant shares it. With neither a plate nor a
+          // shared line name (a brand short name over differing long names),
+          // the label would be empty, so the line reads by its group name.
+          const first = names.parts.get(g.variants[0].code);
+          const sharedLine = first && g.variants.every((v) => names.parts.get(v.code)?.line === first.line) ? first.line : null;
+          const lineParts = first && (first.plate || sharedLine) ? (sharedLine === first.line ? first : { ...first, line: sharedLine }) : null;
+          const lineText = lineParts ? routeNameText(lineParts) : g.name;
+          const rowTexts = multi && isOpen ? variantTexts(g.variants, names.parts, sharedLine, t) : null;
           return (
             <div key={g.name} style={{ borderBottom: "1px solid var(--border-soft)" }}>
               <div
@@ -183,7 +207,7 @@ export function RoutesPicker({
                 <input
                   type="checkbox"
                   checked={allOn}
-                  aria-label={g.name}
+                  aria-label={lineText}
                   ref={(el) => {
                     if (el) el.indeterminate = someOn;
                   }}
@@ -204,10 +228,7 @@ export function RoutesPicker({
                     padding: 0,
                   }}
                 >
-                  <span style={{ fontWeight: 600 }}>{g.name}</span>
-                  {topSuffix && (
-                    <span style={{ color: "var(--text-secondary)" }}> {topSuffix}</span>
-                  )}
+                  {lineParts ? <RoutePartsLabel parts={lineParts} compact nameOnly /> : <span style={{ fontWeight: 600 }}>{g.name}</span>}
                   {multi && (
                     <span style={{ color: "var(--text-tertiary)" }}> {t("filters.routes.variant_count", { count: g.variants.length })}</span>
                   )}
@@ -253,15 +274,8 @@ export function RoutesPicker({
                         }}
                       >
                         <input type="checkbox" checked={on} onChange={() => toggleCode(v.code)} />
-                        <span style={{ color: "var(--text-secondary)", flex: 1 }}>{variantLabel(v)}</span>
-                        <span
-                          style={{
-                            color: "var(--text-tertiary)",
-                            fontFamily: "var(--font-mono)",
-                            fontSize: "var(--text-xs)",
-                          }}
-                        >
-                          {v.code}
+                        <span style={{ color: "var(--text-secondary)", flex: 1 }} title={names.parts.get(v.code)?.id ?? v.code}>
+                          {rowTexts?.get(v.code)}
                         </span>
                       </label>
                     );

@@ -140,14 +140,24 @@ describe("ReportTable route column", () => {
     expect(screen.queryByText(/Weekend\/Holiday/)).not.toBeInTheDocument();
   });
 
-  it("renders a matched route's name alongside its code", () => {
+  it("renders a matched route by its plate, line name and terminals, keeping the route_id in the tooltip", () => {
     mockRoutes([
-      { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },
+      {
+        route_id: "1471981638",
+        route_short_name: "70-3",
+        route_long_name: "あさひが丘線",
+        route_code: "1471981638",
+        trip_headsigns: [],
+        origin_name: "広島バスセンター",
+        destination_name: "あさひが丘下",
+      },
     ]);
-    renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
-    // Variants of a line can share a label, so the code follows it, muted.
-    expect(screen.getByText("T50")).toBeInTheDocument();
-    expect(screen.getByText("39061")).toHaveClass("route-label__code");
+    renderTable([["1471981638", "平日", 5.2, 3.1, 8.4, 120]]);
+    expect(screen.getByText("70-3")).toHaveClass("route-label__plate");
+    expect(screen.getByText("あさひが丘線")).toHaveClass("route-label__line");
+    expect(screen.getByText("広島バスセンター → あさひが丘下")).toBeInTheDocument();
+    expect(screen.queryByText("1471981638")).toBeNull();
+    expect(screen.getByText("70-3").closest(".route-label")).toHaveAttribute("title", "1471981638");
   });
 
   it("falls back to the bare route_code when no static route matches (data gap, not a crash)", () => {
@@ -307,17 +317,18 @@ describe("ReportTable on a phone", () => {
     renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const [item] = screen.getAllByRole("listitem");
-    for (const text of ["1", "T50", "39061", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
+    for (const text of ["1", "T50", "石江・新城線", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
+    expect(within(item).queryByText("39061")).toBeNull();
   });
 
   it("titles a certificate row by its own route column, not the agency in column 0", () => {
     renderTable([["Agency A", "39061", "平日", "2026-09-01", "08:00", "08:12", 720]], "delay_certificate");
     const [item] = screen.getAllByRole("listitem");
-    expect(item.querySelector(".report-cards__route")).toHaveTextContent("39061");
+    expect(item.querySelector(".report-cards__route")).toHaveTextContent(/^T50 石江・新城線/);
     expect(within(item).getAllByText("Agency A")).toHaveLength(1);
-    expect(within(item).getAllByText("39061")).toHaveLength(1);
+    expect(within(item).getAllByText("T50")).toHaveLength(1);
   });
 
   it("leaves out a field with nothing to show, rather than a bare label", () => {

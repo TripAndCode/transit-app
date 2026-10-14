@@ -1,5 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { PeakHourBreakdown } from "../api/types";
+import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
 import { ErrorBanner } from "./ErrorBanner";
 import { Spinner } from "./Spinner";
 import { Modal } from "./Modal";
@@ -21,6 +24,7 @@ export function PeakHourModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const names = useRouteNames(useAgencyId());
 
   const maxAvg =
     data?.routes.length
@@ -94,7 +98,7 @@ export function PeakHourModal({
               <span
                 style={{ fontWeight: 600, minWidth: 48, fontSize: 13 }}
               >
-                {r.route_code}
+                <RouteLabel code={r.route_code} names={names} compact />
               </span>
               <span
                 style={{

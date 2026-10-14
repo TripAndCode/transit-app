@@ -156,8 +156,9 @@
 }
 .ov-check-name {
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   flex: 1;
+  min-width: 0;
 }
 .ov-check-track {
   width: 120px;

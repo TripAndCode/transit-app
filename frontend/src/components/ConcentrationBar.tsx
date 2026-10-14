@@ -2,7 +2,10 @@ import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
+import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
+import { RouteLabel } from "./RouteLabel";
 import { CONCENTRATION_TOP_N } from "./overview/concentrationTopN";
 
 type Props = {
@@ -29,6 +32,7 @@ export function ConcentrationBar({
   onClick,
 }: Props) {
   const { t } = useTranslation();
+  const names = useRouteNames(useAgencyId());
   if (concentration.top_routes.length === 0) return null;
 
   const visibleRoutes = concentration.top_routes.slice(0, limit);
@@ -68,9 +72,7 @@ export function ConcentrationBar({
   // Case B — single-route spotlight
   if (concentration.top_routes.length === 1) {
     const only = concentration.top_routes[0];
-    const displayName = only.route_short_name
-      ? `${only.route_short_name} (${only.route_code})`
-      : only.route_code;
+    const displayName = names.data.get(only.route_code) ?? (only.route_short_name || names.format(only.route_code));
 
     // Try to pluck the matching mover for a tonal sparkline
     const matchInWorse = movers?.worse.find((m) => m.route_code === only.route_code);
@@ -129,10 +131,8 @@ export function ConcentrationBar({
         const opacity = RANK_OPACITY[Math.min(idx, RANK_OPACITY.length - 1)];
         return (
           <div className="ov-pareto-row" key={r.route_code}>
-            <div className="ov-pareto-label clamp-2">
-              {r.route_short_name
-                ? `${r.route_short_name} (${r.route_code})`
-                : r.route_code}
+            <div className="ov-pareto-label">
+              <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
             </div>
             <div className="ov-pareto-track">
               <div

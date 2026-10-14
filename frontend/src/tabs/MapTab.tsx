@@ -18,6 +18,7 @@ import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import { ApiError, apiPost } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
@@ -565,7 +566,7 @@ export function MapTab() {
           {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { focusTripRow(trip); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
+              <span>{trip.route_code ? <RouteLabel code={trip.route_code} names={routeNames} compact /> : routeNames.format(null)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
             {trip.route_code && <Link to={routeHref(String(id), trip.route_code, "", "stops")}>{td("openAnalysis")}</Link>}
@@ -705,7 +706,7 @@ export function MapTab() {
           {inspected && (
             <InspectCard
               trip={inspected}
-              routeName={routeNames.format(inspected.route_code)}
+              routeName={inspected.route_code ? <RouteLabel code={inspected.route_code} names={routeNames} compact /> : routeNames.format(null)}
               vehicles={inspectedVehicles}
               progress={inspected.trip_id === effectiveTrip?.trip_id ? progressQuery.data : undefined}
               pinned={hoveredTrip == null && pinnedTrip != null}

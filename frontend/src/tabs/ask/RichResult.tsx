@@ -64,7 +64,7 @@ export function RichResult({
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
       <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
-        <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} />
+        <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} routeName={formatRoute} />
       </EvidenceCard>
     );
   }
