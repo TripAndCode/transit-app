@@ -65,8 +65,7 @@ def stages(monkeypatch):
         "_top_delayed_routes": [],
         "_peak_hour": None,
         "_peak_hour_by_dow": None,
-        "_service_split": None,
-        "_service_split_daily": [],
+        "_service_day_split": ([], []),
         "_daily_sparkline": [],
     }
     monkeypatch.setattr(ov, "_latest_data_date", _stage(date(2026, 5, 24)))
@@ -83,7 +82,7 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
     payload = await ov.compute_overview_summary(7, ctx, None, "ja", pool=pool)
 
     # The latest-date read ahead of the fan-out takes one, and every stage its own.
-    assert pool.acquires == 12
+    assert pool.acquires == 11
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"
     assert pool.active == 0

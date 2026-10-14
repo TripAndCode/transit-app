@@ -104,7 +104,7 @@ export function OverviewTab() {
   const hasAnyData = (summary: NonNullable<typeof data>) =>
     summary.headline.samples > 0 ||
     summary.concentration.top_routes.length > 0 ||
-    Object.keys(summary.service_split).length > 0;
+    summary.service_split.some((entry) => entry.samples > 0);
 
   // Whether the agency was ever collected decides which empty state is true,
   // so the generic "nothing in this range" waits for the agency list.
@@ -210,7 +210,7 @@ export function OverviewTab() {
                     ),
                   }
                 : null,
-              Object.keys(data.service_split).length > 0
+              data.service_split.some((entry) => entry.samples > 0)
                 ? {
                     key: "service_split",
                     node: (

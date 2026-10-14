@@ -1,6 +1,8 @@
 """Integration tests for pipeline.static_loader against a live Postgres."""
 
 import pathlib
+import zipfile
+from datetime import date
 
 from pipeline.static_loader import load_static
 from tests.fixtures.synthetic_gtfs import build_static_zip as _make_zip
@@ -231,3 +233,78 @@ def test_load_static_replaces_stop_clusters_on_reload(pg_conn, agency_id, tmp_pa
     with pg_conn.cursor() as cur:
         cur.execute("SELECT stop_id FROM stop_clusters WHERE agency_id = %s", (agency_id,))
         assert [r[0] for r in cur.fetchall()] == ["S1"]
+
+
+def test_load_static_loads_calendar_weekly_flags_and_range(pg_conn, agency_id):
+    """A real feed's calendar.txt lands in static_calendar typed (booleans and
+    dates), with each service's trips.txt trip count."""
+    zip_path = str(pathlib.Path(__file__).parent.parent / "fixtures" / "hiroden_static.zip")
+    load_static(zip_path, agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        count = cur.fetchone()[0]
+        cur.execute(
+            "SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date, trips "
+            "FROM static_calendar WHERE agency_id = %s AND service_id = %s",
+            (agency_id, "11_土曜(共通)"),
+        )
+        saturday_service = cur.fetchone()
+    assert count == 45
+    assert saturday_service == (
+        *(False, False, False, False, False, True, False),
+        date(2026, 4, 8),
+        date(2026, 10, 8),
+        219,
+    )
+
+
+def test_load_static_skips_malformed_calendar_rows(pg_conn, agency_id, tmp_path):
+    """One unparseable calendar.txt row is dropped, not allowed to abort the
+    whole static load, and a reload replaces rather than duplicates the rest."""
+    zip_path = tmp_path / "calendar_static.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("stops.txt", "stop_id,stop_name,stop_lat,stop_lon\nS1,A,40.8,140.7")
+        zf.writestr(
+            "calendar.txt",
+            "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+            "WD,1,1,1,1,1,0,0,20260401,20270331\n"
+            "BAD_FLAG,1,1,1,1,1,0,yes,20260401,20270331\n"
+            "BAD_DATE,0,0,0,0,0,1,1,2026-04-01,20270331\n",
+        )
+    load_static(str(zip_path), agency_id, pg_conn)
+    load_static(str(zip_path), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT service_id FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        loaded = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT COUNT(*) FROM static_stops WHERE agency_id = %s", (agency_id,))
+        stops = cur.fetchone()[0]
+    assert loaded == ["WD"]
+    assert stops == 1
+
+
+def test_load_static_clears_the_calendar_when_a_feed_drops_calendar_txt(pg_conn, agency_id, tmp_path):
+    """A feed without calendar.txt leaves no earlier feed's calendar behind to
+    file its dates under the old timetables."""
+    with_calendar = tmp_path / "with_calendar_static.zip"
+    with zipfile.ZipFile(with_calendar, "w") as zf:
+        zf.writestr("trips.txt", "trip_id,route_id,trip_headsign,shape_id,service_id\nT1,R1,,,WD\nT2,R1,,,WD")
+        zf.writestr(
+            "calendar.txt",
+            "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+            "WD,1,1,1,1,1,0,0,20260401,20270331\n"
+            "SAT,0,0,0,0,0,1,0,20260401,20270331\n",
+        )
+    load_static(str(with_calendar), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_id, trips FROM static_calendar WHERE agency_id = %s ORDER BY service_id", (agency_id,)
+        )
+        assert cur.fetchall() == [("SAT", 0), ("WD", 2)]
+
+    without_calendar = tmp_path / "without_calendar_static.zip"
+    with zipfile.ZipFile(without_calendar, "w") as zf:
+        zf.writestr("stops.txt", "stop_id,stop_name,stop_lat,stop_lon\nS1,A,40.8,140.7")
+    load_static(str(without_calendar), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 0

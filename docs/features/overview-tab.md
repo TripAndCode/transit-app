@@ -51,8 +51,16 @@ What the user sees/does:
   - `frontend/src/components/PeakHourRibbon.tsx` — 24-hour avg-delay ribbon;
     clicking an hour opens `frontend/src/components/PeakHourModal.tsx` with
     the top routes for that hour (optionally split by day-of-week).
-  - `frontend/src/components/ServiceSplit.tsx` — weekday vs. weekend avg
-    delay split (card) or a per-day history (modal).
+  - `frontend/src/components/ServiceSplit.tsx` — avg delay per day type
+    (card) or a per-day history (modal). Each date is filed under the
+    timetable class its agency's calendar runs that day
+    (`pipeline/day_types.py`: `calendar.txt` weekly flags plus
+    `calendar_dates.txt` exceptions, majority by trip count; Saturday /
+    Sunday-or-public-holiday / weekday where the calendar is silent), never
+    under the observation's own `service_type`. A feed with one Saturday+Sunday
+    timetable is split 平日 / 土日祝, every other 平日 / 土曜 / 日祝; a day type
+    under 3 days or 1,000 samples is flagged `insufficient` and left out of the
+    comparison.
 
 ## Request path
 
@@ -73,7 +81,7 @@ What the user sees/does:
 | `frontend/src/components/ConcentrationBar.tsx` | Pareto bar (card/modal variants) + movers list |
 | `frontend/src/components/PeakHourRibbon.tsx` | 24-hour avg-delay ribbon (card/modal variants) |
 | `frontend/src/components/PeakHourModal.tsx` | Per-hour (optionally per-DOW) top-routes drill-down |
-| `frontend/src/components/ServiceSplit.tsx` | Weekday vs. weekend split (card/modal variants) |
+| `frontend/src/components/ServiceSplit.tsx` | Day-type split (card/modal variants) |
 | `frontend/src/components/OverviewModal.tsx` | Shared modal chrome each expandable card opens into |
 | `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useOverviewSummary`, `usePeakHourBreakdown` |
@@ -86,6 +94,7 @@ What the user sees/does:
 | `api/routers/overview.py` | `GET /overview/summary`, `GET /peak-hour-breakdown` |
 | `pipeline/reports/overview.py` | `compute_overview_summary()` and its per-module helpers (headline, movers, concentration, top-delayed, peak-hour, service-split); fast-path-vs-live-scan pattern documented in the module docstring |
 | `pipeline/analyze.py` | Builds `agg_daily_trend`, `agg_route_hour`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads |
+| `pipeline/day_types.py` | Files each service date under a day type from the agency's `static_calendar` / `static_calendar_dates` (loaded by `pipeline/static_loader.py`), with the weekday rule as fallback |
 
 ## How to verify manually
 
@@ -97,7 +106,8 @@ What the user sees/does:
   `frontend/src/components/RoutesToCheckList.test.tsx`,
   `frontend/src/components/routesToCheckBands.test.ts`.
 - Backend: `tests/api/test_overview.py` (`/overview/summary`,
-  `/peak-hour-breakdown`).
+  `/peak-hour-breakdown`), `tests/unit/test_day_types.py` (day-type
+  resolution).
 
 **Manual click-through** (`make serve` + `make frontend-dev`, or `make serve`
 alone for single-origin):

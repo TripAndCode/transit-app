@@ -331,11 +331,21 @@
       "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
     },
     "service_split": {
-      "diff": "Difference: {{diff}} min ({{pct}}%)",
-      "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
-      "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
-      "story_same": "Weekday and weekend nearly identical.",
-      "daily_label": "Daily weekday vs weekend trend"
+      "type": {
+        "weekday": "Weekdays",
+        "saturday": "Saturdays",
+        "sunday_holiday": "Sundays & holidays",
+        "weekend_holiday": "Weekends & holidays"
+      },
+      "pair": "{{a}} and {{b}}",
+      "story_slowest": "{{slowest}} run the latest, {{diff}} longer on average than {{fastest}}.",
+      "story_same": "Delay is about the same whatever the day type.",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "samples": "{{value}} obs.",
+      "no_data": "No data",
+      "insufficient": "Not enough data",
+      "daily_label": "Daily trend by day type"
     },
     "peak_hour": {
       "max_label": "Max {{avg}} min",
@@ -352,7 +362,7 @@
     "empty": "No observations in this range. Try a wider window.",
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
-    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off.",
+    "service_split_explainer": "Average delay by day type (weekdays, Saturdays, and Sundays & holidays; or weekdays and weekends & holidays) across the selected range. Each day's type is the timetable the agency's schedule ran that day. A day type with too few days or observations is marked “Not enough data” and left out of the comparison. The daily series below shows whether a gap is persistent or a one-off.",
     "never_collected": "We haven't collected any data for {{agency}} yet.",
     "choose_another_agency": "Choose another agency"
   },

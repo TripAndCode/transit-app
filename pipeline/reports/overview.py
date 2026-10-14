@@ -55,6 +55,7 @@ from typing import Iterable, Iterator
 from api.range import RangeCtx, dow_isodays
 from pipeline import perf
 from pipeline.cache import async_lru_cache
+from pipeline.day_types import DayTypes, load_day_types
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 from pipeline.reports.rankings import _round1
 
@@ -73,7 +74,7 @@ _log = logging.getLogger(__name__)
 _GRAIN_LOOKBACK_DAYS = 7
 
 # How many pooled connections one overview request may hold at once on its
-# pool-gather path. Eleven stages fan out per request; unbounded, two
+# pool-gather path. Ten stages fan out per request; unbounded, two
 # concurrent cold requests alone would exhaust the pool and queue every other
 # endpoint behind them. The bound trades some of one request's overlap for
 # room for several requests at once.
@@ -1003,63 +1004,51 @@ def _peak_from_hour_rows(rows) -> dict | None:
     }
 
 
-async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
-    """Per-day breakdown of 平日 vs 土日祝 avg delay over ``ctx``.
+async def _daily_totals(agency_id: int, ctx: RangeCtx, conn, grain: _Grain | None) -> list[tuple[date, int, int]]:
+    """``(date, samples, sum_delay_sec)`` for each date in ``ctx`` with samples, oldest first.
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted per-(date, service_type) average. Slow path reads the
-    shared grain (:func:`_fetch_grain`) so the hour-of-day filter is honored.
-
-    Returns a list of ``{date: ISO str, weekday: float|None, weekend:
-    float|None}`` rows sorted by date. Dates with neither service_type
-    are silently dropped.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``; slow path
+    reads the shared grain (:func:`_fetch_grain`) so the hour-of-day filter is
+    honored. Every service_type of a date pools together: the day-type split
+    files dates, not services (see :mod:`pipeline.day_types`).
     """
-    if ctx.time_band == "all":
-        where, params, _ = _agg_filter(ctx, next_param=2)
-        where_clause = f" AND ({where})" if where else ""
-        sql = (
-            "SELECT date, service_type,\n"
-            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
-            # the same row population — see _route_weekly_history's identical
-            # rationale.
-            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg\n"
-            "FROM agg_daily_trend\n"
-            f"WHERE agency_id=$1{where_clause}\n"
-            "GROUP BY date, service_type\n"
-            "ORDER BY date"
-        )
-        rows = await conn.fetch(sql, agency_id, *params)
-    else:
-        # Grouping by (date, service_type) -> every group has >= 1 sample.
-        acc: dict[tuple[date, str | None], list[int]] = {}
-        for row in _grain_window(_require_grain(grain), ctx):
-            slot = acc.setdefault((row[0], row[2]), [0, 0])
-            slot[0] += row[4]
-            slot[1] += row[5]
-        rows = [
-            {"date": d, "service_type": service_type, "avg": (total / n) / 60.0}
-            for (d, service_type), (n, total) in sorted(acc.items(), key=lambda kv: kv[0][0])
-        ]
-    by_date: dict[str, dict[str, float | None]] = {}
-    for r in rows:
-        d = r["date"].isoformat()
-        st = r["service_type"]
-        # 2dp, half-up — matches the sibling _service_split's rounding so the
-        # two report the same precision for the same underlying metric.
-        avg = float(_round2(r["avg"])) if r["avg"] is not None else None
-        by_date.setdefault(d, {})[st] = avg
-    out: list[dict] = []
-    for d in sorted(by_date):
-        bucket = by_date[d]
-        out.append(
-            {
-                "date": d,
-                "weekday": bucket.get("平日"),
-                "weekend": bucket.get("土日祝"),
-            }
-        )
-    return out
+    if ctx.time_band != "all":
+        by_day = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=0)
+        return [(d, n, total) for d, (n, total) in sorted(by_day.items())]
+    where, params, _ = _agg_filter(ctx, next_param=2)
+    where_clause = f" AND ({where})" if where else ""
+    rows = await conn.fetch(
+        "SELECT date, SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec\n"
+        "FROM agg_daily_trend\n"
+        # sum_delay_sec is nullable (unlike samples): a pre-backfill or
+        # hand-seeded row can carry samples without it. Excluding such rows
+        # keeps every figure the split reports (mean, days, samples) over one
+        # row population, matching pipeline/digest/build.py's
+        # _ROUTE_BASELINE_SQL.
+        f"WHERE agency_id=$1{where_clause} AND sum_delay_sec IS NOT NULL AND samples > 0\n"
+        "GROUP BY date\n"
+        "ORDER BY date",
+        agency_id,
+        *params,
+    )
+    return [(r["date"], int(r["samples"]), int(r["sum_delay_sec"])) for r in rows]
+
+
+def _avg_min(samples: int, sum_delay_sec: int) -> float:
+    """Sample-weighted mean delay in minutes, 2dp half-up, from exact integer sums."""
+    return float(_round2((sum_delay_sec / samples) / 60.0))
+
+
+def _service_split_daily(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> list[dict]:
+    """Per-date avg delay, each date tagged with its day-type bucket.
+
+    Returns ``{date: ISO str, day_type, avg_min}`` rows sorted by date, one per
+    date with samples. ``day_type`` is the same bucket :func:`_service_split`
+    files the date under, so the modal's series match the card's rows.
+    """
+    return [
+        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total)} for d, n, total in totals
+    ]
 
 
 async def _movers(
@@ -1153,45 +1142,56 @@ async def _movers(
     }
 
 
-async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict[str, float]:
-    """avg_min per service_type (typically '平日' / '土日祝').
+# Below either floor a day type's mean is too thin to compare against the
+# others: one odd day, or a handful of trips, would decide it.
+SPLIT_MIN_DAYS = 3
+SPLIT_MIN_SAMPLES = 1000
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted average. Slow path reads the shared grain
-    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
+
+async def _service_day_split(
+    agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> tuple[list[dict], list[dict]]:
+    """``(service_split, service_split_daily)`` over ``ctx``, from one day-type
+    resolution and one per-date read shared by both."""
+    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    totals = await _daily_totals(agency_id, ctx, conn, grain)
+    return _service_split(day_types, totals), _service_split_daily(day_types, totals)
+
+
+def _service_split(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> list[dict]:
+    """Mean delay per day type over the dates in ``totals``.
+
+    Each date is filed under the timetable class the agency's calendar runs
+    that day (:func:`pipeline.day_types.load_day_types`), never under the
+    observation's own ``service_type``: that is a raw GTFS ``service_id`` whose
+    naming differs per agency (some combine a route group with the day type)
+    and is empty for observations that never matched a scheduled trip, which
+    can be most of them.
+
+    Returns one ``{day_type, avg_min, days, samples, insufficient}`` per bucket
+    the agency is split into, in display order: 平日 / 土曜 / 日祝, or 平日 /
+    土日祝 for a feed with one weekend timetable. ``avg_min`` is the
+    sample-weighted mean (None for a bucket with no data), ``days`` the dates
+    with samples and ``samples`` the observation count, all over the same rows.
+    ``insufficient`` marks a bucket under :data:`SPLIT_MIN_DAYS` days or
+    :data:`SPLIT_MIN_SAMPLES` samples.
     """
-    if ctx.time_band == "all":
-        where, params, _ = _agg_filter(ctx, next_param=2)
-        where_clause = f" AND ({where})" if where else ""
-        rows = await conn.fetch(
-            "SELECT service_type,\n"
-            # sum_delay_sec is nullable (unlike samples); a row can have
-            # samples set but sum_delay_sec still NULL (pre-backfill row,
-            # hand-seeded fixture, or any row analyze() hasn't rewritten
-            # since migration 0028) — FILTER both sides to the same row
-            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
-            # silently dropped, matching pipeline/digest/build.py's
-            # _ROUTE_BASELINE_SQL.
-            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
-            "FROM agg_daily_trend\n"
-            f"WHERE agency_id=$1{where_clause}\n"
-            "GROUP BY service_type",
-            agency_id,
-            *params,
-        )
-    else:
-        # Sorted by service_type purely for a stable key order in the JSON
-        # envelope; the ClickHouse `GROUP BY service_type` this replaces
-        # emitted groups in an arbitrary order.
-        by_service = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=2)
-        rows = [
-            {"service_type": service_type, "avg_min": (total / n) / 60.0}
-            for service_type, (n, total) in sorted(((k, v) for k, v in by_service.items() if k), key=lambda kv: kv[0])
-        ]
-    return {
-        r["service_type"]: float(_round2(r["avg_min"])) for r in rows if r["service_type"] and r["avg_min"] is not None
-    }
+    acc = {bucket: [0, 0, 0] for bucket in day_types.buckets}  # samples, sum_delay_sec, days
+    for d, n, total in totals:
+        slot = acc[day_types.of(d)]
+        slot[0] += n
+        slot[1] += total
+        slot[2] += 1
+    return [
+        {
+            "day_type": bucket,
+            "avg_min": _avg_min(n, total) if n else None,
+            "days": days,
+            "samples": n,
+            "insufficient": days < SPLIT_MIN_DAYS or n < SPLIT_MIN_SAMPLES,
+        }
+        for bucket, (n, total, days) in acc.items()
+    ]
 
 
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
@@ -1361,8 +1361,7 @@ async def compute_overview_summary(
             peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain)
             peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain)
         async with perf.timed_block("overview.service_split"):
-            service_split = await _service_split(agency_id, ctx, conn, ch=ch, grain=grain)
-            service_split_daily = await _service_split_daily(agency_id, ctx, conn, ch=ch, grain=grain)
+            service_split, service_split_daily = await _service_day_split(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
             # Hero card slices `.slice(-7)`; modal shows full series.
             sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
@@ -1406,8 +1405,7 @@ async def compute_overview_summary(
             concentration,
             top_delayed,
             peak,
-            service_split,
-            service_split_daily,
+            (service_split, service_split_daily),
             sparkline_points,
         ) = await asyncio.gather(
             _peak_dow("weekday"),
@@ -1418,8 +1416,7 @@ async def compute_overview_summary(
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
-            _own_conn(_service_split, agency_id, ctx),
-            _own_conn(_service_split_daily, agency_id, ctx),
+            _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )
 
