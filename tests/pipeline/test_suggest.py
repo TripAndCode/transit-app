@@ -267,33 +267,14 @@ async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agency, ch_client, monkeypatch):
-    """compute_on_time's fetch must be pooled by _pool_on_time_by_route
-    *before* it is sliced to ON_TIME_FALLBACK_FETCH_LIMIT: truncating first
-    would pool a route whose service-type rows straddle the fetch boundary
-    from a partial subset of its own rows.
+async def test_on_time_fallback_judges_a_route_on_all_its_observations(suggest_agency, ch_client):
+    """compute_on_time returns one row per route, so the fallback names each
+    route at its on-time rate over every observation, whichever raw service
+    ids they matched, and no fetch size can split a route.
 
-    Three (route, service_type) rows this week, ascending by on_time_pct:
-      RT/svcA    0%   (samples=30)
-      R_other    30%  (samples=30)
-      RT/svcB    100% (samples=30)
-    True sample-weighted pooled RT = (0*30 + 100*30) / 60 = 50% -- WORSE
-    on-time than R_other's 30%, so R_other is genuinely this week's
-    worst-on-time ROUTE, at 30%.
-
-    With a too-small fetch limit (2, monkeypatched below to reproduce the
-    truncation at a scale that doesn't need 50+ real rows), the fetch
-    truncates to just [RT/svcA, R_other] before RT/svcB is ever pooled in:
-    RT's pooled pct collapses to 0% (only svcA counted). The fallback then
-    both picks the WRONG route (RT instead of R_other) and reports the WRONG
-    percentage for it (0% instead of 50%) -- exactly the failure mode an
-    ``ON_TIME_FALLBACK_FETCH_LIMIT`` of 50 produces on real data once an
-    agency has more than 50 qualifying rows. A limit that comfortably covers
-    all 3 rows (the module's real, shipped value -- exercised unpatched
-    below) must not reproduce that truncation, correctly reporting R_other
-    at 30%. (The shipped constant's magnitude relative to real per-agency
-    row counts is asserted directly, DB-free, in
-    ``tests/unit/test_suggest_pooling.py``.)
+    RT's observations split across two raw service ids (0% and 100% on time,
+    30 each) pool to 50%, which beats R_other's 30%: R_other is this week's
+    worst on-time route, even when the fetch keeps a single row.
     """
     from unittest.mock import patch
 
@@ -310,20 +291,10 @@ async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agenc
     week_ctx = RangeCtx(from_date=jst_today(), to_date=jst_today())
 
     async with pool.acquire() as conn:
-        # Reproduce the truncation with a deliberately tiny fetch limit --
-        # what any limit below an agency's qualifying-row count does on real
-        # data.
-        with patch("pipeline.reports.suggest.ON_TIME_FALLBACK_FETCH_LIMIT", 2):
-            truncated = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
-        assert truncated is not None
-        assert truncated["route_code"] == "RT"
-        assert "0%" in truncated["reason_text"]  # RT's pooled pct wrongly collapsed to 0%
-
-        # The shipped limit (patched back to its real value on exiting the
-        # `with` above) must not reproduce that truncation.
-        result = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
-
-    assert result is not None
-    assert result["report_type"] == "on_time"
-    assert result["route_code"] == "R_other"
-    assert "30%" in result["reason_text"]
+        for limit in (1, 5000):
+            with patch("pipeline.reports.suggest.ON_TIME_FALLBACK_FETCH_LIMIT", limit):
+                result = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
+            assert result is not None
+            assert result["report_type"] == "on_time"
+            assert result["route_code"] == "R_other"
+            assert "30%" in result["reason_text"]

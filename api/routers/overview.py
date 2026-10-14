@@ -30,10 +30,12 @@ _PEAK_HOUR_MIN_SAMPLES = 3
 def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
     """Top-20 routes by pooled average delay for one hour of ``agg_route_hour_dow``.
 
-    ``avg_min`` is always re-derived from ``sum_delay_sec``/``samples`` over the
-    grouped rows, never read from the stored per-row ``avg_min``, so the
-    single-DOW and the all-DOW answer are the same statistic computed the same
-    way. The sample floor is applied to the group total alone: a route whose
+    One row per route: its rows for every raw service id it matched (the
+    table's ``service_type``, a GTFS ``service_id``) pool together, as do its
+    rows for every DOW when no DOW is given. ``avg_min`` is always re-derived
+    from ``sum_delay_sec``/``samples`` over the grouped rows, never read from
+    the stored per-row ``avg_min``, so the single-DOW and the all-DOW answer
+    are the same statistic computed the same way. The sample floor is applied to the group total alone: a route whose
     observations are spread thinly across the rows being pooled is still
     well-evidenced once pooled, and dropping its rows first would both hide it
     and bias the average that remains.
@@ -43,15 +45,15 @@ def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
     """
     dow_clause = "AND dow = $3 " if by_dow else ""
     return f"""
-        SELECT route_code, service_type,
+        SELECT route_code,
                (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
                    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
                SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples
         FROM agg_route_hour_dow
         WHERE agency_id = $1 AND hour = $2 {dow_clause}
-        GROUP BY route_code, service_type
+        GROUP BY route_code
         HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
-        ORDER BY avg_min DESC NULLS LAST
+        ORDER BY avg_min DESC NULLS LAST, route_code
         LIMIT 20
     """
 
@@ -206,7 +208,6 @@ class OverviewSummary(BaseModel):
 
 class RouteHourEntry(BaseModel):
     route_code: str
-    service_type: str
     avg_min: float
     samples: int
 
@@ -233,7 +234,8 @@ async def peak_hour_breakdown(
     for the requested hour; either way the average is pooled from the summed
     delay and sample columns. A route whose pooled observations for the hour
     number fewer than ``_PEAK_HOUR_MIN_SAMPLES`` is excluded to suppress noise
-    from infrequent service patterns. Returns at most 20 routes worst-first.
+    from rarely observed routes. Returns at most 20 routes worst-first, ties
+    by route_code.
     """
     params: list[object] = [agency_id, hour]
     if dow is not None:
@@ -245,7 +247,6 @@ async def peak_hour_breakdown(
         routes=[
             RouteHourEntry(
                 route_code=r["route_code"],
-                service_type=r["service_type"],
                 avg_min=round(float(r["avg_min"]), 2),
                 samples=int(r["samples"]),
             )

@@ -1680,6 +1680,22 @@ async def test_peak_hour_breakdown_returns_top_routes(client, aconn, aagency_id)
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_breakdown_lists_a_route_once_across_raw_service_ids(client, aconn, aagency_id):
+    """A route's observations split across raw service ids (and the '' of an
+    unmatched trip) are one route: one entry, pooled, with no raw id in it.
+    Each fragment alone is under the sample floor and would be dropped."""
+    for service_id in ("11_平日(共通)", "1_土曜(共通)", ""):
+        await _seed_agg_route_hour_dow(aconn, aagency_id, "K40", service_id, 2, 8, 6.0, 2)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "K41", "11_平日(共通)", 2, 8, 3.0, 10)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8, "dow": 2})
+    assert r.status_code == 200
+    assert r.json()["routes"] == [
+        {"route_code": "K40", "avg_min": 6.0, "samples": 6},
+        {"route_code": "K41", "avg_min": 3.0, "samples": 10},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_breakdown_excludes_low_samples(client, aconn, aagency_id):
     await _seed_agg_route_hour_dow(aconn, aagency_id, "X1", "平日", 1, 7, 8.0, 2)  # samples < 3
     await _seed_agg_route_hour_dow(aconn, aagency_id, "X2", "平日", 1, 7, 7.0, 3)  # samples == 3, included

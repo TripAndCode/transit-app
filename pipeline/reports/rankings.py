@@ -14,7 +14,15 @@ from pipeline.histogram import (
     count_in_range,
     percentile_from_hist,
 )
-from pipeline.reports.filters import _MIN, _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter, _round2
+from pipeline.reports.filters import (
+    _MIN,
+    _agg_filter,
+    _ch_rows,
+    _dedup_cte_ch,
+    _dist_filter,
+    _round2,
+    _service_label,
+)
 from pipeline.service_day import service_date_ch
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
@@ -34,16 +42,12 @@ ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
 }
 
 
-# The smallest group compute_ranking ranks: percentiles over fewer rows say nothing.
+# The fewest observations behind a route compute_ranking ranks: percentiles
+# over fewer say nothing.
 MIN_GROUP_SAMPLES = 21
-# The reports tab's ranking floor. A special-day variant observed a few dozen
-# times would otherwise top a ranking of routes observed hundreds of times.
+# The reports tab's ranking floor. A route observed a few dozen times in the
+# range would otherwise top a ranking of routes observed hundreds of times.
 RANKING_MIN_SAMPLES = 100
-
-
-def _service_or_none(service_type: str) -> str | None:
-    """Map the '' NOT-NULL PK sentinel back to None (NULL-service routes)."""
-    return service_type or None
 
 
 def _avg_min(sum_delay_sec: int, samples: int) -> Decimal:
@@ -88,54 +92,58 @@ def _weighted_avg_min(days: list[dict]) -> float | None:
 
 
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
-    """Range-scan agg_route_daily_dist, summing the exact per-route scalars.
+    """Range-scan agg_route_daily_dist, summing the exact scalars per route.
 
-    Used by on_time / worst_5min (no percentiles needed). DOW/service/route
-    filters apply; time_band is the caller's responsibility (see module note).
+    The sums run across every date and every raw service id of a route (see
+    :func:`_service_label`). Used by on_time / worst_5min (no percentiles
+    needed). DOW/service/route filters apply; time_band is the caller's
+    responsibility (see module note).
     """
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
-        "SELECT route_code, service_type,\n"
+        "SELECT route_code,\n"
         "       SUM(samples) AS samples,\n"
         "       SUM(sum_delay_sec) AS sum_delay_sec,\n"
         "       SUM(on_time_count) AS on_time_count,\n"
         "       SUM(late5_count) AS late5_count\n"
         "FROM agg_route_daily_dist\n"
         f"WHERE agency_id = $1 AND {where}\n"
-        "GROUP BY route_code, service_type"
+        "GROUP BY route_code"
     )
     return await conn.fetch(sql, agency_id, *params)
 
 
 async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
-    """Range-scan agg_route_daily_dist, summing scalars AND merging histograms.
+    """Range-scan agg_route_daily_dist per route, summing scalars AND merging histograms.
 
-    The histograms are summed element-wise (unnest WITH ORDINALITY → regroup →
-    array_agg) so p50/p90 can be interpolated from the merged buckets in Python.
+    Rows of every date and raw service id of a route merge into one (see
+    :func:`_service_label`). The histograms are summed element-wise (unnest
+    WITH ORDINALITY → regroup → array_agg) so p50/p90 can be interpolated from
+    the merged buckets in Python.
     """
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "WITH ranged AS (\n"
-        "    SELECT route_code, service_type, samples, sum_delay_sec, hist\n"
+        "    SELECT route_code, samples, sum_delay_sec, hist\n"
         "    FROM agg_route_daily_dist\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "),\n"
         "merged_hist AS (\n"
-        "    SELECT route_code, service_type, i, SUM(h) AS c\n"
+        "    SELECT route_code, i, SUM(h) AS c\n"
         "    FROM ranged, unnest(hist) WITH ORDINALITY u(h, i)\n"
-        "    GROUP BY route_code, service_type, i\n"
+        "    GROUP BY route_code, i\n"
         "),\n"
         "hists AS (\n"
-        "    SELECT route_code, service_type, array_agg(c ORDER BY i) AS hist\n"
-        "    FROM merged_hist GROUP BY route_code, service_type\n"
+        "    SELECT route_code, array_agg(c ORDER BY i) AS hist\n"
+        "    FROM merged_hist GROUP BY route_code\n"
         "),\n"
         "scalars AS (\n"
-        "    SELECT route_code, service_type,\n"
+        "    SELECT route_code,\n"
         "           SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec\n"
-        "    FROM ranged GROUP BY route_code, service_type\n"
+        "    FROM ranged GROUP BY route_code\n"
         ")\n"
-        "SELECT s.route_code, s.service_type, s.samples, s.sum_delay_sec, h.hist\n"
-        "FROM scalars s JOIN hists h USING (route_code, service_type)"
+        "SELECT s.route_code, s.samples, s.sum_delay_sec, h.hist\n"
+        "FROM scalars s JOIN hists h USING (route_code)"
     )
     return await conn.fetch(sql, agency_id, *params)
 
@@ -156,8 +164,10 @@ async def compute_ranking(
     Reads agg_route_daily_dist: avg/samples are exact; p50/p90 are interpolated
     from the merged delay histogram (approximate within one bucket — fine for
     ranking). A time_band filter falls back to the live scan (ClickHouse).
-    Groups with fewer than ``min_samples`` observations are left out;
-    ``limit=None`` returns every remaining group.
+    Each row is one route, ``(route_code, service, avg_min, p50_min, p90_min,
+    samples)`` with ``service`` from :func:`_service_label`. Routes with fewer
+    than ``min_samples`` observations are left out; ``limit=None`` returns
+    every remaining route.
     """
     if ctx.time_band != "all":
         if ch is None:
@@ -165,6 +175,7 @@ async def compute_ranking(
         return await _ranking_live(agency_id, ctx, conn, ch, sort_order, limit, min_samples)
 
     rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    service = _service_label(ctx)
     out: list[tuple] = []
     for r in rows:
         samples = r["samples"]
@@ -173,7 +184,7 @@ async def compute_ranking(
         out.append(
             (
                 r["route_code"],
-                _service_or_none(r["service_type"]),
+                service,
                 _avg_min(r["sum_delay_sec"], samples),
                 _sec_to_min(percentile_from_hist(r["hist"], 0.5)),
                 _sec_to_min(percentile_from_hist(r["hist"], 0.9)),
@@ -220,18 +231,18 @@ async def _ranking_live(
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "deduped_ranked AS (\n"
-        "    SELECT route_code, service_type, dep_delay,\n"
-        "        (rank() OVER (PARTITION BY route_code, service_type ORDER BY dep_delay) - 1)\n"
-        "        / (count() OVER (PARTITION BY route_code, service_type) - 1) AS pct\n"
+        "    SELECT route_code, dep_delay,\n"
+        "        (rank() OVER (PARTITION BY route_code ORDER BY dep_delay) - 1)\n"
+        "        / (count() OVER (PARTITION BY route_code) - 1) AS pct\n"
         "    FROM deduped\n"
         ")\n"
-        "SELECT route_code, service_type,\n"
+        "SELECT route_code,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       minIf(dep_delay, pct >= 0.5) / 60.0 AS p50_min,\n"
         "       minIf(dep_delay, pct >= 0.9) / 60.0 AS p90_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped_ranked\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING count(*) >= {rk_min:UInt32}\n"
         f"ORDER BY avg_min {order}, route_code" + limit_sql,
         parameters=params,
@@ -245,16 +256,17 @@ async def _ranking_live(
     # failure mode (`PERCENTILE_DISC` always resolves to a real value for a
     # non-empty group) — this NULL case is specific to this ClickHouse
     # fallback's still-old tie formula, per this function's own docstring.
+    service = _service_label(ctx)
     return [
         (
             route_code,
-            service_type,
+            service,
             _round2(avg_min),
             _round2(p50_min) if p50_min is not None else None,
             _round2(p90_min) if p90_min is not None else None,
             samples,
         )
-        for route_code, service_type, avg_min, p50_min, p90_min, samples in result.result_rows
+        for route_code, avg_min, p50_min, p90_min, samples in result.result_rows
     ]
 
 
@@ -271,7 +283,7 @@ async def compute_on_time(
     early_tolerance_sec: int | None = None,
     late_tolerance_sec: int | None = None,
 ) -> list[tuple]:
-    """On-time percentage per route-service.
+    """On-time percentage per route, one row per route (see :func:`_service_label`).
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
     ``sort_order='asc'`` returns worst routes first (lowest %).
@@ -310,6 +322,7 @@ async def compute_on_time(
             return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
 
         rows = await _read_dist_scalars(agency_id, ctx, conn)
+        service = _service_label(ctx)
         out: list[tuple] = []
         for r in rows:
             samples = r["samples"]
@@ -319,7 +332,7 @@ async def compute_on_time(
             out.append(
                 (
                     r["route_code"],
-                    _service_or_none(r["service_type"]),
+                    service,
                     on_time_pct,
                     _avg_min(r["sum_delay_sec"], samples),
                     samples,
@@ -341,6 +354,7 @@ async def compute_on_time(
         return await _on_time_live_window(agency_id, ctx, conn, ch, low_sec, high_sec, limit, sort_order)
 
     rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    service = _service_label(ctx)
     out = []
     for r in rows:
         samples = r["samples"]
@@ -351,7 +365,7 @@ async def compute_on_time(
         out.append(
             (
                 r["route_code"],
-                _service_or_none(r["service_type"]),
+                service,
                 on_time_pct,
                 _avg_min(r["sum_delay_sec"], samples),
                 samples,
@@ -374,22 +388,23 @@ async def _on_time_live(
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT route_code, service_type,\n"
+        "SELECT route_code,\n"
         "       sum(CASE WHEN dep_delay <= {ot_threshold:Int32} THEN 1.0 ELSE 0 END)\n"
         "           * 100.0 / count(*) AS on_time_pct,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING count(*) > 20\n"
         f"ORDER BY on_time_pct {order}, route_code\n"
         "LIMIT {ot_limit:UInt32}",
         parameters={"agency_id": agency_id, "ot_threshold": threshold_sec, "ot_limit": limit, **ch_params},
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    service = _service_label(ctx)
     return [
-        (route_code, service_type, _round1(on_time_pct), _round2(avg_min), samples)
-        for route_code, service_type, on_time_pct, avg_min, samples in result.result_rows
+        (route_code, service, _round1(on_time_pct), _round2(avg_min), samples)
+        for route_code, on_time_pct, avg_min, samples in result.result_rows
     ]
 
 
@@ -416,13 +431,13 @@ async def _on_time_live_window(
     low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT route_code, service_type,\n"
+        "SELECT route_code,\n"
         f"       sum(CASE WHEN dep_delay <= {{ot_high:Int32}} AND {low_clause} THEN 1.0 ELSE 0 END)\n"
         "           * 100.0 / count(*) AS on_time_pct,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING count(*) > 20\n"
         f"ORDER BY on_time_pct {order}, route_code\n"
         "LIMIT {ot_limit:UInt32}",
@@ -435,9 +450,10 @@ async def _on_time_live_window(
         },
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    service = _service_label(ctx)
     return [
-        (route_code, service_type, _round1(on_time_pct), _round2(avg_min), samples)
-        for route_code, service_type, on_time_pct, avg_min, samples in result.result_rows
+        (route_code, service, _round1(on_time_pct), _round2(avg_min), samples)
+        for route_code, on_time_pct, avg_min, samples in result.result_rows
     ]
 
 
@@ -470,6 +486,7 @@ async def compute_worst_5min(
             raise RuntimeError("compute_worst_5min's time_band-filtered live fallback requires a ClickHouse client")
         return await _worst_5min_live(agency_id, ctx, conn, ch, limit, late)
 
+    service = _service_label(ctx)
     if late_tolerance_sec is None:
         rows = await _read_dist_scalars(agency_id, ctx, conn)
         out: list[tuple] = []
@@ -480,7 +497,7 @@ async def compute_worst_5min(
             out.append(
                 (
                     r["route_code"],
-                    _service_or_none(r["service_type"]),
+                    service,
                     late5,
                     _avg_min(r["sum_delay_sec"], r["samples"]),
                     r["samples"],
@@ -508,7 +525,7 @@ async def compute_worst_5min(
         out.append(
             (
                 r["route_code"],
-                _service_or_none(r["service_type"]),
+                service,
                 late5,
                 _avg_min(r["sum_delay_sec"], samples),
                 samples,
@@ -524,12 +541,12 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, 
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT route_code, service_type,\n"
+        "SELECT route_code,\n"
         "       sum(CASE WHEN dep_delay > {w5_threshold:Int32} THEN 1 ELSE 0 END) AS late5_count,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING sum(CASE WHEN dep_delay > {w5_threshold:Int32} THEN 1 ELSE 0 END) > 0\n"
         "ORDER BY late5_count DESC, route_code\n"
         "LIMIT {w5_limit:UInt32}",
@@ -541,9 +558,10 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, 
         },
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    service = _service_label(ctx)
     return [
-        (route_code, service_type, late5_count, _round2(avg_min), samples)
-        for route_code, service_type, late5_count, avg_min, samples in result.result_rows
+        (route_code, service, late5_count, _round2(avg_min), samples)
+        for route_code, late5_count, avg_min, samples in result.result_rows
     ]
 
 
@@ -561,8 +579,9 @@ async def compute_dow_ranking(
 
     Drops the user's ``service`` filter on purpose — pairing 'weekend' DOW
     with the 平日 filter selects almost no dates, since the weekday
-    timetable rarely runs on a weekend. ``routes`` is preserved so a user
-    filtering to specific routes keeps that filter.
+    timetable rarely runs on a weekend — so each row's service slot is None.
+    ``routes`` is preserved so a user filtering to specific routes keeps that
+    filter.
     """
     overridden = RangeCtx(
         from_date=ctx.from_date,
@@ -581,8 +600,7 @@ async def compute_dow_ranking(
     # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
     where, params, n = _agg_filter(overridden, next_param=2)
     sql = (
-        # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
-        f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
+        f"SELECT route_code, '{label}' AS dow,\n"
         # A count beside a sum_delay_sec-derived average counts that average's
         # rows, so all three FILTER alike — matching _dow_ranking_live, whose
         # count(*) covers exactly the rows its own average does.
@@ -593,13 +611,14 @@ async def compute_dow_ranking(
         "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"
         "FROM agg_daily_trend\n"
         f"WHERE agency_id = $1 AND {where}\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 10\n"
         "ORDER BY avg_min DESC NULLS LAST, route_code\n"
         f"LIMIT ${n}"
     )
     rows = await conn.fetch(sql, agency_id, *params, limit)
-    return [tuple(r) for r in rows]
+    service = _service_label(overridden)
+    return [(r["route_code"], service, r["dow"], r["avg_min"], r["samples"]) for r in rows]
 
 
 async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, label: str, limit: int) -> list[tuple]:
@@ -607,20 +626,21 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
     cte_sql, ch_params = _dedup_cte_ch(overridden)
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        f"SELECT route_code, service_type, '{label}' AS dow,\n"
+        f"SELECT route_code, '{label}' AS dow,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
-        "GROUP BY route_code, service_type\n"
+        "GROUP BY route_code\n"
         "HAVING count(*) > 10\n"
         "ORDER BY avg_min DESC, route_code\n"
         "LIMIT {dr_limit:UInt32}",
         parameters={"agency_id": agency_id, "dr_limit": limit, **ch_params},
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    service = _service_label(overridden)
     return [
-        (route_code, service_type, dow, _round2(avg_min), samples)
-        for route_code, service_type, dow, avg_min, samples in result.result_rows
+        (route_code, service, dow, _round2(avg_min), samples)
+        for route_code, dow, avg_min, samples in result.result_rows
     ]
 
 
@@ -898,14 +918,15 @@ async def compute_trend_series(
     ``None`` there.
     """
     _SMOOTH_WINDOW = 7
-    # A route-service group needs more samples than this to be named an offender.
+    # A route needs more samples than this in a bucket to be named an offender.
     _OFFENDER_MIN_SAMPLES = 5
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
 
     if ctx.time_band == "all":
-        # Sum agg_daily_trend (already per date/route/service) into time buckets.
+        # Sum agg_daily_trend into one row per (bucket, route), across the raw
+        # service ids a route's observations matched (see _service_label).
         # A week/month bucket pools MULTIPLE agg_daily_trend rows, so this reads
         # each row's exact sum_delay_sec (not its rounded avg_min) and divides
         # once at the end — see analyze.py's module docstring for why pooling
@@ -918,17 +939,17 @@ async def compute_trend_series(
         # identical rationale (this SQL-level pooling is a separate, coarser
         # grain from this function's own Python-side by_date_samples/
         # by_date_weighted_sec pooling further below, which already applies
-        # the same guard one level up, across route/service groups within a
-        # bucket rather than across dates within one route/service group).
+        # the same guard one level up, across routes within a bucket rather
+        # than across dates within one route).
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
             f"SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
-            "       route_code, NULLIF(service_type, '') AS service_type,\n"
+            "       route_code,\n"
             "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::bigint AS sum_delay_sec,\n"
             "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
-            "GROUP BY bucket, route_code, service_type"
+            "GROUP BY bucket, route_code"
         )
         per_day = await conn.fetch(sql, agency_id, *params)
     else:
@@ -942,11 +963,11 @@ async def compute_trend_series(
         result = await ch.query(
             f"WITH {cte_sql}\n"
             f"SELECT {bucket_expr} AS bucket,\n"
-            "       route_code, service_type,\n"
+            "       route_code,\n"
             "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
-            "GROUP BY bucket, route_code, service_type",
+            "GROUP BY bucket, route_code",
             parameters={"agency_id": agency_id, **ch_params},
         )
         per_day = _ch_rows(result)
@@ -959,7 +980,7 @@ async def compute_trend_series(
         d = r["bucket"]
         n = r["samples"]
         sum_sec = r["sum_delay_sec"]
-        # Per-(bucket, route, service) display average, rounded once straight
+        # Per-(bucket, route) display average, rounded once straight
         # from the exact raw-seconds sum (half-up, matching Postgres ROUND()).
         avg = float(_round2(sum_sec / n / 60.0)) if n and sum_sec is not None else None
         # sum_delay_sec is nullable (unlike samples); only add a group's n to
@@ -982,7 +1003,6 @@ async def compute_trend_series(
             by_date[d].append(
                 {
                     "route_code": r["route_code"],
-                    "service_type": r["service_type"],
                     "avg_min": avg,
                     "samples": n,
                 }
@@ -995,7 +1015,7 @@ async def compute_trend_series(
         # was populated (see the loop above) — a bucket where every group is
         # still NULL has no by_date_samples entry at all, not just a zero one.
         n = by_date_samples.get(d, 0)
-        # Whole-bucket total pooled from every route/service group's exact
+        # Whole-bucket total pooled from every route's exact
         # raw-seconds sum, dividing once at the end — NOT from re-weighting
         # each group's already-rounded display avg_min above.
         avg = round((by_date_weighted_sec.get(d, 0) / n) / 60, 2) if n else None

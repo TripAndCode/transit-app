@@ -1040,6 +1040,16 @@ _SERVICE_TYPE_MAP: dict[str, ServiceType] = {
 }
 
 
+def _without_service_slot(rows: list[tuple]) -> list[list]:
+    """Ranking rows without their service slot.
+
+    The slot names the service filter every row was computed under
+    (:func:`pipeline.reports.filters._service_label`), which the answer's own
+    conditions already state, so a table column would repeat it on every row.
+    """
+    return [[r[0], *r[2:]] for r in rows]
+
+
 async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     metric = args.get("metric", "avg_delay")
     # Card chips send "k" (the gold eval's canonical form); LLM direct calls
@@ -1057,7 +1067,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
         rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order=sort_order, limit=n)
-        cols = ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"]
+        cols = ["route_code", "avg_min", "p50_min", "p90_min", "samples"]
         label = _summary(
             "label_ranking_ontime" if best_first else "label_ranking_delay",
             lang=locale,
@@ -1069,11 +1079,11 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         # Display-only annotation (pipeline/stats.py) — does not change
         # compute_on_time's own contract.
         rows = annotate_on_time_pct_confidence(rows)
-        cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"]
+        cols = ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
-        cols = ["route_code", "service_type", "late5_count", "avg_min", "samples"]
+        cols = ["route_code", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
     else:
         return ToolResult(kind="empty", summary=_summary("unknown_metric", lang=locale, metric=metric))
@@ -1087,7 +1097,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     return ToolResult(
         kind="table",
         summary=_summary(summary_key, lang=locale, label=label, count=len(rows)),
-        rows=[list(r) for r in rows],
+        rows=_without_service_slot(rows),
         columns=cols,
     )
 
@@ -1193,8 +1203,8 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
             threshold_min=threshold_min,
             count=len(rows),
         ),
-        rows=[list(r) for r in rows],
-        columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        rows=_without_service_slot(rows),
+        columns=["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
     )
 
 

@@ -29,6 +29,21 @@ def _round2(x: float) -> Decimal:
     return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
+def _service_label(ctx: RangeCtx) -> str | None:
+    """The service filter a per-route report row was computed under, or None without one.
+
+    The rankings and the dwell/run report are one row per route over all of
+    its observations in ``ctx``. An observation's own ``service_type`` is the raw
+    GTFS ``service_id`` it matched (blank when it matched none), so grouping by
+    it would split one route into fragments, each averaged over a slice of its
+    data. The service filter selects dates instead
+    (:func:`api.range.resolve_service_dates`), and this label is that filter,
+    kept in each row's service slot because the CSV, report tables and
+    text rows read rows by position.
+    """
+    return None if ctx.service == "all" else ctx.service
+
+
 def _dedup_cte_ch(
     ctx: RangeCtx,
     *,

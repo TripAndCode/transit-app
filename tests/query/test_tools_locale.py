@@ -142,8 +142,8 @@ def test_render_tool_result_table_en():
     result = ToolResult(
         kind="table",
         summary="Delay ranking",
-        rows=[[f"r{i}", "weekday", 1.0, 1, 1, 1] for i in range(35)],
-        columns=["route_code", "service_type", "avg_min", "p50", "p90", "samples"],
+        rows=[[f"r{i}", 1.0, 1, 1, 1] for i in range(35)],
+        columns=["route_code", "avg_min", "p50_min", "p90_min", "samples"],
     )
     out = render_tool_result(result, locale="en")
     assert "【Delay ranking】" in out

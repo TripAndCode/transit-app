@@ -10,8 +10,8 @@ and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
 on-time figure is always the ``legacy_60s`` exact column with no tolerance
 override. The fast path reuses ``pipeline.reports.rankings``'s own
 ``_read_dist_scalars``/``_read_dist_with_hist`` SQL byte-for-byte, simply
-pooling every returned route/service group into one total instead of
-emitting one row per group (with no per-group minimum-sample gate -- that
+pooling every returned route into one total instead of emitting one row per
+route (with no per-route minimum-sample gate -- that
 gate exists in ``compute_on_time`` to keep a *ranking* free of thin-sample
 noise, which has no meaning for a single pooled total). Service-delivered
 numbers come straight from that same function -- this module never

@@ -16,8 +16,8 @@ the PREVIOUS stop's departure) from.
 Unlike ranking/on_time/worst_5min, this report has no live ClickHouse
 fallback for a time_band-filtered query: reconstructing dwell/running time
 needs a same-trip previous-stop window function joined against the static
-schedule, which the existing raw-scan fallbacks (keyed on `route_code,
-service_type` alone, no per-trip ordering) aren't shaped for. A time_band-
+schedule, which the existing raw-scan fallbacks (keyed on `route_code`
+alone, no per-trip ordering) aren't shaped for. A time_band-
 filtered request instead gets an explicit `time_band_supported: false`
 rather than silently ignoring the filter and showing an unfiltered number
 under a filtered label.
@@ -29,7 +29,7 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
-from pipeline.reports.filters import _dist_filter
+from pipeline.reports.filters import _dist_filter, _service_label
 from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
@@ -47,10 +47,12 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     can't be served by this report yet (see module docstring) -- again, a
     caller must render an explicit state, not silently ignore the filter.
 
-    Each ``routes`` entry is
+    Each ``routes`` entry is one route,
     ``{"route_code", "service_type", "dwell_samples", "dwell_avg_sec",
     "dwell_p50_sec", "dwell_p90_sec", "run_samples", "run_avg_sec",
-    "run_p50_sec", "run_p90_sec"}``. No minimum-sample gate is applied here
+    "run_p50_sec", "run_p90_sec"}``, pooled across the raw service ids its
+    observations matched; ``service_type`` names the active service filter
+    (:func:`pipeline.reports.filters._service_label`). No minimum-sample gate is applied here
     (unlike ranking/on_time's ``> 20``/``> 10`` gates) -- `arr_delay`'s own
     sparse coverage already means legitimate samples counts are frequently
     thin, so every route is returned with its own transparent sample count
@@ -64,44 +66,45 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "WITH ranged AS (\n"
-        "    SELECT route_code, service_type, dwell_samples, dwell_sum_sec, hist_dwell,\n"
+        "    SELECT route_code, dwell_samples, dwell_sum_sec, hist_dwell,\n"
         "           run_samples, run_sum_sec, hist_run\n"
         "    FROM agg_route_daily_dwell_run\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "),\n"
         "merged_dwell AS (\n"
-        "    SELECT route_code, service_type, i, SUM(h) AS c\n"
+        "    SELECT route_code, i, SUM(h) AS c\n"
         "    FROM ranged, unnest(hist_dwell) WITH ORDINALITY u(h, i)\n"
-        "    GROUP BY route_code, service_type, i\n"
+        "    GROUP BY route_code, i\n"
         "),\n"
         "merged_run AS (\n"
-        "    SELECT route_code, service_type, i, SUM(h) AS c\n"
+        "    SELECT route_code, i, SUM(h) AS c\n"
         "    FROM ranged, unnest(hist_run) WITH ORDINALITY u(h, i)\n"
-        "    GROUP BY route_code, service_type, i\n"
+        "    GROUP BY route_code, i\n"
         "),\n"
         "dwell_hists AS (\n"
-        "    SELECT route_code, service_type, array_agg(c ORDER BY i) AS hist_dwell\n"
-        "    FROM merged_dwell GROUP BY route_code, service_type\n"
+        "    SELECT route_code, array_agg(c ORDER BY i) AS hist_dwell\n"
+        "    FROM merged_dwell GROUP BY route_code\n"
         "),\n"
         "run_hists AS (\n"
-        "    SELECT route_code, service_type, array_agg(c ORDER BY i) AS hist_run\n"
-        "    FROM merged_run GROUP BY route_code, service_type\n"
+        "    SELECT route_code, array_agg(c ORDER BY i) AS hist_run\n"
+        "    FROM merged_run GROUP BY route_code\n"
         "),\n"
         "scalars AS (\n"
-        "    SELECT route_code, service_type,\n"
+        "    SELECT route_code,\n"
         "           SUM(dwell_samples) AS dwell_samples, SUM(dwell_sum_sec) AS dwell_sum_sec,\n"
         "           SUM(run_samples) AS run_samples, SUM(run_sum_sec) AS run_sum_sec\n"
-        "    FROM ranged GROUP BY route_code, service_type\n"
+        "    FROM ranged GROUP BY route_code\n"
         ")\n"
-        "SELECT s.route_code, s.service_type,\n"
+        "SELECT s.route_code,\n"
         "       s.dwell_samples, s.dwell_sum_sec, dh.hist_dwell,\n"
         "       s.run_samples, s.run_sum_sec, rh.hist_run\n"
         "FROM scalars s\n"
-        "JOIN dwell_hists dh USING (route_code, service_type)\n"
-        "JOIN run_hists rh USING (route_code, service_type)\n"
+        "JOIN dwell_hists dh USING (route_code)\n"
+        "JOIN run_hists rh USING (route_code)\n"
         "ORDER BY route_code"
     )
     rows = await conn.fetch(sql, agency_id, *params)
+    service = _service_label(ctx)
 
     routes = []
     for r in rows:
@@ -110,7 +113,7 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
         routes.append(
             {
                 "route_code": r["route_code"],
-                "service_type": r["service_type"] or None,
+                "service_type": service,
                 "dwell_samples": dwell_samples,
                 # Postgres SUM(bigint) returns NUMERIC, which asyncpg maps to
                 # Decimal -- float() here matches rankings.py's identical
