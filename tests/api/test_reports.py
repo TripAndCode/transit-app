@@ -2156,3 +2156,33 @@ async def test_include_sparse_is_rejected_outside_the_rankings(reports_client):
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports/on_time?include_sparse=1")
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_the_service_filter_reads_the_agencys_timetable_days(reports_client, ch_client, ch_async_client):
+    """The observations carry the feed's own service_id, or nothing at all for
+    a trip the feed never matched, so no row says 平日. The filter keeps the
+    dates the agency's calendar runs each timetable (here the weekday rule: no
+    calendar is loaded), on the aggregate path and on the ClickHouse live path
+    alike."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    await _seed_route(pool, agency_id, "RW", "11_平日(共通)", "2026-05-11", [120] * 25)  # Monday
+    await _seed_route(pool, agency_id, "RW", "", "2026-05-16", [600] * 25)  # Saturday
+    await _seed_route(pool, agency_id, "RW", "", "2026-05-17", [300] * 25)  # Sunday
+    _run_analyze(agency_id, ch_client)
+
+    async def ranked(service: str, **extra: str) -> list[tuple]:
+        params = {"from": "2026-05-11", "to": "2026-05-17", "include_sparse": "1", "service": service, **extra}
+        resp = await client.get(f"/api/{agency_id}/reports/ranking", params=params)
+        assert resp.status_code == 200, resp.text
+        return sorted((r[0], float(r[2]), r[5]) for r in resp.json()["rows"])
+
+    for extra in ({}, {"time_band": "forenoon"}):
+        assert await ranked("平日", **extra) == [("RW", 2.0, 25)]
+        assert await ranked("土曜", **extra) == [("RW", 10.0, 25)]
+        assert await ranked("日祝", **extra) == [("RW", 5.0, 25)]
+        # Both weekend days carry the same (empty) service_type, so they pool.
+        assert await ranked("土日祝", **extra) == [("RW", 7.5, 50)]

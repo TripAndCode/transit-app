@@ -31,7 +31,8 @@ wiring a client at all.
 from collections import defaultdict
 from dataclasses import replace
 
-from api.range import RangeCtx
+from api.range import DAY_TYPE_SERVICE, RangeCtx
+from pipeline.day_types import load_day_types
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
@@ -50,35 +51,34 @@ async def route_dow_breakdown(
 ) -> list[tuple]:
     """Per-DOW delay summary for one route over ctx.
 
-    Returns rows: (route_code, service_type, dow_iso, avg_min, samples)
-    sorted by avg_min DESC. dow_iso is ISODOW (Mon=1..Sun=7) —
-    ``toDayOfWeek``'s default mode matches Postgres's ``EXTRACT(ISODOW ...)``
-    numbering (see api.range.dow_clause_ch's docstring). Backs
-    tools._tool_route_stats. Every group has >= 1 row (no HAVING gate here,
-    matching the original query), so avg() is never NaN.
+    Returns rows: (route_code, dow_iso, avg_min, samples) sorted by avg_min
+    DESC. dow_iso is ISODOW (Mon=1..Sun=7) — ``toDayOfWeek``'s default mode
+    matches Postgres's ``EXTRACT(ISODOW ...)`` numbering (see
+    api.range.dow_clause_ch's docstring). Backs tools._tool_route_stats.
+    Not split by the observations' ``service_type``: that is a feed's raw
+    ``service_id``, which can name a route group as well as a day type and
+    is empty for observations that matched no trip, so it would fragment
+    one weekday into several rows. Every group has >= 1 row (no HAVING gate
+    here, matching the original query), so avg() is never NaN.
     """
     if ch is None:
         return []
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT route_code, service_type,\n"
-        "       toDayOfWeek(date) AS dow,\n"
+        "SELECT toDayOfWeek(date) AS dow,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "WHERE route_code = {rdb_route:String}\n"
-        "GROUP BY route_code, service_type, toDayOfWeek(date)\n"
-        "ORDER BY avg_min DESC",
+        "GROUP BY dow\n"
+        "ORDER BY avg_min DESC, dow",
         parameters={"agency_id": agency_id, "rdb_route": str(route), **ch_params},
     )
     # ClickHouse's round() is round-half-to-even; round in Python (half-up) to
     # match Postgres ROUND() and this codebase's other ClickHouse live-path
     # roundings — see pipeline.reports.rankings._ranking_live.
-    return [
-        (route_code, service_type, dow, _round2(avg_min), samples)
-        for route_code, service_type, dow, avg_min, samples in result.result_rows
-    ]
+    return [(str(route), dow, _round2(avg_min), samples) for dow, avg_min, samples in result.result_rows]
 
 
 async def route_compare_service(
@@ -89,29 +89,43 @@ async def route_compare_service(
     *,
     route: str,
 ) -> list[tuple]:
-    """Single-route weekday vs weekend delay comparison over ctx.
+    """One route's delay per day type over ctx.
 
-    Returns rows: (service_type, avg_min, samples) — typically two rows
-    ('平日' and '土日祝'). Backs tools._tool_compare_segments
-    (dimension='service_type'). Every group has >= 1 row, so avg() is
-    never NaN.
+    Returns rows: (service_type, avg_min, samples), one per day-type bucket
+    the route has samples in, in the agency's bucket order and labelled the
+    way the service filter spells it (:data:`api.range.DAY_TYPE_SERVICE`):
+    平日 / 土曜 / 日祝, or 平日 / 土日祝 for a feed with one weekend timetable.
+    Each date is filed under the timetable the agency's calendar ran it
+    (:func:`pipeline.day_types.load_day_types`), never under the
+    observations' own ``service_type``, a raw ``service_id`` that most
+    observations leave empty. Backs tools._tool_compare_segments
+    (dimension='service_type').
+
+    The per-date sums are exact integer seconds, so each bucket's
+    ``(sum / n) / 60.0`` is the ``avg(dep_delay) / 60.0`` of its rows.
     """
     if ch is None:
         return []
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT service_type,\n"
-        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "SELECT date,\n"
+        "       sum(dep_delay) AS sum_delay,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "WHERE route_code = {rcs_route:String}\n"
-        "GROUP BY service_type",
+        "GROUP BY date",
         parameters={"agency_id": agency_id, "rcs_route": str(route), **ch_params},
     )
+    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    acc = {bucket: [0, 0] for bucket in day_types.buckets}
+    for d, sum_delay, samples in result.result_rows:
+        slot = acc[day_types.of(d)]
+        slot[0] += int(sum_delay)
+        slot[1] += int(samples)
     # Round in Python (half-up) to match Postgres ROUND() — see
     # route_dow_breakdown / pipeline.reports.rankings._ranking_live.
-    return [(service_type, _round2(avg_min), samples) for service_type, avg_min, samples in result.result_rows]
+    return [(DAY_TYPE_SERVICE[bucket], _round2((total / n) / 60.0), n) for bucket, (total, n) in acc.items() if n]
 
 
 async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:

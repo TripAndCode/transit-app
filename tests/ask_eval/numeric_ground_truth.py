@@ -16,7 +16,9 @@ def extract_avg_min(response_json: dict, route_code: str, service_type: str) -> 
     """Pull the ``avg_min`` value for *(route_code, service_type)* out of an
     ``/ask`` response's ``result.rows``/``result.columns`` — the shape
     ``pipeline.query.tools._tool_route_stats`` produces (columns
-    ``["route_code", "service_type", "dow", "avg_min", "samples"]``).
+    ``["route_code", "dow", "avg_min", "samples"]``). Those rows are not split
+    by service type, so *service_type* only narrows a table that carries a
+    ``service_type`` column.
 
     Returns ``None`` when there's no matching row at all (wrong tool called,
     tool returned empty, or the route/service_type didn't match) — the
@@ -83,8 +85,8 @@ def fake_route_stats_response(pattern: SyntheticPattern, avg_min: float) -> dict
         "result": {
             "kind": "table",
             "summary": "テスト",
-            "rows": [[pattern.route_code, pattern.service_type, "月", avg_min, 25]],
-            "columns": ["route_code", "service_type", "dow", "avg_min", "samples"],
+            "rows": [[pattern.route_code, "月", avg_min, 25]],
+            "columns": ["route_code", "dow", "avg_min", "samples"],
             "series": [],
             "pairs": [],
         },

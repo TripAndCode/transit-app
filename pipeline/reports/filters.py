@@ -9,6 +9,7 @@ from api.range import (
     RangeCtx,
     build_agg_daily_trend_filter,
     build_updates_filter_ch,
+    service_date_clause,
 )
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
@@ -89,9 +90,9 @@ def _dated_agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
 
     Date and DOW come from :func:`api.range.build_agg_daily_trend_filter`
     (which keeps the DATE column bare so the primary-key prefix serves the
-    range scan); optional ``service_type`` and ``route_code`` predicates are
-    added here so every reader of ``agg_daily_trend`` and
-    ``agg_route_daily_dist`` shares one filter shape.
+    range scan); the service filter's dates (:func:`api.range.service_date_clause`)
+    and an optional ``route_code`` predicate are added here so every reader of
+    ``agg_daily_trend`` and ``agg_route_daily_dist`` shares one filter shape.
 
     ``time_band`` is silently dropped — these tables roll up to (date, route,
     service) and have no hour-of-day column. When ``ctx.time_band != 'all'``
@@ -99,10 +100,10 @@ def _dated_agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     """
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param)
     parts: list[str] = [frag] if frag else []
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
+    frag, p, n = service_date_clause("date", ctx, n)
+    if frag != "TRUE":
+        parts.append(frag)
+        params.extend(p)
     if ctx.routes:
         parts.append(f"route_code = ANY(${n}::text[])")
         params.append(list(ctx.routes))

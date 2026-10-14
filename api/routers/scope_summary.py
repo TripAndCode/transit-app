@@ -13,11 +13,12 @@ import asyncpg
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_conn
+from api.deps import get_agency, get_agency_range_ctx, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
-from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.range import RangeCtx, ctx_payload
 from api.routers.reports import ReportCtx
 from api.scope_applied import scope_applied
+from pipeline.day_types import DayType
 from pipeline.reports.scope_summary import compute_scope_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["scope"])
@@ -61,6 +62,9 @@ class ScopeSummaryResponse(BaseModel):
     weekdays: list[ScopeWeekday]
     routes: list[ScopeRoute]
     tolerance: list[ScopeTolerance]
+    # The period's day-type buckets in display order (pipeline.day_types):
+    # weekday / saturday / sunday_holiday, or weekday / weekend_holiday.
+    day_types: list[DayType]
     ctx: ReportCtx
     scope_applied: dict[str, bool]
 
@@ -70,7 +74,7 @@ class ScopeSummaryResponse(BaseModel):
 async def scope_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
-    ctx: RangeCtx = Depends(get_range_ctx),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     early: int | None = Query(None, ge=0, le=3600, description="Early on-time tolerance in seconds."),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:

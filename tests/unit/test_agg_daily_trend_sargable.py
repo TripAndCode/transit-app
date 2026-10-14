@@ -4,7 +4,7 @@ index prefix serves the range scan. Asserted on rendered SQL; no database."""
 import inspect
 from datetime import date
 
-from api.range import RangeCtx, date_range_clause
+from api.range import RangeCtx, ServiceDates, date_range_clause
 from pipeline import analyze as analyze_mod
 from pipeline import dashboard_queries
 from pipeline.reports import filters, overview, rankings
@@ -26,7 +26,10 @@ def test_date_range_clause_keeps_the_column_uncast():
 
 
 def test_agg_filter_and_dist_filter_render_the_same_predicate_shape():
-    ctx = _ctx(dow="weekend", service="平日", routes=("R1",))
+    weekdays = ServiceDates(
+        service="平日", from_date=date(2026, 5, 13), to_date=date(2026, 6, 11), dates=(date(2026, 5, 13),)
+    )
+    ctx = _ctx(dow="weekend", service="平日", service_dates=weekdays, routes=("R1",))
     assert filters._agg_filter(ctx, 2) == filters._dist_filter(ctx, 2)
     frag, _, _ = filters._agg_filter(ctx, 2)
     assert "date::date" not in frag

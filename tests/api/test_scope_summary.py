@@ -134,12 +134,43 @@ async def test_tolerance_honours_an_early_bound(seeded):
 
 
 @pytest.mark.asyncio
-async def test_every_section_honours_the_timetable(seeded):
+async def test_every_section_honours_the_timetable_days(seeded):
+    """The 平日 filter keeps the dates the agency runs its weekday timetable
+    whatever service_type the rows carry; with no calendar loaded that is the
+    weekday rule, under which the public holidays 9/21-9/23 are 日祝."""
     conn, agency_id = seeded
-    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="土日祝")
+    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="")
     body = await compute_scope_summary(agency_id, _ctx(service="平日"), conn)
-    assert "R9" not in {r["route_code"] for r in body["routes"]}
-    assert {d["date"]: d for d in body["days"]}[date(2026, 9, 27)]["samples"] == 100
+    assert {r["route_code"] for r in body["routes"]} == {"R1"}
+    # 9/24 (Thu), 9/25 (Fri) and 9/28 (Mon) are the period's weekdays.
+    assert {w["dow"] for w in body["weekdays"]} == {"mon", "thu", "fri"}
+    days = {d["date"] for d in body["days"]}
+    assert date(2026, 9, 24) in days and date(2026, 9, 1) in days
+    assert not days & {date(2026, 9, 21), date(2026, 9, 26), date(2026, 9, 27)}
+    assert all(d.isoweekday() <= 5 for d in days)
+
+    weekend = await compute_scope_summary(agency_id, _ctx(service="土日祝"), conn)
+    assert {r["route_code"] for r in weekend["routes"]} == {"R1", "R2", "R9"}
+    assert {d["date"] for d in weekend["days"]} >= {date(2026, 9, 21), date(2026, 9, 26), date(2026, 9, 27)}
+
+
+@pytest.mark.asyncio
+async def test_day_types_are_the_buckets_the_calendar_splits_the_period_into(seeded):
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn)
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
+    for service_id, days in (("平日", "1111100"), ("土日祝", "0000011")):
+        await conn.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)",
+            agency_id,
+            service_id,
+            *(flag == "1" for flag in days),
+            date(2026, 4, 1),
+            date(2027, 3, 31),
+        )
+    body = await compute_scope_summary(agency_id, _ctx(), conn)
+    assert body["day_types"] == ["weekday", "weekend_holiday"]
 
 
 @pytest.mark.asyncio
@@ -153,6 +184,7 @@ async def test_an_agency_without_aggregates_answers_empty(aconn, aagency_id):
         "weekdays": [],
         "routes": [],
         "tolerance": [],
+        "day_types": ["weekday", "saturday", "sunday_holiday"],
     }
 
 
@@ -173,6 +205,20 @@ async def test_the_endpoint_answers_with_the_summary_and_its_scope(client, seede
     applied = body["scope_applied"]
     assert applied["from"] is True and applied["routes"] is True and applied["early"] is True
     assert applied["time_band"] is False and applied["hour"] is False and applied["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_resolves_the_service_filter_to_the_agencys_days(client, seeded):
+    conn, agency_id = seeded
+    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="")
+    resp = await client.get(
+        f"/api/{agency_id}/scope/summary", params={"from": "2026-09-20", "to": "2026-09-28", "service": "日祝"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert {r["route_code"] for r in body["routes"]} == {"R1", "R9"}
+    assert body["ctx"]["service"] == "日祝"
+    assert body["day_types"] == ["weekday", "saturday", "sunday_holiday"]
 
 
 @pytest.mark.asyncio

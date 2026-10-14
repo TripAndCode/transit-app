@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_ch, get_conn, get_locale
+from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
@@ -451,8 +451,8 @@ class WeatherDelayResponse(BaseModel):
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
-    ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> WeatherDelayResponse:
     """Average delay on observed-rainy service days vs non-rainy ones.
@@ -846,9 +846,9 @@ async def get_report(
         "reliable_min_samples times in the period.",
     ),
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
-    ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""

@@ -1294,8 +1294,8 @@ async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id, ch_client, ch_async_client):
-    """A service filter (the agg has no service dimension) routes peak-hour to
+async def test_peak_hour_falls_back_to_live_under_routes_filter(aconn, aagency_id, ch_client, ch_async_client):
+    """A routes filter (the agg has no route dimension) routes peak-hour to
     the live scan (ClickHouse), which still partitions weekday/weekend
     correctly."""
     weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
@@ -1326,8 +1326,8 @@ async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_
 
     from pipeline.reports import compute_overview_summary
 
-    # service != 'all' forces the live path (agg_hour_daily has no service column).
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), service="平日")
+    # A routes filter forces the live path (agg_hour_daily has no route column).
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), routes=("R_PW",))
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
     pk_wd = out["peak_hour_weekday"]
     pk_we = out["peak_hour_weekend"]
@@ -1336,6 +1336,33 @@ async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_
     assert pk_we["peak_hour"] == 17
     assert pk_wd["by_hour"][8] == pytest.approx(9.0, abs=0.1)
     assert pk_we["by_hour"][17] == pytest.approx(5.5, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_peak_hours_under_a_service_filter_read_its_dates_from_the_aggregate(aconn, aagency_id):
+    """A service filter is a set of dates, which agg_hour_daily applies
+    directly: 平日 keeps the weekday-timetable dates and drops the holiday
+    Monday 9/21, which 日祝 keeps. The undivided peak follows the same dates.
+    No calendar is loaded, so the weekday rule decides."""
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 9, 15), 8, 9.0, 10)  # Tuesday
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 9, 21), 12, 7.0, 10)  # 敬老の日, a Monday
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 9, 26), 17, 5.0, 10)  # Saturday
+    # agg_route_hour has no date, so a service-filtered peak must not read it.
+    await _seed_agg_route_hour(aconn, aagency_id, "R_X", "平日", "06:00", 20.0, 30)
+
+    from pipeline.reports import compute_overview_summary
+
+    window = {"from_date": date(2026, 9, 14), "to_date": date(2026, 9, 27)}
+    weekday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="平日"), aconn, "ja")
+    assert weekday["peak_hour"]["peak_hour"] == 8
+    assert weekday["peak_hour"]["by_hour"][12] is None
+    assert weekday["peak_hour_weekday"]["peak_hour"] == 8
+    assert weekday["peak_hour_weekend"] is None
+
+    holiday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="日祝"), aconn, "ja")
+    assert holiday["peak_hour"]["peak_hour"] == 12
+    assert holiday["peak_hour"]["by_hour"][8] is None
+    assert holiday["peak_hour_weekday"]["peak_hour"] == 12
 
 
 @pytest.mark.asyncio
@@ -2250,13 +2277,13 @@ async def test_compute_overview_summary_slow_path_without_ch_raises(aconn, aagen
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_by_dow_service_filtered_live_path_without_ch_raises(aconn, aagency_id):
-    """ctx.time_band == 'all' but a service filter is set, so agg_hour_daily
+async def test_peak_hour_by_dow_routes_filtered_live_path_without_ch_raises(aconn, aagency_id):
+    """ctx.time_band == 'all' but a routes filter is set, so agg_hour_daily
     can't serve it and no grain was prefetched — the third (live-scan)
     branch of _peak_hour_by_dow must guard on a missing ch too."""
     from pipeline.reports.overview import _peak_hour_by_dow
 
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), service="平日")
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), routes=("R1",))
     with pytest.raises(RuntimeError, match="ClickHouse client"):
         await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekday", ch=None, grain=None)
 
@@ -2296,11 +2323,11 @@ async def test_peak_hour_by_dow_live_scan_degrades_on_ch_failure(aconn, aagency_
     one field to None, exactly as `_peak_from_hour_rows` does for "no data"."""
     from pipeline.reports.overview import _peak_hour_by_dow
 
-    # time_band == 'all' but a service filter is set: agg_hour_daily can't
-    # serve it (aggregated across all services) and no grain was prefetched
+    # time_band == 'all' but a routes filter is set: agg_hour_daily can't
+    # serve it (aggregated across all routes) and no grain was prefetched
     # (nothing else in this request needs live `updates`), so this is the live
     # third branch.
-    ctx = RangeCtx(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30), service="平日")
+    ctx = RangeCtx(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30), routes=("R1",))
     failing = _FailingCh()
     assert await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekday", ch=failing, grain=None) is None
     assert await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekend", ch=failing, grain=None) is None
@@ -2312,7 +2339,7 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     """The whole /overview/summary payload must survive a ClickHouse hiccup in
     `_peak_hour_by_dow`'s live branch.
 
-    In this request shape (`time_band == 'all'` + a service filter) every other
+    In this request shape (`time_band == 'all'` + a routes filter) every other
     surface — headline, movers, concentration, top_delayed, peak_hour,
     service_split, sparkline — is served from Postgres `agg_*` tables, so
     letting the exception propagate would sink an otherwise complete response.
@@ -2332,7 +2359,7 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
 
     from pipeline.reports import compute_overview_summary
 
-    ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), service="平日")
+    ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
     failing = _FailingCh()
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=failing)
 

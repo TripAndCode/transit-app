@@ -38,7 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at
-from api.deps import get_agency, get_ch, get_conn
+from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit, user_key
 from api.range import (
     MAX_RANGE_DAYS,
@@ -47,7 +47,6 @@ from api.range import (
     build_agg_stop_filter,
     clamp_range_ctx,
     ctx_payload,
-    get_range_ctx,
     jst_today,
     parse_iso_date,
     time_band_clause_ch_for,
@@ -516,9 +515,9 @@ async def route_shape(
     request: Request,
     route: str = Query(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
-    ctx: RangeCtx = Depends(get_range_ctx),
 ) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
 
@@ -1314,8 +1313,8 @@ _HEATMAP_CLUSTER_PROJECTION_SQL = """
 async def delay_heatmap(
     request: Request,
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
-    ctx: RangeCtx = Depends(get_range_ctx),
 ) -> dict[str, Any]:
     """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band.
 
