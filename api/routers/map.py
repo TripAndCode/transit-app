@@ -54,8 +54,9 @@ from api.range import (
 from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from pipeline.cache import async_lru_cache
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
-from pipeline.day_types import load_day_types
+from pipeline.day_types import DayTypes, load_day_types
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
@@ -564,19 +565,19 @@ TODAY_BASELINE_LOOKBACK_DAYS = 56
 # class in the lookback instead of being left without one.
 MIN_SAME_CLASS_BASELINE_DAYS = 3
 
-# Each asked-for route's closed days in [$4, $5), split into the days of
-# today's class ($3) and the rest. A route's rows for one date (one per service
+# Every route's closed days in [$3, $4), split into the days of today's class
+# ($2) and the rest. A route's rows for one date (one per service
 # id it ran under, '' among them) count as one day. The histograms merge by
 # summing each bucket position in the same GROUP BY pass, so p90 comes from the
 # pooled distribution rather than from an average of per-day percentiles,
 # without unnesting every row's histogram on each poll of the endpoint.
 _HIST_BUCKET_SUMS = ", ".join(f"SUM(hist[{i}])" for i in range(1, N_BUCKETS + 1))
 _TODAY_BASELINE_SQL = f"""
-    SELECT route_code, date = ANY($3::date[]) AS same_class, COUNT(DISTINCT date) AS days,
+    SELECT route_code, date = ANY($2::date[]) AS same_class, COUNT(DISTINCT date) AS days,
            SUM(samples)::bigint AS samples, SUM(sum_delay_sec)::bigint AS sum_delay_sec,
            SUM(late5_count)::bigint AS late5_count, ARRAY[{_HIST_BUCKET_SUMS}]::bigint[] AS hist
     FROM agg_route_daily_dist
-    WHERE agency_id = $1 AND date >= $4 AND date < $5 AND route_code = ANY($2::text[])
+    WHERE agency_id = $1 AND date >= $3 AND date < $4
     GROUP BY route_code, same_class
 """
 
@@ -612,21 +613,41 @@ def pool_today_baselines(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[st
 
 
 async def fetch_today_baselines(
-    conn: asyncpg.Connection, agency_id: int, route_codes: Sequence[str], today: CalendarDate
+    conn: asyncpg.Connection, agency_id: int, route_codes: Iterable[str], today: CalendarDate
 ) -> dict[str, dict[str, Any]]:
     """The routes' baselines for ``today``, from their closed days in the lookback.
 
     Today's timetable class, and the class of every lookback date, come from
     the agency's own calendar (:func:`pipeline.day_types.load_day_types`), the
-    same reading the service filter uses. So a Saturday is judged against past
-    Saturdays, and a public holiday the calendar runs on the Sunday timetable
-    against past Sundays and holidays.
+    same reading the service filter uses. A date is pooled when the calendar
+    files it under today's class: on a feed split 平日 / 土曜 / 日祝, a Saturday
+    pools past Saturdays, and a public holiday run on the Sunday timetable
+    pools past Sundays and holidays; on a feed split 平日 / 土日祝, a 土日祝 day
+    pools past Saturdays, Sundays and holidays together.
     """
     lookback_from = today - timedelta(days=TODAY_BASELINE_LOOKBACK_DAYS)
     day_types = await load_day_types(conn, agency_id, lookback_from, today)
+    pooled = await _closed_day_baselines(conn, agency_id, today, day_types)
+    return {code: pooled[code] for code in route_codes if code in pooled}
+
+
+# Closed days change only when analyze rebuilds one, while every mounted
+# consumer polls the endpoint, so one read pools every route the agency ran in
+# the lookback and each poll picks today's routes out of it. The key leaves
+# out the route list, which arrives unordered and grows as routes start
+# reporting. It carries the day types instead: a timetable load invalidates
+# them, and the next request's key differs if the load changed the class of
+# any lookback date. The TTL, the report caches', bounds how long a newly
+# analyzed day takes to reach the baseline.
+@async_lru_cache(maxsize=64, ttl_seconds=300)
+async def _closed_day_baselines(
+    conn: asyncpg.Connection, agency_id: int, today: CalendarDate, day_types: DayTypes
+) -> dict[str, dict[str, Any]]:
+    """Every route's baseline for ``today``. Callers share the result and must not modify it."""
+    lookback_from = today - timedelta(days=TODAY_BASELINE_LOOKBACK_DAYS)
     today_class = day_types.of(today)
     same_class = [d for d, cls in day_types.by_date.items() if cls == today_class and d < today]
-    rows = await conn.fetch(_TODAY_BASELINE_SQL, agency_id, list(route_codes), same_class, lookback_from, today)
+    rows = await conn.fetch(_TODAY_BASELINE_SQL, agency_id, same_class, lookback_from, today)
     return pool_today_baselines(rows)
 
 

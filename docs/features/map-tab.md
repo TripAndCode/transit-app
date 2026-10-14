@@ -123,13 +123,18 @@ baseline is that route's closed days of today's timetable class over the
 previous eight weeks (`TODAY_BASELINE_LOOKBACK_DAYS` in `api/routers/map.py`).
 The class of today and of each past date comes from the agency's calendar
 through `pipeline.day_types.load_day_types`, as the service filter reads it.
-So a Saturday is compared with past Saturdays, and a holiday the calendar runs
-on the Sunday timetable with past Sundays and holidays. The baseline mean is
+On a feed split 平日 / 土曜 / 日祝, a Saturday is compared with past Saturdays,
+and a holiday the calendar runs on the Sunday timetable with past Sundays and
+holidays. On a feed split 平日 / 土日祝, a 土日祝 day is compared with past
+Saturdays, Sundays and holidays together. The baseline mean is
 summed delay over summed samples, p90 is interpolated from the merged delay
 histograms, and `late5_pct` is the share of the same samples more than five
 minutes late; `baseline_samples` counts them. A route with fewer than
 `MIN_SAME_CLASS_BASELINE_DAYS` such days is compared with all of its days in
 the window instead. The response does not say which of the two was used.
+Every route's baseline for the day is read once and kept for five minutes,
+the report caches' lifetime. A timetable load that changes the class of any
+date in the window takes effect on the next request.
 
 Observations split across two ClickHouse tables: `updates_live` holds today
 and any later day, `updates` holds every closed day.

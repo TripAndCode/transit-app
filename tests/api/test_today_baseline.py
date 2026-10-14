@@ -8,6 +8,7 @@ import pytest
 
 from api.routers.map import MIN_SAME_CLASS_BASELINE_DAYS, TODAY_BASELINE_LOOKBACK_DAYS, fetch_today_baselines
 from pipeline.cache import clear_all
+from pipeline.day_types import invalidate_day_types
 from pipeline.histogram import LEGACY_SEVERE_LATE_TOLERANCE_SEC, percentile_from_hist
 from tests.fixtures.route_dist import hist_of, seed_route_dist_day
 
@@ -58,6 +59,13 @@ async def _seed_calendar(conn, agency_id, exceptions=()):
             date(2026, 4, 1),
             date(2027, 3, 31),
         )
+    await _seed_exceptions(conn, agency_id, exceptions)
+    # The calendar read is cached; rows written behind the loader's back show once it is cleared.
+    clear_all()
+
+
+async def _seed_exceptions(conn, agency_id, exceptions):
+    """``calendar_dates.txt`` rows as ``(service_id, date, exception_type)``."""
     for service_id, day, exception_type in exceptions:
         await conn.execute(
             "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1, $2, $3, $4)",
@@ -66,8 +74,23 @@ async def _seed_calendar(conn, agency_id, exceptions=()):
             day.strftime("%Y%m%d"),
             exception_type,
         )
-    # The calendar read is cached; rows written behind the loader's back show once it is cleared.
-    clear_all()
+
+
+class Connection:
+    """Passes reads through to ``conn``, counting those of the baseline aggregate.
+
+    Named like asyncpg's connection, so the caches key it as any connection,
+    not as this one object.
+    """
+
+    def __init__(self, conn, reads: list[str]):
+        self._conn = conn
+        self._reads = reads
+
+    async def fetch(self, sql, *args):
+        if "agg_route_daily_dist" in sql:
+            self._reads.append(sql)
+        return await self._conn.fetch(sql, *args)
 
 
 @pytest.mark.asyncio
@@ -174,3 +197,40 @@ async def test_a_route_without_history_or_not_asked_for_has_no_baseline(aconn, a
         await seed_route_dist_day(aconn, aagency_id, "OTHER", day, [100])
 
     assert await fetch_today_baselines(aconn, aagency_id, ["R1"], SATURDAY) == {}
+
+
+@pytest.mark.asyncio
+async def test_one_baseline_read_serves_every_poll_of_the_day(aconn, aagency_id):
+    saturdays = _weekly_before(SATURDAY, 6, 3)
+    for day in saturdays:
+        await seed_route_dist_day(aconn, aagency_id, "R1", day, [100])
+        await seed_route_dist_day(aconn, aagency_id, "R2", day, [200])
+    reads: list[str] = []
+
+    morning = await fetch_today_baselines(Connection(aconn, reads), aagency_id, ["R1"], SATURDAY)
+    # A later poll, on another connection: R2 has reported since, and the list comes in another order.
+    later = await fetch_today_baselines(Connection(aconn, reads), aagency_id, ["R2", "R1"], SATURDAY)
+
+    assert len(reads) == 1
+    assert morning == {"R1": _expected([100] * len(saturdays))}
+    assert later == {"R1": _expected([100] * len(saturdays)), "R2": _expected([200] * len(saturdays))}
+
+
+@pytest.mark.asyncio
+async def test_a_timetable_reload_that_refiles_today_is_read_again(aconn, aagency_id):
+    await _seed_calendar(aconn, aagency_id)
+    for day in _weekdays_before(HOLIDAY_MONDAY, 5):
+        await seed_route_dist_day(aconn, aagency_id, "R1", day, [10, 20])
+    sundays = _weekly_before(HOLIDAY_MONDAY, 7, 4)
+    for day in sundays:
+        await seed_route_dist_day(aconn, aagency_id, "R1", day, [400, 500])
+    before = await fetch_today_baselines(aconn, aagency_id, ["R1"], HOLIDAY_MONDAY)
+
+    # The reloaded timetable runs the holiday on the Sunday timetable; a load
+    # invalidates the day types, and nothing else.
+    await _seed_exceptions(aconn, aagency_id, [("SUNDAY", HOLIDAY_MONDAY, 1), ("WEEKDAY", HOLIDAY_MONDAY, 2)])
+    invalidate_day_types()
+    after = await fetch_today_baselines(aconn, aagency_id, ["R1"], HOLIDAY_MONDAY)
+
+    assert before == {"R1": _expected([10, 20] * 5)}
+    assert after == {"R1": _expected([400, 500] * len(sundays))}
