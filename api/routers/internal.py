@@ -466,8 +466,9 @@ def _refresh_static_step(
     ``refresh_static_recorded`` is the command line's own reload and record,
     writing into the same directory, so the button and the command compare
     against the same change manifest and cannot drift apart. For an agency
-    with no timetable loaded it fetches past that manifest, so a chain does
-    not go on to ingest against an empty schedule because of a stale one.
+    with no timetable loaded it fetches past that manifest, and a reload that
+    still loads nothing for it fails, so a chain never goes on to ingest
+    against an empty schedule.
     """
     import psycopg2
 

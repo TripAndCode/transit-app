@@ -32,6 +32,11 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool 
     no timetable loaded, so a stale manifest cannot keep an agency without
     one. Forcing is also how a column the loader derives reaches a timetable
     whose source has not changed.
+
+    For an agency with no timetable loaded, "nothing newer" leaves nothing to
+    run against, so a reload that loads no zip for it -- the source sent
+    none, or the agency has no source configured -- raises StaticFetchError
+    rather than returning None.
     """
     from pipeline.db import _static_loaded
 
@@ -45,16 +50,20 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool 
         logger.warning(f"[static_fetcher] no agency {agency_id}")
         return None
     static_url, strategy_name = row
+    has_timetable = _static_loaded(conn, agency_id)
     if not static_url or not strategy_name:
+        if not has_timetable:
+            raise StaticFetchError("this agency has no timetable URL or fetch method configured")
         logger.warning(f"[static_fetcher] agency={agency_id} not configured for static refresh")
         return None
 
     strategy = get_static_strategy(strategy_name)
-    if not force and not _static_loaded(conn, agency_id):
+    if not has_timetable and not force:
         logger.info(f"[static_fetcher] agency={agency_id} has no timetable loaded; fetching past the manifest")
-        force = True
-    zip_path = strategy.fetch(agency_id, static_url, dest_dir, force=force)
+    zip_path = strategy.fetch(agency_id, static_url, dest_dir, force=force or not has_timetable)
     if zip_path is None:
+        if not has_timetable:
+            raise StaticFetchError("the source sent no timetable, though this agency has none loaded")
         return None
 
     load_static(str(zip_path), agency_id, conn)

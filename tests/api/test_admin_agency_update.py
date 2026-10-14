@@ -460,6 +460,41 @@ def test_an_agency_with_no_timetable_reloads_the_zip_its_manifest_calls_unchange
     assert (umbrella[2], step[2]) == ("unchanged", "unchanged")
 
 
+@pytest.mark.parametrize(
+    ("source", "reason"),
+    [
+        ("answers 304", "the source sent no timetable, though this agency has none loaded"),
+        ("cleared", "this agency has no timetable URL or fetch method configured"),
+    ],
+)
+def test_a_reload_that_leaves_an_agency_with_no_timetable_fails_and_stops_the_chain(
+    runner_env, pg_conn, source, reason
+):
+    """A source that sends nothing even when asked without validators, or one
+    cleared after the press was accepted, leaves the agency with no timetable;
+    the chain must not go on to ingest against an empty schedule."""
+    from api.routers.internal import _run_agency_update
+
+    if source == "cleared":
+        with pg_conn.cursor() as cur:
+            cur.execute("UPDATE agencies SET static_url = NULL WHERE agency_id = %s", (runner_env["agency_id"],))
+        pg_conn.commit()
+    run_id = runner_env["open_run"]("update")
+    with _upstream_answers(304), patch("api.routers.internal._ingest_and_analyze_sweep") as sweep:
+        _run_agency_update(
+            agency_id=runner_env["agency_id"],
+            requested_by=runner_env["user_id"],
+            run_id=run_id,
+            then_ingest_and_analyze=True,
+        )
+
+    sweep.assert_not_called()
+    (umbrella, step) = _rows(pg_conn, run_id)
+    assert (umbrella[2], step[1], step[2]) == ("error", "static", "error")
+    assert reason in step[4]
+    assert reason in umbrella[4]
+
+
 def test_a_loaded_timetable_records_its_route_count_and_hands_over_to_the_sweep(runner_env, pg_conn):
     from api.routers.internal import SweepOutcome, _run_agency_update
 

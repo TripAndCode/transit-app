@@ -89,6 +89,9 @@ the ETag/Last-Modified a conditional GET sends, and the loaded zip's sha256).
 That file can outlive the timetable tables, after a database restore or once
 an agency's static rows are cleared, so a reload for an agency with no
 timetable loaded sets the manifest aside and loads whatever the source serves.
+If that still loads nothing, because the source sent no zip or the agency's
+static URL or strategy was cleared after the press, the step closes `error`
+rather than `unchanged`, and a chained update stops there.
 For an agency that does have one, `gtfs_pipeline.py refresh-static --force`
 (with `--agency-id <id>` for one agency, or without it for every configured
 one) reloads it the same way. That is how a column the loader derives, such

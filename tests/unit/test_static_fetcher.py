@@ -714,3 +714,60 @@ def test_refresh_static_forces_the_fetch_when_asked_or_when_no_timetable_is_load
     assert strategy.forced == [loads]
     assert result == (strategy.zip_path if loads else None)
     assert loaded == ([str(strategy.zip_path)] if loads else [])
+
+
+class _SourceSendsNothing:
+    """A source that answers 304 even to a request carrying no validators."""
+
+    def __init__(self):
+        self.forced: list[bool] = []
+
+    def fetch(self, agency_id, url, dest_dir, *, force=False):
+        self.forced.append(force)
+        return None
+
+    def record_loaded(self, agency_id, dest_dir, zip_path):
+        raise AssertionError("nothing loaded, so nothing is recorded")
+
+
+def _agency_conn(static_url, static_strategy):
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (static_url, static_strategy)
+    return conn
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_refresh_static_fails_when_an_agency_with_no_timetable_still_loads_none(tmp_path, monkeypatch, force):
+    """ "Nothing newer" for an agency with no timetable leaves it with nothing
+    to run against, which the run card has to show as a failure."""
+    from pipeline import db, static_fetcher
+
+    strategy = _SourceSendsNothing()
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: False)
+    monkeypatch.setattr(static_fetcher, "load_static", MagicMock(side_effect=AssertionError("nothing to load")))
+
+    with pytest.raises(StaticFetchError) as exc:
+        static_fetcher.refresh_static(8, _agency_conn("https://8.8.8.8/x.zip", "direct_url"), tmp_path, force=force)
+    assert strategy.forced == [True]
+    assert exc.value.reason == "the source sent no timetable, though this agency has none loaded"
+
+
+@pytest.mark.parametrize(("static_url", "static_strategy"), [(None, "direct_url"), ("https://8.8.8.8/x.zip", None)])
+def test_refresh_static_of_an_agency_with_no_source_fails_only_without_a_timetable(
+    tmp_path, monkeypatch, static_url, static_strategy
+):
+    """An agency whose source was cleared keeps the timetable it has, so a
+    reload is a no-op; with none loaded it is a failure, not "unchanged"."""
+    from pipeline import db, static_fetcher
+
+    has_timetable = {"value": True}
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable["value"])
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", MagicMock(side_effect=AssertionError("no fetch")))
+
+    assert static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path) is None
+
+    has_timetable["value"] = False
+    with pytest.raises(StaticFetchError) as exc:
+        static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path)
+    assert exc.value.reason == "this agency has no timetable URL or fetch method configured"
