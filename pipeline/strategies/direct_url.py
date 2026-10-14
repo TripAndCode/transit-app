@@ -20,9 +20,9 @@ import contextlib
 import hashlib
 import json
 import logging
-import os
 import pathlib
-import tempfile
+import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -81,6 +81,19 @@ def _try_cond_get(
         return None, e
 
 
+#: A temp file older than this is a killed run's: a fetch is bounded by the
+#: URL guard's timeout and byte cap, so a live one never lasts this long.
+STALE_TEMP_AGE_S = 24 * 60 * 60
+
+
+def _sweep_stale_temps(agency_dir: pathlib.Path) -> None:
+    cutoff = time.time() - STALE_TEMP_AGE_S
+    for path in agency_dir.glob("_tmp_*.zip"):
+        with contextlib.suppress(OSError):
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+
+
 @contextlib.contextmanager
 def _run_temps(agency_dir: pathlib.Path) -> Iterator[tuple[pathlib.Path, pathlib.Path]]:
     """Temp files for this run's current and latest downloads, removed when it ends.
@@ -88,15 +101,16 @@ def _run_temps(agency_dir: pathlib.Path) -> Iterator[tuple[pathlib.Path, pathlib
     Unique to the run: two fetches of one agency that nothing serializes (two
     command-line runs, or one beside an admin press) share the agency
     directory, and neither may read, move or delete the other's download. A
-    temp file that a run killed mid-fetch leaves behind is therefore never
-    taken for a fresh download either, but nothing removes it.
+    temp file a killed run left behind is never taken for a fresh download,
+    and is swept once it is older than any fetch can run.
     """
+    _sweep_stale_temps(agency_dir)
     made: list[pathlib.Path] = []
     try:
         for variant in ("current", "latest"):
-            fd, name = tempfile.mkstemp(prefix=f"_tmp_{variant}_", suffix=".zip", dir=agency_dir)
-            os.close(fd)
-            made.append(pathlib.Path(name))
+            path = agency_dir / f"_tmp_{variant}_{secrets.token_hex(8)}.zip"
+            path.touch(exist_ok=False)
+            made.append(path)
         yield made[0], made[1]
     finally:
         for path in made:

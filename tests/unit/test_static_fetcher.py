@@ -11,6 +11,9 @@ style) so validate_feed_url's DNS resolution never leaves the sandbox.
 
 import hashlib
 import json
+import os
+import stat
+import time
 import traceback
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
@@ -276,9 +279,9 @@ _DEAD_RUN_TEMPS = ("_tmp_current.zip", "_tmp_latest.zip", "_tmp_current_deadrun1
 
 @pytest.mark.parametrize("outcome", ["nothing newer", "new zip", "failed"])
 def test_direct_url_never_touches_a_temp_file_it_did_not_create(tmp_path, outcome):
-    """A temp file another run left, dead or still downloading, is neither
-    read as this run's download nor removed; this run's own are gone when
-    it ends, however it ends."""
+    """A recent temp file another run left, dead or still downloading, is
+    neither read as this run's download nor removed; this run's own are gone
+    when it ends, however it ends."""
     _seed_direct_url_manifest(tmp_path)
     agency_dir = tmp_path / "8"
     for name in _DEAD_RUN_TEMPS:
@@ -297,6 +300,34 @@ def test_direct_url_never_touches_a_temp_file_it_did_not_create(tmp_path, outcom
             result = direct_url.fetch(8, _CURRENT, tmp_path)
             assert (result.read_bytes() if result else None) == (body if outcome == "new zip" else None)
     assert sorted(p.name for p in agency_dir.glob("_tmp_*")) == sorted(_DEAD_RUN_TEMPS)
+
+
+def test_direct_url_sweeps_a_temp_file_older_than_any_fetch(tmp_path):
+    """A temp file older than any fetch can run is a killed run's, and is
+    removed; a fresh one may be a live run's, and stays."""
+    _seed_direct_url_manifest(tmp_path)
+    agency_dir = tmp_path / "8"
+    stale, fresh = agency_dir / "_tmp_current_killed.zip", agency_dir / "_tmp_latest_live.zip"
+    for path in (stale, fresh):
+        path.write_bytes(b"PK\x03\x04half-written")
+    old = time.time() - direct_url.STALE_TEMP_AGE_S - 60
+    os.utime(stale, (old, old))
+    with patch.object(_opener, "open", side_effect=[_http_error(304), _http_error(304)]):
+        assert direct_url.fetch(8, _CURRENT, tmp_path) is None
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_direct_url_persisted_zip_is_readable_like_any_other_file(tmp_path):
+    """The persisted zip gets the mode an ordinary write gives it, not the
+    owner-only mode of the temp file it was downloaded into."""
+    _seed_direct_url_manifest(tmp_path)
+    with patch.object(_opener, "open", side_effect=[_mock_response(b"PK\x03\x04new"), _http_error(304)]):
+        result = direct_url.fetch(8, _CURRENT, tmp_path)
+    umask = os.umask(0)
+    os.umask(umask)
+    assert result is not None
+    assert stat.S_IMODE(result.stat().st_mode) == 0o666 & ~umask
 
 
 def test_direct_url_a_fetch_running_beside_this_one_does_not_take_its_download(tmp_path):
