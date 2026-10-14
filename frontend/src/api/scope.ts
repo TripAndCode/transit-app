@@ -45,7 +45,7 @@ const MAX_STOP_ID_LEN = 128;
 const MAX_TOLERANCE_SEC = 3600;
 
 /** Whether `value` is one of the service filter's values. */
-export function isServiceFilter(value: unknown): value is ServiceFilter {
+function isServiceFilter(value: unknown): value is ServiceFilter {
   return typeof value === "string" && SERVICES.includes(value);
 }
 

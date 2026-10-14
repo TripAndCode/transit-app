@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -374,31 +374,25 @@ describe("AnalysisTab dwell_run route cap", () => {
     );
   }
 
-  it("says under the dwell and running-time table what its service column means", () => {
+  it("lists dwell and running times one row per route, with no service column or note", () => {
+    const route = (route_code: string) => ({
+      route_code,
+      // The active service filter, the same on every row.
+      service_type: "平日",
+      dwell_samples: 1,
+      dwell_avg_sec: 20,
+      dwell_p50_sec: 18,
+      dwell_p90_sec: 40,
+      run_samples: 1,
+      run_avg_sec: 90,
+      run_p50_sec: 85,
+      run_p90_sec: 130,
+    });
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
       data: {
         ...emptyReport("dwell_run"),
-        rows: [
-          {
-            available: true,
-            time_band_supported: true,
-            routes: [
-              {
-                route_code: "R1",
-                service_type: "平日",
-                dwell_samples: 1,
-                dwell_avg_sec: 20,
-                dwell_p50_sec: 18,
-                dwell_p90_sec: 40,
-                run_samples: 1,
-                run_avg_sec: 90,
-                run_p50_sec: 85,
-                run_p90_sec: 130,
-              },
-            ],
-          },
-        ],
+        rows: [{ available: true, time_band_supported: true, routes: [route("R1"), route("R2")] }],
       },
       isPending: false,
       error: null,
@@ -407,13 +401,17 @@ describe("AnalysisTab dwell_run route cap", () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
     vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
     renderWithProviders(
-      <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07"]}>
+      <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&service=平日"]}>
         <Routes>
           <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByText(/^Route R\d$/)).toHaveLength(2);
+    expect(within(table).queryByRole("columnheader", { name: "Service" })).toBeNull();
+    expect(within(table).queryByText("Weekday")).toBeNull();
+    expect(screen.queryByText(/Service: the timetable the trip ran on/)).toBeNull();
   });
 
   it("keeps a raised cap across a refetch of the same report and re-caps when the agency changes", async () => {

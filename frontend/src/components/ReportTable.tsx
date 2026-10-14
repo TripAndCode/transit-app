@@ -55,10 +55,13 @@ type Schema = {
 // scrolls sideways, which only works for a first column.
 const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", route: true };
 
+// The per-route reports leave out row index 1, their service slot: a row is
+// one route over all its observations, and the slot only repeats the active
+// service filter, which the scope already names.
+
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left", service: true },
   { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 3, labelKey: "reports.col.median", align: "right", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.p90", align: "right", unit: "min", format: fmtMinutes },
@@ -70,7 +73,6 @@ const RANKING_COLS: Schema[] = [
 // not repeated as a column.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left", service: true },
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
@@ -80,7 +82,6 @@ const SCHEMAS: Record<string, Schema[]> = {
   ranking_best: RANKING_COLS,
   on_time: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left", service: true },
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -91,7 +92,6 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   worst_5min: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left", service: true },
     { index: 2, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -184,7 +184,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
   const { search } = useLocation();
   const schema = SCHEMAS[reportType];
   // The visible row last clicked to travel; by row, not route, since a route
-  // listed once per service would otherwise name two.
+  // can fill several rows (a delay certificate lists each departure).
   const [travelling, setTravelling] = useState<number | null>(null);
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
