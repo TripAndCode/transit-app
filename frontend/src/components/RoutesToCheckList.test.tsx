@@ -54,7 +54,7 @@ describe("RoutesToCheckList", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
-    expect(headers).toEqual(["2 routes averaging more than 5 min late", "1 route averaging 1.5–3 min late"]);
+    expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);
   });
 
   // The list holds the worst five routes only, so any band can hold fewer
@@ -70,7 +70,7 @@ describe("RoutesToCheckList", () => {
     });
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     // Mild has routes but none listed, so it gets no header at all.
-    expect(headers).toEqual(["3 routes averaging more than 5 min late", "14 routes averaging 3–5 min late (top 2 shown)"]);
+    expect(headers).toEqual(["3 routes averaging 5 min or more late", "14 routes averaging 3–5 min late (top 2 shown)"]);
     expect(document.querySelectorAll(".ov-check-row")).toHaveLength(5);
   });
 
@@ -81,7 +81,7 @@ describe("RoutesToCheckList", () => {
       mild: { count: 40, threshold_min: 1.5 },
     });
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
-    expect(headers).toEqual(["12 routes averaging more than 5 min late (top 5 shown)"]);
+    expect(headers).toEqual(["12 routes averaging 5 min or more late (top 5 shown)"]);
   });
 
   it("marks a truncated mild band the same way", () => {
@@ -92,7 +92,7 @@ describe("RoutesToCheckList", () => {
     });
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual([
-      "1 route averaging more than 5 min late",
+      "1 route averaging 5 min or more late",
       "1 route averaging 3–5 min late",
       "9 routes averaging 1.5–3 min late (top 3 shown)",
     ]);

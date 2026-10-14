@@ -179,7 +179,7 @@ describe("OverviewHeroRow", () => {
     mockHooks(38, 0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });
-    const row = screen.getByRole("button", { name: /Averaging over 5 min late/ });
+    const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
     expect(row).toHaveTextContent("3/ 38 routes");
     await userEvent.click(row);
     expect(onOpenFact).toHaveBeenCalledWith("late_routes");
@@ -190,13 +190,13 @@ describe("OverviewHeroRow", () => {
     const { container } = renderHero();
     const warm = container.querySelectorAll(".ov-hero-fact--attn");
     expect(warm).toHaveLength(1);
-    expect(warm[0]).toHaveAccessibleName(/Averaging over 5 min late/);
+    expect(warm[0]).toHaveAccessibleName(/Averaging 5 min or more late/);
   });
 
   it("keeps the late-route count neutral when no route is in the top band", () => {
     mockHooks(38, 0.1);
     const { container } = renderHero({ severeCount: 0 });
-    expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toHaveTextContent("0/ 38 routes");
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("0/ 38 routes");
     expect(container.querySelector(".ov-hero-fact--attn")).toBeNull();
   });
 
@@ -205,14 +205,14 @@ describe("OverviewHeroRow", () => {
   it("prints a count past the five routes the list holds", () => {
     mockHooks(38, 0.1);
     renderHero({ severeCount: 12 });
-    expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toHaveTextContent("12/ 38 routes");
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");
   });
 
   it("drops the total, not the count, while the route list is unknown", () => {
     mockHooks(38, 0.1);
     vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: undefined, isPending: true } as never);
     renderHero();
-    const row = screen.getByRole("button", { name: /Averaging over 5 min late/ });
+    const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
     expect(row).toHaveTextContent("3routes");
     expect(row).not.toHaveTextContent("/");
   });
@@ -222,7 +222,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ peakHour: null });
     expect(screen.queryByRole("button", { name: /Heaviest hour/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Share of delay/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
 
   it("omits the concentration row without top routes, keeping the others", () => {
@@ -230,7 +230,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ concentration: emptyConcentration });
     expect(screen.queryByRole("button", { name: /Share of delay/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Heaviest hour/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Averaging over 5 min late/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
 
   it("says how long a quiet feed has been quiet, by the rule Live uses", () => {

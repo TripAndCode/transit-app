@@ -185,7 +185,7 @@ describe("OverviewTab", () => {
         // delayed_count counts a different, lower threshold; the hero must not read it.
         top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands },
       });
-    const lateRow = () => screen.getByRole("button", { name: /Averaging over 5 min late/ });
+    const lateRow = () => screen.getByRole("button", { name: /Averaging 5 min or more late/ });
 
     it("opens the peak-hour card's modal from the heaviest-hour row", async () => {
       renderOverview(withFacts());
@@ -204,7 +204,7 @@ describe("OverviewTab", () => {
     // delayed_count.
     it("agrees with the routes-to-check list's top-band header", () => {
       renderOverview(withFacts());
-      expect(screen.getByText("2 routes averaging more than 5 min late")).toBeInTheDocument();
+      expect(screen.getByText("2 routes averaging 5 min or more late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("2")).toBeInTheDocument();
       expect(lateRow()).toHaveClass("ov-hero-fact--attn");
     });
@@ -212,7 +212,7 @@ describe("OverviewTab", () => {
     it("agrees with that header past the five routes the list holds", () => {
       const worst = [delayed("R1", 9.1), delayed("R2", 8.4), delayed("R3", 7.7), delayed("R4", 6.2), delayed("R5", 5.3)];
       renderOverview(withFacts(worst, bandCounts(12, 3, 0)));
-      expect(screen.getByText("12 routes averaging more than 5 min late (top 5 shown)")).toBeInTheDocument();
+      expect(screen.getByText("12 routes averaging 5 min or more late (top 5 shown)")).toBeInTheDocument();
       expect(within(lateRow()).getByText("12")).toBeInTheDocument();
     });
 
