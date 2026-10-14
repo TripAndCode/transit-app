@@ -152,6 +152,54 @@ describe("AgencyRunCard", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("shows a timetable check that found nothing newer as done, saying so", () => {
+    card(
+      run({
+        ...DONE,
+        steps: [
+          step({ step: "static", status: "unchanged", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:00:03Z" }),
+          ...DONE.steps.slice(1),
+        ],
+      }),
+    );
+    expect(stepRows()).toEqual(["done", "done", "done"]);
+    expect(screen.getByText("No newer timetable found · 3 s")).toBeTruthy();
+  });
+
+  it("says the later steps did not run when the run stopped at the failure", () => {
+    card(
+      run({
+        kind: "update",
+        status: "error",
+        finished_at: "2026-10-13T05:02:00Z",
+        steps: [
+          step({ step: "static", status: "ok", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:00:40Z" }),
+          step({ step: "ingest", status: "error", started_at: "2026-10-13T05:00:40Z", finished_at: "2026-10-13T05:02:00Z", error: "RuntimeError: feed down" }),
+          step({ step: "analyze", status: "not_run" }),
+        ],
+      }),
+    );
+    expect(screen.getByText(/the steps after it did not run/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit URL" })).toBeNull();
+  });
+
+  it("says the run went on when a re-aggregation kept going past a failed ingest", () => {
+    card(
+      run({
+        kind: "ingest",
+        status: "error",
+        finished_at: "2026-10-13T05:03:00Z",
+        steps: [
+          step({ step: "ingest", status: "error", started_at: "2026-10-13T05:00:00Z", finished_at: "2026-10-13T05:01:00Z", error: "RuntimeError: feed down" }),
+          step({ step: "analyze", status: "ok", started_at: "2026-10-13T05:01:00Z", finished_at: "2026-10-13T05:03:00Z" }),
+        ],
+      }),
+    );
+    expect(stepRows()).toEqual(["fail", "done"]);
+    expect(screen.getByText(/still went on to the steps after it/)).toBeTruthy();
+    expect(screen.queryByText(/did not run/)).toBeNull();
+  });
+
   it("explains a run another job turned away, without blaming the timetable URL", () => {
     card(
       run({
@@ -164,7 +212,7 @@ describe("AgencyRunCard", () => {
         ],
       }),
     );
-    expect(screen.getByText(/Another run was working on this agency/)).toBeTruthy();
+    expect(screen.getByText(/usually the scheduled one/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Edit URL" })).toBeNull();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });

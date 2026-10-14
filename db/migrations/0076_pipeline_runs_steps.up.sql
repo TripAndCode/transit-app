@@ -7,12 +7,20 @@
 -- `update` is the umbrella kind of the agencies page's chained update
 -- (timetable reload, then ingest, then analyze). Its steps keep their own
 -- kinds, so the board still draws each one in its usual lane.
+--
+-- `unchanged` closes a job that ran and found nothing newer to do -- a
+-- timetable check that loaded no zip. It is kept apart from `ok` so "last
+-- loaded" can mean a load, not the last time someone looked.
 ALTER TABLE pipeline_runs
     ADD COLUMN IF NOT EXISTS parent_run_id BIGINT REFERENCES pipeline_runs(run_id) ON DELETE CASCADE;
 
 ALTER TABLE pipeline_runs DROP CONSTRAINT IF EXISTS pipeline_runs_kind_check;
 ALTER TABLE pipeline_runs ADD CONSTRAINT pipeline_runs_kind_check
     CHECK (kind IN ('ingest', 'promote', 'analyze', 'weather', 'static', 'update'));
+
+ALTER TABLE pipeline_runs DROP CONSTRAINT IF EXISTS pipeline_runs_status_check;
+ALTER TABLE pipeline_runs ADD CONSTRAINT pipeline_runs_status_check
+    CHECK (status IN ('running', 'ok', 'skipped', 'error', 'unchanged'));
 
 -- A run's steps, looked up by their umbrella.
 CREATE INDEX IF NOT EXISTS pipeline_runs_parent_run_id_idx

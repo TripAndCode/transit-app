@@ -134,7 +134,6 @@ AGENCIES_HEALTH_SQL = """
         GROUP BY agency_id
     )
     SELECT a.agency_id, a.agency_name, a.feed_url, a.ingest_strategy, a.deleted_at,
-           a.static_url, a.static_strategy,
            m.analyzed_at, m.max_updates_captured_at, g.latest_data_date
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
@@ -459,11 +458,12 @@ def build_agency_health(
     newly onboarded agency has no probes, no clamp history and no static
     version, and must appear in the table saying so.
 
-    ``static_loaded_on`` is the JST day of the agency's last successful
-    timetable load (``static_loads``), falling back to the fetch day in the
-    loaded zip's name for a timetable loaded before loads were recorded.
-    ``static_version.loaded_at`` cannot stand in for it: analyze restamps
-    that on every run.
+    ``static_loaded_on`` is the JST day of the agency's last timetable load
+    that loaded a zip (``static_loads``: ``ok`` static runs; a check that
+    found nothing newer closes ``unchanged`` and does not count), falling
+    back to the fetch day in the loaded zip's name for a timetable loaded
+    before loads were recorded. ``static_version.loaded_at`` cannot stand in
+    for it: analyze restamps that on every run.
     """
     probes_by_agency = _group_by_agency(probes)
     clamps_by_agency = _group_by_agency(clamps)
@@ -502,7 +502,6 @@ def build_agency_health(
                     if version is None
                     else {"version": version["version"], "loaded_at": _iso(version.get("loaded_at"))}
                 ),
-                "static_configured": bool(header.get("static_url") and header.get("static_strategy")),
                 "static_loaded_on": (
                     jst_date(loads_by_agency.get(aid)) or _version_date(version["version"] if version else None)
                 ),

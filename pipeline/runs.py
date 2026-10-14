@@ -46,8 +46,9 @@ logger = logging.getLogger(__name__)
 #: it was, rather than as a constraint violation swallowed by the guard below.
 RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update")
 
-#: Mirrors the ``status`` CHECK constraint.
-RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
+#: Mirrors the ``status`` CHECK constraint. ``unchanged`` closes a job that
+#: ran and found nothing newer to do (a timetable check that loaded no zip).
+RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error", "unchanged")
 
 #: A stored error is a human-readable marker on a timeline bar, not a log
 #: replacement -- the traceback itself goes to the logger. Bounded so one
@@ -72,7 +73,7 @@ _FINISH_RUN_SQL = """
 #: one working on an old ``running`` row of one of these kinds. An ``update``
 #: umbrella spends most of its life inside the ingest + analyze sweep, so it
 #: is spared on the same terms as the steps it is waiting on.
-_LOCKED_RUN_KINDS = ("ingest", "promote", "analyze", "update")
+LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update")
 
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given
@@ -107,15 +108,18 @@ DEFAULT_REAP_AGE = timedelta(hours=2)
 
 @dataclass
 class RunHandle:
-    """The mutable half of :func:`record_run`: the job's reported row count.
+    """The mutable half of :func:`record_run`: what the job reports about itself.
 
     Set ``rows`` inside the block when the job returns one; left ``None`` the
     column stays NULL, which the board reads as "this job kind has no row
-    count", not as zero rows.
+    count", not as zero rows. ``status`` is what a block that exits normally
+    closes with: ``ok``, or ``unchanged`` for a job that found nothing newer
+    to do.
     """
 
     run_id: int | None
     rows: int | None = None
+    status: str = "ok"
 
 
 def _rollback(conn) -> None:
@@ -212,7 +216,7 @@ def record_run(
         _rollback(conn)
         finish_run(conn, handle.run_id, "error", rows=handle.rows, error=_describe(exc))
         raise
-    finish_run(conn, handle.run_id, "ok", rows=handle.rows)
+    finish_run(conn, handle.run_id, handle.status, rows=handle.rows)
 
 
 def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: datetime | None = None) -> int:
@@ -235,7 +239,7 @@ def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: 
                 (
                     now,
                     now - older_than,
-                    list(_LOCKED_RUN_KINDS),
+                    list(LOCKED_RUN_KINDS),
                     INGEST_ANALYZE_LOCK_KEY >> 32,
                     INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
                 ),

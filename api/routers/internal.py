@@ -456,46 +456,32 @@ def _ingest_and_analyze_sweep(
     return SweepOutcome("ok")
 
 
-class StaticRefreshFailed(RuntimeError):
-    """A timetable reload that left the agency with no timetable at all."""
-
-
 def _refresh_static_step(db_url: str, agency_id: int, *, requested_by: int | None, parent_run_id: int | None) -> None:
     """Reload one agency's timetable as a step of an operator's run, raising
     if the step failed.
 
-    The reload itself is ``refresh_static``, the function behind
-    ``gtfs_pipeline.py refresh-static``, writing into the same directory, so
-    the button and the command compare against the same change manifest and
-    cannot drift apart.
-
-    ``refresh_static`` returns None both for "nothing newer to load" and for
-    a fetch its strategy gave up on (the strategies log and swallow HTTP and
-    network errors), so the two cannot be told apart from here. An agency
-    that still has a timetable loaded is then in a good state either way and
-    the step succeeds; one with no timetable at all has nothing for "no
-    change" to mean, and the step fails rather than letting a chain go on to
-    ingest against an empty schedule. The step's row count is the loaded
-    timetable's route count in both successful cases.
+    ``refresh_static_recorded`` is the command line's own reload and record,
+    writing into the same directory, so the button and the command compare
+    against the same change manifest and cannot drift apart. A reload that
+    loads nothing for an agency with no timetable at all fails, rather than
+    letting a chain go on to ingest against an empty schedule.
     """
     import pathlib
 
     import psycopg2
 
     from pipeline import static_fetcher
-    from pipeline.db import _static_loaded
 
     conn = psycopg2.connect(db_url)
     try:
-        with pipeline_runs.record_run(
-            conn, "static", agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id
-        ) as run:
-            loaded = static_fetcher.refresh_static(agency_id, conn, pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST))
-            if loaded is None and not _static_loaded(conn, agency_id):
-                raise StaticRefreshFailed("no timetable could be fetched from the agency's static URL")
-            with conn.cursor() as cur:
-                cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (agency_id,))
-                run.rows = cur.fetchone()[0]
+        static_fetcher.refresh_static_recorded(
+            agency_id,
+            conn,
+            pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST),
+            requested_by=requested_by,
+            parent_run_id=parent_run_id,
+            require_timetable=True,
+        )
     finally:
         conn.close()
 

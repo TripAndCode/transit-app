@@ -34,7 +34,7 @@ from api.admin_runs import (
     LAST_STATIC_LOAD_SQL,
     LATEST_OPERATOR_RUNS_SQL,
     build_latest_runs,
-    in_flight_cutoff,
+    in_flight_args,
     shape_run,
 )
 from api.deps import get_conn
@@ -168,9 +168,6 @@ class AgencyHealthRow(BaseModel):
     rt_coverage: AgencyRtSummary
     clamp_history: list[ClampDay]
     static_version: AgencyStaticVersion | None
-    #: Both a static URL and a static strategy are set, so a timetable reload
-    #: has something to fetch.
-    static_configured: bool
     #: JST day the current timetable was loaded, when known.
     static_loaded_on: str | None
     #: A job is working on this agency now; a new run would be refused.
@@ -253,7 +250,7 @@ async def _run_state(
     try:
         loads = await conn.fetch(LAST_STATIC_LOAD_SQL)
         runs = build_latest_runs(dict(r) for r in await conn.fetch(LATEST_OPERATOR_RUNS_SQL))
-        busy = {r["agency_id"] for r in await conn.fetch(AGENCIES_IN_FLIGHT_SQL, in_flight_cutoff(now))}
+        busy = {r["agency_id"] for r in await conn.fetch(AGENCIES_IN_FLIGHT_SQL, *in_flight_args(now))}
     except asyncpg.PostgresError:
         _log.warning("agencies health: pipeline_runs could not be read", exc_info=True)
         return [], {}, set()
@@ -601,8 +598,19 @@ async def probe_agency_feed(
     }
 
 
+async def guard_agency_run(conn: asyncpg.Connection, agency_id: int) -> None:
+    """Refuse (409) a new run for an agency a job is already working on.
+
+    Call inside the transaction that then opens the run row: the check holds
+    the agency's request lock until that transaction ends, so two presses
+    arriving together cannot both see "nothing running" and both start.
+    """
+    await conn.execute(AGENCY_RUN_REQUEST_LOCK_SQL, AGENCY_RUN_REQUEST_LOCK_KEY, agency_id)
+    if await conn.fetchval(AGENCY_RUN_IN_FLIGHT_SQL, *in_flight_args(datetime.now(timezone.utc)), agency_id):
+        raise HTTPException(status_code=409, detail="A run for this agency is already in progress")
+
+
 async def _open_agency_run(
-    conn: asyncpg.Connection,
     request: Request,
     admin: User,
     *,
@@ -618,34 +626,34 @@ async def _open_agency_run(
     ``deleted_at IS NULL``, so the work would find nothing and report
     "started"), when a timetable step has no source to fetch from
     (``refresh_static`` treats that as "nothing to do" and returns quietly),
-    and when a job is already working on the agency. That last check and the
-    insert share one transaction under the agency's request lock, so two
-    presses arriving together cannot both see "nothing running" and both
-    start.
-    """
-    header = await _load_agency(conn, agency_id)
-    if header["deleted_at"] is not None:
-        raise HTTPException(status_code=409, detail="This agency is disabled")
-    if needs_static and not (header["static_url"] and header["static_strategy"]):
-        raise HTTPException(status_code=409, detail="This agency has no timetable (static GTFS) source configured")
+    and when a job is already working on the agency (:func:`guard_agency_run`).
 
-    async with conn.transaction():
-        await conn.execute(AGENCY_RUN_REQUEST_LOCK_SQL, AGENCY_RUN_REQUEST_LOCK_KEY, agency_id)
-        if await conn.fetchval(AGENCY_RUN_IN_FLIGHT_SQL, agency_id, in_flight_cutoff(datetime.now(timezone.utc))):
-            raise HTTPException(status_code=409, detail="A run for this agency is already in progress")
-        row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, kind, agency_id, admin.user_id)
-        if row is None:
-            raise HTTPException(status_code=503, detail="pipeline runs are not recordable in this environment")
-        run = shape_run(row)
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action=action,
-            target_type="agency",
-            target_id=agency_id,
-            after={"run_id": run["run_id"]},
-            ip=request.client.host if request.client else None,
-        )
+    Runs on a pool connection of its own, given back before the handler
+    queues the job: a ``Depends(get_conn)`` connection is released only once
+    the response's background tasks have finished, so it would stay checked
+    out for the whole fetch + ingest + analyze.
+    """
+    async with request.app.state.pool.acquire() as conn:
+        header = await _load_agency(conn, agency_id)
+        if header["deleted_at"] is not None:
+            raise HTTPException(status_code=409, detail="This agency is disabled")
+        if needs_static and not (header["static_url"] and header["static_strategy"]):
+            raise HTTPException(status_code=409, detail="This agency has no timetable (static GTFS) source configured")
+        async with conn.transaction():
+            await guard_agency_run(conn, agency_id)
+            row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, kind, agency_id, admin.user_id)
+            if row is None:
+                raise HTTPException(status_code=503, detail="pipeline runs are not recordable in this environment")
+            run = shape_run(row)
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action=action,
+                target_type="agency",
+                target_id=agency_id,
+                after={"run_id": run["run_id"]},
+                ip=request.client.host if request.client else None,
+            )
     return run
 
 
@@ -656,7 +664,6 @@ async def reanalyze_agency(
     request: Request,
     background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, str]:
     """Re-run ingest + analyze for this one agency, in the background.
 
@@ -676,7 +683,6 @@ async def reanalyze_agency(
 
     csrf_guard(request)
     run = await _open_agency_run(
-        conn,
         request,
         admin,
         agency_id=agency_id,
@@ -700,7 +706,6 @@ async def refresh_agency_static(
     request: Request,
     background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:
     """Reload this agency's timetable (static GTFS), in the background.
 
@@ -714,7 +719,6 @@ async def refresh_agency_static(
 
     csrf_guard(request)
     run = await _open_agency_run(
-        conn,
         request,
         admin,
         agency_id=agency_id,
@@ -739,7 +743,6 @@ async def update_agency(
     request: Request,
     background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:
     """Reload the timetable, then ingest and analyze, as one background job.
 
@@ -750,7 +753,6 @@ async def update_agency(
 
     csrf_guard(request)
     run = await _open_agency_run(
-        conn,
         request,
         admin,
         agency_id=agency_id,

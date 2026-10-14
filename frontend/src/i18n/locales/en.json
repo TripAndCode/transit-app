@@ -1477,18 +1477,20 @@
       "res_elapsed": "{{duration}} elapsed",
       "res_waiting": "Waiting",
       "res_not_run": "Not run",
+      "res_unchanged": "No newer timetable found",
       "res_failed": {
         "static": "Timetable could not be fetched",
         "ingest": "Ingest failed",
         "analyze": "Aggregation failed"
       },
-      "res_skipped": "Overlapped another run",
+      "res_skipped": "Overlapped another pipeline run",
       "foot_running": "This keeps going if you leave the page; the result shows here when you come back.",
       "foot_done": "Finished {{time}} · {{duration}} in total",
       "open_pulse": "Open Pulse ›",
       "foot_static_failed": "The timetable URL may have changed.",
       "foot_failed": "The run stopped here; the steps after it did not run.",
-      "foot_skipped": "Another run was working on this agency, so this one stopped.",
+      "foot_failed_continued": "This step failed; the run still went on to the steps after it.",
+      "foot_skipped": "Another ingest or aggregation run (usually the scheduled one) was using the pipeline, so this one stopped here.",
       "edit_url": "Edit URL",
       "retry": "Retry"
     },
@@ -1665,7 +1667,8 @@
         "running": "Running",
         "ok": "Done",
         "skipped": "Skipped",
-        "error": "Failed"
+        "error": "Failed",
+        "unchanged": "Nothing newer"
       },
       "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
       "run_tooltip_rows": "{{count}} rows",

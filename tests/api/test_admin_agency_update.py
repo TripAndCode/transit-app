@@ -25,6 +25,7 @@ import psycopg2
 import pytest
 from httpx import ASGITransport
 
+from api.admin_runs import LAST_STATIC_LOAD_SQL
 from api.middleware.ratelimit import limiter
 from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
@@ -217,7 +218,6 @@ async def test_health_reports_each_agencys_latest_run_step_by_step(app_client, a
     assert r.status_code == 200, r.text
     row = next(h for h in r.json() if h["agency_id"] == aid)
     assert row["in_flight"] is True
-    assert row["static_configured"] is True
     static_finished = datetime.now(timezone.utc) - timedelta(minutes=2)
     assert row["static_loaded_on"] == static_finished.astimezone(timezone(timedelta(hours=9))).date().isoformat()
     run = row["latest_run"]
@@ -237,7 +237,6 @@ async def test_health_carries_no_run_for_an_agency_no_operator_has_run(app_clien
     row = next(h for h in r.json() if h["agency_id"] == aid)
     assert row["latest_run"] is None
     assert row["in_flight"] is False
-    assert row["static_configured"] is False
     assert row["static_loaded_on"] is None
 
 
@@ -378,7 +377,9 @@ def test_a_loaded_timetable_records_its_route_count_and_hands_over_to_the_sweep(
     assert kwargs["stop_on_failure"] is True
 
 
-def test_no_newer_timetable_is_a_successful_step_reporting_the_current_one(runner_env, pg_conn):
+def test_no_newer_timetable_closes_the_step_unchanged_and_moves_no_load_date(runner_env, pg_conn):
+    """A check that loaded nothing is not a load: recording it `ok` would let
+    "last loaded" claim today for a timetable that may be months old."""
     from api.routers.internal import _run_agency_update
 
     with pg_conn.cursor() as cur:
@@ -405,8 +406,11 @@ def test_no_newer_timetable_is_a_successful_step_reporting_the_current_one(runne
 
     sweep.assert_not_called()
     (umbrella, step) = _rows(pg_conn, run_id)
-    assert step[1:4] == ("static", "ok", 2)
+    assert step[1:4] == ("static", "unchanged", None)
     assert umbrella[1:3] == ("static", "ok")
+    with pg_conn.cursor() as cur:
+        cur.execute(LAST_STATIC_LOAD_SQL)
+        assert cur.fetchall() == []
 
 
 def test_the_chained_sweep_stops_an_agency_at_its_first_failed_stage(runner_env, pg_conn):
@@ -505,3 +509,37 @@ def test_the_command_line_reload_records_a_static_run(runner_env, pg_conn, monke
     with pg_conn.cursor() as cur:
         cur.execute("SELECT kind, status FROM pipeline_runs WHERE agency_id = %s", (runner_env["agency_id"],))
         assert cur.fetchall() == [("static", "ok")]
+
+
+def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn):
+    """`refresh-static` without `--agency-id` goes through `refresh_all`,
+    which records each agency's reload the same way."""
+    from pipeline.static_fetcher import refresh_all
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, static_url, static_strategy) "
+            "VALUES ('second', 'https://example.test/2/feed.pb', 'https://example.test/2/gtfs.zip', 'direct_url') "
+            "RETURNING agency_id"
+        )
+        second = cur.fetchone()[0]
+    pg_conn.commit()
+    zip_path = _gtfs_zip(runner_env["tmp"] / "gtfs_static_20261013.zip", routes=2)
+
+    def _fetch(agency_id, static_url, dest_dir):
+        return zip_path if agency_id == runner_env["agency_id"] else None
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
+            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [])
+    finally:
+        conn.close()
+
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT agency_id, kind, status, rows FROM pipeline_runs ORDER BY agency_id")
+        assert cur.fetchall() == [
+            (runner_env["agency_id"], "static", "ok", 2),
+            (second, "static", "unchanged", None),
+        ]

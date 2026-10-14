@@ -25,6 +25,7 @@ from api.deps import get_conn
 from api.routers import admin as admin_router
 from api.security import require_admin
 from tests.conftest import TEST_ORIGIN
+from tests.fixtures.pool import CountingPool
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user(user_id=9)
@@ -47,11 +48,13 @@ _RUN_ROW = {
 class _Conn:
     """Fake asyncpg connection answering each query the runs routes make."""
 
-    def __init__(self, *, runs_error=None, agency_exists=True, insert_unrecordable=False):
+    def __init__(self, *, runs_error=None, agency_exists=True, insert_unrecordable=False, agency_busy=False):
         self.runs_error = runs_error
         self.agency_exists = agency_exists
         self.insert_unrecordable = insert_unrecordable
+        self.agency_busy = agency_busy
         self.inserted: list[tuple] = []
+        self.locked: list[tuple] = []
 
     def transaction(self):
         """The trigger route wraps its row-open and its audit entry
@@ -84,7 +87,14 @@ class _Conn:
     async def fetchval(self, sql, *args):
         if "FROM agencies" in sql:
             return 1 if self.agency_exists else None
+        if "status = 'running'" in sql:
+            return 1 if self.agency_busy else None
         return 0
+
+    async def execute(self, sql, *args):
+        assert "pg_advisory_xact_lock" in sql, f"unexpected execute: {sql}"
+        self.locked.append(args)
+        return "SELECT 1"
 
 
 @pytest.fixture
@@ -110,11 +120,12 @@ def audited(monkeypatch):
     return recorded
 
 
-def _client(conn: _Conn) -> TestClient:
+def _client(conn: _Conn, pool: CountingPool | None = None) -> TestClient:
     app = FastAPI()
     app.include_router(admin_router.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
+    app.state.pool = pool or CountingPool(conn)
     return TestClient(app)
 
 
@@ -225,3 +236,42 @@ def test_an_unknown_agency_is_rejected_before_anything_is_scheduled(scheduled, a
     )
     assert response.status_code == 404
     assert scheduled == []
+
+
+def test_a_single_agency_run_is_refused_while_a_job_holds_that_agency(scheduled, audited):
+    """The board's trigger passes the same one-run-per-agency guard as the
+    agencies page, under the same per-agency lock."""
+    from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
+
+    conn = _Conn(agency_busy=True)
+    response = _client(conn).post(
+        "/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest", "agency_id": 4}
+    )
+    assert response.status_code == 409
+    assert conn.locked == [(AGENCY_RUN_REQUEST_LOCK_KEY, 4)]
+    assert conn.inserted == []
+    assert scheduled == []
+
+
+def test_a_fleet_wide_run_takes_no_agency_lock(scheduled, audited):
+    conn = _Conn(agency_busy=True)
+    response = _client(conn).post("/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest"})
+    assert response.status_code == 202
+    assert conn.locked == []
+
+
+def test_the_connection_is_back_in_the_pool_before_the_sweep_is_queued(monkeypatch, audited):
+    """A `Depends(get_conn)` connection is released only after the
+    response's background tasks finish, which for this route is the whole
+    sweep."""
+    conn = _Conn()
+    pool = CountingPool(conn)
+    held_when_queued: list[int] = []
+
+    def _capture(*, background_tasks, **kwargs):
+        background_tasks.add_task(lambda: held_when_queued.append(pool.held))
+
+    monkeypatch.setattr(admin_router, "_start_manual_run", _capture)
+    response = _client(conn, pool).post("/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest"})
+    assert response.status_code == 202
+    assert held_when_queued == [0]

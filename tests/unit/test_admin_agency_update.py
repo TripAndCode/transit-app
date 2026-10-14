@@ -20,6 +20,7 @@ import api.routers.admin_agencies as admin_agencies
 from api.deps import get_conn
 from api.security import require_admin
 from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
+from tests.fixtures.pool import CountingPool
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -101,11 +102,12 @@ class _Conn:
         return "INSERT 1"
 
 
-def _client(conn: _Conn) -> TestClient:
+def _client(conn: _Conn, pool: CountingPool | None = None) -> TestClient:
     app = FastAPI()
     app.include_router(admin_agencies.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
+    app.state.pool = pool or CountingPool(conn)
     return TestClient(app)
 
 
@@ -233,3 +235,26 @@ def test_reanalyze_needs_no_timetable_source(queued):
 
     assert response.status_code == 202
     assert [call["reanalyze"]["run_id"] for call in queued] == [77]
+
+
+@pytest.mark.parametrize(
+    ("path", "runner"),
+    [
+        ("/api/admin/agencies/1/refresh-static", "_run_agency_update"),
+        ("/api/admin/agencies/1/update", "_run_agency_update"),
+        ("/api/admin/agencies/1/reanalyze", "_run_ingest_and_analyze"),
+    ],
+)
+def test_the_connection_is_back_in_the_pool_before_the_job_runs(monkeypatch, path, runner):
+    """A `Depends(get_conn)` connection is released only after the
+    response's background tasks finish, so taking one here would keep it
+    checked out for the whole fetch + ingest + analyze."""
+    conn = _Conn()
+    pool = CountingPool(conn)
+    held_when_run: list[int] = []
+    monkeypatch.setattr(f"api.routers.internal.{runner}", lambda **_kw: held_when_run.append(pool.held))
+
+    response = _client(conn, pool).post(path)
+    assert response.status_code == 202, response.text
+    assert held_when_run == [0]
+    assert pool.peak == 1

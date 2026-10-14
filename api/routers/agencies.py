@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any
 
 import asyncpg
@@ -91,11 +92,23 @@ async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn
     return _agencies.agency_row_to_dict(row)
 
 
-def _check_strategies(body: AgencyCreate | AgencyPatch) -> None:
-    if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
-        raise HTTPException(status_code=422, detail=f"Unknown ingest_strategy: {body.ingest_strategy!r}")
-    if body.static_strategy is not None and body.static_strategy not in VALID_STATIC_STRATEGIES:
-        raise HTTPException(status_code=422, detail=f"Unknown static_strategy: {body.static_strategy!r}")
+def _check_strategies(body: AgencyCreate | AgencyPatch, stored: Mapping[str, Any] | None = None) -> None:
+    """Reject a strategy name no module can serve.
+
+    On an edit (``stored`` is the row being edited) only a value that
+    changes is checked: the edit form resubmits every field, and a stored
+    value from before an allow-list existed must not make the agency
+    uneditable.
+    """
+    for field, allowed in (
+        ("ingest_strategy", VALID_INGEST_STRATEGIES),
+        ("static_strategy", VALID_STATIC_STRATEGIES),
+    ):
+        value = getattr(body, field)
+        if value is None or (stored is not None and value == stored[field]):
+            continue
+        if value not in allowed:
+            raise HTTPException(status_code=422, detail=f"Unknown {field}: {value!r}")
 
 
 @router.post("", response_model=AdminAgencyOut, status_code=201)
@@ -173,7 +186,7 @@ async def patch_agency(
     )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    _check_strategies(body)
+    _check_strategies(body, row)
     if body.feed_url is not None:
         try:
             validate_feed_url(body.feed_url)

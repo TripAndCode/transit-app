@@ -439,13 +439,6 @@ def _health(*, header=None, versions=(), static_loads=()):
     )[0]
 
 
-def test_a_timetable_source_needs_both_a_url_and_a_strategy():
-    assert _health()["static_configured"] is False
-    configured = dict(_header(), static_url="https://x.test/gtfs.zip", static_strategy="direct_url")
-    assert _health(header=configured)["static_configured"] is True
-    assert _health(header=dict(configured, static_strategy=None))["static_configured"] is False
-
-
 def test_the_timetable_load_date_is_the_last_successful_static_runs_jst_day():
     """`agg_static_version_summary.computed_at` cannot say this: analyze
     restamps it on every run, so it dates the last analysis, not the load."""

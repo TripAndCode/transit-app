@@ -78,7 +78,7 @@ class _Conn:
 
 def test_kind_and_status_vocabularies_match_the_table_constraints():
     assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update")
-    assert RUN_STATUSES == ("running", "ok", "skipped", "error")
+    assert RUN_STATUSES == ("running", "ok", "skipped", "error", "unchanged")
 
 
 def test_start_run_inserts_a_running_row_and_returns_its_id():
@@ -152,6 +152,13 @@ def test_record_run_files_a_step_under_the_umbrella_it_belongs_to():
     with record_run(conn, "static", agency_id=1, requested_by=9, parent_run_id=77):
         pass
     assert conn.statements[0][1] == ("static", 1, "running", None, 9, 77)
+
+
+def test_record_run_closes_a_job_that_found_nothing_newer_as_unchanged():
+    conn = _Conn(run_id=5)
+    with record_run(conn, "static", agency_id=1) as run:
+        run.status = "unchanged"
+    assert conn.statements[1][1] == ("unchanged", None, None, 5)
 
 
 def test_record_run_marks_a_failed_job_error_and_re_raises():

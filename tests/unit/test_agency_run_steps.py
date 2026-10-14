@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from api.admin_runs import build_latest_runs, in_flight_cutoff
+from api.admin_runs import build_latest_runs, in_flight_args
 
 _T0 = datetime(2026, 10, 13, 5, 0, tzinfo=timezone.utc)
 
@@ -109,6 +109,15 @@ def test_a_promotion_failure_is_the_ingest_steps_error():
     assert run["steps"][2]["status"] == "not_run"
 
 
+def test_a_timetable_check_that_found_nothing_newer_is_its_own_step_state():
+    rows = [
+        _row(1, "update", "running"),
+        _row(2, "static", "unchanged", parent=1),
+        _row(3, "ingest", "running", parent=1, minute=1),
+    ]
+    assert _steps(rows)[0] == ("static", "unchanged")
+
+
 def test_a_run_the_advisory_lock_turned_away_keeps_its_skipped_status_and_unrun_steps():
     rows = [
         _row(1, "update", "skipped"),
@@ -162,8 +171,21 @@ def test_timestamps_are_utc_iso_strings():
     assert run["finished_at"] is None
 
 
-def test_in_flight_cutoff_matches_the_reapers_age():
-    from pipeline.runs import DEFAULT_REAP_AGE
+def test_in_flight_reads_rows_the_way_the_reaper_spares_them():
+    """Younger than the reap age, or of a locked kind while the ingest/analyze
+    lock is held: the same two conditions `reap_abandoned_runs` leaves a row
+    alone under, so a press is refused exactly while the reaper would not
+    yet close the row."""
+    from api.admin_runs import AGENCY_RUN_IN_FLIGHT_SQL
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
+    from pipeline.runs import DEFAULT_REAP_AGE, LOCKED_RUN_KINDS
 
     now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
-    assert in_flight_cutoff(now) == now - DEFAULT_REAP_AGE
+    assert in_flight_args(now) == (
+        now - DEFAULT_REAP_AGE,
+        list(LOCKED_RUN_KINDS),
+        INGEST_ANALYZE_LOCK_KEY >> 32,
+        INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
+    )
+    assert "FROM pg_locks" in AGENCY_RUN_IN_FLIGHT_SQL
+    assert "kind = ANY($2::text[])" in AGENCY_RUN_IN_FLIGHT_SQL

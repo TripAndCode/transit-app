@@ -9,9 +9,10 @@ export type RunBar = {
   /** Where the bar ends: the run's finish, or "now" while it is still open. */
   endHour: number;
   status: PipelineRun["status"];
-  /** A run that did no work — displaced by the ingest/analyze advisory lock
-   *  — is drawn hollow so it cannot be mistaken for a fast successful one,
-   *  which a solid bar of the same width would look exactly like. */
+  /** A run that did no work — displaced by the ingest/analyze advisory lock,
+   *  or a check that found nothing newer — is drawn hollow so it cannot be
+   *  mistaken for a fast successful one, which a solid bar of the same width
+   *  would look exactly like. */
   dashed: boolean;
   rows: number | null;
   lockProbeMs: number | null;
@@ -83,7 +84,7 @@ export function runsToBars(runs: readonly PipelineRun[], dayStart: Date, now: Da
       startHour: clampToDay(rawStart),
       endHour: clampToDay(rawEnd),
       status: run.status,
-      dashed: run.status === "skipped",
+      dashed: run.status === "skipped" || run.status === "unchanged",
       rows: run.rows,
       lockProbeMs: run.lock_probe_ms,
       error: run.error,

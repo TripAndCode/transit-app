@@ -305,7 +305,9 @@ export type PipelineRun = {
   started_at: string;
   /** Null while `status` is `running`. */
   finished_at: string | null;
-  status: "running" | "ok" | "skipped" | "error";
+  /** `unchanged`: the job ran and found nothing newer to do (a timetable
+   *  check that loaded no zip). */
+  status: "running" | "ok" | "skipped" | "error" | "unchanged";
   rows: number | null;
   /** What the non-blocking lock acquire cost, for a run displaced by it. A
    *  probe round trip, not time queued -- there is no queue. */
@@ -416,10 +418,11 @@ type AgencyDiagnostics = {
 
 /** One step of an operator's run, as the server reads it from the step rows
  *  filed under the run. `pending`: the run has not reached it yet;
- *  `not_run`: the run ended before it. */
+ *  `not_run`: the run ended before it; `unchanged`: a timetable check that
+ *  loaded nothing newer. */
 export type AgencyRunStep = {
   step: "static" | "ingest" | "analyze";
-  status: "pending" | "running" | "ok" | "skipped" | "error" | "not_run";
+  status: "pending" | "running" | "ok" | "unchanged" | "skipped" | "error" | "not_run";
   started_at: string | null;
   finished_at: string | null;
   /** Routes in the loaded timetable for `static`; realtime rows for `ingest`. */
@@ -458,8 +461,6 @@ export type AgencyHealthRow = {
   };
   clamp_history: AgencyClampDay[];
   static_version: { version: string; loaded_at: string | null } | null;
-  /** Both a static URL and a static strategy are set: a reload can run. */
-  static_configured: boolean;
   /** JST day (`YYYY-MM-DD`) the current timetable was loaded, when known. */
   static_loaded_on: string | null;
   /** A job is working on this agency; a new run would be refused. */

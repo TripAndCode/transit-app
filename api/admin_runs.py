@@ -17,7 +17,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from pipeline.runs import DEFAULT_REAP_AGE
+from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
+from pipeline.runs import DEFAULT_REAP_AGE, LOCKED_RUN_KINDS
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -77,20 +78,41 @@ _STEP_KINDS: dict[str, tuple[str, ...]] = {
 #: caller's transaction.
 AGENCY_RUN_REQUEST_LOCK_SQL = "SELECT pg_advisory_xact_lock($1, $2)"
 
-#: Any job still working on this agency -- an operator's run, or a cron or
-#: command-line one -- counts: a second run started beside it would race it
-#: for the ingest/analyze lock, or reload the timetable under its analyze.
-#: ``$2`` is :func:`in_flight_cutoff`, so a row whose process died is not
-#: mistaken for work in progress for longer than the reaper would leave it.
-AGENCY_RUN_IN_FLIGHT_SQL = """
+#: Which ``running`` rows still count as work in progress: the ones the
+#: reaper would leave alone (``pipeline.runs.reap_abandoned_runs``). That is a
+#: row younger than :func:`in_flight_cutoff` (``$1``), or one of a locked kind
+#: (``$2``) while the ingest/analyze advisory lock is held -- its key's high
+#: and low halves are ``$3``/``$4``. Past that, a row is one whose process
+#: died, and it no longer blocks a new run.
+_STILL_RUNNING = """
+    status = 'running' AND finished_at IS NULL
+    AND (
+        started_at > $1
+        OR (
+            kind = ANY($2::text[])
+            AND EXISTS (
+                SELECT 1 FROM pg_locks
+                WHERE locktype = 'advisory' AND granted
+                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                  AND classid = $3 AND objid = $4 AND objsubid = 1
+            )
+        )
+    )
+"""
+
+#: Any job still working on this agency (``$5``) -- an operator's run, or a
+#: cron or command-line one -- counts: a second run started beside it would
+#: race it for the ingest/analyze lock, or reload the timetable under its
+#: analyze.
+AGENCY_RUN_IN_FLIGHT_SQL = f"""
     SELECT 1 FROM pipeline_runs
-    WHERE agency_id = $1 AND status = 'running' AND finished_at IS NULL AND started_at > $2
+    WHERE agency_id = $5 AND {_STILL_RUNNING}
     LIMIT 1
 """
 
-AGENCIES_IN_FLIGHT_SQL = """
+AGENCIES_IN_FLIGHT_SQL = f"""
     SELECT DISTINCT agency_id FROM pipeline_runs
-    WHERE agency_id IS NOT NULL AND status = 'running' AND finished_at IS NULL AND started_at > $1
+    WHERE agency_id IS NOT NULL AND {_STILL_RUNNING}
 """
 
 #: Each agency's newest operator-triggered umbrella row, and every step row
@@ -104,13 +126,17 @@ LATEST_OPERATOR_RUNS_SQL = """
     )
     SELECT r.run_id, r.parent_run_id, r.kind, r.agency_id, r.started_at, r.finished_at,
            r.status, r.rows, r.error
-    FROM pipeline_runs r
-    WHERE r.run_id IN (SELECT run_id FROM latest) OR r.parent_run_id IN (SELECT run_id FROM latest)
-    ORDER BY r.started_at, r.run_id
+    FROM pipeline_runs r JOIN latest l ON r.run_id = l.run_id
+    UNION ALL
+    SELECT r.run_id, r.parent_run_id, r.kind, r.agency_id, r.started_at, r.finished_at,
+           r.status, r.rows, r.error
+    FROM pipeline_runs r JOIN latest l ON r.parent_run_id = l.run_id
+    ORDER BY started_at, run_id
 """
 
-#: When each agency's timetable last loaded: its newest successful ``static``
-#: run, from the agencies page or the command line.
+#: When each agency's timetable last loaded: its newest ``static`` run that
+#: loaded a zip (``ok``; a check that loaded none closes ``unchanged``), from
+#: the agencies page or the command line.
 LAST_STATIC_LOAD_SQL = """
     SELECT DISTINCT ON (agency_id) agency_id, finished_at
     FROM pipeline_runs
@@ -179,12 +205,19 @@ def jst_date(value: Any) -> str | None:
 
 
 def in_flight_cutoff(now: datetime) -> datetime:
-    """Rows started before this are no longer read as in flight.
-
-    The reaper's own age, so a press is never refused over a row the reaper
-    would already have closed as abandoned.
-    """
+    """Rows started before this count as in flight only while the
+    ingest/analyze lock is held (see ``_STILL_RUNNING``): the reaper's own age."""
     return now - DEFAULT_REAP_AGE
+
+
+def in_flight_args(now: datetime) -> tuple[datetime, list[str], int, int]:
+    """The parameters ``_STILL_RUNNING`` takes, in order."""
+    return (
+        in_flight_cutoff(now),
+        list(LOCKED_RUN_KINDS),
+        INGEST_ANALYZE_LOCK_KEY >> 32,
+        INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
+    )
 
 
 def _step(step: str, umbrella: Mapping[str, Any], rows: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -208,6 +241,8 @@ def _step(step: str, umbrella: Mapping[str, Any], rows: list[Mapping[str, Any]])
         status = "running"
     elif all(s == "skipped" for s in statuses):
         status = "skipped"
+    elif all(s == "unchanged" for s in statuses):
+        status = "unchanged"
     else:
         status = "ok"
     primary = next((r for r in rows if r["kind"] == _STEP_KINDS[step][0]), rows[0])

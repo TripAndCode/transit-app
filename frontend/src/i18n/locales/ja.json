@@ -1477,18 +1477,20 @@
       "res_elapsed": "{{duration}} 経過",
       "res_waiting": "待機",
       "res_not_run": "実行せず",
+      "res_unchanged": "新しい時刻表は見つかりません",
       "res_failed": {
         "static": "時刻表を取得できません",
         "ingest": "取込できません",
         "analyze": "集計できません"
       },
-      "res_skipped": "別の処理と重なりました",
+      "res_skipped": "別の取込・集計と重なりました",
       "foot_running": "画面を離れても続きます。戻るとここに結果が出ます。",
       "foot_done": "{{time}} 完了 · 合計 {{duration}}",
       "open_pulse": "概況を開く ›",
       "foot_static_failed": "時刻表の URL が変わった可能性があります。",
       "foot_failed": "ここで止まり、後の段階は実行していません。",
-      "foot_skipped": "別の処理がこの事業者を実行中だったため、ここで止まりました。",
+      "foot_failed_continued": "この段階は失敗しましたが、後の段階は実行しました。",
+      "foot_skipped": "別の取込・集計（通常は定期実行）が動いていたため、ここで止まりました。",
       "edit_url": "URL を編集",
       "retry": "再試行"
     },
@@ -1665,7 +1667,8 @@
         "running": "実行中",
         "ok": "完了",
         "skipped": "スキップ",
-        "error": "失敗"
+        "error": "失敗",
+        "unchanged": "更新なし"
       },
       "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
       "run_tooltip_rows": "{{count}} 行",

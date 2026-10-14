@@ -53,7 +53,8 @@ Endpoints:
 - `GET /api/admin/agencies/health` — fleet-wide health columns, plus each
   agency's timetable load day, whether a job is in flight for it, and its
   latest operator run step by step (`latest_run`). The page polls it every
-  few seconds only while a run is in flight.
+  3s while an operator's run is in flight, every 30s while only another job
+  (usually the cron sweep) holds an agency, and not at all otherwise.
 - `GET /api/admin/agencies/{agency_id}/diagnostics` — the drawer's full
   bundle: freshness, RT field coverage, static version timeline, clamp
   history, weather station, and the two operator-edited policy tables.
@@ -72,9 +73,11 @@ Endpoints:
 
 The three run actions open an umbrella `pipeline_runs` row (`ingest`,
 `static` or `update`) and file each step's row under it (`parent_run_id`).
-Each answers 409 while any job is working on the agency, for a disabled
-agency, and (the two timetable actions) for an agency with no static URL or
-static strategy.
+A timetable step closes `ok` when it loaded a zip and `unchanged` when it
+loaded none; only `ok` moves the load day. Each action answers 409 while any
+job is working on the agency, for a disabled agency, and (the two timetable
+actions) for an agency with no static URL or static strategy. The board's
+`POST /api/admin/runs` takes the same guard when scoped to one agency.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
 `rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,

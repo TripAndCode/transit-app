@@ -15,7 +15,7 @@ type StepView = "done" | "now" | "fail" | "pending" | "not_run";
 
 function stepView(step: AgencyRunStep, isCurrent: boolean): StepView {
   if (isCurrent) return "now";
-  if (step.status === "ok") return "done";
+  if (step.status === "ok" || step.status === "unchanged") return "done";
   if (step.status === "error" || step.status === "skipped") return "fail";
   if (step.status === "not_run") return "not_run";
   return "pending";
@@ -182,6 +182,7 @@ function StepResult({
     );
   }
   const parts: string[] = [];
+  if (step.status === "unchanged") parts.push(t("admin.agency_run.res_unchanged"));
   if (step.step === "static" && step.rows != null) parts.push(t("admin.agency_run.res_routes", { routes: step.rows }));
   if (step.step === "analyze" && latestDataDate) {
     parts.push(t("admin.agency_run.res_through", { date: formatShortDate(latestDataDate) }));
@@ -223,9 +224,14 @@ export function AgencyRunCard({
   const state = runState(run);
   const current = currentStepIndex(run);
   const views = run.steps.map((step, i) => stepView(step, i === current));
-  const failedStep = run.steps.find((s) => s.status === "error" || s.status === "skipped");
+  const failedIndex = run.steps.findIndex((s) => s.status === "error" || s.status === "skipped");
+  const failedStep = run.steps[failedIndex] as AgencyRunStep | undefined;
   const detail = failedStep?.error ?? (state === "stopped" ? run.error : null);
   const skipped = run.status === "skipped" || failedStep?.status === "skipped";
+  // A re-aggregation keeps going after a failed ingest, so whether the
+  // steps after a failure ran is read off the steps, not assumed.
+  const wentOn =
+    failedIndex !== -1 && run.steps.slice(failedIndex + 1).some((s) => s.status !== "not_run" && s.status !== "pending");
 
   return (
     <section className="agency-run-card" aria-label={t("admin.agency_run.card_label")}>
@@ -276,7 +282,9 @@ export function AgencyRunCard({
               ? t("admin.agency_run.foot_skipped")
               : failedStep?.step === "static"
                 ? t("admin.agency_run.foot_static_failed")
-                : t("admin.agency_run.foot_failed")}
+                : wentOn
+                  ? t("admin.agency_run.foot_failed_continued")
+                  : t("admin.agency_run.foot_failed")}
           </span>
           {failedStep?.step === "static" && !skipped && (
             <button type="button" className="agency-run-link" onClick={onEditUrl}>

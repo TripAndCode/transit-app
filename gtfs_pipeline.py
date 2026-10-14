@@ -379,14 +379,12 @@ def cmd_refresh_static(args):
     """Conditionally fetch and load static GTFS via each agency's static_strategy."""
     import pathlib
 
-    from pipeline.static_fetcher import refresh_all, refresh_static
+    from pipeline.static_fetcher import refresh_all, refresh_static_recorded
 
     conn = _get_conn()
     dest = pathlib.Path(args.dest)
     if args.agency_id:
-        agency_id = int(args.agency_id)
-        with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
-            result = refresh_static(agency_id, conn, dest)
+        result = refresh_static_recorded(int(args.agency_id), conn, dest)
         if result is None:
             logger.info("No change.")
     else:
