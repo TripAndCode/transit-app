@@ -9,6 +9,9 @@ import { PendingNavLink } from "./navPending";
 import { RailTooltip } from "./RailTooltip";
 import "./sidebarLineMap.css";
 
+/** The badge of a pinned route the static routes do not name yet. */
+const PLAIN_BADGE = "\u2022";
+
 /** The routes pinned for the agency, each a link to its page with the Routes
  *  screen's remembered scope, beside today's mean delay. That figure shares
  *  the top bar's query for the summary, and the names the route pickers'
@@ -36,11 +39,12 @@ export function SidebarPinnedRoutes({
       {pins.map((code) => {
         const parts = names.parts.get(code);
         const name = parts ? routeDescription(parts, t) : t("common.route_code_fallback", { code });
-        // The badge holds the route's short code (its route_code only when it
-        // has none), so the line beside it says where the route goes,
-        // falling back to its name.
-        const badge = parts?.plate ?? code;
-        const beside = parts ? (routeWhereText(parts, t) ?? parts.line ?? "") : "";
+        // The badge holds the route's short code, so the line beside it says
+        // where the route goes. A route without a code wears its name's first
+        // character instead, and its name goes beside it. The route_code is
+        // never the badge: on many feeds it is the opaque route_id.
+        const badge = parts?.plate ?? (parts?.line ? Array.from(parts.line)[0] : PLAIN_BADGE);
+        const beside = !parts ? "" : parts.plate ? (routeWhereText(parts, t) ?? parts.line ?? "") : (parts.line ?? routeWhereText(parts, t) ?? "");
         const minutes = todayMeanMinutes(today?.routes, code);
         const delay = minutes == null ? null : t("common.minutes_value", { value: minutes.toFixed(1) });
         const label = delay == null ? name : t("nav.pinned_route_label", { route: name, delay });

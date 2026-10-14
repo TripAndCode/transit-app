@@ -117,6 +117,23 @@ describe("RoutePickerPill options", () => {
     expect(option).not.toHaveTextContent("1471981638");
   });
 
+  it("tells apart two routes that read the same and say nothing of where they run by their route_ids", async () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        { route_id: "111", route_code: "111", route_short_name: "12", route_long_name: "12号線", trip_headsigns: [] },
+        { route_id: "222", route_code: "222", route_short_name: "12", route_long_name: "12号線", trip_headsigns: [] },
+        { route_id: "333", route_code: "333", route_short_name: "70-3", route_long_name: "あさひが丘線", trip_headsigns: [] },
+      ],
+      isLoading: false,
+    } as never);
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Route" }));
+    const [a, b, c] = screen.getAllByRole("option");
+    expect(a.querySelector(".rp-opt-where")).toHaveTextContent("(111)");
+    expect(b.querySelector(".rp-opt-where")).toHaveTextContent("(222)");
+    expect(c.querySelector(".rp-opt-where")).toBeNull();
+  });
+
   it("names an unnamed route by its route_id, with nothing beside it", async () => {
     vi.spyOn(hooks, "useRoutes").mockReturnValue({
       data: [{ route_id: "沖舘・新田線(47011)", route_code: "47011", route_short_name: "", route_long_name: "", trip_headsigns: [] }],

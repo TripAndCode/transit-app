@@ -73,6 +73,31 @@ describe("RoutesPicker labels", () => {
   });
 });
 
+describe("RoutesPicker brand lines", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names a line whose variants share a brand but not a line name by the brand, never a route_id", () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        { route_id: "j1", route_short_name: "めいぷる～ぷ", route_long_name: "めいぷる～ぷ（新天地経由）", route_code: "j1", trip_headsigns: [] },
+        { route_id: "j2", route_short_name: "めいぷる～ぷ", route_long_name: "めいぷる～ぷ（運動公園経由）", route_code: "j2", trip_headsigns: [] },
+      ],
+      isPending: false,
+      refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/routes" element={<RoutesPicker selected={[]} onChange={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const checkbox = screen.getByRole("checkbox", { name: "めいぷる～ぷ" });
+    expect(checkbox.parentElement).toHaveTextContent(/^めいぷる～ぷ/);
+    expect(checkbox.parentElement).not.toHaveTextContent("j1");
+  });
+});
+
 describe("RoutesPicker group checkbox", () => {
   afterEach(() => vi.restoreAllMocks());
 

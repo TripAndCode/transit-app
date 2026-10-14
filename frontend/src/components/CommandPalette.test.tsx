@@ -180,6 +180,31 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("names routes by their labels, telling apart two that read alike only by their route_ids", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: agencies, isPending: false } as never);
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        { route_id: "111", route_short_name: "12", route_long_name: "12号線", route_code: "111", trip_headsigns: [] },
+        { route_id: "222", route_short_name: "12", route_long_name: "12号線", route_code: "222", trip_headsigns: [] },
+        { route_id: "333", route_short_name: "70-3", route_long_name: "あさひが丘線", route_code: "333", trip_headsigns: [], origin_name: "広島バスセンター", destination_name: "あさひが丘下" },
+      ],
+      isPending: false,
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "号線");
+    expect(screen.getByRole("option", { name: /^12号線 \(111\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^12号線 \(222\)/ })).toBeInTheDocument();
+    await user.clear(screen.getByRole("combobox"));
+    await user.type(screen.getByRole("combobox"), "70-3");
+    expect(screen.getByRole("option", { name: /70-3 あさひが丘線.*広島バスセンター → あさひが丘下/ })).toBeInTheDocument();
+  });
+
   it("selecting a route opens its dossier with the Routes screen's own filters, not the current screen's", async () => {
     rememberScreenScope("1", "routes", "routes=7&dow=weekend");
     const user = userEvent.setup();

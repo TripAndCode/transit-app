@@ -16,6 +16,7 @@
 import { useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
+import { routesAlike } from "../../api/routeDisplayName";
 import { routeWhereText, useRouteNames } from "../../api/useRouteNames";
 import { RoutePartsLabel } from "../RouteLabel";
 import { delayColor } from "../../styles/tokens";
@@ -94,6 +95,9 @@ export function RoutePickerPill({
     : routes
   ).filter((r) => r.route_code != null);
   const filtered = filteredList.slice(0, 50);
+  // Read across every route, not just the matches, so a row's text holds
+  // still while the search narrows the list.
+  const alike = routesAlike(routes.flatMap((r) => (r.route_code ? [{ key: r.route_code, full: names.describe(r.route_code) }] : [])));
 
   const display = value ? names.format(value) : placeholder;
 
@@ -139,7 +143,11 @@ export function RoutePickerPill({
             {filtered.map((r) => {
               const code = r.route_code;
               const parts = code != null ? names.parts.get(code) : undefined;
-              const where = parts ? routeWhereText(parts, t) : null;
+              // Where the route runs has its own column, with the route_id
+              // added only where nothing else tells two routes apart.
+              const where = parts
+                ? [routeWhereText(parts, t), code != null && alike.has(code) ? `(${parts.id})` : null].filter(Boolean).join(" ") || null
+                : null;
               const delay = code != null ? delays?.[code] : null;
               return (
                 <button
@@ -154,10 +162,9 @@ export function RoutePickerPill({
                   }}
                 >
                   <span className="rp-opt-name">
-                    {/* Where the route runs has its own column here, so the label never repeats it. */}
-                    {parts ? <RoutePartsLabel parts={{ ...parts, ambiguous: false }} compact /> : names.format(code)}
+                    {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : names.format(code)}
                   </span>
-                  {where ? <span className="rp-opt-where">{where}</span> : <span />}
+                  {where ? <span className="rp-opt-where clamp-2">{where}</span> : <span />}
                   {delay != null ? (
                     <span className="rp-opt-delay">
                       <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />

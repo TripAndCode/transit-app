@@ -55,16 +55,28 @@ function clean(value: string | null | undefined): string {
   return (value ?? "").trim();
 }
 
-function isPlate(code: string): boolean {
-  return code.length <= PLATE_MAX_LENGTH && /\d/.test(code);
+/** Full-width Latin letters, digits and punctuation ("７０－３") and the
+ *  ideographic space as their ASCII forms, for matching only: the label shows
+ *  the name as the feed wrote it. Each character maps to exactly one, so an
+ *  index into the result is an index into the original. */
+function halfWidth(text: string): string {
+  return text.replace(/[\uFF01-\uFF5E\u3000]/gu, (c) => (c === "\u3000" ? " " : String.fromCharCode(c.charCodeAt(0) - 0xfee0)));
 }
 
-/** A name without the agency's own name in front of it; brands that differ
- *  from the agency name stay. A name that is the agency name alone is kept. */
+function isPlate(code: string): boolean {
+  return code.length <= PLATE_MAX_LENGTH && /\d/.test(halfWidth(code));
+}
+
+/** A name without the agency's own name in front of it. Only a whole leading
+ *  word is the agency's: a brand that merely starts with the same text
+ *  ("廿日市さくらバス" for an agency "廿日市") stays whole, and so does a name
+ *  that is the agency name alone. */ // i18n-ignore: JSDoc example
 function withoutAgencyName(name: string, agencyName: string | null | undefined): string {
   const agency = clean(agencyName);
   if (!agency || !name.startsWith(agency)) return name;
-  return name.slice(agency.length).trim() || name;
+  const rest = name.slice(agency.length);
+  if (!/^\s/u.test(rest)) return name;
+  return rest.trim() || name;
 }
 
 /** Two names as one, without saying the same thing twice. */
@@ -75,16 +87,20 @@ function joinNames(a: string, b: string): string {
 }
 
 /** Whether `name` holds `short`. A code counts only as a whole token, so
- *  "12号線" holds "12" while "Line 10" does not hold "1". */
+ *  "12号線" holds "12" while "Line 10" does not hold "1". */ // i18n-ignore: JSDoc example
 function holdsShortName(name: string, short: string): boolean {
-  if (!WHOLE_CODE.test(short)) return name.includes(short);
-  return new RegExp(`(?<![0-9A-Za-z-])${short}(?![0-9A-Za-z-])`).test(name);
+  const [text, code] = [halfWidth(name), halfWidth(short)];
+  if (!WHOLE_CODE.test(code)) return text.includes(code);
+  // `code` is letters, digits and hyphens only, so it is safe in a pattern.
+  return new RegExp(`(?<![0-9A-Za-z-])${code}(?![0-9A-Za-z-])`).test(text);
 }
 
+/** The code that opens `name`, or that `name` is, as the feed wrote it. */
 function splitCode(name: string): { code: string; rest: string } | null {
-  const lead = LEADING_CODE.exec(name);
-  if (lead) return { code: lead[1], rest: lead[2] };
-  return WHOLE_CODE.test(name) ? { code: name, rest: "" } : null;
+  const matchable = halfWidth(name);
+  const lead = LEADING_CODE.exec(matchable);
+  if (lead) return { code: name.slice(0, lead[1].length), rest: name.slice(matchable.length - lead[2].length) };
+  return WHOLE_CODE.test(matchable) ? { code: name, rest: "" } : null;
 }
 
 function plateAndLine(route: RouteNameFields, agencyName: string | null | undefined): { plate: string | null; line: string | null } {
@@ -105,7 +121,7 @@ function plateAndLine(route: RouteNameFields, agencyName: string | null | undefi
   }
   let longName = long === short ? "" : long;
   let codeFromLong = false;
-  if (longCode && longCode.rest && isPlate(longCode.code) && (plate == null || plate === longCode.code)) {
+  if (longCode && longCode.rest && isPlate(longCode.code) && (plate == null || halfWidth(plate) === halfWidth(longCode.code))) {
     plate = longCode.code;
     longName = longCode.rest;
     codeFromLong = true;
@@ -190,20 +206,26 @@ export function routeNameText(parts: Pick<RouteLabelParts, "plate" | "line" | "i
   return [parts.plate, parts.line].filter(Boolean).join(" ") || parts.id;
 }
 
+function shared(texts: string[]): Set<string> {
+  const seen = new Map<string, number>();
+  for (const text of texts) seen.set(text, (seen.get(text) ?? 0) + 1);
+  return new Set([...seen].filter(([, n]) => n > 1).map(([text]) => text));
+}
+
+/** The keys of the routes whose full description another route also has, so
+ *  that only their route_ids tell them apart. */
+export function routesAlike(entries: { key: string; full: string }[]): Set<string> {
+  const alike = shared(entries.map((e) => e.full));
+  return new Set(entries.filter((e) => alike.has(e.full)).map((e) => e.key));
+}
+
 /** Plain-text labels for a list of routes, as an `<option>` has to hold
  *  them: each route's name; where it runs, only where two names match; and
  *  its route_id, only where even that leaves two alike. Several routes can
  *  share a short code, so a name alone does not always tell them apart. */
 export function distinctRouteTexts(entries: { key: string; name: string; full: string; id: string }[]): Map<string, string> {
-  const count = (texts: string[]) => {
-    const seen = new Map<string, number>();
-    for (const text of texts) seen.set(text, (seen.get(text) ?? 0) + 1);
-    return seen;
-  };
-  const names = count(entries.map((e) => e.name));
-  const first = entries.map((e) => ((names.get(e.name) ?? 0) > 1 ? e.full : e.name));
-  const firsts = count(first);
-  return new Map(
-    entries.map((e, i) => [e.key, (firsts.get(first[i]) ?? 0) > 1 ? `${first[i]} (${e.id})` : first[i]]),
-  );
+  const sharedNames = shared(entries.map((e) => e.name));
+  const first = entries.map((e) => (sharedNames.has(e.name) ? e.full : e.name));
+  const sharedFirst = shared(first);
+  return new Map(entries.map((e, i) => [e.key, sharedFirst.has(first[i]) ? `${first[i]} (${e.id})` : first[i]]));
 }

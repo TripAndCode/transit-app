@@ -697,8 +697,9 @@ export type Route = {
   route_code: string | null;
   trip_headsigns: string[];
   /** The route's terminals and main via point, from the feed's routes_jp.txt
-   *  (or its most common first and last stop). Absent until the server sends
-   *  them, so every label must read well without them. */
+   *  or its most common first and last stop. The server always sends these,
+   *  null where a feed does not name them, so a label must read well without
+   *  them. They are optional only so partial test fixtures type-check. */
   origin_name?: string | null;
   via_name?: string | null;
   destination_name?: string | null;

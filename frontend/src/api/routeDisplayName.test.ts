@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distinctRouteTexts, routeLabelParts, routeLabelPartsByCode, routeNameText } from "./routeDisplayName";
+import { distinctRouteTexts, routeLabelParts, routeLabelPartsByCode, routeNameText, routesAlike } from "./routeDisplayName";
 import type { Route } from "./types";
 
 function route(fields: Partial<Route>): Route {
@@ -52,6 +52,17 @@ describe("rule 2: a plate holds only a short public code, at most 6 characters w
   });
 });
 
+describe("full-width codes", () => {
+  it("reads a code written in full-width digits as a code, and shows it as the feed wrote it", () => {
+    expect(nameOf({ route_short_name: "７０-3", route_long_name: "あさひが丘線" })).toEqual({ plate: "７０-3", line: "あさひが丘線" });
+    expect(nameOf({ route_short_name: "", route_long_name: "１７－１ 五月が丘線" })).toEqual({ plate: "１７－１", line: "五月が丘線" });
+  });
+
+  it("matches a short code inside a long name written in full-width digits", () => {
+    expect(nameOf({ route_short_name: "3", route_long_name: "３号線" })).toEqual({ plate: null, line: "３号線" });
+  });
+});
+
 describe("rule 3: a long name that already holds the short name is shown alone", () => {
   it("drops the plate when the long name contains a brand short name (JR中国)", () => {
     expect(nameOf({ route_short_name: "めいぷる～ぷ", route_long_name: "めいぷる～ぷ（新天地経由）" })).toEqual({
@@ -86,6 +97,17 @@ describe("rule 4: a leading agency name is stripped from the line name", () => {
     expect(nameOf({ route_short_name: "", route_long_name: "廿日市さくらバス 原ルート" }, "廿日市市")).toEqual({
       plate: null,
       line: "廿日市さくらバス 原ルート",
+    });
+  });
+
+  it("strips the agency name only as a whole leading word, never cutting a brand that starts with the same text", () => {
+    expect(nameOf({ route_short_name: "", route_long_name: "廿日市さくらバス 原ルート" }, "廿日市")).toEqual({
+      plate: null,
+      line: "廿日市さくらバス 原ルート",
+    });
+    expect(nameOf({ route_short_name: "", route_long_name: "呉市生活バス　阿賀音戸の瀬戸線" }, "呉市生活バス")).toEqual({
+      plate: null,
+      line: "阿賀音戸の瀬戸線",
     });
   });
 
@@ -240,6 +262,16 @@ describe("routeNameText", () => {
     expect(routeNameText(routeLabelParts(route({ route_short_name: "70-3" })))).toBe("70-3");
     expect(routeNameText(routeLabelParts(route({ route_long_name: "国道・古川線" })))).toBe("国道・古川線");
     expect(routeNameText(routeLabelParts(route({ route_short_name: "A1 国道・古川線" })))).toBe("A1 国道・古川線");
+  });
+});
+
+describe("routesAlike", () => {
+  it("names the routes that only their route_ids tell apart", () => {
+    expect(routesAlike([
+      { key: "a", full: "12号線" },
+      { key: "b", full: "12号線" },
+      { key: "c", full: "70-3 あさひが丘線" },
+    ])).toEqual(new Set(["a", "b"]));
   });
 });
 

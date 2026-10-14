@@ -326,6 +326,35 @@ describe("Sidebar", () => {
       expect(link).not.toHaveTextContent("1471981638");
     });
 
+    it("badges a pinned route without a short code by its name, never by its route_code", () => {
+      togglePinnedRoute(8, "1471981638");
+      vi.spyOn(hooks, "useRoutes").mockReturnValue({
+        data: [
+          {
+            route_id: "1471981638",
+            route_short_name: "めいぷる～ぷ",
+            route_long_name: "めいぷる～ぷ（新天地経由）",
+            route_code: "1471981638",
+            trip_headsigns: [],
+          },
+        ],
+      } as never);
+      renderSidebar("/agencies/8/live");
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", {
+        name: "めいぷる～ぷ（新天地経由）",
+      });
+      expect(link.querySelector(".rail-pin-code")).toHaveTextContent(/^め$/);
+      expect(link.querySelector(".rail-pin-name")).toHaveTextContent("めいぷる～ぷ（新天地経由）");
+      expect(link).not.toHaveTextContent("1471981638");
+    });
+
+    it("gives a pinned route a plain badge until the static routes name it", () => {
+      togglePinnedRoute(8, "1471981638");
+      renderSidebar("/agencies/8/live");
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "Route 1471981638" });
+      expect(link.querySelector(".rail-pin-code")).toHaveTextContent("\u2022");
+    });
+
     it("leaves the collapsed rail without the list while it is empty", async () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/8/live");

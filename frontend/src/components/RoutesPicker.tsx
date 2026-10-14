@@ -41,11 +41,8 @@ function variantTexts(
   }));
 }
 
-// Module-scope pure function rather than an in-render IIFE: an ordinary
-// CallExpression with an Identifier callee is unambiguously memoized by the
-// React Compiler the same way as any other function call in these
-// components, closing the "does the compiler memoize an inline IIFE the
-// same way" question this ban's residual-risk note used to leave open.
+// A module-scope function, not an in-render IIFE: the React Compiler memoizes
+// a plain call like this one as it does any other.
 function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
   if (!data) return [];
   const m = new Map<string, RouteVariant[]>();
@@ -182,10 +179,12 @@ export function RoutesPicker({
           const multi = g.variants.length > 1;
           const mean = renderDelay ? groupMean(g.variants, delays) : null;
           // The line reads by its first variant's label, its line name kept
-          // only when every variant shares it.
+          // only when every variant shares it. With neither a plate nor a
+          // shared line name (a brand short name over differing long names),
+          // the label would be empty, so the line reads by its group name.
           const first = names.parts.get(g.variants[0].code);
           const sharedLine = first && g.variants.every((v) => names.parts.get(v.code)?.line === first.line) ? first.line : null;
-          const lineParts = first && { ...first, line: sharedLine, terminals: null, qualifier: null, ambiguous: false };
+          const lineParts = first && (first.plate || sharedLine) ? (sharedLine === first.line ? first : { ...first, line: sharedLine }) : null;
           const lineText = lineParts ? routeNameText(lineParts) : g.name;
           const rowTexts = multi && isOpen ? variantTexts(g.variants, names.parts, sharedLine, t) : null;
           return (
@@ -229,7 +228,7 @@ export function RoutesPicker({
                     padding: 0,
                   }}
                 >
-                  {lineParts ? <RoutePartsLabel parts={lineParts} compact /> : <span style={{ fontWeight: 600 }}>{g.name}</span>}
+                  {lineParts ? <RoutePartsLabel parts={lineParts} compact nameOnly /> : <span style={{ fontWeight: 600 }}>{g.name}</span>}
                   {multi && (
                     <span style={{ color: "var(--text-tertiary)" }}> {t("filters.routes.variant_count", { count: g.variants.length })}</span>
                   )}

@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import i18n from "../i18n";
 import { buildRouteNames } from "../api/useRouteNames";
 import type { Route } from "../api/types";
-import { RouteLabel } from "./RouteLabel";
+import { RouteLabel, RoutePartsLabel } from "./RouteLabel";
 
 void i18n.changeLanguage("en");
 
@@ -44,6 +44,16 @@ describe("RouteLabel", () => {
     expect(container.querySelector(".route-label__line")).toHaveTextContent(/^あさひが丘線$/);
     expect(container.querySelector(".route-label__ends")).toHaveTextContent(/^広島バスセンター → あさひが丘下$/);
     expect(container).toHaveTextContent(/^70-3 あさひが丘線 広島バスセンター → あさひが丘下$/);
+  });
+
+  it("lets each line of the full label wrap once and clamp, rather than cut a Japanese name mid-word", () => {
+    // Guards the clamp the source scan in styles/clamp.test.ts cannot see:
+    // the line name's class is chosen by the variant.
+    const { container } = render(<RouteLabel code="1471981638" names={names} />);
+    expect(container.querySelector(".route-label__line")).toHaveClass("clamp-2");
+    expect(container.querySelector(".route-label__ends")).toHaveClass("clamp-2");
+    const compact = render(<RouteLabel code="1471981638" names={names} compact />);
+    expect(compact.container.querySelector(".route-label__line")).not.toHaveClass("clamp-2");
   });
 
   it("keeps the route_id out of the text, in a tooltip", () => {
@@ -126,6 +136,12 @@ describe("RouteLabel", () => {
     expect(container).toHaveTextContent(/^A1 国道・古川線 · 明の星→青森駅$/);
     expect(container.querySelector(".route-label__aside")).toHaveTextContent("明の星→青森駅");
     expect(render(<RouteLabel code="316470308" names={names} compact />).container.querySelector(".route-label__aside")).toBeNull();
+  });
+
+  it("leaves where a route runs out of a compact label when the caller shows it beside the label", () => {
+    const parts = names.parts.get("10012")!;
+    const { container } = render(<RoutePartsLabel parts={parts} compact nameOnly />);
+    expect(container).toHaveTextContent(/^A1 国道・古川線$/);
   });
 
   it("uses the caller's name until the static routes know the code", () => {

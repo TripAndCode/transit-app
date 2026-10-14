@@ -5,11 +5,12 @@ import { FILTER_SEPARATOR } from "../utils/format";
 import "./RouteLabel.css";
 
 /** A route's label: its short code as a plate, its line name beside it, and
- *  where it runs on a quiet second line. `compact` keeps it to one line, for
+ *  where it runs on a quiet second line. `compact` drops that second line, for
  *  pickers, table cells and other tight places; where it runs then moves into
- *  the tooltip. The feed's route_id is never printed, only kept in the
- *  tooltip: it means nothing to a reader, and the terminals tell apart the
- *  routes that share a short code.
+ *  the tooltip. The feed's route_id means nothing to a reader, so it is kept
+ *  in the tooltip and printed only as the last resort, when the route has
+ *  neither a short nor a long name; the terminals tell apart the routes that
+ *  share a short code.
  *
  *  `fallbackName` is a name the caller's own payload carries, read like a
  *  short name until the static routes load or when they lack the code; with
@@ -36,13 +37,22 @@ export function RouteLabel({
 
 /** `RouteLabel` for a caller that holds the label's parts rather than a code.
  *  A compact label still says where the route runs, inline and muted, when
- *  another route shares its plate and line name. */
-export function RoutePartsLabel({ parts, compact = false }: { parts: RouteLabelParts; compact?: boolean }) {
+ *  another route shares its plate and line name; `nameOnly` leaves that out
+ *  for a caller that shows where the route runs beside the label itself. */
+export function RoutePartsLabel({
+  parts,
+  compact = false,
+  nameOnly = false,
+}: {
+  parts: RouteLabelParts;
+  compact?: boolean;
+  nameOnly?: boolean;
+}) {
   const { t } = useTranslation();
   const { plate, line, terminals, qualifier, ambiguous, id } = parts;
   const where = routeWhereText(parts, t);
   const twoLines = !compact && where != null;
-  const aside = compact && ambiguous ? where : null;
+  const aside = compact && ambiguous && !nameOnly ? where : null;
   const title = compact && where ? `${where}${FILTER_SEPARATOR}${id}` : id;
   const className = [
     "route-label",

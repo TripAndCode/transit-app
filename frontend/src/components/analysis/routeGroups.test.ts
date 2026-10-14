@@ -16,7 +16,7 @@ describe("routeGroups", () => {
       route("3581531211", "14 共立ハイツ線"),
       route("583208004", "共立ハイツ線"),
     ];
-    const groups = routeGroups(routes);
+    const groups = routeGroups(routes, routeLabelPartsByCode(routes));
     expect(groups).toHaveLength(1);
     expect(groups[0][0]).toBe("共立ハイツ線");
     expect(groups[0][1].map((r) => r.route_code).sort()).toEqual(
@@ -26,7 +26,7 @@ describe("routeGroups", () => {
 
   it("keeps genuinely different route names as separate groups", () => {
     const routes = [route("1", "14-5 共立ハイツ線"), route("2", "17-1 五月が丘線")];
-    const groups = routeGroups(routes);
+    const groups = routeGroups(routes, routeLabelPartsByCode(routes));
     expect(groups.map(([name]) => name).sort()).toEqual(["五月が丘線", "共立ハイツ線"]);
   });
 
@@ -39,15 +39,15 @@ describe("routeGroups", () => {
       ["4277339220", "11 共立ハイツ線"], ["444086881", "14-5 共立ハイツ線"], ["583208004", "共立ハイツ線"],
     ] as const;
     const routes = names.map(([code, name]) => route(code, name));
-    const groups = routeGroups(routes);
+    const groups = routeGroups(routes, routeLabelPartsByCode(routes));
     const kyoritsu = groups.find(([name]) => name === "共立ハイツ線");
     expect(kyoritsu?.[1]).toHaveLength(8);
   });
 
   it("selectedGroup still resolves correctly once grouping is fixed", () => {
     const routes = [route("a", "14 共立ハイツ線"), route("b", "共立ハイツ線")];
-    expect(selectedGroup(routes, ["a"])).toBe("共立ハイツ線");
-    expect(selectedGroup(routes, ["a", "b"])).toBe("共立ハイツ線");
+    expect(selectedGroup(routes, ["a"], routeLabelPartsByCode(routes))).toBe("共立ハイツ線");
+    expect(selectedGroup(routes, ["a", "b"], routeLabelPartsByCode(routes))).toBe("共立ハイツ線");
   });
 
   it("groups by the label's line name, once a code has been split off whichever field held it and the agency name taken off", () => {
@@ -77,20 +77,20 @@ describe("routeGroups", () => {
 
   it("skips routes without a route_code", () => {
     const routes: Route[] = [{ route_id: "x", route_code: null, route_long_name: "共立ハイツ線", route_short_name: null, trip_headsigns: [] }];
-    expect(routeGroups(routes)).toHaveLength(0);
+    expect(routeGroups(routes, routeLabelPartsByCode(routes))).toHaveLength(0);
   });
 
   it("keeps a name that is entirely a pattern-number token instead of collapsing it to an empty group", () => {
     const routes = [route("a", "14-5"), route("b", "17-1")];
-    expect(routeGroups(routes).map(([name]) => name).sort()).toEqual(["14-5", "17-1"]);
+    expect(routeGroups(routes, routeLabelPartsByCode(routes)).map(([name]) => name).sort()).toEqual(["14-5", "17-1"]);
   });
 
   it("only ever names a group that routeGroups actually produced for the same routes -- callers rely on this to look the group back up without a non-null assertion", () => {
     const routes = [route("a", "14 共立ハイツ線"), route("b", "共立ハイツ線"), route("c", "17-1 五月が丘線")];
     for (const codes of [["a"], ["a", "b"], ["c"], [], ["missing-code"]]) {
-      const name = selectedGroup(routes, codes);
+      const name = selectedGroup(routes, codes, routeLabelPartsByCode(routes));
       if (name === "") continue;
-      expect(routeGroups(routes).some(([groupName]) => groupName === name)).toBe(true);
+      expect(routeGroups(routes, routeLabelPartsByCode(routes)).some(([groupName]) => groupName === name)).toBe(true);
     }
   });
 });
