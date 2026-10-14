@@ -38,8 +38,8 @@ def _service_label(ctx: RangeCtx) -> str | None:
     it would split one route into fragments, each averaged over a slice of its
     data. The service filter selects dates instead
     (:func:`api.range.resolve_service_dates`), and this label is that filter,
-    kept in each row's service slot because the CSV, report tables and
-    text rows read rows by position.
+    kept in each row's service slot because the CSV export and the frontend's
+    row tuples read the slots by position.
     """
     return None if ctx.service == "all" else ctx.service
 

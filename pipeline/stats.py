@@ -87,13 +87,13 @@ def linear_percentile(values: list[float], q: float) -> float | None:
 def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     """Append a ``low_confidence`` bool to each on-time-style row.
 
-    Expects the ``(route_code, service_type, pct, avg_min, samples)`` row
+    Expects the ``(route_code, service, pct, avg_min, samples)`` row
     shape shared by ``pipeline.reports.rankings.compute_on_time`` and its
-    live fallback (``pct`` a percentage 0..100, ``samples`` the group's
+    live fallback (``pct`` a percentage 0..100, ``samples`` the route's
     observation count). Returns a NEW list of 6-tuples; the input rows and
-    ``compute_on_time``'s own contract are untouched, so callers that pool
-    or re-aggregate its raw rows (e.g. ``pipeline.reports.suggest``'s
-    fallback) are unaffected -- this is a display-layer annotation only.
+    ``compute_on_time``'s own contract are untouched, so callers that read
+    its raw rows (e.g. ``pipeline.reports.suggest``'s fallback) are
+    unaffected -- this is a display-layer annotation only.
 
     ``successes`` is back-derived from the already-rounded percentage
     (``round(pct/100 * samples)``) rather than re-read from an exact count
