@@ -70,7 +70,7 @@ async def _agency_on_time_pooled(
     late_tolerance_sec: int | None,
 ) -> tuple[float | None, float | None, int]:
     """``(on_time_pct, avg_delay_min, samples)`` pooled across EVERY
-    route/service group matching ``ctx`` -- the same tolerance semantics
+    route matching ``ctx`` -- the same tolerance semantics
     :func:`pipeline.reports.rankings.compute_on_time` resolves per-route,
     collapsed to one agency-wide figure. ``(None, None, 0)`` when nothing
     matches ``ctx`` at all.

@@ -1122,7 +1122,7 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
 async def test_reports_trend_live_bucket_totals_include_thin_groups_but_offenders_do_not(
     reports_client, ch_client, ch_async_client
 ):
-    """Under a time_band the trend reads ClickHouse, and a route-service group
+    """Under a time_band the trend reads ClickHouse, and a route
     with 5 or fewer samples still counts toward its day's average and sample
     total; only the top-offenders attribution ignores it. Mirrors the
     agg_daily_trend path's test of the same name."""
@@ -1340,7 +1340,7 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
 
 @pytest.mark.asyncio
 async def test_compute_trend_series_bucket_totals_include_thin_groups_but_offenders_do_not(aconn, aagency_id):
-    """A route-service group with 5 or fewer samples still counts toward its
+    """A route with 5 or fewer samples still counts toward its
     day's average and sample total (the same pooling Overview applies to
     agg_daily_trend); only the top-offenders attribution ignores it, because a
     handful of trips is too noisy to name a worst route."""

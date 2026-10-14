@@ -421,12 +421,12 @@ TOOLS: list[dict] = [
         "function": {
             "name": "top_n",
             "description": (
-                "Ranking of routes, one row per route and service type, over the request window "
+                "Ranking of routes, one row per route, over the request window "
                 "and UI filters. The metric param controls what is ranked: avg_delay (default; "
                 "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
                 "% first, always at the fixed 60-second on-time threshold), worst_5min (most "
                 "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
-                "route-service groups with 20 or fewer samples. For an on-time ranking at another "
+                "routes with 20 or fewer samples. For an on-time ranking at another "
                 "threshold use on_time_rate (best_first=false lists the lowest first). Use for "
                 "'worst N', 'best N', 'most 5-minute delays'."
             ),
@@ -522,9 +522,9 @@ TOOLS: list[dict] = [
         "function": {
             "name": "on_time_rate",
             "description": (
-                "On-time percentage per route and service type over the request window and UI "
-                "filters, highest first unless best_first=false (n rows, default 20); route-service "
-                "groups with 20 or fewer samples are left out. A departure counts as on time when it "
+                "On-time percentage per route over the request window and UI "
+                "filters, highest first unless best_first=false (n rows, default 20); routes "
+                "with 20 or fewer samples are left out. A departure counts as on time when it "
                 "is at most threshold_min minutes late (default 1 = 60 seconds); early departures "
                 "always count as on time. Set threshold_min=5 for '5分以内定時率'."
             ),
