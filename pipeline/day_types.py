@@ -250,3 +250,10 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
     # Only services with a weekly class vote, and those all have a calendar.txt row.
     trips = {r["service_id"]: r["trips"] for r in weekly_rows}
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)
+
+
+def invalidate_day_types() -> None:
+    """Forget every cached calendar read, after a load replaced an agency's
+    calendar, so the next report splits days by the new one instead of waiting
+    out the cache's TTL."""
+    load_day_types.cache_clear()  # type: ignore[attr-defined]

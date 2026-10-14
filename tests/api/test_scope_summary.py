@@ -169,7 +169,8 @@ async def test_day_types_are_the_buckets_the_calendar_splits_the_period_into(see
             date(2026, 4, 1),
             date(2027, 3, 31),
         )
-    # The calendar is cached like the reports it feeds; a reload outlives it.
+    # The calendar is cached like the reports it feeds, so rows written behind
+    # the loader's back show only once the cache is cleared.
     from pipeline.cache import clear_all
 
     clear_all()

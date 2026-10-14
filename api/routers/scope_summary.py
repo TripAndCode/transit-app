@@ -62,7 +62,8 @@ class ScopeSummaryResponse(BaseModel):
     weekdays: list[ScopeWeekday]
     routes: list[ScopeRoute]
     tolerance: list[ScopeTolerance]
-    # The period's day-type buckets in display order (pipeline.day_types):
+    # The agency's day-type buckets over the period and the `days` strip
+    # together, in display order (pipeline.day_types):
     # weekday / saturday / sunday_holiday, or weekday / weekend_holiday.
     day_types: list[DayType]
     ctx: ReportCtx

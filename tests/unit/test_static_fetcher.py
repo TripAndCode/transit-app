@@ -716,6 +716,26 @@ def test_refresh_static_forces_the_fetch_when_asked_or_when_no_timetable_is_load
     assert loaded == ([str(strategy.zip_path)] if loads else [])
 
 
+@pytest.mark.parametrize("has_timetable", [False, True], ids=["a load", "nothing newer"])
+def test_refresh_static_forgets_the_cached_calendar_only_after_a_load(tmp_path, monkeypatch, has_timetable):
+    """Reports read day types from a cache, and a load replaces the calendar
+    they come from; a reload that found nothing newer changes nothing."""
+    from pipeline import day_types, db, static_fetcher
+
+    strategy = _ManifestSaysUnchanged(tmp_path / "gtfs_static_20261015.zip")
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+    cleared: list[bool] = []
+    monkeypatch.setattr(day_types, "invalidate_day_types", lambda: cleared.append(True))
+
+    static_fetcher.refresh_static(8, conn, tmp_path)
+
+    assert cleared == ([] if has_timetable else [True])
+
+
 class _SourceSendsNothing:
     """A source that answers 304 even to a request carrying no validators."""
 
