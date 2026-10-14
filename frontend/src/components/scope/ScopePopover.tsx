@@ -7,17 +7,20 @@ import { popoverLeft } from "./popoverPosition";
  *  opened over it takes the Escape instead. A click outside also closes it;
  *  focus leaving it is handled by the token's wrapper.
  *
- *  It is positioned against the scope section rather than its token, so a
- *  token near the right edge opens a popover that still fits the screen. */
+ *  It is positioned against its positioned ancestor (the scope section, or
+ *  the page heading's row for the saved views) rather than its trigger, so a
+ *  trigger near the right edge opens a popover that still fits the screen. */
 export function ScopePopover({
   label,
   onClose,
   returnFocusTo,
+  className,
   children,
 }: {
   label: string;
   onClose: () => void;
   returnFocusTo: RefObject<HTMLElement | null>;
+  className?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -46,7 +49,7 @@ export function ScopePopover({
   }, [returnFocusTo]);
 
   return (
-    <div ref={ref} role="dialog" aria-label={label} tabIndex={-1} className="scope-popover">
+    <div ref={ref} role="dialog" aria-label={label} tabIndex={-1} className={className ? `scope-popover ${className}` : "scope-popover"}>
       {children}
     </div>
   );

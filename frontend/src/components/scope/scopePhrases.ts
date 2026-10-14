@@ -5,7 +5,7 @@ import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, typ
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
 export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "early" | "tolerance";
 export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null };
-type PhraseCtx = {
+export type PhraseCtx = {
   t: LabelT;
   agencyName: string;
   routeLabel: (code: string) => string;
@@ -101,6 +101,43 @@ export function sentenceParts(template: string): ({ text: string } | { slot: str
   }
   if (last < template.length) parts.push({ text: template.slice(last) });
   return parts;
+}
+
+/** The period's length in days, both ends included. */
+export function periodDays({ from, to }: Pick<Scope, "from" | "to">): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+/** Whether a condition differs from what a reset gives back. The optional
+ *  conditions are tokens only while set, so they always differ. A null
+ *  `defaultPeriod` means it is not known yet, and the period counts as
+ *  unchanged rather than flashing as changed until it is. */
+export function tokenChanged(key: TokenKey, scope: Scope, defaultPeriod: Pick<Scope, "from" | "to"> | null): boolean {
+  switch (key) {
+    case "agency":
+      return false;
+    case "routes":
+      return scope.routes.length > 0;
+    case "period":
+      return defaultPeriod != null && (scope.from !== defaultPeriod.from || scope.to !== defaultPeriod.to);
+    case "days":
+      return scope.dow !== "all";
+    case "time":
+      return scope.hour != null || scope.time_band !== "all";
+    case "tolerance":
+      return (scope.late ?? DEFAULT_LATE_SEC) !== DEFAULT_LATE_SEC;
+    default:
+      return true;
+  }
+}
+
+/** A name to offer when saving `scope` as a view: the conditions it changes,
+ *  or its routes and period when it changes none. */
+export function suggestedViewName(scope: Scope, ctx: PhraseCtx, defaultPeriod: Pick<Scope, "from" | "to"> | null): string {
+  const tokens = scopeTokens(scope, ctx);
+  const changed = tokens.filter((tok) => tokenChanged(tok.key, scope, defaultPeriod));
+  const picked = changed.length > 0 ? changed : tokens.filter((tok) => tok.key === "routes" || tok.key === "period");
+  return picked.map((tok) => tok.label).join(translationT(ctx.t, "common.list_separator"));
 }
 
 /** The scope's conditions as one line, for saved-analysis titles. */

@@ -10,6 +10,7 @@ import {
   lastClosedDayISO,
   parseScope,
   presetScopePatch,
+  scopeAfterPreset,
   scopeToQueryString,
   toJstISO,
 } from "./scope";
@@ -113,6 +114,23 @@ describe("presetScopePatch", () => {
     expect(next.has("hour")).toBe(false);
     expect(next.has("stop")).toBe(false);
     expect(next.get("report")).toBe("trend");
+  });
+});
+
+describe("scopeAfterPreset", () => {
+  const current = parse("from=2026-09-01&to=2026-09-28&dow=weekday&stop=S1");
+
+  it("reads a stored preset back as the whole scope picking it leads to", () => {
+    const stored = { ...current, dow: "weekend", stop: null, routes: ["50"] };
+    expect(scopeAfterPreset(current, stored)).toEqual({ ...current, dow: "weekend", stop: null, routes: ["50"] });
+  });
+
+  it("fills what a sparse preset never stored the way picking it would", () => {
+    expect(scopeAfterPreset(current, { dow: "weekday" })).toEqual({ ...current, stop: null });
+  });
+
+  it("leads back to the same scope for a preset saved from it", () => {
+    expect(scopeToQueryString(scopeAfterPreset(current, { ...current }))).toBe(scopeToQueryString(current));
   });
 });
 
