@@ -17,7 +17,7 @@ cannot disagree at the edge of a day.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -38,6 +38,17 @@ def service_date_ch(column: str = "captured_at") -> str:
 def service_date_of(moment: datetime) -> date:
     """The service date a timestamp belongs to, matching :func:`service_date_ch`."""
     return (moment.astimezone(_JST) - timedelta(hours=SERVICE_DAY_CUTOVER_HOURS)).date()
+
+
+def service_day_start_utc(day: date) -> datetime:
+    """The UTC instant service day ``day`` begins: the cutover hour of that date in Japan time.
+
+    Service day ``day`` runs from here up to the next day's start. A range on
+    the stored ``captured_at`` between the two selects the rows
+    :func:`service_date_ch` files under ``day``, and lets the sort key prune
+    the scan.
+    """
+    return datetime.combine(day, time(SERVICE_DAY_CUTOVER_HOURS), tzinfo=_JST).astimezone(timezone.utc)
 
 
 def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:

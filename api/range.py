@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException, Query
 
 from pipeline.day_types import TWO_WAY, DayType, DayTypes, load_day_types
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -37,6 +37,16 @@ def jst_today() -> date:
     must be derived from that calendar too, never the server's local date.
     """
     return datetime.now(_JST).date()
+
+
+def current_service_date() -> date:
+    """The service day in progress (:mod:`pipeline.service_day`).
+
+    Until the cutover hour this is the day before :func:`jst_today`: what has
+    been observed since midnight is the late-night tail of the service day
+    still running, not the start of a new one.
+    """
+    return service_date_of(datetime.now(_JST))
 
 
 def last_closed_jst_day() -> date:
