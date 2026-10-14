@@ -55,7 +55,7 @@ from typing import Iterable, Iterator
 from api.range import RangeCtx, dow_isodays
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.day_types import load_day_types
+from pipeline.day_types import DayTypes, load_day_types
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 from pipeline.reports.rankings import _round1
 
@@ -74,7 +74,7 @@ _log = logging.getLogger(__name__)
 _GRAIN_LOOKBACK_DAYS = 7
 
 # How many pooled connections one overview request may hold at once on its
-# pool-gather path. Eleven stages fan out per request; unbounded, two
+# pool-gather path. Ten stages fan out per request; unbounded, two
 # concurrent cold requests alone would exhaust the pool and queue every other
 # endpoint behind them. The bound trades some of one request's overlap for
 # room for several requests at once.
@@ -1039,17 +1039,15 @@ def _avg_min(samples: int, sum_delay_sec: int) -> float:
     return float(_round2((sum_delay_sec / samples) / 60.0))
 
 
-async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
-    """Per-date avg delay over ``ctx``, each date tagged with its day-type bucket.
+def _service_split_daily(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> list[dict]:
+    """Per-date avg delay, each date tagged with its day-type bucket.
 
     Returns ``{date: ISO str, day_type, avg_min}`` rows sorted by date, one per
     date with samples. ``day_type`` is the same bucket :func:`_service_split`
     files the date under, so the modal's series match the card's rows.
     """
-    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
     return [
-        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total)}
-        for d, n, total in await _daily_totals(agency_id, ctx, conn, grain)
+        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total)} for d, n, total in totals
     ]
 
 
@@ -1150,8 +1148,18 @@ SPLIT_MIN_DAYS = 3
 SPLIT_MIN_SAMPLES = 1000
 
 
-async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
-    """Mean delay per day type over ``ctx``.
+async def _service_day_split(
+    agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> tuple[list[dict], list[dict]]:
+    """``(service_split, service_split_daily)`` over ``ctx``, from one day-type
+    resolution and one per-date read shared by both."""
+    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
+    totals = await _daily_totals(agency_id, ctx, conn, grain)
+    return _service_split(day_types, totals), _service_split_daily(day_types, totals)
+
+
+def _service_split(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> list[dict]:
+    """Mean delay per day type over the dates in ``totals``.
 
     Each date is filed under the timetable class the agency's calendar runs
     that day (:func:`pipeline.day_types.load_day_types`), never under the
@@ -1168,9 +1176,8 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
     ``insufficient`` marks a bucket under :data:`SPLIT_MIN_DAYS` days or
     :data:`SPLIT_MIN_SAMPLES` samples.
     """
-    day_types = await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
     acc = {bucket: [0, 0, 0] for bucket in day_types.buckets}  # samples, sum_delay_sec, days
-    for d, n, total in await _daily_totals(agency_id, ctx, conn, grain):
+    for d, n, total in totals:
         slot = acc[day_types.of(d)]
         slot[0] += n
         slot[1] += total
@@ -1354,8 +1361,7 @@ async def compute_overview_summary(
             peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain)
             peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain)
         async with perf.timed_block("overview.service_split"):
-            service_split = await _service_split(agency_id, ctx, conn, ch=ch, grain=grain)
-            service_split_daily = await _service_split_daily(agency_id, ctx, conn, ch=ch, grain=grain)
+            service_split, service_split_daily = await _service_day_split(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
             # Hero card slices `.slice(-7)`; modal shows full series.
             sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
@@ -1399,8 +1405,7 @@ async def compute_overview_summary(
             concentration,
             top_delayed,
             peak,
-            service_split,
-            service_split_daily,
+            (service_split, service_split_daily),
             sparkline_points,
         ) = await asyncio.gather(
             _peak_dow("weekday"),
@@ -1411,8 +1416,7 @@ async def compute_overview_summary(
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
-            _own_conn(_service_split, agency_id, ctx),
-            _own_conn(_service_split_daily, agency_id, ctx),
+            _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )
 

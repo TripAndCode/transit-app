@@ -24,9 +24,7 @@ def _days(lo: date, hi: date) -> list[date]:
     return [lo + timedelta(days=i) for i in range((hi - lo).days + 1)]
 
 
-# ---------------------------------------------------------------------------
 # The weekday rule, used where the feed's calendar is silent.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -55,9 +53,7 @@ def test_fallback_matches_the_holiday_list_it_is_given():
         assert fallback_day_type(d, holidays) == fallback_day_type(d)
 
 
-# ---------------------------------------------------------------------------
 # A service's class comes from the weekdays its calendar.txt row names.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -78,9 +74,7 @@ def test_service_class_reads_the_weekly_flags(flags, expected):
     assert service_class(flags) == expected
 
 
-# ---------------------------------------------------------------------------
 # A date's day type is the class of the services the calendar runs that date.
-# ---------------------------------------------------------------------------
 
 
 def _hiroshima_like():
@@ -140,6 +134,20 @@ def test_an_aomori_like_two_class_feed_gets_two_buckets():
     # A window of weekdays alone still belongs to a two-class feed.
     weekdays_only = resolve_day_types(date(2026, 9, 14), date(2026, 9, 18), services, [], {})
     assert weekdays_only.buckets == TWO_WAY
+
+
+def test_a_two_class_tie_goes_to_the_weekday_rule_like_a_three_class_one():
+    """A holiday Monday that adds the weekend timetable without removing the
+    weekday one, at equal weight, is a holiday whether the feed has one weekend
+    class or two."""
+    swap = [("土日祝", date(2026, 9, 21), 1)]
+    two = [WeeklyService("平日", WEEKDAYS, CAL_START, CAL_END), WeeklyService("土日祝", WEEKEND, CAL_START, CAL_END)]
+    two_way = resolve_day_types(date(2026, 9, 21), date(2026, 9, 21), two, swap, {"平日": 100, "土日祝": 100})
+    assert two_way.of(date(2026, 9, 21)) == "weekend_holiday"
+    three_swap = [("11_日祝(共通)", date(2026, 9, 21), 1)]
+    trips = {"11_平日(共通)": 100, "11_日祝(共通)": 100}
+    three_way = resolve_day_types(date(2026, 9, 21), date(2026, 9, 21), _hiroshima_like(), three_swap, trips)
+    assert three_way.of(date(2026, 9, 21)) == "sunday_holiday"
 
 
 def test_a_two_class_feed_folds_fallback_weekends_into_its_weekend_bucket():

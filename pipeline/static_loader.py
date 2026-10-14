@@ -87,6 +87,20 @@ def _calendar_rows(raw_rows: list[list]) -> list[list]:
     return rows
 
 
+def _count_calendar_trips(cur, agency_id: int) -> None:
+    """Store each calendar service's trip count, the weight of its vote for a
+    date's timetable class (``pipeline.day_types``), so reports read it
+    instead of aggregating ``static_trips`` per request. Rows were just
+    inserted at the column's default of 0, so a service with no trips keeps it.
+    """
+    cur.execute(
+        "UPDATE static_calendar c SET trips = t.trips "
+        "FROM (SELECT service_id, COUNT(*) AS trips FROM static_trips WHERE agency_id = %s GROUP BY service_id) t "
+        "WHERE c.agency_id = %s AND c.service_id = t.service_id",
+        (agency_id, agency_id),
+    )
+
+
 def load_static(path: str, agency_id: int, conn) -> None:
     """Load a GTFS static zip into the ``static_*`` tables for ``agency_id``.
 
@@ -129,6 +143,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
         for filename, table, csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
+                if table == "static_calendar":
+                    # An earlier feed's calendar would file this feed's dates under its timetables.
+                    cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
                 continue
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
@@ -218,6 +235,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
             logger.info(f"  {table}: {len(raw_rows):,} rows")
 
+        _count_calendar_trips(cur, agency_id)
         changed = load_route_terminals(zf, names_in_zip, cur, agency_id)
         logger.info(f"  route terminals: {changed:,} routes changed")
 

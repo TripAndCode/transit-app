@@ -107,8 +107,13 @@ class DayTypes:
 def _majority(
     running: Iterable[str], classes: Mapping[str, DayType | None], trips: Mapping[str, int], fallback: DayType
 ) -> DayType:
-    """The class running the most trips, then the most services; a tie that
-    includes ``fallback`` goes to it, any other tie to the first in display order."""
+    """The class running the most trips, then the most services.
+
+    A tie goes to the tied class that agrees with ``fallback``, the weekday
+    rule's verdict; 土日祝 agrees with both 土曜 and 日祝, so a two-class feed
+    breaks a tie the way a three-class one does. Any other tie goes to the
+    first in display order.
+    """
     votes: dict[DayType, list[int]] = {}
     for service_id in running:
         cls = classes.get(service_id)
@@ -120,7 +125,13 @@ def _majority(
         return fallback
     best = max(votes.values())
     tied = [cls for cls in _ORDER if votes.get(cls) == best]
-    return fallback if fallback in tied else tied[0]
+    return next((cls for cls in tied if _agrees(cls, fallback)), tied[0])
+
+
+def _agrees(a: DayType, b: DayType) -> bool:
+    """Whether two classes name the same kind of day, 土日祝 standing for either weekend class."""
+    weekend = {"saturday", "sunday_holiday", "weekend_holiday"}
+    return a == b or ("weekend_holiday" in (a, b) and a in weekend and b in weekend)
 
 
 def resolve_day_types(
@@ -193,8 +204,8 @@ def _gtfs_date(value: str) -> date | None:
 async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -> DayTypes:
     """:func:`resolve_day_types` over the agency's loaded static calendar."""
     weekly_rows = await conn.fetch(
-        "SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date "
-        "FROM static_calendar WHERE agency_id = $1",
+        "SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date, "
+        "trips FROM static_calendar WHERE agency_id = $1",
         agency_id,
     )
     # The YYYYMMDD text compares in calendar order, so BETWEEN bounds it
@@ -205,11 +216,6 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
         agency_id,
         from_date.strftime("%Y%m%d"),
         to_date.strftime("%Y%m%d"),
-    )
-    trip_rows = await conn.fetch(
-        "SELECT service_id, COUNT(*) AS trips FROM static_trips "
-        "WHERE agency_id = $1 AND service_id IS NOT NULL GROUP BY service_id",
-        agency_id,
     )
     weekly = [
         WeeklyService(
@@ -223,5 +229,6 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
     exceptions = [
         (r["service_id"], d, r["exception_type"]) for r in exception_rows if (d := _gtfs_date(r["date"])) is not None
     ]
-    trips = {r["service_id"]: int(r["trips"]) for r in trip_rows}
+    # Only services with a weekly class vote, and those all have a calendar.txt row.
+    trips = {r["service_id"]: r["trips"] for r in weekly_rows}
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)

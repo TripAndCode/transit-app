@@ -236,20 +236,26 @@ def test_load_static_replaces_stop_clusters_on_reload(pg_conn, agency_id, tmp_pa
 
 
 def test_load_static_loads_calendar_weekly_flags_and_range(pg_conn, agency_id):
-    """A real feed's calendar.txt lands in static_calendar typed (booleans and dates)."""
+    """A real feed's calendar.txt lands in static_calendar typed (booleans and
+    dates), with each service's trips.txt trip count."""
     zip_path = str(pathlib.Path(__file__).parent.parent / "fixtures" / "hiroden_static.zip")
     load_static(zip_path, agency_id, pg_conn)
     with pg_conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM static_calendar WHERE agency_id = %s", (agency_id,))
         count = cur.fetchone()[0]
         cur.execute(
-            "SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date "
+            "SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date, trips "
             "FROM static_calendar WHERE agency_id = %s AND service_id = %s",
             (agency_id, "11_土曜(共通)"),
         )
         saturday_service = cur.fetchone()
     assert count == 45
-    assert saturday_service == (False, False, False, False, False, True, False, date(2026, 4, 8), date(2026, 10, 8))
+    assert saturday_service == (
+        *(False, False, False, False, False, True, False),
+        date(2026, 4, 8),
+        date(2026, 10, 8),
+        219,
+    )
 
 
 def test_load_static_skips_malformed_calendar_rows(pg_conn, agency_id, tmp_path):
@@ -274,3 +280,31 @@ def test_load_static_skips_malformed_calendar_rows(pg_conn, agency_id, tmp_path)
         stops = cur.fetchone()[0]
     assert loaded == ["WD"]
     assert stops == 1
+
+
+def test_load_static_clears_the_calendar_when_a_feed_drops_calendar_txt(pg_conn, agency_id, tmp_path):
+    """A feed without calendar.txt leaves no earlier feed's calendar behind to
+    file its dates under the old timetables."""
+    with_calendar = tmp_path / "with_calendar_static.zip"
+    with zipfile.ZipFile(with_calendar, "w") as zf:
+        zf.writestr("trips.txt", "trip_id,route_id,trip_headsign,shape_id,service_id\nT1,R1,,,WD\nT2,R1,,,WD")
+        zf.writestr(
+            "calendar.txt",
+            "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+            "WD,1,1,1,1,1,0,0,20260401,20270331\n"
+            "SAT,0,0,0,0,0,1,0,20260401,20270331\n",
+        )
+    load_static(str(with_calendar), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_id, trips FROM static_calendar WHERE agency_id = %s ORDER BY service_id", (agency_id,)
+        )
+        assert cur.fetchall() == [("SAT", 0), ("WD", 2)]
+
+    without_calendar = tmp_path / "without_calendar_static.zip"
+    with zipfile.ZipFile(without_calendar, "w") as zf:
+        zf.writestr("stops.txt", "stop_id,stop_name,stop_lat,stop_lon\nS1,A,40.8,140.7")
+    load_static(str(without_calendar), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 0

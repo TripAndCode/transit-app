@@ -44,23 +44,17 @@ def _split(weekday=_NONE, saturday=_NONE, sunday_holiday=_NONE, *, weekend_holid
 
 async def _seed_calendar(aconn, agency_id, service_id, days: str, start: date, end: date, *, trips: int = 1):
     """One ``calendar.txt`` service (``days`` is its Monday-first ``"1111100"``
-    flags) and ``trips`` trips running under it."""
+    flags) running ``trips`` trips, as the static loader stores it."""
     await aconn.execute(
         "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
-        "saturday, sunday, start_date, end_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         agency_id,
         service_id,
         *(flag == "1" for flag in days),
         start,
         end,
+        trips,
     )
-    for i in range(trips):
-        await aconn.execute(
-            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1, $2, 'R1', $3)",
-            agency_id,
-            f"{service_id}_{i}",
-            service_id,
-        )
 
 
 async def _seed_calendar_date(aconn, agency_id, service_id, d: date, exception_type: int):
@@ -1407,10 +1401,12 @@ async def test_service_split_files_a_weekday_holiday_under_sundays_and_holidays(
     # still keeps the Monday holiday. (Called directly: under a route filter
     # the payload's peak-hour stage needs ClickHouse, which this
     # aggregate-only test has no use for.)
-    from pipeline.reports.overview import _service_split
+    from pipeline.reports.overview import _service_day_split
 
     scoped = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21), dow="weekday", routes=("R1",))
-    assert await _service_split(aagency_id, scoped, aconn) == _split(weekday=(1.33, 2, 30), sunday_holiday=(2.0, 1, 6))
+    assert (await _service_day_split(aagency_id, scoped, aconn))[0] == _split(
+        weekday=(1.33, 2, 30), sunday_holiday=(2.0, 1, 6)
+    )
 
 
 @pytest.mark.asyncio
@@ -1479,10 +1475,10 @@ async def test_service_split_flags_a_day_type_with_too_few_days_or_samples(aconn
     for d, n in seeds:
         await _seed_agg_daily(aconn, aagency_id, d, "R1", "", 2.0, n)
 
-    from pipeline.reports.overview import _service_split
+    from pipeline.reports.overview import _service_day_split
 
     ctx = RangeCtx(from_date=date(2026, 9, 12), to_date=date(2026, 9, 21))
-    out = await _service_split(aagency_id, ctx, aconn)
+    out, _daily = await _service_day_split(aagency_id, ctx, aconn)
     assert [(e["day_type"], e["days"], e["samples"], e["insufficient"]) for e in out] == [
         ("weekday", 4, 1000, False),
         ("saturday", 2, 5000, True),
