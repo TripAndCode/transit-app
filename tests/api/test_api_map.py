@@ -418,9 +418,39 @@ async def test_routes_list_exposes_every_documented_field(map_app):
                 # Extracted from the parenthesised tail of route_id.
                 "route_code": "1021",
                 "trip_headsigns": ["古川行"],
+                "origin_name": None,
+                "via_name": None,
+                "destination_name": None,
+                "is_loop": False,
+                "bidirectional": False,
             }
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_routes_list_carries_where_each_route_runs(map_app):
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name, "
+            "  origin_name, via_name, destination_name, is_loop, bidirectional) "
+            "VALUES ($1, '1237145910', '54-1', '西広島バイパス線', '広島バスセンター', '市役所', '山田団地車庫前', "
+            "        false, false), "
+            "       ($1, '360868713', '3', '3号線', '広島駅', NULL, '観音新町三丁目', false, true), "
+            "       ($1, '横内環状線(1101)', '1101', '横内環状線', '青森駅', NULL, '青森駅', true, false)",
+            agency_id,
+        )
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/routes")
+    assert resp.status_code == 200
+    fields = ("route_id", "origin_name", "via_name", "destination_name", "is_loop", "bidirectional")
+    assert [tuple(r[f] for f in fields) for r in resp.json()["rows"]] == [
+        ("1237145910", "広島バスセンター", "市役所", "山田団地車庫前", False, False),
+        ("360868713", "広島駅", None, "観音新町三丁目", False, True),
+        ("横内環状線(1101)", "青森駅", None, "青森駅", True, False),
+    ]
 
 
 @pytest.mark.asyncio
