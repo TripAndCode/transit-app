@@ -6,7 +6,7 @@ without a real DNS query — the suite stays hermetic and network-free.
 
 import pytest
 
-from pipeline.url_guard import FeedURLError, _ip_blocked, _redact_url, redact_urls_in_text, validate_feed_url
+from pipeline.url_guard import FeedURLError, _ip_blocked, redact_url, redact_urls_in_text, validate_feed_url
 
 
 def test_rejects_file_scheme():
@@ -68,8 +68,8 @@ def test_blocked_host_error_message_redacts_credentials_and_query_string():
 
 
 def test_redact_url_strips_query_and_userinfo():
-    assert _redact_url("http://user:pass@example.com/feed?apikey=SECRET") == "http://example.com/feed"
-    assert _redact_url("https://8.8.8.8:8443/gtfs-rt.pb?key=abc") == "https://8.8.8.8:8443/gtfs-rt.pb"
+    assert redact_url("http://user:pass@example.com/feed?apikey=SECRET") == "http://example.com/feed"
+    assert redact_url("https://8.8.8.8:8443/gtfs-rt.pb?key=abc") == "https://8.8.8.8:8443/gtfs-rt.pb"
 
 
 def test_ip_blocked_rejects_ipv4_mapped_loopback():
