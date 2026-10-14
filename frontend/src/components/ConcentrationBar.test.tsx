@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
+import * as hooks from "../api/hooks";
 import { ConcentrationBar } from "./ConcentrationBar";
 import type { OverviewConcentration } from "../api/types";
 
@@ -14,9 +16,39 @@ const concentration: OverviewConcentration = {
   rest_route_count: 4,
 };
 
+function renderBar(ui: ReactElement) {
+  return renderWithProviders(
+    <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/pulse" element={ui} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function mockRoutes() {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({
+    data: [
+      {
+        route_id: "1471981638",
+        route_code: "1471981638",
+        route_short_name: "70-3",
+        route_long_name: "あさひが丘線",
+        trip_headsigns: [],
+        origin_name: "広島バスセンター",
+        destination_name: "あさひが丘下",
+      },
+      { route_id: "360868713", route_code: "360868713", route_short_name: "3", route_long_name: "広島駅－観音線", trip_headsigns: [] },
+    ],
+    isLoading: false,
+  } as never);
+}
+
 describe("ConcentrationBar", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("draws the largest share at full width and the rest in proportion to it", () => {
-    const { container } = render(
+    const { container } = renderBar(
       <ConcentrationBar
         concentration={{
           top_routes: [
@@ -34,12 +66,51 @@ describe("ConcentrationBar", () => {
   });
 
   it("hands each fill its rank opacity as a custom property, so the stylesheet's hover rule can still change it", () => {
-    const { container } = renderWithProviders(<ConcentrationBar concentration={concentration} />);
+    const { container } = renderBar(<ConcentrationBar concentration={concentration} />);
     const fills = [...container.querySelectorAll<HTMLElement>(".ov-pareto-fill")];
     expect(fills).toHaveLength(2);
     // An inline `opacity` outranks every class rule, which would leave the
     // hover affordance in overview.css with nothing to act on.
     expect(fills.map((f) => f.style.opacity)).toEqual(["", ""]);
     expect(fills.map((f) => f.style.getPropertyValue("--rank-opacity"))).toEqual(["1", "0.8"]);
+  });
+
+  it("labels each route with the shared route label, never its route_id", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar
+        concentration={{
+          top_routes: [
+            { route_code: "360868713", route_short_name: "3", share_pct: 6.2 },
+            { route_code: "1471981638", route_short_name: "70-3", share_pct: 4.4 },
+          ],
+          rest_share_pct: 89.4,
+          rest_route_count: 155,
+        }}
+      />,
+    );
+    const labels = [...container.querySelectorAll(".ov-pareto-label")];
+    expect(labels[0]).toHaveTextContent(/^3 広島駅－観音線$/);
+    expect(labels[1].querySelector(".route-label__plate")).toHaveTextContent("70-3");
+    expect(labels[1].querySelector(".route-label__ends")).toHaveTextContent("広島バスセンター → あさひが丘下");
+    expect(container).not.toHaveTextContent("360868713");
+    expect(container).not.toHaveTextContent("1471981638");
+  });
+
+  it("names a route by the payload's short name until the static routes load", () => {
+    const { container } = renderBar(
+      <ConcentrationBar concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 4 }, ...concentration.top_routes], rest_share_pct: 46 }} />,
+    );
+    expect(container.querySelector(".ov-pareto-label .route-label__plate")).toHaveTextContent("70-3");
+    expect(container).not.toHaveTextContent("1471981638");
+  });
+
+  it("names the one observed route by its label in the spotlight sentence", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }} />,
+    );
+    expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent("70-3 あさひが丘線 accounts for 100%");
+    expect(container).not.toHaveTextContent("1471981638");
   });
 });

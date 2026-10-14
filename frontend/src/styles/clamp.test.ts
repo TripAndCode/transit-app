@@ -22,6 +22,7 @@ describe("two-line CJK clamp", () => {
   it.each([
     ["styles/overview.css", ".ov-pareto-label {"],
     ["styles/overview.css", ".ov-check-name {"],
+    ["components/paramPills/RoutePickerPill.css", ".rp-opt-where {"],
     ["tabs/ask/investigation.css", ".investigation-steps button {"],
   ])("%s %s neither truncates to one line nor repeats the utility", (file, selector) => {
     const body = ruleBody(read(file), selector);
@@ -29,11 +30,15 @@ describe("two-line CJK clamp", () => {
     expect(decl(body, "-webkit-line-clamp")).toBeNull();
   });
 
+  // A source scan: each file carries a literal `className="… clamp-2 …"` and
+  // no inline ellipsis. A route list's name clamps inside the shared label,
+  // line by line, so the plate and the terminals line stay in view; the scan
+  // sees only RouteLabel's terminals line, whose class is a literal, so
+  // RouteLabel.test.tsx asserts the line name's clamp on the rendered label.
   it.each([
-    "components/RouteForecastSection.tsx",
+    "components/RouteLabel.tsx",
+    "components/paramPills/RoutePickerPill.tsx",
     "components/ThreadSidebar.tsx",
-    "components/ConcentrationBar.tsx",
-    "components/RoutesToCheckList.tsx",
     "tabs/ask/InvestigationCanvas.tsx",
   ])(
     "%s uses .clamp-2 rather than an inline ellipsis",

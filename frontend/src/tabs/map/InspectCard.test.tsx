@@ -83,10 +83,10 @@ function renderCard(overrides: Partial<Parameters<typeof InspectCard>[0]> = {}) 
 }
 
 describe("InspectCard", () => {
-  it("leads with the route badge, name, headsign and the current delay", () => {
+  it("leads with the route's label, headsign and the current delay, not its raw route_code", () => {
     renderCard();
 
-    expect(screen.getByText("42")).toBeTruthy();
+    expect(screen.queryByText("42")).toBeNull();
     expect(screen.getByText("Kanazawa Port - Yuhidera")).toBeTruthy();
     expect(screen.getByText("Yuhidera")).toBeTruthy();
     expect(screen.getByText("+3.2")).toBeTruthy();

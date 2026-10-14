@@ -10,7 +10,8 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import { useAgencies, useRoutes } from "../api/hooks";
-import { useRouteNames } from "../api/useRouteNames";
+import { distinctRouteTexts } from "../api/routeDisplayName";
+import { routeWhereText, useRouteNames, type RouteNames } from "../api/useRouteNames";
 import { scopeToQueryString, useScope, type TimeBand } from "../api/scope";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -78,24 +79,35 @@ function buildAgencyItems(
   }));
 }
 
+/** One item per route, named by its label with where it runs beside it.
+ *  Routes that share a name carry where they run in the label itself, and
+ *  their route_ids only where nothing else tells them apart. */
 function buildRouteItems(
   routes: { route_code: string | null }[] | undefined,
-  formatRoute: (code: string | null | undefined) => string,
+  names: RouteNames,
+  t: TFunction,
   goToRoute: (code: string) => void,
 ): PaletteItem[] {
   if (!routes) return [];
-  const items: PaletteItem[] = [];
-  for (const r of routes) {
-    if (!r.route_code) continue;
-    items.push({
-      id: `route:${r.route_code}`,
+  const codes = routes.flatMap((r) => (r.route_code ? [r.route_code] : []));
+  const labels = distinctRouteTexts(codes.map((code) => ({
+    key: code,
+    name: names.data.get(code) ?? names.format(code),
+    full: names.describe(code),
+    id: names.parts.get(code)?.id ?? code,
+  })));
+  return codes.map((code) => {
+    const parts = names.parts.get(code);
+    const name = names.data.get(code) ?? names.format(code);
+    const label = labels.get(code) ?? name;
+    return {
+      id: `route:${code}`,
       group: "route",
-      label: formatRoute(r.route_code),
-      sublabel: r.route_code,
-      run: () => goToRoute(r.route_code!),
-    });
-  }
-  return items;
+      label,
+      sublabel: label === name ? ((parts && routeWhereText(parts, t)) ?? undefined) : undefined,
+      run: () => goToRoute(code),
+    };
+  });
 }
 
 function buildReportItems(t: TFunction, agencyId: number | null, goToReport: (id: string) => void): PaletteItem[] {
@@ -159,7 +171,7 @@ export function CommandPalette() {
 
   const { data: agencies } = useAgencies();
   const { data: routes } = useRoutes(agencyId);
-  const { format: formatRoute } = useRouteNames(agencyId);
+  const routeNames = useRouteNames(agencyId);
 
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -229,7 +241,7 @@ export function CommandPalette() {
   }));
 
   const agencyItems = buildAgencyItems(agencies, goToAgency);
-  const routeItems = buildRouteItems(routes, formatRoute, goToRoute);
+  const routeItems = buildRouteItems(routes, routeNames, t, goToRoute);
   const reportItems = buildReportItems(t, agencyId, goToReport);
   const timeBandItems = buildTimeBandItems(t, agencyId, goToTimeBand);
   const actionItems: PaletteItem[] = [

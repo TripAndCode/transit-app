@@ -24,13 +24,16 @@ type Props = {
    *  embeds (an Ask answer card) where the chart illustrates one reply rather
    *  than driving the page's filters. */
   brushable?: boolean;
+  /** A worst route's name in the tooltip, from the caller's route labels.
+   *  Without it (the landing page's sample chart) a route reads "Route <code>". */
+  routeName?: (code: string) => string;
 };
 
 /** An in-progress selection: the day the drag started on and the day the
  *  pointer (or keyboard cursor) is on now. Either may be the larger index. */
 type Drag = { anchor: number; head: number };
 
-export function DailyChart({ days, granularity = "day", height = 240, revisionBoundaries = [], brushable = true }: Props) {
+export function DailyChart({ days, granularity = "day", height = 240, revisionBoundaries = [], brushable = true, routeName }: Props) {
   const { t } = useTranslation();
   const suffix = granularity === "day" ? "" : `_${granularity}`;
   const [rawHover, setHover] = useState<number | null>(null);
@@ -438,7 +441,10 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
               {t("reports.daily.worst_label")}{" "}
               {days[cursor].top_offenders
                 .slice(0, 3)
-                .map((o) => t("reports.daily.offender", { code: o.route_code, min: formatMinutes(o.avg_min) }))
+                .map((o) => t("reports.daily.offender", {
+                  route: routeName ? routeName(o.route_code) : t("common.route_code_fallback", { code: o.route_code }),
+                  min: formatMinutes(o.avg_min),
+                }))
                 .join(", ")}
             </div>
           )}

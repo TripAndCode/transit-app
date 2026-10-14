@@ -74,7 +74,7 @@ export function RoutesToCheckList({ routes, bandCounts }: Props) {
               data-flip-key={r.route_code}
               to={agencyId != null ? routeHref(agencyId, r.route_code, search) : "."}
             >
-              <span className="ov-check-name clamp-2">
+              <span className="ov-check-name">
                 <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
               </span>
               <span className="ov-check-track">

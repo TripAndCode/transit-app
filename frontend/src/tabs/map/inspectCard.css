@@ -52,19 +52,6 @@
 
 .ops-inspect__head { display: flex; align-items: flex-start; gap: 8px; }
 
-/* --brand, not --accent: a route badge identifies a line. It is a label, not
-   an interactive accent, and reading as one would make every vehicle on the
-   map look clickable in the same way the filter controls are. */
-.ops-inspect__badge {
-  flex: 0 0 auto;
-  padding: 1px 7px;
-  border-radius: var(--radius);
-  color: var(--on-brand);
-  background: var(--brand);
-  font-size: var(--text-xs);
-  font-weight: 700;
-}
-
 .ops-inspect__name { min-width: 0; font-size: var(--text-sm); line-height: 1.35; }
 .ops-inspect__name b { display: block; font-weight: 600; }
 .ops-inspect__name small { display: block; color: var(--text-secondary); font-size: var(--text-xs); }

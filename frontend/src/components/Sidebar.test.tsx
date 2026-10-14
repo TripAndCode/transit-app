@@ -302,14 +302,57 @@ describe("Sidebar", () => {
       expect(within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "Route 50" })).toBeTruthy();
     });
 
-    it("says where a pinned route goes beside its badge, and names it in full", () => {
-      togglePinnedRoute(8, "50");
+    it("says where a pinned route goes beside its plate, and names it in full", () => {
+      togglePinnedRoute(8, "1471981638");
       vi.spyOn(hooks, "useRoutes").mockReturnValue({
-        data: [{ route_id: "r50", route_short_name: "50", route_long_name: null, route_code: "50", trip_headsigns: ["Nakasuji"] }],
+        data: [
+          {
+            route_id: "1471981638",
+            route_short_name: "70-3",
+            route_long_name: "Asahigaoka Line",
+            route_code: "1471981638",
+            trip_headsigns: [],
+            origin_name: "Bus Center",
+            destination_name: "Asahigaoka",
+          },
+        ],
       } as never);
       renderSidebar("/agencies/8/live");
-      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "50 · for Nakasuji" });
-      expect(within(link).getByText("for Nakasuji")).toBeTruthy();
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", {
+        name: "70-3 Asahigaoka Line · Bus Center → Asahigaoka",
+      });
+      expect(within(link).getByText("70-3")).toBeTruthy();
+      expect(within(link).getByText("Bus Center → Asahigaoka")).toBeTruthy();
+      expect(link).not.toHaveTextContent("1471981638");
+    });
+
+    it("badges a pinned route without a short code by its name, never by its route_code", () => {
+      togglePinnedRoute(8, "1471981638");
+      vi.spyOn(hooks, "useRoutes").mockReturnValue({
+        data: [
+          {
+            route_id: "1471981638",
+            route_short_name: "めいぷる～ぷ",
+            route_long_name: "めいぷる～ぷ（新天地経由）",
+            route_code: "1471981638",
+            trip_headsigns: [],
+          },
+        ],
+      } as never);
+      renderSidebar("/agencies/8/live");
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", {
+        name: "めいぷる～ぷ（新天地経由）",
+      });
+      expect(link.querySelector(".rail-pin-code")).toHaveTextContent(/^め$/);
+      expect(link.querySelector(".rail-pin-name")).toHaveTextContent("めいぷる～ぷ（新天地経由）");
+      expect(link).not.toHaveTextContent("1471981638");
+    });
+
+    it("gives a pinned route a plain badge until the static routes name it", () => {
+      togglePinnedRoute(8, "1471981638");
+      renderSidebar("/agencies/8/live");
+      const link = within(screen.getByRole("navigation", { name: "My routes" })).getByRole("link", { name: "Route 1471981638" });
+      expect(link.querySelector(".rail-pin-code")).toHaveTextContent("\u2022");
     });
 
     it("leaves the collapsed rail without the list while it is empty", async () => {

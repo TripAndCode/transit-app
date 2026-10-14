@@ -58,8 +58,8 @@
    background would leave showing. */
 .report-row--link:hover > td { background-color: var(--bg-soft) !important; }
 .report-route-link { color: inherit; text-decoration: none; }
-.report-route-link:hover .route-label__code,
-.report-route-link:focus-visible .route-label__code { color: var(--text-secondary); }
+.report-route-link:hover .route-label__ends,
+.report-route-link:focus-visible .route-label__ends { color: var(--text-secondary); }
 .report-route-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* The travelling link is one box even when its name wraps: a named
    view-transition element split across line boxes makes the browser skip the
