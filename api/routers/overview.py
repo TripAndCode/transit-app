@@ -122,14 +122,31 @@ class TopDelayedRoute(BaseModel):
     avg_min: float
 
 
+class RouteBandCount(BaseModel):
+    """Routes in one routes-to-check band, and the band's lower bound."""
+
+    count: int
+    threshold_min: float
+
+
+class RouteBandCounts(BaseModel):
+    """One count per band the routes-to-check list shows, worst first."""
+
+    severe: RouteBandCount
+    moderate: RouteBandCount
+    mild: RouteBandCount
+
+
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay + a count of routes averaging at
-    least ``delayed_threshold_min`` late, both over the same window the
-    headline covers."""
+    """Top-5 routes by absolute avg delay, plus a count of routes averaging at
+    least ``delayed_threshold_min`` late and one per routes-to-check band, all
+    over the same window the headline covers. The counts cover every route,
+    not only the five listed."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
     delayed_threshold_min: float
+    band_counts: RouteBandCounts
 
 
 class PeakHour(BaseModel):

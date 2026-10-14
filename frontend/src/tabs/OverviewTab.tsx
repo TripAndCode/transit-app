@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
@@ -12,7 +12,7 @@ import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { AsyncSection } from "../components/AsyncSection";
-import { OverviewHeroRow } from "../components/OverviewHeroRow";
+import { OverviewHeroRow, type HeroFact } from "../components/OverviewHeroRow";
 import { OverviewModal } from "../components/OverviewModal";
 import { PeakHourModal } from "../components/PeakHourModal";
 import { PeakHourRibbon } from "../components/PeakHourRibbon";
@@ -22,6 +22,7 @@ import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { prefersReducedMotion } from "../utils/motion";
 
 import "../styles/overview.css";
 
@@ -70,6 +71,21 @@ export function OverviewTab() {
     peakHourSel?.hour ?? null,
     peakHourSel?.dow ?? null,
   );
+  const routesToCheckRef = useRef<HTMLDivElement>(null);
+
+  // The routes-to-check list is inline rather than behind a modal, so its
+  // fact row brings it into view and moves focus there, where a keyboard
+  // reader continues into its route links.
+  function openFact(fact: HeroFact) {
+    if (fact !== "late_routes") {
+      setOpen(fact);
+      return;
+    }
+    const list = routesToCheckRef.current;
+    if (!list) return;
+    list.scrollIntoView?.({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" }); // jsdom has no scrollIntoView
+    list.focus({ preventScroll: true });
+  }
 
   // Nothing here is answerable without an agency, and every query above is
   // already disabled for a null id.
@@ -154,14 +170,17 @@ export function OverviewTab() {
           <>
             <OverviewHeroRow
               headline={data.headline}
-              delayedCount={data.top_delayed.delayed_count}
-              delayedThresholdMin={data.top_delayed.delayed_threshold_min}
+              severeCount={data.top_delayed.band_counts.severe.count}
+              severeThresholdMin={data.top_delayed.band_counts.severe.threshold_min}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}
               concentration={data.concentration}
+              onOpenFact={openFact}
             />
-            <RoutesToCheckList routes={data.top_delayed.routes} />
+            <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
+              <RoutesToCheckList routes={data.top_delayed.routes} bandCounts={data.top_delayed.band_counts} />
+            </div>
             {/* The stagger index counts the sections that actually render.
                 Any of these can be absent for an agency, and a fixed index
                 would hand whichever one appears first a delay with nothing

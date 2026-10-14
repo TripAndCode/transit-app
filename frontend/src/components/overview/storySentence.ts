@@ -1,11 +1,10 @@
 import type { TFunction } from "i18next";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../../api/types";
-import { formatHourRange } from "../../utils/format";
+import type { OverviewConcentration, OverviewHeadline } from "../../api/types";
 import { CONCENTRATION_TOP_N } from "./concentrationTopN";
 
 /** Below this magnitude (minutes) the change from the window before reads as
  *  noise, not a real trend -- a dead zone around zero so a +/-0.1 min wobble
- *  does not flip the sentence between "behind" and "ahead" on every refresh. */
+ *  does not flip the verdict between "behind" and "ahead" on every refresh. */
 const FLAT_THRESHOLD_MIN = 0.5;
 
 type StoryBranch = "behind" | "ahead" | "flat";
@@ -21,43 +20,35 @@ function branchFor(deltaMin: number | null): StoryBranch {
 }
 
 /**
- * One deterministic sentence for the period-overview hero: how the headline
- * window's average delay compares with the same number of days just before
- * it, which hour is heaviest, and how concentrated delay is among a few
- * routes. Pure template selection plus
- * i18n interpolation -- no LLM, no randomness, same inputs always produce
- * the same key and values.
+ * The period-overview hero's verdict: a short status chip and one sentence
+ * on how the headline window's average delay compares with the same number
+ * of days just before it. Pure template selection plus i18n interpolation --
+ * no LLM, no randomness, same inputs always produce the same keys and values.
  *
- * Falls back to the shorter `{branch}_short` template (delta only) whenever
- * `peak` or `concentration` has nothing to say, rather than interpolating
- * `undefined` into a half-built sentence. A missing/null `delta_min` (no
- * baseline to compare against) is treated as "flat" -- there is no known
- * direction to report -- and formats as `0.0` for the short template.
+ * A missing/null `delta_min` is treated as "flat" -- there is no known
+ * direction to report -- and formats as `0.0`. The caller decides whether a
+ * headline with no baseline gets a verdict at all.
  */
-export function storySentence(
+export function storyVerdict(
   headline: Pick<OverviewHeadline, "delta_min" | "window_from" | "window_to">,
-  peak: OverviewPeakHour | null,
-  concentration: OverviewConcentration | null,
   t: TFunction,
-): string {
+): { state: string; sentence: string } {
   const branch = branchFor(headline.delta_min);
   const delta = headline.delta_min != null ? Math.abs(headline.delta_min).toFixed(1) : "0.0";
   const days = windowDays(headline.window_from, headline.window_to);
+  return {
+    state: t(`overview.story.state_${branch}`, { delta }),
+    sentence: t(`overview.story.${branch}`, { delta, days }),
+  };
+}
 
+/** The share of delay (whole percent) carried by the routes the concentration
+ *  card lists, and how many routes that is; null when there are none. */
+export function topRoutesShare(concentration: OverviewConcentration | null): { share: number; count: number } | null {
   const topRoutes = concentration?.top_routes.slice(0, CONCENTRATION_TOP_N) ?? [];
-  if (peak == null || topRoutes.length === 0) {
-    return t(`overview.story.${branch}_short`, { delta, days });
-  }
-
-  const share = Math.round(topRoutes.reduce((sum, r) => sum + r.share_pct, 0));
-  // `count` rather than a plain interpolation: one dominant route is a real
-  // case (a small agency may only have one observed route at all), and the
-  // English clause has to read "the top route", not "the top 1 routes".
-  return t(`overview.story.${branch}`, {
-    delta,
-    days,
-    peak: formatHourRange(peak.peak_hour),
-    share,
+  if (topRoutes.length === 0) return null;
+  return {
+    share: Math.round(topRoutes.reduce((sum, r) => sum + r.share_pct, 0)),
     count: topRoutes.length,
-  });
+  };
 }

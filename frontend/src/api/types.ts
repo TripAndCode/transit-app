@@ -834,11 +834,26 @@ export type OverviewTopDelayedRoute = {
   avg_min: number;
 };
 
+type OverviewBandCount = {
+  count: number;
+  /** The band's lower bound, in minutes. */
+  threshold_min: number;
+};
+
+/** Routes in each routes-to-check band, over every route rather than only
+ *  the listed ones. */
+export type OverviewBandCounts = {
+  severe: OverviewBandCount;
+  moderate: OverviewBandCount;
+  mild: OverviewBandCount;
+};
+
 type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
   /** The average delay (minutes) at or above which a route was counted. */
   delayed_threshold_min: number;
+  band_counts: OverviewBandCounts;
 };
 
 export type OverviewPeakHour = {
