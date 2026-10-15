@@ -147,7 +147,7 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     raw = bytes(chunks)
     if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
-    from pipeline.ingest import PayloadDecodeError
+    from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
     file_name = f"oracle/{source_file}"
     try:
@@ -160,13 +160,18 @@ async def collector_update(agency_id: int, request: Request) -> dict:
         )
     # 404 and 422 tell the collector that resending the same request cannot
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
-    # of these. Neither is this service failing, so neither logs a traceback.
+    # of these. A missing timetable is a 503 instead because the same bytes
+    # ingest once an operator loads one. None of the three is this service
+    # failing, so none logs a traceback.
     except UnknownAgency as exc:
         _log.warning("collector push for unknown or disabled agency %s", agency_id)
         raise HTTPException(status_code=404, detail="Unknown or disabled agency") from exc
     except PayloadDecodeError as exc:
         _log.warning("collector push for agency %s could not be decoded: %s", agency_id, exc)
         raise HTTPException(status_code=422, detail="Collector payload is not a decodable GTFS-RT feed") from exc
+    except StaticTimetableMissing as exc:
+        _log.warning("collector push refused: %s", exc)
+        raise HTTPException(status_code=503, detail="Agency has no timetable loaded") from exc
     except Exception as exc:
         _log.exception("collector ingest failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc
@@ -297,7 +302,7 @@ def _ingest_and_analyze_sweep(
     from pipeline.analyze import analyze
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
-    from pipeline.ingest import ingest_live
+    from pipeline.ingest import StaticTimetableMissing, ingest_live
     from pipeline.promote import promote_closed_days
 
     # Kept apart from the resolved roster below: the caller's scope decides
@@ -369,6 +374,10 @@ def _ingest_and_analyze_sweep(
                 try:
                     with _stage("ingest", aid) as run:
                         run.rows = ingest_live(aid, conn, ch_client)
+                except StaticTimetableMissing as exc:
+                    _log.warning("cron: %s", exc)
+                    failed.append(f"ingest agency {aid} (no timetable loaded)")
+                    stopped = stop_on_failure
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
                     failed.append(f"ingest agency {aid}")

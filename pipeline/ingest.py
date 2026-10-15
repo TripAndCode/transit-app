@@ -25,6 +25,7 @@ from pipeline.clickhouse import (
     jst_date,
     recent_file_name_exists,
 )
+from pipeline.db import _static_loaded
 from pipeline.strategies import get_ingest_strategy
 
 # archive_captured_at is used below; the private helpers are back-compat
@@ -235,6 +236,37 @@ class PayloadDecodeError(ValueError):
     whoever sent it, which retrying the same bytes cannot cure."""
 
 
+class StaticTimetableMissing(Exception):
+    """The agency's ingest strategy takes each row's schedule from the static
+    timetable, and the agency has none loaded. Raised before anything is read
+    or written, so the same input ingests once an operator loads it.
+
+    Not a ValueError: ingest_live_payload reads one of those from parsing as
+    bytes that can never decode, and these can."""
+
+    def __init__(self, agency_id: int, strategy_name: str):
+        super().__init__(
+            f"agency {agency_id} uses the {strategy_name} ingest strategy and has no timetable loaded; "
+            f"load it first (gtfs_pipeline.py refresh-static --agency-id {agency_id}, or load_static)"
+        )
+        self.agency_id = agency_id
+        self.strategy_name = strategy_name
+
+
+def require_timetable(agency_id: int, conn, strategy_name: str | None = None) -> str:
+    """Return the agency's ingest strategy name (resolved unless given),
+    raising StaticTimetableMissing when that strategy needs a timetable the
+    agency does not have loaded (REQUIRES_STATIC_TIMETABLE in
+    pipeline.strategies). A caller that fetches a feed runs it first, so a
+    refused agency costs no network round trip."""
+    if strategy_name is None:
+        strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy = get_ingest_strategy(strategy_name)
+    if getattr(strategy, "REQUIRES_STATIC_TIMETABLE", False) and not _static_loaded(conn, agency_id):
+        raise StaticTimetableMissing(agency_id, strategy_name)
+    return strategy_name
+
+
 class IngestIncomplete(Exception):
     """An archive ingest that skipped files. Their rows are not in ClickHouse,
     and the next run retries them: the skip-list holds only files whose rows
@@ -260,7 +292,13 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     archives by UTC day, so one archive runs to 09:00 JST the next day and
     its last members can land on a day that has not ended yet; those are
     left unmarked for a later run, which reads them once their day closes.
+
+    Raises :class:`StaticTimetableMissing`, having read and marked nothing,
+    when the agency's strategy needs a timetable it does not have loaded.
     """
+    strategy_name = require_timetable(agency_id, conn)
+    strategy = get_ingest_strategy(strategy_name)
+
     root = pathlib.Path(folder)
     n_errors = 0
     n_inserted = 0
@@ -315,9 +353,6 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
         full = distinct_file_names(ch_client, agency_id)
         done.update(full)
         seen.update(full)
-
-    strategy_name = _resolve_strategy_name(agency_id, conn)
-    strategy = get_ingest_strategy(strategy_name)
 
     today = jst_date(now or datetime.now(timezone.utc))
     unclosed: set[date] = set()
@@ -570,7 +605,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
 
 
 def ingest_live(agency_id: int, conn, ch_client) -> int:
-    """Fetch the agency's GTFS-RT feed_url and ingest it live."""
+    """Fetch the agency's GTFS-RT feed_url and ingest it live, refusing an
+    agency with no timetable its strategy needs before the fetch."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT feed_url FROM agencies WHERE agency_id = %s",
@@ -580,7 +616,7 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     if row is None or not row[0]:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
-    strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy_name = require_timetable(agency_id, conn)
 
     logger.info(f"Fetching live feed from {redact_url(feed_url)} (strategy={strategy_name})")
     with safe_urlopen(feed_url, timeout=30) as resp:
@@ -623,9 +659,11 @@ def ingest_live_payload(
     ``strategy_name`` lets a caller that already resolved it (``ingest_live``)
     skip a second identical lookup; callers without it (the collector push
     path) get it resolved here.
+
+    Raises :class:`StaticTimetableMissing` before parsing when the agency's
+    strategy needs a timetable it does not have loaded.
     """
-    if strategy_name is None:
-        strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy_name = require_timetable(agency_id, conn, strategy_name)
     strategy = get_ingest_strategy(strategy_name)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
     if recent_file_name_exists(ch_client, agency_id, file_name, since, table=LIVE_TABLE):

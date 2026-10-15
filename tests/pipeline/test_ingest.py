@@ -7,8 +7,8 @@ import pytest
 from clickhouse_connect.driver.exceptions import DataError, OperationalError
 
 from pipeline.clickhouse import insert_updates
-from pipeline.ingest import IngestIncomplete, ingest, parse_trip_id
-from tests.fixtures.gtfs_rt import header_only_feed
+from pipeline.ingest import IngestIncomplete, StaticTimetableMissing, ingest, parse_trip_id
+from tests.fixtures.gtfs_rt import header_only_feed, stop_time_update, trip_update, trip_update_feed
 
 _FAKE_ROW = (
     "20260401/ok.pb",
@@ -793,3 +793,45 @@ def test_ingest_leaves_a_member_on_an_unclosed_jst_day_for_a_later_run(pg_conn, 
         ).result_rows
     }
     assert names == {"20260401/TripUpdate_230000.pb"}
+
+
+def test_a_static_join_agency_with_no_timetable_is_refused_until_one_is_loaded(pg_conn, ch_client, tmp_path):
+    """Ingesting before the timetable stores every row with no schedule and
+    marks its file done, so loading the timetable afterwards repairs nothing.
+    The refusal leaves the file unread; the same folder ingests it, joined to
+    the schedule, once the timetable is in."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES ('static_join_needs_timetable', 'http://needs-timetable.example.com/feed.pb', 'static_join') "
+            "RETURNING agency_id"
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+    (tmp_path / "20260401").mkdir()
+    (tmp_path / "20260401" / "TripUpdate_113700.pb").write_bytes(
+        trip_update_feed(trip_update("T1", stop_time_update(1, departure_delay=30), route_id="R1"))
+    )
+
+    with pytest.raises(StaticTimetableMissing):
+        ingest(str(tmp_path), aid, pg_conn, ch_client)
+    stored = "SELECT file_name, service_type, scheduled_time FROM updates WHERE agency_id = {a:UInt16}"
+    assert ch_client.query(stored, parameters={"a": aid}).result_rows == []
+
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop 1')", (aid,))
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, 'T1', 'R1', 'WKDY')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, 'T1', 1, 'S1', '08:00:00')",
+            (aid,),
+        )
+    pg_conn.commit()
+
+    assert ingest(str(tmp_path), aid, pg_conn, ch_client) == 1
+    assert ch_client.query(stored, parameters={"a": aid}).result_rows == [
+        ("20260401/TripUpdate_113700.pb", "WKDY", "08:00:00")
+    ]

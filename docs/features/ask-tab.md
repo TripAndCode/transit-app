@@ -298,7 +298,7 @@ so it is a separate mechanism to build, not a knob to turn on.
    `make frontend-dev` for hot reload on `:5173` (Vite proxies `/api`).
    `make bootstrap` alone leaves the DB empty — load data before clicking
    through, or every card returns an empty result:
-   `make fetch-ingest` (or `ingest_live` + `make load_static`), then
+   `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency.
 3. Build the Stage 2 embedding index so paraphrases actually route to
    `"embedding"` instead of always falling to Stage 3:

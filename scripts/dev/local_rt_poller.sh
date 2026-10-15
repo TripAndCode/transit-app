@@ -9,7 +9,9 @@
 # retrying at the same pace, so a down/rate-limiting feed doesn't get
 # hammered every 30s; it resets to the base interval on the next success.
 # Gives up after too many consecutive failures rather than looping forever
-# against a feed that is never coming back this session.
+# against a feed that is never coming back this session. Exit 78 is not a
+# failure: every other agency ingested, and the one refused for having no
+# timetable loaded waits on an operator, so the poll warns and keeps pace.
 #
 # Wired into `make serve` (see Makefile); not part of the production path,
 # which streams from the Oracle collector or the daily Railway ingest job
@@ -32,7 +34,12 @@ interval="$base_interval"
 consecutive_failures=0
 
 while true; do
-    if poetry run python gtfs_pipeline.py ingest_live; then
+    code=0
+    poetry run python gtfs_pipeline.py ingest_live || code=$?
+    if [ "$code" -eq 0 ] || [ "$code" -eq 78 ]; then
+        if [ "$code" -eq 78 ]; then
+            echo "local_rt_poller: an agency has no timetable loaded; load it to ingest it (see the log above)" >&2
+        fi
         interval="$base_interval"
         consecutive_failures=0
     else

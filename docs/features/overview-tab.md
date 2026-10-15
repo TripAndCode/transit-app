@@ -117,7 +117,7 @@ alone for single-origin):
 
 1. `make bootstrap && make serve` (+ `make frontend-dev` for hot reload on
    `:5173`). `make bootstrap` alone leaves the DB empty — load data first:
-   `make fetch-ingest` (or `ingest_live` + `make load_static`), then
+   `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency.
 2. Open the app — a fresh/remembered agency selection and a bare
    `/agencies/{id}` both land on Pulse (`/agencies/{id}/pulse`); from

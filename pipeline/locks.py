@@ -49,7 +49,7 @@ reasons: the two locks occupy separate advisory-lock spaces, so holding one
 never grants the other's exclusion.
 
 Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
-docs/deploy-railway.md's Railway sketch) invokes ingest/load_static/analyze
+docs/deploy-railway.md's Railway sketch) invokes load_static/ingest/analyze
 as separate per-agency CLI processes, each independently acquiring and
 releasing this lock -- so a cron poke can still land *between* two of those
 per-agency commands and run its own full ingest+analyze in the gap. Callers

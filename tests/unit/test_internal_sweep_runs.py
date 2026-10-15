@@ -241,3 +241,19 @@ def test_the_runner_closes_the_operators_row_with_what_the_sweep_reported(monkey
 
     internal._run_ingest_and_analyze(run_id=5)
     assert closed == [(5, "error", "failed: analyze agency 3")]
+
+
+def test_a_missing_timetable_fails_the_ingest_stage_without_a_traceback(sweep, monkeypatch, caplog):
+    """An agency with no timetable is refused on every poke until an operator
+    loads one: an expected refusal, logged as one line, still named in the
+    outcome so the update chain stops there."""
+
+    def _refuse(*_a, **_k):
+        raise pipeline.ingest.StaticTimetableMissing(1, "static_join")
+
+    monkeypatch.setattr(pipeline.ingest, "ingest_live", _refuse)
+    with caplog.at_level("WARNING"):
+        outcome = internal._ingest_and_analyze_sweep(_DB_URL, stop_on_failure=True)
+    assert outcome == internal.SweepOutcome("error", "failed: ingest agency 1 (no timetable loaded)")
+    assert sweep.recorded == [("ingest", 1)]
+    assert not [r for r in caplog.records if r.exc_info], "an expected refusal logs no traceback"
