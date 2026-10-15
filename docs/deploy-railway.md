@@ -248,12 +248,11 @@ railway run --service app python gtfs_pipeline.py ingest_live
 ```
 
 Static GTFS (stop names, route polylines, and the schedule a `static_join`
-agency's realtime rows join to) is not loaded by `ingest` or `ingest_live`.
-Load it before an agency's first ingest: a `static_join` agency (its
-`ingest_strategy`) takes each row's schedule from the timetable as the row is
-read, so both commands refuse that agency, exiting 78 with nothing read, while
-it has none loaded. `refresh-static` (above) fetches it from the agency's
-configured source; to load a zip you already have instead:
+agency's realtime rows join to) is not loaded by `ingest` or `ingest_live`, and
+both refuse a `static_join` agency with none loaded, before reading or fetching
+anything (exit 78; `REQUIRES_STATIC_TIMETABLE` in
+`pipeline/strategies/__init__.py`). `refresh-static` (above) fetches it from the
+agency's configured source; to load a zip you already have instead:
 
 ```bash
 railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --agency-id <id>

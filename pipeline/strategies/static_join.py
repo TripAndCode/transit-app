@@ -34,9 +34,7 @@ from pipeline.strategies._time import parse_departure_time
 
 _log = logging.getLogger(__name__)
 
-# Each row's schedule comes from the static timetable as the row is read, so
-# a row ingested before a timetable is loaded keeps no schedule for good.
-# pipeline.ingest refuses this strategy for an agency that has none loaded.
+# See REQUIRES_STATIC_TIMETABLE in pipeline.strategies.
 REQUIRES_STATIC_TIMETABLE = True
 
 # A loaded timetable can still be the wrong one (stale, or keyed differently

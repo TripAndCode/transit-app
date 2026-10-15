@@ -57,13 +57,11 @@ make analyze
 make fetch-ingest
 ```
 
-The archive path pulls GTFS-Realtime and static GTFS archives, then loads each
-agency's timetable, ingests its realtime archives, and aggregates. The timetable
-comes first because a `static_join` agency (its `ingest_strategy`) takes each
-row's schedule from it as the row is read: `ingest` and `ingest_live` refuse
-such an agency, exiting 78, while it has no timetable loaded. The live path is
-useful for local checks but does not provide the same historical coverage. Add a
-one-off agency with:
+The archive path pulls GTFS-Realtime and static GTFS archives, then runs ingest,
+static loading, and aggregation. A `static_join` agency needs its timetable
+loaded before it can be ingested (`REQUIRES_STATIC_TIMETABLE` in
+`pipeline/strategies/__init__.py`). The live path is useful for local checks but
+does not provide the same historical coverage. Add a one-off agency with:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
