@@ -15,7 +15,8 @@ Each ingest strategy module exposes:
         True when parse_feed takes each row's schedule from the agency's
         loaded static timetable as the row is read (static_join). A row read
         before any timetable is loaded is stored with no schedule and its
-        file counted as done, so loading one later repairs nothing. Every
+        file counted as done, so loading one later repairs nothing by itself
+        (scripts/repair_archive_rows.py refills such stored rows). Every
         ingest path therefore refuses such an agency while it has no
         timetable loaded (pipeline.ingest.require_timetable), before reading
         or fetching anything, and the CLI exits 78 for it. This is the

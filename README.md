@@ -73,7 +73,8 @@ poetry run python gtfs_pipeline.py add_agency \
 `scripts/repair_archive_rows.py` brings archive-ingested `updates` rows to what
 archive ingest assigns them today: the `captured_at` read from each file's own
 feed header, and, for `static_join` agencies, the timetable fields of rows
-ingested before a timetable was loaded. It targets whatever `CLICKHOUSE_*` and
+ingested before a timetable was loaded, so load each `static_join` agency's
+current timetable first. It targets whatever `CLICKHOUSE_*` and
 `DATABASE_URL` name, and prints both. Without `--apply` it only reads, and
 reports per agency the rows that would move (with a histogram of the shift),
 the blank rows the timetables would fill, and the disk the rebuild needs.

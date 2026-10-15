@@ -1,6 +1,6 @@
 """`scripts/repair_archive_rows.py` against throwaway ClickHouse and Postgres.
 
-Archive rows are seeded as an ingest without a timetable stores them: stamped from
+Archive rows are seeded as rows ingested while no timetable was loaded are stored: stamped from
 a UTC file name read as JST, and with the timetable fields blank because no
 timetable was loaded yet. Each test checks the repaired rows against what
 ingest produces today (`archive_captured_at`, `static_join.parse_feed`).
