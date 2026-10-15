@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import clickhouse_connect
 
-from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, ch_conn_kwargs, checked_table, live_table_for
+from pipeline.clickhouse import LIVE_SOURCED, LIVE_TABLE, UPDATES_TABLE, ch_conn_kwargs, checked_table, live_table_for
 from pipeline.service_day import service_date_ch
 
 
@@ -203,16 +203,20 @@ async def table_holding(ch, agency_id: int, day: date) -> str:
     `pipeline.clickhouse.live_table_for` routes the previous service day live
     because a day collected live is whole only there until promotion copies
     its after-midnight tail. A day that arrived by archive ingest went straight
-    to `updates` and never reached the live table, so for that day a probe of
-    the live table decides. Each day is still read from one table.
+    to `updates`, and promotion never copies live polls onto such a day, so
+    an archive in `updates` is that day whole even when stray polls of it sit
+    in the live table. Each day is still read from one table.
     """
     if live_table_for(day) == UPDATES_TABLE:
         return UPDATES_TABLE
     if live_table_for(day - timedelta(days=1)) == LIVE_TABLE:
         return LIVE_TABLE  # the current service day or later: only ever live
-    probe = await ch.query(
-        f"SELECT 1 FROM {LIVE_TABLE} WHERE agency_id = {{agency_id:UInt16}} "
-        f"AND {service_date_ch('captured_at')} = {{day:Date}} LIMIT 1",
-        parameters={"agency_id": agency_id, "day": day},
+    on_day = f"agency_id = {{agency_id:UInt16}} AND {service_date_ch('captured_at')} = {{day:Date}}"
+    params = {"agency_id": agency_id, "day": day}
+    archived = await ch.query(
+        f"SELECT 1 FROM {UPDATES_TABLE} WHERE {on_day} AND NOT {LIVE_SOURCED} LIMIT 1", parameters=params
     )
-    return LIVE_TABLE if probe.result_rows else UPDATES_TABLE
+    if archived.result_rows:
+        return UPDATES_TABLE
+    live = await ch.query(f"SELECT 1 FROM {LIVE_TABLE} WHERE {on_day} LIMIT 1", parameters=params)
+    return LIVE_TABLE if live.result_rows else UPDATES_TABLE

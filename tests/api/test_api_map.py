@@ -1336,6 +1336,32 @@ async def test_route_trips_read_an_archive_ingested_previous_day_from_updates(ma
 
 
 @pytest.mark.asyncio
+async def test_route_trips_read_an_archived_previous_day_over_stray_live_rows(map_app_ch, ch_client):
+    """Promotion skips a day archive ingest already filled, leaving that day's
+    live polls in the live table until its TTL drops them; the archive in
+    `updates` is the whole day, so it wins."""
+    from api.range import current_service_date
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    yday = current_service_date() - timedelta(days=1)
+    async with app.state.pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R_MIX")
+    insert_updates(
+        ch_client, agency_id, [("20260101/a.pb", _jst_noon_utc(yday), "ARCH_FULL", "平日", "12:00", "R_MIX", 1, 60)]
+    )
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("oracle/x/1.pb", _jst_noon_utc(yday), "LIVE_STRAY", "平日", "12:00", "R_MIX", 1, 900)],
+        table=LIVE_TABLE,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        trips = (await client.get(f"/api/{agency_id}/today/route/R_MIX/trips?date={yday.isoformat()}")).json()
+    assert [t["trip_id"] for t in trips["trips"]] == ["ARCH_FULL"]
+
+
+@pytest.mark.asyncio
 async def test_route_trips_refuses_a_date_outside_the_scan_window(map_app_ch, ch_client):
     """A date beyond the probe's own bound resolves to the empty response
     rather than an unbounded historical scan of a very large table."""
@@ -1446,7 +1472,8 @@ async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_upd
         ch_client,
         agency_id,
         [
-            ("19990101/a.pb", _jst_noon_utc(yday), "HIST_YDAY", "平日", "12:00", "R_SPLIT", 1, 60),
+            # A promoted copy of yesterday's live rows, still missing its tail.
+            ("oracle/y/0.pb", _jst_noon_utc(yday), "HIST_YDAY", "平日", "12:00", "R_SPLIT", 1, 60),
             ("19990101/b.pb", _jst_noon_utc(two_back), "HIST_TWO", "平日", "12:00", "R_SPLIT", 1, 60),
         ],
     )
