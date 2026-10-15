@@ -598,10 +598,28 @@ def _same_ddl(client) -> bool:
     return normal(TABLE) == normal(WORK_TABLE)
 
 
+def _running_copies(client) -> list[str]:
+    """Query ids of INSERTs into the work table still running on the server,
+    which a client killed mid-copy leaves behind."""
+    return [
+        r[0]
+        for r in client.query(
+            "SELECT query_id FROM system.processes WHERE query_id != queryID() AND query ILIKE {pattern:String}",
+            parameters={"pattern": f"INSERT INTO {WORK_TABLE}%"},
+        ).result_rows
+    ]
+
+
 def _copy(client, scope: Scope, keymap: KeyMap, p: Plan) -> None:
     """Fill the work table one destination partition at a time. A partition
     already complete is skipped, so a rerun picks up where a run stopped; one
     holding only part of its rows is the operator's to clear."""
+    running = _running_copies(client)
+    if running:
+        raise Refusal(
+            f"a copy into {WORK_TABLE} is still running on the server ({', '.join(running)}). Wait for it to end, "
+            "or stop it with KILL QUERY WHERE query_id = '...', then rerun"
+        )
     columns = _columns(client)
     names = ", ".join(name for name, _ in columns)
     for part in p.partitions:
@@ -812,7 +830,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--yes", action="store_true", help="skip the --apply confirmation prompt")
     parser.add_argument("--resume", action="store_true", help="finish an --apply run that stopped partway")
     parser.add_argument(
-        "--agency", type=int, action="append", metavar="ID", help="repair only this agency's rows (repeatable)"
+        "--agency",
+        type=int,
+        action="append",
+        metavar="ID",
+        help="change only this agency's rows (repeatable); the table is still rewritten whole",
     )
     parser.add_argument(
         "--extra-static",

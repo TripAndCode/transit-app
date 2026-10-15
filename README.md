@@ -85,8 +85,10 @@ make analyze-all FULL=1 && make check-aggs                        # then rebuild
 
 `--apply` copies `updates` into `updates_repair` one partition at a time,
 verifies the copy, and swaps it in with `EXCHANGE TABLES`. The original rows
-stay in `updates_repair` until you drop it. Rerun with `--resume` to finish a
-run that stopped partway. The script's docstring has the details.
+stay in `updates_repair` until you drop it. Rerun with `--resume`, and the same
+options, to finish a run that stopped partway. `--agency` limits which rows
+change, not how much is rewritten: the whole table is still copied and swapped.
+The script's docstring has the details.
 
 ## Data Flow
 

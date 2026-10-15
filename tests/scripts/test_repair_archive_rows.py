@@ -1,6 +1,6 @@
 """`scripts/repair_archive_rows.py` against throwaway ClickHouse and Postgres.
 
-Archive rows are seeded the way the faulty backfill stored them: stamped from
+Archive rows are seeded as an ingest without a timetable stores them: stamped from
 a UTC file name read as JST, and with the timetable fields blank because no
 timetable was loaded yet. Each test checks the repaired rows against what
 ingest produces today (`archive_captured_at`, `static_join.parse_feed`).
@@ -148,17 +148,18 @@ def _stamp_row(file_name: str, captured_at: str, trip_id: str, header: int | Non
 
 
 # (date dir, member name, header instant or None). Names are the UTC wall
-# clock the collector wrote; the faulty backfill read them as JST.
+# clock the collector wrote; the rows are seeded with them read as JST.
 STAMP_CASES = {
     "morning": ("20260905", "TripUpdate_054355.pb", "2026-09-05T05:43:50+00:00"),
     "next JST day": ("20260905", "TripUpdate_233000.pb", "2026-09-05T23:29:58+00:00"),
     "stale header": ("20260907", "TripUpdate_150000.pb", "2026-09-05T03:00:00+00:00"),
     "no header": ("20260908", "TripUpdate_101500.pb", None),
+    "month edge": ("20260901", "TripUpdate_030000.pb", "2026-09-01T02:59:55+00:00"),
 }
 
 
 def _seed_stamps(ch_client, agency_id: int) -> dict[str, datetime]:
-    """One row per case stamped the faulty way, one already right, one live.
+    """One row per case stamped from its name read as JST, one already right, one live.
     Returns the captured_at archive ingest assigns each one today."""
     expected: dict[str, datetime] = {}
     rows = []
@@ -190,6 +191,17 @@ def test_archive_rows_take_the_captured_at_archive_ingest_assigns_now(ch_client,
     assert _stamps(ch_client) != expected
     assert _apply() == 0
     assert _stamps(ch_client) == expected
+
+
+def test_a_row_whose_stamp_crosses_a_month_moves_to_that_months_partition(ch_client, regex_agency):
+    _seed_stamps(ch_client, regex_agency)
+
+    def partition_of_edge() -> str:
+        return ch_client.query("SELECT _partition_id FROM updates WHERE trip_id = 'month edge'").result_rows[0][0]
+
+    assert partition_of_edge() == "202608"
+    assert _apply() == 0
+    assert partition_of_edge() == "202609"
 
 
 def test_live_rows_are_left_exactly_as_they_were(pg_conn, ch_client, join_agency, tmp_path):
@@ -297,10 +309,10 @@ def test_the_dry_run_reports_moves_and_matches(pg_conn, ch_client, join_agency, 
         keymap = repair.build_keymap(conn, fill, [])
     reports = repair.plan(repair.readonly_client(), repair.Scope(None, fill), keymap).agencies
     report = {r.agency_id: r for r in reports}[join_agency]
-    assert report.archive_rows == 7 + 5
+    assert report.archive_rows == 7 + len(STAMP_CASES) + 1
     # "no header" and "stale header" keep their stamp, as does the row already right.
-    assert report.rows_moving == 2
-    assert report.blank_rows == 7 + 5
+    assert report.rows_moving == len(STAMP_CASES) - 2
+    assert report.blank_rows == 7 + len(STAMP_CASES) + 1
     assert report.matched == {"gtfs_static_20261014": 5}
 
 
@@ -401,6 +413,21 @@ def test_a_partial_partition_in_the_work_table_is_left_to_the_operator(
     err = capsys.readouterr().err
     assert f"{repair.WORK_TABLE} DROP PARTITION ID '202609'" in err
     assert _all_rows(ch_client, repair.WORK_TABLE) == held, "the tool clears nothing itself"
+
+
+def test_a_resume_waits_for_a_copy_still_running_on_the_server(
+    pg_conn, ch_client, join_agency, tmp_path, monkeypatch, capsys
+):
+    """A client killed mid-copy leaves its INSERT running on the server; a
+    resume then must not read that partition as stopped partway."""
+    _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
+    monkeypatch.setattr(repair, "_running_copies", lambda client: ["q-1"])
+    capsys.readouterr()
+
+    assert _apply() != 0
+    err = capsys.readouterr().err
+    assert "q-1" in err and "still running" in err
+    assert not _comment(ch_client, "updates")
 
 
 def test_a_row_that_would_land_on_a_day_holding_live_rows_stops_the_run(ch_client, regex_agency, capsys):
