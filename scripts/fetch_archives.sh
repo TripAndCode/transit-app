@@ -13,6 +13,8 @@
 #   ORACLE_STATIC_DIR Remote static archive dir    (default: /home/opc/app/transportation_analysis/static_archive)
 #   LOCAL_RT_DIR     Local destination for RT      (default: ./raw_archives)
 #   LOCAL_STATIC_DIR Local destination for static  (default: ./raw_archives_static)
+#   SINCE            YYYYMMDD: fetch only RT archives of that day and later
+#                    (per-agency layout only; timetables are always fetched)
 #
 # Usage: scripts/fetch_archives.sh
 
@@ -25,6 +27,11 @@ ORACLE_RT_DIR="${ORACLE_RT_DIR:-/home/opc/app/transportation_analysis/archive}"
 ORACLE_STATIC_DIR="${ORACLE_STATIC_DIR:-/home/opc/app/transportation_analysis/static_archive}"
 LOCAL_RT_DIR="${LOCAL_RT_DIR:-$(dirname "$0")/../raw_archives}"
 LOCAL_STATIC_DIR="${LOCAL_STATIC_DIR:-$(dirname "$0")/../raw_archives_static}"
+
+if [ -n "${SINCE:-}" ] && ! [[ "$SINCE" =~ ^[0-9]{8}$ ]]; then
+    echo "Error: SINCE must be a date as YYYYMMDD, got '$SINCE'" >&2
+    exit 2
+fi
 
 mkdir -p "$LOCAL_RT_DIR" "$LOCAL_STATIC_DIR"
 
@@ -52,7 +59,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=no -o BatchMode=yes"
+# Keepalives turn a dropped connection into an error within about two
+# minutes, where a silent one would leave rsync waiting forever.
+SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=no -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4"
 
 # FETCH_TEST_LOCAL=1: rsync local paths directly (test hook, no ssh).
 if [ "${FETCH_TEST_LOCAL:-0}" = "1" ]; then
@@ -69,12 +78,26 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     # AGENCY_IDS defaults to ids parsed from agencies.csv rows with a feed_url.
     AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$(dirname "$0")/../agencies.csv" | tr '\n' ' ')}"
     for id in $AGENCY_IDS; do
-        echo "==> [a$id] RT archives"
+        echo "==> [a$id] RT archives${SINCE:+ from $SINCE}"
         mkdir -p "$LOCAL_RT_DIR/$id" "$LOCAL_STATIC_DIR/$id"
-        rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
-            --include="*.tar.gz" --exclude="*" \
-            "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
-            "$LOCAL_RT_DIR/$id/"
+        if [ -n "${SINCE:-}" ]; then
+            # Day archives are named YYYYMMDD.tar.gz, so the name orders them.
+            wanted="$(mktemp)"
+            rsync --list-only ${RSYNC_E[@]+"${RSYNC_E[@]}"} "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+                | awk -v since="$SINCE" '{ n = $NF } n ~ /^[0-9]{8}\.tar\.gz$/ && substr(n, 1, 8) >= since { print n }' \
+                > "$wanted"
+            if [ -s "$wanted" ]; then
+                rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} --files-from="$wanted" \
+                    "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+                    "$LOCAL_RT_DIR/$id/"
+            fi
+            rm -f "$wanted"
+        else
+            rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
+                --include="*.tar.gz" --exclude="*" \
+                "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+                "$LOCAL_RT_DIR/$id/"
+        fi
         echo "==> [a$id] static archives"
         rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
             --exclude="latest.zip" --include="*.zip" --exclude="*" \
