@@ -199,6 +199,91 @@ def test_strict_ingest_exits_dataerr_and_records_the_partial_run(strict, code):
     assert (finish.call_args.args[2], finish.call_args.kwargs["rows"]) == ("ok" if code is None else "error", 5)
 
 
+@pytest.mark.parametrize(
+    "cmd,args,target",
+    [
+        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=8, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
+        (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=8), "pipeline.ingest.ingest_live"),
+    ],
+)
+def test_ingest_without_a_timetable_exits_config_and_records_why(cmd, args, target, caplog):
+    """A static-join agency with no timetable loaded is an operator's step
+    left undone: neither the lock-busy code a shell loop retries nor a crash.
+    The run row and the log both say which step."""
+    from pipeline.ingest import StaticTimetableMissing
+
+    conn = _conn()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run") as finish,
+        patch(target, side_effect=StaticTimetableMissing(8, "static_join")),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            cmd(args)
+
+    assert exc_info.value.code == gtfs_pipeline.EX_CONFIG
+    assert gtfs_pipeline.EX_CONFIG not in (gtfs_pipeline.EX_TEMPFAIL, gtfs_pipeline.EX_DATAERR, 1)
+    assert finish.call_args.args[2] == "error"
+    assert "no timetable loaded" in finish.call_args.kwargs["error"]
+    assert any("no timetable loaded" in r.getMessage() and r.levelname == "ERROR" for r in caplog.records)
+    conn.close.assert_called()
+
+
+def _ingest_every_agency(outcomes):
+    """Run `ingest_live` with no --agency-id over agencies 8 and 9, each
+    returning or raising what *outcomes* gives it."""
+    conn = _conn()
+    conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(8,), (9,)]
+    called = []
+
+    def fake_ingest_live(aid, _conn, _ch):
+        called.append(aid)
+        outcome = outcomes[aid]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run"),
+        patch("pipeline.ingest.ingest_live", side_effect=fake_ingest_live),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))
+    return exc_info.value.code, called, conn
+
+
+def test_every_agency_ingest_without_a_timetable_exits_config_without_a_traceback(caplog):
+    """A local poller loops over this command and backs off on failure. An
+    agency with no timetable loaded is not a failing feed and no amount of
+    polling heals it, so it must not read as one: the other agencies still
+    ingest, and the exit is EX_CONFIG, not 1."""
+    from pipeline.ingest import StaticTimetableMissing
+
+    code, called, conn = _ingest_every_agency({8: StaticTimetableMissing(8, "static_join"), 9: 5})
+
+    assert code == gtfs_pipeline.EX_CONFIG
+    assert called == [8, 9]
+    assert not [r for r in caplog.records if r.exc_info]
+    assert any("agency 8" in r.getMessage() for r in caplog.records)
+    conn.rollback.assert_called()
+
+
+def test_every_agency_ingest_with_a_real_failure_still_exits_one():
+    from pipeline.ingest import StaticTimetableMissing
+
+    code, called, _ = _ingest_every_agency({8: StaticTimetableMissing(8, "static_join"), 9: RuntimeError("feed down")})
+
+    assert code == 1
+    assert called == [8, 9]
+
+
 @pytest.mark.parametrize("full", [False, True])
 def test_analyze_full_marks_the_agency_for_a_full_rebuild_before_analyzing(full):
     """The ledger compares per-date counts, so a date whose rows were replaced

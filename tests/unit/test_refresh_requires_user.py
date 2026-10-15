@@ -1,7 +1,8 @@
 """POST /api/{agency_id}/delays/refresh fetches the agency's live feed and
 writes it: a signed-in action while sign-in exists, metered per account
 rather than per address; open under the per-address limit in anonymous-only
-mode.
+mode. An agency with no timetable loaded is refused as unavailable, not as a
+failed feed.
 
 Exercised through a standalone app with `get_agency` overridden, the signed-in
 user injected through request state, and the ingest stubbed, so no database or
@@ -22,6 +23,7 @@ from api.deps import get_agency
 from api.middleware.ratelimit import limiter, user_key
 from api.security import require_user_when_sign_in_exists
 from api.sso import SSO_ENV
+from pipeline.ingest import StaticTimetableMissing
 from tests.fixtures.users import admin_user
 
 
@@ -64,6 +66,20 @@ def test_a_signed_in_refresh_runs_the_ingest(monkeypatch):
 
 def test_anonymous_only_mode_keeps_the_refresh_open(monkeypatch):
     assert _post(monkeypatch, signed_in=False, sso=False) == (200, [7])
+
+
+def test_a_refresh_for_an_agency_with_no_timetable_is_unavailable(monkeypatch):
+    monkeypatch.setenv("ALLOW_TEST_ORIGIN", "1")
+    for var in SSO_ENV:
+        monkeypatch.delenv(var, raising=False)
+    limiter.reset()
+
+    def _refuse(agency_id):
+        raise StaticTimetableMissing(agency_id, "static_join")
+
+    monkeypatch.setattr(map_mod, "_ingest_live_agency", _refuse)
+    resp = _client(signed_in=False).post("/api/7/delays/refresh", headers={"Origin": "http://test"})
+    assert resp.status_code == 503
 
 
 def test_the_refresh_limit_is_keyed_on_the_account():

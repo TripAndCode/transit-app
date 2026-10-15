@@ -103,7 +103,7 @@ What the user sees/does:
 
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data for at least two agencies to see a meaningful ranking:
-   `make fetch-ingest` (or `ingest_live` + `make load_static`) then
+   `make fetch-ingest` (or `make load_static` before `ingest_live`) then
    `make analyze` per agency — a single agency still renders (one card),
    just without a comparison.
 2. Click "Compare" in the rail, then its "Agencies" button → URL

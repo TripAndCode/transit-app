@@ -11,6 +11,15 @@ Each ingest strategy module exposes:
         rather than guessing; a strategy's tuple shorter than 15 elements
         (predating one of these fields) is right-padded with None by
         insert_updates instead.
+    REQUIRES_STATIC_TIMETABLE: bool (optional, False when absent)
+        True when parse_feed takes each row's schedule from the agency's
+        loaded static timetable as the row is read (static_join). A row read
+        before any timetable is loaded is stored with no schedule and its
+        file counted as done, so loading one later repairs nothing. Every
+        ingest path therefore refuses such an agency while it has no
+        timetable loaded (pipeline.ingest.require_timetable), before reading
+        or fetching anything, and the CLI exits 78 for it. This is the
+        canonical statement of that rule; docs and scripts point here.
 
 Each static strategy module exposes:
     fetch(agency_id: int, static_url: str, dest_dir: pathlib.Path, *, force: bool = False)

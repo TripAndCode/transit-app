@@ -14,7 +14,7 @@ from httpx import ASGITransport
 from starlette.requests import Request as StarletteRequest
 
 from api.routers.internal import _MAX_COLLECTOR_PAYLOAD, UnknownAgency, collector_router
-from pipeline.ingest import PayloadDecodeError
+from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
 VALID_HEADERS = {
     "X-Collector-Secret": "shh",
@@ -143,13 +143,16 @@ async def test_happy_path_calls_ingest_once(client):
     [
         (UnknownAgency("Unknown or deleted agency_id=1"), 404),
         (PayloadDecodeError("oracle/x: IndexError: index out of range"), 422),
+        (StaticTimetableMissing(1, "static_join"), 503),
         (RuntimeError("clickhouse unavailable"), 502),
     ],
 )
 async def test_only_a_failure_on_this_side_asks_the_collector_to_retry(client, caplog, raised, status):
     """The collector's curl --retry resends on a 5xx (or a 408/429). A disabled
     agency or bytes that cannot be decoded fail the same way every time, so
-    they are a 404 or 422, logged as a warning without a traceback."""
+    they are a 404 or 422. An agency with no timetable loaded is a 503: the
+    same bytes ingest once an operator loads it. The three are logged as a
+    warning without a traceback."""
     with patch("api.routers.internal._ingest_collector_payload", side_effect=raised):
         async with client as ac:
             r = await ac.post("/internal/collector/updates/1", headers=VALID_HEADERS, content=b"protobuf-bytes")
