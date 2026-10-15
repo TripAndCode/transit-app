@@ -57,8 +57,8 @@ def build_dedup_ch_sql(
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
-    `table` is `updates` for a closed day or `updates_live` for today
-    (`pipeline.clickhouse.live_table_for`); both carry the same columns.
+    `table` is whichever observation table holds the day
+    (`api.clickhouse.table_holding`); both carry the same columns.
 
     GTFS-RT feeds publish refining `dep_delay` estimates as the trip nears
     each stop. The latest observation is what passengers actually
