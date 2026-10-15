@@ -68,6 +68,32 @@ poetry run python gtfs_pipeline.py add_agency \
   --name "My Agency" --feed-url "https://example.test/feed.pb"
 ```
 
+### Repair archive-ingested rows
+
+`scripts/repair_archive_rows.py` brings archive-ingested `updates` rows to what
+archive ingest assigns them today: the `captured_at` read from each file's own
+feed header, and, for `static_join` agencies, the timetable fields of rows
+ingested before a timetable was loaded, so load each `static_join` agency's
+current timetable first. It targets whatever `CLICKHOUSE_*` and
+`DATABASE_URL` name, and prints both. Without `--apply` it only reads, and
+reports per agency the rows that would move (with a histogram of the shift),
+the blank rows the timetables would fill, and the disk the rebuild needs.
+
+```bash
+poetry run python scripts/repair_archive_rows.py                  # report only
+poetry run python scripts/repair_archive_rows.py \
+  --extra-static 8=path/to/gtfs_static_20260816.zip               # an older timetable, for retired trips
+poetry run python scripts/repair_archive_rows.py --apply          # rebuild; asks to confirm
+make analyze-all FULL=1 && make check-aggs                        # then rebuild every date's aggregates
+```
+
+`--apply` copies `updates` into `updates_repair` one partition at a time,
+verifies the copy, and swaps it in with `EXCHANGE TABLES`. The original rows
+stay in `updates_repair` until you drop it. Rerun with `--resume`, and the same
+options, to finish a run that stopped partway. `--agency` limits which rows
+change, not how much is rewritten: the whole table is still copied and swapped.
+The script's docstring has the details.
+
 ## Data Flow
 
 ```text

@@ -480,7 +480,7 @@ def cmd_restamp_archive(args):
 
     from pipeline.analyze import mark_for_full_rebuild
     from pipeline.clickhouse import ch_conn_kwargs, get_client
-    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY, agency_ingest_lock, try_lock_ingest_analyze
+    from pipeline.locks import agency_ingest_lock, held_pipeline_locks, try_lock_ingest_analyze
     from pipeline.restamp_archive import (
         BACKUP_TABLE,
         interrupted_run,
@@ -505,16 +505,8 @@ def cmd_restamp_archive(args):
         # The copy leaves `conn` idle for its whole length; a session lost
         # meanwhile has released every lock, so the swap must not go ahead.
         assert conn is not None
-        with conn.cursor() as cur:
-            # A one-key lock lists as (classid 0, objid key, objsubid 1); a
-            # two-key one as (classid first key, objid second, objsubid 2).
-            cur.execute(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()"
-                " AND ((objsubid = 1 AND classid = 0 AND objid = %s) OR (objsubid = 2 AND classid = %s))",
-                (INGEST_ANALYZE_LOCK_KEY, INGEST_ANALYZE_LOCK_KEY),
-            )
-            if cur.fetchone()[0] < 1 + len(moved):
-                raise RuntimeError("the pipeline lock was lost during the copy; nothing was swapped")
+        if held_pipeline_locks(conn) < 1 + len(moved):
+            raise RuntimeError("the pipeline lock was lost during the copy; nothing was swapped")
 
     ch_client = get_client()
     conn = None

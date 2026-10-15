@@ -53,7 +53,7 @@ _NAME_DAY = "toDate(parseDateTimeOrNull(substring(file_name, 1, 8), '%Y%m%d'))"
 # column type's last second (2299-12-31); a header past it stays unused. Days
 # are Date32, whose range covers that bound, where a Date would wrap.
 _HAS_HEADER = "ifNull(feed_timestamp, 0) BETWEEN 1 AND 10413791999"
-_RESTAMPED = f"""multiIf(
+RESTAMPED = f"""multiIf(
     {LIVE_SOURCED} OR NOT ({_HAS_HEADER}), captured_at,
     startsWith(file_name, '/'), {_HEADER},
     match(file_name, '^[0-9]{{8}}/')
@@ -61,10 +61,10 @@ _RESTAMPED = f"""multiIf(
         AND dateDiff('day', {_NAME_DAY}, toDate32({_HEADER}, 'Asia/Tokyo')) BETWEEN 0 AND 1,
         {_HEADER},
     captured_at)"""
-_NEW_DAY = f"toDate32({_RESTAMPED}, 'Asia/Tokyo')"
+_NEW_DAY = f"toDate32({RESTAMPED}, 'Asia/Tokyo')"
 
 
-def _refused(today: date) -> str:
+def refusal_predicate(today: date) -> str:
     """The rows left out, given the JST day that has not closed yet. Taken as
     one value for a whole run, so the count of refusals and the copy agree
     across a midnight between them."""
@@ -96,7 +96,7 @@ class RestampPlan:
 def plan_restamp(client) -> list[RestampPlan]:
     """Per agency, how many archive rows the restamp would move and how far,
     and how many it would leave out. Reads only."""
-    refused = _refused(_today())
+    refused = refusal_predicate(_today())
     result = client.query(
         f"""
         SELECT agency_id, count(),
@@ -105,7 +105,7 @@ def plan_restamp(client) -> list[RestampPlan]:
                countIf(refused),
                countIf(NOT match(file_name, '^[0-9]{{8}}/') AND NOT startsWith(file_name, '/'))
         FROM (
-            SELECT agency_id, file_name, dateDiff('second', captured_at, {_RESTAMPED}) AS shift, {refused} AS refused
+            SELECT agency_id, file_name, dateDiff('second', captured_at, {RESTAMPED}) AS shift, {refused} AS refused
             FROM {_TABLE}
             WHERE NOT {LIVE_SOURCED}
         )
@@ -247,7 +247,7 @@ def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = Non
     settle_interrupted_run(client)
     preflight(client)
     before = _row_count(client, _TABLE)
-    refusal = _refused(_today())
+    refusal = refusal_predicate(_today())
     refused = int(client.query(f"SELECT countIf({refusal}) FROM {_TABLE}").result_rows[0][0])
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
     client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}{before}'")
@@ -255,7 +255,7 @@ def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = Non
         # Filtered in the inner query: in the outer one `captured_at` names
         # the restamped value, so a refusal tested there would see no move.
         client.command(
-            f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at)"
+            f"INSERT INTO {_STAGING} SELECT * REPLACE ({RESTAMPED} AS captured_at)"
             f" FROM (SELECT * FROM {_TABLE} WHERE NOT {refusal})"
         )
         if _row_count(client, _TABLE) != before:
