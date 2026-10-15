@@ -269,6 +269,16 @@ def test_an_older_timetable_fills_only_trips_todays_timetable_lacks(pg_conn, ch_
     assert fields[("T1", 9)] == (None, None, None, None)
 
 
+def test_a_timetable_listing_a_trip_without_its_stops_leaves_it_to_the_next(pg_conn, ch_client, join_agency, tmp_path):
+    """A trip belongs to the first timetable that supplies its stops, so one
+    that only names it in trips.txt does not shut out a later one."""
+    _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
+    named_only = _timetable(tmp_path, "gtfs_static_20260901", ["OLD,R9,,,先"], ["ZZ,1,S1,,06:00:00"])
+    older = _timetable(tmp_path, "gtfs_static_20260816", ["OLD,R9,,,旧平日"], ["OLD,1,S1,,6:40:00"])
+    assert _apply("--extra-static", f"{join_agency}={named_only}", "--extra-static", f"{join_agency}={older}") == 0
+    assert _timetable_fields(ch_client)[("OLD", 1)] == ("旧平日", "06:40:00", 24000, "gtfs_static_20260816")
+
+
 def test_every_row_is_kept_and_the_originals_stay_in_the_backup(pg_conn, ch_client, join_agency, tmp_path):
     _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
     _seed_stamps(ch_client, join_agency)
@@ -428,6 +438,29 @@ def test_a_resume_waits_for_a_copy_still_running_on_the_server(
     err = capsys.readouterr().err
     assert "q-1" in err and "still running" in err
     assert not _comment(ch_client, "updates")
+    assert _comment(ch_client, repair.WORK_TABLE) is None, "a refused run creates no work table"
+
+
+def test_the_dry_run_says_when_its_options_could_not_resume_a_stopped_run(
+    pg_conn, ch_client, join_agency, tmp_path, monkeypatch, capsys
+):
+    _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
+    original_verify = repair.verify
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(repair, "verify", interrupted)
+    with pytest.raises(RuntimeError, match="killed"):
+        _apply()
+    monkeypatch.setattr(repair, "verify", original_verify)
+    older = _timetable(tmp_path, "gtfs_static_20260816", ["OLD,R9,,,旧平日"], ["OLD,1,S1,,6:40:00"])
+    capsys.readouterr()
+
+    assert repair.main([]) == 0
+    assert "--apply --resume finishes it" in capsys.readouterr().out
+    assert repair.main(["--extra-static", f"{join_agency}={older}"]) == 0
+    assert "different timetables or scope" in capsys.readouterr().out
 
 
 def test_a_row_that_would_land_on_a_day_holding_live_rows_stops_the_run(ch_client, regex_agency, capsys):

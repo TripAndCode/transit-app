@@ -231,7 +231,7 @@ def build_keymap(conn, agencies: list[int], extras: list[tuple[int, str]]) -> Ke
         for trip_id, seq, departure in stop_times:
             if trip_id in supplied:
                 keymap.add((agency_id, trip_id, seq), _values(departure, trips[trip_id], version))
-        owned.update((agency_id, t) for t in supplied)
+        owned.update((agency_id, t) for t, _seq, _dep in stop_times if t in supplied)
     return keymap
 
 
@@ -614,12 +614,6 @@ def _copy(client, scope: Scope, keymap: KeyMap, p: Plan) -> None:
     """Fill the work table one destination partition at a time. A partition
     already complete is skipped, so a rerun picks up where a run stopped; one
     holding only part of its rows is the operator's to clear."""
-    running = _running_copies(client)
-    if running:
-        raise Refusal(
-            f"a copy into {WORK_TABLE} is still running on the server ({', '.join(running)}). Wait for it to end, "
-            "or stop it with KILL QUERY WHERE query_id = '...', then rerun"
-        )
     columns = _columns(client)
     names = ", ".join(name for name, _ in columns)
     for part in p.partitions:
@@ -749,6 +743,12 @@ def run_apply(args, sc: Scope, extras: list[tuple[int, str]]) -> int:
         for agency_id in agencies:
             held.enter_context(agency_ingest_lock(conn, agency_id))
 
+        running = _running_copies(client)
+        if running:
+            raise Refusal(
+                f"a copy into {WORK_TABLE} is still running on the server ({', '.join(running)}). Wait for it to "
+                "end, or stop it with KILL QUERY WHERE query_id = '...', then rerun"
+            )
         state, before = _state(client)
         if state != "fresh" and not args.resume:
             raise Refusal(f"{WORK_TABLE} holds an earlier run that stopped partway; rerun with --resume to finish it")
@@ -808,7 +808,12 @@ def run_dry(sc: Scope, extras: list[tuple[int, str]]) -> int:
         keymap = build_keymap(conn, sc.fill, extras)
     try:
         state, _rows = _state(client)
-        if state != "fresh":
+        if state == "copying" and _marked_inputs(_comment(client, WORK_TABLE)) != keymap.fingerprint(sc):
+            print(
+                "an earlier --apply run stopped partway, begun from different timetables or scope than these "
+                "options; --apply --resume needs the interrupted run's options"
+            )
+        elif state != "fresh":
             print(f"an earlier --apply run stopped partway ({state}); --apply --resume finishes it")
     except Refusal as why:
         print(f"--apply would refuse: {why}")
