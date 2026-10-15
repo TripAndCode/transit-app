@@ -302,7 +302,7 @@ def _ingest_and_analyze_sweep(
     from pipeline.analyze import analyze
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
-    from pipeline.ingest import ingest_live
+    from pipeline.ingest import StaticTimetableMissing, ingest_live
     from pipeline.promote import promote_closed_days
 
     # Kept apart from the resolved roster below: the caller's scope decides
@@ -374,6 +374,10 @@ def _ingest_and_analyze_sweep(
                 try:
                     with _stage("ingest", aid) as run:
                         run.rows = ingest_live(aid, conn, ch_client)
+                except StaticTimetableMissing as exc:
+                    _log.warning("cron: %s", exc)
+                    failed.append(f"ingest agency {aid} (no timetable loaded)")
+                    stopped = stop_on_failure
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
                     failed.append(f"ingest agency {aid}")
