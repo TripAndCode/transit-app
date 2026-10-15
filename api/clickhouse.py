@@ -204,8 +204,10 @@ async def table_holding(ch, agency_id: int, day: date) -> str:
     because a day collected live is whole only there until promotion copies
     its after-midnight tail. A day that arrived by archive ingest went straight
     to `updates`, and promotion never copies live polls onto such a day, so
-    an archive in `updates` is that day whole even when stray polls of it sit
-    in the live table. Each day is still read from one table.
+    archive rows in `updates` win over polls of it left in the live table.
+    Each day is read from one table, so a service day split between them (an
+    archived calendar day whose after-midnight tail is still only live) reads
+    `updates` without that tail until the next calendar day is promoted.
     """
     if live_table_for(day) == UPDATES_TABLE:
         return UPDATES_TABLE

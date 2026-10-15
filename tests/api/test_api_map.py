@@ -1446,12 +1446,20 @@ def _jst_noon_utc(day):
 
 
 @pytest.mark.asyncio
-async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_updates(map_app_ch, ch_client):
+async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_updates(
+    map_app_ch, ch_client, monkeypatch
+):
     """The current service day and the one before read the live table when it
     holds them; the day two back reads `updates`."""
+    import api.range as range_mod
+    import pipeline.clickhouse as clickhouse_mod
     from api.range import current_service_date
     from pipeline.clickhouse import insert_updates
+    from tests.fixtures.clock import freeze_now
 
+    now = datetime.now(timezone.utc)
+    for module in (clickhouse_mod, range_mod):
+        freeze_now(monkeypatch, module, now)
     app, agency_id = map_app_ch
     today = current_service_date()
     yday = today - timedelta(days=1)
