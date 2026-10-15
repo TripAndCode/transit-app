@@ -39,7 +39,7 @@ from api.admin_runs import (
 )
 from api.deps import get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
-from api.range import jst_today
+from api.range import current_service_date
 from api.security import User, csrf_guard, require_admin
 from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
 from pipeline.reports.network import invalidate_network_summary
@@ -278,7 +278,7 @@ async def agencies_health(
     changes: one poll of this snapshot shows the run ending and the dates it
     moved together.
     """
-    today = jst_today()
+    today = current_service_date()
     now = datetime.now(timezone.utc)
     window_start = today - timedelta(days=ad.CLAMP_HISTORY_DAYS - 1)
     headers = await conn.fetch(ad.AGENCIES_HEALTH_SQL)
@@ -325,7 +325,7 @@ async def agency_diagnostics(
     pool = request.app.state.pool
     async with pool.acquire() as conn:
         header = await _load_agency(conn, agency_id)
-    today = jst_today()
+    today = current_service_date()
     window_start = today - timedelta(days=ad.CLAMP_HISTORY_DAYS - 1)
 
     async def _fetch(sql: str, *args: Any) -> list[asyncpg.Record]:

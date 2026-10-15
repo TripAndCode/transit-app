@@ -1053,12 +1053,12 @@ async def _seed_live_route(pool, ch_client, agency_id, route_code, service_type,
     agg_route_daily_dist on each of the newest dates of today's class (the
     weekday rule, as no calendar is loaded), enough of them for a same-class
     baseline."""
-    from api.range import jst_today
+    from api.range import current_service_date
     from api.routers.map import MIN_SAME_CLASS_BASELINE_DAYS
     from pipeline.clickhouse import LIVE_TABLE, insert_updates
     from tests.fixtures.route_dist import recent_days_of_class, seed_route_dist_day
 
-    today = jst_today()
+    today = current_service_date()
     at = _jst_noon_utc(today)
     insert_updates(
         ch_client,
@@ -2048,11 +2048,11 @@ async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client, ch
 async def test_route_summary_reads_only_todays_live_rows(map_app_ch, ch_client):
     from datetime import timedelta
 
-    from api.range import jst_today
+    from api.range import current_service_date
     from pipeline.clickhouse import LIVE_TABLE, insert_updates
 
     app, agency_id = map_app_ch
-    today = jst_today()
+    today = current_service_date()
     yday = today - timedelta(days=1)
     insert_updates(
         ch_client,
@@ -2070,6 +2070,119 @@ async def test_route_summary_reads_only_todays_live_rows(map_app_ch, ch_client):
         body = (await client.get(f"/api/{agency_id}/today/route-summary")).json()
     assert body["date"] == today.isoformat()
     assert {r["route_code"] for r in body["routes"]} == {"R_NEW"}
+
+
+def _future_plain_saturday():
+    """A Saturday the weekday rule (no calendar is loaded) files as 土曜, after
+    a Friday it files as 平日. A week ahead of the real clock, so
+    `updates_live`'s TTL never drops the rows a test captures on it."""
+    from api.range import jst_today
+    from pipeline.day_types import fallback_day_type
+
+    d = jst_today() + timedelta(days=7)
+    while not (fallback_day_type(d) == "saturday" and fallback_day_type(d - timedelta(days=1)) == "weekday"):
+        d += timedelta(days=1)
+    return d
+
+
+def _jst_at(day, hour, minute=0, second=0):
+    from datetime import time
+    from zoneinfo import ZoneInfo
+
+    return datetime.combine(day, time(hour, minute, second), tzinfo=ZoneInfo("Asia/Tokyo")).astimezone(timezone.utc)
+
+
+def _freeze_clock(monkeypatch, moment):
+    """The request's "now" (api.range's clock) is ``moment``."""
+    import api.range as range_mod
+    from tests.fixtures.clock import freeze_now
+
+    freeze_now(monkeypatch, range_mod, moment)
+
+
+async def _seed_class_baselines(pool, agency_id, route_code, friday, *, weekday, saturday):
+    """Enough closed weekdays before ``friday``, and Saturdays before the day
+    after it, for a same-class baseline of either class."""
+    from api.routers.map import MIN_SAME_CLASS_BASELINE_DAYS
+    from tests.fixtures.route_dist import recent_days_of_class, seed_route_dist_day
+
+    for day in recent_days_of_class(friday, MIN_SAME_CLASS_BASELINE_DAYS):
+        await seed_route_dist_day(pool, agency_id, route_code, day, weekday)
+    for day in recent_days_of_class(friday + timedelta(days=1), MIN_SAME_CLASS_BASELINE_DAYS):
+        await seed_route_dist_day(pool, agency_id, route_code, day, saturday)
+
+
+@pytest.mark.asyncio
+async def test_route_summary_before_the_cutover_is_the_service_day_still_running(map_app_ch, ch_client, monkeypatch):
+    """At 01:30 on a Saturday the service day in progress is Friday's: every
+    observation since Friday's cutover, its after-midnight tail included,
+    judged against Friday's class. The part up to midnight, which promotion
+    has already copied into `updates`, counts once, and Friday's own
+    aggregate, which analyze writes for that part, is not its baseline."""
+    from pipeline.clickhouse import insert_updates
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    saturday = _future_plain_saturday()
+    friday = saturday - timedelta(days=1)
+    _freeze_clock(monkeypatch, _jst_at(saturday, 1, 30))
+    friday_evening = ("live_fri_eve", _jst_at(friday, 22), "T2", "平日", "22:00", "R_FRI", 1, 300)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("live_thu_tail", _jst_at(friday, 3, 59, 59), "T0", "平日", "27:59", "R_THU_TAIL", 1, 60),
+            ("live_fri_first", _jst_at(friday, 4), "T1", "平日", "04:00", "R_FRI_FIRST", 1, 60),
+            friday_evening,
+            ("live_fri_tail", _jst_at(saturday, 1), "T3", "平日", "25:00", "R_FRI_TAIL", 1, 120),
+        ],
+        table=LIVE_TABLE,
+    )
+    insert_updates(ch_client, agency_id, [friday_evening])
+    await _seed_class_baselines(pool, agency_id, "R_FRI", friday, weekday=[100] * 10, saturday=[900] * 10)
+    await seed_route_dist_day(pool, agency_id, "R_FRI", friday, [5000] * 10)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        body = (await client.get(f"/api/{agency_id}/today/route-summary")).json()
+
+    assert body["date"] == friday.isoformat()
+    routes = {r["route_code"]: r for r in body["routes"]}
+    assert set(routes) == {"R_FRI_FIRST", "R_FRI", "R_FRI_TAIL"}
+    assert routes["R_FRI"]["samples"] == 1
+    assert (routes["R_FRI"]["baseline_avg_sec"], routes["R_FRI"]["baseline_samples"]) == (100, 30)
+
+
+@pytest.mark.asyncio
+async def test_route_summary_after_the_cutover_is_the_new_service_day(map_app_ch, ch_client, monkeypatch):
+    """At 04:30 on a Saturday Saturday's service day has opened: Friday's
+    after-midnight tail stays Friday's, and Saturday's class is the baseline."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    saturday = _future_plain_saturday()
+    friday = saturday - timedelta(days=1)
+    _freeze_clock(monkeypatch, _jst_at(saturday, 4, 30))
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("live_fri_eve", _jst_at(friday, 22), "T1", "平日", "22:00", "R_FRI", 1, 300),
+            ("live_fri_tail", _jst_at(saturday, 3, 59, 59), "T2", "平日", "27:59", "R_FRI_TAIL", 1, 120),
+            ("live_sat_first", _jst_at(saturday, 4), "T3", "土曜", "04:00", "R_SAT", 1, 600),
+        ],
+        table=LIVE_TABLE,
+    )
+    await _seed_class_baselines(pool, agency_id, "R_SAT", friday, weekday=[100] * 10, saturday=[900] * 10)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        body = (await client.get(f"/api/{agency_id}/today/route-summary")).json()
+
+    assert body["date"] == saturday.isoformat()
+    routes = {r["route_code"]: r for r in body["routes"]}
+    assert set(routes) == {"R_SAT"}
+    assert (routes["R_SAT"]["baseline_avg_sec"], routes["R_SAT"]["baseline_samples"]) == (900, 30)
 
 
 @pytest.mark.asyncio

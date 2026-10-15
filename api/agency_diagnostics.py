@@ -262,9 +262,10 @@ def freshness_state(latest_data_date: date | None, today: date) -> str:
 
     Deliberately Postgres-only: it compares the newest aggregated day against
     the calendar rather than against the newest live ClickHouse poll the way
-    :func:`pipeline.freshness.is_stale` does. Today is counted as fresh
-    because a day in progress is not yet aggregatable, so the boundary is
-    yesterday.
+    :func:`pipeline.freshness.is_stale` does. ``today`` is the service day in
+    progress (:func:`api.range.current_service_date`), the calendar aggregates
+    are filed by, and it cannot be aggregated yet, so the boundary is the day
+    before it.
     """
     if latest_data_date is None:
         return "unknown"
