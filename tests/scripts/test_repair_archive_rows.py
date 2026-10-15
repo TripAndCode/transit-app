@@ -336,6 +336,29 @@ def test_an_interrupted_copy_needs_resume_and_then_finishes(pg_conn, ch_client, 
     assert _comment(ch_client, repair.WORK_TABLE).startswith(repair.BACKUP_MARK)
 
 
+def test_a_resume_with_other_inputs_than_the_interrupted_run_refuses(
+    pg_conn, ch_client, join_agency, tmp_path, monkeypatch, capsys
+):
+    """A resume keeps the partitions already copied, so it must fill the rest
+    from the same timetables and scope the interrupted run used."""
+    _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
+    original_verify = repair.verify
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(repair, "verify", interrupted)
+    with pytest.raises(RuntimeError, match="killed"):
+        _apply()
+    monkeypatch.setattr(repair, "verify", original_verify)
+    older = _timetable(tmp_path, "gtfs_static_20260816", ["OLD,R9,,,旧平日"], ["OLD,1,S1,,6:40:00"])
+    capsys.readouterr()
+
+    assert _apply("--resume", "--extra-static", f"{join_agency}={older}") != 0
+    assert "different timetables or scope" in capsys.readouterr().err
+    assert _apply("--resume") == 0
+
+
 def test_a_run_killed_after_the_swap_resumes_without_copying_again(
     pg_conn, ch_client, join_agency, tmp_path, monkeypatch
 ):

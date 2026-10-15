@@ -49,6 +49,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import pathlib
 import re
@@ -148,6 +149,18 @@ class KeyMap:
         if self._encoded is None:
             self._encoded = self._encode()
         return ExternalData(file_name=_KEYMAP, data=self._encoded, fmt="TabSeparated", structure=_KEYMAP_STRUCTURE)
+
+    def fingerprint(self, scope: Scope) -> str:
+        """A short digest of what a copy is built from: the key map and the
+        scope. A resume must match the run it finishes, or the work table
+        would hold partitions filled from two inputs."""
+        if self._encoded is None:
+            self._encoded = self._encode()
+        digest = hashlib.sha256(repr((scope.agencies, scope.fill)).encode())
+        # Sorted: the timetable rows arrive in no fixed order.
+        for line in sorted(self._encoded.split(b"\n")):
+            digest.update(line + b"\n")
+        return digest.hexdigest()[:16]
 
     def _encode(self) -> bytes:
         rows = ((a, t, s, 1, svc, sched, sec, ver) for (a, t, s), (svc, sched, sec, ver) in self.values.items())
@@ -523,6 +536,12 @@ def _marked_rows(comment: str | None) -> int | None:
     return int(comment[len(WORK_MARK) :].split()[0])
 
 
+def _marked_inputs(comment: str | None) -> str | None:
+    """The inputs fingerprint a copy's mark records: its last word after "rows"."""
+    words = (comment or "")[len(WORK_MARK) :].split()
+    return words[2] if len(words) > 2 and words[1] == "rows" else None
+
+
 def _row_count(client, table: str) -> int:
     return int(client.query(f"SELECT count() FROM {table}").result_rows[0][0])
 
@@ -736,7 +755,14 @@ def run_apply(args, sc: Scope, extras: list[tuple[int, str]]) -> int:
                 if p.free_bytes is not None and p.free_bytes < p.bytes_on_disk:
                     raise Refusal(f"{_size(p.free_bytes)} free, and the copy needs about {_size(p.bytes_on_disk)}")
                 before = p.total_rows
-                client.command(f"CREATE TABLE {WORK_TABLE} AS {TABLE} COMMENT '{WORK_MARK}{before} rows'")
+                mark = f"{WORK_MARK}{before} rows {keymap.fingerprint(sc)}"
+                client.command(f"CREATE TABLE {WORK_TABLE} AS {TABLE} COMMENT '{mark}'")
+            elif _marked_inputs(_comment(client, WORK_TABLE)) != keymap.fingerprint(sc):
+                raise Refusal(
+                    f"{WORK_TABLE} was begun from different timetables or scope (--agency, --extra-static, or the "
+                    "timetables loaded in Postgres). Resume with the interrupted run's options, or drop "
+                    f"{WORK_TABLE} (DROP TABLE {WORK_TABLE}) and run again"
+                )
             assert before is not None
             if p.total_rows != before:
                 raise Refusal(
