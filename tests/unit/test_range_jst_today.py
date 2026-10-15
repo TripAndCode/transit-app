@@ -8,6 +8,8 @@ class of bug for the request-side default window.
 
 from datetime import date, datetime, timezone
 
+import pytest
+
 import api.range as range_mod
 
 
@@ -143,3 +145,21 @@ def test_get_range_ctx_dedupes_and_caps_routes():
         from_=None, to=None, dow="all", time_band="all", service="all", routes=" R2 ,R1,R2,,R3"
     )
     assert ctx.routes == ("R2", "R1", "R3")
+
+
+@pytest.mark.parametrize(
+    ("fixed_utc", "expected"),
+    [
+        (datetime(2026, 3, 6, 15, 0, tzinfo=timezone.utc), date(2026, 3, 6)),  # 00:00 JST 03-07
+        (datetime(2026, 3, 6, 18, 59, 59, tzinfo=timezone.utc), date(2026, 3, 6)),  # 03:59:59 JST 03-07
+        (datetime(2026, 3, 6, 19, 0, tzinfo=timezone.utc), date(2026, 3, 7)),  # 04:00 JST 03-07
+    ],
+)
+def test_the_current_service_date_turns_over_at_the_cutover_not_at_midnight(monkeypatch, fixed_utc, expected):
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+    assert range_mod.current_service_date() == expected

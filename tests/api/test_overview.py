@@ -1599,11 +1599,11 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_cl
     from zoneinfo import ZoneInfo
 
     from api.main import app
-    from api.range import jst_today
+    from api.range import current_service_date
     from pipeline.clickhouse import LIVE_TABLE, insert_updates
 
     app.state.ch_client = ch_async_client
-    noon = datetime.combine(jst_today(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
+    noon = datetime.combine(current_service_date(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
     insert_updates(
         ch_client,
         aagency_id,
@@ -1614,7 +1614,7 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_cl
     from tests.fixtures.route_dist import recent_days_of_class, seed_route_dist_day
 
     # 47 of each closed day's 200 observations run more than five minutes late.
-    for day in recent_days_of_class(jst_today(), MIN_SAME_CLASS_BASELINE_DAYS):
+    for day in recent_days_of_class(current_service_date(), MIN_SAME_CLASS_BASELINE_DAYS):
         await seed_route_dist_day(aconn, aagency_id, "K31", day, [400] * 47 + [60] * 153, service_type="平日")
     r = await client.get(f"/api/{aagency_id}/today/route-summary")
     assert r.status_code == 200
@@ -1629,11 +1629,11 @@ async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency
     from zoneinfo import ZoneInfo
 
     from api.main import app
-    from api.range import jst_today
+    from api.range import current_service_date
     from pipeline.clickhouse import LIVE_TABLE, insert_updates
 
     app.state.ch_client = ch_async_client
-    noon = datetime.combine(jst_today(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
+    noon = datetime.combine(current_service_date(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
     insert_updates(
         ch_client,
         aagency_id,

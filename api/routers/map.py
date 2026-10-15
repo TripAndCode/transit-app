@@ -47,6 +47,7 @@ from api.range import (
     build_agg_stop_filter,
     clamp_range_ctx,
     ctx_payload,
+    current_service_date,
     jst_today,
     parse_iso_date,
     time_band_clause_ch_for,
@@ -55,13 +56,13 @@ from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.cache import async_lru_cache
-from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, live_table_for
 from pipeline.day_types import DayTypes, load_day_types
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
-from pipeline.service_day import service_date_ch, service_date_of, service_day_seconds
+from pipeline.service_day import service_date_ch, service_date_of, service_day_seconds, service_day_start_utc
 
 _log = logging.getLogger(__name__)
 
@@ -538,10 +539,11 @@ async def route_shape(
 
 
 # Today's figures per route: one observation per stop event via the shared
-# dedup, read from `updates_live` alone. `updates` and every aggregate hold
-# closed days only, so a day in progress exists nowhere else. The observations'
-# own service_type is a raw GTFS service id, or empty for one that matched no
-# scheduled trip, so it splits nothing here: a route is one row.
+# dedup over the service day in progress, read from `updates_live` alone so
+# each stop event counts once. Before the cutover part of this service day is
+# also in `updates`, but promotion copies rather than moves it. The
+# observations' own service_type is a raw GTFS service id, or empty for one
+# that matched no scheduled trip, so it splits nothing here: a route is one row.
 _TODAY_ROUTES_SQL = (
     "SELECT route_code, "
     "sum(dep_delay) AS sum_delay_sec, max(dep_delay) AS worst_delay_sec, "
@@ -615,7 +617,7 @@ def pool_today_baselines(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[st
 async def fetch_today_baselines(
     conn: asyncpg.Connection, agency_id: int, route_codes: Iterable[str], today: CalendarDate
 ) -> dict[str, dict[str, Any]]:
-    """The routes' baselines for ``today``, from their closed days in the lookback.
+    """The routes' baselines for service day ``today``, from their closed days in the lookback.
 
     Today's timetable class, and the class of every lookback date, come from
     the agency's own calendar (:func:`pipeline.day_types.load_day_types`), the
@@ -706,6 +708,11 @@ async def today_route_summary(
 ) -> dict[str, Any]:
     """Per-route triage summary for today.
 
+    Today is the service day in progress (:func:`api.range.current_service_date`),
+    from its cutover hour to the next one: between midnight and the cutover it
+    is still the previous date, so a late-night tail is reported, and judged,
+    with the day it belongs to. ``date`` names that service day.
+
     Powers the 最新観測 tab. Each row is one route, whatever service ids its
     observations carry: today's figures (``avg_delay_sec``,
     ``worst_delay_sec``, ``trips_observed``, ``samples``, ``last_seen_at``)
@@ -721,15 +728,17 @@ async def today_route_summary(
     a sensible default.
 
     Today's figures are computed live from `updates_live`; the baseline comes
-    from `agg_route_daily_dist`, which holds closed days only.
+    from `agg_route_daily_dist`'s dates before today. Promotion copies whole
+    calendar days into `updates`, so before the cutover analyze can already
+    have filed a partial row for today's service date, which is no closed day.
     """
-    today = jst_today()
+    today = current_service_date()
     result = await ch.query(
         _TODAY_ROUTES_SQL,
         parameters={
             "agency_id": agency_id,
-            "day_start": jst_midnight_utc(today),
-            "day_end": jst_midnight_utc(today + timedelta(days=1)),
+            "day_start": service_day_start_utc(today),
+            "day_end": service_day_start_utc(today + timedelta(days=1)),
         },
     )
     today_rows = [dict(zip(result.column_names, r, strict=True)) for r in result.result_rows]

@@ -1,9 +1,10 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS, service_date_ch, service_date_of
+from pipeline.clickhouse import jst_midnight_utc
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS, service_date_ch, service_date_of, service_day_start_utc
 
 
 def _jst(y, m, d, h, mi=0):
@@ -34,3 +35,13 @@ def test_service_date_of_reads_a_utc_instant_in_japan_time():
 def test_the_sql_fragment_names_the_column_it_is_given():
     assert "u.captured_at" in service_date_ch("u.captured_at")
     assert service_date_ch().count("captured_at") == 1
+
+
+@pytest.mark.parametrize("day", [date(2026, 3, 6), date(2026, 3, 7), date(2026, 12, 31)])
+def test_a_service_day_starts_at_the_cutover_hour_of_its_date(day):
+    start = service_day_start_utc(day)
+    assert start == jst_midnight_utc(day) + timedelta(hours=SERVICE_DAY_CUTOVER_HOURS)
+    assert start.utcoffset() == timedelta(0)
+    assert service_date_of(start) == day
+    assert service_date_of(start - timedelta(microseconds=1)) == day - timedelta(days=1)
+    assert service_date_of(service_day_start_utc(day + timedelta(days=1)) - timedelta(microseconds=1)) == day

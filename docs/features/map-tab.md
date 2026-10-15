@@ -118,9 +118,13 @@ the observation age and calls the count "trips in latest observation" rather
 than claiming stale rows are physically operating now.
 
 `/today/route-summary` pools each route's observations into one row, whatever
-service ids they matched; many match none and carry an empty one. Its
-baseline is that route's closed days of today's timetable class over the
-previous eight weeks (`TODAY_BASELINE_LOOKBACK_DAYS` in `api/routers/map.py`).
+service ids they matched; many match none and carry an empty one. Today is
+the service day in progress, which turns over at the cutover hour in
+`pipeline/service_day.py` rather than at midnight: until then it is still the
+previous date, so the late-night tail is counted, and judged, with the day it
+belongs to. Its baseline is that route's closed days of today's timetable
+class over the previous eight weeks (`TODAY_BASELINE_LOOKBACK_DAYS` in
+`api/routers/map.py`).
 The class of today and of each past date comes from the agency's calendar
 through `pipeline.day_types.load_day_types`, as the service filter reads it.
 On a feed split 平日 / 土曜 / 日祝, a Saturday is compared with past Saturdays,
