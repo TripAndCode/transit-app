@@ -162,8 +162,9 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
     # of these. A missing timetable is a 503 because the same bytes ingest
     # once an operator loads one; past curl's retries the push is dropped, and
-    # the day's archive backfills it. None of the three is this service
-    # failing, so none logs a traceback.
+    # only a day the live path never promoted can be backfilled from its
+    # archive. None of the three is this service failing, so none logs a
+    # traceback.
     except UnknownAgency as exc:
         _log.warning("collector push for unknown or disabled agency %s", agency_id)
         raise HTTPException(status_code=404, detail="Unknown or disabled agency") from exc
