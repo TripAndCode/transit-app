@@ -130,9 +130,9 @@ def _values(departure: str | None, service_id: str | None, version: str | None) 
 
 @dataclass
 class KeyMap:
-    """What parse_feed resolves per (agency_id, trip_id, stop_sequence): a
-    key takes the values of the first timetable that has both its stop time
-    and its trip, Postgres's first, so one key never mixes two versions."""
+    """What parse_feed resolves per (agency_id, trip_id, stop_sequence). A
+    trip takes every stop from the first timetable that has it, Postgres's
+    first, as parse_feed reads one timetable: no trip mixes two versions."""
 
     values: dict[Key, Values] = field(default_factory=dict)
     sources: list[str] = field(default_factory=list)
@@ -194,6 +194,8 @@ def read_timetable_zip(path: str) -> tuple[str, dict[str, str | None], list[tupl
 
 def build_keymap(conn, agencies: list[int], extras: list[tuple[int, str]]) -> KeyMap:
     keymap = KeyMap()
+    # (agency_id, trip_id) an earlier timetable already supplies.
+    owned: set[tuple[int, str]] = set()
     if agencies:
         keymap.sources.append("Postgres static_stop_times/static_trips")
         with conn.cursor(name="repair_keymap") as cur:
@@ -207,13 +209,16 @@ def build_keymap(conn, agencies: list[int], extras: list[tuple[int, str]]) -> Ke
             )
             for agency_id, trip_id, seq, departure, service_id, version in cur:
                 keymap.add((agency_id, trip_id, seq), _values(departure, service_id, version))
+                owned.add((agency_id, trip_id))
         conn.rollback()
     for agency_id, path in extras:
         version, trips, stop_times = read_timetable_zip(path)
         keymap.sources.append(f"agency {agency_id}: {version}")
+        supplied = {t for t in trips if (agency_id, t) not in owned}
         for trip_id, seq, departure in stop_times:
-            if trip_id in trips:
+            if trip_id in supplied:
                 keymap.add((agency_id, trip_id, seq), _values(departure, trips[trip_id], version))
+        owned.update((agency_id, t) for t in supplied)
     return keymap
 
 

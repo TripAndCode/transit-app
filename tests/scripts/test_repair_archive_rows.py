@@ -239,7 +239,10 @@ def test_rows_that_already_matched_and_other_strategies_keep_their_fields(
     )
 
 
-def test_an_older_timetable_fills_a_retired_trip_and_never_outranks_todays(pg_conn, ch_client, join_agency, tmp_path):
+def test_an_older_timetable_fills_only_trips_todays_timetable_lacks(pg_conn, ch_client, join_agency, tmp_path):
+    """parse_feed reads one timetable, so a trip's rows never mix versions: a
+    trip today's timetable has takes nothing from an older one, even at a stop
+    today's lacks."""
     reference = _seed_blank_archive_rows(pg_conn, ch_client, join_agency, tmp_path)
     older = _timetable(
         tmp_path,
@@ -250,8 +253,8 @@ def test_an_older_timetable_fills_a_retired_trip_and_never_outranks_todays(pg_co
     assert _apply("--extra-static", f"{join_agency}={older}") == 0
     fields = _timetable_fields(ch_client)
     assert fields[("OLD", 1)] == ("旧平日", "06:40:00", 24000, "gtfs_static_20260816")
-    assert fields[("T1", 1)] == reference[("T1", 1)], "today's timetable wins where both have the stop"
-    assert fields[("T1", 9)] == ("旧", None, 87000, "gtfs_static_20260816")
+    assert fields[("T1", 1)] == reference[("T1", 1)]
+    assert fields[("T1", 9)] == (None, None, None, None)
 
 
 def test_every_row_is_kept_and_the_originals_stay_in_the_backup(pg_conn, ch_client, join_agency, tmp_path):
