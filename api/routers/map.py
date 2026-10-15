@@ -1494,8 +1494,8 @@ async def delay_timeline(
     :func:`timeline_day_in_range`'s window is a 422, not a silently-served
     (and cache-evicting) query -- see that function's docstring.
 
-    Read-only, served from `updates_live` for today and `updates` for a
-    closed day (`pipeline.clickhouse.live_table_for`), joined against the
+    Read-only, served from whichever table holds the whole service day
+    (`pipeline.clickhouse.live_table_for`), joined against the
     static schedule for positions — not from the `agg_*` tables, whose
     finest time grain is the seven-band `time_band` column, far coarser than
     the hour (or quarter hour) the rail steps through.

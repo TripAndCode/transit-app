@@ -1290,6 +1290,42 @@ async def test_route_trips_default_day_is_the_service_day_of_a_post_midnight_obs
 
 
 @pytest.mark.asyncio
+async def test_route_trips_read_a_service_days_after_midnight_tail_from_the_live_table(
+    map_app_ch, ch_client, monkeypatch
+):
+    """At 01:30 JST the service day still running began the calendar day
+    before, and its after-midnight rows are only in the live table: promotion
+    has not copied the calendar day they fall on, which has not closed."""
+    import pipeline.clickhouse as clickhouse_mod
+    from pipeline.clickhouse import insert_updates
+    from tests.fixtures.clock import freeze_now
+
+    app, agency_id = map_app_ch
+    await _seed_route(app.state.pool, agency_id, "R_TAIL", "平日", [("X", 1, 60, "08:00")])
+    insert_updates(
+        ch_client,
+        agency_id=agency_id,
+        rows=[
+            (
+                "live_tail.pb",
+                datetime(2026, 6, 9, 15, 30, tzinfo=timezone.utc),
+                "TAIL",
+                "平日",
+                "00:25:00",
+                "R_TAIL",
+                1,
+                90,
+            )
+        ],
+        table=LIVE_TABLE,
+    )
+    freeze_now(monkeypatch, clickhouse_mod, datetime(2026, 6, 9, 16, 30, tzinfo=timezone.utc))  # 01:30 JST 06-10
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        trips = await client.get(f"/api/{agency_id}/today/route/R_TAIL/trips?date=2026-06-09")
+    assert [t["trip_id"] for t in trips.json()["trips"]] == ["TAIL"]
+
+
+@pytest.mark.asyncio
 async def test_route_trips_refuses_a_date_outside_the_scan_window(map_app_ch, ch_client):
     """A date beyond the probe's own bound resolves to the empty response
     rather than an unbounded historical scan of a very large table."""

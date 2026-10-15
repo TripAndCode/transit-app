@@ -281,8 +281,8 @@ async def compute_delay_timeline(
 
     ``routes`` limits the frames to those routes' stop events; empty means the
     whole agency. The TTL bounds how long a still-accumulating day can be served
-    stale; a day that has ended is read from `updates`, which receives its
-    after-midnight tail only when the following calendar day is promoted.
+    stale; ``table`` is the one that holds the whole day
+    (`pipeline.clickhouse.live_table_for`).
     """
     ctx = RangeCtx(from_date=day, to_date=day, routes=routes)
     sql, params = build_timeline_ch_sql(ctx, step_minutes, table=table)

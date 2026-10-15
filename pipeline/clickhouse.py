@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
+from pipeline.service_day import service_date_of
+
 _JST = ZoneInfo("Asia/Tokyo")
 
 UPDATES_TABLE = "updates"
@@ -44,18 +46,18 @@ def jst_midnight_utc(day: date) -> datetime:
 
 
 def live_table_for(day: date, *, now: datetime | None = None) -> str:
-    """The table that holds JST calendar *day*'s observations.
+    """The one table that holds service *day*'s observations (`pipeline.service_day`).
 
-    Today and any later day are `updates_live`; every closed day is `updates`.
-    A closed day reads `updates` even before promotion has copied it there, so
-    a reader asking for yesterday between JST midnight and the first promotion
-    run gets nothing yet. This routes by calendar day, as promotion does: a
-    service day (`pipeline.service_day`) spans two of them, so the newest
-    service day's after-midnight tail is still in `updates_live` and reaches
-    `updates` with the next promotion.
+    The current service day, the one before it and any later day are
+    `updates_live`; every older day is `updates`. Promotion copies whole JST
+    calendar days, so a service day's after-midnight tail reaches `updates`
+    only once the next calendar day has closed, after the cutover that ends the
+    following service day. Until that cutover the day is whole only in
+    `updates_live`, whose TTL keeps every row well past it. Each day is read
+    from one table, so no stop event counts twice.
     """
-    today = jst_date(now or datetime.now(timezone.utc))
-    return LIVE_TABLE if day >= today else UPDATES_TABLE
+    current = service_date_of(now or datetime.now(timezone.utc))
+    return LIVE_TABLE if day >= current - timedelta(days=1) else UPDATES_TABLE
 
 
 # Column order matches every ingest strategy's row-tuple shape (see
