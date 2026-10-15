@@ -37,7 +37,7 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from api.clickhouse import max_captured_at
+from api.clickhouse import max_captured_at, table_holding
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit, user_key
 from api.range import (
@@ -56,7 +56,7 @@ from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.cache import async_lru_cache
-from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, live_table_for
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table
 from pipeline.day_types import DayTypes, load_day_types
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
@@ -1053,7 +1053,7 @@ async def route_trips(
     if target_date is None:
         return empty
 
-    sql, band_params = build_route_trips_sql(time_band, table=live_table_for(target_date))
+    sql, band_params = build_route_trips_sql(time_band, table=await table_holding(ch, agency_id, target_date))
     dedup_result = await ch.query(
         sql,
         parameters={
@@ -1125,7 +1125,7 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 
 def build_route_stop_profile_sql(table: str) -> str:
     """Latest delay per (trip, stop) for one route on one service day, read from
-    *table* (`pipeline.clickhouse.live_table_for` picks it from the day).
+    *table* (`api.clickhouse.table_holding` picks it for the day).
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
     one non-key column is read off the winning row, so one argMax suffices.
@@ -1170,7 +1170,7 @@ async def route_stop_profile(
     day = service_date_of(latest_ts)
 
     dedup_result = await ch.query(
-        build_route_stop_profile_sql(live_table_for(day)),
+        build_route_stop_profile_sql(await table_holding(ch, agency_id, day)),
         parameters={"agency_id": agency_id, "route": route_code, "day": day},
     )
     dedup_rows = list(dedup_result.result_rows)
@@ -1495,7 +1495,7 @@ async def delay_timeline(
     (and cache-evicting) query -- see that function's docstring.
 
     Read-only, served from whichever table holds the whole service day
-    (`pipeline.clickhouse.live_table_for`), joined against the
+    (`api.clickhouse.table_holding`), joined against the
     static schedule for positions — not from the `agg_*` tables, whose
     finest time grain is the seven-band `time_band` column, far coarser than
     the hour (or quarter hour) the rail steps through.
@@ -1522,6 +1522,6 @@ async def delay_timeline(
     # or repeated list cannot multiply cache entries or widen the query.
     route_filter = clamp_range_ctx(from_=day, to=day, routes=routes.split(",") if routes else ()).routes
     frames = await compute_delay_timeline(
-        agency_id, day, step, conn, ch, table=live_table_for(day), routes=tuple(route_filter)
+        agency_id, day, step, conn, ch, table=await table_holding(ch, agency_id, day), routes=tuple(route_filter)
     )
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)

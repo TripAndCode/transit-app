@@ -3,8 +3,7 @@
 (pipeline/ingest.py, pipeline/analyze.py, pipeline/freshness.py). Mirrors
 pipeline/db.py's role for the Postgres side: one place for the raw-observation
 SQL shape, so ingest and analyze can't drift. `checked_table`/`live_table_for`
-here are the one place every reader and writer learns which table a JST day
-lives in.
+here are where every reader learns which table a service day lives in.
 """
 
 import os
@@ -50,11 +49,13 @@ def live_table_for(day: date, *, now: datetime | None = None) -> str:
 
     The current service day, the one before it and any later day are
     `updates_live`; every older day is `updates`. Promotion copies whole JST
-    calendar days, so a service day's after-midnight tail reaches `updates`
-    only once the next calendar day has closed, after the cutover that ends the
-    following service day. Until that cutover the day is whole only in
-    `updates_live`, whose TTL keeps every row well past it. Each day is read
-    from one table, so no stop event counts twice.
+    calendar days, so a day collected live has its after-midnight tail in
+    `updates` only once the next calendar day has closed and a promotion run
+    has followed; until the cutover after that, the day reads the live table,
+    whose TTL keeps every row well past it. A promotion that has not run by
+    then leaves the day partial in `updates`. A day that arrived by archive
+    ingest is in `updates` alone, which `api.clickhouse.table_holding` probes
+    for. Each day is read from one table, so no stop event counts twice.
     """
     current = service_date_of(now or datetime.now(timezone.utc))
     return LIVE_TABLE if day >= current - timedelta(days=1) else UPDATES_TABLE

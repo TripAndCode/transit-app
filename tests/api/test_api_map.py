@@ -1296,33 +1296,43 @@ async def test_route_trips_read_a_service_days_after_midnight_tail_from_the_live
     """At 01:30 JST the service day still running began the calendar day
     before, and its after-midnight rows are only in the live table: promotion
     has not copied the calendar day they fall on, which has not closed."""
+    import api.range as range_mod
     import pipeline.clickhouse as clickhouse_mod
+    from api.range import current_service_date
     from pipeline.clickhouse import insert_updates
     from tests.fixtures.clock import freeze_now
 
     app, agency_id = map_app_ch
+    # A week ahead of the real clock, so the live table's TTL keeps the row.
+    day = current_service_date() + timedelta(days=7)
+    next_day = day + timedelta(days=1)
     await _seed_route(app.state.pool, agency_id, "R_TAIL", "平日", [("X", 1, 60, "08:00")])
     insert_updates(
         ch_client,
         agency_id=agency_id,
-        rows=[
-            (
-                "live_tail.pb",
-                datetime(2026, 6, 9, 15, 30, tzinfo=timezone.utc),
-                "TAIL",
-                "平日",
-                "00:25:00",
-                "R_TAIL",
-                1,
-                90,
-            )
-        ],
+        rows=[("live_tail.pb", _jst_at(next_day, 0, 30), "TAIL", "平日", "00:25:00", "R_TAIL", 1, 90)],
         table=LIVE_TABLE,
     )
-    freeze_now(monkeypatch, clickhouse_mod, datetime(2026, 6, 9, 16, 30, tzinfo=timezone.utc))  # 01:30 JST 06-10
+    for module in (clickhouse_mod, range_mod):
+        freeze_now(monkeypatch, module, _jst_at(next_day, 1, 30))
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        trips = await client.get(f"/api/{agency_id}/today/route/R_TAIL/trips?date=2026-06-09")
+        trips = await client.get(f"/api/{agency_id}/today/route/R_TAIL/trips?date={day.isoformat()}")
     assert [t["trip_id"] for t in trips.json()["trips"]] == ["TAIL"]
+
+
+@pytest.mark.asyncio
+async def test_route_trips_read_an_archive_ingested_previous_day_from_updates(map_app_ch, ch_client, monkeypatch):
+    """An agency whose days arrive by archive ingest has yesterday's service
+    day in `updates` only, never in the live table."""
+    import pipeline.clickhouse as clickhouse_mod
+    from tests.fixtures.clock import freeze_now
+
+    app, agency_id = map_app_ch
+    await _seed_route(app.state.pool, agency_id, "R_ARCH", "平日", [("ARCH", 1, 60, "08:00")], ch_client=ch_client)
+    freeze_now(monkeypatch, clickhouse_mod, datetime(2026, 6, 10, 1, 0, tzinfo=timezone.utc))  # 10:00 JST 06-10
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        trips = await client.get(f"/api/{agency_id}/today/route/R_ARCH/trips?date=2026-06-09")
+    assert [t["trip_id"] for t in trips.json()["trips"]] == ["ARCH"]
 
 
 @pytest.mark.asyncio
@@ -1411,12 +1421,15 @@ def _jst_noon_utc(day):
 
 @pytest.mark.asyncio
 async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_updates(map_app_ch, ch_client):
-    from api.range import jst_today
+    """The current service day and the one before read the live table when it
+    holds them; the day two back reads `updates`."""
+    from api.range import current_service_date
     from pipeline.clickhouse import insert_updates
 
     app, agency_id = map_app_ch
-    today = jst_today()
+    today = current_service_date()
     yday = today - timedelta(days=1)
+    two_back = today - timedelta(days=2)
     async with app.state.pool.acquire() as conn:
         await _seed_route_existence(conn, agency_id, "R_SPLIT")
     insert_updates(
@@ -1424,21 +1437,28 @@ async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_upd
         agency_id,
         [
             ("oracle/t/1.pb", _jst_noon_utc(today), "LIVE_TODAY", "平日", "12:00", "R_SPLIT", 1, 300),
-            # Yesterday's live copy, not yet promoted: a past day never reads it.
             ("oracle/y/1.pb", _jst_noon_utc(yday), "LIVE_YDAY", "平日", "12:00", "R_SPLIT", 1, 900),
+            ("oracle/b/1.pb", _jst_noon_utc(two_back), "LIVE_TWO", "平日", "12:00", "R_SPLIT", 1, 900),
         ],
         table=LIVE_TABLE,
     )
     insert_updates(
-        ch_client, agency_id, [("19990101/a.pb", _jst_noon_utc(yday), "HIST_YDAY", "平日", "12:00", "R_SPLIT", 1, 60)]
+        ch_client,
+        agency_id,
+        [
+            ("19990101/a.pb", _jst_noon_utc(yday), "HIST_YDAY", "平日", "12:00", "R_SPLIT", 1, 60),
+            ("19990101/b.pb", _jst_noon_utc(two_back), "HIST_TWO", "平日", "12:00", "R_SPLIT", 1, 60),
+        ],
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         default = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips")).json()
-        past = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips?date={yday.isoformat()}")).json()
+        yday_trips = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips?date={yday.isoformat()}")).json()
+        past = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips?date={two_back.isoformat()}")).json()
     assert default["date"] == today.isoformat()
     assert [t["trip_id"] for t in default["trips"]] == ["LIVE_TODAY"]
-    assert past["date"] == yday.isoformat()
-    assert [t["trip_id"] for t in past["trips"]] == ["HIST_YDAY"]
+    assert [t["trip_id"] for t in yday_trips["trips"]] == ["LIVE_YDAY"]
+    assert past["date"] == two_back.isoformat()
+    assert [t["trip_id"] for t in past["trips"]] == ["HIST_TWO"]
 
 
 @pytest.mark.asyncio

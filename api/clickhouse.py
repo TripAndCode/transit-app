@@ -7,11 +7,12 @@ shutdown, same lifecycle shape as app.state.pool for Postgres.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import clickhouse_connect
 
-from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, checked_table
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, ch_conn_kwargs, checked_table, live_table_for
+from pipeline.service_day import service_date_ch
 
 
 async def get_ch_client():
@@ -194,3 +195,24 @@ async def max_captured_at_before_by_agency(
             return aid, None
 
     return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))
+
+
+async def table_holding(ch, agency_id: int, day: date) -> str:
+    """The one table holding *agency_id*'s service *day* whole.
+
+    `pipeline.clickhouse.live_table_for` routes the previous service day live
+    because a day collected live is whole only there until promotion copies
+    its after-midnight tail. A day that arrived by archive ingest went straight
+    to `updates` and never reached the live table, so for that day a probe of
+    the live table decides. Each day is still read from one table.
+    """
+    if live_table_for(day) == UPDATES_TABLE:
+        return UPDATES_TABLE
+    if live_table_for(day - timedelta(days=1)) == LIVE_TABLE:
+        return LIVE_TABLE  # the current service day or later: only ever live
+    probe = await ch.query(
+        f"SELECT 1 FROM {LIVE_TABLE} WHERE agency_id = {{agency_id:UInt16}} "
+        f"AND {service_date_ch('captured_at')} = {{day:Date}} LIMIT 1",
+        parameters={"agency_id": agency_id, "day": day},
+    )
+    return LIVE_TABLE if probe.result_rows else UPDATES_TABLE

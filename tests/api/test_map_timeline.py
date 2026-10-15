@@ -290,19 +290,19 @@ async def test_timeline_without_a_date_resolves_the_latest_observed_day(timeline
 async def test_timeline_reads_today_from_updates_live_and_a_past_day_from_updates(timeline_client, timeline_app):
     from datetime import timedelta
 
-    from api.range import jst_today
+    from api.range import current_service_date
 
     client, agency_id, ch_client = timeline_client
     pool = timeline_app[0].state.pool
-    today = jst_today()
-    yday = today - timedelta(days=1)
+    today = current_service_date()
+    two_back = today - timedelta(days=2)
     await _three_visits(pool, ch_client, agency_id, stop_id="S1", prefix="LT", day=today, table="updates_live")
     await _three_visits(pool, ch_client, agency_id, stop_id="S2", prefix="HT", day=today, table="updates")
-    await _three_visits(pool, ch_client, agency_id, stop_id="S1", prefix="LY", day=yday, table="updates_live")
-    await _three_visits(pool, ch_client, agency_id, stop_id="S2", prefix="HY", day=yday, table="updates")
+    await _three_visits(pool, ch_client, agency_id, stop_id="S1", prefix="LY", day=two_back, table="updates_live")
+    await _three_visits(pool, ch_client, agency_id, stop_id="S2", prefix="HY", day=two_back, table="updates")
     label = bucket_label(bucket_of(8 * 3600, 60), 60)
     now_resp = await client.get(f"/api/{agency_id}/delays/timeline?date={today.isoformat()}")
-    past_resp = await client.get(f"/api/{agency_id}/delays/timeline?date={yday.isoformat()}")
+    past_resp = await client.get(f"/api/{agency_id}/delays/timeline?date={two_back.isoformat()}")
     now_frames = {f["t"]: f for f in now_resp.json()["frames"]}
     past_frames = {f["t"]: f for f in past_resp.json()["frames"]}
     assert [p["stop_id"] for p in now_frames[label]["points"]] == ["S1"]
