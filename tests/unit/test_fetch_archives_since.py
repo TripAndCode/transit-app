@@ -24,7 +24,7 @@ def _run(tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
     (remote / "8" / "static").mkdir(parents=True, exist_ok=True)
     (remote / "8" / "static" / "gtfs_static_20261014.zip").write_bytes(b"zip")
     full_env = {
-        **{k: v for k, v in os.environ.items() if k != "SINCE"},
+        **{k: v for k, v in os.environ.items() if k not in ("SINCE", "ORACLE_SSH_KEY")},
         "FETCH_TEST_LOCAL": "1",
         "ORACLE_HOST": "collector.invalid",
         "ORACLE_SSH_KEY_PATH": os.devnull,
@@ -62,6 +62,6 @@ def test_since_later_than_every_archive_fetches_none_and_succeeds(tmp_path):
 
 def test_a_malformed_since_is_refused_before_anything_is_fetched(tmp_path):
     result = _run(tmp_path, SINCE="2026-09-17")
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "SINCE" in result.stderr
-    assert not (tmp_path / "rt" / "8").exists() or _fetched(tmp_path) == []
+    assert not (tmp_path / "rt").exists(), "refused before any local directory is made"

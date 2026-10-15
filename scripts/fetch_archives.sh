@@ -51,10 +51,12 @@ else
     exit 1
 fi
 
+WANTED_FILE=""
 cleanup() {
     if [ "$CLEANUP_KEY" -eq 1 ]; then
         rm -f "$KEY_FILE"
     fi
+    rm -f "${WANTED_FILE:-}"
     return 0
 }
 trap cleanup EXIT
@@ -82,16 +84,16 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
         mkdir -p "$LOCAL_RT_DIR/$id" "$LOCAL_STATIC_DIR/$id"
         if [ -n "${SINCE:-}" ]; then
             # Day archives are named YYYYMMDD.tar.gz, so the name orders them.
-            wanted="$(mktemp)"
+            WANTED_FILE="$(mktemp)"
             rsync --list-only ${RSYNC_E[@]+"${RSYNC_E[@]}"} "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
                 | awk -v since="$SINCE" '{ n = $NF } n ~ /^[0-9]{8}\.tar\.gz$/ && substr(n, 1, 8) >= since { print n }' \
-                > "$wanted"
-            if [ -s "$wanted" ]; then
-                rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} --files-from="$wanted" \
+                > "$WANTED_FILE"
+            if [ -s "$WANTED_FILE" ]; then
+                rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} --files-from="$WANTED_FILE" \
                     "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
                     "$LOCAL_RT_DIR/$id/"
             fi
-            rm -f "$wanted"
+            rm -f "$WANTED_FILE"
         else
             rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
                 --include="*.tar.gz" --exclude="*" \
@@ -107,6 +109,9 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     done
 else
     # ── legacy flat layout (unchanged behavior) ───────────────────────────
+    if [ -n "${SINCE:-}" ]; then
+        echo "  (SINCE applies to the per-agency layout only; fetching every archived day)" >&2
+    fi
     echo "==> Fetching RT archives from ${REMOTE_PREFIX}${ORACLE_RT_DIR}/"
     rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
         --include="*.tar.gz" --exclude="*" \
