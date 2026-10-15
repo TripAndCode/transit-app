@@ -65,6 +65,37 @@ _DB_COLS = {
 }
 
 
+def resolve_static_zip(path: str) -> pathlib.Path:
+    """The zip *path* names: the file itself, or the most recently named
+    ``*static*.zip`` inside it when it is a directory.
+
+    Raises:
+        FileNotFoundError: If no zip resolves.
+    """
+    p = pathlib.Path(path)
+    if p.is_dir():
+        # Match both legacy *_static.zip and the Oracle scraper's gtfs_static_*.zip
+        zips = sorted(p.glob("*static*.zip"))
+        if not zips:
+            raise FileNotFoundError(f"No *static*.zip found in {p}")
+        p = zips[-1]
+        logger.info(f"Using: {p.name}")
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {p}")
+    return p
+
+
+def read_static_rows(zf: zipfile.ZipFile, filename: str) -> list[list]:
+    """*filename*'s rows as the loader reads them: the columns
+    ``_STATIC_FILE_MAP`` lists for it, in that order, each the file's raw text
+    or None where the file has no such column. The caller checks that the zip
+    holds the file."""
+    csv_cols = next(cols for name, _table, cols in _STATIC_FILE_MAP if name == filename)
+    with zf.open(filename) as f:
+        reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+        return [[row.get(c) for c in csv_cols] for row in reader]
+
+
 def _calendar_rows(raw_rows: list[list]) -> list[list]:
     """calendar.txt rows typed for ``static_calendar``, malformed ones dropped.
 
@@ -123,16 +154,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
     ``calendar.txt`` clears it, so an earlier feed's timetables cannot
     classify this feed's dates.
     """
-    p = pathlib.Path(path)
-    if p.is_dir():
-        # Match both legacy *_static.zip and the Oracle scraper's gtfs_static_*.zip
-        zips = sorted(p.glob("*static*.zip"))
-        if not zips:
-            raise FileNotFoundError(f"No *static*.zip found in {p}")
-        p = zips[-1]
-        logger.info(f"Using: {p.name}")
-    if not p.exists():
-        raise FileNotFoundError(f"File not found: {p}")
+    p = resolve_static_zip(path)
 
     # The loaded zip's filename stem (e.g. "gtfs_static_20260101" or the
     # legacy "hiroden_static") is the only identifier that survives past this
@@ -143,7 +165,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
         names_in_zip = set(zf.namelist())
-        for filename, table, csv_cols in _STATIC_FILE_MAP:
+        for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
                 if table == "static_calendar":
@@ -153,9 +175,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
 
-            with zf.open(filename) as f:
-                reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-                raw_rows = [[row.get(c) for c in csv_cols] for row in reader]
+            raw_rows = read_static_rows(zf, filename)
 
             if table == "static_stops":
                 for row in raw_rows:

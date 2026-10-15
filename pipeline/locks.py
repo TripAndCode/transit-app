@@ -181,3 +181,19 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
             conn.rollback()
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))
+
+
+def held_pipeline_locks(conn) -> int:
+    """How many pipeline locks this session holds: the ingest+analyze lock
+    and each agency's `updates` lock it has acquired. A job that holds them
+    across a long ClickHouse rewrite checks this before its swap, since a
+    session lost meanwhile has released every lock."""
+    with conn.cursor() as cur:
+        # A one-key lock lists as (classid 0, objid key, objsubid 1); a
+        # two-key one as (classid first key, objid second, objsubid 2).
+        cur.execute(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()"
+            " AND ((objsubid = 1 AND classid = 0 AND objid = %s) OR (objsubid = 2 AND classid = %s))",
+            (INGEST_ANALYZE_LOCK_KEY, INGEST_ANALYZE_LOCK_KEY),
+        )
+        return cur.fetchone()[0]
