@@ -253,12 +253,18 @@ class StaticTimetableMissing(Exception):
         self.strategy_name = strategy_name
 
 
-def _require_timetable(strategy, strategy_name: str, agency_id: int, conn) -> None:
-    """Raise StaticTimetableMissing when *strategy* needs a timetable the
-    agency does not have loaded (see REQUIRES_STATIC_TIMETABLE in
-    pipeline.strategies)."""
+def require_timetable(agency_id: int, conn, strategy_name: str | None = None) -> str:
+    """Return the agency's ingest strategy name (resolved unless given),
+    raising StaticTimetableMissing when that strategy needs a timetable the
+    agency does not have loaded (REQUIRES_STATIC_TIMETABLE in
+    pipeline.strategies). A caller that fetches a feed runs it first, so a
+    refused agency costs no network round trip."""
+    if strategy_name is None:
+        strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy = get_ingest_strategy(strategy_name)
     if getattr(strategy, "REQUIRES_STATIC_TIMETABLE", False) and not _static_loaded(conn, agency_id):
         raise StaticTimetableMissing(agency_id, strategy_name)
+    return strategy_name
 
 
 class IngestIncomplete(Exception):
@@ -290,9 +296,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     Raises :class:`StaticTimetableMissing`, having read and marked nothing,
     when the agency's strategy needs a timetable it does not have loaded.
     """
-    strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy_name = require_timetable(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
-    _require_timetable(strategy, strategy_name, agency_id, conn)
 
     root = pathlib.Path(folder)
     n_errors = 0
@@ -600,7 +605,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
 
 
 def ingest_live(agency_id: int, conn, ch_client) -> int:
-    """Fetch the agency's GTFS-RT feed_url and ingest it live."""
+    """Fetch the agency's GTFS-RT feed_url and ingest it live, refusing an
+    agency with no timetable its strategy needs before the fetch."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT feed_url FROM agencies WHERE agency_id = %s",
@@ -610,7 +616,7 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     if row is None or not row[0]:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
-    strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy_name = require_timetable(agency_id, conn)
 
     logger.info(f"Fetching live feed from {redact_url(feed_url)} (strategy={strategy_name})")
     with safe_urlopen(feed_url, timeout=30) as resp:
@@ -657,10 +663,8 @@ def ingest_live_payload(
     Raises :class:`StaticTimetableMissing` before parsing when the agency's
     strategy needs a timetable it does not have loaded.
     """
-    if strategy_name is None:
-        strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy_name = require_timetable(agency_id, conn, strategy_name)
     strategy = get_ingest_strategy(strategy_name)
-    _require_timetable(strategy, strategy_name, agency_id, conn)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
     if recent_file_name_exists(ch_client, agency_id, file_name, since, table=LIVE_TABLE):
         logger.info("Skipping duplicate live payload: %s", file_name)

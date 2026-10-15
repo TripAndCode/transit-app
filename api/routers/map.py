@@ -84,11 +84,13 @@ def _ingest_live_agency(agency_id: int) -> int:
     refresh from racing the scheduled ingest/analyze job. Local development
     prefers the Oracle collector's newest loose protobuf; environments without
     the local-dev SSH transport fall back to the agency's live feed URL.
+    Either pull waits until the agency is known to have the timetable its
+    ingest strategy needs.
     """
     import psycopg2
 
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest_live, ingest_live_payload
+    from pipeline.ingest import ingest_live, ingest_live_payload, require_timetable
     from pipeline.locks import try_lock_ingest_analyze
 
     db_url = os.environ.get("DATABASE_URL")
@@ -101,6 +103,7 @@ def _ingest_live_agency(agency_id: int) -> int:
         conn = psycopg2.connect(db_url)
         if not try_lock_ingest_analyze(conn):
             raise HTTPException(status_code=409, detail="A data refresh is already in progress")
+        require_timetable(agency_id, conn)
         ch_client = get_client()
         oracle_host = os.environ.get("ORACLE_HOST")
         oracle_user = os.environ.get("ORACLE_USER", "opc")

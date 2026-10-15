@@ -123,3 +123,14 @@ def test_aomori_regex_never_consults_the_timetable(monkeypatch, archive):
     assert ingest.ingest(str(archive), 1, MagicMock(), MagicMock()) == 1
     assert ingest.ingest_live_payload(1, b"raw", "2026-10-01T00:00:00+00:00", "oracle/x", MagicMock(), MagicMock()) == 1
     assert calls == []
+
+
+def test_a_live_pull_is_refused_before_the_feed_is_fetched(monkeypatch):
+    _strategy(monkeypatch, "static_join", has_timetable=False)
+    _refuse_every_write(monkeypatch)
+    monkeypatch.setattr(ingest, "safe_urlopen", _must_not_run("safe_urlopen"))
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("http://feed.example/tu.pb",)
+
+    with pytest.raises(StaticTimetableMissing):
+        ingest.ingest_live(8, conn, MagicMock())
