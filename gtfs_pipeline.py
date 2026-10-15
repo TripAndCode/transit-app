@@ -38,10 +38,10 @@ EX_TEMPFAIL = 75
 # its caller must not count the input as done.
 EX_DATAERR = 65
 
-# sysexits.h EX_CONFIG -- ingest refused an agency whose ingest strategy needs
-# a timetable and has none loaded. Nothing was read, and nothing heals it but
-# an operator loading one, so a per-agency shell loop skips just this agency
-# and still fails the run.
+# sysexits.h EX_CONFIG -- ingest or ingest_live refused an agency for having
+# no timetable loaded, before reading or fetching anything for it, and nothing
+# else failed. Only an operator loading one heals it, so a shell loop skips
+# just that agency and a poller keeps its pace, while the run still fails.
 EX_CONFIG = 78
 
 # Shared by every all-agencies loop below (analyze-all, check-aggs, ingest-live)
@@ -640,6 +640,11 @@ def cmd_ingest_live(args):
     after the first one that errors. ingest_live() has no internal
     rollback-on-error of its own (unlike analyze()), so the connection is
     rolled back here before continuing to the next agency.
+
+    An agency refused for having no timetable loaded is not a failure here:
+    it is logged without a traceback and, when nothing else failed, the run
+    exits EX_CONFIG rather than 1, so a polling loop does not back off from
+    feeds that are fine.
     """
     from pipeline.clickhouse import get_client
     from pipeline.ingest import StaticTimetableMissing, ingest_live
@@ -664,19 +669,28 @@ def cmd_ingest_live(args):
         conn.close()
         return
     failed = []
+    no_timetable = []
     for aid in agency_ids:
         try:
             logger.info(f"--- Ingesting agency_id={aid} ---")
             with pipeline_runs.record_run(conn, "ingest", agency_id=aid) as run:
                 run.rows = ingest_live(aid, conn, ch_client)
+        except StaticTimetableMissing as exc:
+            logger.error(f"ingest-live: {exc}")
+            conn.rollback()
+            no_timetable.append(aid)
         except Exception:
             logger.exception(f"ingest-live failed for agency {aid}")
             conn.rollback()
             failed.append(aid)
     conn.close()
+    if no_timetable:
+        logger.error(f"ingest-live: {len(no_timetable)} agencies have no timetable loaded: {no_timetable}")
     if failed:
         logger.error(f"ingest-live: {len(failed)} of {len(agency_ids)} agencies failed: {failed}")
         sys.exit(1)
+    if no_timetable:
+        sys.exit(EX_CONFIG)
     logger.info(f"ingest-live: all {len(agency_ids)} agencies ingested.")
 
 
