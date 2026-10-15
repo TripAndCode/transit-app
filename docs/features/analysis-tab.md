@@ -319,7 +319,7 @@ the scope as one sentence above their content
 **Manual click-through** (`make serve` + `make frontend-dev`):
 
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load data first:
-   `make fetch-ingest` (or `ingest_live` + `make load_static`), then
+   `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency - otherwise every report shows the
    no-data empty state.
 2. Click "Time" in the rail -> URL `/agencies/:agencyId/time`; expect its

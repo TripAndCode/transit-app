@@ -48,7 +48,8 @@ returns to `:5173` instead of `:8000`.
 The bootstrap database is empty. Choose one path:
 
 ```bash
-# Fallback: sample the current agency feeds.
+# Fallback: load each agency's timetable, then sample the current agency feeds.
+poetry run python gtfs_pipeline.py refresh-static
 poetry run python gtfs_pipeline.py ingest_live
 make analyze
 
@@ -56,9 +57,13 @@ make analyze
 make fetch-ingest
 ```
 
-The archive path pulls GTFS-Realtime and static GTFS archives, then runs ingest,
-static loading, and aggregation. The live path is useful for local checks but
-does not provide the same historical coverage. Add a one-off agency with:
+The archive path pulls GTFS-Realtime and static GTFS archives, then loads each
+agency's timetable, ingests its realtime archives, and aggregates. The timetable
+comes first because a `static_join` agency (its `ingest_strategy`) takes each
+row's schedule from it as the row is read: `ingest` and `ingest_live` refuse
+such an agency, exiting 78, while it has no timetable loaded. The live path is
+useful for local checks but does not provide the same historical coverage. Add a
+one-off agency with:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
@@ -103,8 +108,8 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make db` | Start Postgres/PostGIS and ClickHouse |
 | `make db-down` | Stop databases and keep their volumes |
 | `make migrate` | Apply pending Postgres migrations |
-| `make ingest FOLDER=./raw_archives` | Load realtime archives |
 | `make load_static STATIC_PATH=./raw_archives_static` | Load static GTFS |
+| `make ingest FOLDER=./raw_archives` | Load realtime archives (a `static_join` agency's timetable first) |
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline |

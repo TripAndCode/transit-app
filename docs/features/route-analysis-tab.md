@@ -137,7 +137,7 @@ What the user sees/does:
 **Manual click-through** (`make serve` + `make frontend-dev`):
 
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
-   data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
+   data first: `make fetch-ingest` (or `make load_static` before `ingest_live`),
    then `make analyze` for the agency.
 2. Click "Routes" in the rail → URL `/agencies/:agencyId/routes`; choose a
    route in "Open a route" → URL `/agencies/:agencyId/routes/<route_code>`.

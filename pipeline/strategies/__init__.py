@@ -11,6 +11,10 @@ Each ingest strategy module exposes:
         rather than guessing; a strategy's tuple shorter than 15 elements
         (predating one of these fields) is right-padded with None by
         insert_updates instead.
+    REQUIRES_STATIC_TIMETABLE: bool (optional, False when absent)
+        True when parse_feed takes each row's schedule from the agency's
+        loaded static timetable. pipeline.ingest then refuses the agency,
+        before reading anything, while it has no timetable loaded.
 
 Each static strategy module exposes:
     fetch(agency_id: int, static_url: str, dest_dir: pathlib.Path, *, force: bool = False)

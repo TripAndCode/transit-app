@@ -164,6 +164,8 @@ def test_a_static_join_live_poll_with_early_stops_and_a_sequenceless_stop_is_sto
             "RETURNING agency_id"
         )
         aid = cur.fetchone()[0]
+        # A loaded timetable, so the push is accepted; this poll's trip is not in it.
+        cur.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S9', 'Stop 9')", (aid,))
     pg_conn.commit()
 
     pb = trip_update_feed(

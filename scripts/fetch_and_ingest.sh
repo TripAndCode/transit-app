@@ -6,6 +6,10 @@
 # updates_live, promoted daily by the cron); the same archives reach R2/S3 for
 # backfill (see docs/deploy-railway.md).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
+# Each agency's timetable loads before its realtime archives ingest: a
+# static_join agency's rows take their schedule from it as they are read, and
+# ingest refuses one with no timetable loaded (exit 78). That agency is
+# skipped, the rest still run, and the script exits 78 once they are done.
 #
 # Env vars: everything from fetch_archives.sh plus:
 #   DATABASE_URL   Postgres connection string
@@ -27,7 +31,15 @@ bash "$SCRIPT_DIR/fetch_archives.sh"
 if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     # ── v3: per-agency ingest ────────────────────────────────────────────
     AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$SCRIPT_DIR/../agencies.csv" | tr '\n' ' ')}"
+    no_timetable=""
     for id in $AGENCY_IDS; do
+        STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
+        if compgen -G "$STATIC_DIR/*.zip" > /dev/null; then
+            echo "==> [a$id] Loading static GTFS"
+            poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" load_static \
+                "$STATIC_DIR" --agency-id "$id"
+        fi
+
         echo "==> [a$id] Ingesting RT archives"
         # gtfs_pipeline.py's ingest/analyze exit 75 (EX_TEMPFAIL) on ingest/
         # analyze lock contention -- transient, self-healing on the next
@@ -44,14 +56,12 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
                 echo "==> [a$id] ingest lock busy, skipping this agency this run"
                 continue
             fi
+            if [ "$code" -eq 78 ]; then
+                echo "==> [a$id] no timetable loaded, skipping this agency" >&2
+                no_timetable="$no_timetable $id"
+                continue
+            fi
             exit "$code"
-        fi
-
-        STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
-        if compgen -G "$STATIC_DIR/*.zip" > /dev/null; then
-            echo "==> [a$id] Loading static GTFS"
-            poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" load_static \
-                "$STATIC_DIR" --agency-id "$id"
         fi
 
         echo "==> [a$id] Running analysis"
@@ -66,14 +76,13 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
             exit "$code"
         fi
     done
+    if [ -n "$no_timetable" ]; then
+        echo "=== fetch_and_ingest skipped agencies with no timetable loaded:$no_timetable (load it, then rerun) ===" >&2
+        exit 78
+    fi
 else
     # ── legacy single-agency path ──────────────────────────────────
-    # 2. Ingest new RT archives (ClickHouse has no ON CONFLICT: ingest skips files whose
-    #    names are already stored for the agency, which keeps reruns idempotent)
-    echo "==> Ingesting RT archives for agency $AGENCY_ID"
-    poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest "$SCRIPT_DIR/../raw_archives" --agency-id "$AGENCY_ID"
-
-    # 3. Load latest static GTFS (idempotent — re-loads only if new zip appears).
+    # 2. Load latest static GTFS (idempotent — re-loads only if new zip appears).
     #    Skip when no static zip is present locally (Oracle VM may not collect static yet).
     STATIC_DIR="$SCRIPT_DIR/../raw_archives_static"
     if compgen -G "$STATIC_DIR/*static*.zip" > /dev/null; then
@@ -82,6 +91,11 @@ else
     else
         echo "==> No *_static.zip in $STATIC_DIR — skipping load_static"
     fi
+
+    # 3. Ingest new RT archives (ClickHouse has no ON CONFLICT: ingest skips files whose
+    #    names are already stored for the agency, which keeps reruns idempotent)
+    echo "==> Ingesting RT archives for agency $AGENCY_ID"
+    poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest "$SCRIPT_DIR/../raw_archives" --agency-id "$AGENCY_ID"
 
     # 4. Re-run aggregations
     echo "==> Running analysis for agency $AGENCY_ID"

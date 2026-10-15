@@ -34,6 +34,18 @@ from pipeline.strategies._time import parse_departure_time
 
 _log = logging.getLogger(__name__)
 
+# Each row's schedule comes from the static timetable as the row is read, so
+# a row ingested before a timetable is loaded keeps no schedule for good.
+# pipeline.ingest refuses this strategy for an agency that has none loaded.
+REQUIRES_STATIC_TIMETABLE = True
+
+# A loaded timetable can still be the wrong one (stale, or keyed differently
+# from the realtime feed), which the ingest guard cannot see. More than half
+# of a poll missing it is that sign; a smaller poll is too often a trip or two
+# the timetable rightly lacks (an added or late-night trip) to count.
+_MISS_WARN_FRACTION = 0.5
+_MISS_WARN_MIN_ROWS = 20
+
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
 # trust; the per-agency probe registry below is the other half of the gate.
@@ -471,7 +483,12 @@ def parse_feed(
             )
         )
 
-    if miss:
+    if miss and len(rows) >= _MISS_WARN_MIN_ROWS and miss > _MISS_WARN_FRACTION * len(rows):
+        _log.warning(
+            f"[static_join] agency={agency_id} {file_name}: {miss}/{len(rows)} rows missed the timetable, "
+            "so they are stored with no schedule; check the loaded timetable is this feed's current one"
+        )
+    elif miss:
         _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows)} rows missed JOIN (logged)")
     if no_route:
         _log.info(

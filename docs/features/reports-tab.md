@@ -120,7 +120,7 @@ issuing their own requests.
 **Manual click-through** (`make serve` + `make frontend-dev`):
 
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
-   data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
+   data first: `make fetch-ingest` (or `make load_static` before `ingest_live`),
    then `make analyze` for the agency.
 2. Click "Reports" in the rail → URL `/agencies/:agencyId/reports`;
    expect the trend chart and routes-to-check table to populate (or the

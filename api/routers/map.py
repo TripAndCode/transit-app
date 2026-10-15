@@ -375,11 +375,16 @@ async def refresh_live_delays(
     would otherwise re-poll the collector on every request. In anonymous-only
     mode it stays open under the per-address limit.
     """
+    from pipeline.ingest import StaticTimetableMissing
+
     csrf_guard(request)
     try:
         inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
     except HTTPException:
         raise
+    except StaticTimetableMissing as exc:
+        _log.warning("manual live refresh refused: %s", exc)
+        raise HTTPException(status_code=503, detail="This agency's timetable is not loaded yet") from exc
     except Exception as exc:
         _log.exception("manual live refresh failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Live feed refresh failed") from exc

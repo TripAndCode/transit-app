@@ -199,6 +199,39 @@ def test_strict_ingest_exits_dataerr_and_records_the_partial_run(strict, code):
     assert (finish.call_args.args[2], finish.call_args.kwargs["rows"]) == ("ok" if code is None else "error", 5)
 
 
+@pytest.mark.parametrize(
+    "cmd,args,target",
+    [
+        (gtfs_pipeline.cmd_ingest, Namespace(agency_id=8, folder="/tmp/x", strict=False), "pipeline.ingest.ingest"),
+        (gtfs_pipeline.cmd_ingest_live, Namespace(agency_id=8), "pipeline.ingest.ingest_live"),
+    ],
+)
+def test_ingest_without_a_timetable_exits_config_and_records_why(cmd, args, target, caplog):
+    """A static-join agency with no timetable loaded is an operator's step
+    left undone: neither the lock-busy code a shell loop retries nor a crash.
+    The run row and the log both say which step."""
+    from pipeline.ingest import StaticTimetableMissing
+
+    conn = _conn()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run") as finish,
+        patch(target, side_effect=StaticTimetableMissing(8, "static_join")),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            cmd(args)
+
+    assert exc_info.value.code == gtfs_pipeline.EX_CONFIG
+    assert gtfs_pipeline.EX_CONFIG not in (gtfs_pipeline.EX_TEMPFAIL, gtfs_pipeline.EX_DATAERR, 1)
+    assert finish.call_args.args[2] == "error"
+    assert "no timetable loaded" in finish.call_args.kwargs["error"]
+    assert any("no timetable loaded" in r.getMessage() and r.levelname == "ERROR" for r in caplog.records)
+    conn.close.assert_called()
+
+
 @pytest.mark.parametrize("full", [False, True])
 def test_analyze_full_marks_the_agency_for_a_full_rebuild_before_analyzing(full):
     """The ledger compares per-date counts, so a date whose rows were replaced

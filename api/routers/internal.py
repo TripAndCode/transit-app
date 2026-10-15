@@ -147,7 +147,7 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     raw = bytes(chunks)
     if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
-    from pipeline.ingest import PayloadDecodeError
+    from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
     file_name = f"oracle/{source_file}"
     try:
@@ -160,13 +160,19 @@ async def collector_update(agency_id: int, request: Request) -> dict:
         )
     # 404 and 422 tell the collector that resending the same request cannot
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
-    # of these. Neither is this service failing, so neither logs a traceback.
+    # of these. A missing timetable is a 503 because the same bytes ingest
+    # once an operator loads one; past curl's retries the push is dropped, and
+    # the day's archive backfills it. None of the three is this service
+    # failing, so none logs a traceback.
     except UnknownAgency as exc:
         _log.warning("collector push for unknown or disabled agency %s", agency_id)
         raise HTTPException(status_code=404, detail="Unknown or disabled agency") from exc
     except PayloadDecodeError as exc:
         _log.warning("collector push for agency %s could not be decoded: %s", agency_id, exc)
         raise HTTPException(status_code=422, detail="Collector payload is not a decodable GTFS-RT feed") from exc
+    except StaticTimetableMissing as exc:
+        _log.warning("collector push refused: %s", exc)
+        raise HTTPException(status_code=503, detail="Agency has no timetable loaded") from exc
     except Exception as exc:
         _log.exception("collector ingest failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc

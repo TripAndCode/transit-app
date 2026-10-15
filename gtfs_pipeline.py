@@ -5,6 +5,7 @@ import argparse
 import logging
 import os
 import sys
+from typing import NoReturn
 from urllib.parse import urlsplit
 
 import psycopg2
@@ -36,6 +37,12 @@ EX_TEMPFAIL = 75
 # sysexits.h EX_DATAERR -- `ingest --strict` finished but skipped files, so
 # its caller must not count the input as done.
 EX_DATAERR = 65
+
+# sysexits.h EX_CONFIG -- ingest refused an agency whose ingest strategy needs
+# a timetable and has none loaded. Nothing was read, and nothing heals it but
+# an operator loading one, so a per-agency shell loop skips just this agency
+# and still fails the run.
+EX_CONFIG = 78
 
 # Shared by every all-agencies loop below (analyze-all, check-aggs, ingest-live)
 # so a test can assert against the query as actually executed, not a hand-typed
@@ -342,10 +349,11 @@ def cmd_ingest(args):
     """Run the archive ingest pipeline for one agency.
 
     A skipped file is logged and the run still exits 0, which a per-agency
-    shell loop relies on; ``--strict`` exits EX_DATAERR instead.
+    shell loop relies on; ``--strict`` exits EX_DATAERR instead. An agency
+    refused for having no timetable loaded exits EX_CONFIG.
     """
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import IngestIncomplete, ingest
+    from pipeline.ingest import IngestIncomplete, StaticTimetableMissing, ingest
 
     conn = _get_conn()
     _lock_or_skip_agency(conn, "ingest", "ingest", _args_agency_id(args))
@@ -361,7 +369,17 @@ def cmd_ingest(args):
     except IngestIncomplete:
         conn.close()
         sys.exit(EX_DATAERR)
+    except StaticTimetableMissing as exc:
+        _exit_no_timetable(conn, exc)
     conn.close()
+
+
+def _exit_no_timetable(conn, exc) -> NoReturn:
+    """Exit EX_CONFIG for an agency ingest refused, naming the step to run.
+    Its run row already holds the same reason."""
+    logger.error("ingest: %s", exc)
+    conn.close()
+    sys.exit(EX_CONFIG)
 
 
 def cmd_load_static(args):
@@ -624,14 +642,17 @@ def cmd_ingest_live(args):
     rolled back here before continuing to the next agency.
     """
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest_live
+    from pipeline.ingest import StaticTimetableMissing, ingest_live
 
     conn = _get_conn()
     _lock_or_exit(conn, "ingest-live", "ingest")
     ch_client = get_client()
     if args.agency_id is not None:
-        with pipeline_runs.record_run(conn, "ingest", agency_id=int(args.agency_id)) as run:
-            run.rows = ingest_live(int(args.agency_id), conn, ch_client)
+        try:
+            with pipeline_runs.record_run(conn, "ingest", agency_id=int(args.agency_id)) as run:
+                run.rows = ingest_live(int(args.agency_id), conn, ch_client)
+        except StaticTimetableMissing as exc:
+            _exit_no_timetable(conn, exc)
         conn.close()
         return
 

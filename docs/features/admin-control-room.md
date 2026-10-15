@@ -93,6 +93,11 @@ timetable loaded sets the manifest aside and loads whatever the source serves.
 If that still loads nothing, because the source sent no zip or the agency's
 static URL or strategy was cleared after the press, the step closes `error`
 rather than `unchanged`, and a chained update stops there.
+The update runs the timetable step first because a `static_join` agency's
+ingest step closes `error`, naming the timetable as the step to run, while the
+agency has none loaded. The reanalyze action and an ingest run from the board
+have no timetable step of their own, so for such an agency they record that
+error.
 For an agency that does have one, `gtfs_pipeline.py refresh-static --force`
 (with `--agency-id <id>` for one agency, or without it for every configured
 one) reloads it the same way. That is how a column the loader derives, such

@@ -225,10 +225,12 @@ but only for days the live path never promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
 exposed and Oracle never accepts inbound connections.
 
-To kick the first load by hand (the same command the daily job runs), from
-your Mac through the app service so it executes on the private network:
+To kick the first load by hand, from your Mac through the app service so it
+executes on the private network, load the agency's timetable (below), then run
+the same commands the daily job runs:
 
 ```bash
+railway run --service app python gtfs_pipeline.py refresh-static --agency-id <id>
 railway run --service app python gtfs_pipeline.py ingest <zips-dir> --agency-id <id>
 railway run --service app python gtfs_pipeline.py analyze_all
 ```
@@ -245,8 +247,13 @@ promotes its day after JST midnight:
 railway run --service app python gtfs_pipeline.py ingest_live
 ```
 
-Static GTFS (stop names, route polylines) rides along in the archive zips the
-job ingests. Without that job it isn't fetched — load a static zip once:
+Static GTFS (stop names, route polylines, and the schedule a `static_join`
+agency's realtime rows join to) is not loaded by `ingest` or `ingest_live`.
+Load it before an agency's first ingest: a `static_join` agency (its
+`ingest_strategy`) takes each row's schedule from the timetable as the row is
+read, so both commands refuse that agency, exiting 78 with nothing read, while
+it has none loaded. `refresh-static` (above) fetches it from the agency's
+configured source; to load a zip you already have instead:
 
 ```bash
 railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --agency-id <id>
@@ -325,6 +332,12 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > has copied a day's rows into `updates`, this job skips that day's archive
 > files rather than store them under a second source. Disable this job for
 > any range where the live path is the agency's history source.
+
+> **A `static_join` agency's timetable must be loaded before this job runs.**
+> `ingest` exits `EX_CONFIG` (78) for one with none loaded, having read none
+> of its files. The sketch has no `set -e`, so the loop moves on and those
+> days are not ingested; load the timetable (step 3), then pull and ingest
+> them again.
 
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
