@@ -539,11 +539,9 @@ async def route_shape(
 
 
 # Today's figures per route: one observation per stop event via the shared
-# dedup over the service day in progress, read from `updates_live` alone.
-# Promotion copies whole calendar days, so before the cutover the part of the
-# service day up to midnight may be in `updates` too, but it is still in
-# `updates_live`: promotion never deletes, and the table's TTL outlasts a
-# service day. Reading one table counts each stop event once. The
+# dedup over the service day in progress, read from `updates_live` alone so
+# each stop event counts once. Before the cutover part of this service day is
+# also in `updates`, but promotion copies rather than moves it. The
 # observations' own service_type is a raw GTFS service id, or empty for one
 # that matched no scheduled trip, so it splits nothing here: a route is one row.
 _TODAY_ROUTES_SQL = (
@@ -730,9 +728,9 @@ async def today_route_summary(
     a sensible default.
 
     Today's figures are computed live from `updates_live`; the baseline comes
-    from `agg_route_daily_dist`'s dates before today. Promotion and analyze
-    work in calendar days, so before the cutover that table can already hold
-    a row for today's part up to midnight, which is no closed day.
+    from `agg_route_daily_dist`'s dates before today. Promotion copies whole
+    calendar days into `updates`, so before the cutover analyze can already
+    have filed a partial row for today's service date, which is no closed day.
     """
     today = current_service_date()
     result = await ch.query(

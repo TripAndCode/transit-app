@@ -22,6 +22,7 @@ import api.range as range_mod
 from api.deps import get_conn
 from api.routers import admin_agencies
 from api.security import require_admin
+from tests.fixtures.clock import freeze_now
 from tests.fixtures.users import admin_user
 
 THURSDAY = date(2026, 3, 5)
@@ -68,12 +69,7 @@ def _client() -> TestClient:
 
 
 def _freeze(monkeypatch, moment: datetime) -> None:
-    class FrozenDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return moment.astimezone(tz) if tz else moment
-
-    monkeypatch.setattr(range_mod, "datetime", FrozenDateTime)
+    freeze_now(monkeypatch, range_mod, moment)
 
 
 @pytest.mark.parametrize(

@@ -2095,13 +2095,9 @@ def _jst_at(day, hour, minute=0, second=0):
 def _freeze_clock(monkeypatch, moment):
     """The request's "now" (api.range's clock) is ``moment``."""
     import api.range as range_mod
+    from tests.fixtures.clock import freeze_now
 
-    class FrozenDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return moment.astimezone(tz) if tz else moment
-
-    monkeypatch.setattr(range_mod, "datetime", FrozenDateTime)
+    freeze_now(monkeypatch, range_mod, moment)
 
 
 async def _seed_class_baselines(pool, agency_id, route_code, friday, *, weekday, saturday):
