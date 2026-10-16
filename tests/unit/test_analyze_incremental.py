@@ -13,8 +13,9 @@ import pytest
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
+from pipeline import ch_aggregates
 from pipeline.analyze import analyze
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_day_start_utc
 
 AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
@@ -44,6 +45,7 @@ class FakeClickHouse:
         self._ledger = ledger
         self.queries: list[tuple[str, dict]] = []
         self.streams: list[str] = []
+        self.commands: list[tuple[str, dict]] = []
 
     def query(self, sql, parameters=None):
         self.queries.append((sql, parameters or {}))
@@ -56,6 +58,14 @@ class FakeClickHouse:
     def query_row_block_stream(self, sql, parameters=None):
         self.streams.append(sql)
         return _EmptyStream()
+
+    def command(self, sql, parameters=None, settings=None):
+        self.commands.append((sql, parameters or {}))
+
+    @property
+    def ch_agg_builds(self) -> list[tuple[str, dict]]:
+        """Each INSERT into a ClickHouse aggregate's work table: one per table and month."""
+        return [c for c in self.commands if c[0].startswith("INSERT INTO") and "__work_a" in c[0]]
 
     @property
     def alltime_scans(self) -> list[str]:
@@ -393,3 +403,20 @@ def test_the_fingerprint_is_never_empty_without_a_static_schedule():
     """An agency with no schedule still has a clamp and a builder version to
     invalidate against; an empty value would leave it with neither."""
     assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != ""
+
+
+# ── The ClickHouse-computed aggregates ───────────────────────────────────
+
+
+def test_a_noop_run_builds_no_clickhouse_aggregate():
+    _, ch = _noop_run()
+    assert ch.ch_agg_builds == []
+    assert not [sql for sql, _ in ch.commands if "PARTITION" in sql]
+
+
+def test_a_changed_run_builds_each_clickhouse_aggregate_for_the_changed_month_only():
+    _, ch = _changed_run()
+    assert len(ch.ch_agg_builds) == len(ch_aggregates.TABLES)
+    for _, params in ch.ch_agg_builds:
+        assert params["month_start"] == service_day_start_utc(date(2026, 1, 1))
+        assert params["month_end"] == service_day_start_utc(date(2026, 2, 1))

@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+from pipeline import ch_aggregates
+
 JST = timezone(timedelta(hours=9))
 
 
@@ -59,3 +61,39 @@ def edge_rows() -> list[tuple]:
         update_row(day, "t12", 120, scheduled_time=None, route_code="r1"),
         update_row(day, "t13", 50, scheduled_time=None, route_code=None),
     ]
+
+
+def normalized(value):
+    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC."""
+    if isinstance(value, float):
+        return float(f"{value:.7g}")
+    if isinstance(value, datetime):
+        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    return value
+
+
+def ch_rows(ch_client, agency_id: int, table: str) -> list[str]:
+    """The agency's rows of *table* in ClickHouse, normalized, sorted and rendered with str()."""
+    sql, params = ch_aggregates.rows_sql(table, agency_id, None)
+    return sorted(str(tuple(map(normalized, row))) for row in ch_client.query(sql, parameters=params).result_rows)
+
+
+def pg_rows(conn, agency_id: int, table: str) -> list[str]:
+    """The agency's rows of *table* in Postgres, in ch_rows's form."""
+    columns = ", ".join(ch_aggregates.COLUMNS[table])
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {columns} FROM {table} WHERE agency_id = %s", (agency_id,))
+        return sorted(str(tuple(map(normalized, row))) for row in cur.fetchall())
+
+
+def record_builds(monkeypatch) -> list[tuple[str, list[int]]]:
+    """Record each ch_aggregates.build call's (table, months) while still building."""
+    calls: list[tuple[str, list[int]]] = []
+    real = ch_aggregates.build
+
+    def build(ch, table, agency_id, months):
+        calls.append((table, months))
+        real(ch, table, agency_id, months)
+
+    monkeypatch.setattr(ch_aggregates, "build", build)
+    return calls
