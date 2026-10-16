@@ -506,6 +506,26 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool, ingest_strategy:
     return "|".join(parts)
 
 
+def _ledger_counts(agency_id: int, ch_client) -> dict:
+    """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
+    live = _ch_query(
+        "plan: per-date ledger",
+        ch_client,
+        """
+        SELECT """
+        + _SERVICE_DATE
+        + """ AS date,
+               countIf(dep_delay IS NOT NULL) AS raw_samples,
+               count() AS total_rows
+        FROM updates
+        WHERE agency_id = {agency_id:UInt16}
+        GROUP BY date
+        """,
+        {"agency_id": agency_id},
+    )
+    return {row[0]: (row[1], row[2]) for row in live.result_rows}
+
+
 def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: str) -> list | None:
     """The service dates whose aggregates no longer match their sources.
 
@@ -566,22 +586,7 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live = _ch_query(
-        "plan: per-date ledger",
-        ch_client,
-        """
-        SELECT """
-        + _SERVICE_DATE
-        + """ AS date,
-               countIf(dep_delay IS NOT NULL) AS raw_samples,
-               count() AS total_rows
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16}
-        GROUP BY date
-        """,
-        {"agency_id": agency_id},
-    )
-    live_counts = {row[0]: (row[1], row[2]) for row in live.result_rows}
+    live_counts = _ledger_counts(agency_id, ch_client)
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
