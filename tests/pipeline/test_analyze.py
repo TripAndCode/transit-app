@@ -2,6 +2,7 @@ from datetime import date, datetime, time, timezone
 
 import pytest
 
+from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from tests.conftest import mirror_updates_to_ch
@@ -1955,12 +1956,15 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     assert _agg_snapshot(pg_conn, agency_id) == first
     assert first["agg_stop_routes"], "fixture built no agg_stop_routes, so its skip would pass vacuously"
     # The no-change run reads `updates` once, for the ledger. Anything else it
-    # sends is an index-served single-row probe, never a scan.
+    # sends to `updates` is an index-served single-row probe, never a scan; its
+    # other reads are of the ClickHouse-computed aggregates, which are
+    # aggregate-sized.
     assert recording.streams == []
     ledger = [s for s in recording.queries if "raw_samples" in s and "clamp_count" not in s]
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
-    assert all(s.rstrip().endswith("LIMIT 1") for s in others), others
+    aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
+    assert all(s.rstrip().endswith("LIMIT 1") or any(r in s for r in aggregate_reads) for s in others), others
 
 
 def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):

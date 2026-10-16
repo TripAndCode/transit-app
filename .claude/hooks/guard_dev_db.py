@@ -83,9 +83,9 @@ REPLICA_CONTAINER = re.compile(r"transit-ml-[a-z0-9_.-]+")
 # to the stores it writes; it runs only when the command points every one of
 # them at the throwaway stack.
 DESTRUCTIVE_TARGETS = {
-    "analyze": {"pg"},
+    "analyze": {"pg", "ch"},
     "bootstrap": {"pg", "ch"},
-    "analyze-all": {"pg"},
+    "analyze-all": {"pg", "ch"},
     "build-rag-index": {"pg"},
     "ch-bootstrap": {"ch"},
     "db": {"pg", "ch"},
@@ -104,8 +104,8 @@ DESTRUCTIVE_TARGETS = {
 }
 DESTRUCTIVE_SUBCOMMANDS = {
     "add_agency": {"pg"},
-    "analyze": {"pg"},
-    "analyze_all": {"pg"},
+    "analyze": {"pg", "ch"},
+    "analyze_all": {"pg", "ch"},
     "build_rag_index": {"pg"},
     "ingest": {"pg", "ch"},
     "ingest_live": {"pg", "ch"},

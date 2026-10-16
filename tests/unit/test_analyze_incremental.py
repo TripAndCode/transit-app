@@ -7,14 +7,15 @@ are covered against real engines in tests/pipeline/test_analyze.py; nothing here
 restates them.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
+from pipeline import ch_aggregates
 from pipeline.analyze import analyze
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_day_start_utc
 
 AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
@@ -40,10 +41,13 @@ class _EmptyStream:
 
 
 class FakeClickHouse:
-    def __init__(self, ledger):
+    def __init__(self, ledger, *, totals=(0, 0, 0), tables=ch_aggregates.TABLES):
         self._ledger = ledger
+        self._totals = totals
+        self._tables = tables
         self.queries: list[tuple[str, dict]] = []
         self.streams: list[str] = []
+        self.commands: list[tuple[str, dict]] = []
 
     def query(self, sql, parameters=None):
         self.queries.append((sql, parameters or {}))
@@ -51,11 +55,29 @@ class FakeClickHouse:
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
             return _FakeResult(self._ledger)
+        if "FROM system.tables" in sql:
+            return _FakeResult([(name,) for name in self._tables])
+        if "sum(sum_delay_sec)" in sql:
+            return _FakeResult([self._totals])
+        # A work table holds the month of the ledger's date once built, so a
+        # swap replaces that month rather than dropping it.
+        if "toYYYYMM(date)" in sql and "__work_a" in sql:
+            return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
+        if "toYYYYMM(" in sql and "FROM updates WHERE" in sql:
+            return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
         return _FakeResult([])
 
     def query_row_block_stream(self, sql, parameters=None):
         self.streams.append(sql)
         return _EmptyStream()
+
+    def command(self, sql, parameters=None, settings=None):
+        self.commands.append((sql, parameters or {}))
+
+    @property
+    def ch_agg_builds(self) -> list[tuple[str, dict]]:
+        """Each INSERT into a ClickHouse aggregate's work table: one per table and month."""
+        return [c for c in self.commands if c[0].startswith("INSERT INTO") and "__work_a" in c[0]]
 
     @property
     def alltime_scans(self) -> list[str]:
@@ -105,12 +127,14 @@ class FakeCursor:
 class FakeConn:
     """Answers only the probes `analyze` makes; every builder returns no rows."""
 
-    def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False):
+    def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0)):
         self.executed: list[str] = []
         self._fingerprint: str | None = None
         self._ledger_rows = ledger_rows
         self._ingest_strategy = ingest_strategy
         self._has_static = has_static
+        self._pg_totals = pg_totals
+        self._purged: set[str] = set()
 
     def cursor(self):
         return FakeCursor(self)
@@ -125,6 +149,12 @@ class FakeConn:
         return TRANSACTION_STATUS_IDLE
 
     def respond(self, sql):
+        if sql.startswith("DELETE FROM"):
+            self._purged.add(sql.split()[2])
+        # A Postgres copy's totals: what it held, until its own purge emptied it.
+        if "coalesce(sum(sum_delay_sec), 0)" in sql:
+            table = sql.split(" FROM ")[1].split()[0]
+            return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
         if "SELECT count(*), coalesce(sum(" in sql:
@@ -143,7 +173,9 @@ class FakeConn:
 LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
 
 
-def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
+def _run(
+    ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0), ch_tables=ch_aggregates.TABLES
+):
     """Run `analyze`, returning the fakes.
 
     *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
@@ -155,11 +187,12 @@ def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
         ledger_rows=stored if stored is not None else ledger,
         ingest_strategy=ingest_strategy,
         has_static=has_static,
+        pg_totals=pg_totals,
     )
     conn._fingerprint = analyze_mod._static_fingerprint(
         AGENCY_ID, conn, has_static=has_static, ingest_strategy=ingest_strategy
     )
-    ch = FakeClickHouse(ledger)
+    ch = FakeClickHouse(ledger, tables=ch_tables)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
 
@@ -393,3 +426,38 @@ def test_the_fingerprint_is_never_empty_without_a_static_schedule():
     """An agency with no schedule still has a clamp and a builder version to
     invalidate against; an empty value would leave it with neither."""
     assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != ""
+
+
+# ── The ClickHouse-computed aggregates ───────────────────────────────────
+
+
+def test_a_noop_run_writes_nothing_to_clickhouse():
+    _, ch = _noop_run()
+    assert ch.commands == []
+
+
+def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_over():
+    _, ch = _changed_run()
+    tables = len(ch_aggregates.TABLES)
+    recomputed = [params for sql, params in ch.ch_agg_builds if "FROM updates" in sql]
+    carried = [params for sql, params in ch.ch_agg_builds if "FROM updates" not in sql]
+    day = {
+        "day_start_0": service_day_start_utc(LEDGER_DATE),
+        "day_end_0": service_day_start_utc(LEDGER_DATE + timedelta(days=1)),
+    }
+    assert recomputed == [{"agency_id": AGENCY_ID, **day}] * tables
+    assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
+    assert len([sql for sql, _ in ch.commands if "REPLACE PARTITION (7, 202601)" in sql]) == tables
+
+
+def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():
+    conn, ch = _noop_run(pg_totals=(1, 1, 60))
+    assert len(ch.ch_agg_builds) == len(ch_aggregates.TABLES)
+    assert ch.alltime_scans == []
+    for table in ch_aggregates.TABLES:
+        assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
+
+
+def test_analyze_names_the_bootstrap_when_a_clickhouse_aggregate_table_is_missing():
+    with pytest.raises(RuntimeError, match="make ch-bootstrap"):
+        _noop_run(ch_tables=())

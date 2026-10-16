@@ -9,6 +9,11 @@ transaction, so re-running is idempotent and a crash mid-run rolls back to the
 prior snapshot. The ledger's blind spot (see `_static_fingerprint`) is
 recovered only by a deliberate full rebuild (`analyze --full`).
 
+The tables in `pipeline.ch_aggregates.TABLES` are computed and stored in
+ClickHouse and rebuilt in whole months; each run copies what it rebuilt into the
+Postgres table of the same name, which is what the API reads
+(`_rebuild_ch_aggregates`).
+
 Aggregation tables produced:
 - agg_route_stats      — overall delay stats per route/service_type
 - agg_route_hour       — delay by scheduled departure time
@@ -78,6 +83,7 @@ from statistics import median
 import psycopg2.extras
 
 from api.range import time_band_case_sql
+from pipeline import ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
@@ -175,7 +181,9 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # table's purge and build are both date-restricted, so the staleness signal must
 # cover all it reads (see _dates_needing_rebuild). Each is keyed by `date`, so the
 # purge removes exactly what is rebuilt, and the ledger's total_rows counts
-# delay-less rows too.
+# delay-less rows too. The ClickHouse-computed tables among them (_CH_AGG_TABLES)
+# are rebuilt by _rebuild_ch_aggregates instead, which recomputes those dates and
+# purges their Postgres copy by whole month, through the same (agency_id, date) key.
 _INCREMENTAL_AGG_TABLES = frozenset(
     {
         "agg_daily_trend",
@@ -230,6 +238,11 @@ _NOOP_SKIPPABLE_AGG_TABLES = (
     _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES | _KEYSET_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 )
 
+# Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
+# rows are a copy, written only by _copy_ch_aggregate, which purges the months it
+# replaces, so the purge loop in _analyze_locked leaves them alone.
+_CH_AGG_TABLES = frozenset(ch_aggregates.TABLES)
+
 
 # ── Step timing ──────────────────────────────────────────────────────────
 # Deliberately not `pipeline.perf`: that registry is in-process and read back
@@ -245,7 +258,7 @@ _NOOP_SKIPPABLE_AGG_TABLES = (
 # the whole statement to either side.
 #
 # Timing lives inside the shared primitives (`_insert_agg`, `_ch_query`,
-# `_build_and_insert`) rather than at each call site, so an aggregate cannot
+# `_build_and_insert`, `_stream_copy`) rather than at each call site, so an aggregate cannot
 # be added without being measured. The builders that bypass those primitives
 # — a fused `INSERT ... SELECT`, or a hand-rolled `execute_values` — still
 # wrap themselves, which is why the summary reports measured-vs-wall-clock
@@ -629,6 +642,50 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
     return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 
 
+def _stream_copy(
+    cur, ch_client, ch_sql: str, parameters: dict, target: str, *, scan_label: str, load_label: str
+) -> int:
+    """Stream *ch_sql*'s rows out of ClickHouse into ``COPY {target} FROM STDIN``; return how many.
+
+    `query_row_block_stream` (not `query`) so the result is never held in memory
+    whole. `.query()` buffers the ENTIRE result as a Python list (`result_rows`)
+    before returning it — one live copy of a set that can scale with the agency's
+    total row count. Streaming yields one block at a time, so peak memory is
+    bounded by one block, and each block is written to Postgres before the next
+    is fetched.
+
+    COPY, not row-wise INSERT: bulk-loading the same rows measures several times
+    faster. `_copy_field` owns the encoding, including the UTC offset that
+    otherwise has to be put back on every timestamp before the driver sees it.
+
+    The load is timed directly and the scan taken as the remainder, rather than
+    timing both: the query runs inside the stream's own __enter__, so measuring
+    only the time between yielded blocks would leave that — the bulk of a large
+    scan — out of the summary entirely. Deriving one from the whole elapsed span
+    keeps the two labels summing to it exactly.
+    """
+    transfer_start = time.perf_counter()
+    load_ms = 0.0
+    copied = 0
+    with ch_client.query_row_block_stream(ch_sql, parameters=parameters) as stream:
+        for block in stream:
+            if not block:
+                continue
+            t0 = time.perf_counter()
+            buf = io.StringIO()
+            for row in block:
+                buf.write("\t".join(_copy_field(v) for v in row))
+                buf.write("\n")
+            buf.seek(0)
+            cur.copy_expert(f"COPY {target} FROM STDIN", buf)
+            copied += len(block)
+            load_ms += (time.perf_counter() - t0) * 1000
+    transfer_ms = (time.perf_counter() - transfer_start) * 1000
+    _add_step(scan_label, transfer_ms - load_ms)
+    _add_step(load_label, load_ms)
+    return copied
+
+
 def _load_temp_table(
     cur,
     ch_client,
@@ -658,43 +715,15 @@ def _load_temp_table(
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TEMP TABLE {table} ({columns}) ON COMMIT DROP")
     if load:
-        # `query_row_block_stream` (not `query`) so we never hold the whole
-        # dedup result in memory at once. `.query()` buffers the ENTIRE
-        # result as a Python list (`result_rows`) before returning it — one
-        # live copy of a set that scales with the agency's total row count.
-        # Streaming yields one block at a time, so peak memory is bounded by
-        # one block, and each block is written to Postgres before the next
-        # is fetched.
-        #
-        # COPY, not row-wise INSERT: this is the single largest step of a
-        # run, and bulk-loading the same rows measures several times faster.
-        # `_copy_field` owns the encoding, including the UTC offset that
-        # otherwise has to be put back on every timestamp before the driver
-        # sees it.
-        #
-        # The load is timed directly and the scan taken as the remainder,
-        # rather than timing both: the query runs inside the stream's own
-        # __enter__, so measuring only the time between yielded blocks
-        # would leave that — the bulk of a large agency's scan — out of
-        # the summary entirely. Deriving one from the whole elapsed span
-        # keeps the two labels summing to it exactly.
-        transfer_start = time.perf_counter()
-        load_ms = 0.0
-        with ch_client.query_row_block_stream(ch_sql, parameters=parameters) as stream:
-            for block in stream:
-                if not block:
-                    continue
-                t0 = time.perf_counter()
-                buf = io.StringIO()
-                for row in block:
-                    buf.write("\t".join(_copy_field(v) for v in row))
-                    buf.write("\n")
-                buf.seek(0)
-                cur.copy_expert(f"COPY {table} FROM STDIN", buf)
-                load_ms += (time.perf_counter() - t0) * 1000
-        transfer_ms = (time.perf_counter() - transfer_start) * 1000
-        _add_step(f"{label}: ClickHouse scan", transfer_ms - load_ms)
-        _add_step(f"{label}: COPY into TEMP", load_ms)
+        _stream_copy(
+            cur,
+            ch_client,
+            ch_sql,
+            parameters,
+            table,
+            scan_label=f"{label}: ClickHouse scan",
+            load_label=f"{label}: COPY into TEMP",
+        )
     with _step(f"{label}: ANALYZE TEMP"):
         cur.execute(f"ANALYZE {table}")
 
@@ -738,6 +767,130 @@ def _ch_build_and_insert(
     logger.info(f"  {table}: {len(rows)} rows")
 
 
+def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) -> dict[str, list | None]:
+    """The dates each ClickHouse-computed table recomputes: the ledger's changed
+    dates, or None for all of them.
+
+    A table whose ClickHouse rows don't add up to its Postgres copy is rebuilt
+    whole, whatever the ledger says. That covers the first run after a table
+    moves to ClickHouse, which starts it empty, and a run after one whose
+    ClickHouse swap landed but whose Postgres transaction rolled back. Only that
+    table goes whole: the rest keep the ledger's dates, so moving a table never
+    forces a full rebuild of the agency. Comparing the two stores, rather than
+    asking whether ClickHouse holds any row, keeps an agency whose data yields no
+    rows for a table from rebuilding it on every run.
+
+    It first checks that ClickHouse has every such table, so a store that
+    predates one stops the run before anything is written.
+    """
+    missing = ch_aggregates.missing_tables(ch_client)
+    if missing:
+        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
+    if rebuild_dates is None:
+        return dict.fromkeys(ch_aggregates.TABLES)
+    scopes: dict[str, list | None] = {}
+    for table in ch_aggregates.TABLES:
+        with _step(f"{table}: compare stores"):
+            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
+        if not agree:
+            logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
+        scopes[table] = rebuild_dates if agree else None
+    return scopes
+
+
+def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+    """`ch_aggregates.totals` for the Postgres copy. *months* is None or non-empty."""
+    where = "agency_id = %s"
+    params: list = [agency_id]
+    if months is not None:
+        bounds = [ch_aggregates.month_bounds(month) for month in months]
+        where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
+        params += [day for pair in bounds for day in pair]
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*), coalesce(sum(samples), 0)::bigint, coalesce(sum(sum_delay_sec), 0)::bigint "
+            f"FROM {table} WHERE {where}",
+            params,
+        )
+        count, samples, delay = cur.fetchone()
+    return int(count), int(samples), int(delay)
+
+
+def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn, ch_client) -> None:
+    """Replace the agency's Postgres rows of *table* with ClickHouse's, over the
+    months in *scope*, or every row of the agency when it is None.
+
+    A full rebuild purges the whole agency rather than the months ClickHouse
+    holds, so a Postgres row in a month ClickHouse never had goes too. The copy is
+    then checked against ClickHouse, and a mismatch raises, which rolls the run's
+    Postgres transaction back.
+    """
+    with _step(f"{table}: purge Postgres copy"), conn.cursor() as cur:
+        if scope is None:
+            cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
+        else:
+            for month in scope:
+                cur.execute(
+                    f"DELETE FROM {table} WHERE agency_id = %s AND date >= %s AND date < %s",
+                    (agency_id, *ch_aggregates.month_bounds(month)),
+                )
+    sql, params = ch_aggregates.rows_sql(table, agency_id, scope)
+    with conn.cursor() as cur:
+        copied = _stream_copy(
+            cur,
+            ch_client,
+            sql,
+            params,
+            f"{table} ({', '.join(ch_aggregates.COLUMNS[table])})",
+            scan_label=f"{table}: ClickHouse read",
+            load_label=f"{table}: COPY into Postgres",
+        )
+    with _step(f"{table}: verify copy"):
+        expected = ch_aggregates.totals(ch_client, table, agency_id, scope)
+        actual = _pg_totals(conn, table, agency_id, scope)
+    if actual != expected:
+        raise RuntimeError(
+            f"{table}: Postgres copy {actual} does not match ClickHouse {expected} for agency {agency_id}"
+        )
+    logger.info(f"  {table}: {copied} rows")
+
+
+def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> None:
+    """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
+
+    Every build finishes before any swap, so a failed build leaves every table as
+    it stood, and the swaps run back to back. A swap is not undone if the
+    Postgres transaction rolls back afterwards. The ledger rolls back with it, so
+    the next run rebuilds the same months, and _ch_agg_scopes rebuilds whole a
+    table whose two stores no longer agree.
+
+    The agency's work tables are dropped however the builds end. A process that
+    dies can't do that, so ch_aggregates.build drops its own before starting.
+    """
+    pending = {table: changed for table, changed in scopes.items() if changed != []}
+    for table in scopes:
+        if table not in pending:
+            logger.info(f"  {table}: unchanged, not rebuilt")
+    if not pending:
+        return
+    months: dict[str, list[int]] = {}
+    try:
+        for table, changed in pending.items():
+            with _step(f"{table}: ClickHouse build"):
+                months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
+                ch_aggregates.build(ch_client, table, agency_id, months[table], changed)
+        for table in pending:
+            with _step(f"{table}: ClickHouse swap"):
+                ch_aggregates.swap(ch_client, table, agency_id, months[table])
+    finally:
+        try:
+            ch_aggregates.drop_work_tables(ch_client, agency_id)
+        except Exception:
+            logger.exception(f"  could not drop agency {agency_id}'s ClickHouse work tables")
+    for table, changed in pending.items():
+        _copy_ch_aggregate(table, agency_id, None if changed is None else months[table], conn, ch_client)
+
+
 def analyze(agency_id: int, conn, ch_client) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
@@ -763,9 +916,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     Re-running is idempotent — same inputs produce the same final state.
 
     *ch_client* is the ClickHouse client used to fetch the deduped fact
-    slice (the `updates` fact table now lives in ClickHouse); every
-    aggregate builder below still reads the Postgres TEMP TABLE it's
-    loaded into, unchanged.
+    slice (the `updates` fact table lives in ClickHouse), which every
+    Postgres builder below reads from a TEMP TABLE. The ClickHouse-computed
+    tables read `updates` there directly (`_rebuild_ch_aggregates`).
 
     Call analyze(), never this directly: it assumes the agency's lock is
     already held for the duration.
@@ -799,16 +952,18 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         logger.info("  incremental: every date")
     else:
         logger.info(f"  incremental: {len(rebuild_dates)} date(s) changed since the last run")
+    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, rebuild_dates)
     date_where, date_params = _date_filter(rebuild_dates, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
         # Scoped for the incremental tables, whole for the rest, skipped for
-        # whatever this run is not going to rebuild. The scope must match what
-        # each table's build below produces; see _INCREMENTAL_AGG_TABLES and
-        # _NOOP_SKIPPABLE_AGG_TABLES for why the two cannot diverge.
+        # whatever this run is not going to rebuild and for _CH_AGG_TABLES. The
+        # scope must match what each table's build below produces; see
+        # _INCREMENTAL_AGG_TABLES and _NOOP_SKIPPABLE_AGG_TABLES for why the
+        # two cannot diverge.
         with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
-                if _nothing_to_rebuild(tbl, rebuild_dates):
+                if tbl in _CH_AGG_TABLES or _nothing_to_rebuild(tbl, rebuild_dates):
                     continue
                 if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
                     cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
@@ -1159,39 +1314,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 "late5_count",
                 "hist",
             ],
-            p,
-            conn,
-        )
-
-        # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost) and
-        # the reports/trend hourly heatmap (same grain). UNTYPED dedup (all
-        # observations, no service filter) since both readers aggregate
-        # hour-of-day across every route; a service/route filter falls back to
-        # the live path on read. `sum_delay_sec` lets a caller that pools
-        # MULTIPLE rows of this table (e.g. the trend heatmap's
-        # dow×band grid) divide an exact raw-seconds total once, at the end,
-        # instead of re-weighting this row's own already-rounded `avg_min`.
-        # `EXTRACT(HOUR FROM scheduled_time)` is always 0-23, same invariant as
-        # the agg_route_hour_dow comment above (see pipeline/strategies/_time.py).
-        sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped)
-            SELECT
-                %(agency_id)s AS agency_id,
-                date,
-                EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
-            FROM deduped
-            WHERE scheduled_time IS NOT NULL
-            GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
-            ORDER BY date, hour
-        """
-        _build_and_insert(
-            sql,
-            "agg_hour_daily",
-            ["agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -2004,6 +2126,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 logger.info("  agg_static_version_summary: 0 rows (static_version_id not populated)")
         else:
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
+
+        # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
+        # Last, so a Postgres builder that fails above leaves ClickHouse
+        # untouched too.
+        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes)
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.

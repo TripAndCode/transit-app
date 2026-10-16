@@ -107,6 +107,16 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
         id="make-ingest-postgres-redirected-only",
     ),
+    # analyze writes ClickHouse too (pipeline/ch_aggregates.py).
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make analyze-all",
+        id="make-analyze-all-postgres-redirected-only",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run python gtfs_pipeline.py "
+        "analyze_all",
+        id="cli-analyze-all-postgres-redirected-only",
+    ),
     # Postgres CLIs that mutate without ever spelling a SQL keyword.
     pytest.param("dropdb -h transit-pg transit", id="dropdb"),
     pytest.param("createdb -h transit-pg transit_extra", id="createdb"),
@@ -412,6 +422,10 @@ ALLOWED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
         "make ingest FOLDER=raw",
         id="ingest-pointed-at-both-test-stores",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        id="analyze-all-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
     pytest.param(
