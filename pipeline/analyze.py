@@ -629,6 +629,50 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
     return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 
 
+def _stream_copy(
+    cur, ch_client, ch_sql: str, parameters: dict, target: str, *, scan_label: str, load_label: str
+) -> int:
+    """Stream *ch_sql*'s rows out of ClickHouse into ``COPY {target} FROM STDIN``; return how many.
+
+    `query_row_block_stream` (not `query`) so the result is never held in memory
+    whole. `.query()` buffers the ENTIRE result as a Python list (`result_rows`)
+    before returning it — one live copy of a set that can scale with the agency's
+    total row count. Streaming yields one block at a time, so peak memory is
+    bounded by one block, and each block is written to Postgres before the next
+    is fetched.
+
+    COPY, not row-wise INSERT: bulk-loading the same rows measures several times
+    faster. `_copy_field` owns the encoding, including the UTC offset that
+    otherwise has to be put back on every timestamp before the driver sees it.
+
+    The load is timed directly and the scan taken as the remainder, rather than
+    timing both: the query runs inside the stream's own __enter__, so measuring
+    only the time between yielded blocks would leave that — the bulk of a large
+    scan — out of the summary entirely. Deriving one from the whole elapsed span
+    keeps the two labels summing to it exactly.
+    """
+    transfer_start = time.perf_counter()
+    load_ms = 0.0
+    copied = 0
+    with ch_client.query_row_block_stream(ch_sql, parameters=parameters) as stream:
+        for block in stream:
+            if not block:
+                continue
+            t0 = time.perf_counter()
+            buf = io.StringIO()
+            for row in block:
+                buf.write("\t".join(_copy_field(v) for v in row))
+                buf.write("\n")
+            buf.seek(0)
+            cur.copy_expert(f"COPY {target} FROM STDIN", buf)
+            copied += len(block)
+            load_ms += (time.perf_counter() - t0) * 1000
+    transfer_ms = (time.perf_counter() - transfer_start) * 1000
+    _add_step(scan_label, transfer_ms - load_ms)
+    _add_step(load_label, load_ms)
+    return copied
+
+
 def _load_temp_table(
     cur,
     ch_client,
@@ -658,43 +702,15 @@ def _load_temp_table(
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TEMP TABLE {table} ({columns}) ON COMMIT DROP")
     if load:
-        # `query_row_block_stream` (not `query`) so we never hold the whole
-        # dedup result in memory at once. `.query()` buffers the ENTIRE
-        # result as a Python list (`result_rows`) before returning it — one
-        # live copy of a set that scales with the agency's total row count.
-        # Streaming yields one block at a time, so peak memory is bounded by
-        # one block, and each block is written to Postgres before the next
-        # is fetched.
-        #
-        # COPY, not row-wise INSERT: this is the single largest step of a
-        # run, and bulk-loading the same rows measures several times faster.
-        # `_copy_field` owns the encoding, including the UTC offset that
-        # otherwise has to be put back on every timestamp before the driver
-        # sees it.
-        #
-        # The load is timed directly and the scan taken as the remainder,
-        # rather than timing both: the query runs inside the stream's own
-        # __enter__, so measuring only the time between yielded blocks
-        # would leave that — the bulk of a large agency's scan — out of
-        # the summary entirely. Deriving one from the whole elapsed span
-        # keeps the two labels summing to it exactly.
-        transfer_start = time.perf_counter()
-        load_ms = 0.0
-        with ch_client.query_row_block_stream(ch_sql, parameters=parameters) as stream:
-            for block in stream:
-                if not block:
-                    continue
-                t0 = time.perf_counter()
-                buf = io.StringIO()
-                for row in block:
-                    buf.write("\t".join(_copy_field(v) for v in row))
-                    buf.write("\n")
-                buf.seek(0)
-                cur.copy_expert(f"COPY {table} FROM STDIN", buf)
-                load_ms += (time.perf_counter() - t0) * 1000
-        transfer_ms = (time.perf_counter() - transfer_start) * 1000
-        _add_step(f"{label}: ClickHouse scan", transfer_ms - load_ms)
-        _add_step(f"{label}: COPY into TEMP", load_ms)
+        _stream_copy(
+            cur,
+            ch_client,
+            ch_sql,
+            parameters,
+            table,
+            scan_label=f"{label}: ClickHouse scan",
+            load_label=f"{label}: COPY into TEMP",
+        )
     with _step(f"{label}: ANALYZE TEMP"):
         cur.execute(f"ANALYZE {table}")
 
