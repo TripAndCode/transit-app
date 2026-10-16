@@ -68,6 +68,21 @@ poetry run python gtfs_pipeline.py add_agency \
   --name "My Agency" --feed-url "https://example.test/feed.pb"
 ```
 
+### Fill days the dashboard is missing
+
+The admin agencies page's 再集計 and まとめて更新 read the agency's live feed,
+which carries only the present moment, so neither fills a past day. Past days
+come from the collector's daily archives:
+
+```bash
+SINCE=20260917 make fetch-ingest   # fetch and ingest archived days from that date on
+make check-aggs                    # confirm the aggregates reach the newest day
+```
+
+Days already ingested are skipped, and the same run aggregates each newly
+ingested day. After a repair that rewrites rows already stored (below), rebuild
+every date with `make analyze-all FULL=1` instead.
+
 ### Repair archive-ingested rows
 
 `scripts/repair_archive_rows.py` brings archive-ingested `updates` rows to what
