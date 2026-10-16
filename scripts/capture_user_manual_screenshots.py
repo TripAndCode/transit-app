@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from urllib.parse import unquote
 
 from playwright.sync_api import Page, ViewportSize, sync_playwright
 
@@ -97,15 +98,13 @@ def first_route_code(page: Page, agency: str) -> str:
     page.wait_for_load_state("networkidle")
     row = page.locator("table tbody tr").first
     row.wait_for(timeout=15_000)
-    text = row.inner_text()
-    # Route rows read like "...中大野→野木 33101\xa0›\t平日\t...5.8..." -- the
-    # route code is the run of digits immediately before the "›" link
-    # marker, not the row's last number (later columns are stats, not the
-    # code).
-    match = re.search(r"(\d+)\s*\xa0?[››]", text)
+    # A row shows the route's readable label, not its code; the code is the
+    # last path segment of the row's link to the route page.
+    href = row.locator("a[href*='/routes/']").first.get_attribute("href") or ""
+    match = re.search(r"/routes/([^/?#]+)", href)
     if not match:
-        raise RuntimeError(f"could not read a route code from ranking row: {text!r}")
-    return match.group(1)
+        raise RuntimeError(f"could not read a route code from the ranking row's link: {href!r}")
+    return unquote(match.group(1))
 
 
 def capture(base: str, locale: str) -> None:
@@ -118,6 +117,9 @@ def capture(base: str, locale: str) -> None:
         ctx.add_init_script(
             f"window.localStorage.setItem('app.locale', '{locale}');"
             "window.localStorage.setItem('help_hint_dismissed', '1');"
+            # The data-freshness banner reflects whatever the capture data's
+            # newest day is, not the screen being documented.
+            "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
         )
         page = ctx.new_page()
         page.goto(f"{base}/")
@@ -131,6 +133,9 @@ def capture(base: str, locale: str) -> None:
         ctx.add_init_script(
             f"window.localStorage.setItem('app.locale', '{locale}');"
             "window.localStorage.setItem('help_hint_dismissed', '1');"
+            # The data-freshness banner reflects whatever the capture data's
+            # newest day is, not the screen being documented.
+            "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
         )
         page = ctx.new_page()
         agency = f"{base}/agencies/{AGENCY_ID}"
