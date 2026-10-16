@@ -196,7 +196,7 @@ def test_dedup_ch_tiebreak_uses_file_name_when_captured_at_ties():
 
 def test_include_captured_at_flag_adds_last_captured_at_projection():
     """include_captured_at=True surfaces `last_captured_at` (used by
-    agg_route_daily's last_seen_at, see pipeline/analyze.py); default keeps
+    agg_route_daily's last_seen_at, see pipeline/ch_aggregates.py); default keeps
     only the deduped `date`. Pure string check — no ClickHouse instance
     needed. Ports tests/pipeline/test_dedup.py's equivalent assertion
     against the now-deleted `build_dedup_inner_sql`."""
@@ -249,8 +249,8 @@ def test_include_arr_delay_implausible_value_nulls_arr_delay_without_dropping_ro
     must be treated as unmeasured for the `arr_delay` COLUMN ONLY -- the row
     itself must still be selected and its (perfectly valid) `dep_delay` must
     still win `argMax` normally. This query's WHERE/GROUP BY is shared by
-    every caller of `include_captured_at=True` (analyze()'s single
-    `_analyze_deduped` materialization feeds every aggregate, not just the
+    every caller (analyze()'s `_analyze_deduped` load, made with
+    `include_arr_delay=True`, feeds every Postgres-built aggregate, not just the
     dwell/running-time one that needs `arr_delay`), so a row-level filter on
     `arr_delay` here would corrupt `dep_delay` resolution for every other
     aggregate too -- regression coverage for exactly that failure mode."""

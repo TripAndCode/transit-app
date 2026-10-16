@@ -114,14 +114,14 @@ def build_dedup_ch_sql(
     Column order/count in the SELECT list must stay exactly
     `route_code, service_type, scheduled_time, trip_id, date,
     stop_sequence, dep_delay[, last_captured_at][, scheduled_sec][, arr_delay]`
-    — `pipeline/analyze.py` consumes the result by tuple position (`r[-1]` for
-    `last_captured_at` when `include_captured_at`; `arr_delay`, when
-    requested, is always the LAST column regardless of which other optional
-    columns are also requested, so a caller combining every flag still finds
-    it at `r[-1]`). A caller that wants positionally-stable access to
-    `scheduled_sec` too (not just `arr_delay`) should read the result by
-    column name instead (e.g. `pipeline.reports.filters._ch_rows`), since its
-    own position shifts depending on `include_captured_at`.
+    — `pipeline/analyze.py` loads the result into its TEMP tables by
+    position, so `arr_delay`, when requested, is always the LAST column
+    regardless of which other optional columns are also requested (a caller
+    combining every flag still finds it at `r[-1]`). A caller that wants
+    positionally-stable access to `scheduled_sec` too (not just `arr_delay`)
+    should read the result by column name instead (e.g.
+    `pipeline.reports.filters._ch_rows`), since its own position shifts
+    depending on `include_captured_at`.
 
     `include_scheduled_sec` projects the raw seconds-since-service-day-start
     schedule value ingest stored alongside `scheduled_time` (see

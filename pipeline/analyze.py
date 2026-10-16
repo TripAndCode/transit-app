@@ -132,10 +132,11 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 
 # The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
 # (see analyze()), because the dedup is the expensive full-partition scan+sort
-# and every aggregate needs it. The dedup itself runs in ClickHouse
-# (build_dedup_ch_sql, the `updates` fact table's home) and its result is
-# bulk-loaded into the temp table every builder below reads; no builder ever
-# reads `updates` directly.
+# and every aggregate built in Postgres below needs it. The dedup itself runs in
+# ClickHouse (build_dedup_ch_sql, the `updates` fact table's home) and its result
+# is bulk-loaded into the temp table those builders read; none of them reads
+# `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
+# run their own dedup there instead.
 #
 # Two temp tables, because the builders want two different slices and
 # materialising their union means shipping the whole history for the sake of
