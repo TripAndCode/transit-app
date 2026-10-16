@@ -31,3 +31,31 @@ def work_tables(ch_client) -> list[str]:
         "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, '__work_a[0-9]+$')"
     ).result_rows
     return sorted(row[0] for row in rows)
+
+
+def edge_rows() -> list[tuple]:
+    """Observations at the edges a ported builder must match Postgres on, all on service day 2026-09-14."""
+    day = datetime(2026, 9, 14, 8, 0)
+    return [
+        # Mean ties of 1.5 s and -1.5 s, which Postgres rounds away from zero.
+        update_row(day, "t1", 1, scheduled_time="07:10:00", route_code="TIE+"),
+        update_row(day, "t2", 2, scheduled_time="07:20", route_code="TIE+"),
+        update_row(day, "t3", -1, scheduled_time="09:00:00", route_code="TIE-"),
+        update_row(day, "t4", -2, scheduled_time="09:59:59", route_code="TIE-"),
+        # The first and the last hour, one written without a leading zero.
+        update_row(day, "t5", 30, scheduled_time="0:05"),
+        update_row(day, "t6", -30, scheduled_time="23:59:00"),
+        # No scheduled time: in the route tables, not in agg_hour_daily.
+        update_row(day, "t7", 600, scheduled_time=None),
+        # Polled twice: only the later estimate counts.
+        update_row(day, "t8", 999, scheduled_time="10:00:00"),
+        update_row(day + timedelta(minutes=1), "t8", 60, scheduled_time="10:00:00"),
+        # Beyond the plausibility clamp: the dedup drops it.
+        update_row(day, "t9", 10**6, scheduled_time="10:00:00"),
+        # 03:30 on the 15th is still service day 2026-09-14.
+        update_row(datetime(2026, 9, 15, 3, 30), "t10", 45, scheduled_time="03:30:00"),
+        # Keys the route tables keep apart: no service type, a lower-case route, no route.
+        update_row(day, "t11", 90, scheduled_time=None, service_type=None),
+        update_row(day, "t12", 120, scheduled_time=None, route_code="r1"),
+        update_row(day, "t13", 50, scheduled_time=None, route_code=None),
+    ]
