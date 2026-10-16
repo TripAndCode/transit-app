@@ -166,3 +166,19 @@ def test_dropping_an_agencys_work_tables_leaves_another_agencys_alone(ch_client)
 
 def test_a_bootstrapped_clickhouse_lacks_no_aggregate_table(ch_client):
     assert ch_aggregates.missing_tables(ch_client) == []
+
+
+def test_source_months_span_the_agencys_first_to_last_month(ch_client):
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [update_row(datetime(2026, 8, 3, 8, 0), "a", 60), update_row(datetime(2026, 10, 2, 8, 0), "b", 60)],
+    )
+    insert_updates(
+        ch_client,
+        OTHER,
+        [update_row(datetime(2026, 12, 2, 8, 0), "x", 60), update_row(datetime(2027, 1, 5, 8, 0), "y", 60)],
+    )
+    assert ch_aggregates.source_months(ch_client, AGENCY) == [AUG, SEPT, OCT]
+    assert ch_aggregates.source_months(ch_client, OTHER) == [202612, 202701]
+    assert ch_aggregates.source_months(ch_client, 7999) == []

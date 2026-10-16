@@ -295,7 +295,8 @@ def _ch_test_client():
 def _drop_ch_work_tables(client) -> None:
     """Drop every aggregate work table a run left behind, whichever agency's."""
     rows = client.query(
-        "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, '__work_a[0-9]+$')"
+        "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, {pattern:String})",
+        parameters={"pattern": ch_aggregates.WORK_TABLE_PATTERN},
     ).result_rows
     for (name,) in rows:
         client.command(f"DROP TABLE IF EXISTS {name} SYNC")
@@ -303,8 +304,8 @@ def _drop_ch_work_tables(client) -> None:
 
 @pytest.fixture(scope="session")
 def _ch_schema() -> None:
-    """Create the ClickHouse `updates` and `updates_live` tables once per test
-    session.
+    """Create the ClickHouse observation and aggregate tables once per test
+    session, dropping any aggregate work table a previous session left behind.
 
     A no-op when RUN_CH_INTEGRATION isn't set, so requesting `ch_client`
     still skips cleanly instead of attempting a connection — the check must

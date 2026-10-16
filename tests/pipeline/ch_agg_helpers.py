@@ -30,7 +30,8 @@ def update_row(
 def work_tables(ch_client) -> list[str]:
     """Every aggregate work table in the test database."""
     rows = ch_client.query(
-        "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, '__work_a[0-9]+$')"
+        "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, {pattern:String})",
+        parameters={"pattern": ch_aggregates.WORK_TABLE_PATTERN},
     ).result_rows
     return sorted(row[0] for row in rows)
 

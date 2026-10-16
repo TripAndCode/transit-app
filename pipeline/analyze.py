@@ -949,14 +949,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         logger.info("  incremental: every date")
     else:
         logger.info(f"  incremental: {len(rebuild_dates)} date(s) changed since the last run")
-    # Before the transaction, for the reason rebuild_dates is.
     ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, rebuild_dates)
     date_where, date_params = _date_filter(rebuild_dates, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
         # Scoped for the incremental tables, whole for the rest, skipped for
-        # whatever this run is not going to rebuild, and for the
-        # ClickHouse-computed tables, whose copy purges what it replaces. The
+        # whatever this run is not going to rebuild and for _CH_AGG_TABLES. The
         # scope must match what each table's build below produces; see
         # _INCREMENTAL_AGG_TABLES and _NOOP_SKIPPABLE_AGG_TABLES for why the
         # two cannot diverge.

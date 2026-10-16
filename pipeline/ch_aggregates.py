@@ -65,9 +65,10 @@ def _round_half_away(numerator: str, denominator: str, scale: int) -> str:
     return f"(toDecimal64({quotient}, 0) * toDecimal64(1, {scale}) / {unit})"
 
 
-# scheduled_time is "HH:MM" or "HH:MM:SS" and never names an hour past 23 (see
-# pipeline/strategies/_time.py), so its leading field is the hour Postgres's
-# EXTRACT(HOUR FROM scheduled_time) gave.
+# scheduled_time is a time of day written as hours, minutes and optionally
+# seconds, colon-separated, the hours with or without a leading zero, and never
+# past 23 (see pipeline/strategies/_time.py). Its field before the first colon is
+# the hour Postgres's EXTRACT(HOUR FROM scheduled_time) gave.
 _HOUR = "toInt16(splitByChar(':', assumeNotNull(d.scheduled_time))[1])"
 
 
@@ -106,6 +107,10 @@ def _checked(table: str) -> str:
     return table
 
 
+# A ClickHouse regular expression matching every name work_table returns.
+WORK_TABLE_PATTERN = "__work_a[0-9]+$"
+
+
 def work_table(table: str, agency_id: int) -> str:
     """The agency's scratch copy of *table*.
 
@@ -119,7 +124,7 @@ def select_sql(table: str, month: int) -> tuple[str, dict]:
     """The SELECT computing one month of *table* for the agency bound as `agency_id`.
 
     Its columns are COLUMNS[table], in order. A plain SELECT, so a read-only
-    session can run it too (scripts/ch_agg_parity.py).
+    session can run it too.
     """
     spec = _SPECS[_checked(table)]
     where, params = month_where(month)
@@ -163,12 +168,27 @@ def swap(ch, table: str, agency_id: int, months: list[int]) -> None:
 
 
 def source_months(ch, agency_id: int) -> list[int]:
-    """Every month of service date holding a row of the agency's `updates`."""
-    rows = ch.query(
-        f"SELECT DISTINCT toYYYYMM({service_date_ch()}) FROM {UPDATES_TABLE} WHERE agency_id = {{agency_id:UInt16}}",
-        parameters={"agency_id": agency_id},
-    ).result_rows
-    return sorted(row[0] for row in rows)
+    """Every month of service date from the agency's first `updates` row to its last.
+
+    Two probes that the (agency_id, captured_at) sort key serves from either end
+    of the agency's rows, rather than a read of its whole history. A month in the
+    range that holds no row builds nothing, and `swap` then drops it.
+    """
+    ends = []
+    for direction in ("ASC", "DESC"):
+        rows = ch.query(
+            f"SELECT toYYYYMM({service_date_ch()}) FROM {UPDATES_TABLE} "
+            f"WHERE agency_id = {{agency_id:UInt16}} ORDER BY captured_at {direction} LIMIT 1",
+            parameters={"agency_id": agency_id},
+        ).result_rows
+        if not rows:
+            return []
+        ends.append(rows[0][0])
+    months, month = [], ends[0]
+    while month <= ends[1]:
+        months.append(month)
+        month = month + 1 if month % 100 < 12 else (month // 100 + 1) * 100 + 1
+    return months
 
 
 def months_for(ch, table: str, agency_id: int, scope: list[int] | None) -> list[int]:
