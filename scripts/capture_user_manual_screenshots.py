@@ -100,11 +100,27 @@ def first_route_code(page: Page, agency: str) -> str:
     row.wait_for(timeout=15_000)
     # A row shows the route's readable label, not its code; the code is the
     # last path segment of the row's link to the route page.
-    href = row.locator("a[href*='/routes/']").first.get_attribute("href") or ""
+    link = row.locator("a[href*='/routes/']")
+    if link.count() == 0:
+        raise RuntimeError(f"the top ranking row has no route link: {row.inner_text()!r}")
+    href = link.first.get_attribute("href") or ""
     match = re.search(r"/routes/([^/?#]+)", href)
     if not match:
         raise RuntimeError(f"could not read a route code from the ranking row's link: {href!r}")
     return unquote(match.group(1))
+
+
+def new_capture_context(browser, locale: str):
+    """A browser context in *locale*, with the help hint already dismissed and
+    the data-freshness banner too: that banner reflects whatever the capture
+    data's newest day is, not the screen being documented."""
+    ctx = browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
+    ctx.add_init_script(
+        f"window.localStorage.setItem('app.locale', '{locale}');"
+        "window.localStorage.setItem('help_hint_dismissed', '1');"
+        "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
+    )
+    return ctx
 
 
 def capture(base: str, locale: str) -> None:
@@ -113,14 +129,7 @@ def capture(base: str, locale: str) -> None:
         browser = p.chromium.launch()
 
         # 01: fresh context -- no agency chosen yet.
-        ctx = browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
-        ctx.add_init_script(
-            f"window.localStorage.setItem('app.locale', '{locale}');"
-            "window.localStorage.setItem('help_hint_dismissed', '1');"
-            # The data-freshness banner reflects whatever the capture data's
-            # newest day is, not the screen being documented.
-            "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
-        )
+        ctx = new_capture_context(browser, locale)
         page = ctx.new_page()
         page.goto(f"{base}/")
         page.wait_for_load_state("networkidle")
@@ -129,14 +138,7 @@ def capture(base: str, locale: str) -> None:
         ctx.close()
 
         # Every other scene: agency already chosen via the URL.
-        ctx = browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
-        ctx.add_init_script(
-            f"window.localStorage.setItem('app.locale', '{locale}');"
-            "window.localStorage.setItem('help_hint_dismissed', '1');"
-            # The data-freshness banner reflects whatever the capture data's
-            # newest day is, not the screen being documented.
-            "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
-        )
+        ctx = new_capture_context(browser, locale)
         page = ctx.new_page()
         agency = f"{base}/agencies/{AGENCY_ID}"
         route_code = first_route_code(page, agency)
