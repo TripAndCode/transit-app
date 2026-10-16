@@ -256,7 +256,7 @@ _CH_AGG_TABLES = frozenset(ch_aggregates.TABLES)
 # the whole statement to either side.
 #
 # Timing lives inside the shared primitives (`_insert_agg`, `_ch_query`,
-# `_build_and_insert`) rather than at each call site, so an aggregate cannot
+# `_build_and_insert`, `_stream_copy`) rather than at each call site, so an aggregate cannot
 # be added without being measured. The builders that bypass those primitives
 # — a fused `INSERT ... SELECT`, or a hand-rolled `execute_values` — still
 # wrap themselves, which is why the summary reports measured-vs-wall-clock
@@ -765,9 +765,9 @@ def _ch_build_and_insert(
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) -> dict[str, list[int] | None]:
-    """The months each ClickHouse-computed table rebuilds: those holding a changed
-    date, or None for every month.
+def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) -> dict[str, list | None]:
+    """The dates each ClickHouse-computed table recomputes: the ledger's changed
+    dates, or None for all of them.
 
     A table whose ClickHouse rows don't add up to its Postgres copy is rebuilt
     whole, whatever the ledger says. That covers the first run after a table
@@ -786,14 +786,13 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
         raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
     if rebuild_dates is None:
         return dict.fromkeys(ch_aggregates.TABLES)
-    months = ch_aggregates.months_of(rebuild_dates)
-    scopes: dict[str, list[int] | None] = {}
+    scopes: dict[str, list | None] = {}
     for table in ch_aggregates.TABLES:
         with _step(f"{table}: compare stores"):
             agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
         if not agree:
             logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
-        scopes[table] = months if agree else None
+        scopes[table] = rebuild_dates if agree else None
     return scopes
 
 
@@ -854,7 +853,7 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
     logger.info(f"  {table}: {copied} rows")
 
 
-def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list[int] | None]) -> None:
+def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
     Every build finishes before any swap, so a failed build leaves every table as
@@ -866,16 +865,18 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
     The agency's work tables are dropped however the builds end. A process that
     dies can't do that, so ch_aggregates.build drops its own before starting.
     """
-    pending = {table: scope for table, scope in scopes.items() if scope != []}
+    pending = {table: changed for table, changed in scopes.items() if changed != []}
     for table in scopes:
         if table not in pending:
             logger.info(f"  {table}: unchanged, not rebuilt")
+    if not pending:
+        return
     months: dict[str, list[int]] = {}
     try:
-        for table, scope in pending.items():
+        for table, changed in pending.items():
             with _step(f"{table}: ClickHouse build"):
-                months[table] = ch_aggregates.months_for(ch_client, table, agency_id, scope)
-                ch_aggregates.build(ch_client, table, agency_id, months[table])
+                months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
+                ch_aggregates.build(ch_client, table, agency_id, months[table], changed)
         for table in pending:
             with _step(f"{table}: ClickHouse swap"):
                 ch_aggregates.swap(ch_client, table, agency_id, months[table])
@@ -884,8 +885,8 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
             ch_aggregates.drop_work_tables(ch_client, agency_id)
         except Exception:
             logger.exception(f"  could not drop agency {agency_id}'s ClickHouse work tables")
-    for table, scope in pending.items():
-        _copy_ch_aggregate(table, agency_id, scope, conn, ch_client)
+    for table, changed in pending.items():
+        _copy_ch_aggregate(table, agency_id, None if changed is None else months[table], conn, ch_client)
 
 
 def analyze(agency_id: int, conn, ch_client) -> None:

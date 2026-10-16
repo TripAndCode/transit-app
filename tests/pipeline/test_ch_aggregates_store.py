@@ -134,7 +134,7 @@ def test_a_full_rebuild_covers_every_month_in_updates_or_in_the_table(ch_client)
     ch_client.command("TRUNCATE TABLE updates")
     insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 10, 2, 8, 0), "b", 60, scheduled_time=None)])
     assert ch_aggregates.months_for(ch_client, "agg_hour_daily", AGENCY, None) == [AUG, OCT]
-    assert ch_aggregates.months_for(ch_client, "agg_hour_daily", AGENCY, [SEPT]) == [SEPT]
+    assert ch_aggregates.months_for(ch_client, "agg_hour_daily", AGENCY, [date(2026, 9, 14)]) == [SEPT]
 
 
 def test_totals_and_rows_cover_only_the_requested_months_of_the_agency(ch_client):
@@ -182,3 +182,23 @@ def test_source_months_span_the_agencys_first_to_last_month(ch_client):
     assert ch_aggregates.source_months(ch_client, AGENCY) == [AUG, SEPT, OCT]
     assert ch_aggregates.source_months(ch_client, OTHER) == [202612, 202701]
     assert ch_aggregates.source_months(ch_client, 7999) == []
+
+
+def test_build_recomputes_only_the_changed_dates_and_carries_the_rest_of_the_month(ch_client):
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time="08:00:00"),
+            update_row(datetime(2026, 9, 15, 8, 0), "b", 120, scheduled_time="08:00:00"),
+        ],
+    )
+    _rebuild(ch_client, AGENCY, [SEPT])
+    # 2026-09-14's raw rows go, so only a carried-over row can still show it.
+    ch_client.command("TRUNCATE TABLE updates")
+    insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 9, 15, 8, 0), "b", 180, scheduled_time="08:00:00")])
+    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [SEPT], [date(2026, 9, 15)])
+    assert _hour_daily(ch_client, WORK) == [
+        (date(2026, 9, 14), 8, Decimal("1.00"), 1, 60),
+        (date(2026, 9, 15), 8, Decimal("3.00"), 1, 180),
+    ]

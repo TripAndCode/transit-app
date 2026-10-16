@@ -7,7 +7,7 @@ are covered against real engines in tests/pipeline/test_analyze.py; nothing here
 restates them.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
@@ -59,6 +59,10 @@ class FakeClickHouse:
             return _FakeResult([(name,) for name in self._tables])
         if "sum(sum_delay_sec)" in sql:
             return _FakeResult([self._totals])
+        # A work table holds the month of the ledger's date once built, so a
+        # swap replaces that month rather than dropping it.
+        if "toYYYYMM(date)" in sql and "__work_a" in sql:
+            return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
         if "toYYYYMM(" in sql and "FROM updates WHERE" in sql:
             return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
         return _FakeResult([])
@@ -130,7 +134,7 @@ class FakeConn:
         self._ingest_strategy = ingest_strategy
         self._has_static = has_static
         self._pg_totals = pg_totals
-        self._purged = False
+        self._purged: set[str] = set()
 
     def cursor(self):
         return FakeCursor(self)
@@ -146,10 +150,11 @@ class FakeConn:
 
     def respond(self, sql):
         if sql.startswith("DELETE FROM"):
-            self._purged = True
-        # A Postgres copy's totals: what it held, until a purge emptied it.
+            self._purged.add(sql.split()[2])
+        # A Postgres copy's totals: what it held, until its own purge emptied it.
         if "coalesce(sum(sum_delay_sec), 0)" in sql:
-            return ((0, 0, 0) if self._purged else self._pg_totals), []
+            table = sql.split(" FROM ")[1].split()[0]
+            return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
         if "SELECT count(*), coalesce(sum(" in sql:
@@ -426,18 +431,23 @@ def test_the_fingerprint_is_never_empty_without_a_static_schedule():
 # ── The ClickHouse-computed aggregates ───────────────────────────────────
 
 
-def test_a_noop_run_builds_no_clickhouse_aggregate():
+def test_a_noop_run_writes_nothing_to_clickhouse():
     _, ch = _noop_run()
-    assert ch.ch_agg_builds == []
-    assert not [sql for sql, _ in ch.commands if "PARTITION" in sql]
+    assert ch.commands == []
 
 
-def test_a_changed_run_builds_each_clickhouse_aggregate_for_the_changed_month_only():
+def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_over():
     _, ch = _changed_run()
-    assert len(ch.ch_agg_builds) == len(ch_aggregates.TABLES)
-    for _, params in ch.ch_agg_builds:
-        assert params["month_start"] == service_day_start_utc(date(2026, 1, 1))
-        assert params["month_end"] == service_day_start_utc(date(2026, 2, 1))
+    tables = len(ch_aggregates.TABLES)
+    recomputed = [params for sql, params in ch.ch_agg_builds if "FROM updates" in sql]
+    carried = [params for sql, params in ch.ch_agg_builds if "FROM updates" not in sql]
+    day = {
+        "day_start_0": service_day_start_utc(LEDGER_DATE),
+        "day_end_0": service_day_start_utc(LEDGER_DATE + timedelta(days=1)),
+    }
+    assert recomputed == [{"agency_id": AGENCY_ID, **day}] * tables
+    assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
+    assert len([sql for sql, _ in ch.commands if "REPLACE PARTITION (7, 202601)" in sql]) == tables
 
 
 def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():

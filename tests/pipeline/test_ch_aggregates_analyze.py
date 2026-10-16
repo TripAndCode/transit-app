@@ -10,6 +10,7 @@ from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
 from tests.pipeline.ch_agg_helpers import ch_rows, pg_rows, record_builds, update_row, work_tables
+from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 SEPT = 202609
 OCT = 202610
@@ -108,10 +109,10 @@ def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_co
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
     real = ch_aggregates.select_sql
 
-    def select_sql(table, month):
+    def select_sql(table, month, days=None):
         if table == ch_aggregates.TABLES[-1]:
             raise RuntimeError("injected build failure")
-        return real(table, month)
+        return real(table, month, days)
 
     monkeypatch.setattr(ch_aggregates, "select_sql", select_sql)
     with pytest.raises(RuntimeError, match="injected build failure"):
@@ -142,3 +143,27 @@ def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_co
     analyze(agency_id, pg_conn, ch_client)  # the next run brings the two stores back together
     for table in ch_aggregates.TABLES:
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) != before[table], table
+
+
+def test_an_incremental_run_recomputes_only_the_changed_dates(pg_conn, agency_id, ch_client, monkeypatch):
+    insert_updates(
+        ch_client,
+        agency_id,
+        [update_row(datetime(2026, 9, 14, 8, 0), "a", 60), update_row(datetime(2026, 10, 2, 8, 0), "b", 120)],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    calls = []
+    real = ch_aggregates.select_sql
+
+    def select_sql(table, month, days=None):
+        calls.append((table, month, days))
+        return real(table, month) if days is None else real(table, month, days)
+
+    monkeypatch.setattr(ch_aggregates, "select_sql", select_sql)
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 10, 3, 8, 0), "c", 180)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert calls == [(table, OCT, [date(2026, 10, 3)]) for table in ch_aggregates.TABLES]
+    for table in ch_aggregates.TABLES:
+        assert stored_rows(pg_conn, agency_id, table) == legacy_rows(pg_conn, ch_client, agency_id, table), table
+        assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table), table

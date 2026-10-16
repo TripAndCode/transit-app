@@ -5,10 +5,11 @@ ClickHouse table with the name and columns of its Postgres counterpart.
 `pipeline.analyze` drives the build and copies the agency's rows into the
 Postgres table the API reads; this module is the ClickHouse side only.
 
-A run rebuilds whole months of service date. Each table is partitioned by
-(agency_id, month), a run computes its months into the agency's work table, and
-`swap` then moves each month into place with REPLACE PARTITION, so a reader
-never sees a month half built.
+A run replaces whole months of service date. Each table is partitioned by
+(agency_id, month), a run assembles each month it touches in the agency's work
+table, recomputing from `updates` only the dates whose rows changed, and `swap`
+then moves each month into place with REPLACE PARTITION, so a reader never sees
+a month half built.
 
 Every value equals what the Postgres builder produced, column for column.
 Means are rounded half away from zero from exact integer sums, which is what
@@ -49,6 +50,21 @@ def month_where(month: int) -> tuple[str, dict]:
         "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64}",
         {"month_start": service_day_start_utc(first), "month_end": service_day_start_utc(following)},
     )
+
+
+def days_where(days: list[date]) -> tuple[str, dict]:
+    """A predicate selecting the `updates` rows whose service date is one of *days*.
+
+    Ranges on the stored instant, for the reason `month_where` gives.
+    """
+    clauses, params = [], {}
+    for i, day in enumerate(days):
+        clauses.append(
+            f"(u.captured_at >= {{day_start_{i}:DateTime64}} AND u.captured_at < {{day_end_{i}:DateTime64}})"
+        )
+        params[f"day_start_{i}"] = service_day_start_utc(day)
+        params[f"day_end_{i}"] = service_day_start_utc(day + timedelta(days=1))
+    return " OR ".join(clauses), params
 
 
 def _round_half_away(numerator: str, denominator: str, scale: int) -> str:
@@ -120,31 +136,43 @@ def work_table(table: str, agency_id: int) -> str:
     return f"{_checked(table)}__work_a{int(agency_id)}"
 
 
-def select_sql(table: str, month: int) -> tuple[str, dict]:
-    """The SELECT computing one month of *table* for the agency bound as `agency_id`.
+def select_sql(table: str, month: int, days: list[date] | None = None) -> tuple[str, dict]:
+    """The SELECT computing *table*'s rows for the agency bound as `agency_id`:
+    those of one month, or of only *days* within it.
 
     Its columns are COLUMNS[table], in order. A plain SELECT, so a read-only
     session can run it too.
     """
     spec = _SPECS[_checked(table)]
-    where, params = month_where(month)
+    where, params = month_where(month) if days is None else days_where(days)
     source = build_dedup_ch_sql(extra_where=where, include_captured_at=spec.with_captured_at)
     return spec.select(source), params
 
 
-def build(ch, table: str, agency_id: int, months: list[int]) -> None:
+def build(ch, table: str, agency_id: int, months: list[int], changed: list[date] | None = None) -> None:
     """Compute *months* of *table* for the agency into its work table.
 
-    One INSERT per month, so the dedup's GROUP BY holds one month of the
-    agency's rows at a time rather than its whole history. The work table is
-    dropped first, which also clears one a dead run left behind.
+    One INSERT per month, so the dedup's GROUP BY holds at most one month of the
+    agency's rows rather than its whole history. Given *changed*, the dates whose
+    source rows moved, only those are recomputed from `updates`; the rest of each
+    month is copied from *table*, where the last run left it, so a run that adds
+    a day reads one day of raw rows. The work table is dropped first, which also
+    clears one a dead run left behind.
     """
     work = work_table(table, agency_id)
     ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
     ch.command(f"CREATE TABLE {work} AS {table}")
     columns = ", ".join(COLUMNS[table])
     for month in months:
-        sql, params = select_sql(table, month)
+        days = [day for day in changed or () if day.year * 100 + day.month == month]
+        if days:
+            ch.command(
+                f"INSERT INTO {work} ({columns}) SELECT {columns} FROM {table} "
+                "WHERE agency_id = {agency_id:Int32} AND toYYYYMM(date) = {month:UInt32} "
+                "AND NOT has({days:Array(Date)}, date)",
+                parameters={"agency_id": agency_id, "month": month, "days": days},
+            )
+        sql, params = select_sql(table, month, days or None)
         ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 
@@ -191,12 +219,12 @@ def source_months(ch, agency_id: int) -> list[int]:
     return months
 
 
-def months_for(ch, table: str, agency_id: int, scope: list[int] | None) -> list[int]:
-    """The months a rebuild of *table* covers: *scope*, or, when None, every month
-    the agency has in `updates` or in *table*, so a month whose source rows are
-    all gone is emptied too."""
-    if scope is not None:
-        return scope
+def months_for(ch, table: str, agency_id: int, changed: list[date] | None) -> list[int]:
+    """The months a rebuild of *table* covers: those holding a *changed* date, or,
+    when None, every month the agency has in `updates` or in *table*, so a month
+    whose source rows are all gone is emptied too."""
+    if changed is not None:
+        return months_of(changed)
     stored = ch.query(
         f"SELECT DISTINCT toYYYYMM(date) FROM {_checked(table)} WHERE agency_id = {{agency_id:Int32}}",
         parameters={"agency_id": agency_id},

@@ -92,9 +92,9 @@ def record_builds(monkeypatch) -> list[tuple[str, list[int]]]:
     calls: list[tuple[str, list[int]]] = []
     real = ch_aggregates.build
 
-    def build(ch, table, agency_id, months):
+    def build(ch, table, agency_id, months, changed=None):
         calls.append((table, months))
-        real(ch, table, agency_id, months)
+        real(ch, table, agency_id, months, changed)
 
     monkeypatch.setattr(ch_aggregates, "build", build)
     return calls
