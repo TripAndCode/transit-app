@@ -765,11 +765,48 @@ def _ch_build_and_insert(
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _ch_agg_scopes(rebuild_dates: list | None) -> dict[str, list[int] | None]:
+def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) -> dict[str, list[int] | None]:
     """The months each ClickHouse-computed table rebuilds: those holding a changed
-    date, or None for every month."""
-    months = None if rebuild_dates is None else ch_aggregates.months_of(rebuild_dates)
-    return dict.fromkeys(ch_aggregates.TABLES, months)
+    date, or None for every month.
+
+    A table whose ClickHouse rows don't add up to its Postgres copy is rebuilt
+    whole, whatever the ledger says. That covers the first run after a table
+    moves to ClickHouse, which starts it empty, and a run after one whose
+    ClickHouse swap landed but whose Postgres transaction rolled back. Only that
+    table goes whole: the rest keep the ledger's dates, so moving a table never
+    forces a full rebuild of the agency. Comparing the two stores, rather than
+    asking whether ClickHouse holds any row, keeps an agency whose data yields no
+    rows for a table from rebuilding it on every run.
+    """
+    if rebuild_dates is None:
+        return dict.fromkeys(ch_aggregates.TABLES)
+    months = ch_aggregates.months_of(rebuild_dates)
+    scopes: dict[str, list[int] | None] = {}
+    for table in ch_aggregates.TABLES:
+        with _step(f"{table}: compare stores"):
+            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
+        if not agree:
+            logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
+        scopes[table] = months if agree else None
+    return scopes
+
+
+def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+    """`ch_aggregates.totals` for the Postgres copy. *months* is None or non-empty."""
+    where = "agency_id = %s"
+    params: list = [agency_id]
+    if months is not None:
+        bounds = [ch_aggregates.month_bounds(month) for month in months]
+        where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
+        params += [day for pair in bounds for day in pair]
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*), coalesce(sum(samples), 0)::bigint, coalesce(sum(sum_delay_sec), 0)::bigint "
+            f"FROM {table} WHERE {where}",
+            params,
+        )
+        count, samples, delay = cur.fetchone()
+    return int(count), int(samples), int(delay)
 
 
 def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn, ch_client) -> None:
@@ -888,7 +925,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     else:
         logger.info(f"  incremental: {len(rebuild_dates)} date(s) changed since the last run")
     # Before the transaction, for the reason rebuild_dates is.
-    ch_scopes = _ch_agg_scopes(rebuild_dates)
+    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, rebuild_dates)
     date_where, date_params = _date_filter(rebuild_dates, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────

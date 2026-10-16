@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 import pytest
 
+from pipeline import analyze as analyze_mod
 from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
@@ -63,3 +64,36 @@ def test_a_month_whose_rows_are_gone_is_emptied_in_both_stores(pg_conn, agency_i
     analyze(agency_id, pg_conn, ch_client)
     for table in ch_aggregates.TABLES:
         assert _dates(ch_client, pg_conn, agency_id, table) == ([date(2026, 9, 14)], [date(2026, 9, 14)]), table
+
+
+def test_a_table_clickhouse_lost_is_rebuilt_whole_without_rebuilding_the_agency(
+    pg_conn, agency_id, ch_client, monkeypatch
+):
+    """A table that has just moved starts empty in ClickHouse while its Postgres
+    copy holds the legacy rows. Only that table is rebuilt whole."""
+    insert_updates(
+        ch_client,
+        agency_id,
+        [update_row(datetime(2026, 9, 14, 8, 0), "a", 60), update_row(datetime(2026, 10, 2, 8, 0), "b", 120)],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    served = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.TABLES}
+    for table in ch_aggregates.TABLES:
+        ch_client.command(f"TRUNCATE TABLE {table}")
+    built = record_builds(monkeypatch)
+
+    analyze(agency_id, pg_conn, ch_client)  # the ledger says nothing changed
+
+    assert built == [(table, [SEPT, OCT]) for table in ch_aggregates.TABLES]
+    assert "alltime: ClickHouse scan" not in analyze_mod._step_ms, "the whole agency was rebuilt"
+    for table in ch_aggregates.TABLES:
+        assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) == served[table], table
+
+
+def test_a_table_the_agency_has_no_rows_for_is_not_rebuilt_on_every_run(pg_conn, agency_id, ch_client, monkeypatch):
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time=None)])
+    analyze(agency_id, pg_conn, ch_client)
+    assert pg_rows(pg_conn, agency_id, "agg_hour_daily") == []
+    built = record_builds(monkeypatch)
+    analyze(agency_id, pg_conn, ch_client)
+    assert built == []

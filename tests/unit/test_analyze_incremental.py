@@ -41,8 +41,9 @@ class _EmptyStream:
 
 
 class FakeClickHouse:
-    def __init__(self, ledger):
+    def __init__(self, ledger, *, totals=(0, 0, 0)):
         self._ledger = ledger
+        self._totals = totals
         self.queries: list[tuple[str, dict]] = []
         self.streams: list[str] = []
         self.commands: list[tuple[str, dict]] = []
@@ -53,6 +54,10 @@ class FakeClickHouse:
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
             return _FakeResult(self._ledger)
+        if "sum(sum_delay_sec)" in sql:
+            return _FakeResult([self._totals])
+        if "toYYYYMM(" in sql and "FROM updates WHERE" in sql:
+            return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
         return _FakeResult([])
 
     def query_row_block_stream(self, sql, parameters=None):
@@ -115,12 +120,14 @@ class FakeCursor:
 class FakeConn:
     """Answers only the probes `analyze` makes; every builder returns no rows."""
 
-    def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False):
+    def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0)):
         self.executed: list[str] = []
         self._fingerprint: str | None = None
         self._ledger_rows = ledger_rows
         self._ingest_strategy = ingest_strategy
         self._has_static = has_static
+        self._pg_totals = pg_totals
+        self._purged = False
 
     def cursor(self):
         return FakeCursor(self)
@@ -135,6 +142,11 @@ class FakeConn:
         return TRANSACTION_STATUS_IDLE
 
     def respond(self, sql):
+        if sql.startswith("DELETE FROM"):
+            self._purged = True
+        # A Postgres copy's totals: what it held, until a purge emptied it.
+        if "coalesce(sum(sum_delay_sec), 0)" in sql:
+            return ((0, 0, 0) if self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
         if "SELECT count(*), coalesce(sum(" in sql:
@@ -153,7 +165,7 @@ class FakeConn:
 LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
 
 
-def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
+def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0)):
     """Run `analyze`, returning the fakes.
 
     *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
@@ -165,6 +177,7 @@ def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
         ledger_rows=stored if stored is not None else ledger,
         ingest_strategy=ingest_strategy,
         has_static=has_static,
+        pg_totals=pg_totals,
     )
     conn._fingerprint = analyze_mod._static_fingerprint(
         AGENCY_ID, conn, has_static=has_static, ingest_strategy=ingest_strategy
@@ -420,3 +433,11 @@ def test_a_changed_run_builds_each_clickhouse_aggregate_for_the_changed_month_on
     for _, params in ch.ch_agg_builds:
         assert params["month_start"] == service_day_start_utc(date(2026, 1, 1))
         assert params["month_end"] == service_day_start_utc(date(2026, 2, 1))
+
+
+def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():
+    conn, ch = _noop_run(pg_totals=(1, 1, 60))
+    assert len(ch.ch_agg_builds) == len(ch_aggregates.TABLES)
+    assert ch.alltime_scans == []
+    for table in ch_aggregates.TABLES:
+        assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
