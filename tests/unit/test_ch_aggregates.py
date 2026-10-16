@@ -33,3 +33,9 @@ def test_month_where_bounds_the_month_at_the_service_day_cutover():
         "month_start": datetime(2026, 8, 31, 19, 0, tzinfo=timezone.utc),
         "month_end": datetime(2026, 9, 30, 19, 0, tzinfo=timezone.utc),
     }
+
+
+def test_work_tables_are_named_per_agency_and_only_for_registered_tables():
+    assert ch_aggregates.work_table("agg_hour_daily", 8) == "agg_hour_daily__work_a8"
+    with pytest.raises(ValueError, match="Not a ClickHouse aggregate"):
+        ch_aggregates.work_table("agg_nope", 8)

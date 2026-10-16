@@ -62,3 +62,18 @@ PARTITION BY toYYYYMMDD(captured_at)
 ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)
 TTL toDateTime(captured_at) + INTERVAL 3 DAY DELETE
 SETTINGS allow_nullable_key = 1;
+
+-- Aggregates computed in ClickHouse by pipeline/ch_aggregates.py. Each has the
+-- columns and types of the Postgres table of the same name, which holds the copy
+-- the API reads. One partition per agency and month of service date, the unit a
+-- run replaces.
+CREATE TABLE IF NOT EXISTS agg_hour_daily (
+    agency_id     Int32,
+    date          Date,
+    hour          Int16,
+    avg_min       Decimal(18, 2),
+    samples       Int32,
+    sum_delay_sec Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, hour);

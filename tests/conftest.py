@@ -8,6 +8,7 @@ import pytest
 from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
+from pipeline import ch_aggregates
 from tests.sharding import assign_shards, shard_from_env
 
 # Host ports the dev Postgres is published on (see .claude/hooks/guard_dev_db.py).
@@ -291,6 +292,15 @@ def _ch_test_client():
     return clickhouse_connect.get_client(**{**_CH_TEST, "port": int(_CH_TEST["port"])})
 
 
+def _drop_ch_work_tables(client) -> None:
+    """Drop every aggregate work table a run left behind, whichever agency's."""
+    rows = client.query(
+        "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, '__work_a[0-9]+$')"
+    ).result_rows
+    for (name,) in rows:
+        client.command(f"DROP TABLE IF EXISTS {name} SYNC")
+
+
 @pytest.fixture(scope="session")
 def _ch_schema() -> None:
     """Create the ClickHouse `updates` and `updates_live` tables once per test
@@ -307,6 +317,9 @@ def _ch_schema() -> None:
     try:
         client.command("DROP TABLE IF EXISTS updates_live")
         client.command("DROP TABLE IF EXISTS updates")
+        _drop_ch_work_tables(client)
+        for table in ch_aggregates.TABLES:
+            client.command(f"DROP TABLE IF EXISTS {table}")
         _apply_ch_schema(client)
     finally:
         client.close()
@@ -319,8 +332,9 @@ def ch_client(_ch_schema):
     Lives in the root conftest, not a subdirectory one, because analyze()'s
     dedup materialization means tests/api/ and tests/query/ need a ClickHouse
     client too, not just tests/pipeline/ — a root conftest fixture is visible
-    to every subdirectory. Truncate (not drop+recreate) both `updates` and
-    `updates_live` before each test for isolation, since ClickHouse has no
+    to every subdirectory. Truncate (not drop+recreate) the observation and
+    aggregate tables, and drop any aggregate work table, before each test
+    for isolation, since ClickHouse has no
     transactional rollback to lean on like the pg_conn fixture does — the
     schema itself never changes mid-session, so only `_ch_schema` needs to pay
     MergeTree's CREATE TABLE cost, once. The skip (rather than a file-level
@@ -333,6 +347,9 @@ def ch_client(_ch_schema):
     client = _ch_test_client()
     client.command("TRUNCATE TABLE IF EXISTS updates")
     client.command("TRUNCATE TABLE IF EXISTS updates_live")
+    for table in ch_aggregates.TABLES:
+        client.command(f"TRUNCATE TABLE IF EXISTS {table}")
+    _drop_ch_work_tables(client)
     yield client
     client.close()
 
