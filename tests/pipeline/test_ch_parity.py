@@ -6,7 +6,7 @@ for every ClickHouse-computed table with what the frozen legacy builder
 """
 
 import pathlib
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -17,7 +17,7 @@ from pipeline.clickhouse import insert_updates
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import edge_rows
+from tests.pipeline.ch_agg_helpers import JST, edge_rows
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -76,3 +76,52 @@ def test_agg_hour_daily_rounds_mean_ties_away_from_zero(pg_conn, agency_id, ch_c
             10: Decimal("1.00"),
             23: Decimal("-0.50"),
         }
+
+
+def test_route_daily_and_trend_match_hand_computed_values_in_both_stores(pg_conn, agency_id, ch_client):
+    insert_updates(ch_client, agency_id, edge_rows())
+    analyze(agency_id, pg_conn, ch_client)
+
+    daily = (
+        "SELECT route_code, service_type, avg_delay_sec, worst_delay_sec, trips_observed, samples, sum_delay_sec "
+        "FROM agg_route_daily WHERE agency_id = {} AND date = '2026-09-14'"
+    )
+    expected_daily = {
+        ("R1", "平日"): (141, 600, 5, 5, 705),
+        ("R1", ""): (90, 90, 1, 1, 90),
+        ("r1", "平日"): (120, 120, 1, 1, 120),
+        ("TIE+", "平日"): (2, 2, 2, 2, 3),
+        ("TIE-", "平日"): (-2, -1, 2, 2, -3),
+    }
+    trend = (
+        "SELECT route_code, service_type, avg_min, sum_late_sec "
+        "FROM agg_daily_trend WHERE agency_id = {} AND date = '2026-09-14'"
+    )
+    expected_trend = {
+        ("R1", "平日"): (2.35, 735),
+        ("R1", ""): (1.5, 90),
+        ("r1", "平日"): (2.0, 120),
+        ("TIE+", "平日"): (0.03, 3),
+        ("TIE-", "平日"): (-0.03, 0),
+    }
+    with pg_conn.cursor() as cur:
+        cur.execute(daily.format("%s"), (agency_id,))
+        pg_daily = cur.fetchall()
+        cur.execute(trend.format("%s"), (agency_id,))
+        pg_trend = cur.fetchall()
+        cur.execute(
+            "SELECT last_seen_at FROM agg_route_daily "
+            "WHERE agency_id = %s AND route_code = 'R1' AND service_type = '平日'",
+            (agency_id,),
+        )
+        assert cur.fetchone()[0] == datetime(2026, 9, 15, 3, 30, tzinfo=JST)
+    ch_daily = ch_client.query(daily.format("{agency_id:Int32}"), parameters={"agency_id": agency_id}).result_rows
+    ch_trend = ch_client.query(trend.format("{agency_id:Int32}"), parameters={"agency_id": agency_id}).result_rows
+
+    for rows in (pg_daily, ch_daily):
+        assert {(r[0], r[1]): tuple(r[2:]) for r in rows} == expected_daily
+    for rows in (pg_trend, ch_trend):
+        got = {(r[0], r[1]): (float(r[2]), r[3]) for r in rows}
+        assert got.keys() == expected_trend.keys()
+        for key, (avg_min, late) in expected_trend.items():
+            assert got[key] == (pytest.approx(avg_min, abs=1e-6), late), key

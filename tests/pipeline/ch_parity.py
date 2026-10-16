@@ -19,6 +19,36 @@ _DEDUPED_COLUMNS = (
 )
 
 LEGACY_SQL = {
+    "agg_daily_trend": """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
+            SELECT
+                %(agency_id)s AS agency_id,
+                date, route_code,
+                COALESCE(service_type, '') AS service_type,
+                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec,
+                SUM(GREATEST(dep_delay, 0)) AS sum_late_sec
+            FROM deduped
+            GROUP BY date, route_code, COALESCE(service_type, '')
+            ORDER BY date, route_code
+        """,
+    "agg_route_daily": """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
+            SELECT
+                %(agency_id)s AS agency_id,
+                date::text, route_code,
+                COALESCE(service_type, '') AS service_type,
+                ROUND(AVG(dep_delay))::int AS avg_delay_sec,
+                MAX(dep_delay)             AS worst_delay_sec,
+                COUNT(DISTINCT trip_id)    AS trips_observed,
+                COUNT(*)                   AS samples,
+                MAX(captured_at)           AS last_seen_at,
+                SUM(dep_delay)             AS sum_delay_sec
+            FROM deduped
+            GROUP BY date, route_code, COALESCE(service_type, '')
+            ORDER BY date, route_code
+        """,
     "agg_hour_daily": """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT

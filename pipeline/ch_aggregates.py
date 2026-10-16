@@ -82,6 +82,49 @@ def _round_half_away(numerator: str, denominator: str, scale: int) -> str:
     return f"(toDecimal64({quotient}, 0) * toDecimal64(1, {scale}) / {unit})"
 
 
+# The route-keyed tables skip a row with no route and file a NULL service type
+# under '', grouping by that same expression so NULL and '' never split a key.
+_ROUTE_KEYS = "d.date, d.route_code, ifNull(d.service_type, '')"
+
+
+def _daily_trend(source: str) -> str:
+    avg_min = _round_half_away("s", "60 * n", 2)
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, service_type,
+               toFloat32({avg_min}) AS avg_min, toInt32(n) AS samples,
+               s AS sum_delay_sec, late AS sum_late_sec
+        FROM (
+            SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
+                   ifNull(d.service_type, '') AS service_type,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   sum(greatest(assumeNotNull(d.dep_delay), 0)) AS late
+            FROM ({source}) AS d
+            WHERE d.route_code IS NOT NULL
+            GROUP BY {_ROUTE_KEYS}
+        )
+    """
+
+
+def _route_daily(source: str) -> str:
+    avg_delay_sec = _round_half_away("s", "n", 0)
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, service_type,
+               toInt32({avg_delay_sec}) AS avg_delay_sec, worst AS worst_delay_sec,
+               toInt32(trips) AS trips_observed, toInt32(n) AS samples,
+               last_seen AS last_seen_at, s AS sum_delay_sec
+        FROM (
+            SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
+                   ifNull(d.service_type, '') AS service_type,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   max(assumeNotNull(d.dep_delay)) AS worst, uniqExact(d.trip_id) AS trips,
+                   max(d.last_captured_at) AS last_seen
+            FROM ({source}) AS d
+            WHERE d.route_code IS NOT NULL
+            GROUP BY {_ROUTE_KEYS}
+        )
+    """
+
+
 # scheduled_time is a time of day written as hours, minutes and optionally
 # seconds, colon-separated, the hours with or without a leading zero, and never
 # past 23 (see pipeline/strategies/_time.py). Its field before the first colon is
@@ -112,6 +155,26 @@ class _Spec(NamedTuple):
 # Build and swap order. Each spec's columns are its Postgres table's, in the
 # order the copy writes them.
 _SPECS: dict[str, _Spec] = {
+    "agg_daily_trend": _Spec(
+        ("agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec", "sum_late_sec"),
+        _daily_trend,
+    ),
+    "agg_route_daily": _Spec(
+        (
+            "agency_id",
+            "date",
+            "route_code",
+            "service_type",
+            "avg_delay_sec",
+            "worst_delay_sec",
+            "trips_observed",
+            "samples",
+            "last_seen_at",
+            "sum_delay_sec",
+        ),
+        _route_daily,
+        with_captured_at=True,
+    ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
 }
 TABLES: tuple[str, ...] = tuple(_SPECS)
