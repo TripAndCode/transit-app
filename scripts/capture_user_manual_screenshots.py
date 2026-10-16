@@ -112,13 +112,14 @@ def first_route_code(page: Page, agency: str) -> str:
 
 def new_capture_context(browser, locale: str):
     """A browser context in *locale*, with the help hint already dismissed and
-    the data-freshness banner too: that banner reflects whatever the capture
-    data's newest day is, not the screen being documented."""
+    the data-freshness and feed-health banners too: they reflect the capture
+    data's state, not the screen being documented."""
     ctx = browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
     ctx.add_init_script(
         f"window.localStorage.setItem('app.locale', '{locale}');"
         "window.localStorage.setItem('help_hint_dismissed', '1');"
         "window.sessionStorage.setItem('ds_banner_dismissed_at', String(Date.now()));"
+        "window.sessionStorage.setItem('fh_banner_dismissed_at', String(Date.now()));"
     )
     return ctx
 
