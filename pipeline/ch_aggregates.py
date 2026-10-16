@@ -212,3 +212,13 @@ def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[in
     sql, params = _agency_rows("count(), sum(samples), sum(sum_delay_sec)", table, agency_id, months)
     count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(samples), int(delay)
+
+
+def missing_tables(ch) -> list[str]:
+    """The tables in TABLES the connected database lacks."""
+    rows = ch.query(
+        "SELECT name FROM system.tables WHERE database = currentDatabase() AND has({names:Array(String)}, name)",
+        parameters={"names": list(TABLES)},
+    ).result_rows
+    present = {row[0] for row in rows}
+    return [table for table in TABLES if table not in present]

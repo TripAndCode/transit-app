@@ -97,3 +97,48 @@ def test_a_table_the_agency_has_no_rows_for_is_not_rebuilt_on_every_run(pg_conn,
     built = record_builds(monkeypatch)
     analyze(agency_id, pg_conn, ch_client)
     assert built == []
+
+
+def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_conn, agency_id, ch_client, monkeypatch):
+    """The last table's build fails, after every earlier table's has finished:
+    nothing was swapped, so every table stands in both stores."""
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
+    analyze(agency_id, pg_conn, ch_client)
+    before = {t: (ch_rows(ch_client, agency_id, t), pg_rows(pg_conn, agency_id, t)) for t in ch_aggregates.TABLES}
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
+    real = ch_aggregates.select_sql
+
+    def select_sql(table, month):
+        if table == ch_aggregates.TABLES[-1]:
+            raise RuntimeError("injected build failure")
+        return real(table, month)
+
+    monkeypatch.setattr(ch_aggregates, "select_sql", select_sql)
+    with pytest.raises(RuntimeError, match="injected build failure"):
+        analyze(agency_id, pg_conn, ch_client)
+
+    after = {t: (ch_rows(ch_client, agency_id, t), pg_rows(pg_conn, agency_id, t)) for t in ch_aggregates.TABLES}
+    assert after == before
+    assert work_tables(ch_client) == []
+
+
+def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_conn, agency_id, ch_client, monkeypatch):
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
+    analyze(agency_id, pg_conn, ch_client)
+    before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.TABLES}
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
+    real = ch_aggregates.rows_sql
+
+    def rows_sql(table, agency, months):
+        sql, params = real(table, agency, months)
+        return sql + " LIMIT 0", params
+
+    monkeypatch.setattr(ch_aggregates, "rows_sql", rows_sql)
+    with pytest.raises(RuntimeError, match="does not match ClickHouse"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.TABLES} == before
+
+    monkeypatch.undo()
+    analyze(agency_id, pg_conn, ch_client)  # the next run brings the two stores back together
+    for table in ch_aggregates.TABLES:
+        assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) != before[table], table

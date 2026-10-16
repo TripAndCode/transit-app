@@ -777,7 +777,13 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
     forces a full rebuild of the agency. Comparing the two stores, rather than
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
+
+    It first checks that ClickHouse has every such table, so a store that
+    predates one stops the run before anything is written.
     """
+    missing = ch_aggregates.missing_tables(ch_client)
+    if missing:
+        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
     if rebuild_dates is None:
         return dict.fromkeys(ch_aggregates.TABLES)
     months = ch_aggregates.months_of(rebuild_dates)
@@ -814,7 +820,9 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
     months in *scope*, or every row of the agency when it is None.
 
     A full rebuild purges the whole agency rather than the months ClickHouse
-    holds, so a Postgres row in a month ClickHouse never had goes too.
+    holds, so a Postgres row in a month ClickHouse never had goes too. The copy is
+    then checked against ClickHouse, and a mismatch raises, which rolls the run's
+    Postgres transaction back.
     """
     with _step(f"{table}: purge Postgres copy"), conn.cursor() as cur:
         if scope is None:
@@ -836,29 +844,46 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
             scan_label=f"{table}: ClickHouse read",
             load_label=f"{table}: COPY into Postgres",
         )
+    with _step(f"{table}: verify copy"):
+        expected = ch_aggregates.totals(ch_client, table, agency_id, scope)
+        actual = _pg_totals(conn, table, agency_id, scope)
+    if actual != expected:
+        raise RuntimeError(
+            f"{table}: Postgres copy {actual} does not match ClickHouse {expected} for agency {agency_id}"
+        )
     logger.info(f"  {table}: {copied} rows")
 
 
 def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list[int] | None]) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
-    Every build finishes before any swap, so the swaps run back to back. A swap
-    is not undone if the Postgres transaction rolls back afterwards; the ledger
-    rolls back with it, so the next run rebuilds the same months.
+    Every build finishes before any swap, so a failed build leaves every table as
+    it stood, and the swaps run back to back. A swap is not undone if the
+    Postgres transaction rolls back afterwards. The ledger rolls back with it, so
+    the next run rebuilds the same months, and _ch_agg_scopes rebuilds whole a
+    table whose two stores no longer agree.
+
+    The agency's work tables are dropped however the builds end. A process that
+    dies can't do that, so ch_aggregates.build drops its own before starting.
     """
     pending = {table: scope for table, scope in scopes.items() if scope != []}
     for table in scopes:
         if table not in pending:
             logger.info(f"  {table}: unchanged, not rebuilt")
     months: dict[str, list[int]] = {}
-    for table, scope in pending.items():
-        with _step(f"{table}: ClickHouse build"):
-            months[table] = ch_aggregates.months_for(ch_client, table, agency_id, scope)
-            ch_aggregates.build(ch_client, table, agency_id, months[table])
-    for table in pending:
-        with _step(f"{table}: ClickHouse swap"):
-            ch_aggregates.swap(ch_client, table, agency_id, months[table])
-    ch_aggregates.drop_work_tables(ch_client, agency_id)
+    try:
+        for table, scope in pending.items():
+            with _step(f"{table}: ClickHouse build"):
+                months[table] = ch_aggregates.months_for(ch_client, table, agency_id, scope)
+                ch_aggregates.build(ch_client, table, agency_id, months[table])
+        for table in pending:
+            with _step(f"{table}: ClickHouse swap"):
+                ch_aggregates.swap(ch_client, table, agency_id, months[table])
+    finally:
+        try:
+            ch_aggregates.drop_work_tables(ch_client, agency_id)
+        except Exception:
+            logger.exception(f"  could not drop agency {agency_id}'s ClickHouse work tables")
     for table, scope in pending.items():
         _copy_ch_aggregate(table, agency_id, scope, conn, ch_client)
 

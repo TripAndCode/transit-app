@@ -162,3 +162,7 @@ def test_dropping_an_agencys_work_tables_leaves_another_agencys_alone(ch_client)
         ch_aggregates.build(ch_client, "agg_hour_daily", agency_id, [])
     ch_aggregates.drop_work_tables(ch_client, AGENCY)
     assert work_tables(ch_client) == [ch_aggregates.work_table("agg_hour_daily", OTHER)]
+
+
+def test_a_bootstrapped_clickhouse_lacks_no_aggregate_table(ch_client):
+    assert ch_aggregates.missing_tables(ch_client) == []

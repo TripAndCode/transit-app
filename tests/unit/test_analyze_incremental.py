@@ -41,9 +41,10 @@ class _EmptyStream:
 
 
 class FakeClickHouse:
-    def __init__(self, ledger, *, totals=(0, 0, 0)):
+    def __init__(self, ledger, *, totals=(0, 0, 0), tables=ch_aggregates.TABLES):
         self._ledger = ledger
         self._totals = totals
+        self._tables = tables
         self.queries: list[tuple[str, dict]] = []
         self.streams: list[str] = []
         self.commands: list[tuple[str, dict]] = []
@@ -54,6 +55,8 @@ class FakeClickHouse:
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
             return _FakeResult(self._ledger)
+        if "FROM system.tables" in sql:
+            return _FakeResult([(name,) for name in self._tables])
         if "sum(sum_delay_sec)" in sql:
             return _FakeResult([self._totals])
         if "toYYYYMM(" in sql and "FROM updates WHERE" in sql:
@@ -165,7 +168,9 @@ class FakeConn:
 LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
 
 
-def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0)):
+def _run(
+    ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0), ch_tables=ch_aggregates.TABLES
+):
     """Run `analyze`, returning the fakes.
 
     *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
@@ -182,7 +187,7 @@ def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_tota
     conn._fingerprint = analyze_mod._static_fingerprint(
         AGENCY_ID, conn, has_static=has_static, ingest_strategy=ingest_strategy
     )
-    ch = FakeClickHouse(ledger)
+    ch = FakeClickHouse(ledger, tables=ch_tables)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
 
@@ -441,3 +446,8 @@ def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_t
     assert ch.alltime_scans == []
     for table in ch_aggregates.TABLES:
         assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
+
+
+def test_analyze_names_the_bootstrap_when_a_clickhouse_aggregate_table_is_missing():
+    with pytest.raises(RuntimeError, match="make ch-bootstrap"):
+        _noop_run(ch_tables=())
