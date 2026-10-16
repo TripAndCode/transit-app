@@ -143,8 +143,7 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 #
 #   _analyze_deduped  — every column, only the dates being rebuilt. UNTYPED
 #     (keeps NULL-service rows — notably agency 9, 広島バス — which the reports
-#     and route-summary surface), plus raw captured_at (agg_route_daily needs a
-#     per-day last_seen_at) and arr_delay (agg_route_daily_dwell_run).
+#     and route-summary surface), plus arr_delay (agg_route_daily_dwell_run).
 #   _analyze_alltime  — the whole history, but only rows with a service_type,
 #     which is a small fraction of it. The aggregates spanning all of history
 #     (route_stats/hour/hour_dow) are keyed by service_type and so filter
@@ -1009,17 +1008,13 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_client,
                 # Column order must match build_dedup_ch_sql's SELECT list exactly:
                 # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, last_captured_at, arr_delay (arr_delay
-                # is always last regardless of include_captured_at -- see
-                # build_dedup_ch_sql's docstring).
+                # stop_sequence, dep_delay, arr_delay.
                 table="_analyze_deduped",
                 columns=(
                     "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, "
-                    "captured_at timestamptz, arr_delay int"
+                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int"
                 ),
                 ch_sql=build_dedup_ch_sql(
-                    include_captured_at=True,
                     include_arr_delay=True,
                     extra_where=_date_predicate(rebuild_dates, "u.captured_at"),
                 ),

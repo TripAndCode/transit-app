@@ -10,7 +10,7 @@ per-date counts. A date ingested or changed since the last analyze would differ
 for that reason alone.
 
 --time-only skips the comparison and times each month's build instead: the dedup
-on its own, then each table's SELECT, each wrapped in a count so the rows stay on
+on its own, then each table's SELECT, each run in full with its rows discarded on
 the server.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
@@ -82,6 +82,9 @@ def parity(ch, conn, agency_id: int) -> int:
         stored = {day: (raw, total) for day, raw, total in cur.fetchall()}
     dates = comparable_dates(stored, _ledger_counts(agency_id, ch))
     print(f"agency {agency_id}: {len(dates)} of {len(stored)} ledger dates are current")
+    if not dates:
+        print("parity: nothing to compare: no ledger date matches ClickHouse's counts")
+        return 1
     failures = 0
     for table in ch_aggregates.TABLES:
         compared = 0
@@ -101,8 +104,10 @@ def parity(ch, conn, agency_id: int) -> int:
 
 
 def _timed(ch, sql: str, params: dict) -> float:
+    """Seconds *sql* takes to run in full. FORMAT Null has the server produce
+    every column and discard the rows, so nothing the build computes is skipped."""
     start = time.perf_counter()
-    ch.query(f"SELECT count() FROM ({sql})", parameters=params)
+    ch.raw_query(f"{sql} FORMAT Null", parameters=params)
     return time.perf_counter() - start
 
 
