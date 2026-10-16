@@ -134,6 +134,10 @@ FastAPI + React SPA  <-------------------------------------------------+
 - Without collector streaming, `ingest_live` takes one live sample per poke.
 - The API normally reads precomputed `agg_*` tables; narrow time-band queries
   may read ClickHouse directly.
+- `analyze` computes the tables listed in `pipeline/ch_aggregates.py` in
+  ClickHouse, stores them there and copies them into Postgres; it builds the
+  rest in Postgres. A ClickHouse that predates one of those tables needs
+  `make ch-bootstrap` before the next `analyze`.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 
