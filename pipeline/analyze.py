@@ -181,7 +181,9 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # table's purge and build are both date-restricted, so the staleness signal must
 # cover all it reads (see _dates_needing_rebuild). Each is keyed by `date`, so the
 # purge removes exactly what is rebuilt, and the ledger's total_rows counts
-# delay-less rows too.
+# delay-less rows too. The ClickHouse-computed tables among them (_CH_AGG_TABLES)
+# are rebuilt by _rebuild_ch_aggregates instead, which recomputes those dates and
+# purges their Postgres copy by whole month, through the same (agency_id, date) key.
 _INCREMENTAL_AGG_TABLES = frozenset(
     {
         "agg_daily_trend",

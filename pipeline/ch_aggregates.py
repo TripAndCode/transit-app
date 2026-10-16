@@ -11,7 +11,8 @@ table, recomputing from `updates` only the dates whose rows changed, and `swap`
 then moves each month into place with REPLACE PARTITION, so a reader never sees
 a month half built.
 
-Every value equals what the Postgres builder produced, column for column.
+Every value equals what the Postgres builder it replaced produced, column for
+column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
 Means are rounded half away from zero from exact integer sums, which is what
 Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
