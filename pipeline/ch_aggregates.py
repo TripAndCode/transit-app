@@ -230,18 +230,25 @@ def _pctl(p: str) -> str:
 
 def _distribution(source: str, keys: str, where: str = "1") -> str:
     """Per *keys*: the event count `n`, the delay sum `s`, the on-time and late
-    counts, and `dist`, every delay value with its count, sorted by value."""
+    counts, and `dist`, every delay value with its count, sorted by value.
+
+    The counts are summed per (*keys*, value) first, so `dist` holds each value
+    once: its length is bounded by the delay range, not by how many scheduled
+    times a route has."""
     return f"""
         SELECT {keys}, sum(k) AS n, sum(toInt64(dep) * k) AS s,
                sumIf(k, dep <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC}) AS on_time,
                sumIf(k, dep > {LEGACY_SEVERE_LATE_TOLERANCE_SEC}) AS late5,
                arraySort(groupArray((dep, k))) AS dist
         FROM (
-            SELECT v.route_code AS route_code, v.service_type AS service_type,
-                   v.scheduled_sec AS scheduled_sec, v.dep_delay AS dep, sum(v.samples) AS k
-            FROM ({source}) AS v
-            WHERE {where}
-            GROUP BY route_code, service_type, scheduled_sec, dep
+            SELECT {keys}, dep, sum(samples) AS k
+            FROM (
+                SELECT v.route_code AS route_code, v.service_type AS service_type,
+                       v.scheduled_sec AS scheduled_sec, v.dep_delay AS dep, v.samples AS samples
+                FROM ({source}) AS v
+                WHERE {where}
+            )
+            GROUP BY {keys}, dep
         )
         GROUP BY {keys}
     """

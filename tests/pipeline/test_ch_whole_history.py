@@ -198,3 +198,23 @@ def test_route_hour_merges_a_time_written_with_and_without_seconds(ch_client):
         parameters={"agency_id": AGENCY},
     ).result_rows
     assert rows == [("07:05:00", 6), ("15:00:00", 1)]
+
+
+def test_a_routes_distribution_holds_each_delay_value_once_whatever_its_scheduled_times(ch_client):
+    """agg_route_stats sorts one array per route; a value seen at two departure
+    times must be one entry, or the array grows with the timetable, not the delays."""
+    day = datetime(2026, 9, 14, 8, 0)
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            update_row(day, "a", 30, scheduled_time="07:00:00", route_code="ONE"),
+            update_row(day, "b", 30, scheduled_time="08:00:00", route_code="ONE"),
+            update_row(day, "c", 45, scheduled_time="08:00:00", route_code="ONE"),
+        ],
+    )
+    _recount(ch_client, [SEPT])
+    source = f"SELECT * FROM {COUNTS} WHERE agency_id = {{agency_id:Int32}}"
+    sql = ch_aggregates._distribution(source, "route_code, service_type")
+    ((dist,),) = ch_client.query(f"SELECT dist FROM ({sql})", parameters={"agency_id": AGENCY}).result_rows
+    assert [tuple(pair) for pair in dist] == [(30, 2), (45, 1)]

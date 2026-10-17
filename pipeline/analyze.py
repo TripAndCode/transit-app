@@ -1061,10 +1061,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
                 )
 
-        # Every route-keyed builder filters `route_code IS NOT NULL` in its own
-        # CTE rather than in the dedup load: agg_stop_daily reads the same slice
-        # and must keep a stop's traffic when the route is unknown. A NULL key
-        # would otherwise abort the whole-agency transaction.
+        # The dedup load keeps rows with no route_code, because agg_stop_daily
+        # must keep a stop's traffic when the route is unknown. Each route-keyed
+        # builder filters `route_code IS NOT NULL` in its own CTE instead: a NULL
+        # key would otherwise abort the whole-agency transaction.
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
         # already clamped via build_dedup_ch_sql) — NOT raw `updates`. So
