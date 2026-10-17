@@ -1,4 +1,4 @@
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 
 /**
  * Construct a MapLibre map, catching the synchronous throw some browsers/test
