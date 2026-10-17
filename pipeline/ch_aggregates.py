@@ -180,8 +180,33 @@ def _hour_daily(source: str) -> str:
     """
 
 
+# scheduled_time's seconds past midnight, from the same fields _HOUR reads: hours,
+# minutes and optional seconds. NULL when there is no scheduled time. The value
+# Postgres's `time` cast of the string takes, so two spellings of one time are one key.
+_SCHEDULED_SEC = (
+    "if(d.scheduled_time IS NULL, NULL, "
+    "toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[1]) * 3600 "
+    "+ toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[2]) * 60 "
+    "+ toInt32OrZero(splitByChar(':', assumeNotNull(d.scheduled_time))[3]))"
+)
+
+
 def _route_delay_counts(source: str) -> str:
-    raise NotImplementedError
+    # The whole-history tables key on a typed service, so an untyped or unrouted
+    # event is left out here, as the alltime slice left it out; filtering after the
+    # dedup is the same because both columns are part of its key.
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, service_type, scheduled_sec,
+               dep_delay, toInt32(n) AS samples, toInt64(dep_delay) * toInt64(n) AS sum_delay_sec
+        FROM (
+            SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
+                   assumeNotNull(d.service_type) AS service_type, {_SCHEDULED_SEC} AS scheduled_sec,
+                   assumeNotNull(d.dep_delay) AS dep_delay, count() AS n
+            FROM ({source}) AS d
+            WHERE d.route_code IS NOT NULL AND d.service_type IS NOT NULL
+            GROUP BY date, route_code, service_type, scheduled_sec, dep_delay
+        )
+    """
 
 
 def _route_hour_dow(source: str) -> str:
