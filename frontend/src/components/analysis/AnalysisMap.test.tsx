@@ -63,9 +63,8 @@ vi.mock("maplibre-gl", () => {
       return this;
     }
   }
-  const maplibregl = { Map: MockMap, NavigationControl: MockNavigationControl, LngLatBounds: MockLngLatBounds };
   return {
-    default: maplibregl,
+    setWorkerUrl: () => {},
     Map: MockMap,
     NavigationControl: MockNavigationControl,
     LngLatBounds: MockLngLatBounds,

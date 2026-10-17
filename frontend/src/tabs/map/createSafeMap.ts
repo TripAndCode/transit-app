@@ -1,4 +1,10 @@
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+
+// MapLibre looks for its worker beside its own module URL. Bundling moves that
+// module into a chunk with no worker next to it, so the worker is emitted as
+// an asset of its own and its URL handed over before any map exists.
+maplibregl.setWorkerUrl(workerUrl);
 
 /**
  * Construct a MapLibre map, catching the synchronous throw some browsers/test

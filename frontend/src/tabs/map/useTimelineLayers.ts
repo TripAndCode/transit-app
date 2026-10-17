@@ -84,7 +84,7 @@ export function useTimelineLayers(
     const handler = (event?: { originalEvent?: unknown }) => {
       if (event?.originalEvent) interact();
     };
-    const events = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "mousedown", "touchstart"];
+    const events = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "mousedown", "touchstart"] as const;
     for (const event of events) map.on(event, handler);
     return () => {
       for (const event of events) map.off(event, handler);

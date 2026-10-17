@@ -72,6 +72,6 @@ export function usePearlLayer(
   useFlowTick(on && line != null && !reducedMotion, FLOW_PAINT_INTERVAL_MS, (elapsed) => {
     const map = mapRef.current;
     if (!map?.getLayer(PEARL_LAYER)) return;
-    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(pearlPhase(elapsed)));
+    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(pearlPhase(elapsed)) as never);
   });
 }

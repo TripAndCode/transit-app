@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef } from "react";
-import maplibregl, { type LayerSpecification, type Map as MLMap } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { LayerSpecification, Map as MLMap } from "maplibre-gl";
 import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import {
   DELAY_THRESHOLDS,

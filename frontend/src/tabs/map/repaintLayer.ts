@@ -1,5 +1,7 @@
 import type { Map as MLMap } from "maplibre-gl";
 
+type PaintName = Parameters<MLMap["setPaintProperty"]>[1];
+
 /** Writes a paint builder's whole output onto a layer that already exists.
  *
  *  Paint builders resolve theme tokens to concrete colours, because MapLibre
@@ -10,5 +12,5 @@ import type { Map as MLMap } from "maplibre-gl";
  *  of colour properties, keeps a property added to a builder from going
  *  stale the same way; MapLibre skips a write whose value is unchanged. */
 export function repaintLayer(map: MLMap, layerId: string, paint: object): void {
-  for (const [property, value] of Object.entries(paint)) map.setPaintProperty(layerId, property, value);
+  for (const [property, value] of Object.entries(paint)) map.setPaintProperty(layerId, property as PaintName, value);
 }
