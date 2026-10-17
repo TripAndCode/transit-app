@@ -6,9 +6,10 @@ counts; percentiles do **not**, so we store a per-day/route delay histogram and
 interpolate p50/p90 from the merged buckets over the requested range. The
 approximation error is bounded by ``WIDTH`` (one bucket), acceptable for ranking.
 
-Bucketing here (analyze write path) and interpolation here (report read path)
-share the same edges so the two never drift — change ``LO``/``HI``/``WIDTH`` in
-one place and both sides move together.
+Bucketing (the write path, ``pipeline.ch_aggregates``'s ``_route_daily_dist``)
+and interpolation here (the report read path) share the same edges so the two
+never drift — change ``LO``/``HI``/``WIDTH`` in one place and both sides move
+together.
 
 :func:`count_in_range` reads the same merged buckets to estimate an on-time
 window or a "later than X" count for a caller-chosen tolerance, so a report
@@ -27,11 +28,11 @@ _N_INNER = (HI - LO) // WIDTH  # 35 inner bins
 # 0 = underflow, 1.._N_INNER = inner, _N_INNER+1 = overflow.
 N_BUCKETS = _N_INNER + 2
 
-# The write path (pipeline/analyze.py) bakes these two thresholds into exact
-# per-route scalar columns at analyze time (agg_route_daily_dist's
-# on_time_count/late5_count, agg_route_stats's on_time_pct/late5_pct/
-# late_5min_plus) -- the "legacy_60s" preset. Both that write path and the
-# read path (pipeline/reports/rankings.py) import these two constants
+# The write paths bake these two thresholds into exact per-route scalar
+# columns at analyze time (agg_route_daily_dist's on_time_count/late5_count in
+# pipeline/ch_aggregates.py, agg_route_stats's on_time_pct/late5_pct/
+# late_5min_plus in pipeline/analyze.py) -- the "legacy_60s" preset. Both write
+# paths and the read path (pipeline/reports/rankings.py) import these constants
 # instead of repeating the literals, so the exact precomputed fast-path
 # columns and this default preset's own values can never drift apart -- the
 # same rationale LO/HI/WIDTH above already apply to bucket edges.
@@ -166,11 +167,11 @@ def bucket_case_sql(column: str, *, lo: int = LO, hi: int = HI, width: int = WID
     ``NULL`` propagates to ``NULL`` (not bucket 0), so a caller composing a
     ``COUNT(*) FILTER (WHERE bucket_col = i)`` histogram naturally excludes
     rows where *column* itself is unmeasured, rather than miscounting them as
-    underflow. ``analyze()``'s own delay-histogram ``_BUCKET_EXPR`` predates
-    this helper and doesn't need the NULL guard (``dep_delay`` is already
-    filtered non-NULL upstream there); new bucketed columns that CAN be NULL
-    per row (e.g. ``pipeline.dwell_run``'s dwell/running seconds) should use
-    this helper instead of hand-rolling the same CASE shape.
+    underflow. The delay histogram doesn't need that guard and is built in
+    ClickHouse (``pipeline.ch_aggregates``), where ``dep_delay`` is filtered
+    non-NULL upstream; a Postgres-built column that CAN be NULL per row (e.g.
+    ``pipeline.dwell_run``'s dwell/running seconds) should use this helper
+    instead of hand-rolling the same CASE shape.
     """
     n_inner = (hi - lo) // width
     return (
