@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ApiError, apiGet, onApiKeyRejected } from "./client";
+import { ApiError, apiGet, onApiKeyRejected, saveApiKey, storedApiKey } from "./client";
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
@@ -101,7 +101,26 @@ describe("a stored API key the server rejects", () => {
     await apiGet("/api/config");
 
     expect(storage.store.get("api_key")).toBe("fresh");
+    expect(sentKey((fetch as ReturnType<typeof vi.fn>).mock.calls[1])).toBe("fresh");
     expect(rejected).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("is dropped before sending when it cannot travel in a header at all", async () => {
+    // A full-width space from an IME: fetch would reject the header outright.
+    const storage = memoryStorage({ api_key: "key　" });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi.fn().mockResolvedValue(json(200, { ok: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rejected = vi.fn();
+    const unsubscribe = onApiKeyRejected(rejected);
+
+    await expect(apiGet("/api/config")).resolves.toEqual({ ok: 1 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentKey(fetchMock.mock.calls[0])).toBeUndefined();
+    expect(storage.store.has("api_key")).toBe(false);
+    expect(rejected).toHaveBeenCalledTimes(1);
     unsubscribe();
   });
 
@@ -127,8 +146,30 @@ describe("a stored API key the server rejects", () => {
   });
 });
 
+describe("saveApiKey", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("stores the trimmed key, and clears it for an empty one", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    saveApiKey("  pro-key \n");
+    expect(storedApiKey()).toBe("pro-key");
+    saveApiKey("   ");
+    expect(storage.store.has("api_key")).toBe(false);
+  });
+});
+
 describe("blocked web storage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("reads no key and saves nothing, without throwing", () => {
+    const blocked = () => {
+      throw new DOMException("blocked", "SecurityError");
+    };
+    vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked, removeItem: blocked });
+    expect(storedApiKey()).toBeNull();
+    expect(() => saveApiKey("k")).not.toThrow();
+  });
 
   it("still sends the request, without a key", async () => {
     vi.stubGlobal("localStorage", {

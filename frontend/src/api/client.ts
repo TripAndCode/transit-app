@@ -221,14 +221,16 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 /** Sends the request with the stored API key, if any. A key the server
  *  rejects is dropped and the request sent once more without it. */
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  const apiKey = storedApiKey();
+  const apiKey = sendableStoredApiKey();
   const response = await sendOnce(path, init, apiKey);
   if (apiKey && (await isRejectedApiKey(response))) {
     // The middleware answers every request carrying a bad key with this 401,
     // /api/config included, so keeping the key would lock the user out of the
     // app shell -- including the Settings drawer that could clear it.
     if (clearStoredApiKey(apiKey)) reportApiKeyRejected();
-    return sendOnce(path, init, null);
+    // A key saved since this request was sent is the user's current choice.
+    const replacement = sendableStoredApiKey();
+    return sendOnce(path, init, replacement === apiKey ? null : replacement);
   }
   return response;
 }
@@ -249,16 +251,41 @@ function sendOnce(path: string, init: RequestInit, apiKey: string | null): Promi
 }
 
 const API_KEY_STORAGE_KEY = "api_key";
-/** Mirrors api/middleware/auth.py's 401 for an unknown, revoked or expired key. */
+/** Mirrors api/middleware/auth.py's 401 for every unusable key -- unknown,
+ *  revoked, expired, or owned by a suspended account; it does not say which. */
 const INVALID_API_KEY_DETAIL = "Invalid API key";
+/** fetch rejects a header value outside printable ASCII before sending. */
+const SENDABLE_API_KEY = /^[\x21-\x7e]+$/;
 
-/** Storage access throws where site data is blocked; no key is then sent. */
-function storedApiKey(): string | null {
+/** The stored API key, or null. Storage access throws where site data is
+ *  blocked; no key is then read or sent. */
+export function storedApiKey(): string | null {
   try {
     return localStorage.getItem(API_KEY_STORAGE_KEY);
   } catch {
     return null;
   }
+}
+
+/** Stores *key* without surrounding whitespace, or clears it when empty. */
+export function saveApiKey(key: string): void {
+  const trimmed = key.trim();
+  try {
+    if (trimmed) localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
+    else localStorage.removeItem(API_KEY_STORAGE_KEY);
+  } catch {
+    // Blocked storage keeps nothing, so no key is sent either.
+  }
+}
+
+/** The stored key if it can be sent at all. One that cannot (a full-width
+ *  character from an IME) would fail every request before it left, the same
+ *  lockout as a rejected key, so it is dropped the same way. */
+function sendableStoredApiKey(): string | null {
+  const key = storedApiKey();
+  if (key === null || SENDABLE_API_KEY.test(key)) return key;
+  if (clearStoredApiKey(key)) reportApiKeyRejected();
+  return null;
 }
 
 /** Removes the stored key only while it is still *rejected*, so requests that
