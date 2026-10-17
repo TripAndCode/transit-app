@@ -312,6 +312,9 @@ def _route_hour_dow(source: str) -> str:
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
+    # The two integer columns whose agency sums, with the row count, are what a
+    # store check compares between ClickHouse and the Postgres copy.
+    sums: tuple[str, str] = ("samples", "sum_delay_sec")
 
 
 # Build and swap order. Each copied table's columns are its Postgres table's, in
@@ -744,11 +747,17 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
     return _agency_rows(", ".join(COLUMNS[table]), table, agency_id, months)
 
 
+def sum_columns(table: str) -> tuple[str, str]:
+    """The two columns *table*'s store check sums."""
+    return {**_SPECS, **_WHOLE_SPECS}[_checked(table)].sums
+
+
 def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
-    """(rows, sum of samples, sum of sum_delay_sec) for the agency over *months*,
-    or all of them when None: the figures a store check compares, with *table*'s
+    """(rows, and the sums of sum_columns(table)) for the agency over *months*, or
+    all of them when None: the figures a store check compares, with *table*'s
     Postgres copy or, for COUNTS, with the table pipeline.analyze names."""
-    sql, params = _agency_rows("count(), sum(samples), sum(sum_delay_sec)", table, agency_id, months)
+    first, second = sum_columns(table)
+    sql, params = _agency_rows(f"count(), sum({first}), sum({second})", table, agency_id, months)
     count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(samples), int(delay)
 

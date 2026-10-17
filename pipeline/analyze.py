@@ -800,9 +800,10 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
         bounds = [ch_aggregates.month_bounds(month) for month in months]
         where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
         params += [day for pair in bounds for day in pair]
+    first, second = ch_aggregates.sum_columns(table)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT count(*), coalesce(sum(samples), 0)::bigint, coalesce(sum(sum_delay_sec), 0)::bigint "
+            f"SELECT count(*), coalesce(sum({first}), 0)::bigint, coalesce(sum({second}), 0)::bigint "
             f"FROM {table} WHERE {where}",
             params,
         )
