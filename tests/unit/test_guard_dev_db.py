@@ -104,37 +104,39 @@ BLOCKED = [
         "make analyze-all database_url=postgresql://transit:transit@localhost:5544/transit_test clickhouse_port=8124",
         id="lowercase-make-variable-names",
     ),
-    # The value of a value-taking flag is a file name, not a variable.
-    pytest.param(
-        "make -o DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
-        id="assignment-shaped-value-of-o",
-    ),
-    pytest.param(
-        "make -W DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
-        id="assignment-shaped-value-of-capital-w",
-    ),
-    pytest.param(
-        "make --what-if DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
-        id="assignment-shaped-value-of-what-if",
-    ),
-    # Any flag not known to take no argument may consume the next word: an
-    # unlisted, bundled or abbreviated one must not let that word count.
+    # A flag outside the short allowlist may consume the next word as a file
+    # name, so an assignment-shaped word after it points nothing.
     *[
         pytest.param(
             f"make {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
             id=f"assignment-shaped-value-of-{flag.strip('-')}",
         )
-        for flag in ("-I", "--include-dir", "--new-file", "--old-file", "--eval", "-E", "-sW", "-kI", "--what")
+        for flag in (
+            "-o",
+            "-W",
+            "--what-if",
+            "-I",
+            "--include-dir",
+            "--new-file",
+            "--old-file",
+            "--eval",
+            "-E",
+            "-sW",
+            "-kI",
+            "--what",
+            "-f",
+        )
     ],
-    # Only a plain NAME=value word repoints a store. A word make may expand or
-    # re-parse -- another assignment form, a `$`, `--eval` text -- can set any
-    # variable, so after one no store counts as pointed at the throwaway pair.
+    # A word make may expand or re-parse -- another assignment form, a `$`,
+    # `--eval` text, a make-control variable -- can set any variable, wherever
+    # it stands; a flag outside the allowlist may take no value at all and leave
+    # the dev word after it live.
     *[
         pytest.param(
-            f"make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test {later}",
-            id=f"later-word-points-back-at-dev-{case}",
+            f"make prune-query-log {before}DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test{after}",
+            id=f"{order}-word-points-back-at-dev-{case}",
         )
-        for case, later in (
+        for case, word in (
             ("colon", "DATABASE_URL:=postgresql://transit:transit@localhost:5433/transit"),
             ("double-colon", "DATABASE_URL::=postgresql://transit:transit@localhost:5433/transit"),
             ("triple-colon", "DATABASE_URL:::=postgresql://transit:transit@localhost:5433/transit"),
@@ -148,8 +150,31 @@ BLOCKED = [
             ("eval-flag", "--eval 'override DATABASE_URL=postgresql://transit:transit@localhost:5433/transit'"),
             ("glued-eval-flag", "'--eval=override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
             ("glued-short-eval", "'-Eoverride DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("abbreviated-eval", "'--ev=override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("abbreviated-eval-word", "--eva 'override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("makeflags", "MAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("gnumakeflags", "GNUMAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("no-arg-flag-unlisted", "-L DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("output-sync", "-O DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
         )
+        for order, before, after in (("later", "", f" {word}"), ("earlier", f"{word} ", ""))
     ],
+    # A make-control variable set anywhere in the command reaches make too.
+    pytest.param(
+        "MAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="makeflags-env-prefix",
+    ),
+    pytest.param(
+        "export GNUMAKEFLAGS=--eval=x; "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="makeflags-exported-earlier",
+    ),
+    pytest.param(
+        "MAKEFILES=extra.mk bash -c "
+        "'make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test'",
+        id="makefiles-around-a-quoted-script",
+    ),
     # The last of two assignments is the one the command sees.
     pytest.param(
         "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
@@ -538,8 +563,8 @@ ALLOWED = [
         id="test-db-as-a-make-variable",
     ),
     pytest.param(
-        "make -C . -f Makefile prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
-        id="test-db-make-variable-after-value-flags",
+        "make -C . prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="test-db-make-variable-after-a-directory-flag",
     ),
     # A flag that takes no argument does not swallow the assignment after it.
     *[

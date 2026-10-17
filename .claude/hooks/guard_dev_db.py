@@ -483,7 +483,13 @@ def runs_default_clickhouse_client(cmd: str) -> bool:
     return False
 
 
-def runs_destructive_command(cmd: str) -> bool:
+# Variables that steer make itself. Set anywhere in a command -- an env prefix,
+# an earlier `export`, around a quoted script -- they reach every make in it and
+# can rewrite any variable, so no make target there counts as pointed.
+_MAKE_CONTROL = re.compile(r"\b(?:GNUMAKEFLAGS|MAKEFLAGS|MFLAGS|MAKEOVERRIDES|MAKEFILES)\b")
+
+
+def runs_destructive_command(cmd: str, make_controlled: bool = False) -> bool:
     """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
     command, that writes a store its own assignments do not point at the
     throwaway stack.
@@ -492,11 +498,13 @@ def runs_destructive_command(cmd: str) -> bool:
     "..."`) and is read as a command line of its own. Quoted prose naming a
     destructive target is read the same way and blocked, the cheap direction.
     """
+    make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
     # Case is kept: make and the shell both match variable names case-sensitively.
     for segment in _simple_commands(_shell_tokens(cmd)):
-        if _segment_writes_dev(segment):
+        if _segment_writes_dev(segment, make_controlled):
             return True
-        if any(runs_destructive_command(tok) for tok in segment if any(c.isspace() for c in tok)):
+        quoted = (tok for tok in segment if any(c.isspace() for c in tok))
+        if any(runs_destructive_command(tok, make_controlled) for tok in quoted):
             return True
     return False
 
@@ -543,17 +551,19 @@ def _simple_commands(lowered: list[str]) -> list[list[str]]:
     return [segment for segment in segments if segment]
 
 
-def _segment_writes_dev(segment: list[str]) -> bool:
+def _segment_writes_dev(segment: list[str], make_controlled: bool) -> bool:
     for i, tok in enumerate(segment):
         name = tok.rsplit("/", 1)[-1].lower()
         if name in _MAKE_NAMES:
             # The Makefile's `-include .env` outranks the environment, so an env
             # prefix does not repoint a make target; only make's own VAR=value
             # arguments do.
-            targets, assignments = make_args(segment[i + 1 :])
+            targets, assignments, trusted = make_args(segment[i + 1 :])
             writes: set[str] = set()
             for target in targets:
                 writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
+            if writes and (make_controlled or not trusted):
+                return True
             if _points_at_dev(writes, assignments):
                 return True
         elif name in _CLI_NAMES and i + 1 < len(segment):
@@ -576,96 +586,41 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
     return False
 
 
-# `make` flags known to take no argument. Any other flag -- value-taking,
-# abbreviated, or one this list has never heard of -- may consume the next word,
-# so that word is never counted as an assignment (a false block is the cheap
-# direction). `-j`/`-l` take only an optional number glued on.
-_MAKE_NOARG_SHORT = frozenset("bBdehiknpqrRsStvw")
-_MAKE_NOARG_LONG = frozenset(
-    {
-        "--",
-        "--always-make",
-        "--check-symlink-times",
-        "--debug",
-        "--dry-run",
-        "--environment-overrides",
-        "--help",
-        "--ignore-errors",
-        "--jobs",
-        "--just-print",
-        "--keep-going",
-        "--load-average",
-        "--max-load",
-        "--no-builtin-rules",
-        "--no-builtin-variables",
-        "--no-keep-going",
-        "--no-print-directory",
-        "--print-data-base",
-        "--print-directory",
-        "--question",
-        "--quiet",
-        "--recon",
-        "--silent",
-        "--stop",
-        "--touch",
-        "--trace",
-        "--version",
-        "--warn-undefined-variables",
-    }
-)
+# The only make flags a destructive target may carry. Make can read a variable
+# from almost any other word -- an unlisted flag's value or the word after a flag
+# that takes none, `$` expansion, a non-plain `=` form, `--eval` text -- so any
+# such word makes the whole command untrusted (a false block is the cheap
+# direction). `-C` takes the directory after it.
+_SAFE_MAKE_FLAG = re.compile(r"-[sk]+|-j[0-9]*|--silent|--keep-going|--no-print-directory|--jobs(?:=[0-9]+)?")
 
 
-def _flag_may_take_next(flag: str) -> bool:
-    if flag.startswith("--"):
-        return "=" not in flag and flag not in _MAKE_NOARG_LONG
-    letters = flag[1:]
-    for k, c in enumerate(letters):
-        if c in "jl":
-            return False
-        if c not in _MAKE_NOARG_SHORT:
-            # Anything after a value-taking letter is its glued-on value.
-            return k == len(letters) - 1
-    return False
-
-
-def _may_rewrite_variables(arg: str, *, flag: bool) -> bool:
-    """Whether make might set an arbitrary variable from *arg*: it expands `$`
-    in its arguments, reads every non-plain `=` form as an assignment, and
-    parses `--eval`/`-E` text as makefile source."""
-    if "$" in arg:
-        return True
-    if flag:
-        return arg.startswith("--eval") or (not arg.startswith("--") and "E" in arg)
-    return "=" in arg and not _ASSIGNMENT.match(arg)
-
-
-def make_args(args: list[str]) -> tuple[list[str], list[str]]:
-    """The targets and the VAR=value assignments in `make`'s own arguments, up
-    to the next shell separator. Only a plain NAME=value word repoints a store;
-    after a word make might rewrite variables from, no store counts as pointed."""
-    unpoint_all = [f"{name}=" for name, _ in THROWAWAY.values()]
+def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
+    """The targets and the plain NAME=value assignments in `make`'s own
+    arguments, up to the next shell separator, and whether every word was one
+    of those, an allowlisted flag, or `-C <dir>`."""
     targets: list[str] = []
     assignments: list[str] = []
-    after_flag = False
+    trusted = True
+    after_directory_flag = False
     for arg in args:
         if _is_separator(arg):
             break
-        if after_flag:
-            # A flag's value is a file or directory name, never an assignment.
-            after_flag = False
-            if "=" not in arg:
-                targets.append(arg)
+        if "$" in arg:
+            trusted = False
+        elif after_directory_flag:
+            after_directory_flag = False
+        elif arg == "-C":
+            after_directory_flag = True
         elif arg.startswith("-"):
-            if _may_rewrite_variables(arg, flag=True):
-                assignments += unpoint_all
-            after_flag = _flag_may_take_next(arg)
-        elif _may_rewrite_variables(arg, flag=False):
-            assignments += unpoint_all
+            trusted = trusted and bool(_SAFE_MAKE_FLAG.fullmatch(arg))
         elif "=" in arg:
-            assignments.append(arg)
+            if _ASSIGNMENT.match(arg):
+                assignments.append(arg)
+            else:
+                trusted = False
         else:
             targets.append(arg)
-    return targets, assignments
+    return targets, assignments, trusted
 
 
 def targets_dev_db(tokens: list[str], cmd: str) -> bool:
@@ -745,8 +700,8 @@ def main() -> int:
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
             "so run it as its own call. A destructive make target runs only as "
             "`make <target> DATABASE_URL=...:5544/... CLICKHOUSE_PORT=8124` (an env prefix before `make` loses "
-            "to .env), and a gtfs_pipeline subcommand only with those assigned as its env prefix, for each store "
-            "it writes. See AGENTS.md.\n"
+            "to .env; flags limited to -s, -k, -j, -C <dir>, --no-print-directory), and a gtfs_pipeline "
+            "subcommand only with those assigned as its env prefix, for each store it writes. See AGENTS.md.\n"
         )
         return 2
     return 0
