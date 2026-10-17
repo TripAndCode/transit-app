@@ -461,3 +461,11 @@ def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_t
 def test_analyze_names_the_bootstrap_when_a_clickhouse_aggregate_table_is_missing():
     with pytest.raises(RuntimeError, match="make ch-bootstrap"):
         _noop_run(ch_tables=())
+
+
+def test_the_dated_slice_loads_no_capture_time():
+    """No builder reading _analyze_deduped needs a capture time, so its load leaves it out."""
+    _, ch = _changed_run()
+    dated = [s for s in ch.streams if "arr_delay" in s and "service_type IS NOT NULL" not in s]
+    assert dated, "the changed run loaded no dated slice"
+    assert not [s for s in dated if "last_captured_at" in s]

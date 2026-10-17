@@ -77,3 +77,31 @@ CREATE TABLE IF NOT EXISTS agg_hour_daily (
 ) ENGINE = MergeTree
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, hour);
+
+CREATE TABLE IF NOT EXISTS agg_daily_trend (
+    agency_id     Int32,
+    date          Date,
+    route_code    String,
+    service_type  String,
+    avg_min       Float32,
+    samples       Int32,
+    sum_delay_sec Int64,
+    sum_late_sec  Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, route_code, service_type);
+
+CREATE TABLE IF NOT EXISTS agg_route_daily (
+    agency_id       Int32,
+    date            Date,
+    route_code      String,
+    service_type    String,
+    avg_delay_sec   Int32,
+    worst_delay_sec Int32,
+    trips_observed  Int32,
+    samples         Int32,
+    last_seen_at    DateTime64(0, 'UTC'),
+    sum_delay_sec   Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, route_code, service_type);

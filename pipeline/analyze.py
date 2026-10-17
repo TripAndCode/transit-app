@@ -132,10 +132,11 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 
 # The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
 # (see analyze()), because the dedup is the expensive full-partition scan+sort
-# and every aggregate needs it. The dedup itself runs in ClickHouse
-# (build_dedup_ch_sql, the `updates` fact table's home) and its result is
-# bulk-loaded into the temp table every builder below reads; no builder ever
-# reads `updates` directly.
+# and every aggregate built in Postgres below needs it. The dedup itself runs in
+# ClickHouse (build_dedup_ch_sql, the `updates` fact table's home) and its result
+# is bulk-loaded into the temp table those builders read; none of them reads
+# `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
+# run their own dedup there instead.
 #
 # Two temp tables, because the builders want two different slices and
 # materialising their union means shipping the whole history for the sake of
@@ -143,8 +144,7 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 #
 #   _analyze_deduped  — every column, only the dates being rebuilt. UNTYPED
 #     (keeps NULL-service rows — notably agency 9, 広島バス — which the reports
-#     and route-summary surface), plus raw captured_at (agg_route_daily needs a
-#     per-day last_seen_at) and arr_delay (agg_route_daily_dwell_run).
+#     and route-summary surface), plus arr_delay (agg_route_daily_dwell_run).
 #   _analyze_alltime  — the whole history, but only rows with a service_type,
 #     which is a small fraction of it. The aggregates spanning all of history
 #     (route_stats/hour/hour_dow) are keyed by service_type and so filter
@@ -506,6 +506,26 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool, ingest_strategy:
     return "|".join(parts)
 
 
+def _ledger_counts(agency_id: int, ch_client) -> dict:
+    """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
+    live = _ch_query(
+        "plan: per-date ledger",
+        ch_client,
+        """
+        SELECT """
+        + _SERVICE_DATE
+        + """ AS date,
+               countIf(dep_delay IS NOT NULL) AS raw_samples,
+               count() AS total_rows
+        FROM updates
+        WHERE agency_id = {agency_id:UInt16}
+        GROUP BY date
+        """,
+        {"agency_id": agency_id},
+    )
+    return {row[0]: (row[1], row[2]) for row in live.result_rows}
+
+
 def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: str) -> list | None:
     """The service dates whose aggregates no longer match their sources.
 
@@ -566,22 +586,7 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live = _ch_query(
-        "plan: per-date ledger",
-        ch_client,
-        """
-        SELECT """
-        + _SERVICE_DATE
-        + """ AS date,
-               countIf(dep_delay IS NOT NULL) AS raw_samples,
-               count() AS total_rows
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16}
-        GROUP BY date
-        """,
-        {"agency_id": agency_id},
-    )
-    live_counts = {row[0]: (row[1], row[2]) for row in live.result_rows}
+    live_counts = _ledger_counts(agency_id, ch_client)
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
@@ -1004,17 +1009,13 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_client,
                 # Column order must match build_dedup_ch_sql's SELECT list exactly:
                 # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, last_captured_at, arr_delay (arr_delay
-                # is always last regardless of include_captured_at -- see
-                # build_dedup_ch_sql's docstring).
+                # stop_sequence, dep_delay, arr_delay.
                 table="_analyze_deduped",
                 columns=(
                     "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, "
-                    "captured_at timestamptz, arr_delay int"
+                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int"
                 ),
                 ch_sql=build_dedup_ch_sql(
-                    include_captured_at=True,
                     include_arr_delay=True,
                     extra_where=_date_predicate(rebuild_dates, "u.captured_at"),
                 ),
@@ -1190,83 +1191,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             p,
             conn,
             rebuild_dates,
-        )
-
-        # ── agg_daily_trend ──────────────────────────────────────────────
-        # UNTYPED dedup so NULL-service routes (e.g. 広島's unmatched rows) are
-        # kept — the reports (dow/compare/trend) and overview that read this
-        # table never filtered them on their live paths. NULL is coalesced to ''
-        # for the NOT NULL column; GROUP BY the same COALESCE (not the raw
-        # column) so NULL and '' can't split into duplicate keys. Readers that
-        # surface service_type map '' back to None.
-        sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
-            SELECT
-                %(agency_id)s AS agency_id,
-                date, route_code,
-                COALESCE(service_type, '') AS service_type,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec,
-                SUM(GREATEST(dep_delay, 0)) AS sum_late_sec
-            FROM deduped
-            GROUP BY date, route_code, COALESCE(service_type, '')
-            ORDER BY date, route_code
-        """
-        _build_and_insert(
-            sql,
-            "agg_daily_trend",
-            [
-                "agency_id",
-                "date",
-                "route_code",
-                "service_type",
-                "avg_min",
-                "samples",
-                "sum_delay_sec",
-                "sum_late_sec",
-            ],
-            p,
-            conn,
-        )
-
-        # ── agg_route_daily (per-route, per-day; backs route_exists, latest_data_date,
-        # and range-scoped reports) ──
-        # today/route-summary does not read this table: its figures are computed
-        # live from `updates_live`, against baselines from agg_route_daily_dist.
-        sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
-            SELECT
-                %(agency_id)s AS agency_id,
-                date::text, route_code,
-                COALESCE(service_type, '') AS service_type,
-                ROUND(AVG(dep_delay))::int AS avg_delay_sec,
-                MAX(dep_delay)             AS worst_delay_sec,
-                COUNT(DISTINCT trip_id)    AS trips_observed,
-                COUNT(*)                   AS samples,
-                MAX(captured_at)           AS last_seen_at,
-                SUM(dep_delay)             AS sum_delay_sec
-            FROM deduped
-            GROUP BY date, route_code, COALESCE(service_type, '')
-            ORDER BY date, route_code
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_daily",
-            [
-                "agency_id",
-                "date",
-                "route_code",
-                "service_type",
-                "avg_delay_sec",
-                "worst_delay_sec",
-                "trips_observed",
-                "samples",
-                "last_seen_at",
-                "sum_delay_sec",
-            ],
-            p,
-            conn,
         )
 
         # ── agg_route_daily_dist (per-day delay distribution for reports) ──
