@@ -5,11 +5,14 @@ ClickHouse table with the name and columns of its Postgres counterpart.
 `pipeline.analyze` drives the build and copies the agency's rows into the
 Postgres table the API reads; this module is the ClickHouse side only.
 
-A run replaces whole months of service date. Each table is partitioned by
-(agency_id, month), a run assembles each month it touches in the agency's work
-table, recomputing only the dates whose rows changed from one dedup of the month
-that the tables needing it share, and `swap` then moves each month into place
-with REPLACE PARTITION, so a reader never sees a month half built.
+A run replaces whole months of service date in the date-keyed tables: each is
+partitioned by (agency_id, month), a run assembles each month it touches in the
+agency's work table, recomputing only the dates whose rows changed from one dedup
+of the month that the tables needing it share, and `swap` then moves each month
+into place with REPLACE PARTITION, so a reader never sees a month half built.
+COUNTS, one of them, holds the exact delay distribution; the whole-history tables
+are finalized from it into one partition per agency, which `swap_whole_history`
+replaces whole.
 
 Every value equals what the Postgres builder it replaced produced, column for
 column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
@@ -210,7 +213,19 @@ def _route_delay_counts(source: str) -> str:
 
 
 def _route_hour_dow(source: str) -> str:
-    raise NotImplementedError
+    avg_min = _round_half_away("s", "60 * n", 2)
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, service_type, dow, hour,
+               toFloat32({avg_min}) AS avg_min, toInt32(n) AS samples, s AS sum_delay_sec
+        FROM (
+            SELECT v.route_code AS route_code, v.service_type AS service_type,
+                   toInt16(toDayOfWeek(v.date)) AS dow, toInt16(intDiv(assumeNotNull(v.scheduled_sec), 3600)) AS hour,
+                   sum(v.samples) AS n, sum(v.sum_delay_sec) AS s
+            FROM ({source}) AS v
+            WHERE v.scheduled_sec IS NOT NULL
+            GROUP BY route_code, service_type, dow, hour
+        )
+    """
 
 
 class _Spec(NamedTuple):
@@ -441,6 +456,70 @@ def swap(ch, table: str, agency_id: int, months: list[int]) -> None:
             ch.command(f"ALTER TABLE {table} REPLACE PARTITION {partition} FROM {work}")
         else:
             ch.command(f"ALTER TABLE {table} DROP PARTITION {partition}")
+
+
+def whole_history_sql(table: str, source: str | None = None) -> str:
+    """The SELECT computing *table*'s rows for the agency bound as `agency_id`, in COLUMNS order.
+
+    *source* yields COUNTS' rows of the agency. Without it the counts are
+    computed in the query from the agency's whole-history dedup: what a
+    read-only session runs.
+    """
+    if table not in _WHOLE_SPECS:
+        raise ValueError(f"{table!r} is not a whole-history aggregate")
+    if source is None:
+        source = _route_delay_counts(_dedup_select("1"))
+    return _WHOLE_SPECS[table].select(source)
+
+
+def _counts_source(agency_id: int, counts_months: list[int] | None) -> tuple[str, dict]:
+    """The agency's counts as a run that rebuilt *counts_months* sees them: those
+    months from the counts work table, every other month from COUNTS itself."""
+    live = f"SELECT * FROM {COUNTS} WHERE agency_id = {{agency_id:Int32}}"
+    if not counts_months:
+        return live, {}
+    return (
+        f"{live} AND NOT has({{counts_months:Array(UInt32)}}, toYYYYMM(date)) "
+        f"UNION ALL SELECT * FROM {work_table(COUNTS, agency_id)}",
+        {"counts_months": counts_months},
+    )
+
+
+def build_whole_history(
+    ch,
+    agency_id: int,
+    tables: Iterable[str],
+    counts_months: list[int] | None,
+    step: Callable[[str], AbstractContextManager] = _untimed,
+) -> None:
+    """Compute each whole-history table in *tables* into its work table, from the
+    agency's counts. Runs after `build` and before any swap, so the months
+    `build` just recounted (*counts_months*) are read from the counts work table."""
+    source, params = _counts_source(agency_id, counts_months)
+    for table in tables:
+        work = work_table(table, agency_id)
+        columns = ", ".join(COLUMNS[table])
+        with step(f"{table}: ClickHouse build"):
+            ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+            ch.command(f"CREATE TABLE {work} AS {table}")
+            ch.command(
+                f"INSERT INTO {work} ({columns}) {whole_history_sql(table, source)}",
+                parameters={"agency_id": agency_id, **params},
+            )
+
+
+def swap_whole_history(ch, table: str, agency_id: int) -> None:
+    """Move the agency's work table into *table*'s agency partition, or drop the
+    partition when the work table holds no row: REPLACE PARTITION refuses a source
+    partition with no parts."""
+    if table not in _WHOLE_SPECS:
+        raise ValueError(f"{table!r} is not a whole-history aggregate")
+    work = work_table(table, agency_id)
+    ((rows,),) = ch.query(f"SELECT count() FROM {work}").result_rows
+    if rows:
+        ch.command(f"ALTER TABLE {table} REPLACE PARTITION {int(agency_id)} FROM {work}")
+    else:
+        ch.command(f"ALTER TABLE {table} DROP PARTITION {int(agency_id)}")
 
 
 def source_months(ch, agency_id: int) -> list[int]:
