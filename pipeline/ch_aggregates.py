@@ -7,9 +7,9 @@ Postgres table the API reads; this module is the ClickHouse side only.
 
 A run replaces whole months of service date. Each table is partitioned by
 (agency_id, month), a run assembles each month it touches in the agency's work
-table from one dedup of that month that every table shares, recomputing only the
-dates whose rows changed, and `swap` then moves each month into place with
-REPLACE PARTITION, so a reader never sees a month half built.
+table, recomputing only the dates whose rows changed from one dedup of the month
+that the tables needing it share, and `swap` then moves each month into place
+with REPLACE PARTITION, so a reader never sees a month half built.
 
 Every value equals what the Postgres builder it replaced produced, column for
 column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
@@ -187,7 +187,7 @@ def _checked(table: str) -> str:
 
 
 # A ClickHouse regular expression matching every name work_table and dedup_table
-# return, which is how drop_work_tables' callers and the test fixtures find them.
+# return; the test fixtures find every agency's scratch tables by it.
 WORK_TABLE_PATTERN = "__work_a[0-9]+$"
 
 
@@ -210,9 +210,9 @@ def select_sql(table: str, month: int, days: list[date] | None = None, source: s
     those of one month, or of only *days* within it.
 
     Its columns are COLUMNS[table], in order. Without *source* it dedups
-    `updates` itself, which a read-only session can run. *source* names a table
-    already holding the month's dedup (`build`'s dedup table), which it reads
-    instead.
+    `updates` itself: what a read-only session runs, and what `build` runs for a
+    month only one table needs. *source* names a table already holding the
+    month's dedup (`build`'s dedup table), which it reads instead.
     """
     spec = _SPECS[_checked(table)]
     if source is None:
@@ -234,7 +234,7 @@ class Rebuild(NamedTuple):
 
 
 def dedup_table(agency_id: int) -> str:
-    """The agency's scratch table for one month of the dedup, which every table's build reads."""
+    """The agency's scratch table for one month of the dedup, shared by the tables that need the month."""
     return f"dedup__work_a{int(agency_id)}"
 
 

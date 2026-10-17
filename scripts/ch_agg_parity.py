@@ -13,8 +13,9 @@ for that reason alone.
 on its own, then each table's SELECT, each run in full with its rows discarded on
 the server. Each table's SELECT dedups `updates` itself there, so the per-table
 figures are what an unshared build would pay. A run instead fills one dedup per
-month into a table every table reads (`ch_aggregates.build`), paying the dedup
-column's figure plus the cost of writing it.
+month into a table the tables needing that month share (`ch_aggregates.build`),
+paying the dedup column's figure plus the cost of writing it; a month only one
+table needs is built straight from `updates`.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
 that adds them is applied. Both connections are read-only: ClickHouse with
