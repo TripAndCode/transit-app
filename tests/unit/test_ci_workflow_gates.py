@@ -417,7 +417,11 @@ def test_no_workflow_names_a_self_hosted_runner_outright() -> None:
 def test_no_pull_request_target_workflow_checks_out_code() -> None:
     """A pull_request_target run holds a write token in the base repository's
     context, even for a fork or Dependabot PR, so it must never check out code:
-    that is how PR-controlled files would end up running with that token."""
+    that is how PR-controlled files would end up running with that token.
+
+    The check sees inline `actions/checkout` steps only, so a job that hands its
+    steps to a reusable workflow (job-level `uses:`) fails too, because its steps
+    would go unchecked."""
     offenders = []
     for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
@@ -428,9 +432,11 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
         if "pull_request_target" not in triggers:
             continue
         for job_name, job in doc["jobs"].items():
+            if "uses" in job:
+                offenders.append(f"{workflow.name} / {job_name}: calls reusable workflow {job['uses']}")
             for step in job.get("steps", []):
                 if str(step.get("uses", "")).startswith("actions/checkout"):
-                    offenders.append(f"{workflow.name} / {job_name}")
+                    offenders.append(f"{workflow.name} / {job_name}: {step['uses']}")
     assert not offenders, "pull_request_target jobs that check out code: " + "; ".join(offenders)
 
 

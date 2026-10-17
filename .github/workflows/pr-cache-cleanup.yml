@@ -3,10 +3,10 @@ name: PR cache cleanup
 # A pull request's caches live under refs/pull/<N>/merge, which only that PR's runs
 # can read, so once it closes they are dead weight. They still count against the
 # repository's cache quota, and the eviction that quota forces takes main's caches too.
-#
-# pull_request_target, not pull_request: a run triggered by a Dependabot or fork PR
-# gets a read-only token, which cannot delete caches. This job never checks out or
-# runs PR code, and the only PR-derived value it uses is the PR number.
+
+# pull_request_target, not pull_request: a Dependabot or fork PR's pull_request run
+# gets a read-only token, which cannot delete caches. This job must never check out
+# PR code; test_no_pull_request_target_workflow_checks_out_code enforces that.
 on:
   pull_request_target:
     types: [closed]
