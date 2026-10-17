@@ -76,6 +76,9 @@ class FakeClickHouse:
     def command(self, sql, parameters=None, settings=None):
         self.commands.append((sql, parameters or {}))
 
+    def insert(self, table, rows, column_names=None):
+        self.commands.append((f"INSERT {table}", {}))
+
     @property
     def ch_agg_builds(self) -> list[tuple[str, dict]]:
         """Each INSERT into an aggregate or dedup work table."""
@@ -100,6 +103,10 @@ class FakeCursor:
         self._one = None
         self._all: list = []
         self.rowcount = -1
+        self.itersize = 0
+
+    def __iter__(self):
+        return iter(self._all)
 
     def __enter__(self):
         return self
@@ -133,7 +140,7 @@ class FakeConn:
         self._pg_totals = pg_totals
         self._purged: set[str] = set()
 
-    def cursor(self):
+    def cursor(self, name=None):
         return FakeCursor(self)
 
     def commit(self):
