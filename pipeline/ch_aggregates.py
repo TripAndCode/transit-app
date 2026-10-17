@@ -180,6 +180,14 @@ def _hour_daily(source: str) -> str:
     """
 
 
+def _route_delay_counts(source: str) -> str:
+    raise NotImplementedError
+
+
+def _route_hour_dow(source: str) -> str:
+    raise NotImplementedError
+
+
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
@@ -222,13 +230,40 @@ _SPECS: dict[str, _Spec] = {
         _route_daily_dist,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "route_delay_counts": _Spec(
+        (
+            "agency_id",
+            "date",
+            "route_code",
+            "service_type",
+            "scheduled_sec",
+            "dep_delay",
+            "samples",
+            "sum_delay_sec",
+        ),
+        _route_delay_counts,
+    ),
 }
-TABLES: tuple[str, ...] = tuple(_SPECS)
-COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _SPECS.items()}
+COUNTS = "route_delay_counts"
+# The date-keyed tables copied into Postgres; `build` fills these and COUNTS month by month.
+TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name != COUNTS)
+MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
+
+# Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
+_WHOLE_SPECS: dict[str, _Spec] = {
+    "agg_route_hour_dow": _Spec(
+        ("agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"),
+        _route_hour_dow,
+    ),
+}
+WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
+COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
+ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
+COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in {**_SPECS, **_WHOLE_SPECS}.items()}
 
 
 def _checked(table: str) -> str:
-    if table not in _SPECS:
+    if table not in COLUMNS:
         raise ValueError(f"Not a ClickHouse aggregate: {table!r}")
     return table
 
@@ -261,7 +296,9 @@ def select_sql(table: str, month: int, days: list[date] | None = None, source: s
     month only one table needs. *source* names a table already holding the
     month's dedup (`build`'s dedup table), which it reads instead.
     """
-    spec = _SPECS[_checked(table)]
+    if _checked(table) not in _SPECS:
+        raise ValueError(f"{table!r} is not built by month")
+    spec = _SPECS[table]
     if source is None:
         where, params = month_where(month) if days is None else days_where(days)
         rows = _dedup_select(where)
@@ -421,7 +458,7 @@ def months_for(ch, table: str, agency_id: int, changed: list[date] | None) -> li
 def drop_work_tables(ch, agency_id: int) -> None:
     """Drop the agency's work tables and its dedup table. SYNC, so their disk is
     freed now rather than after the Atomic database's drop delay."""
-    for name in (*(work_table(table, agency_id) for table in TABLES), dedup_table(agency_id)):
+    for name in (*(work_table(table, agency_id) for table in ALL_TABLES), dedup_table(agency_id)):
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
 
 
@@ -449,10 +486,10 @@ def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[in
 
 
 def missing_tables(ch) -> list[str]:
-    """The tables in TABLES the connected database lacks."""
+    """The tables in ALL_TABLES the connected database lacks."""
     rows = ch.query(
         "SELECT name FROM system.tables WHERE database = currentDatabase() AND has({names:Array(String)}, name)",
-        parameters={"names": list(TABLES)},
+        parameters={"names": list(ALL_TABLES)},
     ).result_rows
     present = {row[0] for row in rows}
-    return [table for table in TABLES if table not in present]
+    return [table for table in ALL_TABLES if table not in present]

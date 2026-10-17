@@ -41,7 +41,7 @@ class _EmptyStream:
 
 
 class FakeClickHouse:
-    def __init__(self, ledger, *, totals=(0, 0, 0), tables=ch_aggregates.TABLES):
+    def __init__(self, ledger, *, totals=(0, 0, 0), tables=ch_aggregates.ALL_TABLES):
         self._ledger = ledger
         self._totals = totals
         self._tables = tables
@@ -174,7 +174,7 @@ LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
 
 
 def _run(
-    ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0), ch_tables=ch_aggregates.TABLES
+    ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0), ch_tables=ch_aggregates.ALL_TABLES
 ):
     """Run `analyze`, returning the fakes.
 

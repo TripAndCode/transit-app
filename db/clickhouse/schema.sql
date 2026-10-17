@@ -119,3 +119,38 @@ CREATE TABLE IF NOT EXISTS agg_route_daily_dist (
 ) ENGINE = MergeTree
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, route_code, service_type);
+
+-- The exact delay distribution behind the whole-history aggregates: per agency,
+-- service date, route, typed service and scheduled time, one row per dep_delay
+-- value with the number of stop events that took it. ClickHouse only, never
+-- copied. Month partitions like the date-keyed tables, so a run recounts only
+-- the dates it touches and the whole-history tables are finalized from these
+-- counts instead of from all of `updates`.
+CREATE TABLE IF NOT EXISTS route_delay_counts (
+    agency_id     Int32,
+    date          Date,
+    route_code    String,
+    service_type  String,
+    scheduled_sec Nullable(Int32),
+    dep_delay     Int32,
+    samples       Int32,
+    sum_delay_sec Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, route_code, service_type, scheduled_sec, dep_delay)
+SETTINGS allow_nullable_key = 1;
+
+-- Whole-history aggregates, finalized from route_delay_counts. One partition per
+-- agency, replaced whole by a run that changed anything.
+CREATE TABLE IF NOT EXISTS agg_route_hour_dow (
+    agency_id     Int32,
+    route_code    String,
+    service_type  String,
+    dow           Int16,
+    hour          Int16,
+    avg_min       Float32,
+    samples       Int32,
+    sum_delay_sec Int64
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, route_code, service_type, dow, hour);
