@@ -11,7 +11,7 @@ import pytest
 
 from pipeline import ch_aggregates
 from pipeline.clickhouse import insert_updates
-from tests.pipeline.ch_agg_helpers import update_row, work_tables
+from tests.pipeline.ch_agg_helpers import edge_rows, update_row, work_tables
 
 AGENCY = 7001
 OTHER = 7002
@@ -31,8 +31,12 @@ def _hour_daily(ch_client, table: str, agency_id: int = AGENCY) -> list[tuple]:
     )
 
 
+def _build(ch_client, agency_id: int, months: list[int], changed=None, table: str = "agg_hour_daily") -> None:
+    ch_aggregates.build(ch_client, agency_id, {table: ch_aggregates.Rebuild(months, changed)})
+
+
 def _rebuild(ch_client, agency_id: int, months: list[int]) -> None:
-    ch_aggregates.build(ch_client, "agg_hour_daily", agency_id, months)
+    _build(ch_client, agency_id, months)
     ch_aggregates.swap(ch_client, "agg_hour_daily", agency_id, months)
 
 
@@ -71,7 +75,7 @@ def test_build_computes_only_the_requested_month_and_rounds_ties_away_from_zero(
             update_row(datetime(2026, 10, 2, 8, 0), "e", 60, scheduled_time="08:00:00"),
         ],
     )
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [SEPT])
+    _build(ch_client, AGENCY, [SEPT])
     assert _hour_daily(ch_client, WORK) == [
         (date(2026, 9, 14), 7, Decimal("0.03"), 2, 3),
         (date(2026, 9, 14), 9, Decimal("-0.03"), 2, -3),
@@ -82,9 +86,9 @@ def test_build_computes_only_the_requested_month_and_rounds_ties_away_from_zero(
 def test_a_row_before_the_cutover_on_the_first_belongs_to_the_previous_month(ch_client):
     """Service day 2026-10-01 starts at 04:00 JST, so 03:30 is still 2026-09-30."""
     insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 10, 1, 3, 30), "a", 120, scheduled_time="03:30:00")])
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [OCT])
+    _build(ch_client, AGENCY, [OCT])
     assert _hour_daily(ch_client, WORK) == []
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [SEPT])
+    _build(ch_client, AGENCY, [SEPT])
     assert _hour_daily(ch_client, WORK) == [(date(2026, 9, 30), 3, Decimal("2.00"), 1, 120)]
 
 
@@ -92,7 +96,7 @@ def test_build_starts_from_an_empty_work_table_whatever_a_dead_run_left(ch_clien
     ch_client.command(f"CREATE TABLE {WORK} AS agg_hour_daily")
     ch_client.command(f"INSERT INTO {WORK} VALUES ({AGENCY}, '2026-09-01', 5, 9.99, 1, 599)")
     insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time="08:00:00")])
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [SEPT])
+    _build(ch_client, AGENCY, [SEPT])
     assert _hour_daily(ch_client, WORK) == [(date(2026, 9, 14), 8, Decimal("1.00"), 1, 60)]
 
 
@@ -122,7 +126,7 @@ def test_swap_replaces_the_built_months_and_empties_the_ones_with_no_rows_left(c
 
 def test_swap_refuses_a_work_table_holding_months_outside_the_rebuild(ch_client):
     insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 10, 2, 8, 0), "b", 120, scheduled_time="08:00:00")])
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [OCT])
+    _build(ch_client, AGENCY, [OCT])
     with pytest.raises(RuntimeError, match="outside the rebuild"):
         ch_aggregates.swap(ch_client, "agg_hour_daily", AGENCY, [SEPT])
     assert _hour_daily(ch_client, "agg_hour_daily") == []
@@ -159,7 +163,7 @@ def test_totals_and_rows_cover_only_the_requested_months_of_the_agency(ch_client
 
 def test_dropping_an_agencys_work_tables_leaves_another_agencys_alone(ch_client):
     for agency_id in (AGENCY, OTHER):
-        ch_aggregates.build(ch_client, "agg_hour_daily", agency_id, [])
+        _build(ch_client, agency_id, [])
     ch_aggregates.drop_work_tables(ch_client, AGENCY)
     assert work_tables(ch_client) == [ch_aggregates.work_table("agg_hour_daily", OTHER)]
 
@@ -197,8 +201,113 @@ def test_build_recomputes_only_the_changed_dates_and_carries_the_rest_of_the_mon
     # 2026-09-14's raw rows go, so only a carried-over row can still show it.
     ch_client.command("TRUNCATE TABLE updates")
     insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 9, 15, 8, 0), "b", 180, scheduled_time="08:00:00")])
-    ch_aggregates.build(ch_client, "agg_hour_daily", AGENCY, [SEPT], [date(2026, 9, 15)])
+    _build(ch_client, AGENCY, [SEPT], [date(2026, 9, 15)])
     assert _hour_daily(ch_client, WORK) == [
         (date(2026, 9, 14), 8, Decimal("1.00"), 1, 60),
         (date(2026, 9, 15), 8, Decimal("3.00"), 1, 180),
     ]
+
+
+class _Counting:
+    """A ClickHouse client that counts the INSERTs into AGENCY's dedup table."""
+
+    def __init__(self, ch):
+        self._ch = ch
+        self.dedup_inserts = 0
+
+    def command(self, sql, parameters=None, settings=None):
+        if sql.startswith(f"INSERT INTO {ch_aggregates.dedup_table(AGENCY)} "):
+            self.dedup_inserts += 1
+        return self._ch.command(sql, parameters=parameters, settings=settings)
+
+    def query(self, sql, parameters=None):
+        return self._ch.query(sql, parameters=parameters)
+
+
+def _work_rows(ch_client, table: str) -> list[str]:
+    columns = ", ".join(ch_aggregates.COLUMNS[table])
+    rows = ch_client.query(f"SELECT {columns} FROM {ch_aggregates.work_table(table, AGENCY)}").result_rows
+    return sorted(map(str, rows))
+
+
+def _unshared_rows(ch_client, table: str, months: list[int]) -> list[str]:
+    """What *table*'s SELECT gives when it dedups `updates` itself, month by month."""
+    rows: list = []
+    for month in months:
+        sql, params = ch_aggregates.select_sql(table, month)
+        rows += ch_client.query(sql, parameters={"agency_id": AGENCY, **params}).result_rows
+    return sorted(map(str, rows))
+
+
+def _work_dates(ch_client, table: str) -> list[date]:
+    rows = ch_client.query(f"SELECT DISTINCT date FROM {ch_aggregates.work_table(table, AGENCY)} ORDER BY date")
+    return [row[0] for row in rows.result_rows]
+
+
+def test_one_dedup_per_month_feeds_every_table(ch_client):
+    insert_updates(ch_client, AGENCY, [*edge_rows(), update_row(datetime(2026, 10, 2, 8, 0), "x", 120)])
+    counting = _Counting(ch_client)
+    rebuilds = {table: ch_aggregates.Rebuild([SEPT, OCT], None) for table in ch_aggregates.TABLES}
+    ch_aggregates.build(counting, AGENCY, rebuilds)
+    assert counting.dedup_inserts == 2
+    for table in ch_aggregates.TABLES:
+        assert _work_rows(ch_client, table) == _unshared_rows(ch_client, table, [SEPT, OCT]), table
+
+
+def test_tables_with_different_scopes_share_the_months_dedup(ch_client):
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time="08:00:00"),
+            update_row(datetime(2026, 9, 15, 8, 0), "b", 120, scheduled_time="08:00:00"),
+        ],
+    )
+    for table in ("agg_hour_daily", "agg_daily_trend"):
+        _build(ch_client, AGENCY, [SEPT], table=table)
+        ch_aggregates.swap(ch_client, table, AGENCY, [SEPT])
+    # 2026-09-14's raw rows go, so only a carried-over row can still show it.
+    ch_client.command("TRUNCATE TABLE updates")
+    insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 9, 15, 8, 0), "b", 180, scheduled_time="08:00:00")])
+    counting = _Counting(ch_client)
+    ch_aggregates.build(
+        counting,
+        AGENCY,
+        {
+            "agg_hour_daily": ch_aggregates.Rebuild([SEPT], None),
+            "agg_daily_trend": ch_aggregates.Rebuild([SEPT], [date(2026, 9, 15)]),
+        },
+    )
+    assert counting.dedup_inserts == 1
+    assert _work_dates(ch_client, "agg_hour_daily") == [date(2026, 9, 15)]
+    assert _work_dates(ch_client, "agg_daily_trend") == [date(2026, 9, 14), date(2026, 9, 15)]
+
+
+def test_a_finished_build_leaves_no_dedup_table(ch_client):
+    insert_updates(ch_client, AGENCY, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
+    _build(ch_client, AGENCY, [SEPT])
+    assert ch_aggregates.dedup_table(AGENCY) not in work_tables(ch_client)
+
+
+def test_dropping_an_agencys_work_tables_also_drops_its_dedup_table(ch_client):
+    ch_client.command(f"CREATE TABLE {ch_aggregates.dedup_table(AGENCY)} (x UInt8) ENGINE = Memory")
+    ch_aggregates.drop_work_tables(ch_client, AGENCY)
+    assert work_tables(ch_client) == []
+
+
+def test_a_month_only_one_table_needs_skips_the_shared_dedup(ch_client):
+    """Filling the dedup table costs more than one table's own dedup, so a lone
+    table reads `updates` directly."""
+    insert_updates(ch_client, AGENCY, [*edge_rows(), update_row(datetime(2026, 10, 2, 8, 0), "x", 120)])
+    counting = _Counting(ch_client)
+    ch_aggregates.build(
+        counting,
+        AGENCY,
+        {
+            "agg_hour_daily": ch_aggregates.Rebuild([SEPT, OCT], None),
+            "agg_daily_trend": ch_aggregates.Rebuild([OCT], None),
+        },
+    )
+    assert counting.dedup_inserts == 1
+    assert _work_rows(ch_client, "agg_hour_daily") == _unshared_rows(ch_client, "agg_hour_daily", [SEPT, OCT])
+    assert _work_rows(ch_client, "agg_daily_trend") == _unshared_rows(ch_client, "agg_daily_trend", [OCT])

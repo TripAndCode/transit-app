@@ -880,10 +880,15 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
         return
     months: dict[str, list[int]] = {}
     try:
-        for table, changed in pending.items():
-            with _step(f"{table}: ClickHouse build"):
+        with _step("ClickHouse months"):
+            for table, changed in pending.items():
                 months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
-                ch_aggregates.build(ch_client, table, agency_id, months[table], changed)
+        ch_aggregates.build(
+            ch_client,
+            agency_id,
+            {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in pending.items()},
+            _step,
+        )
         for table in pending:
             with _step(f"{table}: ClickHouse swap"):
                 ch_aggregates.swap(ch_client, table, agency_id, months[table])

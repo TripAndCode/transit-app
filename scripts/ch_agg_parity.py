@@ -11,7 +11,11 @@ for that reason alone.
 
 --time-only skips the comparison and times each month's build instead: the dedup
 on its own, then each table's SELECT, each run in full with its rows discarded on
-the server.
+the server. Each table's SELECT dedups `updates` itself there, so the per-table
+figures are what an unshared build would pay. A run instead fills one dedup per
+month into a table the tables needing that month share (`ch_aggregates.build`),
+paying the dedup column's figure plus the cost of writing it; a month only one
+table needs is built straight from `updates`.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
 that adds them is applied. Both connections are read-only: ClickHouse with
@@ -117,7 +121,11 @@ def timing(ch, agency_id: int) -> int:
     totals = dict.fromkeys(["dedup", *ch_aggregates.TABLES], 0.0)
     for month in months:
         where, params = ch_aggregates.month_where(month)
-        line = {"dedup": _timed(ch, build_dedup_ch_sql(extra_where=where), {"agency_id": agency_id, **params})}
+        line = {
+            "dedup": _timed(
+                ch, build_dedup_ch_sql(extra_where=where, include_captured_at=True), {"agency_id": agency_id, **params}
+            )
+        }
         for table in ch_aggregates.TABLES:
             sql, month_params = ch_aggregates.select_sql(table, month)
             line[table] = _timed(ch, sql, {"agency_id": agency_id, **month_params})
