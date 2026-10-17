@@ -93,7 +93,6 @@ def test_a_table_clickhouse_lost_is_rebuilt_whole_without_rebuilding_the_agency(
     analyze(agency_id, pg_conn, ch_client)  # the ledger says nothing changed
 
     assert built == [(table, [SEPT, OCT]) for table in ch_aggregates.TABLES]
-    assert "alltime: ClickHouse scan" not in analyze_mod._step_ms, "the whole agency was rebuilt"
     for table in ch_aggregates.TABLES:
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) == served[table], table
 
@@ -102,9 +101,13 @@ def test_a_table_the_agency_has_no_rows_for_is_not_rebuilt_on_every_run(pg_conn,
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time=None)])
     analyze(agency_id, pg_conn, ch_client)
     assert pg_rows(pg_conn, agency_id, "agg_hour_daily") == []
+    assert pg_rows(pg_conn, agency_id, "agg_route_hour") == []
+    assert pg_rows(pg_conn, agency_id, "agg_route_stats")
     built = record_builds(monkeypatch)
+    finalized = _record_finalizes(monkeypatch)
     analyze(agency_id, pg_conn, ch_client)
     assert built == []
+    assert finalized == []
 
 
 def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_conn, agency_id, ch_client, monkeypatch):
@@ -225,3 +228,40 @@ def test_a_run_with_nothing_changed_leaves_the_whole_history_tables_unbuilt(pg_c
     analyze(agency_id, pg_conn, ch_client)
 
     assert calls == []
+
+
+def _record_finalizes(monkeypatch) -> list[list[str]]:
+    """Record the tables of every ch_aggregates.build_whole_history call, while still building."""
+    calls: list[list[str]] = []
+    real = ch_aggregates.build_whole_history
+
+    def build_whole_history(ch, agency_id, tables, *args, **kwargs):
+        calls.append(list(tables))
+        real(ch, agency_id, tables, *args, **kwargs)
+
+    monkeypatch.setattr(ch_aggregates, "build_whole_history", build_whole_history)
+    return calls
+
+
+def test_whole_history_tables_clickhouse_lost_are_finalized_again_without_recounting(
+    pg_conn, agency_id, ch_client, monkeypatch
+):
+    """The first run after they move: ClickHouse holds no rows while their Postgres
+    copies hold the legacy ones, and the counts agree. Only those tables are rebuilt,
+    from the counts as they stand."""
+    insert_updates(ch_client, agency_id, whole_history_rows())
+    analyze(agency_id, pg_conn, ch_client)
+    lost = ("agg_route_stats", "agg_route_hour")
+    served = {table: pg_rows(pg_conn, agency_id, table) for table in lost}
+    for table in lost:
+        ch_client.command(f"TRUNCATE TABLE {table}")
+    built = record_builds(monkeypatch)
+    finalized = _record_finalizes(monkeypatch)
+
+    analyze(agency_id, pg_conn, ch_client)  # the ledger says nothing changed
+
+    assert built == []
+    assert finalized == [list(lost)]
+    for table in lost:
+        assert served[table]
+        assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) == served[table], table

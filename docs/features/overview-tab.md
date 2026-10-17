@@ -96,7 +96,7 @@ What the user sees/does:
 |---|---|
 | `api/routers/overview.py` | `GET /overview/summary`, `GET /peak-hour-breakdown` |
 | `pipeline/reports/overview.py` | `compute_overview_summary()` and its per-module helpers (headline, movers, concentration, top-delayed, peak-hour, service-split); fast-path-vs-live-scan pattern documented in the module docstring |
-| `pipeline/analyze.py`, `pipeline/ch_aggregates.py` | Build `agg_daily_trend`, `agg_route_hour`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads. `ch_aggregates` computes `agg_daily_trend`, `agg_hour_daily` and `agg_route_hour_dow` in ClickHouse; `analyze` copies them into Postgres and builds `agg_route_hour` there |
+| `pipeline/analyze.py`, `pipeline/ch_aggregates.py` | Build `agg_daily_trend`, `agg_route_hour`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads. `ch_aggregates` computes all four in ClickHouse; `analyze` copies them into Postgres |
 | `pipeline/day_types.py` | Files each service date under a day type from the agency's `static_calendar` / `static_calendar_dates` (loaded by `pipeline/static_loader.py`), with the weekday rule as fallback |
 
 ## How to verify manually

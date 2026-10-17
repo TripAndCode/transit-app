@@ -216,6 +216,83 @@ def _route_delay_counts(source: str) -> str:
     """
 
 
+def _pctl(p: str) -> str:
+    """Postgres's PERCENTILE_DISC(*p*) over `dist`, sorted (value, count) pairs whose counts sum to `n`.
+
+    The first value whose running count reaches ceil(p * n), with p * n in float64
+    as Postgres computes it (`Max(1, ceil(p * rowcount))`), so equal to its
+    arraySort(groupArray(x))[ceil(p * n)] form without holding every value.
+    """
+    position = f"toUInt64(ceil({p} * n))"
+    running = "arrayCumSum(arrayMap(x -> tupleElement(x, 2), dist))"
+    return f"tupleElement(dist[arrayFirstIndex(c -> c >= {position}, {running})], 1)"
+
+
+def _distribution(source: str, keys: str, where: str = "1") -> str:
+    """Per *keys*: the event count `n`, the delay sum `s`, the on-time and late
+    counts, and `dist`, every delay value with its count, sorted by value.
+
+    The counts are summed per (*keys*, value) first, so `dist` holds each value
+    once: its length is bounded by the delay range, not by how many scheduled
+    times a route has."""
+    return f"""
+        SELECT {keys}, sum(k) AS n, sum(toInt64(dep) * k) AS s,
+               sumIf(k, dep <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC}) AS on_time,
+               sumIf(k, dep > {LEGACY_SEVERE_LATE_TOLERANCE_SEC}) AS late5,
+               arraySort(groupArray((dep, k))) AS dist
+        FROM (
+            SELECT {keys}, dep, sum(samples) AS k
+            FROM (
+                SELECT v.route_code AS route_code, v.service_type AS service_type,
+                       v.scheduled_sec AS scheduled_sec, v.dep_delay AS dep, v.samples AS samples
+                FROM ({source}) AS v
+                WHERE {where}
+            )
+            GROUP BY {keys}, dep
+        )
+        GROUP BY {keys}
+    """
+
+
+def _route_stats(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, service_type,
+               toFloat32({_round_half_away("s", "60 * n", 2)}) AS avg_min,
+               toFloat32({_round_half_away("p50", "60", 2)}) AS p50_min,
+               toFloat32({_round_half_away("p90", "60", 2)}) AS p90_min,
+               toInt32(late5) AS late_5min_plus,
+               toFloat32({_round_half_away("100 * on_time", "n", 1)}) AS on_time_pct,
+               toFloat32({_round_half_away("100 * late5", "n", 1)}) AS late5_pct,
+               toInt32(n) AS samples, s AS sum_delay_sec
+        FROM (
+            SELECT *, {_pctl("0.5")} AS p50, {_pctl("0.9")} AS p90
+            FROM ({_distribution(source, "route_code, service_type")})
+        )
+    """
+
+
+# Seconds past midnight as HH:MM:SS, the text form of a Postgres `time`.
+_SCHEDULED_TIME = (
+    "concat(leftPad(toString(intDiv(sec, 3600)), 2, '0'), ':', "
+    "leftPad(toString(intDiv(sec, 60) % 60), 2, '0'), ':', leftPad(toString(sec % 60), 2, '0'))"
+)
+
+
+def _route_hour(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, service_type,
+               {_SCHEDULED_TIME} AS scheduled_time,
+               toFloat32({_round_half_away("s", "60 * n", 2)}) AS avg_min,
+               toFloat32({_round_half_away("p50", "60", 2)}) AS p50_min,
+               toFloat32({_round_half_away("p90", "60", 2)}) AS p90_min,
+               toInt32(n) AS samples, s AS sum_delay_sec
+        FROM (
+            SELECT *, assumeNotNull(scheduled_sec) AS sec, {_pctl("0.5")} AS p50, {_pctl("0.9")} AS p90
+            FROM ({_distribution(source, "route_code, service_type, scheduled_sec", "v.scheduled_sec IS NOT NULL")})
+        )
+    """
+
+
 def _route_hour_dow(source: str) -> str:
     avg_min = _round_half_away("s", "60 * n", 2)
     return f"""
@@ -295,6 +372,36 @@ MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
 
 # Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
 _WHOLE_SPECS: dict[str, _Spec] = {
+    "agg_route_stats": _Spec(
+        (
+            "agency_id",
+            "route_code",
+            "service_type",
+            "avg_min",
+            "p50_min",
+            "p90_min",
+            "late_5min_plus",
+            "on_time_pct",
+            "late5_pct",
+            "samples",
+            "sum_delay_sec",
+        ),
+        _route_stats,
+    ),
+    "agg_route_hour": _Spec(
+        (
+            "agency_id",
+            "route_code",
+            "service_type",
+            "scheduled_time",
+            "avg_min",
+            "p50_min",
+            "p90_min",
+            "samples",
+            "sum_delay_sec",
+        ),
+        _route_hour,
+    ),
     "agg_route_hour_dow": _Spec(
         ("agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"),
         _route_hour_dow,

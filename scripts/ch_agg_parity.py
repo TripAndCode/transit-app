@@ -32,6 +32,7 @@ import pathlib
 import sys
 import time
 from datetime import datetime, timezone
+from datetime import time as time_of_day
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -48,9 +49,12 @@ _TIMEOUT_SEC = 3600
 
 
 def normalized(value):
-    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC, arrays as tuples."""
+    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC, arrays as tuples,
+    and a time of day as its HH:MM:SS text, the form ClickHouse holds it in."""
     if isinstance(value, float):
         return float(f"{value:.7g}")
+    if isinstance(value, time_of_day):
+        return value.isoformat()
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
     if isinstance(value, list):

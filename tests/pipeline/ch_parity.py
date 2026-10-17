@@ -30,7 +30,10 @@ _DEDUPED_COLUMNS = (
 _ALLTIME_COLUMNS = (
     "route_code text, service_type text, scheduled_time time, trip_id text, date date, stop_sequence int, dep_delay int"
 )
-_ALLTIME_TABLES = frozenset({"agg_route_hour_dow"})
+_ALLTIME_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
+# agg_route_stats's builder read its two thresholds through these names.
+on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
+late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
 
 _BUCKET_EXPR = (
     f"CASE WHEN dep_delay < {LO} THEN 0 "
@@ -103,6 +106,76 @@ LEGACY_SQL = {
             WHERE scheduled_time IS NOT NULL
             GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
             ORDER BY date, hour
+        """,
+    "agg_route_stats": f"""
+            WITH deduped AS (SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL),
+            grouped AS (
+                SELECT
+                    route_code, service_type,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always
+                    -- an actual observed dep_delay value. It handles ties and
+                    -- single-row groups correctly by construction: it picks the
+                    -- smallest ordered value whose cumulative distribution is
+                    -- >= the target fraction, so a tied cluster or an n=1
+                    -- partition always resolves to a real value instead of
+                    -- skipping every row below the threshold. NOTE: this does
+                    -- NOT match pipeline/reports/rankings.py's _ranking_live
+                    -- ClickHouse fallback, which intentionally reproduces the
+                    -- old min-rank tie formula this column used to use — see
+                    -- that function's docstring for the known, accepted
+                    -- divergence on tied data. Computing both fractions from
+                    -- one ARRAY[...] call (rather than two separate
+                    -- PERCENTILE_DISC calls) keeps this to a single per-group
+                    -- sort of dep_delay.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1 ELSE 0 END) AS late_5min_plus,
+                    SUM(CASE WHEN dep_delay<={on_time_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type
+            )
+            SELECT
+                %(agency_id)s AS agency_id,
+                route_code, service_type,
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                late_5min_plus,
+                ROUND(on_time_pct_raw, 1) AS on_time_pct,
+                ROUND(late5_pct_raw, 1) AS late5_pct,
+                samples,
+                sum_delay_sec
+            FROM grouped
+            ORDER BY avg_min DESC
+        """,
+    "agg_route_hour": """
+            WITH deduped AS (
+                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
+            ),
+            grouped AS (
+                SELECT
+                    route_code, service_type, scheduled_time,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC: see agg_route_stats's identical column above.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type, scheduled_time
+            )
+            SELECT
+                %(agency_id)s AS agency_id,
+                route_code, service_type, scheduled_time,
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                samples,
+                sum_delay_sec
+            FROM grouped
+            ORDER BY route_code, scheduled_time
         """,
     "agg_route_hour_dow": """
             WITH deduped AS (
