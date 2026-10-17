@@ -65,6 +65,8 @@ class FakeClickHouse:
             return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
         if "toYYYYMM(" in sql and "FROM updates WHERE" in sql:
             return _FakeResult([(LEDGER_DATE.year * 100 + LEDGER_DATE.month,)])
+        if sql.startswith("SELECT count() FROM") and "__work_a" in sql:
+            return _FakeResult([(1,)])
         return _FakeResult([])
 
     def query_row_block_stream(self, sql, parameters=None):
@@ -174,7 +176,13 @@ LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
 
 
 def _run(
-    ledger, *, stored=None, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0), ch_tables=ch_aggregates.ALL_TABLES
+    ledger,
+    *,
+    stored=None,
+    ingest_strategy=None,
+    has_static=False,
+    pg_totals=(0, 0, 0),
+    ch_tables=ch_aggregates.ALL_TABLES,
 ):
     """Run `analyze`, returning the fakes.
 
@@ -231,17 +239,26 @@ def test_a_run_with_a_changed_date_still_scans_the_full_history():
     assert len(ch.alltime_scans) == 1
 
 
-@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour", "agg_route_hour_dow"])
+@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour"])
 def test_a_noop_run_neither_purges_nor_rebuilds_an_alltime_aggregate(table):
     """Skipping the build without skipping the purge would empty the table."""
     conn, _ = _noop_run()
 
     assert not [s for s in conn.executed if f"DELETE FROM {table}" in s]
     assert not [s for s in conn.executed if f"INSERT INTO {table}" in s]
-    assert not [s for s in conn.executed if f"FROM {table}" in s and s.lstrip().startswith("SELECT")]
+    # The one read a no-op run makes of it is the counts' store check, a totals probe.
+    reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
+    assert not [s for s in reads if "coalesce(sum(sum_delay_sec), 0)" not in s]
 
 
-@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour", "agg_route_hour_dow"])
+def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():
+    conn, ch = _noop_run()
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        assert not [s for s in conn.executed if f"DELETE FROM {table}" in s], table
+        assert not [c for c in ch.commands if f"{table}__work_a" in c[0]], table
+
+
+@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour"])
 def test_a_run_with_a_changed_date_purges_the_alltime_aggregate_whole(table):
     conn, _ = _changed_run()
 
@@ -438,14 +455,14 @@ def test_a_noop_run_writes_nothing_to_clickhouse():
 
 def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_over():
     _, ch = _changed_run()
-    tables = len(ch_aggregates.TABLES)
+    tables = len(ch_aggregates.MONTHLY_TABLES)
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
     day = {
         "day_start_0": service_day_start_utc(LEDGER_DATE),
         "day_end_0": service_day_start_utc(LEDGER_DATE + timedelta(days=1)),
     }
     filled = [params for sql, params in ch.ch_agg_builds if sql.startswith(f"INSERT INTO {dedup} ")]
-    carried = [params for sql, params in ch.ch_agg_builds if "NOT has(" in sql]
+    carried = [params for sql, params in ch.ch_agg_builds if "NOT has({days:" in sql]
     recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
     assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
@@ -456,7 +473,7 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
 def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():
     conn, ch = _noop_run(pg_totals=(1, 1, 60))
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
-    assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.TABLES)
+    assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.MONTHLY_TABLES)
     assert ch.alltime_scans == []
     for table in ch_aggregates.TABLES:
         assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table

@@ -9,7 +9,14 @@ from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import ch_rows, pg_rows, record_builds, update_row, work_tables
+from tests.pipeline.ch_agg_helpers import (
+    ch_rows,
+    pg_rows,
+    record_builds,
+    update_row,
+    whole_history_rows,
+    work_tables,
+)
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 SEPT = 202609
@@ -31,9 +38,10 @@ def _dates(ch_client, pg_conn, agency_id: int, table: str) -> tuple[list[date], 
 @pytest.mark.parametrize("pattern_fn", ALL_PATTERNS, ids=lambda fn: fn.__name__)
 def test_clickhouse_holds_the_rows_postgres_serves(pattern_fn, tmp_path, pg_conn, agency_id, ch_client):
     run_pattern(pattern_fn(), tmp_path, pg_conn, agency_id, ch_client)
-    for table in ch_aggregates.TABLES:
+    for table in ch_aggregates.COPIED_TABLES:
         served = pg_rows(pg_conn, agency_id, table)
-        assert served, f"{table}: nothing stored, so this would pass vacuously"
+        if table in ch_aggregates.TABLES:
+            assert served, f"{table}: nothing stored, so this would pass vacuously"
         assert ch_rows(ch_client, agency_id, table) == served, table
 
 
@@ -48,7 +56,7 @@ def test_a_changed_date_rebuilds_only_the_month_holding_it(pg_conn, agency_id, c
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 10, 3, 8, 0), "c", 180)])
     analyze(agency_id, pg_conn, ch_client)
 
-    assert built == [(table, [OCT]) for table in ch_aggregates.TABLES]
+    assert built == [(table, [OCT]) for table in ch_aggregates.MONTHLY_TABLES]
     every_date = [date(2026, 9, 14), date(2026, 10, 2), date(2026, 10, 3)]
     for table in ch_aggregates.TABLES:
         assert _dates(ch_client, pg_conn, agency_id, table) == (every_date, every_date), table
@@ -163,7 +171,7 @@ def test_an_incremental_run_recomputes_only_the_changed_dates(pg_conn, agency_id
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 10, 3, 8, 0), "c", 180)])
     analyze(agency_id, pg_conn, ch_client)
 
-    assert calls == [(table, OCT, [date(2026, 10, 3)]) for table in ch_aggregates.TABLES]
+    assert calls == [(table, OCT, [date(2026, 10, 3)]) for table in ch_aggregates.MONTHLY_TABLES]
     for table in ch_aggregates.TABLES:
         assert stored_rows(pg_conn, agency_id, table) == legacy_rows(pg_conn, ch_client, agency_id, table), table
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table), table
@@ -175,3 +183,46 @@ def test_a_rebuild_times_the_shared_dedup_apart_from_each_tables_build(pg_conn, 
     assert "ClickHouse dedup" in analyze_mod._step_ms
     for table in ch_aggregates.TABLES:
         assert f"{table}: ClickHouse build" in analyze_mod._step_ms, table
+
+
+def test_a_counts_table_that_lost_its_rows_is_rebuilt_whole_before_finalizing(pg_conn, agency_id, ch_client):
+    insert_updates(ch_client, agency_id, whole_history_rows())
+    analyze(agency_id, pg_conn, ch_client)
+    served = pg_rows(pg_conn, agency_id, "agg_route_hour_dow")
+    assert served
+    for month in (SEPT, OCT):
+        ch_client.command(f"ALTER TABLE {ch_aggregates.COUNTS} DROP PARTITION ({int(agency_id)}, {month})")
+
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert pg_rows(pg_conn, agency_id, "agg_route_hour_dow") == served
+    assert ch_rows(ch_client, agency_id, "agg_route_hour_dow") == served
+
+
+def test_an_incremental_run_recounts_one_month_and_finalizes_over_all(pg_conn, agency_id, ch_client, monkeypatch):
+    insert_updates(ch_client, agency_id, whole_history_rows())
+    analyze(agency_id, pg_conn, ch_client)
+    later = update_row(datetime(2026, 10, 2, 9, 0), "w11", 3, scheduled_time="07:05:00", route_code="WH")
+    insert_updates(ch_client, agency_id, [later])
+    built = record_builds(monkeypatch)
+
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert (ch_aggregates.COUNTS, [OCT]) in built
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT dow, samples, sum_delay_sec FROM agg_route_hour_dow WHERE agency_id = %s ORDER BY dow, hour",
+            (agency_id,),
+        )
+        assert cur.fetchall() == [(1, 2, 121), (5, 3, 6), (7, 2, 150), (7, 1, -30)]
+
+
+def test_a_run_with_nothing_changed_leaves_the_whole_history_tables_unbuilt(pg_conn, agency_id, ch_client, monkeypatch):
+    insert_updates(ch_client, agency_id, whole_history_rows())
+    analyze(agency_id, pg_conn, ch_client)
+    calls: list = []
+    monkeypatch.setattr(ch_aggregates, "build_whole_history", lambda *a, **k: calls.append(a))
+
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert calls == []

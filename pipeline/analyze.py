@@ -9,9 +9,10 @@ transaction, so re-running is idempotent and a crash mid-run rolls back to the
 prior snapshot. The ledger's blind spot (see `_static_fingerprint`) is
 recovered only by a deliberate full rebuild (`analyze --full`).
 
-The tables in `pipeline.ch_aggregates.TABLES` are computed and stored in
-ClickHouse and rebuilt in whole months; each run copies what it rebuilt into the
-Postgres table of the same name, which is what the API reads
+The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
+ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
+finalized from ClickHouse's delay counts. Each run copies what it rebuilt into
+the Postgres table of the same name, which is what the API reads
 (`_rebuild_ch_aggregates`).
 
 Aggregation tables produced:
@@ -131,7 +132,7 @@ _SERVICE_DATE = service_date_ch()
 #     and route-summary surface), plus arr_delay (agg_route_daily_dwell_run).
 #   _analyze_alltime  — the whole history, but only rows with a service_type,
 #     which is a small fraction of it. The aggregates spanning all of history
-#     (route_stats/hour/hour_dow) are keyed by service_type and so filter
+#     built here (route_stats/hour) are keyed by service_type and so filter
 #     `service_type IS NOT NULL` anyway — pushing that filter into the load is
 #     equivalent to a typed dedup, because service_type is part of the dedup
 #     key.
@@ -198,7 +199,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # therefore skips their purge and their build together, and with them the
 # full-history ClickHouse scan that feeds them — the largest single read a run
 # makes, paid today to reproduce a byte-identical result.
-_ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
+_ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour"})
 
 # Aggregates keyed by something other than date whose value spans all of
 # history. They cannot be rebuilt in part, but a run where no row of any date
@@ -223,9 +224,14 @@ _NOOP_SKIPPABLE_AGG_TABLES = (
 )
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
-# rows are a copy, written only by _copy_ch_aggregate, which purges the months it
+# rows are a copy, written only by _copy_ch_aggregate, which purges what it
 # replaces, so the purge loop in _analyze_locked leaves them alone.
-_CH_AGG_TABLES = frozenset(ch_aggregates.TABLES)
+_CH_AGG_TABLES = frozenset(ch_aggregates.COPIED_TABLES)
+
+# The Postgres table whose agency totals ch_aggregates.COUNTS must reproduce: both
+# cover every typed, routed stop event of the history, so (Σ samples,
+# Σ sum_delay_sec) agree exactly when the counts are whole.
+_COUNTS_REFERENCE = "agg_route_stats"
 
 
 # ── Step timing ──────────────────────────────────────────────────────────
@@ -774,6 +780,10 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
 
+    COUNTS has no Postgres copy, so its totals are compared with _COUNTS_REFERENCE's
+    instead. A whole-history table is rebuilt whole whenever the counts are, or when
+    its own two stores disagree, and left standing otherwise.
+
     It first checks that ClickHouse has every such table, so a store that
     predates one stops the run before anything is written.
     """
@@ -781,7 +791,7 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
     if missing:
         raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
     if rebuild_dates is None:
-        return dict.fromkeys(ch_aggregates.TABLES)
+        return dict.fromkeys(ch_aggregates.ALL_TABLES)
     scopes: dict[str, list | None] = {}
     for table in ch_aggregates.TABLES:
         with _step(f"{table}: compare stores"):
@@ -789,6 +799,19 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
         if not agree:
             logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
         scopes[table] = rebuild_dates if agree else None
+    counts = ch_aggregates.COUNTS
+    with _step(f"{counts}: compare stores"):
+        agree = (
+            ch_aggregates.totals(ch_client, counts, agency_id, None)[1:]
+            == _pg_totals(conn, _COUNTS_REFERENCE, agency_id, None)[1:]
+        )
+    if not agree:
+        logger.info(f"  {counts}: totals differ from {_COUNTS_REFERENCE}; recounting every month")
+    scopes[counts] = rebuild_dates if agree else None
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        with _step(f"{table}: compare stores"):
+            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
+        scopes[table] = None if scopes[counts] != [] or not agree else []
     return scopes
 
 
@@ -860,34 +883,48 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
 
     The agency's work tables are dropped however the builds end. A process that
     dies can't do that, so ch_aggregates.build drops its own before starting.
+
+    The whole-history tables are finalized from the counts after every monthly build
+    and before any swap, so they read the months just recounted from the counts' work
+    table; COUNTS itself is never copied.
     """
-    pending = {table: changed for table, changed in scopes.items() if changed != []}
+    monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
+    whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
     for table in scopes:
-        if table not in pending:
+        if table not in monthly and table not in whole:
             logger.info(f"  {table}: unchanged, not rebuilt")
-    if not pending:
+    if not monthly and not whole:
         return
     months: dict[str, list[int]] = {}
     try:
         with _step("ClickHouse months"):
-            for table, changed in pending.items():
+            for table, changed in monthly.items():
                 months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
-        ch_aggregates.build(
-            ch_client,
-            agency_id,
-            {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in pending.items()},
-            _step,
-        )
-        for table in pending:
+        if monthly:
+            ch_aggregates.build(
+                ch_client,
+                agency_id,
+                {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in monthly.items()},
+                _step,
+            )
+        if whole:
+            ch_aggregates.build_whole_history(ch_client, agency_id, whole, months.get(ch_aggregates.COUNTS), _step)
+        for table in monthly:
             with _step(f"{table}: ClickHouse swap"):
                 ch_aggregates.swap(ch_client, table, agency_id, months[table])
+        for table in whole:
+            with _step(f"{table}: ClickHouse swap"):
+                ch_aggregates.swap_whole_history(ch_client, table, agency_id)
     finally:
         try:
             ch_aggregates.drop_work_tables(ch_client, agency_id)
         except Exception:
             logger.exception(f"  could not drop agency {agency_id}'s ClickHouse work tables")
-    for table, changed in pending.items():
-        _copy_ch_aggregate(table, agency_id, None if changed is None else months[table], conn, ch_client)
+    for table, changed in monthly.items():
+        if table in ch_aggregates.TABLES:
+            _copy_ch_aggregate(table, agency_id, None if changed is None else months[table], conn, ch_client)
+    for table in whole:
+        _copy_ch_aggregate(table, agency_id, None, conn, ch_client)
 
 
 def analyze(agency_id: int, conn, ch_client) -> None:
@@ -991,7 +1028,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_sql=build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL"),
                 parameters={"agency_id": agency_id},
                 # An empty rebuild list means no date's rows moved, so this
-                # slice would come back identical and the three aggregates
+                # slice would come back identical and the two aggregates
                 # over it are already standing at that answer — see
                 # _ALLTIME_AGG_TABLES. Skipping the scan skips a read of the
                 # agency's whole history, not just of the dates in question.
@@ -1145,43 +1182,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 "samples",
                 "sum_delay_sec",
             ],
-            p,
-            conn,
-            rebuild_dates,
-        )
-
-        # ── agg_route_hour_dow ───────────────────────────────────────────
-        # Per route × service × day-of-week × hour, for the Forecast heatmap.
-        # `scheduled_time IS NOT NULL` guards the NOT NULL `hour` column: a typed
-        # row lacking a scheduled time would otherwise yield a NULL hour and abort
-        # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
-        # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
-        # notation, e.g. "25:30:00") cannot be a same-day `scheduled_time`, so such a
-        # row reaches `_analyze_alltime` with a NULL `scheduled_time` (static_join
-        # keeps it; only the aomori_regex strategy skips it) and is excluded by the
-        # filter below. A late-night continuation trip is therefore absent from this
-        # aggregate rather than folded into the early-morning bucket.
-        sql = """
-            WITH deduped AS (
-                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
-            )
-            SELECT
-                %(agency_id)s AS agency_id,
-                route_code, service_type,
-                EXTRACT(ISODOW FROM date::date)::smallint AS dow,
-                EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
-            FROM deduped
-            GROUP BY route_code, service_type,
-                     EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
-            ORDER BY route_code
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_hour_dow",
-            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
             rebuild_dates,

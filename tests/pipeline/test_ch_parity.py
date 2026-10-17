@@ -18,16 +18,17 @@ from pipeline.histogram import N_BUCKETS, bucketize
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows
+from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows, whole_history_rows
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def _assert_parity(pg_conn, ch_client, agency_id: int) -> None:
-    for table in ch_aggregates.TABLES:
+    for table in ch_aggregates.COPIED_TABLES:
         stored = stored_rows(pg_conn, agency_id, table)
-        assert stored, f"{table}: nothing stored, so this would pass vacuously"
+        if table in ch_aggregates.TABLES:
+            assert stored, f"{table}: nothing stored, so this would pass vacuously"
         assert stored == legacy_rows(pg_conn, ch_client, agency_id, table), table
 
 
@@ -58,6 +59,14 @@ def test_parity_on_a_real_feed(pg_conn, ch_client):
         rows = static_join.parse_feed(raw, captured_at, f"parity/{i}.bin", agency_id, pg_conn)
         insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
+    _assert_parity(pg_conn, ch_client, agency_id)
+
+
+def test_parity_on_the_whole_history_rows(pg_conn, agency_id, ch_client):
+    insert_updates(ch_client, agency_id, whole_history_rows())
+    analyze(agency_id, pg_conn, ch_client)
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        assert stored_rows(pg_conn, agency_id, table), table
     _assert_parity(pg_conn, ch_client, agency_id)
 
 

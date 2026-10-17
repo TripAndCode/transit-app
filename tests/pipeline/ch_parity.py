@@ -26,6 +26,12 @@ _DEDUPED_COLUMNS = (
     "captured_at timestamptz, arr_delay int"
 )
 
+# _analyze_alltime's columns and slice, as analyze loaded them for the whole-history builders.
+_ALLTIME_COLUMNS = (
+    "route_code text, service_type text, scheduled_time time, trip_id text, date date, stop_sequence int, dep_delay int"
+)
+_ALLTIME_TABLES = frozenset({"agg_route_hour_dow"})
+
 _BUCKET_EXPR = (
     f"CASE WHEN dep_delay < {LO} THEN 0 "
     f"WHEN dep_delay >= {HI} THEN {N_BUCKETS - 1} "
@@ -98,6 +104,23 @@ LEGACY_SQL = {
             GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
             ORDER BY date, hour
         """,
+    "agg_route_hour_dow": """
+            WITH deduped AS (
+                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
+            )
+            SELECT
+                %(agency_id)s AS agency_id,
+                route_code, service_type,
+                EXTRACT(ISODOW FROM date::date)::smallint AS dow,
+                EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
+                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
+            FROM deduped
+            GROUP BY route_code, service_type,
+                     EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
+            ORDER BY route_code
+        """,
 }
 
 
@@ -111,13 +134,18 @@ def legacy_rows(conn, ch_client, agency_id: int, table: str) -> list[str]:
     """
     columns = ", ".join(ch_aggregates.COLUMNS[table])
     placeholders = ", ".join(["%s"] * len(ch_aggregates.COLUMNS[table]))
+    alltime = table in _ALLTIME_TABLES
     with conn.cursor() as cur:
         _load_temp_table(
             cur,
             ch_client,
-            table="_analyze_deduped",
-            columns=_DEDUPED_COLUMNS,
-            ch_sql=build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True),
+            table="_analyze_alltime" if alltime else "_analyze_deduped",
+            columns=_ALLTIME_COLUMNS if alltime else _DEDUPED_COLUMNS,
+            ch_sql=(
+                build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL")
+                if alltime
+                else build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True)
+            ),
             parameters={"agency_id": agency_id},
             label="parity",
         )

@@ -1963,7 +1963,7 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     ledger = [s for s in recording.queries if "raw_samples" in s and "clamp_count" not in s]
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
-    aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
+    aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.ALL_TABLES, "system.tables"))
     assert all(s.rstrip().endswith("LIMIT 1") or any(r in s for r in aggregate_reads) for s in others), others
 
 
