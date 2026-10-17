@@ -26,7 +26,7 @@ itsdangerous = ">=2.2"
 cryptography = ">=48,<51"
 clickhouse-connect = {version = "^1.6.0", extras = ["async"]}
 boto3 = "^1.35"
-pyarrow = "^22"
+pyarrow = ">=22,<27"
 # Japanese public holidays: the day-type rule for dates a feed's own calendar does not cover.
 jpholiday = "^1.0.3"
 
