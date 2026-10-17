@@ -84,6 +84,21 @@ BLOCKED = [
         "make prune-query-log && psql postgresql://transit:transit@localhost:5544/transit_test -c 'SELECT 1'",
         id="throwaway-port-only-in-another-command",
     ),
+    # make's `-include .env` outranks the environment, so an env prefix does not
+    # repoint a make target; only a VAR=value argument after `make` does.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        id="env-prefix-migrate-down",
+    ),
+    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="env-prefix-ch-bootstrap"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        id="env-prefix-analyze-all",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        id="env-prefix-with-a-glued-redirect",
+    ),
     # The last of two assignments is the one the command sees.
     pytest.param(
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
@@ -409,7 +424,7 @@ ALLOWED = [
     pytest.param("ls -la", id="unrelated"),
     pytest.param('echo "DROP TABLE updates"', id="write-without-target"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="migrate-down-pointed-at-test-db",
     ),
     pytest.param(
@@ -417,14 +432,14 @@ ALLOWED = [
         "migrate down",
         id="cli-migrate-down-pointed-at-test-db",
     ),
-    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-pointed-at-test-ch"),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8124", id="ch-bootstrap-pointed-at-test-ch"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
-        "make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
         id="ingest-pointed-at-both-test-stores",
     ),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124",
         id="analyze-all-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
@@ -464,7 +479,7 @@ ALLOWED = [
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
     pytest.param('git commit -m "make it faster"', id="quoted-prose-naming-no-target"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test>out.log",
         id="test-db-with-a-glued-redirect",
     ),
     pytest.param(

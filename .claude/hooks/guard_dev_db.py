@@ -61,9 +61,10 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
 # Per store, the variable that points it and the throwaway value of it. Read
-# from the NAME=value assignments of the same simple command -- the env prefix
-# or a make variable -- so a throwaway port named anywhere else (another
-# command, a comment) points nothing at it.
+# from the NAME=value assignments of the same simple command -- make's own
+# VAR=value arguments for a make target, the env prefix for a direct CLI call --
+# so a throwaway port named anywhere else (another command, a comment) points
+# nothing at it.
 THROWAWAY = {
     # The port of the URL's host, not a ":5544" anywhere in it (a password).
     "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
@@ -543,17 +544,28 @@ def _simple_commands(lowered: list[str]) -> list[list[str]]:
 
 
 def _segment_writes_dev(segment: list[str]) -> bool:
-    writes: set[str] = set()
     for i, tok in enumerate(segment):
         name = tok.rsplit("/", 1)[-1]
         if name in _MAKE_NAMES:
+            # The Makefile's `-include .env` outranks the environment, so an env
+            # prefix does not repoint a make target; only make's own VAR=value
+            # arguments do.
+            writes: set[str] = set()
             for target in make_targets(segment[i + 1 :]):
                 writes |= DESTRUCTIVE_TARGETS.get(target, set())
+            if _points_at_dev(writes, segment[i + 1 :]):
+                return True
         elif name in _CLI_NAMES and i + 1 < len(segment):
-            writes |= DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set())
-    # Later assignments win, as they do for the shell's env prefix and for
-    # make's own command-line variables, which also override the prefix.
-    assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
+            # Nothing loads `.env` for a direct CLI call, so its env prefix is its target.
+            if _points_at_dev(DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set()), segment[:i]):
+                return True
+    return False
+
+
+def _points_at_dev(writes: set[str], words: list[str]) -> bool:
+    """Whether any store in *writes* is left pointed at dev by the NAME=value
+    assignments among *words*. Later assignments win."""
+    assigned = dict(tok.split("=", 1) for tok in words if _ASSIGNMENT.match(tok))
     for store in writes:
         name, throwaway = THROWAWAY[store]
         value = assigned.get(name, "")
@@ -659,8 +671,9 @@ def main() -> int:
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123/:9000 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
-            "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "
-            "DATABASE_URL=...:5544/... and/or CLICKHOUSE_PORT=8124 assigned on that same command, for each store "
+            "so run it as its own call. A destructive make target runs only as "
+            "`make <target> DATABASE_URL=...:5544/... CLICKHOUSE_PORT=8124` (an env prefix before `make` loses "
+            "to .env), and a gtfs_pipeline subcommand only with those assigned as its env prefix, for each store "
             "it writes. See AGENTS.md.\n"
         )
         return 2
