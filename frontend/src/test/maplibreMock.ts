@@ -115,14 +115,7 @@ export class MockLngLatBounds {
   }
 }
 
-const maplibregl = {
-  Map: MockMap,
-  Popup: MockPopup,
-  NavigationControl: MockNavigationControl,
-  LngLatBounds: MockLngLatBounds,
-};
-
-export default maplibregl;
+export function setWorkerUrl() {}
 export const Map = MockMap;
 export const Popup = MockPopup;
 export const NavigationControl = MockNavigationControl;
