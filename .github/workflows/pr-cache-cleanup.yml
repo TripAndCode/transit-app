@@ -1,0 +1,27 @@
+name: PR cache cleanup
+
+# A pull request's caches live under refs/pull/<N>/merge, which only that PR's runs
+# can read, so once it closes they are dead weight. They still count against the
+# repository's cache quota, and the eviction that quota forces takes main's caches too.
+
+# pull_request_target, not pull_request: a Dependabot or fork PR's pull_request run
+# gets a read-only token, which cannot delete caches. This job must never check out
+# PR code; test_no_pull_request_target_workflow_checks_out_code enforces that.
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  delete-caches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete this PR's caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
