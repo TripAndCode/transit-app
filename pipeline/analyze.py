@@ -203,9 +203,11 @@ _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _KEYSET_AGG_TABLES | _STA
 # replaces, so the purge loop in _analyze_locked leaves them alone.
 _CH_AGG_TABLES = frozenset(ch_aggregates.COPIED_TABLES)
 
-# The Postgres table whose agency totals ch_aggregates.COUNTS must reproduce: both
-# cover every typed, routed stop event of the history, so (Σ samples,
-# Σ sum_delay_sec) agree exactly when the counts are whole.
+# The Postgres table whose agency totals ch_aggregates.COUNTS must match: both
+# cover every typed, routed stop event of the history, and the copy was finalized
+# from the counts the last committed run left. A difference means the counts lost
+# or gained rows since (a dropped partition, a swap whose Postgres transaction
+# rolled back), which the next run recounts before finalizing anything.
 _COUNTS_REFERENCE = "agg_route_stats"
 
 
@@ -1065,6 +1067,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # must keep a stop's traffic when the route is unknown. Each route-keyed
         # builder filters `route_code IS NOT NULL` in its own CTE instead: a NULL
         # key would otherwise abort the whole-agency transaction.
+
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
         # already clamped via build_dedup_ch_sql) — NOT raw `updates`. So
