@@ -105,3 +105,17 @@ CREATE TABLE IF NOT EXISTS agg_route_daily (
 ) ENGINE = MergeTree
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, route_code, service_type);
+
+CREATE TABLE IF NOT EXISTS agg_route_daily_dist (
+    agency_id     Int32,
+    date          Date,
+    route_code    String,
+    service_type  String,
+    samples       Int32,
+    sum_delay_sec Int64,
+    on_time_count Int32,
+    late5_count   Int32,
+    hist          Array(Int32)
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, route_code, service_type);

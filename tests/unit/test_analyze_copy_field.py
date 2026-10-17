@@ -82,3 +82,15 @@ def test_an_aware_datetime_keeps_its_own_offset():
 )
 def test_delimiters_and_backslashes_are_escaped(raw, expected):
     assert _copy_field(raw) == expected
+
+
+def test_a_list_is_a_postgres_array_literal():
+    assert _copy_field([3, 0, 12]) == "{3,0,12}"
+
+
+def test_an_empty_list_is_an_empty_array():
+    assert _copy_field([]) == "{}"
+
+
+def test_a_missing_element_is_null_inside_the_array():
+    assert _copy_field([1, None]) == "{1,NULL}"

@@ -82,3 +82,14 @@ def test_timing_runs_each_select_in_full_and_discards_its_rows():
     ch = _ClickHouse()
     _timed(ch, "SELECT 1", {})
     assert ch.raw == ["SELECT 1 FORMAT Null"]
+
+
+def test_differences_compare_array_columns():
+    """A histogram column comes back as a list, which a set of rows cannot hold as is."""
+    day = date(2026, 9, 1)
+    ch = [(1, day, "R1", [0, 2, 1])]
+    pg = [(1, day, "R1", [0, 2, 1])]
+    assert differences(ch, pg, {day}) == ([], [])
+    only_ch, only_pg = differences(ch, [(1, day, "R1", [0, 1, 2])], {day})
+    assert only_ch == [(1, day, "R1", (0, 2, 1))]
+    assert only_pg == [(1, day, "R1", (0, 1, 2))]
