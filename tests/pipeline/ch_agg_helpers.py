@@ -1,6 +1,6 @@
 """Rows and probes shared by the ClickHouse aggregate tests."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from pipeline import ch_aggregates
 
@@ -68,6 +68,8 @@ def normalized(value):
     """*value* as both stores can be compared on: floats at float32 precision, instants in UTC."""
     if isinstance(value, float):
         return float(f"{value:.7g}")
+    if isinstance(value, time):
+        return value.isoformat()
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
     return value
