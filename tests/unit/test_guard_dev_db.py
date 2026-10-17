@@ -99,6 +99,11 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
         id="env-prefix-with-a-glued-redirect",
     ),
+    # Environment variable names are case-sensitive too.
+    pytest.param(
+        "database_url=postgresql://transit:transit@localhost:5544/transit_test python gtfs_pipeline.py migrate down",
+        id="lowercase-cli-env-prefix-name",
+    ),
     # Make variable names are case-sensitive: a lowercase one sets a different variable.
     pytest.param(
         "make analyze-all database_url=postgresql://transit:transit@localhost:5544/transit_test clickhouse_port=8124",
@@ -172,10 +177,56 @@ BLOCKED = [
         "'MAKE=make CLICKHOUSE_PORT='",
         id="sub-make-variable",
     ),
-    # Bash ends the command at an unquoted newline or comment; words after it never reach make.
+    # A recipe pastes make variable values into shell text, and the shell expands
+    # an env-prefix value: anything beyond URL-safe characters can run a command.
+    pytest.param(
+        "make prune-query-log 'DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test;"
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit'",
+        id="semicolon-inside-a-make-value",
+    ),
+    pytest.param(
+        "make prune-query-log 'DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`id`'",
+        id="backticks-inside-a-make-value",
+    ),
+    pytest.param(
+        "make ingest 'FOLDER=raw;id' DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="semicolon-inside-another-make-value",
+    ),
+    pytest.param(
+        "DATABASE_URL='postgresql://transit:transit@localhost:5544/transit_test`id`' "
+        "python gtfs_pipeline.py migrate down",
+        id="backticks-inside-a-cli-env-prefix",
+    ),
+    # Bash ends the command at an unquoted comment; words after it never reach make.
     pytest.param(
         "make prune-query-log # DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="assignment-inside-a-comment",
+    ),
+    # A destructive command spanning lines is blocked outright: where bash ends a
+    # line (continuation, escaped backslash, a comment holding a quote) is not
+    # worth re-deriving. The throwaway form fits on one line.
+    pytest.param(
+        "make analyze-all \\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\\n"
+        "  CLICKHOUSE_PORT=8124",
+        id="multi-line-make-command",
+    ),
+    pytest.param(
+        "make prune-query-log \\\\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="escaped-backslash-before-a-newline",
+    ),
+    pytest.param(
+        "make prune-query-log\\\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="continuation-with-no-space",
+    ),
+    pytest.param(
+        "make prune-query-log # don't run yet\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="comment-with-a-quote-before-a-newline",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test\n"
+        "poetry run python gtfs_pipeline.py migrate down",
+        id="cli-env-prefix-on-the-line-before",
     ),
     pytest.param(
         "make prune-query-log\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
@@ -219,6 +270,14 @@ BLOCKED = [
     ),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
+    # The default goal is `all: bootstrap`.
+    pytest.param("make", id="bare-make-runs-the-default-goal"),
+    pytest.param("make all", id="make-all"),
+    pytest.param("make -j2", id="flags-only-make-runs-the-default-goal"),
+    pytest.param(
+        "make DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignments-only-make-runs-the-default-goal-on-dev-clickhouse",
+    ),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
         "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
@@ -597,12 +656,8 @@ ALLOWED = [
         "CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test AGENCY_ID=1 FULL=1",
         id="documented-throwaway-analyze-all-with-recipe-variables",
     ),
-    # A backslash-newline continues the same command, as in bash.
-    pytest.param(
-        "make analyze-all \\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\\n"
-        "  CLICKHOUSE_PORT=8124",
-        id="line-continued-make-variables",
-    ),
+    # A newline elsewhere in the command does not block a non-destructive one.
+    pytest.param("make lint\nmake check-aggs", id="multi-line-read-only-make"),
     # A flag that takes no argument does not swallow the assignment after it.
     *[
         pytest.param(
@@ -756,13 +811,27 @@ READ_ONLY_TARGETS = {
 READ_ONLY_SUBCOMMANDS = {"check_aggs", "check_migrations", "digest"}
 
 
+def _make_prerequisites() -> dict[str, set[str]]:
+    import re
+
+    prerequisites: dict[str, set[str]] = {}
+    for line in (HOOK.parents[2] / "Makefile").read_text().splitlines():
+        if (match := re.match(r"^([A-Za-z0-9_-][A-Za-z0-9_.-]*):(?!=)(.*)$", line)) is not None:
+            prerequisites[match[1]] = set(match[2].split("#", 1)[0].split())
+    return prerequisites
+
+
 def _targets_reaching_a_store() -> set[str]:
     """Targets whose recipe runs against $(db_url) or the ClickHouse client,
-    directly or through a `$(MAKE) <target>` it calls."""
+    directly, through a `$(MAKE) <target>` it calls, or through a prerequisite."""
     import re
 
     recipes = _make_recipes()
-    calls = {target: set(re.findall(r"\$\(MAKE\)\s+([A-Za-z0-9_.-]+)", recipe)) for target, recipe in recipes.items()}
+    prerequisites = _make_prerequisites()
+    calls = {
+        target: set(re.findall(r"\$\(MAKE\)\s+([A-Za-z0-9_.-]+)", recipe)) | prerequisites.get(target, set())
+        for target, recipe in recipes.items()
+    }
     reaching = {
         target
         for target, recipe in recipes.items()

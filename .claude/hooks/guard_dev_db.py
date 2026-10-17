@@ -83,6 +83,8 @@ REPLICA_CONTAINER = re.compile(r"transit-ml-[a-z0-9_.-]+")
 # to the stores it writes; it runs only when the command points every one of
 # them at the throwaway stack.
 DESTRUCTIVE_TARGETS = {
+    # `all: bootstrap` is also the default goal, which a make naming no target runs.
+    "all": {"pg", "ch"},
     "analyze": {"pg", "ch"},
     "bootstrap": {"pg", "ch"},
     "analyze-all": {"pg", "ch"},
@@ -489,7 +491,7 @@ def runs_default_clickhouse_client(cmd: str) -> bool:
 _MAKE_CONTROL = re.compile(r"\b(?:GNUMAKEFLAGS|MAKEFLAGS|MFLAGS|MAKEOVERRIDES|MAKEFILES)\b")
 
 
-def runs_destructive_command(cmd: str, make_controlled: bool = False) -> bool:
+def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline: bool = False) -> bool:
     """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
     command, that writes a store its own assignments do not point at the
     throwaway stack.
@@ -499,33 +501,31 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False) -> bool:
     destructive target is read the same way and blocked, the cheap direction.
     """
     make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
+    # shlex reads a newline as plain whitespace, while bash ends a command there
+    # (or not: a continuation, an escaped backslash, a comment holding a quote).
+    # A destructive command spanning lines is blocked rather than re-derived.
+    multiline = multiline or "\n" in cmd
     # Case is kept: make and the shell both match variable names case-sensitively.
-    for segment in _simple_commands(_shell_tokens(cmd, newlines=True)):
-        if _segment_writes_dev(segment, make_controlled):
+    for segment in _simple_commands(_shell_tokens(cmd)):
+        if _segment_writes_dev(segment, make_controlled, multiline):
             return True
         quoted = (tok for tok in segment if any(c.isspace() for c in tok))
-        if any(runs_destructive_command(tok, make_controlled) for tok in quoted):
+        if any(runs_destructive_command(tok, make_controlled, multiline) for tok in quoted):
             return True
     return False
 
 
-def _shell_tokens(text: str, newlines: bool = False) -> list[str]:
+def _shell_tokens(text: str) -> list[str]:
     """shlex tokens with each run of shell operator characters (`;`, `&&`,
     `|`, `>` ...) a token of its own, also where it is glued to a word:
-    `shlex.split("make a;ls")` keeps `a;ls` as one token. With *newlines*, an
-    unquoted newline is such an operator too, as it ends a command in bash,
-    and a backslash-newline joins two lines into one."""
+    `shlex.split("make a;ls")` keeps `a;ls` as one token."""
     # A `#` starts a comment only at the start of a word, which shlex's default
     # (any `#`) gets wrong: `pa#ss@host ... -f x.sql` would lose its flag. The
     # comment-aware lexer is the fallback for a trailing comment holding an
     # unbalanced quote, which the comment-free one cannot lex.
-    if newlines:
-        text = text.replace("\\\n", " ")
     for commenters in ("", "#"):
-        lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n" if newlines else True)
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
-        if newlines:
-            lexer.whitespace = " \t\r"
         lexer.commenters = commenters
         try:
             return list(lexer)
@@ -534,7 +534,7 @@ def _shell_tokens(text: str, newlines: bool = False) -> list[str]:
     return text.split()
 
 
-_OPERATOR_CHARS = frozenset("();<>|&\n")
+_OPERATOR_CHARS = frozenset("();<>|&")
 
 
 def _is_separator(tok: str) -> bool:
@@ -557,7 +557,7 @@ def _simple_commands(lowered: list[str]) -> list[list[str]]:
     return [segment for segment in segments if segment]
 
 
-def _segment_writes_dev(segment: list[str], make_controlled: bool) -> bool:
+def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bool) -> bool:
     for i, tok in enumerate(segment):
         name = tok.rsplit("/", 1)[-1].lower()
         if name in _MAKE_NAMES:
@@ -566,15 +566,18 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool) -> bool:
             # arguments do.
             targets, assignments, trusted = make_args(segment[i + 1 :])
             writes: set[str] = set()
-            for target in targets:
+            for target in targets or ["all"]:
                 writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
-            if writes and (make_controlled or not trusted):
+            if writes and (make_controlled or multiline or not trusted):
                 return True
             if _points_at_dev(writes, assignments):
                 return True
         elif name in _CLI_NAMES and i + 1 < len(segment):
             # Nothing loads `.env` for a direct CLI call, so its env prefix is its target.
-            if _points_at_dev(DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1].lower(), set()), segment[:i]):
+            cli_writes = DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1].lower(), set())
+            if cli_writes and multiline:
+                return True
+            if _points_at_dev(cli_writes, segment[:i]):
                 return True
     return False
 
@@ -587,7 +590,7 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
         name, throwaway = THROWAWAY[store]
         value = assigned.get(name, "").lower()
         # A throwaway host:port whose `?port=` query overrides it is the dev store.
-        if not throwaway.match(value) or PORT_KEY.search(value):
+        if not _SAFE_VALUE.fullmatch(value) or not throwaway.match(value) or PORT_KEY.search(value):
             return True
     return False
 
@@ -598,6 +601,9 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
 # such word makes the whole command untrusted (a false block is the cheap
 # direction). `-C` takes the directory after it.
 _SAFE_MAKE_FLAG = re.compile(r"-[sk]+|-j[0-9]*|--silent|--keep-going|--no-print-directory|--jobs(?:=[0-9]+)?")
+# Make pastes a variable's value into recipe shell text, and the shell expands an
+# env-prefix value, so only URL-safe characters are trusted in either.
+_SAFE_VALUE = re.compile(r"[A-Za-z0-9_.,:/@%+=?~-]*")
 # The only variables a destructive make command may set: the ones its recipes
 # read. Any other can repoint a recipe (`db_url`), its shell (`SHELL`) or a
 # sub-make (`MAKE`).
@@ -623,7 +629,8 @@ _SAFE_MAKE_VARIABLES = frozenset(
 def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
     """The targets and the plain NAME=value assignments in `make`'s own
     arguments, up to the next shell separator, and whether every word was one
-    of those (with an allowlisted name), an allowlisted flag, or `-C <dir>`.
+    of those (with an allowlisted name and a URL-safe value), an allowlisted
+    flag, or `-C <dir>`.
     A `#` word starts a comment the guard cannot place, so it is untrusted."""
     targets: list[str] = []
     assignments: list[str] = []
@@ -632,7 +639,7 @@ def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
     for arg in args:
         if _is_separator(arg):
             break
-        if "$" in arg or arg.startswith("#"):
+        if arg.startswith("#"):
             trusted = False
         elif after_directory_flag:
             after_directory_flag = False
@@ -641,7 +648,8 @@ def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
         elif arg.startswith("-"):
             trusted = trusted and bool(_SAFE_MAKE_FLAG.fullmatch(arg))
         elif "=" in arg:
-            if _ASSIGNMENT.match(arg) and arg.split("=", 1)[0] in _SAFE_MAKE_VARIABLES:
+            name, _, value = arg.partition("=")
+            if _ASSIGNMENT.match(arg) and name in _SAFE_MAKE_VARIABLES and _SAFE_VALUE.fullmatch(value):
                 assignments.append(arg)
             else:
                 trusted = False
