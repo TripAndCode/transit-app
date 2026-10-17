@@ -227,7 +227,20 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 // the same language the user picked in the UI. Falls back to "ja" so
 // the header is always present, matching the LocaleMiddleware default.
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  const apiKey = localStorage.getItem("api_key");
+  const apiKey = storedApiKey();
+  const response = await sendOnce(path, init, apiKey);
+  if (apiKey && (await isRejectedApiKey(response))) {
+    // The middleware answers every request carrying a bad key with this 401,
+    // /api/config included, so keeping the key would lock the user out of the
+    // app shell -- including the Settings drawer that could clear it.
+    clearStoredApiKey();
+    reportApiKeyRejected();
+    return sendOnce(path, init, null);
+  }
+  return response;
+}
+
+function sendOnce(path: string, init: RequestInit, apiKey: string | null): Promise<Response> {
   const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -237,4 +250,60 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include", signal });
+}
+
+const API_KEY_STORAGE_KEY = "api_key";
+/** Mirrors api/middleware/auth.py's 401 for an unknown, revoked or expired key. */
+const INVALID_API_KEY_DETAIL = "Invalid API key";
+
+/** Storage access throws where site data is blocked; no key is then sent. */
+function storedApiKey(): string | null {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function clearStoredApiKey(): void {
+  try {
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
+  } catch {
+    // Nothing was readable either, so nothing will be sent again.
+  }
+}
+
+async function isRejectedApiKey(response: Response): Promise<boolean> {
+  if (response.status !== 401) return false;
+  try {
+    const body: unknown = await response.clone().json();
+    return (body as { detail?: unknown } | null)?.detail === INVALID_API_KEY_DETAIL;
+  } catch {
+    return false;
+  }
+}
+
+const apiKeyRejectedListeners = new Set<() => void>();
+let apiKeyRejectionUnseen = false;
+
+function reportApiKeyRejected(): void {
+  if (apiKeyRejectedListeners.size === 0) {
+    apiKeyRejectionUnseen = true;
+    return;
+  }
+  for (const listener of apiKeyRejectedListeners) listener();
+}
+
+/** Calls *listener* when a stored API key is rejected and dropped -- also once
+ *  on subscribe, if that happened before anyone was listening (the first
+ *  requests can run before the notice mounts). Returns the unsubscribe. */
+export function onApiKeyRejected(listener: () => void): () => void {
+  apiKeyRejectedListeners.add(listener);
+  if (apiKeyRejectionUnseen) {
+    apiKeyRejectionUnseen = false;
+    listener();
+  }
+  return () => {
+    apiKeyRejectedListeners.delete(listener);
+  };
 }

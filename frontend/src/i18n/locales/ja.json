@@ -386,7 +386,8 @@
     "settings_title": "設定",
     "settings_api_key_label": "API キー",
     "settings_api_key_placeholder": "未設定でも全機能が使えます",
-    "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。"
+    "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。",
+    "settings_api_key_rejected": "保存されていた API キーが受け付けられなかったため、削除しました。必要なら設定から登録し直してください。"
   },
   "common": {
     "cancel": "キャンセル",
