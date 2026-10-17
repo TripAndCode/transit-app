@@ -849,16 +849,24 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
     logger.info(f"  {table}: {copied} rows")
 
 
+def _has_stop_times(conn, agency_id: int) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT EXISTS (SELECT 1 FROM static_stop_times WHERE agency_id = %s)", (agency_id,))
+        return bool(cur.fetchone()[0])
+
+
 def _mirror_static_stop_times(agency_id: int, conn, ch_client, has_static: bool, fingerprint: str) -> None:
     """Bring ClickHouse's copy of the agency's static_stop_times up to the Postgres one.
 
     The copy records the fingerprint it was taken under. The fingerprint covers
     static_stop_times, so a changed schedule always differs from the copy, and a
-    matching one is current: no row is read then. An agency without a schedule has
-    no copy.
+    matching one is current: no row is read then. An agency without a schedule,
+    or whose schedule has no stop times, has no copy, which is what no copy reads
+    as.
     """
     wanted = fingerprint if has_static else None
-    if ch_aggregates.static_mirror_fingerprint(ch_client, agency_id) == wanted:
+    mirrored = ch_aggregates.static_mirror_fingerprint(ch_client, agency_id)
+    if mirrored == wanted or (mirrored is None and not _has_stop_times(conn, agency_id)):
         return
     with _step("static_stop_times: mirror into ClickHouse"):
         if not has_static:

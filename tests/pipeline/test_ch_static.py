@@ -58,6 +58,19 @@ def test_an_agency_without_a_schedule_has_no_mirror(pg_conn, agency_id, ch_clien
     assert ch_aggregates.static_mirror_fingerprint(ch_client, agency_id) is None
 
 
+def test_a_schedule_with_no_stop_times_is_mirrored_once_as_none(pg_conn, agency_id, ch_client, monkeypatch):
+    """No stop times to copy is no copy, which is what an empty mirror reads as: nothing to redo next run."""
+    _seed_schedule(pg_conn, agency_id, [("t1", 1, "S1")])
+    _mirror_static_stop_times(agency_id, pg_conn, ch_client, has_static=True, fingerprint="fp-1")
+    _seed_schedule(pg_conn, agency_id, [])
+    _mirror_static_stop_times(agency_id, pg_conn, ch_client, has_static=True, fingerprint="fp-2")
+    assert _mirror(ch_client, agency_id) == []
+    replaced = []
+    monkeypatch.setattr(ch_aggregates, "replace_static_stop_times", lambda *args: replaced.append(args) or 0)
+    _mirror_static_stop_times(agency_id, pg_conn, ch_client, has_static=True, fingerprint="fp-2")
+    assert replaced == []
+
+
 def test_mirroring_one_agency_leaves_another_alone(pg_conn, agency_id, ch_client):
     _seed_schedule(pg_conn, agency_id, [("t1", 1, "S1")])
     ch_aggregates.replace_static_stop_times(ch_client, AGENCY, [(AGENCY, "x", 1, "X", None, None)], "other")

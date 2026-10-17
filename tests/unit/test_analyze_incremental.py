@@ -161,6 +161,8 @@ class FakeConn:
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
+        if sql.startswith("SELECT EXISTS (SELECT 1 FROM static_stop_times"):
+            return (False,), []
         if "SELECT count(*), coalesce(sum(" in sql:
             return (0, 0), []
         if "static_fingerprint FROM agg_meta" in sql:
