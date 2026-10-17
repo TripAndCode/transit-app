@@ -65,8 +65,9 @@ type DataTableProps<Row> = {
    *  checkbox's "all", so select-all does not silently mean "all but one". */
   isRowSelectable?: (row: Row) => boolean;
   /** Seen before the table's own `j`/`k`/`x`/`Enter` handling, for keys that
-   *  belong to the page rather than to a table. Call `preventDefault()` to
-   *  take the key. */
+   *  belong to the page rather than to a table. Called only while the row
+   *  itself has focus; a key pressed on a control inside a cell goes to that
+   *  control. Call `preventDefault()` to take the key. */
   onRowKeyDown?: (event: React.KeyboardEvent<HTMLTableRowElement>, row: Row) => void;
   /** Page-level keys the caller handles itself, listed in the toolbar's
    *  shortcut hint after the table's own four. A shortcut a reader cannot
