@@ -24,23 +24,28 @@ from tests.pipeline.ch_parity import legacy_rows, stored_rows
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
-def _assert_parity(pg_conn, ch_client, agency_id: int) -> None:
+# The tables that join the static schedule, rightly empty for a fixture that loads none.
+_STATIC_JOINED = frozenset({"agg_stop_daily", "agg_route_stop_daily"})
+
+
+def _assert_parity(pg_conn, ch_client, agency_id: int, *, static: bool) -> None:
     for table in ch_aggregates.COPIED_TABLES:
         stored = stored_rows(pg_conn, agency_id, table)
-        assert stored, f"{table}: nothing stored, so this would pass vacuously"
+        if static or table not in _STATIC_JOINED:
+            assert stored, f"{table}: nothing stored, so this would pass vacuously"
         assert stored == legacy_rows(pg_conn, ch_client, agency_id, table), table
 
 
 @pytest.mark.parametrize("pattern_fn", ALL_PATTERNS, ids=lambda fn: fn.__name__)
 def test_parity_on_the_synthetic_patterns(pattern_fn, tmp_path, pg_conn, agency_id, ch_client):
     run_pattern(pattern_fn(), tmp_path, pg_conn, agency_id, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id)
+    _assert_parity(pg_conn, ch_client, agency_id, static=True)
 
 
 def test_parity_on_the_edge_cases(pg_conn, agency_id, ch_client):
     insert_updates(ch_client, agency_id, edge_rows())
     analyze(agency_id, pg_conn, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id)
+    _assert_parity(pg_conn, ch_client, agency_id, static=False)
 
 
 def test_parity_on_a_real_feed(pg_conn, ch_client):
@@ -58,13 +63,13 @@ def test_parity_on_a_real_feed(pg_conn, ch_client):
         rows = static_join.parse_feed(raw, captured_at, f"parity/{i}.bin", agency_id, pg_conn)
         insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id)
+    _assert_parity(pg_conn, ch_client, agency_id, static=True)
 
 
 def test_parity_on_the_whole_history_rows(pg_conn, agency_id, ch_client):
     insert_updates(ch_client, agency_id, whole_history_rows())
     analyze(agency_id, pg_conn, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id)
+    _assert_parity(pg_conn, ch_client, agency_id, static=False)
 
 
 def test_agg_hour_daily_rounds_mean_ties_away_from_zero(pg_conn, agency_id, ch_client):
@@ -138,7 +143,7 @@ def test_route_daily_dist_bins_the_bucket_edges_like_postgres(pg_conn, agency_id
     rows = histogram_edge_rows()
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id)
+    _assert_parity(pg_conn, ch_client, agency_id, static=False)
 
     kept = [row[7] for row in rows if abs(row[7]) <= 7200]
     expected = [0] * N_BUCKETS

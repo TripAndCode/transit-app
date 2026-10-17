@@ -13,6 +13,7 @@ from tests.pipeline.ch_agg_helpers import (
     ch_rows,
     pg_rows,
     record_builds,
+    seed_schedule,
     update_row,
     whole_history_rows,
     work_tables,
@@ -45,6 +46,7 @@ def test_clickhouse_holds_the_rows_postgres_serves(pattern_fn, tmp_path, pg_conn
 
 
 def test_a_changed_date_rebuilds_only_the_month_holding_it(pg_conn, agency_id, ch_client, monkeypatch):
+    seed_schedule(pg_conn, agency_id, ["a", "b", "c"])
     insert_updates(
         ch_client,
         agency_id,
@@ -64,6 +66,7 @@ def test_a_changed_date_rebuilds_only_the_month_holding_it(pg_conn, agency_id, c
 
 
 def test_a_month_whose_rows_are_gone_is_emptied_in_both_stores(pg_conn, agency_id, ch_client):
+    seed_schedule(pg_conn, agency_id, ["a", "b"])
     september = update_row(datetime(2026, 9, 14, 8, 0), "a", 60)
     insert_updates(ch_client, agency_id, [september, update_row(datetime(2026, 10, 2, 8, 0), "b", 120)])
     analyze(agency_id, pg_conn, ch_client)
@@ -79,6 +82,7 @@ def test_a_table_clickhouse_lost_is_rebuilt_whole_without_rebuilding_the_agency(
 ):
     """A table that has just moved starts empty in ClickHouse while its Postgres
     copy holds the legacy rows. Only that table is rebuilt whole."""
+    seed_schedule(pg_conn, agency_id, ["a", "b"])
     insert_updates(
         ch_client,
         agency_id,
@@ -134,6 +138,7 @@ def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_co
 
 
 def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_conn, agency_id, ch_client, monkeypatch):
+    seed_schedule(pg_conn, agency_id, ["a", "c"])
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
     analyze(agency_id, pg_conn, ch_client)
     before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.COPIED_TABLES}
