@@ -65,6 +65,46 @@ describe("a stored API key the server rejects", () => {
     expect(later).not.toHaveBeenCalled();
   });
 
+  it("is reported once when several requests carrying it are rejected together", async () => {
+    vi.stubGlobal("localStorage", memoryStorage({ api_key: "stale" }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit & { headers: Record<string, string> }) =>
+        Promise.resolve(init.headers["X-API-Key"] ? json(401, { detail: "Invalid API key" }) : json(200, {})),
+      ),
+    );
+    const rejected = vi.fn();
+    const unsubscribe = onApiKeyRejected(rejected);
+
+    await Promise.all([apiGet("/api/config"), apiGet("/api/me"), apiGet("/api/agencies")]);
+
+    expect(rejected).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("leaves a key saved while the rejected request was in flight", async () => {
+    const storage = memoryStorage({ api_key: "stale" });
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(() => {
+          storage.store.set("api_key", "fresh");
+          return Promise.resolve(json(401, { detail: "Invalid API key" }));
+        })
+        .mockResolvedValueOnce(json(200, {})),
+    );
+    const rejected = vi.fn();
+    const unsubscribe = onApiKeyRejected(rejected);
+
+    await apiGet("/api/config");
+
+    expect(storage.store.get("api_key")).toBe("fresh");
+    expect(rejected).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it("keeps the key and does not retry on any other 401", async () => {
     const storage = memoryStorage({ api_key: "good" });
     vi.stubGlobal("localStorage", storage);

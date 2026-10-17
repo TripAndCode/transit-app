@@ -218,14 +218,8 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
-// credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
-// cookie. Same-origin requests (single-origin prod / make serve) are
-// unaffected — browsers always send same-origin cookies.
-//
-// Accept-Language is stamped from the current i18n instance so the
-// backend (Ask LLM prelude / formatter / tool summaries) renders in
-// the same language the user picked in the UI. Falls back to "ja" so
-// the header is always present, matching the LocaleMiddleware default.
+/** Sends the request with the stored API key, if any. A key the server
+ *  rejects is dropped and the request sent once more without it. */
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   const apiKey = storedApiKey();
   const response = await sendOnce(path, init, apiKey);
@@ -233,13 +227,15 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
     // The middleware answers every request carrying a bad key with this 401,
     // /api/config included, so keeping the key would lock the user out of the
     // app shell -- including the Settings drawer that could clear it.
-    clearStoredApiKey();
-    reportApiKeyRejected();
+    if (clearStoredApiKey(apiKey)) reportApiKeyRejected();
     return sendOnce(path, init, null);
   }
   return response;
 }
 
+// credentials:'include' sends the sid cookie cross-origin too (Vite dev :5173 →
+// :8000). Accept-Language follows the UI language so server-rendered text
+// matches it, falling back to "ja" like the LocaleMiddleware default.
 function sendOnce(path: string, init: RequestInit, apiKey: string | null): Promise<Response> {
   const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
@@ -265,11 +261,16 @@ function storedApiKey(): string | null {
   }
 }
 
-function clearStoredApiKey(): void {
+/** Removes the stored key only while it is still *rejected*, so requests that
+ *  failed together report once, and a late 401 cannot remove a key saved since.
+ *  Returns whether it removed the key. A failed remove leaves the key in place. */
+function clearStoredApiKey(rejected: string): boolean {
   try {
+    if (localStorage.getItem(API_KEY_STORAGE_KEY) !== rejected) return false;
     localStorage.removeItem(API_KEY_STORAGE_KEY);
+    return true;
   } catch {
-    // Nothing was readable either, so nothing will be sent again.
+    return false;
   }
 }
 
