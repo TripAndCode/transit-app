@@ -183,6 +183,9 @@ export function DataTable<Row>({
   }
 
   function onRowKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>, row: Row) {
+    // Row shortcuts apply only while the row itself has focus; a key pressed on a
+    // button or select inside a cell belongs to that control.
+    if (event.target !== event.currentTarget) return;
     onCallerRowKeyDown?.(event, row);
     if (event.defaultPrevented) return;
     if (event.key === "j" || event.key === "ArrowDown") {

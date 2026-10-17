@@ -171,6 +171,82 @@ describe("DataTable", () => {
     expect(onOpen).toHaveBeenCalledWith(ROWS[1]);
   });
 
+  describe("keys pressed on a control inside a cell", () => {
+    function renderWithControls() {
+      const onOpen = vi.fn();
+      const onAction = vi.fn();
+      const onCallerKey = vi.fn();
+      const columns: DataTableColumn<Row>[] = [
+        { key: "name", header: "Agency", render: (r) => r.name },
+        {
+          key: "action",
+          header: "Action",
+          // Callers stop a cell control's click from also opening the row.
+          render: (r) => (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onAction(r.id);
+              }}
+            >
+              {`Edit ${r.name}`}
+            </button>
+          ),
+        },
+        {
+          key: "role",
+          header: "Role",
+          render: (r) => (
+            <select aria-label={`Role of ${r.name}`} defaultValue="viewer">
+              <option value="viewer">viewer</option>
+              <option value="admin">admin</option>
+            </select>
+          ),
+        },
+      ];
+      wrap(
+        <DataTable
+          caption="Agencies"
+          rows={ROWS}
+          columns={columns}
+          rowKey={(r) => r.id}
+          onOpen={onOpen}
+          onRowKeyDown={onCallerKey}
+        />,
+      );
+      return { onOpen, onAction, onCallerKey };
+    }
+
+    it("lets Enter run the button instead of opening the row", async () => {
+      const user = userEvent.setup();
+      const { onOpen, onAction } = renderWithControls();
+      screen.getByRole("button", { name: "Edit Kaga" }).focus();
+      await user.keyboard("{Enter}");
+      expect(onAction).toHaveBeenCalledWith("b");
+      expect(onOpen).not.toHaveBeenCalled();
+    });
+
+    it("leaves arrow keys and typed letters to a select", async () => {
+      const user = userEvent.setup();
+      const { onCallerKey } = renderWithControls();
+      const select = screen.getByRole("combobox", { name: "Role of Kaga" });
+      select.focus();
+      await user.keyboard("{ArrowDown}a");
+      expect(select).toHaveFocus();
+      expect(onCallerKey).not.toHaveBeenCalled();
+    });
+
+    it("still answers row shortcuts on the row itself", async () => {
+      const user = userEvent.setup();
+      const { onOpen, onCallerKey } = renderWithControls();
+      screen.getAllByRole("row")[1].focus();
+      await user.keyboard("a{Enter}");
+      expect(onCallerKey).toHaveBeenCalled();
+      expect(onOpen).toHaveBeenCalledWith(ROWS[0]);
+    });
+  });
+
   it("marks selected rows for assistive tech", async () => {
     const user = userEvent.setup();
     wrap(<Harness selectable />);
