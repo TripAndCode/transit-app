@@ -7,7 +7,9 @@ Parity runs each table's ClickHouse build as a plain SELECT, one month at a time
 and compares its rows with the Postgres table's on the dates whose aggregates are
 current: those whose Postgres ledger (agg_feed_health) still matches ClickHouse's
 per-date counts. A date ingested or changed since the last analyze would differ
-for that reason alone.
+for that reason alone. The whole-history tables are computed in the query from
+the agency's whole-history dedup and compared whole, and only when every date is
+current, since each of their rows spans every date.
 
 --time-only skips the comparison and times each month's build instead: the dedup
 on its own, then each table's SELECT, each run in full with its rows discarded on
@@ -61,6 +63,13 @@ def comparable_dates(stored: dict, live: dict) -> set:
     return {day for day, counts in stored.items() if live.get(day) == counts}
 
 
+def whole_history_current(stored: dict, live: dict) -> bool:
+    """Whether every date's aggregates are current: the ledger matches ClickHouse
+    date for date, with none missing from it. A whole-history row spans every
+    date, so it is comparable only then."""
+    return stored == live
+
+
 def differences(ch_rows, pg_rows, dates) -> tuple[list, list]:
     """Rows only ClickHouse has and rows only Postgres has, on *dates*.
 
@@ -86,7 +95,8 @@ def parity(ch, conn, agency_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         stored = {day: (raw, total) for day, raw, total in cur.fetchall()}
-    dates = comparable_dates(stored, _ledger_counts(agency_id, ch))
+    live = _ledger_counts(agency_id, ch)
+    dates = comparable_dates(stored, live)
     print(f"agency {agency_id}: {len(dates)} of {len(stored)} ledger dates are current")
     if not dates:
         print("parity: nothing to compare: no ledger date matches ClickHouse's counts")
@@ -105,6 +115,23 @@ def parity(ch, conn, agency_id: int) -> int:
                     print(f"  {table} {month} {label}: {row}")
             failures += len(only_ch) + len(only_pg)
         print(f"{table}: {compared} Postgres rows compared")
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        if not whole_history_current(stored, live):
+            print(f"{table}: skipped; a whole-history row spans every date, and not every date is current")
+            continue
+        ch_rows = ch.query(ch_aggregates.whole_history_sql(table), parameters={"agency_id": agency_id}).result_rows
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(ch_aggregates.COLUMNS[table])} FROM {table} WHERE agency_id = %s", (agency_id,)
+            )
+            pg_rows = cur.fetchall()
+        ch_set = {tuple(map(normalized, row)) for row in ch_rows}
+        pg_set = {tuple(map(normalized, row)) for row in pg_rows}
+        for label, rows in (("only in ClickHouse", ch_set - pg_set), ("only in Postgres", pg_set - ch_set)):
+            for row in sorted(rows, key=str)[:5]:
+                print(f"  {table} {label}: {row}")
+        failures += len(ch_set ^ pg_set)
+        print(f"{table}: {len(pg_rows)} Postgres rows compared")
     print("parity: OK" if not failures else f"parity: {failures} differing rows")
     return 1 if failures else 0
 
@@ -120,7 +147,7 @@ def _timed(ch, sql: str, params: dict) -> float:
 def timing(ch, agency_id: int) -> int:
     months = ch_aggregates.source_months(ch, agency_id)
     print(f"agency {agency_id}: {len(months)} months")
-    totals = dict.fromkeys(["dedup", *ch_aggregates.TABLES], 0.0)
+    totals = dict.fromkeys(["dedup", *ch_aggregates.MONTHLY_TABLES], 0.0)
     for month in months:
         where, params = ch_aggregates.month_where(month)
         line = {
@@ -128,7 +155,7 @@ def timing(ch, agency_id: int) -> int:
                 ch, build_dedup_ch_sql(extra_where=where, include_captured_at=True), {"agency_id": agency_id, **params}
             )
         }
-        for table in ch_aggregates.TABLES:
+        for table in ch_aggregates.MONTHLY_TABLES:
             sql, month_params = ch_aggregates.select_sql(table, month)
             line[table] = _timed(ch, sql, {"agency_id": agency_id, **month_params})
         for key, seconds in line.items():
