@@ -88,13 +88,13 @@ def pg_rows(conn, agency_id: int, table: str) -> list[str]:
 
 
 def record_builds(monkeypatch) -> list[tuple[str, list[int]]]:
-    """Record each ch_aggregates.build call's (table, months) while still building."""
+    """Record each table's months from every ch_aggregates.build call, while still building."""
     calls: list[tuple[str, list[int]]] = []
     real = ch_aggregates.build
 
-    def build(ch, table, agency_id, months, changed=None):
-        calls.append((table, months))
-        real(ch, table, agency_id, months, changed)
+    def build(ch, agency_id, rebuilds, *args, **kwargs):
+        calls.extend((table, rebuild.months) for table, rebuild in rebuilds.items())
+        real(ch, agency_id, rebuilds, *args, **kwargs)
 
     monkeypatch.setattr(ch_aggregates, "build", build)
     return calls

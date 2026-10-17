@@ -7,9 +7,9 @@ Postgres table the API reads; this module is the ClickHouse side only.
 
 A run replaces whole months of service date. Each table is partitioned by
 (agency_id, month), a run assembles each month it touches in the agency's work
-table, recomputing from `updates` only the dates whose rows changed, and `swap`
-then moves each month into place with REPLACE PARTITION, so a reader never sees
-a month half built.
+table from one dedup of that month that every table shares, recomputing only the
+dates whose rows changed, and `swap` then moves each month into place with
+REPLACE PARTITION, so a reader never sees a month half built.
 
 Every value equals what the Postgres builder it replaced produced, column for
 column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
@@ -19,6 +19,7 @@ even and is never used for them.
 """
 
 from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
@@ -149,7 +150,6 @@ def _hour_daily(source: str) -> str:
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
-    with_captured_at: bool = False
 
 
 # Build and swap order. Each spec's columns are its Postgres table's, in the
@@ -173,7 +173,6 @@ _SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_daily,
-        with_captured_at=True,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
 }
@@ -200,44 +199,108 @@ def work_table(table: str, agency_id: int) -> str:
     return f"{_checked(table)}__work_a{int(agency_id)}"
 
 
-def select_sql(table: str, month: int, days: list[date] | None = None) -> tuple[str, dict]:
+def _dedup_select(where: str) -> str:
+    """The dedup of the agency's `updates` rows matching *where*, with every column a table reads."""
+    return build_dedup_ch_sql(extra_where=where, include_captured_at=True)
+
+
+def select_sql(table: str, month: int, days: list[date] | None = None, source: str | None = None) -> tuple[str, dict]:
     """The SELECT computing *table*'s rows for the agency bound as `agency_id`:
     those of one month, or of only *days* within it.
 
-    Its columns are COLUMNS[table], in order. A plain SELECT, so a read-only
-    session can run it too.
+    Its columns are COLUMNS[table], in order. Without *source* it dedups
+    `updates` itself, which a read-only session can run. *source* names a table
+    already holding the month's dedup (`build`'s dedup table), which it reads
+    instead.
     """
     spec = _SPECS[_checked(table)]
-    where, params = month_where(month) if days is None else days_where(days)
-    source = build_dedup_ch_sql(extra_where=where, include_captured_at=spec.with_captured_at)
-    return spec.select(source), params
+    if source is None:
+        where, params = month_where(month) if days is None else days_where(days)
+        rows = _dedup_select(where)
+    elif days is None:
+        rows, params = f"SELECT * FROM {source}", {}
+    else:
+        rows, params = f"SELECT * FROM {source} WHERE has({{days:Array(Date)}}, date)", {"days": days}
+    return spec.select(rows), params
 
 
-def build(ch, table: str, agency_id: int, months: list[int], changed: list[date] | None = None) -> None:
-    """Compute *months* of *table* for the agency into its work table.
+class Rebuild(NamedTuple):
+    """One table's share of a build: its *months*, and within them only the
+    *changed* dates, or every date when None."""
 
-    One INSERT per month, so the dedup's GROUP BY holds at most one month of the
-    agency's rows rather than its whole history. Given *changed*, the dates whose
-    source rows moved, only those are recomputed from `updates`; the rest of each
-    month is copied from *table*, where the last run left it, so a run that adds
-    a day reads one day of raw rows. The work table is dropped first, which also
-    clears one a dead run left behind.
+    months: list[int]
+    changed: list[date] | None
+
+
+def dedup_table(agency_id: int) -> str:
+    """The agency's scratch table for one month of the dedup, which every table's build reads."""
+    return f"dedup__work_a{int(agency_id)}"
+
+
+def _untimed(label: str) -> AbstractContextManager:
+    return nullcontext()
+
+
+def build(
+    ch, agency_id: int, rebuilds: dict[str, Rebuild], step: Callable[[str], AbstractContextManager] = _untimed
+) -> None:
+    """Compute each of *rebuilds* into its table's work table.
+
+    One month at a time, so a GROUP BY holds at most a month of the agency's
+    rows. The month's dedup, the costliest part of a build, runs once into the
+    agency's dedup table and feeds every table that month. It covers the whole
+    month when any table needs every date of it, and otherwise only the changed
+    dates. A table rebuilt for its changed dates recomputes only those; the rest
+    of each month is copied from the table itself, where the last run left it.
+    The work and dedup tables are dropped first, which also clears ones a dead
+    run left behind, and the dedup table again once the build ends.
     """
+    dedup = dedup_table(agency_id)
+    for table in rebuilds:
+        work = work_table(table, agency_id)
+        ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+        ch.command(f"CREATE TABLE {work} AS {table}")
+    ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
+    ch.command(
+        f"CREATE TABLE {dedup} ENGINE = MergeTree ORDER BY date EMPTY AS {_dedup_select('0')}",
+        parameters={"agency_id": agency_id},
+    )
+    for month in sorted({month for rebuild in rebuilds.values() for month in rebuild.months}):
+        days = {
+            table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
+        }
+        if any(table_days is None for table_days in days.values()):
+            where, params = month_where(month)
+        else:
+            where, params = days_where(sorted({day for table_days in days.values() for day in table_days or ()}))
+        with step("ClickHouse dedup"):
+            ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
+        for table, table_days in days.items():
+            with step(f"{table}: ClickHouse build"):
+                _build_month(ch, table, agency_id, month, table_days)
+        ch.command(f"TRUNCATE TABLE {dedup}")
+    ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
+
+
+def _days_in(changed: list[date] | None, month: int) -> list[date] | None:
+    """*changed*'s dates within *month*, or None for every date of it."""
+    if changed is None:
+        return None
+    return [day for day in changed if day.year * 100 + day.month == month] or None
+
+
+def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | None) -> None:
     work = work_table(table, agency_id)
-    ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-    ch.command(f"CREATE TABLE {work} AS {table}")
     columns = ", ".join(COLUMNS[table])
-    for month in months:
-        days = [day for day in changed or () if day.year * 100 + day.month == month]
-        if days:
-            ch.command(
-                f"INSERT INTO {work} ({columns}) SELECT {columns} FROM {table} "
-                "WHERE agency_id = {agency_id:Int32} AND toYYYYMM(date) = {month:UInt32} "
-                "AND NOT has({days:Array(Date)}, date)",
-                parameters={"agency_id": agency_id, "month": month, "days": days},
-            )
-        sql, params = select_sql(table, month, days or None)
-        ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
+    if days is not None:
+        ch.command(
+            f"INSERT INTO {work} ({columns}) SELECT {columns} FROM {table} "
+            "WHERE agency_id = {agency_id:Int32} AND toYYYYMM(date) = {month:UInt32} "
+            "AND NOT has({days:Array(Date)}, date)",
+            parameters={"agency_id": agency_id, "month": month, "days": days},
+        )
+    sql, params = select_sql(table, month, days, source=dedup_table(agency_id))
+    ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 
 def swap(ch, table: str, agency_id: int, months: list[int]) -> None:
@@ -297,10 +360,10 @@ def months_for(ch, table: str, agency_id: int, changed: list[date] | None) -> li
 
 
 def drop_work_tables(ch, agency_id: int) -> None:
-    """Drop the agency's work tables. SYNC, so their disk is freed now rather
-    than after the Atomic database's drop delay."""
-    for table in TABLES:
-        ch.command(f"DROP TABLE IF EXISTS {work_table(table, agency_id)} SYNC")
+    """Drop the agency's work tables and its dedup table. SYNC, so their disk is
+    freed now rather than after the Atomic database's drop delay."""
+    for name in (*(work_table(table, agency_id) for table in TABLES), dedup_table(agency_id)):
+        ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
 
 
 def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:

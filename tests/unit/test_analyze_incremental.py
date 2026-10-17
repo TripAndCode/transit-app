@@ -76,7 +76,7 @@ class FakeClickHouse:
 
     @property
     def ch_agg_builds(self) -> list[tuple[str, dict]]:
-        """Each INSERT into a ClickHouse aggregate's work table: one per table and month."""
+        """Each INSERT into an aggregate or dedup work table."""
         return [c for c in self.commands if c[0].startswith("INSERT INTO") and "__work_a" in c[0]]
 
     @property
@@ -439,20 +439,24 @@ def test_a_noop_run_writes_nothing_to_clickhouse():
 def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_over():
     _, ch = _changed_run()
     tables = len(ch_aggregates.TABLES)
-    recomputed = [params for sql, params in ch.ch_agg_builds if "FROM updates" in sql]
-    carried = [params for sql, params in ch.ch_agg_builds if "FROM updates" not in sql]
+    dedup = ch_aggregates.dedup_table(AGENCY_ID)
     day = {
         "day_start_0": service_day_start_utc(LEDGER_DATE),
         "day_end_0": service_day_start_utc(LEDGER_DATE + timedelta(days=1)),
     }
-    assert recomputed == [{"agency_id": AGENCY_ID, **day}] * tables
+    filled = [params for sql, params in ch.ch_agg_builds if sql.startswith(f"INSERT INTO {dedup} ")]
+    carried = [params for sql, params in ch.ch_agg_builds if "NOT has(" in sql]
+    recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
+    assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
+    assert recomputed == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * tables
     assert len([sql for sql, _ in ch.commands if "REPLACE PARTITION (7, 202601)" in sql]) == tables
 
 
 def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():
     conn, ch = _noop_run(pg_totals=(1, 1, 60))
-    assert len(ch.ch_agg_builds) == len(ch_aggregates.TABLES)
+    dedup = ch_aggregates.dedup_table(AGENCY_ID)
+    assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.TABLES)
     assert ch.alltime_scans == []
     for table in ch_aggregates.TABLES:
         assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table

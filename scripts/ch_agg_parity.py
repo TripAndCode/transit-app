@@ -11,7 +11,9 @@ for that reason alone.
 
 --time-only skips the comparison and times each month's build instead: the dedup
 on its own, then each table's SELECT, each run in full with its rows discarded on
-the server.
+the server. Each table's SELECT dedups `updates` itself there, so the per-table
+figures are what an unshared build would pay; a run shares one dedup per month
+(`ch_aggregates.build`).
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
 that adds them is applied. Both connections are read-only: ClickHouse with
