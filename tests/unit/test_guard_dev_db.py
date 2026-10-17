@@ -117,6 +117,26 @@ BLOCKED = [
         "make --what-if DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
         id="assignment-shaped-value-of-what-if",
     ),
+    # Any flag not known to take no argument may consume the next word: an
+    # unlisted, bundled or abbreviated one must not let that word count.
+    *[
+        pytest.param(
+            f"make {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
+            id=f"assignment-shaped-value-of-{flag.strip('-')}",
+        )
+        for flag in ("-I", "--include-dir", "--new-file", "--old-file", "--eval", "-E", "-sW", "-kI", "--what")
+    ],
+    # Make reads every assignment form; only a plain NAME=value repoints a store.
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "DATABASE_URL:=postgresql://transit:transit@localhost:5433/transit",
+        id="later-colon-assignment-points-back-at-dev",
+    ),
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "'DATABASE_URL = postgresql://transit:transit@localhost:5433/transit'",
+        id="later-spaced-assignment-points-back-at-dev",
+    ),
     # The last of two assignments is the one the command sees.
     pytest.param(
         "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
@@ -508,6 +528,14 @@ ALLOWED = [
         "make -C . -f Makefile prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="test-db-make-variable-after-value-flags",
     ),
+    # A flag that takes no argument does not swallow the assignment after it.
+    *[
+        pytest.param(
+            f"make prune-query-log {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+            id=f"test-db-make-variable-after-{flag.strip('-')}",
+        )
+        for flag in ("-s", "-sk", "-j", "-j4", "--no-print-directory", "--jobs=2")
+    ],
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
         id="copy-to-reads-data-out",

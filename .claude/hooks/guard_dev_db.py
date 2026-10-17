@@ -575,40 +575,79 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
     return False
 
 
-# `make` options whose value is the next argument, not a target or a variable.
-_MAKE_VALUE_FLAGS = {
-    "-C",
-    "-f",
-    "-I",
-    "-o",
-    "-W",
-    "--directory",
-    "--file",
-    "--makefile",
-    "--include-dir",
-    "--assume-old",
-    "--old-file",
-    "--assume-new",
-    "--new-file",
-    "--what-if",
-}
+# `make` flags known to take no argument. Any other flag -- value-taking,
+# abbreviated, or one this list has never heard of -- may consume the next word,
+# so that word is never counted as an assignment (a false block is the cheap
+# direction). `-j`/`-l` take only an optional number glued on.
+_MAKE_NOARG_SHORT = frozenset("bBdehiknpqrRsStvw")
+_MAKE_NOARG_LONG = frozenset(
+    {
+        "--",
+        "--always-make",
+        "--check-symlink-times",
+        "--debug",
+        "--dry-run",
+        "--environment-overrides",
+        "--help",
+        "--ignore-errors",
+        "--jobs",
+        "--just-print",
+        "--keep-going",
+        "--load-average",
+        "--max-load",
+        "--no-builtin-rules",
+        "--no-builtin-variables",
+        "--no-keep-going",
+        "--no-print-directory",
+        "--print-data-base",
+        "--print-directory",
+        "--question",
+        "--quiet",
+        "--recon",
+        "--silent",
+        "--stop",
+        "--touch",
+        "--trace",
+        "--version",
+        "--warn-undefined-variables",
+    }
+)
+# Every form make reads as a variable assignment: =, :=, ::=, :::=, +=, ?=, !=.
+_ANY_MAKE_ASSIGNMENT = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::{1,3}|[+?!])?=")
+
+
+def _flag_may_take_next(flag: str) -> bool:
+    if flag.startswith("--"):
+        return "=" not in flag and flag not in _MAKE_NOARG_LONG
+    letters = flag[1:]
+    for k, c in enumerate(letters):
+        if c in "jl":
+            return False
+        if c not in _MAKE_NOARG_SHORT:
+            # Anything after a value-taking letter is its glued-on value.
+            return k == len(letters) - 1
+    return False
 
 
 def make_args(args: list[str]) -> tuple[list[str], list[str]]:
     """The targets and the VAR=value assignments in `make`'s own arguments, up
-    to the next shell separator, past its flags and their values."""
+    to the next shell separator. Only a plain NAME=value word is kept as it is;
+    any other assignment form is kept as an empty value, which points its store
+    at nothing."""
     targets: list[str] = []
     assignments: list[str] = []
-    skip = False
+    after_flag = False
     for arg in args:
         if _is_separator(arg):
             break
-        if skip:
-            skip = False
+        if after_flag:
+            after_flag = False
+            if "=" not in arg:
+                targets.append(arg)
         elif arg.startswith("-"):
-            skip = arg in _MAKE_VALUE_FLAGS
-        elif _ASSIGNMENT.match(arg):
-            assignments.append(arg)
+            after_flag = _flag_may_take_next(arg)
+        elif match := _ANY_MAKE_ASSIGNMENT.match(arg):
+            assignments.append(arg if _ASSIGNMENT.match(arg) else f"{match.group(1)}=")
         elif "=" not in arg:
             targets.append(arg)
     return targets, assignments
