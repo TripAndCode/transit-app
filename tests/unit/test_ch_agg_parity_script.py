@@ -1,9 +1,9 @@
 """The pure parts of scripts/ch_agg_parity.py."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
-from scripts.ch_agg_parity import _timed, comparable_dates, differences, parity, whole_history_current
+from scripts.ch_agg_parity import _timed, comparable_dates, differences, normalized, parity, whole_history_current
 
 
 def test_only_dates_whose_ledger_still_matches_clickhouse_are_compared():
@@ -103,3 +103,8 @@ def test_whole_history_is_compared_only_when_every_date_is_current():
     assert whole_history_current(stored, {first: (5, 5), second: (6, 6)})
     assert not whole_history_current(stored, {first: (5, 5), second: (7, 7)})
     assert not whole_history_current(stored, {first: (5, 5), second: (6, 6), date(2026, 9, 3): (1, 1)})
+
+
+def test_a_postgres_time_compares_equal_to_its_clickhouse_text():
+    """agg_route_hour's scheduled_time is a `time` in Postgres and HH:MM:SS text in ClickHouse."""
+    assert normalized(time(7, 45)) == normalized("07:45:00")

@@ -82,11 +82,6 @@ class FakeClickHouse:
         return [c for c in self.commands if c[0].startswith("INSERT INTO") and "__work_a" in c[0]]
 
     @property
-    def alltime_scans(self) -> list[str]:
-        """The full-history dedup slice: typed, and without captured_at."""
-        return [s for s in self.streams if "service_type IS NOT NULL" in s and "last_captured_at" not in s]
-
-    @property
     def stop_routes_scans(self) -> list[str]:
         return [s for s in self.streams if "SELECT DISTINCT route_code" in s]
 
@@ -219,52 +214,37 @@ def _changed_run(**kw):
     )
 
 
-# ── The all-time slice and the aggregates built from it ──────────────────
+# ── The whole-history aggregates, finalized from ClickHouse's counts ──────
 
 
-def test_a_noop_run_does_not_scan_the_full_history():
-    """The all-time slice spans every date, so it is the most expensive read a
-    run makes — and a run where no date changed would rebuild the three
-    aggregates over it to exactly what already stands."""
-    _, ch = _noop_run()
-
-    assert ch.alltime_scans == []
-
-
-def test_a_run_with_a_changed_date_still_scans_the_full_history():
-    """The guard keys off the ledger, not off incrementality in general: an
-    all-time aggregate spans the changed date too, so it must be rebuilt whole."""
+def test_a_changed_run_finalizes_the_whole_history_tables_from_the_counts_not_from_updates():
+    """Reading `updates` for them would reread the agency's whole history."""
     _, ch = _changed_run()
-
-    assert len(ch.alltime_scans) == 1
-
-
-@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour"])
-def test_a_noop_run_neither_purges_nor_rebuilds_an_alltime_aggregate(table):
-    """Skipping the build without skipping the purge would empty the table."""
-    conn, _ = _noop_run()
-
-    assert not [s for s in conn.executed if f"DELETE FROM {table}" in s]
-    assert not [s for s in conn.executed if f"INSERT INTO {table}" in s]
-    # The counts' store check probes agg_route_stats's totals, once: it is the table
-    # covering the counts' population. Nothing else reads either table.
-    reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
-    assert len(reads) == (1 if table == "agg_route_stats" else 0), reads
-    assert all("coalesce(sum(sum_delay_sec), 0)" in s for s in reads), reads
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        builds = [sql for sql, _ in ch.commands if sql.startswith(f"INSERT INTO {table}__work_a")]
+        assert len(builds) == 1, (table, builds)
+        assert f"FROM {ch_aggregates.COUNTS}" in builds[0] and "FROM updates" not in builds[0], table
 
 
 def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():
+    """Skipping the build without skipping the purge would empty the table."""
     conn, ch = _noop_run()
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
         assert not [s for s in conn.executed if f"DELETE FROM {table}" in s], table
+        assert not [s for s in conn.executed if f"INSERT INTO {table}" in s], table
         assert not [c for c in ch.commands if f"{table}__work_a" in c[0]], table
+        # Read only by store checks' totals probes: its own, and agg_route_stats's
+        # once more as the counts' reference, the table covering their population.
+        reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
+        assert len(reads) == (2 if table == "agg_route_stats" else 1), (table, reads)
+        assert all("coalesce(sum(sum_delay_sec), 0)" in s for s in reads), reads
 
 
-@pytest.mark.parametrize("table", ["agg_route_stats", "agg_route_hour"])
-def test_a_run_with_a_changed_date_purges_the_alltime_aggregate_whole(table):
+@pytest.mark.parametrize("table", ch_aggregates.WHOLE_HISTORY_TABLES)
+def test_a_run_with_a_changed_date_replaces_a_whole_history_aggregate_whole(table):
     conn, _ = _changed_run()
 
-    assert [s for s in conn.executed if f"DELETE FROM {table} WHERE agency_id" in s]
+    assert [s for s in conn.executed if f"DELETE FROM {table} WHERE agency_id = %s" in s and "date" not in s]
 
 
 # ── The scans the ledger now speaks for ───────────────────────────────────
@@ -361,11 +341,12 @@ def test_a_date_that_lost_only_delayless_rows_is_rebuilt():
 
 def test_a_ledger_without_total_rows_rebuilds_every_date():
     """A row written before the column existed cannot vouch for delay-less rows."""
-    conn, ch = _run(
+    conn, _ = _run(
         [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)],
         stored=[(LEDGER_DATE, LEDGER_SAMPLES, None)],
     )
-    assert len(ch.alltime_scans) == 1
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
     assert [
         s for s in conn.executed if "DELETE FROM agg_daily_trend WHERE agency_id = %s" in s and "date = ANY" not in s
     ]
@@ -433,7 +414,8 @@ def test_a_strategy_change_alone_rebuilds_every_date():
     ch = FakeClickHouse(ledger)
     analyze(AGENCY_ID, conn, ch)
 
-    assert len(ch.alltime_scans) == 1
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
     assert [
         s
         for s in conn.executed
@@ -476,8 +458,7 @@ def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_t
     conn, ch = _noop_run(pg_totals=(1, 1, 60))
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
     assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.MONTHLY_TABLES)
-    assert ch.alltime_scans == []
-    for table in ch_aggregates.TABLES:
+    for table in ch_aggregates.COPIED_TABLES:
         assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
 
 

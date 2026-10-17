@@ -142,6 +142,37 @@ SETTINGS allow_nullable_key = 1;
 
 -- Whole-history aggregates, finalized from route_delay_counts. One partition per
 -- agency, replaced whole by a run that changed anything.
+CREATE TABLE IF NOT EXISTS agg_route_stats (
+    agency_id      Int32,
+    route_code     String,
+    service_type   String,
+    avg_min        Float32,
+    p50_min        Float32,
+    p90_min        Float32,
+    late_5min_plus Int32,
+    on_time_pct    Float32,
+    late5_pct      Float32,
+    samples        Int32,
+    sum_delay_sec  Int64
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, route_code, service_type);
+
+-- scheduled_time is written HH:MM:SS, the text form of the Postgres `time` it is copied into.
+CREATE TABLE IF NOT EXISTS agg_route_hour (
+    agency_id      Int32,
+    route_code     String,
+    service_type   String,
+    scheduled_time String,
+    avg_min        Float32,
+    p50_min        Float32,
+    p90_min        Float32,
+    samples        Int32,
+    sum_delay_sec  Int64
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, route_code, service_type, scheduled_time);
+
 CREATE TABLE IF NOT EXISTS agg_route_hour_dow (
     agency_id     Int32,
     route_code    String,

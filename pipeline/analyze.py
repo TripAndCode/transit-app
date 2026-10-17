@@ -89,12 +89,7 @@ from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, reconstruct_headways
-from pipeline.histogram import (
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
-    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
-    bucket_case_sql,
-    hist_array_sql,
-)
+from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.locks import agency_ingest_lock
 from pipeline.service_day import service_date_ch
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
@@ -123,19 +118,12 @@ _SERVICE_DATE = service_date_ch()
 # `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
 # run their own dedup there instead.
 #
-# Two temp tables, because the builders want two different slices and
-# materialising their union means shipping the whole history for the sake of
-# the small part of it that genuinely needs it:
-#
-#   _analyze_deduped  — every column, only the dates being rebuilt. UNTYPED
-#     (keeps NULL-service rows — notably agency 9, 広島バス — which the reports
-#     and route-summary surface), plus arr_delay (agg_route_daily_dwell_run).
-#   _analyze_alltime  — the whole history, but only rows with a service_type,
-#     which is a small fraction of it. The aggregates spanning all of history
-#     built here (route_stats/hour) are keyed by service_type and so filter
-#     `service_type IS NOT NULL` anyway — pushing that filter into the load is
-#     equivalent to a typed dedup, because service_type is part of the dedup
-#     key.
+# The temp table, _analyze_deduped, holds every column for only the dates being
+# rebuilt. It is UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス —
+# which the reports and route-summary surface), plus arr_delay
+# (agg_route_daily_dwell_run). The aggregates spanning all of history are
+# finalized in ClickHouse from its delay counts, so no slice of the whole
+# history is loaded here.
 #
 # NULL service is coalesced to '' where it must fit a NOT NULL column; the
 # endpoints map it back.
@@ -190,17 +178,6 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # on the next reload — see the migration's own docstring and the dedicated
 # section below for why deleting it every run would defeat its purpose.
 
-# Aggregates spanning the whole history, built from `_analyze_alltime`. They
-# carry no `date` column, so unlike _INCREMENTAL_AGG_TABLES they can never be
-# rebuilt in part — but a run where NO date changed would rebuild them to
-# exactly what already stands, because each is a pure function of that slice
-# plus constants the fingerprint covers (:func:`_static_fingerprint`), and the
-# slice is a pure function of rows the ledger just proved unchanged. Such a run
-# therefore skips their purge and their build together, and with them the
-# full-history ClickHouse scan that feeds them — the largest single read a run
-# makes, paid today to reproduce a byte-identical result.
-_ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour"})
-
 # Aggregates keyed by something other than date whose value spans all of
 # history. They cannot be rebuilt in part, but a run where no row of any date
 # changed and the fingerprint matched (they join static_stop_times) would
@@ -217,20 +194,20 @@ _KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
 _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
 
 # What a run with no changed date may leave standing: a date-scoped table with
-# no date to rebuild, or an all-time, keyset or static-only table whose whole
-# input is unchanged.
-_NOOP_SKIPPABLE_AGG_TABLES = (
-    _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES | _KEYSET_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
-)
+# no date to rebuild, or a keyset or static-only table whose whole input is
+# unchanged.
+_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _KEYSET_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
 # rows are a copy, written only by _copy_ch_aggregate, which purges what it
 # replaces, so the purge loop in _analyze_locked leaves them alone.
 _CH_AGG_TABLES = frozenset(ch_aggregates.COPIED_TABLES)
 
-# The Postgres table whose agency totals ch_aggregates.COUNTS must reproduce: both
-# cover every typed, routed stop event of the history, so (Σ samples,
-# Σ sum_delay_sec) agree exactly when the counts are whole.
+# The Postgres table whose agency totals ch_aggregates.COUNTS must match: both
+# cover every typed, routed stop event of the history, and the copy was finalized
+# from the counts the last committed run left. A difference means the counts lost
+# or gained rows since (a dropped partition, a swap whose Postgres transaction
+# rolled back), which the next run recounts before finalizing anything.
 _COUNTS_REFERENCE = "agg_route_stats"
 
 
@@ -1009,32 +986,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                         (agency_id, rebuild_dates),
                     )
 
-        # ── Materialise the deduped fact slices ─────────────────────────
-        # See the module-level note above _AGG_TABLES_ORDERED for why there
-        # are two and what each one holds. Both slices come out of the same
-        # ClickHouse dedup; they differ only in which rows it is asked for.
+        # ── Materialise the deduped fact slice ──────────────────────────
+        # See the module-level note above _AGG_TABLES_ORDERED for what it holds.
         with conn.cursor() as cur:
-            _load_temp_table(
-                cur,
-                ch_client,
-                table="_analyze_alltime",
-                # Column order matches build_dedup_ch_sql's SELECT list. Neither
-                # captured_at nor arr_delay is requested: no all-time aggregate
-                # reads them, and this is the slice that spans every date.
-                columns=(
-                    "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int"
-                ),
-                ch_sql=build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL"),
-                parameters={"agency_id": agency_id},
-                # An empty rebuild list means no date's rows moved, so this
-                # slice would come back identical and the two aggregates
-                # over it are already standing at that answer — see
-                # _ALLTIME_AGG_TABLES. Skipping the scan skips a read of the
-                # agency's whole history, not just of the dates in question.
-                load=rebuild_dates != [],
-                label="alltime",
-            )
             _load_temp_table(
                 cur,
                 ch_client,
@@ -1057,135 +1011,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 load=rebuild_dates != [],
                 label="dedup",
             )
-
-        # Every route-keyed builder filters `route_code IS NOT NULL` in its own
-        # CTE rather than in the dedup load: agg_stop_daily reads the same slice
-        # and must keep a stop's traffic when the route is unknown. A NULL key
-        # would otherwise abort the whole-agency transaction.
-        # ── agg_route_stats ──────────────────────────────────────────────
-        # No minimum-sample HAVING here — see the module docstring's no-gate
-        # policy.
-        # on_time_pct_raw/late_5min_plus/late5_pct_raw bake the legacy_60s
-        # preset's fixed thresholds (LEGACY_ON_TIME_LATE_TOLERANCE_SEC=60,
-        # LEGACY_SEVERE_LATE_TOLERANCE_SEC=300) into these exact scalar
-        # columns — the only preset analyze() materialises. A caller wanting
-        # a different on-time/late tolerance reads agg_route_daily_dist's
-        # `hist` column instead and estimates it at query time (see
-        # pipeline.histogram.count_in_range /
-        # pipeline.reports.rankings.compute_on_time), rather than needing a
-        # re-aggregation for every tolerance someone might ask for.
-        on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
-        late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
-        sql = f"""
-            WITH deduped AS (SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL),
-            grouped AS (
-                SELECT
-                    route_code, service_type,
-                    AVG(dep_delay) AS avg_delay_sec,
-                    -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always
-                    -- an actual observed dep_delay value. It handles ties and
-                    -- single-row groups correctly by construction: it picks the
-                    -- smallest ordered value whose cumulative distribution is
-                    -- >= the target fraction, so a tied cluster or an n=1
-                    -- partition always resolves to a real value instead of
-                    -- skipping every row below the threshold. NOTE: this does
-                    -- NOT match pipeline/reports/rankings.py's _ranking_live
-                    -- ClickHouse fallback, which intentionally reproduces the
-                    -- old min-rank tie formula this column used to use — see
-                    -- that function's docstring for the known, accepted
-                    -- divergence on tied data. Computing both fractions from
-                    -- one ARRAY[...] call (rather than two separate
-                    -- PERCENTILE_DISC calls) keeps this to a single per-group
-                    -- sort of dep_delay.
-                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
-                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1 ELSE 0 END) AS late_5min_plus,
-                    SUM(CASE WHEN dep_delay<={on_time_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
-                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
-                    COUNT(*) AS samples,
-                    SUM(dep_delay) AS sum_delay_sec
-                FROM deduped
-                GROUP BY route_code, service_type
-            )
-            SELECT
-                %(agency_id)s AS agency_id,
-                route_code, service_type,
-                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
-                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
-                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
-                late_5min_plus,
-                ROUND(on_time_pct_raw, 1) AS on_time_pct,
-                ROUND(late5_pct_raw, 1) AS late5_pct,
-                samples,
-                sum_delay_sec
-            FROM grouped
-            ORDER BY avg_min DESC
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_stats",
-            [
-                "agency_id",
-                "route_code",
-                "service_type",
-                "avg_min",
-                "p50_min",
-                "p90_min",
-                "late_5min_plus",
-                "on_time_pct",
-                "late5_pct",
-                "samples",
-                "sum_delay_sec",
-            ],
-            p,
-            conn,
-            rebuild_dates,
-        )
-
-        # ── agg_route_hour ───────────────────────────────────────────────
-        sql = """
-            WITH deduped AS (
-                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
-            ),
-            grouped AS (
-                SELECT
-                    route_code, service_type, scheduled_time,
-                    AVG(dep_delay) AS avg_delay_sec,
-                    -- PERCENTILE_DISC: see agg_route_stats's identical column above.
-                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
-                    COUNT(*) AS samples,
-                    SUM(dep_delay) AS sum_delay_sec
-                FROM deduped
-                GROUP BY route_code, service_type, scheduled_time
-            )
-            SELECT
-                %(agency_id)s AS agency_id,
-                route_code, service_type, scheduled_time,
-                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
-                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
-                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
-                samples,
-                sum_delay_sec
-            FROM grouped
-            ORDER BY route_code, scheduled_time
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_hour",
-            [
-                "agency_id",
-                "route_code",
-                "service_type",
-                "scheduled_time",
-                "avg_min",
-                "p50_min",
-                "p90_min",
-                "samples",
-                "sum_delay_sec",
-            ],
-            p,
-            conn,
-            rebuild_dates,
-        )
 
         # ── agg_feed_health (per-day data-quality signal and rebuild ledger) ──
         # Per-day raw observation count (raw_samples: rows carrying a
@@ -1237,6 +1062,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 logger.info(
                     f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
                 )
+
+        # The dedup load keeps rows with no route_code, because agg_stop_daily
+        # must keep a stop's traffic when the route is unknown. Each route-keyed
+        # builder filters `route_code IS NOT NULL` in its own CTE instead: a NULL
+        # key would otherwise abort the whole-agency transaction.
 
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
