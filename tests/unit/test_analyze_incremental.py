@@ -59,6 +59,9 @@ class FakeClickHouse:
             return _FakeResult([(name,) for name in self._tables])
         if sql.startswith("SELECT count(), sum("):
             return _FakeResult([self._totals])
+        # An internal table's reference figure: the counts' is their totals' samples.
+        if any(sql.startswith(f"SELECT {e} FROM {t} ") for t, (_, e, _) in ch_aggregates.REFERENCES.items()):
+            return _FakeResult([(self._totals[1],)])
         # A work table holds the month of the ledger's date once built, so a
         # swap replaces that month rather than dropping it.
         if "toYYYYMM(date)" in sql and "__work_a" in sql:
@@ -159,6 +162,10 @@ class FakeConn:
         if "), 0)::bigint, coalesce(sum(" in sql:
             table = sql.split(" FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
+        # A reference table's figure, as an internal table's store check reads it.
+        for reference, _, expression in ch_aggregates.REFERENCES.values():
+            if sql.startswith(f"SELECT coalesce({expression}, 0)::bigint FROM {reference} "):
+                return ((0 if reference in self._purged else self._pg_totals[1]),), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
         if sql.startswith("SELECT EXISTS (SELECT 1 FROM static_stop_times"):
@@ -242,11 +249,14 @@ def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():
         assert not [s for s in conn.executed if f"DELETE FROM {table}" in s], table
         assert not [s for s in conn.executed if f"INSERT INTO {table}" in s], table
         assert not [c for c in ch.commands if f"{table}__work_a" in c[0]], table
-        # Read only by store checks' totals probes: its own, and agg_route_stats's
-        # once more as the counts' reference, the table covering their population.
+        # Read only by store checks' probes: its own totals, and agg_route_stats's
+        # figure once more as the counts' reference, the table covering their population.
         reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
         assert len(reads) == (2 if table == "agg_route_stats" else 1), (table, reads)
-        assert all("coalesce(sum(sum_delay_sec), 0)" in s for s in reads), reads
+        probes = ("SELECT count(*), coalesce(sum(samples), 0)::bigint, coalesce(sum(sum_delay_sec), 0)::bigint FROM ",)
+        if table == "agg_route_stats":
+            probes += ("SELECT coalesce(sum(samples), 0)::bigint FROM agg_route_stats ",)
+        assert all(s.startswith(probes) for s in reads), reads
 
 
 @pytest.mark.parametrize("table", ch_aggregates.WHOLE_HISTORY_TABLES)

@@ -202,14 +202,6 @@ _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _KEYSET_AGG_TABLES | _STA
 # replaces, so the purge loop in _analyze_locked leaves them alone.
 _CH_AGG_TABLES = frozenset(ch_aggregates.COPIED_TABLES)
 
-# The Postgres table whose agency totals ch_aggregates.COUNTS must match: both
-# cover every typed, routed stop event of the history, and the copy was finalized
-# from the counts the last committed run left. A difference means the counts lost
-# or gained rows since (a dropped partition, a swap whose Postgres transaction
-# rolled back), which the next run recounts before finalizing anything.
-_COUNTS_REFERENCE = "agg_route_stats"
-
-
 # ── Step timing ──────────────────────────────────────────────────────────
 # Deliberately not `pipeline.perf`: that registry is in-process and read back
 # through the API's /debug snapshot, which nothing does for a batch job that
@@ -756,9 +748,10 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
 
-    COUNTS has no Postgres copy, so its totals are compared with _COUNTS_REFERENCE's
-    instead. A whole-history table is rebuilt whole whenever any month of the counts
-    is recounted, or when its own two stores disagree, and left standing otherwise.
+    An internal table has no Postgres copy, so its figure is compared with its
+    ch_aggregates.REFERENCES table's instead. A whole-history table is rebuilt whole
+    whenever any month of its internal table is rebuilt, or when its own two stores
+    disagree, and left standing otherwise.
 
     It first checks that ClickHouse has every such table, so a store that
     predates one stops the run before anything is written.
@@ -775,19 +768,21 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
         if not agree:
             logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
         scopes[table] = rebuild_dates if agree else None
-    counts = ch_aggregates.COUNTS
-    with _step(f"{counts}: compare stores"):
-        agree = (
-            ch_aggregates.totals(ch_client, counts, agency_id, None)[1:]
-            == _pg_totals(conn, _COUNTS_REFERENCE, agency_id, None)[1:]
-        )
-    if not agree:
-        logger.info(f"  {counts}: totals differ from {_COUNTS_REFERENCE}; recounting every month")
-    scopes[counts] = rebuild_dates if agree else None
+    for internal, (reference, _, pg_expression) in ch_aggregates.REFERENCES.items():
+        with _step(f"{internal}: compare stores"):
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT coalesce({pg_expression}, 0)::bigint FROM {reference} WHERE agency_id = %s", (agency_id,)
+                )
+                expected = int(cur.fetchone()[0])
+            agree = ch_aggregates.reference_figure(ch_client, internal, agency_id) == expected
+        if not agree:
+            logger.info(f"  {internal}: figures differ from {reference}; recounting every month")
+        scopes[internal] = rebuild_dates if agree else None
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
         with _step(f"{table}: compare stores"):
             agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
-        scopes[table] = None if scopes[counts] != [] or not agree else []
+        scopes[table] = None if scopes[ch_aggregates.whole_history_source(table)] != [] or not agree else []
     return scopes
 
 
@@ -799,15 +794,14 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
         bounds = [ch_aggregates.month_bounds(month) for month in months]
         where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
         params += [day for pair in bounds for day in pair]
-    first, second = ch_aggregates.sum_columns(table)
+    (_, first), (_, second) = ch_aggregates.store_figures(table)
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT count(*), coalesce(sum({first}), 0)::bigint, coalesce(sum({second}), 0)::bigint "
-            f"FROM {table} WHERE {where}",
+            f"SELECT count(*), coalesce({first}, 0)::bigint, coalesce({second}, 0)::bigint FROM {table} WHERE {where}",
             params,
         )
-        count, samples, delay = cur.fetchone()
-    return int(count), int(samples), int(delay)
+        count, one, two = cur.fetchone()
+    return int(count), int(one), int(two)
 
 
 def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn, ch_client) -> None:
@@ -896,9 +890,9 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
     The agency's work tables are dropped however the builds end. A process that
     dies can't do that, so ch_aggregates.build drops its own before starting.
 
-    The whole-history tables are finalized from the counts after every monthly build
-    and before any swap, so they read the months just recounted from the counts' work
-    table; COUNTS itself is never copied.
+    The whole-history tables are finalized from their internal tables after every
+    monthly build and before any swap, so they read the months just rebuilt from
+    those tables' work tables; an internal table itself is never copied.
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
@@ -920,7 +914,8 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
                 _step,
             )
         if whole:
-            ch_aggregates.build_whole_history(ch_client, agency_id, whole, months.get(ch_aggregates.COUNTS), _step)
+            recounted = {t: months[t] for t in ch_aggregates.INTERNAL_TABLES if t in months}
+            ch_aggregates.build_whole_history(ch_client, agency_id, whole, recounted, _step)
         for table in monthly:
             with _step(f"{table}: ClickHouse swap"):
                 ch_aggregates.swap(ch_client, table, agency_id, months[table])

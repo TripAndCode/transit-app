@@ -370,12 +370,24 @@ def _route_hour_dow(source: str) -> str:
     """
 
 
+# Two (ClickHouse, Postgres) integer expressions over the agency's rows: with the
+# row count, what a store check compares between ClickHouse and the Postgres copy.
+_Figures = tuple[tuple[str, str], tuple[str, str]]
+_DEFAULT_FIGURES: _Figures = (("sum(samples)", "sum(samples)"), ("sum(sum_delay_sec)", "sum(sum_delay_sec)"))
+_DELAY_SUM_FIGURES: _Figures = (("sum(samples)", "sum(samples)"), ("sum(delay_sum)", "sum(delay_sum)"))
+
+
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
-    # The two integer columns whose agency sums, with the row count, are what a
-    # store check compares between ClickHouse and the Postgres copy.
-    sums: tuple[str, str] = ("samples", "sum_delay_sec")
+    figures: _Figures = _DEFAULT_FIGURES
+
+
+class _WholeSpec(NamedTuple):
+    columns: tuple[str, ...]
+    select: Callable[[str], str]
+    source: str  # the internal table it is finalized from
+    figures: _Figures = _DEFAULT_FIGURES
 
 
 # Build and swap order. Each copied table's columns are its Postgres table's, in
@@ -418,12 +430,12 @@ _SPECS: dict[str, _Spec] = {
     "agg_stop_daily": _Spec(
         ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _stop_daily,
-        ("samples", "delay_sum"),
+        _DELAY_SUM_FIGURES,
     ),
     "agg_route_stop_daily": _Spec(
         ("agency_id", "route_code", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _route_stop_daily,
-        ("samples", "delay_sum"),
+        _DELAY_SUM_FIGURES,
     ),
     "route_delay_counts": _Spec(
         (
@@ -440,15 +452,17 @@ _SPECS: dict[str, _Spec] = {
     ),
 }
 COUNTS = "route_delay_counts"
-# The date-keyed tables copied into Postgres; `build` fills these and COUNTS month by month.
-TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name != COUNTS)
-MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
+# The date-keyed tables that exist only in ClickHouse, which the whole-history tables are finalized from.
+INTERNAL_TABLES: tuple[str, ...] = (COUNTS,)
+# The date-keyed tables copied into Postgres; `build` fills these and INTERNAL_TABLES month by month.
+TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name not in INTERNAL_TABLES)
+MONTHLY_TABLES: tuple[str, ...] = (*TABLES, *INTERNAL_TABLES)
 # The tables whose rows join the agency's mirrored schedule, so an agency has none until analyze mirrors it.
 STATIC_JOINED_TABLES: frozenset[str] = frozenset({"agg_stop_daily", "agg_route_stop_daily"})
 
-# Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
-_WHOLE_SPECS: dict[str, _Spec] = {
-    "agg_route_stats": _Spec(
+# Whole-history tables, finalized from their internal table by `build_whole_history`. Build and swap order.
+_WHOLE_SPECS: dict[str, _WholeSpec] = {
+    "agg_route_stats": _WholeSpec(
         (
             "agency_id",
             "route_code",
@@ -463,8 +477,9 @@ _WHOLE_SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_stats,
+        COUNTS,
     ),
-    "agg_route_hour": _Spec(
+    "agg_route_hour": _WholeSpec(
         (
             "agency_id",
             "route_code",
@@ -477,16 +492,19 @@ _WHOLE_SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_hour,
+        COUNTS,
     ),
-    "agg_route_hour_dow": _Spec(
+    "agg_route_hour_dow": _WholeSpec(
         ("agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"),
         _route_hour_dow,
+        COUNTS,
     ),
 }
 WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
 COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
 ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
-COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in {**_SPECS, **_WHOLE_SPECS}.items()}
+_ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
+COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}
 
 
 def _checked(table: str) -> str:
@@ -659,16 +677,21 @@ def whole_history_sql(table: str, source: str | None = None) -> str:
     return _WHOLE_SPECS[table].select(source)
 
 
-def _counts_source(agency_id: int, counts_months: list[int] | None) -> tuple[str, dict]:
-    """The agency's counts as a run that rebuilt *counts_months* sees them: those
-    months from the counts work table, every other month from COUNTS itself."""
-    live = f"SELECT * FROM {COUNTS} WHERE agency_id = {{agency_id:Int32}}"
-    if not counts_months:
+def whole_history_source(table: str) -> str:
+    """The internal table *table* is finalized from."""
+    return _WHOLE_SPECS[_checked(table)].source
+
+
+def _internal_source(agency_id: int, internal: str, months: list[int] | None) -> tuple[str, dict]:
+    """The agency's rows of *internal* as a run that rebuilt *months* of it sees
+    them: those months from its work table, every other month from *internal* itself."""
+    live = f"SELECT * FROM {internal} WHERE agency_id = {{agency_id:Int32}}"
+    if not months:
         return live, {}
     return (
-        f"{live} AND NOT has({{counts_months:Array(UInt32)}}, toYYYYMM(date)) "
-        f"UNION ALL SELECT * FROM {work_table(COUNTS, agency_id)}",
-        {"counts_months": counts_months},
+        f"{live} AND NOT has({{months:Array(UInt32)}}, toYYYYMM(date)) "
+        f"UNION ALL SELECT * FROM {work_table(internal, agency_id)}",
+        {"months": months},
     )
 
 
@@ -676,14 +699,16 @@ def build_whole_history(
     ch,
     agency_id: int,
     tables: Iterable[str],
-    counts_months: list[int] | None,
+    recounted: dict[str, list[int]],
     step: Callable[[str], AbstractContextManager] = _untimed,
 ) -> None:
     """Compute each whole-history table in *tables* into its work table, from the
-    agency's counts. Runs after `build` and before any swap, so the months
-    `build` just recounted (*counts_months*) are read from the counts work table."""
-    source, params = _counts_source(agency_id, counts_months)
+    agency's rows of its internal table. Runs after `build` and before any swap, so
+    the months `build` just rebuilt of each internal table (*recounted*) are read
+    from that table's work table."""
     for table in tables:
+        internal = whole_history_source(table)
+        source, params = _internal_source(agency_id, internal, recounted.get(internal))
         work = work_table(table, agency_id)
         columns = ", ".join(COLUMNS[table])
         with step(f"{table}: ClickHouse build"):
@@ -816,19 +841,40 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
     return _agency_rows(", ".join(COLUMNS[table]), table, agency_id, months)
 
 
-def sum_columns(table: str) -> tuple[str, str]:
-    """The two columns *table*'s store check sums."""
-    return {**_SPECS, **_WHOLE_SPECS}[_checked(table)].sums
+def store_figures(table: str) -> _Figures:
+    """The two (ClickHouse, Postgres) figures *table*'s store check compares beside the row count."""
+    return _ALL_SPECS[_checked(table)].figures
 
 
 def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
-    """(rows, and the sums of sum_columns(table)) for the agency over *months*, or
-    all of them when None: the figures a store check compares, with *table*'s
-    Postgres copy or, for COUNTS, with the table pipeline.analyze names."""
-    first, second = sum_columns(table)
-    sql, params = _agency_rows(f"count(), sum({first}), sum({second})", table, agency_id, months)
-    count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
-    return int(count), int(samples), int(delay)
+    """(rows, and store_figures(table)'s ClickHouse figures) for the agency over
+    *months*, or all of them when None: what a store check compares with *table*'s
+    Postgres copy."""
+    (first, _), (second, _) = store_figures(table)
+    sql, params = _agency_rows(f"count(), {first}, {second}", table, agency_id, months)
+    count, one, two = ch.query(sql, parameters=params).result_rows[0]
+    return int(count), int(one or 0), int(two or 0)
+
+
+# Per internal table, which has no Postgres copy: the Postgres table whose agency
+# figure it must reproduce, and that figure as a ClickHouse and a Postgres
+# expression. A difference means the internal table lost or gained rows since the
+# copy was finalized from it (a dropped partition, a swap whose Postgres
+# transaction rolled back), which the next run recounts before finalizing anything.
+REFERENCES: dict[str, tuple[str, str, str]] = {
+    # Both cover every typed, routed stop event of the history.
+    COUNTS: ("agg_route_stats", "sum(samples)", "sum(samples)"),
+}
+
+
+def reference_figure(ch, internal: str, agency_id: int) -> int:
+    """REFERENCES' ClickHouse figure for the agency's rows of *internal*."""
+    expression = REFERENCES[internal][1]
+    ((value,),) = ch.query(
+        f"SELECT {expression} FROM {internal} WHERE agency_id = {{agency_id:Int32}}",
+        parameters={"agency_id": agency_id},
+    ).result_rows
+    return int(value or 0)
 
 
 def missing_tables(ch) -> list[str]:

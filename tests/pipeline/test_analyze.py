@@ -1970,7 +1970,10 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or any(r in s for r in aggregate_reads)
-        or (any(r in s for r in totals_reads) and s.startswith("SELECT count(), sum(samples), sum(sum_delay_sec)"))
+        or (
+            any(r in s for r in totals_reads)
+            and s.startswith(("SELECT count(), sum(samples), sum(sum_delay_sec)", "SELECT sum(samples) FROM "))
+        )
         for s in others
     ), others
 
