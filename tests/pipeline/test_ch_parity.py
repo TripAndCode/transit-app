@@ -18,7 +18,7 @@ from pipeline.histogram import N_BUCKETS, bucketize
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows, whole_history_rows
+from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows, seed_schedule, whole_history_rows
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -39,9 +39,10 @@ def test_parity_on_the_synthetic_patterns(pattern_fn, tmp_path, pg_conn, agency_
 
 
 def test_parity_on_the_edge_cases(pg_conn, agency_id, ch_client):
+    seed_schedule(pg_conn, agency_id, sorted({row[2] for row in edge_rows()}))
     insert_updates(ch_client, agency_id, edge_rows())
     analyze(agency_id, pg_conn, ch_client)
-    _assert_parity(pg_conn, ch_client, agency_id, static=False)
+    _assert_parity(pg_conn, ch_client, agency_id, static=True)
 
 
 def test_parity_on_a_real_feed(pg_conn, ch_client):

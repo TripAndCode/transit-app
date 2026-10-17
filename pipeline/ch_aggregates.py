@@ -1,9 +1,11 @@
 """Aggregates computed and stored in ClickHouse.
 
 Three kinds of table live here. The date-keyed aggregates (TABLES) are built
-from `updates` by a ClickHouse GROUP BY. COUNTS, also date-keyed and built the
-same way, holds the exact delay distribution and exists only in ClickHouse. The
-whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Each
+from `updates` by a ClickHouse GROUP BY; STATIC_JOINED_TABLES also join
+STATIC_STOP_TIMES, a copy of the agency's Postgres schedule. COUNTS, also
+date-keyed and built the same way, holds the exact delay distribution and exists
+only in ClickHouse. The whole-history aggregates (WHOLE_HISTORY_TABLES) are
+finalized from COUNTS. Each
 table in COPIED_TABLES has the name and columns of a Postgres counterpart;
 `pipeline.analyze` drives the builds and copies the agency's rows of each into
 the Postgres table the API reads. This module is the ClickHouse side only.

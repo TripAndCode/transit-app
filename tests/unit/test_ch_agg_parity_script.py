@@ -139,7 +139,7 @@ class _Mirrored(_ClickHouse):
 
     def query(self, sql, parameters=None):
         super().query(sql, parameters)
-        return _Result([("fp",)] if "SELECT fingerprint" in sql else [])
+        return _Result([("fp",)] if "SELECT fingerprint" in sql or "system.tables" in sql else [])
 
 
 def test_parity_compares_the_static_joined_tables_once_the_schedule_is_mirrored(monkeypatch):
@@ -158,6 +158,23 @@ def test_timing_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(c
     assert [sql for sql in ch.raw if _joins_the_mirror(sql)] == []
     assert len(ch.raw) == 1 + len(ch_aggregates.MONTHLY_TABLES) - len(ch_aggregates.STATIC_JOINED_TABLES)
     assert "no schedule mirror" in capsys.readouterr().out
+
+
+class _Unmigrated(_ClickHouse):
+    """Predates the schema that adds the schedule mirror, so reading it fails."""
+
+    def query(self, sql, parameters=None):
+        if f"FROM {ch_aggregates.STATIC_STOP_TIMES}" in sql:
+            raise RuntimeError("UNKNOWN_TABLE")
+        return super().query(sql, parameters)
+
+
+def test_both_modes_run_before_the_schema_adds_the_schedule_mirror(monkeypatch):
+    day = date(2026, 9, 1)
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
+    monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
+    assert parity(_Unmigrated(), _Conn([(day, 5, 5)]), 1) == 0
+    assert timing(_Unmigrated(), 1) == 0
 
 
 def test_a_postgres_time_compares_equal_to_its_clickhouse_text():

@@ -19,11 +19,12 @@ month into a table the tables needing that month share (`ch_aggregates.build`),
 paying the dedup column's figure plus the cost of writing it; a month only one
 table needs is built straight from `updates`.
 
-Neither mode reads a ClickHouse aggregate table. The static-joined tables join
-ClickHouse's static_stop_times, the schedule mirror the schema adds and only an
-analyze fills, so both modes skip them while it holds nothing for the agency.
-Both connections are read-only: ClickHouse with readonly=1, Postgres in a
-read-only session.
+Neither mode reads a ClickHouse aggregate table, so both run before the schema
+that adds them is applied. The static-joined tables join ClickHouse's
+static_stop_times, the schedule mirror that schema adds and only an analyze
+fills, so both modes skip them until it holds the agency's schedule. Both
+connections are read-only: ClickHouse with readonly=1, Postgres in a read-only
+session.
 """
 
 from __future__ import annotations
@@ -88,7 +89,11 @@ def differences(ch_rows, pg_rows, dates) -> tuple[list, list]:
 
 def unmirrored(ch, agency_id: int) -> frozenset[str]:
     """The static-joined tables while ClickHouse holds no schedule for the agency, else none."""
-    if ch_aggregates.static_mirror_fingerprint(ch, agency_id) is not None:
+    mirror = ch.query(
+        "SELECT 1 FROM system.tables WHERE database = currentDatabase() AND name = {name:String}",
+        parameters={"name": ch_aggregates.STATIC_STOP_TIMES},
+    ).result_rows
+    if mirror and ch_aggregates.static_mirror_fingerprint(ch, agency_id) is not None:
         return frozenset()
     print(f"{', '.join(sorted(ch_aggregates.STATIC_JOINED_TABLES))}: skipped; no schedule mirror until an analyze")
     return ch_aggregates.STATIC_JOINED_TABLES
