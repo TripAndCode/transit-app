@@ -133,7 +133,7 @@ def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_co
 def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_conn, agency_id, ch_client, monkeypatch):
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
     analyze(agency_id, pg_conn, ch_client)
-    before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.TABLES}
+    before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.COPIED_TABLES}
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
     real = ch_aggregates.rows_sql
 
@@ -144,11 +144,11 @@ def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_co
     monkeypatch.setattr(ch_aggregates, "rows_sql", rows_sql)
     with pytest.raises(RuntimeError, match="does not match ClickHouse"):
         analyze(agency_id, pg_conn, ch_client)
-    assert {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.TABLES} == before
+    assert {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.COPIED_TABLES} == before
 
     monkeypatch.undo()
     analyze(agency_id, pg_conn, ch_client)  # the next run brings the two stores back together
-    for table in ch_aggregates.TABLES:
+    for table in ch_aggregates.COPIED_TABLES:
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) != before[table], table
 
 

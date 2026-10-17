@@ -3,10 +3,10 @@
 Three kinds of table live here. The date-keyed aggregates (TABLES) are built
 from `updates` by a ClickHouse GROUP BY. COUNTS, also date-keyed and built the
 same way, holds the exact delay distribution and exists only in ClickHouse. The
-whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Every
-aggregate has the name and columns of a Postgres counterpart; `pipeline.analyze`
-drives the builds and copies the agency's rows of each into the Postgres table
-the API reads. This module is the ClickHouse side only.
+whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Each
+table in COPIED_TABLES has the name and columns of a Postgres counterpart;
+`pipeline.analyze` drives the builds and copies the agency's rows of each into
+the Postgres table the API reads. This module is the ClickHouse side only.
 
 A run replaces whole months of service date in the date-keyed tables: each is
 partitioned by (agency_id, month), a run assembles each month it touches in the
@@ -17,7 +17,7 @@ COUNTS, one of them, holds the exact delay distribution; the whole-history table
 are finalized from it into one partition per agency, which `swap_whole_history`
 replaces whole.
 
-Every aggregate's value equals what the Postgres builder it replaced produced,
+Every copied table's value equals what the Postgres builder it replaced produced,
 column for column; tests/pipeline/ch_parity.py keeps those builders as the parity
 oracle.
 Means are rounded half away from zero from exact integer sums, which is what

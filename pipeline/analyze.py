@@ -781,8 +781,8 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, rebuild_dates: list | None) 
     rows for a table from rebuilding it on every run.
 
     COUNTS has no Postgres copy, so its totals are compared with _COUNTS_REFERENCE's
-    instead. A whole-history table is rebuilt whole whenever the counts are, or when
-    its own two stores disagree, and left standing otherwise.
+    instead. A whole-history table is rebuilt whole whenever any month of the counts
+    is recounted, or when its own two stores disagree, and left standing otherwise.
 
     It first checks that ClickHouse has every such table, so a store that
     predates one stops the run before anything is written.

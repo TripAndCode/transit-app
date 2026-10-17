@@ -27,8 +27,7 @@ FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 def _assert_parity(pg_conn, ch_client, agency_id: int) -> None:
     for table in ch_aggregates.COPIED_TABLES:
         stored = stored_rows(pg_conn, agency_id, table)
-        if table in ch_aggregates.TABLES:
-            assert stored, f"{table}: nothing stored, so this would pass vacuously"
+        assert stored, f"{table}: nothing stored, so this would pass vacuously"
         assert stored == legacy_rows(pg_conn, ch_client, agency_id, table), table
 
 
@@ -65,8 +64,6 @@ def test_parity_on_a_real_feed(pg_conn, ch_client):
 def test_parity_on_the_whole_history_rows(pg_conn, agency_id, ch_client):
     insert_updates(ch_client, agency_id, whole_history_rows())
     analyze(agency_id, pg_conn, ch_client)
-    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
-        assert stored_rows(pg_conn, agency_id, table), table
     _assert_parity(pg_conn, ch_client, agency_id)
 
 
