@@ -186,7 +186,8 @@ def _checked(table: str) -> str:
     return table
 
 
-# A ClickHouse regular expression matching every name work_table returns.
+# A ClickHouse regular expression matching every name work_table and dedup_table
+# return, which is how drop_work_tables' callers and the test fixtures find them.
 WORK_TABLE_PATTERN = "__work_a[0-9]+$"
 
 
@@ -250,25 +251,34 @@ def build(
     rows. The month's dedup, the costliest part of a build, runs once into the
     agency's dedup table and feeds every table that month. It covers the whole
     month when any table needs every date of it, and otherwise only the changed
-    dates. A table rebuilt for its changed dates recomputes only those; the rest
-    of each month is copied from the table itself, where the last run left it.
-    The work and dedup tables are dropped first, which also clears ones a dead
-    run left behind, and the dedup table again once the build ends.
+    dates. Filling that table costs more than one table's own dedup, so a month
+    only one table needs is built straight from `updates`. A table rebuilt for
+    its changed dates recomputes only those; the rest of each month is copied
+    from the table itself, where the last run left it. The work and dedup tables
+    are dropped first, which also clears ones a dead run left behind, and the
+    dedup table again once every month is built; after a failure the caller's
+    `drop_work_tables` clears them.
     """
     dedup = dedup_table(agency_id)
-    for table in rebuilds:
-        work = work_table(table, agency_id)
-        ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-        ch.command(f"CREATE TABLE {work} AS {table}")
-    ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
-    ch.command(
-        f"CREATE TABLE {dedup} ENGINE = MergeTree ORDER BY date EMPTY AS {_dedup_select('0')}",
-        parameters={"agency_id": agency_id},
-    )
+    with step("ClickHouse build setup"):
+        for table in rebuilds:
+            work = work_table(table, agency_id)
+            ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+            ch.command(f"CREATE TABLE {work} AS {table}")
+        ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
+        ch.command(
+            f"CREATE TABLE {dedup} ENGINE = MergeTree ORDER BY date EMPTY AS {_dedup_select('0')}",
+            parameters={"agency_id": agency_id},
+        )
     for month in sorted({month for rebuild in rebuilds.values() for month in rebuild.months}):
         days = {
             table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
         }
+        if len(days) == 1:
+            ((table, table_days),) = days.items()
+            with step(f"{table}: ClickHouse build"):
+                _build_month(ch, table, agency_id, month, table_days, source=None)
+            continue
         if any(table_days is None for table_days in days.values()):
             where, params = month_where(month)
         else:
@@ -277,9 +287,11 @@ def build(
             ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
         for table, table_days in days.items():
             with step(f"{table}: ClickHouse build"):
-                _build_month(ch, table, agency_id, month, table_days)
-        ch.command(f"TRUNCATE TABLE {dedup}")
-    ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
+                _build_month(ch, table, agency_id, month, table_days, source=dedup)
+        with step("ClickHouse build setup"):
+            ch.command(f"TRUNCATE TABLE {dedup}")
+    with step("ClickHouse build setup"):
+        ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
 
 
 def _days_in(changed: list[date] | None, month: int) -> list[date] | None:
@@ -289,7 +301,7 @@ def _days_in(changed: list[date] | None, month: int) -> list[date] | None:
     return [day for day in changed if day.year * 100 + day.month == month] or None
 
 
-def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | None) -> None:
+def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | None, source: str | None) -> None:
     work = work_table(table, agency_id)
     columns = ", ".join(COLUMNS[table])
     if days is not None:
@@ -299,7 +311,7 @@ def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | 
             "AND NOT has({days:Array(Date)}, date)",
             parameters={"agency_id": agency_id, "month": month, "days": days},
         )
-    sql, params = select_sql(table, month, days, source=dedup_table(agency_id))
+    sql, params = select_sql(table, month, days, source=source)
     ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 

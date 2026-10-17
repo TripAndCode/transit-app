@@ -293,3 +293,21 @@ def test_dropping_an_agencys_work_tables_also_drops_its_dedup_table(ch_client):
     ch_client.command(f"CREATE TABLE {ch_aggregates.dedup_table(AGENCY)} (x UInt8) ENGINE = Memory")
     ch_aggregates.drop_work_tables(ch_client, AGENCY)
     assert work_tables(ch_client) == []
+
+
+def test_a_month_only_one_table_needs_skips_the_shared_dedup(ch_client):
+    """Filling the dedup table costs more than one table's own dedup, so a lone
+    table reads `updates` directly."""
+    insert_updates(ch_client, AGENCY, [*edge_rows(), update_row(datetime(2026, 10, 2, 8, 0), "x", 120)])
+    counting = _Counting(ch_client)
+    ch_aggregates.build(
+        counting,
+        AGENCY,
+        {
+            "agg_hour_daily": ch_aggregates.Rebuild([SEPT, OCT], None),
+            "agg_daily_trend": ch_aggregates.Rebuild([OCT], None),
+        },
+    )
+    assert counting.dedup_inserts == 1
+    assert _work_rows(ch_client, "agg_hour_daily") == _unshared_rows(ch_client, "agg_hour_daily", [SEPT, OCT])
+    assert _work_rows(ch_client, "agg_daily_trend") == _unshared_rows(ch_client, "agg_daily_trend", [OCT])
