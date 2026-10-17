@@ -61,8 +61,9 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
 # Per store, the variable that points it and the throwaway value of it. Read
-# from the NAME=value assignments of the same simple command, so a throwaway
-# port named anywhere else (another command, a comment) points nothing at it.
+# only from the command's own assignments -- `make_args` for a make target, the
+# env prefix for a gtfs_pipeline call -- so a throwaway port named anywhere else
+# (another command, a comment) points nothing at it.
 THROWAWAY = {
     # The port of the URL's host, not a ":5544" anywhere in it (a password).
     "pg": ("DATABASE_URL", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
@@ -612,8 +613,6 @@ _MAKE_NOARG_LONG = frozenset(
         "--warn-undefined-variables",
     }
 )
-# Every form make reads as a variable assignment: =, :=, ::=, :::=, +=, ?=, !=.
-_ANY_MAKE_ASSIGNMENT = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::{1,3}|[+?!])?=")
 
 
 def _flag_may_take_next(flag: str) -> bool:
@@ -629,11 +628,22 @@ def _flag_may_take_next(flag: str) -> bool:
     return False
 
 
+def _may_rewrite_variables(arg: str, *, flag: bool) -> bool:
+    """Whether make might set an arbitrary variable from *arg*: it expands `$`
+    in its arguments, reads every non-plain `=` form as an assignment, and
+    parses `--eval`/`-E` text as makefile source."""
+    if "$" in arg:
+        return True
+    if flag:
+        return arg.startswith("--eval") or (not arg.startswith("--") and "E" in arg)
+    return "=" in arg and not _ASSIGNMENT.match(arg)
+
+
 def make_args(args: list[str]) -> tuple[list[str], list[str]]:
     """The targets and the VAR=value assignments in `make`'s own arguments, up
-    to the next shell separator. Only a plain NAME=value word is kept as it is;
-    any other assignment form is kept as an empty value, which points its store
-    at nothing."""
+    to the next shell separator. Only a plain NAME=value word repoints a store;
+    after a word make might rewrite variables from, no store counts as pointed."""
+    unpoint_all = [f"{name}=" for name, _ in THROWAWAY.values()]
     targets: list[str] = []
     assignments: list[str] = []
     after_flag = False
@@ -641,14 +651,19 @@ def make_args(args: list[str]) -> tuple[list[str], list[str]]:
         if _is_separator(arg):
             break
         if after_flag:
+            # A flag's value is a file or directory name, never an assignment.
             after_flag = False
             if "=" not in arg:
                 targets.append(arg)
         elif arg.startswith("-"):
+            if _may_rewrite_variables(arg, flag=True):
+                assignments += unpoint_all
             after_flag = _flag_may_take_next(arg)
-        elif match := _ANY_MAKE_ASSIGNMENT.match(arg):
-            assignments.append(arg if _ASSIGNMENT.match(arg) else f"{match.group(1)}=")
-        elif "=" not in arg:
+        elif _may_rewrite_variables(arg, flag=False):
+            assignments += unpoint_all
+        elif "=" in arg:
+            assignments.append(arg)
+        else:
             targets.append(arg)
     return targets, assignments
 

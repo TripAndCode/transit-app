@@ -87,8 +87,10 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   when a dev-store target — a dev Postgres/ClickHouse port or container name,
   `docker compose exec`/`run` against the dev service, any `$DATABASE_URL`
   expansion (an inline `DATABASE_URL=…` assignment does not reach it, so name a
-  throwaway URL itself), or a `migrate-down` Make target with no throwaway port
-  in the same command — appears alongside a write/DDL keyword, or a `psql
+  throwaway URL itself), or a destructive Make target not pointed at the
+  throwaway pair by `make <target> DATABASE_URL=… CLICKHOUSE_PORT=…` arguments
+  (an env prefix before `make` does not count; see AGENTS.md) — appears alongside
+  a write/DDL keyword, or a `psql
   -f`/`--file` invocation whose script contents it can't read. A volume teardown
   is blocked on its own: `compose down -v`, `docker volume rm` of a
   `transit_*data` volume or of a list computed at run time, any `docker volume

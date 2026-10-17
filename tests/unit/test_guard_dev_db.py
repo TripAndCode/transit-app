@@ -126,17 +126,30 @@ BLOCKED = [
         )
         for flag in ("-I", "--include-dir", "--new-file", "--old-file", "--eval", "-E", "-sW", "-kI", "--what")
     ],
-    # Make reads every assignment form; only a plain NAME=value repoints a store.
-    pytest.param(
-        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        "DATABASE_URL:=postgresql://transit:transit@localhost:5433/transit",
-        id="later-colon-assignment-points-back-at-dev",
-    ),
-    pytest.param(
-        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        "'DATABASE_URL = postgresql://transit:transit@localhost:5433/transit'",
-        id="later-spaced-assignment-points-back-at-dev",
-    ),
+    # Only a plain NAME=value word repoints a store. A word make may expand or
+    # re-parse -- another assignment form, a `$`, `--eval` text -- can set any
+    # variable, so after one no store counts as pointed at the throwaway pair.
+    *[
+        pytest.param(
+            f"make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test {later}",
+            id=f"later-word-points-back-at-dev-{case}",
+        )
+        for case, later in (
+            ("colon", "DATABASE_URL:=postgresql://transit:transit@localhost:5433/transit"),
+            ("double-colon", "DATABASE_URL::=postgresql://transit:transit@localhost:5433/transit"),
+            ("triple-colon", "DATABASE_URL:::=postgresql://transit:transit@localhost:5433/transit"),
+            ("plus", "DATABASE_URL+=x"),
+            ("question", "DATABASE_URL?=x"),
+            ("bang", "DATABASE_URL!=echo x"),
+            ("spaced", "'DATABASE_URL = postgresql://transit:transit@localhost:5433/transit'"),
+            ("expanded-name", "'DATA$()BASE_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("expanded-name-braces", "'DATABASE${E}_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("eval-in-a-value", "'X=$(eval override DATABASE_URL:=postgresql://transit:transit@localhost:5433/t)'"),
+            ("eval-flag", "--eval 'override DATABASE_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("glued-eval-flag", "'--eval=override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("glued-short-eval", "'-Eoverride DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+        )
+    ],
     # The last of two assignments is the one the command sees.
     pytest.param(
         "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
