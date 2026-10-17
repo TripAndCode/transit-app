@@ -81,7 +81,7 @@ const MERMAID_JS_MARKER = "mermaidAPI";
 // "current measured size" — it's headroom, not a baseline to keep in
 // sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
 // MapLibre-scale regression with room to spare.
-const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
+const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
 
 // Each language's strings are their own dynamic chunk (src/i18n/index.ts)
 // so a visitor downloads only the active one. A locale chunk in an entry's

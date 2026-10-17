@@ -206,7 +206,10 @@ describe("AdminAuditPage", () => {
     await waitFor(() => {
       expect(useAdminAuditMock.mock.calls.at(-1)?.[0]).toMatchObject({ actor: "7" });
     });
-    expect(screen.queryByRole("status")).toBeNull();
+    // The router renders the new URL inside a transition, so a render that
+    // has already called the hook with the new filters can still be
+    // uncommitted.
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 
   it("shows no truncation notice for a complete export", async () => {

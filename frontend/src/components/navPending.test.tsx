@@ -43,7 +43,7 @@ function renderShell() {
     ],
     { initialEntries: ["/"] },
   );
-  renderWithProviders(<RouterProvider router={router} future={{ v7_startTransition: true }} />);
+  renderWithProviders(<RouterProvider router={router} />);
   return router;
 }
 

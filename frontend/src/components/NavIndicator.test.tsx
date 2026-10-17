@@ -53,7 +53,7 @@ function renderShell(at: string, axis: "x" | "y" = "y") {
     ],
     { initialEntries: [at] },
   );
-  renderWithProviders(<RouterProvider router={router} future={{ v7_startTransition: true }} />);
+  renderWithProviders(<RouterProvider router={router} />);
   return document.querySelector<HTMLElement>(".nav-indicator")!;
 }
 

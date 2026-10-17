@@ -190,7 +190,7 @@ void i18nReady.then((stringsLoaded) => {
       {stringsLoaded ? (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
-            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            <RouterProvider router={router} />
           </ToastProvider>
         </QueryClientProvider>
       ) : (

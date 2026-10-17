@@ -102,8 +102,11 @@ describe("prefetchRouteChunk", () => {
 });
 
 describe("router shell", () => {
-  it("opts the data router into React's startTransition for navigations", () => {
-    expect(mainTsx).toMatch(/future=\{\{\s*v7_startTransition:\s*true\s*\}\}/);
+  it("keeps the data router's navigations in React's startTransition", () => {
+    // RouterProvider wraps every navigation in startTransition unless
+    // `useTransitions={false}` opts it out.
+    expect(mainTsx).toMatch(/<RouterProvider router=\{router\}/);
+    expect(mainTsx).not.toMatch(/useTransitions=\{\s*false\s*\}/);
   });
 
   it("keeps one Suspense boundary above the Outlet instead of one per tab", () => {

@@ -221,9 +221,9 @@ test("app-authored MapLibre class overrides in entry CSS do not false-positive (
 });
 
 test("vendor split defeats a naive entry-only budget, but the summed static closure still fails", () => {
-  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES (600 KiB as of
-  // writing) -- not derived from it (the script has no exports), so if that
-  // constant is ever raised well past 4 MiB this fixture needs bumping too.
+  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES -- not derived
+  // from it (the script has no exports), so if that constant is ever raised
+  // well past 4 MiB this fixture needs bumping too.
   const bigChunk = "x".repeat(4 * 1024 * 1024);
   const dist = makeDist({
     ".vite/manifest.json": JSON.stringify({
