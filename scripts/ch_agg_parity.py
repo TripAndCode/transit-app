@@ -46,11 +46,13 @@ _TIMEOUT_SEC = 3600
 
 
 def normalized(value):
-    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC."""
+    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC, arrays as tuples."""
     if isinstance(value, float):
         return float(f"{value:.7g}")
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    if isinstance(value, list):
+        return tuple(value)
     return value
 
 

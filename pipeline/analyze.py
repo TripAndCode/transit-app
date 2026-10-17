@@ -302,11 +302,16 @@ def _copy_field(value) -> str:
     which every real analyze() caller pins to Asia/Tokyo — landing the row
     nine hours early. Writing the offset also removes the need to rebuild each
     row as a tz-aware tuple before handing it to the driver.
+
+    A list, which is how an Array column arrives, is written as a Postgres array
+    literal; its elements are numbers, which need no quoting.
     """
     if value is None:
         return "\\N"
     if isinstance(value, datetime):
         return value.isoformat() + ("+00:00" if value.tzinfo is None else "")
+    if isinstance(value, list):
+        return "{" + ",".join("NULL" if item is None else str(item) for item in value) + "}"
     text = str(value)
     if "\\" in text or "\t" in text or "\n" in text or "\r" in text:
         text = text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
