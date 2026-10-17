@@ -30,6 +30,7 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
+from api.range import TIME_BAND_RANGES
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
 from pipeline.histogram import (
@@ -41,6 +42,10 @@ from pipeline.histogram import (
     WIDTH,
 )
 from pipeline.service_day import service_date_ch, service_day_start_utc
+
+# The agency's Postgres static_stop_times, mirrored for the aggregates that join the schedule.
+STATIC_STOP_TIMES = "static_stop_times"
+_STATIC_STOP_TIMES_COLUMNS = ("agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time")
 
 
 def months_of(dates: Iterable[date]) -> list[int]:
@@ -216,6 +221,60 @@ def _route_delay_counts(source: str) -> str:
     """
 
 
+def _clock_sec(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 3600 + int(minutes) * 60
+
+
+# time_band_case_sql on the scheduled time's seconds: the first range holding it,
+# 'none' for no scheduled time or none of them.
+_TIME_BAND = (
+    f"multiIf({_SCHEDULED_SEC} IS NULL, 'none', "
+    + ", ".join(
+        f"{_SCHEDULED_SEC} >= {_clock_sec(start)} AND {_SCHEDULED_SEC} < {_clock_sec(end)}, '{band}'"
+        for band, (start, end) in TIME_BAND_RANGES.items()
+    )
+    + ", 'none')"
+)
+
+# The agency's mirrored schedule, joined on the stop event's trip and sequence.
+_STATIC_JOIN = (
+    f"INNER JOIN (SELECT trip_id, stop_sequence, stop_id FROM {STATIC_STOP_TIMES} "
+    "WHERE agency_id = {agency_id:UInt16}) AS st "
+    "ON st.trip_id = d.trip_id AND st.stop_sequence = toInt32(d.stop_sequence)"
+)
+
+
+def _stop_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date, service_type, time_band,
+               s AS delay_sum, toInt32(n) AS samples
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, ifNull(d.service_type, '') AS service_type,
+                   {_TIME_BAND} AS time_band, sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
+            FROM ({source}) AS d
+            {_STATIC_JOIN}
+            GROUP BY stop_id, date, service_type, time_band
+        )
+    """
+
+
+def _route_stop_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, stop_id, date, service_type, time_band,
+               s AS delay_sum, toInt64(n) AS samples
+        FROM (
+            SELECT assumeNotNull(d.route_code) AS route_code, st.stop_id AS stop_id, d.date AS date,
+                   ifNull(d.service_type, '') AS service_type, {_TIME_BAND} AS time_band,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
+            FROM ({source}) AS d
+            {_STATIC_JOIN}
+            WHERE d.route_code IS NOT NULL
+            GROUP BY route_code, stop_id, date, service_type, time_band
+        )
+    """
+
+
 def _pctl(p: str) -> str:
     """Postgres's PERCENTILE_DISC(*p*) over `dist`, sorted (value, count) pairs whose counts sum to `n`.
 
@@ -354,6 +413,16 @@ _SPECS: dict[str, _Spec] = {
         _route_daily_dist,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "agg_stop_daily": _Spec(
+        ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
+        _stop_daily,
+        ("samples", "delay_sum"),
+    ),
+    "agg_route_stop_daily": _Spec(
+        ("agency_id", "route_code", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
+        _route_stop_daily,
+        ("samples", "delay_sum"),
+    ),
     "route_delay_counts": _Spec(
         (
             "agency_id",
@@ -425,10 +494,6 @@ def _checked(table: str) -> str:
 # A ClickHouse regular expression matching every name work_table and dedup_table
 # return; the test fixtures find every agency's scratch tables by it.
 WORK_TABLE_PATTERN = "__work_a[0-9]+$"
-
-# The agency's Postgres static_stop_times, mirrored for the aggregates that join the schedule.
-STATIC_STOP_TIMES = "static_stop_times"
-_STATIC_STOP_TIMES_COLUMNS = ("agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time")
 
 
 def work_table(table: str, agency_id: int) -> str:

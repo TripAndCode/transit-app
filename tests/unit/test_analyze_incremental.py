@@ -57,7 +57,7 @@ class FakeClickHouse:
             return _FakeResult(self._ledger)
         if "FROM system.tables" in sql:
             return _FakeResult([(name,) for name in self._tables])
-        if "sum(sum_delay_sec)" in sql:
+        if sql.startswith("SELECT count(), sum("):
             return _FakeResult([self._totals])
         # A work table holds the month of the ledger's date once built, so a
         # swap replaces that month rather than dropping it.
@@ -156,7 +156,7 @@ class FakeConn:
         if sql.startswith("DELETE FROM"):
             self._purged.add(sql.split()[2])
         # A Postgres copy's totals: what it held, until its own purge emptied it.
-        if "coalesce(sum(sum_delay_sec), 0)" in sql:
+        if "), 0)::bigint, coalesce(sum(" in sql:
             table = sql.split(" FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
