@@ -24,14 +24,10 @@ from tests.pipeline.ch_parity import legacy_rows, stored_rows
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
-# The tables that join the static schedule, rightly empty for a fixture that loads none.
-_STATIC_JOINED = frozenset({"agg_stop_daily", "agg_route_stop_daily"})
-
-
 def _assert_parity(pg_conn, ch_client, agency_id: int, *, static: bool) -> None:
     for table in ch_aggregates.COPIED_TABLES:
         stored = stored_rows(pg_conn, agency_id, table)
-        if static or table not in _STATIC_JOINED:
+        if static or table not in ch_aggregates.STATIC_JOINED_TABLES:
             assert stored, f"{table}: nothing stored, so this would pass vacuously"
         assert stored == legacy_rows(pg_conn, ch_client, agency_id, table), table
 

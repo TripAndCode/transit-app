@@ -441,6 +441,8 @@ COUNTS = "route_delay_counts"
 # The date-keyed tables copied into Postgres; `build` fills these and COUNTS month by month.
 TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name != COUNTS)
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
+# The tables whose rows join the agency's mirrored schedule, so an agency has none until analyze mirrors it.
+STATIC_JOINED_TABLES: frozenset[str] = frozenset({"agg_stop_daily", "agg_route_stop_daily"})
 
 # Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
 _WHOLE_SPECS: dict[str, _Spec] = {

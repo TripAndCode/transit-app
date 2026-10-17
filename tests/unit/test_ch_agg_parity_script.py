@@ -3,7 +3,17 @@
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
-from scripts.ch_agg_parity import _timed, comparable_dates, differences, normalized, parity, whole_history_current
+from pipeline import ch_aggregates
+from scripts import ch_agg_parity
+from scripts.ch_agg_parity import (
+    _timed,
+    comparable_dates,
+    differences,
+    normalized,
+    parity,
+    timing,
+    whole_history_current,
+)
 
 
 def test_only_dates_whose_ledger_still_matches_clickhouse_are_compared():
@@ -35,9 +45,11 @@ class _ClickHouse:
     """Answers every query with no rows, and records what it was asked."""
 
     def __init__(self):
+        self.queries = []
         self.raw = []
 
     def query(self, sql, parameters=None):
+        self.queries.append(sql)
         return _Result([])
 
     def raw_query(self, sql, parameters=None):
@@ -103,6 +115,49 @@ def test_whole_history_is_compared_only_when_every_date_is_current():
     assert whole_history_current(stored, {first: (5, 5), second: (6, 6)})
     assert not whole_history_current(stored, {first: (5, 5), second: (7, 7)})
     assert not whole_history_current(stored, {first: (5, 5), second: (6, 6), date(2026, 9, 3): (1, 1)})
+
+
+def _joins_the_mirror(sql: str) -> bool:
+    return ch_aggregates.STATIC_STOP_TIMES in sql and "SELECT fingerprint" not in sql
+
+
+def test_parity_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(capsys, monkeypatch):
+    """They join ClickHouse's schedule mirror, which only an analyze fills. Compared
+    before it, every row Postgres holds would read as missing from ClickHouse."""
+    day = date(2026, 9, 1)
+    # A date ClickHouse has and the ledger lacks keeps the whole-history tables out of it.
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
+    ch = _ClickHouse()
+    assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
+    assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
+    assert len(ch.queries) == len(ch_aggregates.TABLES) - len(ch_aggregates.STATIC_JOINED_TABLES) + 1
+    assert "no schedule mirror" in capsys.readouterr().out
+
+
+class _Mirrored(_ClickHouse):
+    """Holds a schedule mirror for every agency, and no other rows."""
+
+    def query(self, sql, parameters=None):
+        super().query(sql, parameters)
+        return _Result([("fp",)] if "SELECT fingerprint" in sql else [])
+
+
+def test_parity_compares_the_static_joined_tables_once_the_schedule_is_mirrored(monkeypatch):
+    day = date(2026, 9, 1)
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
+    ch = _Mirrored()
+    assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
+    assert len([sql for sql in ch.queries if _joins_the_mirror(sql)]) == len(ch_aggregates.STATIC_JOINED_TABLES)
+
+
+def test_timing_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(capsys, monkeypatch):
+    """An empty mirror joins nothing, so its figure would be a fast query that measured nothing."""
+    monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
+    ch = _ClickHouse()
+    assert timing(ch, 1) == 0
+    assert [sql for sql in ch.raw if _joins_the_mirror(sql)] == []
+    assert len(ch.raw) == 1 + len(ch_aggregates.MONTHLY_TABLES) - len(ch_aggregates.STATIC_JOINED_TABLES)
+    assert "no schedule mirror" in capsys.readouterr().out
 
 
 def test_a_postgres_time_compares_equal_to_its_clickhouse_text():
