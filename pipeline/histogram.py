@@ -31,7 +31,7 @@ N_BUCKETS = _N_INNER + 2
 # The write paths bake these two thresholds into exact per-route scalar
 # columns at analyze time (agg_route_daily_dist's on_time_count/late5_count in
 # pipeline/ch_aggregates.py, agg_route_stats's on_time_pct/late5_pct/
-# late_5min_plus in pipeline/analyze.py) -- the "legacy_60s" preset. Both write
+# late_5min_plus, also in pipeline/ch_aggregates.py) -- the "legacy_60s" preset. Both write
 # paths and the read path (pipeline/reports/rankings.py) import these constants
 # instead of repeating the literals, so the exact precomputed fast-path
 # columns and this default preset's own values can never drift apart -- the
