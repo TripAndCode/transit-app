@@ -372,4 +372,5 @@ def test_the_static_joined_tables_are_those_whose_select_joins_the_schedule_mirr
         for table in ch_aggregates.MONTHLY_TABLES
         if ch_aggregates.STATIC_STOP_TIMES in ch_aggregates.select_sql(table, 202609)[0]
     }
+    joined |= {t for t in ch_aggregates.WHOLE_HISTORY_TABLES if ch_aggregates.whole_history_source(t) in joined}
     assert joined == ch_aggregates.STATIC_JOINED_TABLES

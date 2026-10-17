@@ -177,14 +177,6 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # on the next reload — see the migration's own docstring and the dedicated
 # section below for why deleting it every run would defeat its purpose.
 
-# Aggregates keyed by something other than date whose value spans all of
-# history. They cannot be rebuilt in part, but a run where no row of any date
-# changed and the fingerprint matched (they join static_stop_times) would
-# rebuild them to what already stands; the ledger's total_rows is what makes
-# "no row changed" knowable, because these read rows with and without a
-# dep_delay alike.
-_KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
-
 # Aggregates built from the static schedule alone. Every column they read is
 # in _STATIC_DEPENDENCY_COLUMNS, plus constants the fingerprint covers via
 # ANALYZE_LOGIC_VERSION (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC
@@ -193,9 +185,8 @@ _KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
 _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
 
 # What a run with no changed date may leave standing: a date-scoped table with
-# no date to rebuild, or a keyset or static-only table whose whole input is
-# unchanged.
-_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _KEYSET_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
+# no date to rebuild, or a static-only table whose whole input is unchanged.
+_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
 # rows are a copy, written only by _copy_ch_aggregate, which purges what it
@@ -833,6 +824,16 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
             scan_label=f"{table}: ClickHouse read",
             load_label=f"{table}: COPY into Postgres",
         )
+    if table == "agg_stop_routes":
+        # ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
+        # order string_agg(... ORDER BY route_code) gave: the database collation's.
+        with _step(f"{table}: order route lists"), conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agg_stop_routes SET route_codes = "
+                "(SELECT string_agg(r, ',' ORDER BY r) FROM unnest(string_to_array(route_codes, ',')) AS r) "
+                "WHERE agency_id = %s",
+                (agency_id,),
+            )
     with _step(f"{table}: verify copy"):
         expected = ch_aggregates.totals(ch_client, table, agency_id, scope)
         actual = _pg_totals(conn, table, agency_id, scope)
@@ -1097,89 +1098,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # below filters `route_code IS NOT NULL` in its own query instead: a NULL
         # key would otherwise abort the whole-agency transaction.
         if has_static:
-            # ── agg_stop_routes (distinct observed routes per stop) ──────────────
-            # Needs a JOIN against Postgres static_stop_times, so — mirroring the
-            # _analyze_deduped pattern — fetch the distinct raw keys from
-            # ClickHouse and bulk-load them into a small Postgres TEMP TABLE,
-            # then run the JOIN against that instead of raw `updates`. It's a
-            # DISTINCT route_code set, unaffected by poll duplication, and
-            # doesn't read dep_delay, so no clamp/dedup is needed on this side.
-            #
-            # Deliberately NOT derived from _analyze_deduped (a cheaper,
-            # single-scan alternative tried and reverted): _analyze_deduped is
-            # pre-filtered by the dedup's clamp (`dep_delay IS NOT NULL AND
-            # BETWEEN -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`),
-            # so a (route_code, trip_id, stop_sequence) whose every observation
-            # was NULL/implausible would silently drop out of stop coverage —
-            # a real, non-trivial share of keys, enough to lose stops' entire
-            # route coverage in practice. `agg_stop_routes` is about which
-            # routes serve a stop, independent of whether any of those
-            # observations happened to carry a numeric delay — the extra,
-            # non-trivial ClickHouse round-trip (a second full scan of the
-            # agency's keys, not a cheap add-on) is the correctness-over-perf
-            # trade this table's semantics require.
-            #
-            # Skipped only on a run where no date changed at all: the ledger's
-            # total_rows counts delay-less rows too, so "no date changed"
-            # covers this table's whole input (see _KEYSET_AGG_TABLES). A
-            # changed date means a whole rebuild — the value is an all-time
-            # set keyed by stop, which no date-scoped scan can produce.
-            if _nothing_to_rebuild("agg_stop_routes", rebuild_dates):
-                logger.info("  agg_stop_routes: unchanged, not rebuilt")
-            else:
-                with conn.cursor() as cur:
-                    cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
-                    cur.execute(
-                        "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
-                        "ON COMMIT DROP"
-                    )
-                    # `query_row_block_stream` (not `query`), same rationale as
-                    # _analyze_deduped above: this key set is deliberately LARGER
-                    # than _analyze_deduped by design (that's the correctness fix
-                    # this block exists for), so buffering the whole thing in
-                    # `.query()`'s result_rows would hit the same unbounded-memory
-                    # shape that streaming was introduced to eliminate 40 lines
-                    # up, just for a bigger set.
-                    #
-                    # A stop whose only keys lack a route would aggregate to a NULL
-                    # route_codes, which the NOT NULL column rejects for the whole
-                    # agency; such keys name no route to list anyway.
-                    ch_keys_sql = (
-                        "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
-                        "WHERE agency_id = {agency_id:UInt16} AND route_code IS NOT NULL"
-                    )
-                    with (
-                        _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),
-                        ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream,
-                    ):
-                        for block in stream:
-                            if not block:
-                                continue
-                            psycopg2.extras.execute_values(
-                                cur, "INSERT INTO _analyze_raw_keys VALUES %s", block, page_size=10_000
-                            )
-                    # The planner sizes a freshly created temp table at a few
-                    # thousand rows (reltuples=0) regardless of how many rows it
-                    # actually holds, and this table drives the join below against
-                    # static_stop_times -- ANALYZE gives the planner real stats to
-                    # pick a join strategy from, same as _analyze_deduped gets.
-                    with _step("agg_stop_routes: ANALYZE TEMP"):
-                        cur.execute("ANALYZE _analyze_raw_keys")
-                    sql = """
-                        INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
-                        SELECT %(agency_id)s, sst.stop_id,
-                               string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
-                        FROM _analyze_raw_keys k
-                        JOIN static_stop_times sst
-                          ON sst.agency_id = %(agency_id)s
-                         AND sst.trip_id = k.trip_id
-                         AND sst.stop_sequence = k.stop_sequence
-                        GROUP BY sst.stop_id
-                    """
-                    with _step("agg_stop_routes: build+insert"):
-                        cur.execute(sql, p)
-                    logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
-
             # ── agg_route_headway (scheduled-headway classification) ─────
             # Supports classifying routes by scheduled frequency for later
             # filtering. Derived purely from the static GTFS schedule

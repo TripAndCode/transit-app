@@ -142,7 +142,8 @@ def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_co
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
     analyze(agency_id, pg_conn, ch_client)
     before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.COPIED_TABLES}
-    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
+    # A new route, so every table changes: agg_stop_routes lists routes, not observations.
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180, route_code="R2")])
     real = ch_aggregates.rows_sql
 
     def rows_sql(table, agency, months):

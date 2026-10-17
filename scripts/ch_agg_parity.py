@@ -65,6 +65,15 @@ def normalized(value):
     return value
 
 
+def comparable(table: str, row) -> tuple:
+    """*row* normalized, with agg_stop_routes' route list as a sorted tuple of codes:
+    ClickHouse orders the list by bytes, the Postgres copy by its collation."""
+    values = tuple(map(normalized, row))
+    if table == "agg_stop_routes":
+        return (*values[:-1], tuple(sorted(values[-1].split(","))))
+    return values
+
+
 def comparable_dates(stored: dict, live: dict) -> set:
     """The dates whose ledger row matches ClickHouse's counts, so their aggregates are current."""
     return {day for day, counts in stored.items() if live.get(day) == counts}
@@ -138,6 +147,8 @@ def parity(ch, conn, agency_id: int) -> int:
             failures += len(only_ch) + len(only_pg)
         print(f"{table}: {compared} Postgres rows compared")
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        if table in skipped:
+            continue
         if not whole_history_current(stored, live):
             print(f"{table}: skipped; a whole-history row spans every date, and not every date is current")
             continue
@@ -147,8 +158,8 @@ def parity(ch, conn, agency_id: int) -> int:
                 f"SELECT {', '.join(ch_aggregates.COLUMNS[table])} FROM {table} WHERE agency_id = %s", (agency_id,)
             )
             pg_rows = cur.fetchall()
-        ch_set = {tuple(map(normalized, row)) for row in ch_rows}
-        pg_set = {tuple(map(normalized, row)) for row in pg_rows}
+        ch_set = {comparable(table, row) for row in ch_rows}
+        pg_set = {comparable(table, row) for row in pg_rows}
         for label, differing in (("only in ClickHouse", ch_set - pg_set), ("only in Postgres", pg_set - ch_set)):
             for row in sorted(differing, key=str)[:5]:
                 print(f"  {table} {label}: {row}")
