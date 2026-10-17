@@ -25,6 +25,14 @@ from typing import NamedTuple
 
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
+from pipeline.histogram import (
+    HI,
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+    LO,
+    N_BUCKETS,
+    WIDTH,
+)
 from pipeline.service_day import service_date_ch, service_day_start_utc
 
 
@@ -126,6 +134,31 @@ def _route_daily(source: str) -> str:
     """
 
 
+# histogram.bucketize in SQL: underflow below LO, overflow at or past HI, and
+# WIDTH-second inner bins between, indexed with intDiv on a non-negative offset.
+_BUCKET = f"multiIf(dep < {LO}, 0, dep >= {HI}, {N_BUCKETS - 1}, 1 + intDiv(dep - ({LO}), {WIDTH}))"
+_HIST = "[" + ", ".join(f"toInt32(countIf(d.b = {i}))" for i in range(N_BUCKETS)) + "]"
+
+
+def _route_daily_dist(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, service_type,
+               toInt32(n) AS samples, s AS sum_delay_sec,
+               toInt32(on_time) AS on_time_count, toInt32(late5) AS late5_count, hist
+        FROM (
+            SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
+                   ifNull(d.service_type, '') AS service_type,
+                   count() AS n, sum(d.dep) AS s,
+                   countIf(d.dep <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC}) AS on_time,
+                   countIf(d.dep > {LEGACY_SEVERE_LATE_TOLERANCE_SEC}) AS late5,
+                   {_HIST} AS hist
+            FROM (SELECT *, assumeNotNull(dep_delay) AS dep, {_BUCKET} AS b FROM ({source})) AS d
+            WHERE d.route_code IS NOT NULL
+            GROUP BY {_ROUTE_KEYS}
+        )
+    """
+
+
 # scheduled_time is a time of day written as hours, minutes and optionally
 # seconds, colon-separated, the hours with or without a leading zero, and never
 # past 23 (see pipeline/strategies/_time.py). Its field before the first colon is
@@ -173,6 +206,20 @@ _SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_daily,
+    ),
+    "agg_route_daily_dist": _Spec(
+        (
+            "agency_id",
+            "date",
+            "route_code",
+            "service_type",
+            "samples",
+            "sum_delay_sec",
+            "on_time_count",
+            "late5_count",
+            "hist",
+        ),
+        _route_daily_dist,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
 }

@@ -89,12 +89,8 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, reconstruct_headways
 from pipeline.histogram import (
-    HI,
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
-    LO,
-    N_BUCKETS,
-    WIDTH,
     bucket_case_sql,
     hist_array_sql,
 )
@@ -117,18 +113,6 @@ ANALYZE_LOGIC_VERSION = 4
 # group or bucket raw `updates` rows by day (`pipeline.service_day`).
 _SERVICE_DATE = service_date_ch()
 
-# SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
-# with the read path by deriving both from the same LO/HI/WIDTH constants.
-# Operands are non-negative inside the inner range, so SQL integer division
-# matches Python floor division.
-_BUCKET_EXPR = (
-    f"CASE WHEN dep_delay < {LO} THEN 0 "
-    f"WHEN dep_delay >= {HI} THEN {N_BUCKETS - 1} "
-    f"ELSE 1 + (dep_delay - ({LO})) / {WIDTH} END"
-)
-# Fixed-length bucket-count array (one COUNT FILTER per bucket) — guarantees
-# every row stores exactly N_BUCKETS counts regardless of which bins are empty.
-_HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
 
 # The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
 # (see analyze()), because the dedup is the expensive full-partition scan+sort
@@ -1201,55 +1185,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             p,
             conn,
             rebuild_dates,
-        )
-
-        # ── agg_route_daily_dist (per-day delay distribution for reports) ──
-        # Exact scalars (sum/count, threshold counts) + a fixed-width delay
-        # histogram so range-scoped ranking/on_time/worst_5min read this tiny
-        # table instead of scanning raw `updates`. UNTYPED dedup keeps
-        # NULL-service routes (the live reports never filtered them); NULL is
-        # coalesced to '' in the inner CTE so GROUP BY service_type — and the
-        # NOT NULL PK — see the sentinel, never a raw NULL/'' split.
-        # on_time_count/late5_count bake the legacy_60s preset's fixed
-        # thresholds — see the identical rationale on agg_route_stats above.
-        # A caller wanting a different tolerance reads `hist` instead (same
-        # column this table already stores for p50/p90 interpolation).
-        sql = f"""
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL),
-            bucketed AS (
-                SELECT date, route_code,
-                    COALESCE(service_type, '') AS service_type,
-                    dep_delay, {_BUCKET_EXPR} AS b
-                FROM deduped
-            )
-            SELECT
-                %(agency_id)s AS agency_id,
-                date::text, route_code, service_type,
-                COUNT(*)                              AS samples,
-                SUM(dep_delay)                        AS sum_delay_sec,
-                COUNT(*) FILTER (WHERE dep_delay <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC})  AS on_time_count,
-                COUNT(*) FILTER (WHERE dep_delay > {LEGACY_SEVERE_LATE_TOLERANCE_SEC})  AS late5_count,
-                {_HIST_ARRAY}                         AS hist
-            FROM bucketed
-            GROUP BY date, route_code, service_type
-            ORDER BY date, route_code
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_daily_dist",
-            [
-                "agency_id",
-                "date",
-                "route_code",
-                "service_type",
-                "samples",
-                "sum_delay_sec",
-                "on_time_count",
-                "late5_count",
-                "hist",
-            ],
-            p,
-            conn,
         )
 
         # ── agg_feed_health (per-day data-quality signal and rebuild ledger) ──

@@ -98,3 +98,10 @@ def record_builds(monkeypatch) -> list[tuple[str, list[int]]]:
 
     monkeypatch.setattr(ch_aggregates, "build", build)
     return calls
+
+
+def histogram_edge_rows() -> list[tuple]:
+    """One observation at each histogram and threshold edge on route EDGE, service day 2026-09-14."""
+    day = datetime(2026, 9, 14, 8, 0)
+    delays = [-301, -300, -1, 0, 60, 61, 299, 300, 301, 1799, 1800, 7000]
+    return [update_row(day, f"e{i}", delay, route_code="EDGE") for i, delay in enumerate(delays)]

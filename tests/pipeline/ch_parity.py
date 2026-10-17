@@ -10,6 +10,14 @@ import psycopg2.extras
 from pipeline import ch_aggregates
 from pipeline.analyze import _load_temp_table
 from pipeline.db import build_dedup_ch_sql
+from pipeline.histogram import (
+    HI,
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+    LO,
+    N_BUCKETS,
+    WIDTH,
+)
 
 # _analyze_deduped's columns in build_dedup_ch_sql's SELECT order, as analyze loaded them.
 _DEDUPED_COLUMNS = (
@@ -18,7 +26,34 @@ _DEDUPED_COLUMNS = (
     "captured_at timestamptz, arr_delay int"
 )
 
+_BUCKET_EXPR = (
+    f"CASE WHEN dep_delay < {LO} THEN 0 "
+    f"WHEN dep_delay >= {HI} THEN {N_BUCKETS - 1} "
+    f"ELSE 1 + (dep_delay - ({LO})) / {WIDTH} END"
+)
+_HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
+
 LEGACY_SQL = {
+    "agg_route_daily_dist": f"""
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL),
+            bucketed AS (
+                SELECT date, route_code,
+                    COALESCE(service_type, '') AS service_type,
+                    dep_delay, {_BUCKET_EXPR} AS b
+                FROM deduped
+            )
+            SELECT
+                %(agency_id)s AS agency_id,
+                date::text, route_code, service_type,
+                COUNT(*)                              AS samples,
+                SUM(dep_delay)                        AS sum_delay_sec,
+                COUNT(*) FILTER (WHERE dep_delay <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC})  AS on_time_count,
+                COUNT(*) FILTER (WHERE dep_delay > {LEGACY_SEVERE_LATE_TOLERANCE_SEC})  AS late5_count,
+                {_HIST_ARRAY}                         AS hist
+            FROM bucketed
+            GROUP BY date, route_code, service_type
+            ORDER BY date, route_code
+        """,
     "agg_daily_trend": """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
             SELECT

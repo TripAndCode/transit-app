@@ -14,10 +14,11 @@ import pytest
 from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.histogram import N_BUCKETS, bucketize
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import JST, edge_rows
+from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -125,3 +126,29 @@ def test_route_daily_and_trend_match_hand_computed_values_in_both_stores(pg_conn
         assert got.keys() == expected_trend.keys()
         for key, (avg_min, late) in expected_trend.items():
             assert got[key] == (pytest.approx(avg_min, abs=1e-6), late), key
+
+
+def test_route_daily_dist_bins_the_bucket_edges_like_postgres(pg_conn, agency_id, ch_client):
+    rows = histogram_edge_rows()
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+    _assert_parity(pg_conn, ch_client, agency_id)
+
+    kept = [row[7] for row in rows if abs(row[7]) <= 7200]
+    expected = [0] * N_BUCKETS
+    for delay in kept:
+        expected[bucketize(delay)] += 1
+    query = (
+        "SELECT samples, sum_delay_sec, on_time_count, late5_count, hist FROM agg_route_daily_dist "
+        "WHERE agency_id = {} AND route_code = 'EDGE'"
+    )
+    with pg_conn.cursor() as cur:
+        cur.execute(query.format("%s"), (agency_id,))
+        pg_row = cur.fetchone()
+    (ch_row,) = ch_client.query(query.format("{agency_id:Int32}"), parameters={"agency_id": agency_id}).result_rows
+    for row in (pg_row, ch_row):
+        samples, total, on_time, late5, hist = row
+        assert (samples, total) == (len(kept), sum(kept))
+        assert on_time == sum(1 for delay in kept if delay <= 60)
+        assert late5 == sum(1 for delay in kept if delay > 300)
+        assert list(hist) == expected
