@@ -500,7 +500,7 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False) -> bool:
     """
     make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
     # Case is kept: make and the shell both match variable names case-sensitively.
-    for segment in _simple_commands(_shell_tokens(cmd)):
+    for segment in _simple_commands(_shell_tokens(cmd, newlines=True)):
         if _segment_writes_dev(segment, make_controlled):
             return True
         quoted = (tok for tok in segment if any(c.isspace() for c in tok))
@@ -509,17 +509,23 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False) -> bool:
     return False
 
 
-def _shell_tokens(text: str) -> list[str]:
+def _shell_tokens(text: str, newlines: bool = False) -> list[str]:
     """shlex tokens with each run of shell operator characters (`;`, `&&`,
     `|`, `>` ...) a token of its own, also where it is glued to a word:
-    `shlex.split("make a;ls")` keeps `a;ls` as one token."""
+    `shlex.split("make a;ls")` keeps `a;ls` as one token. With *newlines*, an
+    unquoted newline is such an operator too, as it ends a command in bash,
+    and a backslash-newline joins two lines into one."""
     # A `#` starts a comment only at the start of a word, which shlex's default
     # (any `#`) gets wrong: `pa#ss@host ... -f x.sql` would lose its flag. The
     # comment-aware lexer is the fallback for a trailing comment holding an
     # unbalanced quote, which the comment-free one cannot lex.
+    if newlines:
+        text = text.replace("\\\n", " ")
     for commenters in ("", "#"):
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n" if newlines else True)
         lexer.whitespace_split = True
+        if newlines:
+            lexer.whitespace = " \t\r"
         lexer.commenters = commenters
         try:
             return list(lexer)
@@ -528,7 +534,7 @@ def _shell_tokens(text: str) -> list[str]:
     return text.split()
 
 
-_OPERATOR_CHARS = frozenset("();<>|&")
+_OPERATOR_CHARS = frozenset("();<>|&\n")
 
 
 def _is_separator(tok: str) -> bool:
@@ -592,12 +598,33 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
 # such word makes the whole command untrusted (a false block is the cheap
 # direction). `-C` takes the directory after it.
 _SAFE_MAKE_FLAG = re.compile(r"-[sk]+|-j[0-9]*|--silent|--keep-going|--no-print-directory|--jobs(?:=[0-9]+)?")
+# The only variables a destructive make command may set: the ones its recipes
+# read. Any other can repoint a recipe (`db_url`), its shell (`SHELL`) or a
+# sub-make (`MAKE`).
+_SAFE_MAKE_VARIABLES = frozenset(
+    {
+        "DATABASE_URL",
+        "CLICKHOUSE_PORT",
+        "CLICKHOUSE_DATABASE",
+        "AGENCY_ID",
+        "CONFIRM",
+        "CSV",
+        "DAY",
+        "DAYS",
+        "FOLDER",
+        "FULL",
+        "LOCALE",
+        "STATIC_PATH",
+        "TARGET",
+    }
+)
 
 
 def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
     """The targets and the plain NAME=value assignments in `make`'s own
     arguments, up to the next shell separator, and whether every word was one
-    of those, an allowlisted flag, or `-C <dir>`."""
+    of those (with an allowlisted name), an allowlisted flag, or `-C <dir>`.
+    A `#` word starts a comment the guard cannot place, so it is untrusted."""
     targets: list[str] = []
     assignments: list[str] = []
     trusted = True
@@ -605,7 +632,7 @@ def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
     for arg in args:
         if _is_separator(arg):
             break
-        if "$" in arg:
+        if "$" in arg or arg.startswith("#"):
             trusted = False
         elif after_directory_flag:
             after_directory_flag = False
@@ -614,7 +641,7 @@ def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
         elif arg.startswith("-"):
             trusted = trusted and bool(_SAFE_MAKE_FLAG.fullmatch(arg))
         elif "=" in arg:
-            if _ASSIGNMENT.match(arg):
+            if _ASSIGNMENT.match(arg) and arg.split("=", 1)[0] in _SAFE_MAKE_VARIABLES:
                 assignments.append(arg)
             else:
                 trusted = False

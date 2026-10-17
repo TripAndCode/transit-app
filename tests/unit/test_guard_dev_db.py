@@ -159,6 +159,32 @@ BLOCKED = [
         )
         for order, before, after in (("later", "", f" {word}"), ("earlier", f"{word} ", ""))
     ],
+    # Only the variables destructive recipes read may be set: another name can
+    # repoint a recipe (`db_url`), its shell (`SHELL`) or a sub-make (`MAKE`).
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "db_url=postgresql://transit:transit@otherhost/transit",
+        id="recipe-internal-variable",
+    ),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8124 'SHELL=env -u CLICKHOUSE_PORT /bin/sh'", id="shell-variable"),
+    pytest.param(
+        "make bootstrap DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
+        "'MAKE=make CLICKHOUSE_PORT='",
+        id="sub-make-variable",
+    ),
+    # Bash ends the command at an unquoted newline or comment; words after it never reach make.
+    pytest.param(
+        "make prune-query-log # DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignment-inside-a-comment",
+    ),
+    pytest.param(
+        "make prune-query-log\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignment-on-the-next-line",
+    ),
+    pytest.param(
+        "make analyze-all\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124",
+        id="both-assignments-on-the-next-line",
+    ),
     # A make-control variable set anywhere in the command reaches make too.
     pytest.param(
         "MAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit "
@@ -565,6 +591,17 @@ ALLOWED = [
     pytest.param(
         "make -C . prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="test-db-make-variable-after-a-directory-flag",
+    ),
+    pytest.param(
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test AGENCY_ID=1 FULL=1",
+        id="documented-throwaway-analyze-all-with-recipe-variables",
+    ),
+    # A backslash-newline continues the same command, as in bash.
+    pytest.param(
+        "make analyze-all \\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\\n"
+        "  CLICKHOUSE_PORT=8124",
+        id="line-continued-make-variables",
     ),
     # A flag that takes no argument does not swallow the assignment after it.
     *[
