@@ -1,9 +1,12 @@
 """Aggregates computed and stored in ClickHouse.
 
-Each table here is built from `updates` by a ClickHouse GROUP BY into a
-ClickHouse table with the name and columns of its Postgres counterpart.
-`pipeline.analyze` drives the build and copies the agency's rows into the
-Postgres table the API reads; this module is the ClickHouse side only.
+Three kinds of table live here. The date-keyed aggregates (TABLES) are built
+from `updates` by a ClickHouse GROUP BY. COUNTS, also date-keyed and built the
+same way, holds the exact delay distribution and exists only in ClickHouse. The
+whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Every
+aggregate has the name and columns of a Postgres counterpart; `pipeline.analyze`
+drives the builds and copies the agency's rows of each into the Postgres table
+the API reads. This module is the ClickHouse side only.
 
 A run replaces whole months of service date in the date-keyed tables: each is
 partitioned by (agency_id, month), a run assembles each month it touches in the
@@ -14,8 +17,9 @@ COUNTS, one of them, holds the exact delay distribution; the whole-history table
 are finalized from it into one partition per agency, which `swap_whole_history`
 replaces whole.
 
-Every value equals what the Postgres builder it replaced produced, column for
-column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
+Every aggregate's value equals what the Postgres builder it replaced produced,
+column for column; tests/pipeline/ch_parity.py keeps those builders as the parity
+oracle.
 Means are rounded half away from zero from exact integer sums, which is what
 Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
@@ -233,8 +237,8 @@ class _Spec(NamedTuple):
     select: Callable[[str], str]
 
 
-# Build and swap order. Each spec's columns are its Postgres table's, in the
-# order the copy writes them.
+# Build and swap order. Each copied table's columns are its Postgres table's, in
+# the order the copy writes them; COUNTS has no Postgres table.
 _SPECS: dict[str, _Spec] = {
     "agg_daily_trend": _Spec(
         ("agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec", "sum_late_sec"),
@@ -583,7 +587,8 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
 
 def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
     """(rows, sum of samples, sum of sum_delay_sec) for the agency over *months*,
-    or all of them when None: the figures the Postgres copy is checked against."""
+    or all of them when None: the figures a store check compares, with *table*'s
+    Postgres copy or, for COUNTS, with the table pipeline.analyze names."""
     sql, params = _agency_rows("count(), sum(samples), sum(sum_delay_sec)", table, agency_id, months)
     count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(samples), int(delay)

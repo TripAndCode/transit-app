@@ -246,9 +246,11 @@ def test_a_noop_run_neither_purges_nor_rebuilds_an_alltime_aggregate(table):
 
     assert not [s for s in conn.executed if f"DELETE FROM {table}" in s]
     assert not [s for s in conn.executed if f"INSERT INTO {table}" in s]
-    # The one read a no-op run makes of it is the counts' store check, a totals probe.
+    # The counts' store check probes agg_route_stats's totals, once: it is the table
+    # covering the counts' population. Nothing else reads either table.
     reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
-    assert not [s for s in reads if "coalesce(sum(sum_delay_sec), 0)" not in s]
+    assert len(reads) == (1 if table == "agg_route_stats" else 0), reads
+    assert all("coalesce(sum(sum_delay_sec), 0)" in s for s in reads), reads
 
 
 def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():

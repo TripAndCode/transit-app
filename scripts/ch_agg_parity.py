@@ -127,8 +127,8 @@ def parity(ch, conn, agency_id: int) -> int:
             pg_rows = cur.fetchall()
         ch_set = {tuple(map(normalized, row)) for row in ch_rows}
         pg_set = {tuple(map(normalized, row)) for row in pg_rows}
-        for label, rows in (("only in ClickHouse", ch_set - pg_set), ("only in Postgres", pg_set - ch_set)):
-            for row in sorted(rows, key=str)[:5]:
+        for label, differing in (("only in ClickHouse", ch_set - pg_set), ("only in Postgres", pg_set - ch_set)):
+            for row in sorted(differing, key=str)[:5]:
                 print(f"  {table} {label}: {row}")
         failures += len(ch_set ^ pg_set)
         print(f"{table}: {len(pg_rows)} Postgres rows compared")

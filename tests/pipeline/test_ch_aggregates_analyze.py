@@ -40,8 +40,7 @@ def test_clickhouse_holds_the_rows_postgres_serves(pattern_fn, tmp_path, pg_conn
     run_pattern(pattern_fn(), tmp_path, pg_conn, agency_id, ch_client)
     for table in ch_aggregates.COPIED_TABLES:
         served = pg_rows(pg_conn, agency_id, table)
-        if table in ch_aggregates.TABLES:
-            assert served, f"{table}: nothing stored, so this would pass vacuously"
+        assert served, f"{table}: nothing stored, so this would pass vacuously"
         assert ch_rows(ch_client, agency_id, table) == served, table
 
 
