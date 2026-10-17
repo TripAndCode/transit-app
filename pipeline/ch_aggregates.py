@@ -1,18 +1,25 @@
 """Aggregates computed and stored in ClickHouse.
 
-Each table here is built from `updates` by a ClickHouse GROUP BY into a
-ClickHouse table with the name and columns of its Postgres counterpart.
-`pipeline.analyze` drives the build and copies the agency's rows into the
-Postgres table the API reads; this module is the ClickHouse side only.
+Three kinds of table live here. The date-keyed aggregates (TABLES) are built
+from `updates` by a ClickHouse GROUP BY. COUNTS, also date-keyed and built the
+same way, holds the exact delay distribution and exists only in ClickHouse. The
+whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Each
+table in COPIED_TABLES has the name and columns of a Postgres counterpart;
+`pipeline.analyze` drives the builds and copies the agency's rows of each into
+the Postgres table the API reads. This module is the ClickHouse side only.
 
-A run replaces whole months of service date. Each table is partitioned by
-(agency_id, month), a run assembles each month it touches in the agency's work
-table, recomputing only the dates whose rows changed from one dedup of the month
-that the tables needing it share, and `swap` then moves each month into place
-with REPLACE PARTITION, so a reader never sees a month half built.
+A run replaces whole months of service date in the date-keyed tables: each is
+partitioned by (agency_id, month), a run assembles each month it touches in the
+agency's work table, recomputing only the dates whose rows changed from one dedup
+of the month that the tables needing it share, and `swap` then moves each month
+into place with REPLACE PARTITION, so a reader never sees a month half built.
+COUNTS, one of them, holds the exact delay distribution; the whole-history tables
+are finalized from it into one partition per agency, which `swap_whole_history`
+replaces whole.
 
-Every value equals what the Postgres builder it replaced produced, column for
-column; tests/pipeline/ch_parity.py keeps that builder as the parity oracle.
+Every copied table's value equals what the Postgres builder it replaced produced,
+column for column; tests/pipeline/ch_parity.py keeps those builders as the parity
+oracle.
 Means are rounded half away from zero from exact integer sums, which is what
 Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
@@ -180,13 +187,58 @@ def _hour_daily(source: str) -> str:
     """
 
 
+# scheduled_time's seconds past midnight, from the same fields _HOUR reads: hours,
+# minutes and optional seconds. NULL when there is no scheduled time. The value
+# Postgres's `time` cast of the string takes, so two spellings of one time are one key.
+_SCHEDULED_SEC = (
+    "if(d.scheduled_time IS NULL, NULL, "
+    "toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[1]) * 3600 "
+    "+ toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[2]) * 60 "
+    "+ toInt32OrZero(splitByChar(':', assumeNotNull(d.scheduled_time))[3]))"
+)
+
+
+def _route_delay_counts(source: str) -> str:
+    # The whole-history tables key on a typed service, so an untyped or unrouted
+    # event is left out here, as the alltime slice left it out; filtering after the
+    # dedup is the same because both columns are part of its key.
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, service_type, scheduled_sec,
+               dep_delay, toInt32(n) AS samples, toInt64(dep_delay) * toInt64(n) AS sum_delay_sec
+        FROM (
+            SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
+                   assumeNotNull(d.service_type) AS service_type, {_SCHEDULED_SEC} AS scheduled_sec,
+                   assumeNotNull(d.dep_delay) AS dep_delay, count() AS n
+            FROM ({source}) AS d
+            WHERE d.route_code IS NOT NULL AND d.service_type IS NOT NULL
+            GROUP BY date, route_code, service_type, scheduled_sec, dep_delay
+        )
+    """
+
+
+def _route_hour_dow(source: str) -> str:
+    avg_min = _round_half_away("s", "60 * n", 2)
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, service_type, dow, hour,
+               toFloat32({avg_min}) AS avg_min, toInt32(n) AS samples, s AS sum_delay_sec
+        FROM (
+            SELECT v.route_code AS route_code, v.service_type AS service_type,
+                   toInt16(toDayOfWeek(v.date)) AS dow, toInt16(intDiv(assumeNotNull(v.scheduled_sec), 3600)) AS hour,
+                   sum(v.samples) AS n, sum(v.sum_delay_sec) AS s
+            FROM ({source}) AS v
+            WHERE v.scheduled_sec IS NOT NULL
+            GROUP BY route_code, service_type, dow, hour
+        )
+    """
+
+
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
 
 
-# Build and swap order. Each spec's columns are its Postgres table's, in the
-# order the copy writes them.
+# Build and swap order. Each copied table's columns are its Postgres table's, in
+# the order the copy writes them; COUNTS has no Postgres table.
 _SPECS: dict[str, _Spec] = {
     "agg_daily_trend": _Spec(
         ("agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec", "sum_late_sec"),
@@ -222,13 +274,40 @@ _SPECS: dict[str, _Spec] = {
         _route_daily_dist,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "route_delay_counts": _Spec(
+        (
+            "agency_id",
+            "date",
+            "route_code",
+            "service_type",
+            "scheduled_sec",
+            "dep_delay",
+            "samples",
+            "sum_delay_sec",
+        ),
+        _route_delay_counts,
+    ),
 }
-TABLES: tuple[str, ...] = tuple(_SPECS)
-COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _SPECS.items()}
+COUNTS = "route_delay_counts"
+# The date-keyed tables copied into Postgres; `build` fills these and COUNTS month by month.
+TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name != COUNTS)
+MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
+
+# Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
+_WHOLE_SPECS: dict[str, _Spec] = {
+    "agg_route_hour_dow": _Spec(
+        ("agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"),
+        _route_hour_dow,
+    ),
+}
+WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
+COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
+ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
+COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in {**_SPECS, **_WHOLE_SPECS}.items()}
 
 
 def _checked(table: str) -> str:
-    if table not in _SPECS:
+    if table not in COLUMNS:
         raise ValueError(f"Not a ClickHouse aggregate: {table!r}")
     return table
 
@@ -261,7 +340,9 @@ def select_sql(table: str, month: int, days: list[date] | None = None, source: s
     month only one table needs. *source* names a table already holding the
     month's dedup (`build`'s dedup table), which it reads instead.
     """
-    spec = _SPECS[_checked(table)]
+    if _checked(table) not in _SPECS:
+        raise ValueError(f"{table!r} is not built by month")
+    spec = _SPECS[table]
     if source is None:
         where, params = month_where(month) if days is None else days_where(days)
         rows = _dedup_select(where)
@@ -381,6 +462,70 @@ def swap(ch, table: str, agency_id: int, months: list[int]) -> None:
             ch.command(f"ALTER TABLE {table} DROP PARTITION {partition}")
 
 
+def whole_history_sql(table: str, source: str | None = None) -> str:
+    """The SELECT computing *table*'s rows for the agency bound as `agency_id`, in COLUMNS order.
+
+    *source* yields COUNTS' rows of the agency. Without it the counts are
+    computed in the query from the agency's whole-history dedup: what a
+    read-only session runs.
+    """
+    if table not in _WHOLE_SPECS:
+        raise ValueError(f"{table!r} is not a whole-history aggregate")
+    if source is None:
+        source = _route_delay_counts(_dedup_select("1"))
+    return _WHOLE_SPECS[table].select(source)
+
+
+def _counts_source(agency_id: int, counts_months: list[int] | None) -> tuple[str, dict]:
+    """The agency's counts as a run that rebuilt *counts_months* sees them: those
+    months from the counts work table, every other month from COUNTS itself."""
+    live = f"SELECT * FROM {COUNTS} WHERE agency_id = {{agency_id:Int32}}"
+    if not counts_months:
+        return live, {}
+    return (
+        f"{live} AND NOT has({{counts_months:Array(UInt32)}}, toYYYYMM(date)) "
+        f"UNION ALL SELECT * FROM {work_table(COUNTS, agency_id)}",
+        {"counts_months": counts_months},
+    )
+
+
+def build_whole_history(
+    ch,
+    agency_id: int,
+    tables: Iterable[str],
+    counts_months: list[int] | None,
+    step: Callable[[str], AbstractContextManager] = _untimed,
+) -> None:
+    """Compute each whole-history table in *tables* into its work table, from the
+    agency's counts. Runs after `build` and before any swap, so the months
+    `build` just recounted (*counts_months*) are read from the counts work table."""
+    source, params = _counts_source(agency_id, counts_months)
+    for table in tables:
+        work = work_table(table, agency_id)
+        columns = ", ".join(COLUMNS[table])
+        with step(f"{table}: ClickHouse build"):
+            ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+            ch.command(f"CREATE TABLE {work} AS {table}")
+            ch.command(
+                f"INSERT INTO {work} ({columns}) {whole_history_sql(table, source)}",
+                parameters={"agency_id": agency_id, **params},
+            )
+
+
+def swap_whole_history(ch, table: str, agency_id: int) -> None:
+    """Move the agency's work table into *table*'s agency partition, or drop the
+    partition when the work table holds no row: REPLACE PARTITION refuses a source
+    partition with no parts."""
+    if table not in _WHOLE_SPECS:
+        raise ValueError(f"{table!r} is not a whole-history aggregate")
+    work = work_table(table, agency_id)
+    ((rows,),) = ch.query(f"SELECT count() FROM {work}").result_rows
+    if rows:
+        ch.command(f"ALTER TABLE {table} REPLACE PARTITION {int(agency_id)} FROM {work}")
+    else:
+        ch.command(f"ALTER TABLE {table} DROP PARTITION {int(agency_id)}")
+
+
 def source_months(ch, agency_id: int) -> list[int]:
     """Every month of service date from the agency's first `updates` row to its last.
 
@@ -421,7 +566,7 @@ def months_for(ch, table: str, agency_id: int, changed: list[date] | None) -> li
 def drop_work_tables(ch, agency_id: int) -> None:
     """Drop the agency's work tables and its dedup table. SYNC, so their disk is
     freed now rather than after the Atomic database's drop delay."""
-    for name in (*(work_table(table, agency_id) for table in TABLES), dedup_table(agency_id)):
+    for name in (*(work_table(table, agency_id) for table in ALL_TABLES), dedup_table(agency_id)):
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
 
 
@@ -442,17 +587,18 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
 
 def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
     """(rows, sum of samples, sum of sum_delay_sec) for the agency over *months*,
-    or all of them when None: the figures the Postgres copy is checked against."""
+    or all of them when None: the figures a store check compares, with *table*'s
+    Postgres copy or, for COUNTS, with the table pipeline.analyze names."""
     sql, params = _agency_rows("count(), sum(samples), sum(sum_delay_sec)", table, agency_id, months)
     count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(samples), int(delay)
 
 
 def missing_tables(ch) -> list[str]:
-    """The tables in TABLES the connected database lacks."""
+    """The tables in ALL_TABLES the connected database lacks."""
     rows = ch.query(
         "SELECT name FROM system.tables WHERE database = currentDatabase() AND has({names:Array(String)}, name)",
-        parameters={"names": list(TABLES)},
+        parameters={"names": list(ALL_TABLES)},
     ).result_rows
     present = {row[0] for row in rows}
-    return [table for table in TABLES if table not in present]
+    return [table for table in ALL_TABLES if table not in present]

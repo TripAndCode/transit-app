@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from scripts.ch_agg_parity import _timed, comparable_dates, differences, parity
+from scripts.ch_agg_parity import _timed, comparable_dates, differences, parity, whole_history_current
 
 
 def test_only_dates_whose_ledger_still_matches_clickhouse_are_compared():
@@ -93,3 +93,13 @@ def test_differences_compare_array_columns():
     only_ch, only_pg = differences(ch, [(1, day, "R1", [0, 1, 2])], {day})
     assert only_ch == [(1, day, "R1", (0, 2, 1))]
     assert only_pg == [(1, day, "R1", (0, 1, 2))]
+
+
+def test_whole_history_is_compared_only_when_every_date_is_current():
+    """A whole-history row spans every date, so one stale or unledgered date makes
+    the two stores legitimately differ."""
+    first, second = date(2026, 9, 1), date(2026, 9, 2)
+    stored = {first: (5, 5), second: (6, 6)}
+    assert whole_history_current(stored, {first: (5, 5), second: (6, 6)})
+    assert not whole_history_current(stored, {first: (5, 5), second: (7, 7)})
+    assert not whole_history_current(stored, {first: (5, 5), second: (6, 6), date(2026, 9, 3): (1, 1)})

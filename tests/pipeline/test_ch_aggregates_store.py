@@ -311,3 +311,43 @@ def test_a_month_only_one_table_needs_skips_the_shared_dedup(ch_client):
     assert counting.dedup_inserts == 1
     assert _work_rows(ch_client, "agg_hour_daily") == _unshared_rows(ch_client, "agg_hour_daily", [SEPT, OCT])
     assert _work_rows(ch_client, "agg_daily_trend") == _unshared_rows(ch_client, "agg_daily_trend", [OCT])
+
+
+def _columns_and_partition_key(ch_client, table: str) -> tuple[list[str], str]:
+    columns = ch_client.query(
+        "SELECT name FROM system.columns WHERE database = currentDatabase() AND table = {t:String} ORDER BY position",
+        parameters={"t": table},
+    ).result_rows
+    ((key,),) = ch_client.query(
+        "SELECT partition_key FROM system.tables WHERE database = currentDatabase() AND name = {t:String}",
+        parameters={"t": table},
+    ).result_rows
+    return [row[0] for row in columns], key
+
+
+def test_the_counts_table_has_its_registry_columns_and_month_partitions(ch_client):
+    columns, key = _columns_and_partition_key(ch_client, ch_aggregates.COUNTS)
+    assert columns == list(ch_aggregates.COLUMNS[ch_aggregates.COUNTS])
+    assert "agency_id" in key and "toYYYYMM(date)" in key, key
+
+
+def test_each_whole_history_table_has_its_registry_columns_and_one_partition_per_agency(ch_client):
+    assert ch_aggregates.WHOLE_HISTORY_TABLES
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        columns, key = _columns_and_partition_key(ch_client, table)
+        assert columns == list(ch_aggregates.COLUMNS[table]), table
+        assert key == "agency_id", (table, key)
+
+
+def test_each_whole_history_table_names_only_columns_its_postgres_table_has(pg_conn):
+    with pg_conn.cursor() as cur:
+        for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))
+            assert set(ch_aggregates.COLUMNS[table]) <= {row[0] for row in cur.fetchall()}, table
+
+
+def test_dropping_an_agencys_work_tables_covers_the_counts_and_whole_history_tables(ch_client):
+    for table in (ch_aggregates.COUNTS, *ch_aggregates.WHOLE_HISTORY_TABLES):
+        ch_client.command(f"CREATE TABLE {ch_aggregates.work_table(table, AGENCY)} AS {table}")
+    ch_aggregates.drop_work_tables(ch_client, AGENCY)
+    assert work_tables(ch_client) == []

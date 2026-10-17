@@ -1964,7 +1964,15 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
     aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
-    assert all(s.rstrip().endswith("LIMIT 1") or any(r in s for r in aggregate_reads) for s in others), others
+    # The counts hold a row per delay value of every stop event, so the counts and
+    # the tables finalized from them may be read only by the store check's totals probe.
+    totals_reads = tuple(f"FROM {t} " for t in (ch_aggregates.COUNTS, *ch_aggregates.WHOLE_HISTORY_TABLES))
+    assert all(
+        s.rstrip().endswith("LIMIT 1")
+        or any(r in s for r in aggregate_reads)
+        or (any(r in s for r in totals_reads) and s.startswith("SELECT count(), sum(samples), sum(sum_delay_sec)"))
+        for s in others
+    ), others
 
 
 def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):
