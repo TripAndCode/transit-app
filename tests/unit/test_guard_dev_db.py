@@ -99,10 +99,28 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
         id="env-prefix-with-a-glued-redirect",
     ),
+    # Make variable names are case-sensitive: a lowercase one sets a different variable.
+    pytest.param(
+        "make analyze-all database_url=postgresql://transit:transit@localhost:5544/transit_test clickhouse_port=8124",
+        id="lowercase-make-variable-names",
+    ),
+    # The value of a value-taking flag is a file name, not a variable.
+    pytest.param(
+        "make -o DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
+        id="assignment-shaped-value-of-o",
+    ),
+    pytest.param(
+        "make -W DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
+        id="assignment-shaped-value-of-capital-w",
+    ),
+    pytest.param(
+        "make --what-if DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
+        id="assignment-shaped-value-of-what-if",
+    ),
     # The last of two assignments is the one the command sees.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit",
         id="later-assignment-points-back-at-dev",
     ),
     # A separator glued to a word still ends the simple command.
@@ -112,19 +130,19 @@ BLOCKED = [
     pytest.param('bash -c "make prune-query-log;ls"', id="glued-semicolon-inside-bash-c"),
     # :5544 in the password is not the port the URL connects to.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:5544@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:5544@localhost:5433/transit",
         id="throwaway-port-only-in-the-password",
     ),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-ingest-postgres-redirected-only",
     ),
     # analyze writes ClickHouse too (pipeline/ch_aggregates.py).
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-analyze-all-postgres-redirected-only",
     ),
     pytest.param(
@@ -302,7 +320,7 @@ BLOCKED = [
     pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
     pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
     pytest.param(
-        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        "make prune-query-log DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433",
         id="throwaway-url-overridden-by-port-query",
     ),
     # clickhouse-client's native port, which compose.yml says can be published.
@@ -485,6 +503,10 @@ ALLOWED = [
     pytest.param(
         "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="test-db-as-a-make-variable",
+    ),
+    pytest.param(
+        "make -C . -f Makefile prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="test-db-make-variable-after-value-flags",
     ),
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",

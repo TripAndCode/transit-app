@@ -61,14 +61,12 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
 # Per store, the variable that points it and the throwaway value of it. Read
-# from the NAME=value assignments of the same simple command -- make's own
-# VAR=value arguments for a make target, the env prefix for a direct CLI call --
-# so a throwaway port named anywhere else (another command, a comment) points
-# nothing at it.
+# from the NAME=value assignments of the same simple command, so a throwaway
+# port named anywhere else (another command, a comment) points nothing at it.
 THROWAWAY = {
     # The port of the URL's host, not a ":5544" anywhere in it (a password).
-    "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
-    "ch": ("clickhouse_port", re.compile(r"8124$")),
+    "pg": ("DATABASE_URL", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
+    "ch": ("CLICKHOUSE_PORT", re.compile(r"8124$")),
 }
 # Container names the throwaway stack runs under (see the transit-app-gotchas skill).
 THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
@@ -493,7 +491,8 @@ def runs_destructive_command(cmd: str) -> bool:
     "..."`) and is read as a command line of its own. Quoted prose naming a
     destructive target is read the same way and blocked, the cheap direction.
     """
-    for segment in _simple_commands(_shell_tokens(cmd.lower())):
+    # Case is kept: make and the shell both match variable names case-sensitively.
+    for segment in _simple_commands(_shell_tokens(cmd)):
         if _segment_writes_dev(segment):
             return True
         if any(runs_destructive_command(tok) for tok in segment if any(c.isspace() for c in tok)):
@@ -527,7 +526,7 @@ def _is_separator(tok: str) -> bool:
     return bool(tok) and set(tok) <= _OPERATOR_CHARS
 
 
-_ASSIGNMENT = re.compile(r"^[a-z_][a-z0-9_]*=")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _MAKE_NAMES = {"make", "gmake"}
 # `python gtfs_pipeline.py ...` and `python -m gtfs_pipeline ...`.
 _CLI_NAMES = {"gtfs_pipeline.py", "gtfs_pipeline"}
@@ -545,19 +544,20 @@ def _simple_commands(lowered: list[str]) -> list[list[str]]:
 
 def _segment_writes_dev(segment: list[str]) -> bool:
     for i, tok in enumerate(segment):
-        name = tok.rsplit("/", 1)[-1]
+        name = tok.rsplit("/", 1)[-1].lower()
         if name in _MAKE_NAMES:
             # The Makefile's `-include .env` outranks the environment, so an env
             # prefix does not repoint a make target; only make's own VAR=value
             # arguments do.
+            targets, assignments = make_args(segment[i + 1 :])
             writes: set[str] = set()
-            for target in make_targets(segment[i + 1 :]):
-                writes |= DESTRUCTIVE_TARGETS.get(target, set())
-            if _points_at_dev(writes, segment[i + 1 :]):
+            for target in targets:
+                writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
+            if _points_at_dev(writes, assignments):
                 return True
         elif name in _CLI_NAMES and i + 1 < len(segment):
             # Nothing loads `.env` for a direct CLI call, so its env prefix is its target.
-            if _points_at_dev(DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set()), segment[:i]):
+            if _points_at_dev(DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1].lower(), set()), segment[:i]):
                 return True
     return False
 
@@ -568,21 +568,37 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
     assigned = dict(tok.split("=", 1) for tok in words if _ASSIGNMENT.match(tok))
     for store in writes:
         name, throwaway = THROWAWAY[store]
-        value = assigned.get(name, "")
+        value = assigned.get(name, "").lower()
         # A throwaway host:port whose `?port=` query overrides it is the dev store.
         if not throwaway.match(value) or PORT_KEY.search(value):
             return True
     return False
 
 
-# `make` options whose value is the next argument, not a target.
-_MAKE_VALUE_FLAGS = {"-c", "-f", "-o", "--directory", "--file", "--makefile"}
+# `make` options whose value is the next argument, not a target or a variable.
+_MAKE_VALUE_FLAGS = {
+    "-C",
+    "-f",
+    "-I",
+    "-o",
+    "-W",
+    "--directory",
+    "--file",
+    "--makefile",
+    "--include-dir",
+    "--assume-old",
+    "--old-file",
+    "--assume-new",
+    "--new-file",
+    "--what-if",
+}
 
 
-def make_targets(args: list[str]) -> list[str]:
-    """The targets in `make`'s own arguments: up to the next shell separator,
-    past its flags and VAR=value assignments."""
+def make_args(args: list[str]) -> tuple[list[str], list[str]]:
+    """The targets and the VAR=value assignments in `make`'s own arguments, up
+    to the next shell separator, past its flags and their values."""
     targets: list[str] = []
+    assignments: list[str] = []
     skip = False
     for arg in args:
         if _is_separator(arg):
@@ -591,9 +607,11 @@ def make_targets(args: list[str]) -> list[str]:
             skip = False
         elif arg.startswith("-"):
             skip = arg in _MAKE_VALUE_FLAGS
+        elif _ASSIGNMENT.match(arg):
+            assignments.append(arg)
         elif "=" not in arg:
             targets.append(arg)
-    return targets
+    return targets, assignments
 
 
 def targets_dev_db(tokens: list[str], cmd: str) -> bool:

@@ -19,6 +19,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POINTED = ("DATABASE_URL", "CLICKHOUSE_PORT", "CLICKHOUSE_DATABASE")
+# An outer make (`make test VAR=...`) hands its command-line variables to a child
+# make through these, which would mask a wrong documented command.
+MAKE_HANDOFF = ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL", "GNUMAKEFLAGS")
 DEV_ENV = "DATABASE_URL=postgresql://dev:dev@devhost:5433/transit\nCLICKHOUSE_PORT=8123\nCLICKHOUSE_DATABASE=transit\n"
 PROBE = '\n__probe:\n\t@printf \'%s\\n\' "$$DATABASE_URL" "$$CLICKHOUSE_PORT" "$$CLICKHOUSE_DATABASE"\n'
 
@@ -35,7 +38,7 @@ def test_documented_throwaway_analyze_all_reaches_the_throwaway_stores(tmp_path)
     (tmp_path / "Makefile").write_text((REPO_ROOT / "Makefile").read_text() + PROBE)
     (tmp_path / ".env").write_text(DEV_ENV)
     words = shlex.split(_documented_command())
-    env = {k: v for k, v in os.environ.items() if k not in POINTED}
+    env = {k: v for k, v in os.environ.items() if k not in POINTED + MAKE_HANDOFF}
     while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
         name, value = words.pop(0).split("=", 1)
         env[name] = value
