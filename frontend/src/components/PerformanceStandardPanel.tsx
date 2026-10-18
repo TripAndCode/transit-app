@@ -23,21 +23,22 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { formatDuration } from "../utils/format";
+import { fixedTenth, formatDuration, roundTenth } from "../utils/format";
 
 function fmtMetricValue(v: number | null, metricType: PerformanceStandardRow["metric_type"]): string {
   if (v == null) return "—";
-  return metricType === "ewt_sec" ? formatDuration(v) : `${v.toFixed(1)}%`;
+  return metricType === "ewt_sec" ? formatDuration(v) : `${fixedTenth(v)}%`;
 }
 
 function fmtAchievementRate(v: number | null): string {
-  return v == null ? "—" : `${(v * 100).toFixed(1)}%`;
+  return v == null ? "—" : `${fixedTenth((v * 100))}%`;
 }
 
 function fmtEstimate(v: number | null): string {
   if (v == null) return "—";
-  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${sign}${Math.abs(v).toFixed(1)}`;
+  const r = roundTenth(v);
+  const sign = r > 0 ? "+" : r < 0 ? "−" : "";
+  return `${sign}${fixedTenth(Math.abs(r))}`;
 }
 
 export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope }) {

@@ -22,6 +22,7 @@ import { RoutePartsLabel } from "../RouteLabel";
 import { delayColor } from "../../styles/tokens";
 import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import "./RoutePickerPill.css";
+import { fixedTenth } from "../../utils/format";
 
 /** Popover's own rendered height (search input + max-height list + padding/border),
  *  matching RoutePickerPill.css's .rp-list max-height (280px) plus chrome. Used to
@@ -168,7 +169,7 @@ export function RoutePickerPill({
                   {delay != null ? (
                     <span className="rp-opt-delay">
                       <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />
-                      <span className="rp-delay-val">{delay.toFixed(1)}</span>
+                      <span className="rp-delay-val">{fixedTenth(delay)}</span>
                     </span>
                   ) : (
                     <span />

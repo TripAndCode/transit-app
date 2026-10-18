@@ -5,6 +5,7 @@ import { drawHeroFrame } from "./heroMapDraw";
 import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
 import { WIDE_LAYOUT_MIN_WIDTH, layoutFor } from "./heroPanelDraw";
 import { KPI } from "./heroMapScene";
+import { fixedTenth } from "../../utils/format";
 
 /** Recording stand-in for CanvasRenderingContext2D (jsdom has none): every
  *  method is a no-op, `fillText` records its text, and gradients/metrics
@@ -72,7 +73,7 @@ const LABELS: HeroLabels = {
   routesToCheck: "routes-to-check",
   sampleNotice: "sample-notice",
   delayShort: (m) => `+${m}`,
-  minutes: (m) => `${m.toFixed(1)}m`,
+  minutes: (m) => `${fixedTenth(m)}m`,
   hourOfDay: (h) => `${h}h`,
   clock: (h) => `${h}:00`,
   minuteUnit: "m",

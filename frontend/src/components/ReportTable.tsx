@@ -18,7 +18,7 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
-import { formatNumber, fmtPct, formatDuration } from "../utils/format";
+import { fixedTenth, fmtPct, formatDuration, formatNumber } from "../utils/format";
 import "./ReportTable.css";
 import { ServiceNote } from "./ServiceNote";
 
@@ -132,7 +132,7 @@ function fmtMinutes(v: unknown): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return n.toFixed(1);
+  return fixedTenth(n);
 }
 
 function fmtNum(v: unknown, _t: TFunction): string {

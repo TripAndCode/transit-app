@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMediaQuery } from "./useMediaQuery";
+import { roundTo } from "../utils/format";
 
 type UseCountUpOptions = {
   /** Animation length in ms. 0 (or less) jumps straight to `value`. */
@@ -14,11 +15,6 @@ type UseCountUpOptions = {
 // component re-renders with).
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
-}
-
-function round(n: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(n * factor) / factor;
 }
 
 /**
@@ -70,7 +66,7 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
       // Written every frame, not only on arrival: a `value` that changes
       // mid-tween cancels this loop, and the next one starts from wherever
       // the figure actually is.
-      fromRef.current = round(from + delta * easeOutCubic(t), decimals);
+      fromRef.current = roundTo(from + delta * easeOutCubic(t), decimals);
       setDisplay(fromRef.current);
       if (t < 1) frameId = requestAnimationFrame(tick);
     }

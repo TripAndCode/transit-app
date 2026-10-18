@@ -99,6 +99,15 @@ export default tseslint.config(
             'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
         },
         {
+          // `(-0.04).toFixed(1)` is "-0.0": a figure that rounds to zero keeps
+          // the sign of the raw value. fixedTenth (src/utils/format.ts) rounds
+          // first, so every `.toFixed(1)` goes through it. Not caught: a digit
+          // count held in a variable, and `Number.prototype.toFixed.call`.
+          selector:
+            "CallExpression:matches([callee.property.name='toFixed'], [callee.property.value='toFixed'])[arguments.0.value=1]",
+          message: 'Use fixedTenth(v) from src/utils/format.ts instead of v.toFixed(1); it rounds first, so a near-zero value never prints "-0.0".',
+        },
+        {
           // A raw number (or any other literal) assigned to a `zIndex`
           // object property bypasses the shared stacking-order ladder in
           // src/styles/zIndex.ts — nothing else then tells you where it

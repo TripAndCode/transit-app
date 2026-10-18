@@ -28,7 +28,7 @@ import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
-import { FILTER_SEPARATOR, formatDateRange, formatNumber } from "../utils/format";
+import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
 // chunk, which the sidebar warms on hover, downloading a map nobody has asked
@@ -230,14 +230,14 @@ export function RouteAnalysisTab() {
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
               <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min ?? t("missing")}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
+                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min == null ? t("missing") : fixedTenth(s.avg_min)}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
               </tbody></table></div>
             </div>}
             <p className="focus-muted">{t("caveat")}</p>
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
             {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
-          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
+          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : fixedTenth(selected.avg_min)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
         </div>
       </>}
     </AsyncSection>}

@@ -1,11 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { niceAxis } from "./niceAxis";
+import { fixedTenth } from "../../utils/format";
 
 describe("niceAxis", () => {
   it("widens the range to round steps a reader can use", () => {
     expect(niceAxis(0, 10.7, 6)).toEqual({ low: 0, high: 12, ticks: [0, 2, 4, 6, 8, 10, 12] });
-    expect(niceAxis(0, 2.7, 6).ticks.map((v) => v.toFixed(1))).toEqual(["0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0"]);
+    expect(niceAxis(0, 2.7, 6).ticks.map((v) => fixedTenth(v))).toEqual(["0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0"]);
   });
 
   it("steps below zero by the same round step", () => {
