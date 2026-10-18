@@ -73,7 +73,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
                   <td style={{ ...td(), fontWeight: 500 }}>
                     <RouteLabel code={r.route_code} names={routeNames} compact />
                     {r.day_type && (
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
+                      <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
                     )}
                   </td>
                   <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
