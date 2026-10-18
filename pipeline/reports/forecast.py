@@ -56,6 +56,28 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
         "(each = one stop, on one run, on one day). It may not fully account for "
         "incidents, weather, or today's conditions."
     ),
+    # The agency-wide overview pools every route, so it names the agency's routes, not one route.
+    ("overview", "ja"): (
+        "曜日・時間帯ごとに、この事業者の全路線の過去の遅れの計測記録から平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+    ),
+    ("overview", "en"): (
+        "Average delay by day of week and time of day, across the past measurements of all "
+        "of this agency's routes (each = one stop, on one run, on one day). It does not "
+        "account for incidents, weather, or today's conditions."
+    ),
+    ("overview_ml", "ja"): (
+        "曜日・時間帯ごとの見込みです。一部は予測モデルによる見込み値で、"
+        "残りはこの事業者の全路線の過去の遅れの計測記録から平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況を"
+        "完全には反映していません。"
+    ),
+    ("overview_ml", "en"): (
+        "Expected delay by day of week and time of day. Some cells show a forecast model's "
+        "estimate; the rest average the past measurements of all of this agency's routes "
+        "(each = one stop, on one run, on one day). It may not fully account for "
+        "incidents, weather, or today's conditions."
+    ),
 }
 
 
@@ -337,5 +359,5 @@ def summarize_agency_overview(
     if top_n is not None:
         routes = routes[:top_n]
 
-    case = "heatmap_ml" if any(c["source"] == "ml" for c in grid) else "heatmap"
+    case = "overview_ml" if any(c["source"] == "ml" for c in grid) else "overview"
     return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer(case, locale)}

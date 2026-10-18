@@ -44,6 +44,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_in_range,
 )
+from pipeline.query.formatter import format_day_marker
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
@@ -216,12 +217,12 @@ async def compute_council_summary(
     }
 
 
-def shift_time_str(time_str: str, delta_sec: int) -> str:
+def shift_time_str(time_str: str, delta_sec: int, locale: str = "ja") -> str:
     """Shift a zero-padded ``"HH:MM[:SS]"`` clock string by ``delta_sec``
     seconds, wrapping at 24h. Returns ``"HH:MM:SS"`` (always with seconds,
-    regardless of whether the input had them), with a trailing
-    ``"(+1日)"``/``"(-1日)"`` suffix when the shift crosses a calendar-day
-    boundary. ``dep_delay`` is clamped to ``pipeline.db.MAX_PLAUSIBLE_DELAY_SEC``
+    regardless of whether the input had them), with a trailing day marker in
+    *locale* (``"(+1日)"``, ``" (+1 day)"``) when the shift crosses a
+    calendar-day boundary. ``dep_delay`` is clamped to ``pipeline.db.MAX_PLAUSIBLE_DELAY_SEC``
     (±7200s, ±2h) everywhere it is read in this codebase, so this can only
     ever cross a single day boundary, never more. Public (unlike most of this
     module's helpers) so it can be unit-tested as pure logic, same rationale
@@ -235,7 +236,9 @@ def shift_time_str(time_str: str, delta_sec: int) -> str:
     hh, rem2 = divmod(rem, 3600)
     mm, ss = divmod(rem2, 60)
     base = f"{hh:02d}:{mm:02d}:{ss:02d}"
-    return base if day_offset == 0 else f"{base}({day_offset:+d}日)"
+    if day_offset == 0:
+        return base
+    return base + format_day_marker(day_offset, locale)
 
 
 async def compute_delay_certificate(
@@ -245,6 +248,7 @@ async def compute_delay_certificate(
     ch,
     threshold_sec: int = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
     limit: int = 100,
+    locale: str = "ja",
 ) -> tuple[list[tuple], int]:
     """Every physical trip-run in ``ctx``'s range whose departure delay
     STRICTLY EXCEEDS ``threshold_sec`` (``dep_delay > threshold_sec`` -- a
@@ -313,7 +317,7 @@ async def compute_delay_certificate(
     total = int(result.first_item["total"]) if result.result_rows else 0
     rows: list[tuple] = []
     for route_code, service_type, d, scheduled_time, dep_delay, _total in result.result_rows:
-        actual_time = shift_time_str(scheduled_time, int(dep_delay))
+        actual_time = shift_time_str(scheduled_time, int(dep_delay), locale)
         rows.append(
             (
                 agency_name,
