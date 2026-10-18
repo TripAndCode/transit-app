@@ -846,9 +846,11 @@ async def chat_with_tools(
             try:
                 payload = json.loads(content)
                 if isinstance(payload, dict) and _names_a_tool(payload.get("tool")):
+                    # Non-object args read as {}, as on the native tool-call path below.
+                    sig_args = payload.get("args")
                     sig = IntentSignature(
                         tool=str(payload["tool"]),
-                        args=payload.get("args") or {},
+                        args=sig_args if isinstance(sig_args, dict) else {},
                         confidence=float(payload.get("confidence") or 0.0),
                         rationale=str(payload.get("rationale") or ""),
                     )
