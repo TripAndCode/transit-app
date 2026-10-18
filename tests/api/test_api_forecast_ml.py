@@ -120,6 +120,31 @@ async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropp
     assert cell["expected_avg_min"] == 7.0  # (9.0 + 5.0) / 2, not one or the other
 
 
+async def test_overview_leaves_out_a_run_past_midnight_of_its_service_day(client, aconn, aagency_id, monkeypatch):
+    """A run starting after midnight keeps an hour of 24 or more, which no band
+    covers; the baseline leaves such runs out too."""
+    monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
+    flags.reset_cache()
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # mean_min=9.0, hour 8
+    await _seed_raw_ml_row(
+        aconn,
+        aagency_id,
+        "R1",
+        service_date=jst_today() + timedelta(days=1),
+        hour=25,
+        mean_min=30.0,
+        origin_date=jst_today(),
+    )
+
+    response = await client.get(f"/api/{aagency_id}/forecast/overview")
+
+    assert response.status_code == 200
+    target_dow = (jst_today() + timedelta(days=1)).isoweekday()
+    cell = next(c for c in response.json()["grid"] if c["dow"] == target_dow and c["band"] == "morning")
+    assert cell["source"] == "ml"
+    assert cell["expected_avg_min"] == 9.0
+
+
 async def test_overview_falls_back_to_baseline_when_the_flag_is_off(client, aconn, aagency_id, monkeypatch):
     monkeypatch.setenv("ML_FORECAST_ENABLED", "false")
     flags.reset_cache()
