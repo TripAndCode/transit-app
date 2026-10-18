@@ -231,6 +231,20 @@ describe("RouteAnalysisTab sub-tab state", () => {
     vi.restoreAllMocks();
   });
 
+  it("prints each stop's mean in the stop table at one decimal, as the selected stop's figure is", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ ...STOP, avg_min: 2 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    fireEvent.click(tab("Stop table"));
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("2.0")).toBeInTheDocument();
+  });
+
   it("falls back to the trend sub-tab when the URL names one that does not exist", () => {
     renderWithSubTab("&sub_tab=garbage");
     expect(tab("Along the route")).toHaveAttribute("aria-selected", "true");

@@ -230,7 +230,7 @@ export function RouteAnalysisTab() {
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
               <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min ?? t("missing")}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
+                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min == null ? t("missing") : fixedTenth(s.avg_min)}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
               </tbody></table></div>
             </div>}
             <p className="focus-muted">{t("caveat")}</p>

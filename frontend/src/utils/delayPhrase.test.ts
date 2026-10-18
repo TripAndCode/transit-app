@@ -14,6 +14,10 @@ describe("avgDelayText", () => {
     expect(avgDelayText(t, -0.4)).toBe("avg 0.4 min early");
   });
 
+  it("rounds a negative half away from zero, as every other delay figure does", () => {
+    expect(avgDelayText(t, -1.25)).toBe("avg 1.3 min early");
+  });
+
   it("calls an average that rounds to zero late, not early", () => {
     expect(avgDelayText(t, -0.04)).toBe("avg 0.0 min late");
   });

@@ -42,11 +42,18 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return format;
 }
 
-/** Round to one decimal, a half away from zero as Intl and the API round, with zero
- *  always positive. Derive a displayed sign from this value, not the raw one, so a
- *  tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
+/** Round to `digits` decimals, a half away from zero as Intl and the API round, with
+ *  zero always positive. */
+export function roundTo(v: number, digits: number): number {
+  const scale = 10 ** digits;
+  // Adding 0 turns -0 into 0 and, unlike `|| 0`, leaves NaN visible as bad data.
+  return (Math.sign(v) * Math.round(Math.abs(v) * scale)) / scale + 0;
+}
+
+/** {@link roundTo} one decimal. Derive a displayed sign from this value, not the raw
+ *  one, so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
 export function roundTenth(v: number): number {
-  return (Math.sign(v) * Math.round(Math.abs(v) * 10)) / 10 || 0;
+  return roundTo(v, 1);
 }
 
 /** `v` with one decimal, rounded first so a figure that rounds to zero prints "0.0", never "-0.0".
@@ -111,11 +118,8 @@ export function fmtRatioPct(v: number | null): string {
  *  "6.3分"), at one decimal: the precision every delay figure uses. */ // i18n-ignore: JSDoc examples
 export function formatMinutes(v: number | null | undefined, digits = 1): string {
   if (v == null || !isFinite(v)) return EM_DASH;
-  // Intl keeps the sign of a value that rounds to zero ("-0.0"). Rounding first, half
-  // away from zero as Intl does, and folding -0 into 0 prints it unsigned.
-  const scale = 10 ** digits;
-  const rounded = (Math.sign(v) * Math.round(Math.abs(v) * scale)) / scale || 0;
-  const value = formatNumber(rounded, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  // Intl keeps the sign of a value that rounds to zero ("-0.0"); rounding first prints it unsigned.
+  const value = formatNumber(roundTo(v, digits), { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return i18n.t("common.minutes_value", { value });
 }
 

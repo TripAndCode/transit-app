@@ -248,6 +248,11 @@ describe("roundTenth", () => {
     expect(fixedTenth(-0.04)).toBe("0.0");
     expect(roundTenth(-0.04) < 0).toBe(false);
   });
+
+  it("leaves NaN as NaN, so bad data never reads as a zero", () => {
+    expect(roundTenth(NaN)).toBeNaN();
+    expect(fixedTenth(NaN)).toBe("NaN");
+  });
 });
 
 describe("fixedTenth", () => {
