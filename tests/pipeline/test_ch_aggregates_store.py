@@ -364,6 +364,9 @@ def test_store_figures_pair_a_clickhouse_and_a_postgres_expression(ch_client):
     for table in ch_aggregates.COPIED_TABLES:
         (ch_first, pg_first), (ch_second, pg_second) = ch_aggregates.store_figures(table)
         assert all(isinstance(e, str) and e for e in (ch_first, pg_first, ch_second, pg_second)), table
+    for table in ch_aggregates.INTERNAL_TABLES:
+        with pytest.raises(ValueError, match="REFERENCES"):
+            ch_aggregates.store_figures(table)
 
 
 def test_the_static_joined_tables_are_those_whose_select_joins_the_schedule_mirror():

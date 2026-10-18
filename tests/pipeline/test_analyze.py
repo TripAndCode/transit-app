@@ -641,7 +641,7 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
 def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
     """A stop served by 2+ distinct routes must comma-join them, alphabetically
-    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path, not
+    ordered — guards the ClickHouse-built stop_route_days path, not
     just the single-route case test_analyze_builds_agg_stop_routes already
     covers."""
     with pg_conn.cursor() as cur:
@@ -677,9 +677,9 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     table is about which routes serve a stop, independent of whether any
     observation happened to carry a numeric delay.
 
-    So agg_stop_routes must come from the ClickHouse-sourced
-    _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
-    only and never touches dep_delay — not from _analyze_deduped, whose
+    So agg_stop_routes must come from stop_route_days, which reads every
+    `updates` row's route_code/trip_id/stop_sequence and never touches
+    dep_delay — not from the dedup, whose
     `dep_delay IS NOT NULL` pre-filter silently drops this exact case (a
     real, non-trivial share of keys, enough to lose stops' entire route
     coverage in practice)."""

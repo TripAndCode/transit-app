@@ -827,11 +827,13 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
     if table == "agg_stop_routes":
         # ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
         # order string_agg(... ORDER BY route_code) gave: the database collation's.
+        # A list with no comma has nothing to order, and string_to_array splits ''
+        # into no element at all, which would write NULL.
         with _step(f"{table}: order route lists"), conn.cursor() as cur:
             cur.execute(
                 "UPDATE agg_stop_routes SET route_codes = "
                 "(SELECT string_agg(r, ',' ORDER BY r) FROM unnest(string_to_array(route_codes, ',')) AS r) "
-                "WHERE agency_id = %s",
+                "WHERE agency_id = %s AND strpos(route_codes, ',') > 0",
                 (agency_id,),
             )
     with _step(f"{table}: verify copy"):

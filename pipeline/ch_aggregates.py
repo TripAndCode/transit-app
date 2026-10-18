@@ -412,7 +412,7 @@ class _WholeSpec(NamedTuple):
 
 
 # Build and swap order. Each copied table's columns are its Postgres table's, in
-# the order the copy writes them; COUNTS has no Postgres table.
+# the order the copy writes them; the internal tables have no Postgres table.
 _SPECS: dict[str, _Spec] = {
     "agg_daily_trend": _Spec(
         ("agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec", "sum_late_sec"),
@@ -894,6 +894,8 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
 
 def store_figures(table: str) -> _Figures:
     """The two (ClickHouse, Postgres) figures *table*'s store check compares beside the row count."""
+    if table in INTERNAL_TABLES:
+        raise ValueError(f"{table!r} has no Postgres copy; REFERENCES holds its check")
     return _ALL_SPECS[_checked(table)].figures
 
 
@@ -915,11 +917,12 @@ def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[in
 REFERENCES: dict[str, tuple[str, str, str]] = {
     # Both cover every typed, routed stop event of the history.
     COUNTS: ("agg_route_stats", "sum(samples)", "sum(samples)"),
-    # Both hold every (stop, route) pair the history observed.
+    # Both hold every (stop, route) pair the history observed. A list's routes are
+    # its commas plus one: string_to_array would count a list of one empty code as none.
     ROUTE_STOP_DAYS: (
         "agg_stop_routes",
         "uniqExact(stop_id, route_code)",
-        "sum(cardinality(string_to_array(route_codes, ',')))",
+        "sum(1 + char_length(route_codes) - char_length(replace(route_codes, ',', '')))",
     ),
 }
 

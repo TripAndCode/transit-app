@@ -231,10 +231,10 @@ def _changed_run(**kw):
     )
 
 
-# ── The whole-history aggregates, finalized from ClickHouse's counts ──────
+# ── The whole-history aggregates, finalized from ClickHouse's internal tables ──
 
 
-def test_a_changed_run_finalizes_the_whole_history_tables_from_the_counts_not_from_updates():
+def test_a_changed_run_finalizes_the_whole_history_tables_from_their_internal_tables_not_from_updates():
     """Reading `updates` for them would reread the agency's whole history."""
     _, ch = _changed_run()
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
