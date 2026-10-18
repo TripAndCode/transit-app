@@ -696,6 +696,8 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
     lon, lat = body["geometry"]["coordinates"][0]
     assert 139.0 < lon < 142.0
     assert 39.0 < lat < 42.0
+    # Only the windowed vote fills the stops; the empty-window fallback returns none.
+    assert [stop["stop_sequence"] for stop in body["stops"]] == [1, 2]
 
 
 @pytest.mark.asyncio
