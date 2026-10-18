@@ -57,7 +57,7 @@ class FakeClickHouse:
             return _FakeResult(self._ledger)
         if "FROM system.tables" in sql:
             return _FakeResult([(name,) for name in self._tables])
-        if "sum(sum_delay_sec)" in sql:
+        if sql.startswith("SELECT count(), sum("):
             return _FakeResult([self._totals])
         # A work table holds the month of the ledger's date once built, so a
         # swap replaces that month rather than dropping it.
@@ -75,6 +75,9 @@ class FakeClickHouse:
 
     def command(self, sql, parameters=None, settings=None):
         self.commands.append((sql, parameters or {}))
+
+    def insert(self, table, rows, column_names=None):
+        self.commands.append((f"INSERT {table}", {}))
 
     @property
     def ch_agg_builds(self) -> list[tuple[str, dict]]:
@@ -100,6 +103,10 @@ class FakeCursor:
         self._one = None
         self._all: list = []
         self.rowcount = -1
+        self.itersize = 0
+
+    def __iter__(self):
+        return iter(self._all)
 
     def __enter__(self):
         return self
@@ -133,7 +140,7 @@ class FakeConn:
         self._pg_totals = pg_totals
         self._purged: set[str] = set()
 
-    def cursor(self):
+    def cursor(self, name=None):
         return FakeCursor(self)
 
     def commit(self):
@@ -149,11 +156,13 @@ class FakeConn:
         if sql.startswith("DELETE FROM"):
             self._purged.add(sql.split()[2])
         # A Postgres copy's totals: what it held, until its own purge emptied it.
-        if "coalesce(sum(sum_delay_sec), 0)" in sql:
+        if "), 0)::bigint, coalesce(sum(" in sql:
             table = sql.split(" FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
+        if sql.startswith("SELECT EXISTS (SELECT 1 FROM static_stop_times"):
+            return (False,), []
         if "SELECT count(*), coalesce(sum(" in sql:
             return (0, 0), []
         if "static_fingerprint FROM agg_meta" in sql:

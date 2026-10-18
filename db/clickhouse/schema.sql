@@ -78,6 +78,31 @@ CREATE TABLE IF NOT EXISTS agg_hour_daily (
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, hour);
 
+CREATE TABLE IF NOT EXISTS agg_stop_daily (
+    agency_id    Int32,
+    stop_id      String,
+    date         Date,
+    service_type String,
+    time_band    String,
+    delay_sum    Int64,
+    samples      Int32
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, stop_id, date, service_type, time_band);
+
+CREATE TABLE IF NOT EXISTS agg_route_stop_daily (
+    agency_id    Int32,
+    route_code   String,
+    stop_id      String,
+    date         Date,
+    service_type String,
+    time_band    String,
+    delay_sum    Int64,
+    samples      Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, route_code, stop_id, date, service_type, time_band);
+
 CREATE TABLE IF NOT EXISTS agg_daily_trend (
     agency_id     Int32,
     date          Date,
@@ -185,3 +210,19 @@ CREATE TABLE IF NOT EXISTS agg_route_hour_dow (
 ) ENGINE = MergeTree
 PARTITION BY agency_id
 ORDER BY (agency_id, route_code, service_type, dow, hour);
+
+-- The agency's Postgres static_stop_times, mirrored for the aggregates that join
+-- the schedule. One partition per agency, replaced whole. `fingerprint` is the
+-- analyze fingerprint the copy was taken under, which changes whenever the
+-- schedule does.
+CREATE TABLE IF NOT EXISTS static_stop_times (
+    agency_id      Int32,
+    trip_id        String,
+    stop_sequence  Int32,
+    stop_id        String,
+    arrival_time   Nullable(String),
+    departure_time Nullable(String),
+    fingerprint    LowCardinality(String)
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, trip_id, stop_sequence);

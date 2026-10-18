@@ -7,6 +7,7 @@ a parity test asks whether the ClickHouse build reproduces exactly this.
 
 import psycopg2.extras
 
+from api.range import time_band_case_sql
 from pipeline import ch_aggregates
 from pipeline.analyze import _load_temp_table
 from pipeline.db import build_dedup_ch_sql
@@ -31,6 +32,8 @@ _ALLTIME_COLUMNS = (
     "route_code text, service_type text, scheduled_time time, trip_id text, date date, stop_sequence int, dep_delay int"
 )
 _ALLTIME_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
+# agg_stop_daily's and agg_route_stop_daily's builders read their band CASE through this name.
+band_case = time_band_case_sql("d.scheduled_time")
 # agg_route_stats's builder read its two thresholds through these names.
 on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
 late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
@@ -177,6 +180,34 @@ LEGACY_SQL = {
             FROM grouped
             ORDER BY route_code, scheduled_time
         """,
+    "agg_stop_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped)
+                SELECT
+                    %(agency_id)s, sst.stop_id, d.date, COALESCE(d.service_type, ''),
+                    {band_case} AS time_band,
+                    SUM(d.dep_delay)::bigint, COUNT(*)
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date, COALESCE(d.service_type, ''), {band_case}
+            """,
+    "agg_route_stop_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
+                SELECT
+                    %(agency_id)s, d.route_code, sst.stop_id, d.date,
+                    COALESCE(d.service_type, '') AS service_type,
+                    {band_case} AS time_band,
+                    SUM(d.dep_delay)::bigint, COUNT(*)
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY d.route_code, sst.stop_id, d.date,
+                         COALESCE(d.service_type, ''), {band_case}
+            """,
     "agg_route_hour_dow": """
             WITH deduped AS (
                 SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
