@@ -221,8 +221,11 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 /** Sends the request with the stored API key, if any. A key the server
  *  rejects is dropped and the request sent once more without it. */
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  // One timeout for the request, retry included.
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   const apiKey = sendableStoredApiKey();
-  const response = await sendOnce(path, init, apiKey);
+  const response = await sendOnce(path, init, apiKey, signal);
   if (apiKey && (await isRejectedApiKey(response))) {
     // The middleware answers every request carrying a bad key with this 401,
     // /api/config included, so keeping the key would lock the user out of the
@@ -230,7 +233,7 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
     if (clearStoredApiKey(apiKey)) reportApiKeyRejected();
     // A key saved since this request was sent is the user's current choice.
     const replacement = sendableStoredApiKey();
-    return sendOnce(path, init, replacement === apiKey ? null : replacement);
+    return sendOnce(path, init, replacement === apiKey ? null : replacement, signal);
   }
   return response;
 }
@@ -238,15 +241,13 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
 // credentials:'include' sends the sid cookie cross-origin too (Vite dev :5173 →
 // :8000). Accept-Language follows the UI language so server-rendered text
 // matches it, falling back to "ja" like the LocaleMiddleware default.
-function sendOnce(path: string, init: RequestInit, apiKey: string | null): Promise<Response> {
+function sendOnce(path: string, init: RequestInit, apiKey: string | null, signal: AbortSignal): Promise<Response> {
   const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept-Language": lang,
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include", signal });
 }
 
@@ -254,8 +255,6 @@ const API_KEY_STORAGE_KEY = "api_key";
 /** Mirrors api/middleware/auth.py's 401 for every unusable key -- unknown,
  *  revoked, expired, or owned by a suspended account; it does not say which. */
 const INVALID_API_KEY_DETAIL = "Invalid API key";
-/** fetch rejects a header value outside printable ASCII before sending. */
-const SENDABLE_API_KEY = /^[\x21-\x7e]+$/;
 
 /** The stored API key, or null. Storage access throws where site data is
  *  blocked; no key is then read or sent. */
@@ -278,14 +277,29 @@ export function saveApiKey(key: string): void {
   }
 }
 
-/** The stored key if it can be sent at all. One that cannot (a full-width
- *  character from an IME) would fail every request before it left, the same
- *  lockout as a rejected key, so it is dropped the same way. */
+/** The stored key, trimmed, if it can be sent at all. Whitespace around it is
+ *  stripped from storage too (fetch strips it from the header anyway, and an
+ *  older Settings saved it as typed). A key fetch would refuse as a header (a
+ *  full-width character from an IME) fails every request before it leaves --
+ *  the same lockout as a rejected key -- so it is dropped the same way. */
 function sendableStoredApiKey(): string | null {
-  const key = storedApiKey();
-  if (key === null || SENDABLE_API_KEY.test(key)) return key;
+  const stored = storedApiKey();
+  if (stored === null) return null;
+  const key = stored.trim();
+  if (key !== stored) saveApiKey(key);
+  if (!key) return null;
+  if (isSendableHeaderValue(key)) return key;
   if (clearStoredApiKey(key)) reportApiKeyRejected();
   return null;
+}
+
+function isSendableHeaderValue(value: string): boolean {
+  try {
+    new Headers([["X-API-Key", value]]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Removes the stored key only while it is still *rejected*, so requests that

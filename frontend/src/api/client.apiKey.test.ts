@@ -106,9 +106,63 @@ describe("a stored API key the server rejects", () => {
     unsubscribe();
   });
 
+  it("is sent trimmed and kept when it was stored with whitespace around it", async () => {
+    // Settings used to save the input as typed; fetch strips the whitespace.
+    const storage = memoryStorage({ api_key: " pro-key \n" });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi.fn().mockResolvedValue(json(200, { ok: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rejected = vi.fn();
+    const unsubscribe = onApiKeyRejected(rejected);
+
+    await apiGet("/api/config");
+
+    expect(sentKey(fetchMock.mock.calls[0])).toBe("pro-key");
+    expect(storage.store.get("api_key")).toBe("pro-key");
+    expect(rejected).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("drops a whitespace-padded key the server rejects", async () => {
+    const storage = memoryStorage({ api_key: "stale " });
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(json(401, { detail: "Invalid API key" }))
+        .mockResolvedValueOnce(json(200, {})),
+    );
+    const rejected = vi.fn();
+    const unsubscribe = onApiKeyRejected(rejected);
+
+    await apiGet("/api/config");
+
+    expect(storage.store.has("api_key")).toBe(false);
+    expect(rejected).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("bounds the retry by the same timeout as the first attempt", async () => {
+    vi.stubGlobal("localStorage", memoryStorage({ api_key: "stale" }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(401, { detail: "Invalid API key" }))
+      .mockResolvedValueOnce(json(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+    // Subscribed so the rejection is not held over for a later test's listener.
+    const unsubscribe = onApiKeyRejected(() => {});
+
+    await apiGet("/api/config");
+
+    const [first, second] = fetchMock.mock.calls.map((c) => (c[1] as RequestInit).signal);
+    expect(second).toBe(first);
+    unsubscribe();
+  });
+
   it("is dropped before sending when it cannot travel in a header at all", async () => {
-    // A full-width space from an IME: fetch would reject the header outright.
-    const storage = memoryStorage({ api_key: "key　" });
+    // A kana from an IME: fetch would reject the header outright.
+    const storage = memoryStorage({ api_key: "keyあ" });
     vi.stubGlobal("localStorage", storage);
     const fetchMock = vi.fn().mockResolvedValue(json(200, { ok: 1 }));
     vi.stubGlobal("fetch", fetchMock);
