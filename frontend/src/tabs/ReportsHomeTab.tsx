@@ -19,7 +19,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { FILTER_SEPARATOR, formatDateRange, formatNumber } from "../utils/format";
+import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
 import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import "../styles/focusedAnalysis.css";
 
@@ -108,7 +108,7 @@ export function ReportsHomeTab() {
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
-          {rows.map((row) => <tr key={row[0]}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
+          {rows.map((row) => <tr key={row[0]}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[2] == null ? "—" : fixedTenth(Number(row[2]))}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
             <Link to={routeHref(String(id), String(row[0]), `?${queryString}`)}>{t("open")}</Link>
           </td></tr>)}
         </tbody></table></div>}

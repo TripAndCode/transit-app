@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import type { OverviewConcentration, OverviewHeadline } from "../../api/types";
 import { CONCENTRATION_TOP_N } from "./concentrationTopN";
+import { fixedTenth } from "../../utils/format";
 
 /** Below this magnitude (minutes) the change from the window before reads as
  *  noise, not a real trend -- a dead zone around zero so a +/-0.1 min wobble
@@ -34,7 +35,7 @@ export function storyVerdict(
   t: TFunction,
 ): { state: string; sentence: string } {
   const branch = branchFor(headline.delta_min);
-  const delta = headline.delta_min != null ? Math.abs(headline.delta_min).toFixed(1) : "0.0";
+  const delta = headline.delta_min != null ? fixedTenth(Math.abs(headline.delta_min)) : "0.0";
   const days = windowDays(headline.window_from, headline.window_to);
   return {
     state: t(`overview.story.state_${branch}`, { delta }),

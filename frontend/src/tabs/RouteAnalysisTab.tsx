@@ -28,7 +28,7 @@ import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
-import { FILTER_SEPARATOR, formatDateRange, formatNumber } from "../utils/format";
+import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
 // chunk, which the sidebar warms on hover, downloading a map nobody has asked
@@ -237,7 +237,7 @@ export function RouteAnalysisTab() {
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
             {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
-          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
+          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : fixedTenth(selected.avg_min)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
         </div>
       </>}
     </AsyncSection>}

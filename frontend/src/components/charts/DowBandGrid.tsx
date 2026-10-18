@@ -4,7 +4,7 @@ import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
-import { formatMinutes } from "../../utils/format";
+import { fixedTenth, formatMinutes } from "../../utils/format";
 
 const RAMP_STOPS = 5;
 
@@ -18,13 +18,13 @@ export type TipAnchor = { clientX: number; clientY: number };
 export function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(min)}</span>
       <span style={{ display: "inline-flex", gap: 2 }}>
         {Array.from({ length: RAMP_STOPS }, (_, i) => (
           <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: colorFor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
         ))}
       </span>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{max.toFixed(1)}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(max)}</span>
       <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>{unit}</span>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useRef, type CSSProperties } from "react";
 import { useDrawOn } from "./charts/ChartEnter";
+import { fixedTenth } from "../utils/format";
 
 type Props = {
   points: number[];
@@ -70,7 +71,7 @@ export function InlineSparkline({
   const coords = points.map((v, i) => {
     const x = i * stepX;
     const y = toY(v);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
+    return `${fixedTenth(x)},${fixedTenth(y)}`;
   });
   const last = coords[coords.length - 1].split(",");
   const lastX = parseFloat(last[0]);
@@ -80,7 +81,7 @@ export function InlineSparkline({
 
   // Area path: polyline + close back along the bottom.
   const area_path =
-    `M 0,${firstY.toFixed(1)} ` +
+    `M 0,${fixedTenth(firstY)} ` +
     coords
       .slice(1)
       .map((c) => {
@@ -88,7 +89,7 @@ export function InlineSparkline({
         return `L ${cx},${cy}`;
       })
       .join(" ") +
-    ` L ${lastX.toFixed(1)},${height} L 0,${height} Z`;
+    ` L ${fixedTenth(lastX)},${height} L 0,${height} Z`;
 
   const baselineY = baseline == null ? null : toY(baseline);
 

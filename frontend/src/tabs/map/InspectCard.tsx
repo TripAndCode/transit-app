@@ -5,6 +5,7 @@ import { InlineSparkline } from "../../components/InlineSparkline";
 import { Tooltip } from "../../components/Tooltip";
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
 import "./inspectCard.css";
+import { fixedTenth, roundTenth } from "../../utils/format";
 
 /** Mean delay in minutes for each hour the trip reported in, oldest first.
  *  Buckets on absolute hour boundaries rather than a parsed local hour, so
@@ -115,7 +116,7 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
         <p className="ops-inspect__delay">
           {/* Sign comes from the value, so a trip running early reads "-1.5"
               rather than a caller-supplied "+" colliding with the minus. */}
-          <b className="num">{`${shownDelayMin < 0 ? "-" : "+"}${Math.abs(shownDelayMin).toFixed(1)}`}</b>
+          <b className="num">{`${roundTenth(shownDelayMin) < 0 ? "-" : "+"}${fixedTenth(Math.abs(shownDelayMin))}`}</b>
           <span>{t("operations.inspect.delay_unit")}</span>
         </p>
 

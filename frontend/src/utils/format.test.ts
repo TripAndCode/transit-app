@@ -1,21 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import i18n from "../i18n";
-import {
-  formatNumber,
-  formatDateTime,
-  formatReportTime,
-  formatDate,
-  formatDateRange,
-  formatDuration,
-  formatHourRange,
-  formatMinutes,
-  formatShortDate,
-  FILTER_SEPARATOR,
-  EM_DASH,
-  fmtPct,
-  fmtRatioPct,
-  roundTenth,
-} from "./format";
+import { EM_DASH, FILTER_SEPARATOR, fixedTenth, fmtPct, fmtRatioPct, formatDate, formatDateRange, formatDateTime, formatDuration, formatHourRange, formatMinutes, formatNumber, formatReportTime, formatShortDate, roundTenth } from "./format";
 
 describe("formatNumber", () => {
   afterEach(async () => {
@@ -253,7 +238,18 @@ describe("roundTenth", () => {
   it("rounds to one decimal and never yields a value that prints as -0.0", () => {
     expect(roundTenth(1.26)).toBe(1.3);
     expect(roundTenth(-0.3)).toBe(-0.3);
-    expect(roundTenth(-0.04).toFixed(1)).toBe("0.0");
+    expect(fixedTenth(-0.04)).toBe("0.0");
     expect(roundTenth(-0.04) < 0).toBe(false);
+  });
+});
+
+describe("fixedTenth", () => {
+  it("prints one decimal with no negative zero for a figure that rounds to zero", () => {
+    expect(fixedTenth(-0.04)).toBe("0.0");
+    expect(fixedTenth(-2 / 60)).toBe("0.0");
+    expect(fixedTenth(-0.05)).toBe("0.0");
+    expect(fixedTenth(-0.06)).toBe("-0.1");
+    expect(fixedTenth(1.25)).toBe("1.3");
+    expect(fixedTenth(12)).toBe("12.0");
   });
 });

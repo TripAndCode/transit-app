@@ -12,7 +12,7 @@ import { Section } from "../components/ui/Section";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
-import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
+import { fixedTenth, fmtPct, formatDateRange, formatNumber } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -64,7 +64,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   return (
     <span>
       {avgDelayMin >= 0 ? "+" : ""}
-      {displayed.toFixed(1)}
+      {fixedTenth(displayed)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
     </span>
   );
@@ -135,13 +135,13 @@ function AgencyRow({
       >
         {displayedOnTimePct == null
           ? "—"
-          : `${displayedOnTimePct.toFixed(1)}%${weightedView ? t("network.on_time_weighted_suffix") : ""}`}
+          : `${fixedTenth(displayedOnTimePct)}%${weightedView ? t("network.on_time_weighted_suffix") : ""}`}
       </span>
 
       <div className="network-row__meta">
         <span>
           {t("network.col_delivered")}{" "}
-          {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
+          {a.service_delivered_pct == null ? "—" : `${fixedTenth(a.service_delivered_pct)}%`}
         </span>
         <ScheduleVersionTooltip
           label={
@@ -156,7 +156,7 @@ function AgencyRow({
             {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
               ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
               : `${t("network.col_vehicle_km_delivered")} ${
-                  a.vehicle_km_delivered_pct != null ? `${a.vehicle_km_delivered_pct.toFixed(1)}%` : "—"
+                  a.vehicle_km_delivered_pct != null ? `${fixedTenth(a.vehicle_km_delivered_pct)}%` : "—"
                 }`}
           </span>
         </ScheduleVersionTooltip>

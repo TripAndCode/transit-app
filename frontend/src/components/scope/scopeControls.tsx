@@ -11,6 +11,7 @@ import { sinceStart } from "./brushMath";
 import { PeriodBrush } from "./PeriodBrush";
 import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
+import { fixedTenth } from "../../utils/format";
 
 export type ControlProps = {
   scope: Scope;
@@ -38,7 +39,7 @@ function DelayBar({ minutes }: { minutes: number }) {
   return (
     <span className="scope-delay">
       <span className="scope-mini-bar" style={{ background: delayRampVar(minutes) }} aria-hidden="true" />
-      {t("scope.control.mean_min", { n: minutes.toFixed(1) })}
+      {t("scope.control.mean_min", { n: fixedTenth(minutes) })}
     </span>
   );
 }

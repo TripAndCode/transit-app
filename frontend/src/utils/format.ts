@@ -48,6 +48,13 @@ export function roundTenth(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
+/** `v` with one decimal, rounded first so a figure that rounds to zero prints "0.0", never "-0.0".
+ *  Use it instead of `.toFixed(1)`, which a lint rule bans for that reason. */
+export function fixedTenth(v: number): string {
+  // eslint-disable-next-line no-restricted-syntax -- the one place a tenth is printed, after rounding
+  return roundTenth(v).toFixed(1);
+}
+
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
@@ -88,14 +95,14 @@ export function fmtPct(v: unknown, _t: TFunction): string {
   if (v == null) return EM_DASH;
   const n = Number(v);
   if (!isFinite(n)) return EM_DASH;
-  return `${n.toFixed(1)}%`;
+  return `${fixedTenth(n)}%`;
 }
 
 /** Formats a 0..1 ratio (e.g. `long_gap_rate`) as a percentage. Not
  *  interchangeable with {@link fmtPct}, which expects its input already
  *  scaled to 0-100. */
 export function fmtRatioPct(v: number | null): string {
-  return v == null ? EM_DASH : `${(v * 100).toFixed(1)}%`;
+  return v == null ? EM_DASH : `${fixedTenth(v * 100)}%`;
 }
 
 /** Minutes with the unit spaced as the language spaces it ("6.3 min",

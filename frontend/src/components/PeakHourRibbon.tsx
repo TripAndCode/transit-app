@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { dowValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewPeakHour } from "../api/types";
-import { formatMinutes, formatHourRange } from "../utils/format";
+import { fixedTenth, formatHourRange, formatMinutes } from "../utils/format";
 
 /** From this hour on, the peak label sits left of its callout. */
 const LATE_PEAK_HOUR = 18;
@@ -260,7 +260,7 @@ function PeakHourChart({
             left: `${((peakBarX + CELL_W / 2 + (flip ? -6 : 6)) / W) * 100}%`,
           }}
         >
-          {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
+          {t("overview.peak_hour.max_label", { avg: fixedTenth(peak_hour.peak_avg_min) })}
         </span>
         {[0, 6, 12, 18].map((h) => (
           <span
@@ -360,7 +360,7 @@ export function PeakHourRibbon({
       <p className="ov-pareto-rest" style={{ marginTop: 10 }}>
         {t("overview.peak_hour_callout", {
           range: formatHourRange(peak_hour.peak_hour),
-          avg: peak_hour.peak_avg_min.toFixed(1),
+          avg: fixedTenth(peak_hour.peak_avg_min),
         })}
       </p>
     </div>

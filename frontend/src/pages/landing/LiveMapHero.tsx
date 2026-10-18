@@ -4,6 +4,7 @@ import { DELAY_THRESHOLDS } from "../../styles/tokens";
 import type { HeroLabels } from "./heroCanvas";
 import { OVERVIEW } from "./heroMapScene";
 import { useHeroMapAnimation } from "./useHeroMapAnimation";
+import { fixedTenth } from "../../utils/format";
 
 /** The landing hero's animated backdrop: the operations map with trip dots,
  *  the app's right-hand panel, and morphs that carry a trip's reported
@@ -14,7 +15,7 @@ import { useHeroMapAnimation } from "./useHeroMapAnimation";
 export function LiveMapHero() {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const oneDecimal = (m: number) => (Number.isInteger(m) ? String(m) : m.toFixed(1));
+  const oneDecimal = (m: number) => (Number.isInteger(m) ? String(m) : fixedTenth(m));
   const labels: HeroLabels = {
     screens: { live: t("landing.hero_map.screens.live"), period: t("landing.hero_map.screens.period") },
     captions: { 0: t("landing.hero_map.captions.live"), 1: t("landing.hero_map.captions.trip"), 2: t("landing.hero_map.captions.playback"), 3: t("landing.hero_map.captions.overview") },
@@ -52,12 +53,12 @@ export function LiveMapHero() {
     hourlyTitle: t("landing.hero_map.hourly_title"),
     peak: t("landing.hero_map.peak"),
     overviewAverage: t("landing.hero_map.overview_average"),
-    overviewChange: t("landing.hero_map.overview_change", { minutes: Math.abs(OVERVIEW.changeVsPrevious).toFixed(1) }),
+    overviewChange: t("landing.hero_map.overview_change", { minutes: fixedTenth(Math.abs(OVERVIEW.changeVsPrevious)) }),
     overviewDelayedRoutes: t("landing.hero_map.overview_delayed_routes"),
     routesToCheck: t("landing.hero_map.routes_to_check"),
     sampleNotice: t("landing.hero_map.sample_notice"),
     delayShort: (m) => t("landing.hero_map.delay_short", { minutes: oneDecimal(m) }),
-    minutes: (m) => t("landing.hero_map.minutes", { minutes: m.toFixed(1) }),
+    minutes: (m) => t("landing.hero_map.minutes", { minutes: fixedTenth(m) }),
     hourOfDay: (hour) => t("landing.hero_map.hour_of_day", { hour }),
     clock: (hour) => t("landing.hero_map.clock", { hour: String(hour).padStart(2, "0") }),
     minuteUnit: t("landing.hero_map.minute_unit"),

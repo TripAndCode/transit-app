@@ -1,4 +1,5 @@
 import type { AgencyClampDay } from "../../api/admin";
+import { fixedTenth } from "../../utils/format";
 
 /** Clamp-rate trend for the recent window, as a bare sparkline.
  *
@@ -34,7 +35,7 @@ export function ClampSparkline({ days, label }: { days: AgencyClampDay[]; label:
       run = [];
       return;
     }
-    run.push(`${(i * step).toFixed(1)},${(height - (v / max) * (height - 2) - 1).toFixed(1)}`);
+    run.push(`${fixedTenth((i * step))},${fixedTenth((height - (v / max) * (height - 2) - 1))}`);
   });
   if (run.length) segments.push(run);
 
