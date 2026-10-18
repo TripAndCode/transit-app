@@ -1124,6 +1124,8 @@
       "empty": "No high-frequency route has enough data in this range yet.",
       "day_type_note": "Each route is compared only on the days that run its main timetable, named beside it.",
       "empty_off_timetable": "There are high-frequency routes, but none of them runs its main timetable on the selected days.",
+      "some_off_timetable_one": "{{count}} more high-frequency route runs no day of its main timetable on the selected days, so it is left out.",
+      "some_off_timetable_other": "{{count}} more high-frequency routes run no day of their main timetable on the selected days, so they are left out.",
       "col": {
         "ewt": "Excess wait",
         "cov": "Spacing CoV",

@@ -19,8 +19,8 @@ depend on.
 from __future__ import annotations
 
 from api.range import RangeCtx, dow_clause
-from pipeline.day_types import DayType, agrees, load_day_types, service_class
-from pipeline.headways import coefficient_of_variation_from_pooled, dominant_service_ctes, mean_wait_from_pooled
+from pipeline.day_types import agrees, load_day_types, load_dominant_day_types
+from pipeline.headways import coefficient_of_variation_from_pooled, mean_wait_from_pooled
 from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
@@ -56,22 +56,6 @@ def _daily_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     return " AND ".join(parts), params, n
 
 
-async def _dominant_day_types(agency_id: int, conn) -> dict[str, DayType | None]:
-    """Each route's dominant service's class (平日 / 土曜 / ...), None when the
-    service has no weekly calendar or one that mixes weekdays with the weekend."""
-    rows = await conn.fetch(
-        f"""
-        WITH {dominant_service_ctes("$1")}
-        SELECT ds.route_code, c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday
-        FROM dominant_service ds
-        LEFT JOIN static_calendar c ON c.agency_id = $1 AND c.service_id = ds.service_id
-        """,
-        agency_id,
-    )
-    days = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-    return {r["route_code"]: None if r["monday"] is None else service_class(tuple(r[d] for d in days)) for r in rows}
-
-
 def _sum(values: list) -> float | None:
     """SQL SUM's NULL handling: the sum of the non-NULL values, NULL when there are none."""
     present = [v for v in values if v is not None]
@@ -90,10 +74,10 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
 
     Pools `agg_route_headway_daily`'s per-day sufficient statistics
     (`actual_headway_sum_sec` / `actual_headway_sumsq_sec2` /
-    `long_gap_count`) across *ctx*'s date range via a plain SQL SUM --
-    additive across any partition of the same gap population (see
-    `pipeline.headways`'s module docstring), so this is bit-for-bit the same
-    as computing the formulas directly over every in-range day's gaps
+    `long_gap_count`) over the in-range days pooled (below), summed as SQL SUM
+    would sum them -- additive across any partition of the same gap population
+    (see `pipeline.headways`'s module docstring), so this is bit-for-bit the
+    same as computing the formulas directly over those days' gaps
     concatenated. EWT compares the pooled actual mean wait against
     `agg_route_headway.scheduled_wait_mean_sec` -- the SAME mean-wait
     formula applied to the static schedule's own headway distribution (see
@@ -105,8 +89,8 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     timetable -- a weekday route's weekends and holidays -- would read as late
     against it. Only the days whose day type (`pipeline.day_types`) agrees with
     that service's class are pooled, and `day_type` names the class. A route
-    whose dominant service has no class (no weekly calendar, or one mixing
-    weekdays with the weekend) is pooled over every day, with `day_type` None.
+    whose dominant service has no class is pooled over every day, with
+    `day_type` None.
 
     A high-frequency route with zero `agg_route_headway_daily` rows in
     range (no RT-reconstructed headway data has accumulated yet), or none on
@@ -120,9 +104,9 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     live feed would otherwise get its rows pooled here as if trustworthy.
     This additionally requires a live RT field-coverage verdict for the
     agency (via `pipeline.strategies.static_join.
-    rt_field_coverage_confirmed`) before returning anything, returning
-    an empty list for an unconfirmed agency rather than a possibly-empty-but-
-    still-queried result.
+    rt_field_coverage_confirmed`) before returning anything, returning no
+    rows and a zero count for an unconfirmed agency rather than a
+    possibly-empty-but-still-queried result.
     """
     if not await rt_field_coverage_confirmed(agency_id, conn):
         return [], 0
@@ -139,7 +123,7 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
         ORDER BY h.route_code, d.date
     """
     rows = await conn.fetch(sql, agency_id, *params)
-    classes = await _dominant_day_types(agency_id, conn) if rows else {}
+    classes = await load_dominant_day_types(conn, agency_id) if rows else {}
     day_types = (
         await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
         if any(c is not None for c in classes.values())

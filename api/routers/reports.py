@@ -259,8 +259,8 @@ async def list_reports(
 
 class HeadwayQualityRow(BaseModel):
     """One high-frequency route's pooled Excess Waiting Time / coefficient of
-    variation / long-gap rate over the request's range — see
-    ``pipeline.reports.headway_quality.compute_headway_quality``.
+    variation / long-gap rate over the request's range, on the days of its
+    ``day_type`` — see ``pipeline.reports.headway_quality.compute_headway_quality_report``.
 
     ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
     nullable together: a route can appear here (it's classified

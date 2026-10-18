@@ -50,6 +50,11 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       {data && data.rows.some((r) => r.day_type) && (
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>{t("reports.headway_quality.day_type_note")}</p>
       )}
+      {data && data.rows.length > 0 && (data.routes_off_timetable ?? 0) > 0 && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.some_off_timetable", { count: data.routes_off_timetable })}
+        </p>
+      )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table style={SHARED_TABLE}>

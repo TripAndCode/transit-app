@@ -63,6 +63,19 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.getByText(/days that run its main timetable/i)).toBeInTheDocument();
   });
 
+  it("counts the routes left out for not running their main timetable on the selected days", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: {
+        rows: [{ route_code: "100", ewt_sec: 0, cov: 0, long_gap_rate: 0, samples: 2, day_type: "weekday" }],
+        routes_off_timetable: 2,
+        ctx: CTX,
+      },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText(/2 more high-frequency routes/i)).toBeInTheDocument();
+  });
+
   it("says why no route is shown when none runs its main timetable on the selected days", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], routes_off_timetable: 2, ctx: CTX } });
