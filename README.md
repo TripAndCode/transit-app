@@ -137,8 +137,10 @@ FastAPI + React SPA  <-------------------------------------------------+
 - `analyze` computes the tables in `pipeline/ch_aggregates.py`'s
   `COPIED_TABLES` in ClickHouse, stores them there and copies them into
   Postgres; the whole-history ones are finalized from a ClickHouse-only table
-  of delay counts. It builds the rest in Postgres. A ClickHouse that predates one of those tables needs
-  `make ch-bootstrap` before the next `analyze`.
+  of delay counts. Those that join the static schedule read `analyze`'s
+  ClickHouse copy of it, `static_stop_times`, refreshed when the schedule
+  changes. It builds the rest in Postgres. A ClickHouse that predates one of
+  those tables needs `make ch-bootstrap` before the next `analyze`.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 
