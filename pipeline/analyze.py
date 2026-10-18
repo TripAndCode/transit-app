@@ -11,7 +11,7 @@ recovered only by a deliberate full rebuild (`analyze --full`).
 
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
-finalized from ClickHouse's delay counts. Each run copies what it rebuilt into
+finalized from ClickHouse-only internal tables. Each run copies what it rebuilt into
 the Postgres table of the same name, which is what the API reads
 (`_rebuild_ch_aggregates`).
 
@@ -115,13 +115,14 @@ _SERVICE_DATE = service_date_ch()
 # ClickHouse (build_dedup_ch_sql, the `updates` fact table's home) and its result
 # is bulk-loaded into the temp table those builders read; none of them reads
 # `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
-# run their own dedup there instead.
+# run their own dedup there instead, or read `updates` whole where a table needs
+# rows the dedup's delay filter drops.
 #
 # The temp table, _analyze_deduped, holds every column for only the dates being
 # rebuilt. It is UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス —
 # which the reports and route-summary surface), plus arr_delay
 # (agg_route_daily_dwell_run). The aggregates spanning all of history are
-# finalized in ClickHouse from its delay counts, so no slice of the whole
+# finalized in ClickHouse from its internal tables, so no slice of the whole
 # history is loaded here.
 #
 # NULL service is coalesced to '' where it must fit a NOT NULL column; the
@@ -828,7 +829,8 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
         # ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
         # order string_agg(... ORDER BY route_code) gave: the database collation's.
         # A list with no comma has nothing to order, and string_to_array splits ''
-        # into no element at all, which would write NULL.
+        # into no element at all, which would write NULL. Splitting on commas is
+        # sound because a route code holds none: the API's `routes` filter splits on them too.
         with _step(f"{table}: order route lists"), conn.cursor() as cur:
             cur.execute(
                 "UPDATE agg_stop_routes SET route_codes = "

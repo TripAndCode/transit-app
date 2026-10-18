@@ -8,7 +8,7 @@ and compares its rows with the Postgres table's on the dates whose aggregates ar
 current: those whose Postgres ledger (agg_feed_health) still matches ClickHouse's
 per-date counts. A date ingested or changed since the last analyze would differ
 for that reason alone. The whole-history tables are computed in the query from
-the agency's whole-history dedup and compared whole, and only when every date is
+the agency's whole history and compared whole, and only when every date is
 current, since each of their rows spans every date.
 
 --time-only skips the comparison and times each month's build instead: the dedup
@@ -17,7 +17,8 @@ the server. Each table's SELECT dedups `updates` itself there, so the per-table
 figures are what an unshared build would pay. A run instead fills one dedup per
 month into a table the tables needing that month share (`ch_aggregates.build`),
 paying the dedup column's figure plus the cost of writing it; a month only one
-table needs is built straight from `updates`.
+table needs is built straight from `updates`. A raw table reads `updates`
+without the dedup either way.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
 that adds them is applied. The static-joined tables join ClickHouse's

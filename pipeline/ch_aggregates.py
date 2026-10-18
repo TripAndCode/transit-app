@@ -918,7 +918,8 @@ REFERENCES: dict[str, tuple[str, str, str]] = {
     # Both cover every typed, routed stop event of the history.
     COUNTS: ("agg_route_stats", "sum(samples)", "sum(samples)"),
     # Both hold every (stop, route) pair the history observed. A list's routes are
-    # its commas plus one: string_to_array would count a list of one empty code as none.
+    # its commas plus one, since a route code holds no comma: string_to_array
+    # would count a list of one empty code as none.
     ROUTE_STOP_DAYS: (
         "agg_stop_routes",
         "uniqExact(stop_id, route_code)",
