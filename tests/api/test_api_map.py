@@ -6,9 +6,11 @@ import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
+from api.range import jst_today
 from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
 from tests.fixtures.stop_clusters import rebuild_stop_clusters
+from tests.query.test_tool_queries import jst_midday
 
 
 @pytest.fixture(autouse=True)
@@ -720,8 +722,9 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00')",
+            "VALUES ($1, 'T1', 'R1', 1, 60, $2, 'test.pb', 'weekday', '09:00:00')",
             agency_id,
+            jst_midday(),
         )
         await conn.execute(
             "INSERT INTO static_shapes (agency_id, shape_id, geom) "
@@ -734,7 +737,8 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
     mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+        today = jst_today().isoformat()
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={today}&to={today}")
 
     assert resp.status_code == 200
     unobserved = resp.json()["unobserved_stops"]
