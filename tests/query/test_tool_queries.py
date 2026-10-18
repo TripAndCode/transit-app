@@ -11,24 +11,7 @@ from pipeline.query.tool_queries import (
     route_info,
 )
 from tests.conftest import confirm_rt_field_coverage
-
-
-def jst_midday() -> datetime:
-    """A UTC instant safely inside the current JST civil day.
-
-    Every query here buckets by the JST calendar (``api.range.jst_today``),
-    so seeding at ``datetime.now()`` puts rows on whichever side of JST
-    midnight the clock happens to be. A fixture that inserts one row per
-    minute then straddles two civil days whenever CI runs in the hour before
-    15:00 UTC, and per-day assertions come apart -- six trips become five
-    and one.
-
-    Midday leaves twelve hours of headroom either side, which no fixture
-    here comes close to using. It is also eight hours past the 04:00 JST
-    service-day cutover, which matters to the tools that pair a trip's stops
-    within one service date.
-    """
-    return datetime.combine(jst_today(), time(12, 0), tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
+from tests.fixtures.clock import jst_midday
 
 
 async def _trust_schedule_padding(conn, *agency_ids):
