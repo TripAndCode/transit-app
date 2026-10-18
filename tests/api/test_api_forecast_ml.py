@@ -121,8 +121,6 @@ async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropp
 
 
 async def test_overview_leaves_out_a_run_past_midnight_of_its_service_day(client, aconn, aagency_id, monkeypatch):
-    """A run starting after midnight keeps an hour of 24 or more, which no band
-    covers; the baseline leaves such runs out too."""
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
     await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # mean_min=9.0, hour 8
