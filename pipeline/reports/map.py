@@ -92,7 +92,7 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
 
 
 def _unnamed_stop(stop_sequence: int) -> str:
-    """The name a stop goes by when its stops.txt row carries none."""
+    """The name a stop goes by when stops.txt gives it none: no name field, or no matching row."""
     return f"{stop_sequence}番停留所"
 
 
