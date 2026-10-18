@@ -19,6 +19,8 @@ type Props = {
   selectedTripId: string | null;
   progress: LiveTripProgressResponse | undefined;
   progressLoading: boolean;
+  progressError: unknown;
+  onRetryProgress: () => void;
   onSelectDirection: (key: string) => void;
   onSelectRoute: (routeCode: string) => void;
   onSelectTrip: (trip: LiveTrip) => void;
@@ -84,6 +86,8 @@ export function OperationsTripPanel({
   selectedTripId,
   progress,
   progressLoading,
+  progressError,
+  onRetryProgress,
   onSelectDirection,
   onSelectRoute,
   onSelectTrip,
@@ -152,6 +156,12 @@ export function OperationsTripPanel({
             <small>{t("operations.trip_panel.progress_disclosure")}</small>
           </div>
           {progressLoading && <div className="ops-progress-loading">{t("operations.trip_panel.progress_loading")}</div>}
+          {!progressLoading && !progress && !!progressError && (
+            <div className="ops-progress-loading" role="status">
+              <span>{t("operations.trip_panel.progress_error")}</span>
+              <button type="button" className="btn-ghost" onClick={onRetryProgress}>{t("common.retry")}</button>
+            </div>
+          )}
           {!progressLoading && progress && progress.stops.length === 0 && <div className="ops-progress-loading">{t("operations.trip_panel.no_progress")}</div>}
           {progress && progress.stops.length > 0 && (
             <>

@@ -32,6 +32,7 @@ function controller(overrides: Partial<PlaybackController> = {}): PlaybackContro
     toggle: vi.fn(),
     pause: vi.fn(),
     cycleSpeed: vi.fn(),
+    retry: vi.fn(),
     ...overrides,
   };
 }
@@ -122,6 +123,20 @@ describe("PlaybackRail", () => {
     renderRail({ frames: [], loading: true, date: null });
     expect(screen.getByText("operations.playback.loading")).toBeTruthy();
     expect(screen.queryByRole("slider")).toBeNull();
+  });
+
+  it("says the day failed to load, rather than that it had no observations, and offers a retry", async () => {
+    const c = renderRail({ frames: [], date: null, error: new Error("timeline failed") });
+    expect(screen.getByText("operations.playback.error")).toBeTruthy();
+    expect(screen.queryByText("operations.playback.empty")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "common.retry" }));
+    expect(c.retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a loaded day playable when a later refetch fails", () => {
+    renderRail({ error: new Error("refetch failed") });
+    expect(screen.getByRole("slider")).toBeTruthy();
+    expect(screen.queryByText("operations.playback.error")).toBeNull();
   });
 
   it("leaves playback mode through its own control", async () => {

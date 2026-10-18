@@ -589,6 +589,8 @@ export function MapTab() {
           selectedTripId={effectiveTrip?.trip_id ?? null}
           progress={progressQuery.data}
           progressLoading={progressQuery.isLoading}
+          progressError={progressQuery.error}
+          onRetryProgress={() => { void progressQuery.refetch(); }}
           onSelectDirection={(key) => patchSelection({ direction: key, trip: null })}
           onSelectRoute={focusRoute}
           onSelectTrip={(trip) => {
@@ -694,8 +696,9 @@ export function MapTab() {
           )}
           {(liveQuery.isLoading || summaryQuery.isLoading) && <div className="ops-map__loading">{t("operations.loading")}</div>}
           {/* Playback draws the day's frames on this same map, so the empty
-              overlay steps aside while it runs. */}
-          {!mapUnavailable && !liveQuery.isLoading && !playbackOn && liveRows.length === 0 && (
+              overlay steps aside while it runs. A failed fetch also leaves no
+              rows; the error banner above speaks for it instead. */}
+          {!mapUnavailable && !liveQuery.isLoading && !liveQuery.error && !playbackOn && liveRows.length === 0 && (
             <div className="ops-map__empty">
               <EmptyState
                 title={t("operations.empty.title")}

@@ -22,6 +22,7 @@ export type PlaybackController = {
   toggle: () => void;
   pause: () => void;
   cycleSpeed: () => void;
+  retry: () => void;
 };
 
 /** How often the clock re-reads the playhead. Well inside one frame's dwell,
@@ -107,5 +108,6 @@ export function useDayPlayback(
       originRef.current = performance.now() - (safeIndex * FRAME_MS) / next;
       setSpeed(next);
     },
+    retry: () => void query.refetch(),
   };
 }

@@ -37,6 +37,8 @@ describe("OperationsTripPanel", () => {
       selectedTripId="T1"
       progress={progress}
       progressLoading={false}
+      progressError={null}
+      onRetryProgress={() => {}}
       onSelectDirection={() => {}}
       onSelectRoute={() => {}}
       onSelectTrip={selectTrip}
@@ -65,11 +67,37 @@ describe("OperationsTripPanel", () => {
       selectedTripId={null}
       progress={undefined}
       progressLoading={false}
+      progressError={null}
+      onRetryProgress={() => {}}
       onSelectDirection={() => {}}
       onSelectRoute={() => {}}
       onSelectTrip={() => {}}
       t={t}
     />);
     expect(screen.getByText(text)).toBeInTheDocument();
+  });
+
+  it("says the trip's report history failed to load, with a retry, instead of leaving the section blank", async () => {
+    const retry = vi.fn();
+    render(<OperationsTripPanel
+      routeName="B1 新町線"
+      reporting
+      activeRoutes={[]}
+      directions={[{ key: "direction:1", label: "新町", trips }]}
+      selectedDirection="direction:1"
+      trips={trips}
+      selectedTripId="T1"
+      progress={undefined}
+      progressLoading={false}
+      progressError={new Error("progress failed")}
+      onRetryProgress={retry}
+      onSelectDirection={() => {}}
+      onSelectRoute={() => {}}
+      onSelectTrip={() => {}}
+      t={t}
+    />);
+    expect(screen.getByText("operations.trip_panel.progress_error")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "common.retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

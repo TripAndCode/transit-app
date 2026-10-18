@@ -134,4 +134,18 @@ describe("useDayPlayback", () => {
     act(() => result.current.toggle());
     expect(result.current.playing).toBe(false);
   });
+
+  it("retries the day's fetch through its query", () => {
+    const refetch = vi.fn();
+    vi.spyOn(hooks, "useTimeline").mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("timeline failed"),
+      refetch,
+    } as unknown as ReturnType<typeof hooks.useTimeline>);
+    const { result } = renderHook(() => useDayPlayback(1, true));
+    expect(result.current.error).toBeInstanceOf(Error);
+    act(() => result.current.retry());
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
 });
