@@ -227,3 +227,15 @@ def test_routes_sort_recent_daily_by_date_even_if_rows_arrive_unsorted():
     ]
     out = summarize_agency_overview([], route_rows, recent_daily_rows)
     assert out["routes"][0]["recent_daily"] == [2.0, 4.0, 6.0]
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+def test_the_agency_overview_does_not_call_its_figures_one_routes(locale):
+    """It pools every route of the agency; the heatmap's wording names a single route."""
+    names_the_agency = "事業者" if locale == "ja" else "agency"
+    out = summarize_agency_overview([], [], locale=locale)
+    ml = summarize_agency_overview([], [], locale=locale, ml_cells=[{"dow": 1, "hour": 9, "mean_min": 3.0}])
+    for disclaimer in (out["disclaimer"], ml["disclaimer"]):
+        assert names_the_agency in disclaimer
+        assert "この路線" not in disclaimer
+        assert "this route" not in disclaimer
