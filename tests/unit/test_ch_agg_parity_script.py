@@ -97,6 +97,16 @@ def test_timing_runs_each_select_in_full_and_discards_its_rows():
     assert ch.raw == ["SELECT 1 FORMAT Null"]
 
 
+def test_differences_read_each_side_s_date_from_the_column_named():
+    """agg_stop_daily keeps its date third."""
+    day = date(2026, 9, 1)
+    ch = [(1, "S1", day, "平日", "morning", 30, 1), (1, "S1", date(2026, 9, 2), "平日", "morning", 99, 9)]
+    pg = [(1, "S1", day, "平日", "morning", 30, 1), (1, "S2", date(2026, 9, 2), "平日", "morning", 7, 7)]
+    assert differences(ch, pg, {day}, date_at=2) == ([], [])
+    only_ch, only_pg = differences(ch, [(1, "S1", day, "平日", "morning", 31, 1)], {day}, date_at=2)
+    assert only_ch == [ch[0]] and only_pg == [(1, "S1", day, "平日", "morning", 31, 1)]
+
+
 def test_differences_compare_array_columns():
     """A histogram column comes back as a list, which a set of rows cannot hold as is."""
     day = date(2026, 9, 1)
@@ -129,7 +139,7 @@ def test_parity_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(c
     # A date ClickHouse has and the ledger lacks keeps the whole-history tables out of it.
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _ClickHouse()
-    assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
+    parity(ch, _OnePerTable(day), 1)
     assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
     assert len(ch.queries) == len([t for t in ch_aggregates.TABLES if t not in ch_aggregates.STATIC_JOINED_TABLES]) + 1
     assert "no schedule mirror" in capsys.readouterr().out
@@ -177,7 +187,7 @@ def test_both_modes_run_before_the_schema_adds_the_schedule_mirror(monkeypatch):
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
-    assert parity(_Unmigrated(), _Conn([(day, 5, 5)]), 1) == 0
+    parity(_Unmigrated(), _OnePerTable(day), 1)
     assert timing(_Unmigrated(), 1) == 0
 
 
@@ -191,11 +201,10 @@ def test_parity_leaves_agg_stop_routes_until_the_schedule_is_mirrored(monkeypatc
     assert len([sql for sql in ch.queries if "GROUP BY" in sql]) > len(ch_aggregates.TABLES)
 
 
-class _OnePerTable(_Conn):
+class _OnePerTable:
     """agg_feed_health holds one current date, and every aggregate one row on it."""
 
     def __init__(self, day):
-        super().__init__([])
         self._day = day
 
     def cursor(self):
