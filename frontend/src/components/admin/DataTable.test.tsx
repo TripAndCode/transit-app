@@ -237,6 +237,30 @@ describe("DataTable", () => {
       expect(onCallerKey).not.toHaveBeenCalled();
     });
 
+    it("still answers row shortcuts on the row's own selection checkbox", async () => {
+      // Check rows with the mouse, then act on the selection from the keyboard.
+      const user = userEvent.setup();
+      const onCallerKey = vi.fn();
+      wrap(
+        <DataTable
+          caption="Agencies"
+          rows={ROWS}
+          columns={COLUMNS}
+          rowKey={(r) => r.id}
+          selectable
+          selectedIds={new Set()}
+          onSelectionChange={() => {}}
+          onRowKeyDown={onCallerKey}
+        />,
+      );
+      const rows = screen.getAllByRole("row").slice(1);
+      within(rows[0]).getByRole("checkbox").focus();
+      await user.keyboard("a");
+      expect(onCallerKey).toHaveBeenCalledTimes(1);
+      await user.keyboard("j");
+      expect(rows[1]).toHaveFocus();
+    });
+
     it("still answers row shortcuts on the row itself", async () => {
       const user = userEvent.setup();
       const { onOpen, onCallerKey } = renderWithControls();
