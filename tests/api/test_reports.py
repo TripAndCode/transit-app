@@ -2054,6 +2054,31 @@ async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client,
 
 
 @pytest.mark.asyncio
+async def test_delay_certificate_marks_a_run_past_midnight_in_the_request_language(
+    reports_client, ch_client, ch_async_client
+):
+    """The JSON rows follow the request's language; the CSV stays Japanese."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-24"
+    await _seed_route_at(pool, agency_id, "RMIDNIGHT", "平日", day, "23:50", [1200])
+    mirror_updates_to_ch(ch_client, agency_id)
+    url = f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300"
+
+    resp = await client.get(url, headers={"Accept-Language": "en"})
+    assert resp.status_code == 200
+    (row,) = [r for r in resp.json()["rows"] if r[1] == "RMIDNIGHT"]
+    assert row[5] == "00:10:00 (+1 day)"
+
+    csv_resp = await client.get(url + "&format=csv", headers={"Accept-Language": "en"})
+    assert csv_resp.status_code == 200
+    assert "00:10:00(+1日)" in csv_resp.text
+
+
+@pytest.mark.asyncio
 async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_client):
     import csv
     import io
