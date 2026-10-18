@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
+import * as csv from "../components/analysis/csv";
 import { ReportsHomeTab } from "./ReportsHomeTab";
 import type { Agency, DefinitionMeta, RankingRow, ReportResponse, TrendDay } from "../api/types";
 
@@ -109,6 +110,32 @@ describe("ReportsHomeTab", () => {
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
+  });
+
+  it("asks for the API's longest ranking list, so the summary carries every route", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    const rankingCall = vi.mocked(hooks.useReport).mock.calls.find((call) => call[1] === "ranking");
+    expect(rankingCall?.[3]).toEqual({ limit: hooks.REPORT_ROWS_MAX });
+  });
+
+  it("says how many routes it shows, on screen and in the CSV, when the ranking is longer still", async () => {
+    const download = vi.spyOn(csv, "downloadCsv").mockImplementation(() => {});
+    const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), rows_total: 600 };
+    mockReports(trendResponse(), ranking);
+    renderTab();
+    expect(screen.getByText("Showing 1 of 600")).toBeInTheDocument();
+    const section = screen.getByRole("heading", { name: "Mean delay by service pattern" }).closest("section") as HTMLElement;
+    await userEvent.click(within(section).getByRole("button", { name: "Download CSV" }));
+    const [, csvRows] = download.mock.calls[0];
+    expect(csvRows).toContainEqual(["rows_shown", "1", "rows_total", "600"]);
+  });
+
+  it("says nothing about coverage when every route is listed", () => {
+    const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), rows_total: 1 };
+    mockReports(trendResponse(), ranking);
+    renderTab();
+    expect(screen.queryByText(/^Showing /)).toBeNull();
   });
 
   it("says the routes list leaves out routes observed too few times to trust", () => {
