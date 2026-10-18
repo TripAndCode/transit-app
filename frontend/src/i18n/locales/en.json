@@ -1122,6 +1122,8 @@
       "title": "Headway quality",
       "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
       "empty": "No high-frequency route has enough data in this range yet.",
+      "day_type_note": "Each route is compared only on the days that run its main timetable, named beside it.",
+      "empty_off_timetable": "There are high-frequency routes, but none of them runs its main timetable on the selected days.",
       "col": {
         "ewt": "Excess wait",
         "cov": "Spacing CoV",

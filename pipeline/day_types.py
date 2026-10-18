@@ -131,10 +131,10 @@ def _majority(
         return fallback
     best = max(votes.values())
     tied = [cls for cls in _ORDER if votes.get(cls) == best]
-    return next((cls for cls in tied if _agrees(cls, fallback)), tied[0])
+    return next((cls for cls in tied if agrees(cls, fallback)), tied[0])
 
 
-def _agrees(a: DayType, b: DayType) -> bool:
+def agrees(a: DayType, b: DayType) -> bool:
     """Whether two classes name the same kind of day, 土日祝 standing for either weekend class."""
     weekend = {"saturday", "sunday_holiday", "weekend_holiday"}
     return a == b or ("weekend_holiday" in (a, b) and a in weekend and b in weekend)

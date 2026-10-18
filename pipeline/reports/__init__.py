@@ -20,7 +20,7 @@ from pipeline.reports.definition import (
     resolve_definition_meta,
 )
 from pipeline.reports.dwell_run import compute_dwell_run_decomposition
-from pipeline.reports.headway_quality import compute_headway_quality
+from pipeline.reports.headway_quality import compute_headway_quality, compute_headway_quality_report
 from pipeline.reports.overview import compute_overview_summary
 from pipeline.reports.performance_standard import compute_performance_standards, simulation_disclaimer
 from pipeline.reports.rankings import (
@@ -49,6 +49,7 @@ __all__ = [
     "compute_dow_ranking",
     "compute_dwell_run_decomposition",
     "compute_headway_quality",
+    "compute_headway_quality_report",
     "compute_hourly_heatmap",
     "compute_on_time",
     "compute_overview_summary",

@@ -6,6 +6,7 @@ import { FILTER_SEPARATOR, formatMinutes, formatNumber, formatShortDate, roundTe
 import type { LabelT } from "../utils/filterValueLabels";
 import { niceAxis } from "./charts/niceAxis";
 import { showsLabel } from "./analysis/axisLabels";
+import { DAY_TYPE_KEY } from "./dayTypeKey";
 
 type Props = {
   /** Every bucket the agency is split into, in display order. */
@@ -14,13 +15,6 @@ type Props = {
   daily?: OverviewServiceSplitDay[];
   variant?: "card" | "modal";
   onClick?: () => void;
-};
-
-const DAY_TYPE_KEY: Record<OverviewDayType, string> = {
-  weekday: "overview.service_split.type.weekday",
-  saturday: "overview.service_split.type.saturday",
-  sunday_holiday: "overview.service_split.type.sunday_holiday",
-  weekend_holiday: "overview.service_split.type.weekend_holiday",
 };
 
 /** A bucket whose mean is drawn and compared: it has data, and enough of it. */
