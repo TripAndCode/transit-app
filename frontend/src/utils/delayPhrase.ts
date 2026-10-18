@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { fixedTenth } from "../utils/format";
+import { fixedTenth } from "./format";
 
 /** An average delay in words, late or early, so a phrase never carries a
  *  signed figure. A value that rounds to zero reads as late. */

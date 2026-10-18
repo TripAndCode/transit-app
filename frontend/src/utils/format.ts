@@ -109,7 +109,11 @@ export function fmtRatioPct(v: number | null): string {
  *  "6.3分"), at one decimal: the precision every delay figure uses. */ // i18n-ignore: JSDoc examples
 export function formatMinutes(v: number | null | undefined, digits = 1): string {
   if (v == null || !isFinite(v)) return EM_DASH;
-  const value = formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  // Intl keeps the sign of a value that rounds to zero ("-0.0"). Rounding first, half
+  // away from zero as Intl does, and folding -0 into 0 prints it unsigned.
+  const scale = 10 ** digits;
+  const rounded = (Math.sign(v) * Math.round(Math.abs(v) * scale)) / scale || 0;
+  const value = formatNumber(rounded, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return i18n.t("common.minutes_value", { value });
 }
 

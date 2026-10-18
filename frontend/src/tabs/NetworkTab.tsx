@@ -12,7 +12,7 @@ import { Section } from "../components/ui/Section";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
-import { fixedTenth, fmtPct, formatDateRange, formatNumber } from "../utils/format";
+import { fixedTenth, fmtPct, formatDateRange, formatNumber, roundTenth } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -63,7 +63,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   if (avgDelayMin == null) return <>—</>;
   return (
     <span>
-      {avgDelayMin >= 0 ? "+" : ""}
+      {roundTenth(displayed) >= 0 ? "+" : ""}
       {fixedTenth(displayed)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
     </span>

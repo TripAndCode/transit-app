@@ -104,6 +104,13 @@ describe("formatMinutes", () => {
     expect(formatMinutes(6.34)).toBe("6.3分");
   });
 
+  it("prints a delay that rounds to zero without a minus sign", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatMinutes(-0.04)).toBe("0.0 min");
+    expect(formatMinutes(-0.06)).toBe("-0.1 min");
+    expect(formatMinutes(-0.004, 2)).toBe("0.00 min");
+  });
+
   it("returns the em dash for a missing value", () => {
     expect(formatMinutes(null)).toBe("—");
     expect(formatMinutes(Number.NaN)).toBe("—");

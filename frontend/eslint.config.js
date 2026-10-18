@@ -101,8 +101,10 @@ export default tseslint.config(
         {
           // `(-0.04).toFixed(1)` is "-0.0": a figure that rounds to zero keeps
           // the sign of the raw value. fixedTenth (src/utils/format.ts) rounds
-          // first, so every one-decimal figure goes through it.
-          selector: "CallExpression[callee.property.name='toFixed'][arguments.0.value=1]",
+          // first, so every `.toFixed(1)` goes through it. Not caught: a digit
+          // count held in a variable, and `Number.prototype.toFixed.call`.
+          selector:
+            "CallExpression:matches([callee.property.name='toFixed'], [callee.property.value='toFixed'])[arguments.0.value=1]",
           message: 'Use fixedTenth(v) from src/utils/format.ts instead of v.toFixed(1); it rounds first, so a near-zero value never prints "-0.0".',
         },
         {
