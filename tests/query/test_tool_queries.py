@@ -24,7 +24,9 @@ def jst_midday() -> datetime:
     and one.
 
     Midday leaves twelve hours of headroom either side, which no fixture
-    here comes close to using.
+    here comes close to using. It is also eight hours past the 04:00 JST
+    service-day cutover, which matters to the tools that pair a trip's stops
+    within one service date.
     """
     return datetime.combine(jst_today(), time(12, 0), tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
 
