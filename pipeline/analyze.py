@@ -1500,8 +1500,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # GTFS departure (24:30:00 is 88200 here), which the scheduled side
             # counts through hms_to_sec_sql. It comes from the same latest poll
             # as dep_delay: a static reload can move an event's schedule between
-            # polls, and this key, unlike build_dedup_ch_sql's, does not split
-            # them. The filters are on `u.` columns
+            # polls, and nothing in this key separates the two. The filters are on `u.` columns
             # because an unqualified name matching a SELECT alias in WHERE is
             # replaced by that alias's aggregate (see build_dedup_ch_sql).
             ch_headway = _ch_query(
