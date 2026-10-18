@@ -119,9 +119,10 @@ tier routing, the high-risk overlay and the fix cap.
   CI sees only the tip that triggered it, so local verification stays mandatory.
 - After analyze changes, rebuilding aggregates (`make analyze-all`) writes `agg_*` in
   both Postgres and ClickHouse, so an agent runs it only against the throwaway pair
-  (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
-  CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test make analyze-all`);
-  rebuilding the dev aggregates is the operator's step, which the PR body flags.
+  (`make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
+  CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test`). Pass them as make
+  variables: the Makefile includes `.env`, whose values beat an env prefix.
+  Rebuilding the dev aggregates is the operator's step, which the PR body flags.
   `make check-aggs` only reads, and detects stale aggregates. It only compares each
   agency's newest day, so a date whose row count didn't change but whose rows did
   (replaced one-for-one) needs `FULL=1` to actually rebuild.

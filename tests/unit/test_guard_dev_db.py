@@ -100,16 +100,28 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:5544@localhost:5433/transit make prune-query-log",
         id="throwaway-port-only-in-the-password",
     ),
+    # An env prefix loses to `.env`, which the Makefile includes and exports: the
+    # target still runs against the dev store `.env` names.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        id="migrate-down-test-db-only-as-env-prefix",
+    ),
+    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-test-ch-only-as-env-prefix"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        id="analyze-all-test-stores-only-as-env-prefix",
+    ),
+    pytest.param("env CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-test-ch-only-through-env"),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-ingest-postgres-redirected-only",
     ),
     # analyze writes ClickHouse too (pipeline/ch_aggregates.py).
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-analyze-all-postgres-redirected-only",
     ),
     pytest.param(
@@ -408,23 +420,26 @@ ALLOWED = [
     pytest.param('psql -h localhost -p 5544 -U transit -c "DELETE FROM updates"', id="test-db-separated"),
     pytest.param("ls -la", id="unrelated"),
     pytest.param('echo "DROP TABLE updates"', id="write-without-target"),
+    # Make's command-line variables beat `.env`, which the Makefile includes.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="migrate-down-pointed-at-test-db",
     ),
+    # gtfs_pipeline reads no `.env`, so its env prefix is what it runs with.
     pytest.param(
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run python gtfs_pipeline.py "
         "migrate down",
         id="cli-migrate-down-pointed-at-test-db",
     ),
-    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-pointed-at-test-ch"),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8124", id="ch-bootstrap-pointed-at-test-ch"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
-        "make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
         id="ingest-pointed-at-both-test-stores",
     ),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
+        "CLICKHOUSE_DATABASE=transit_test",
         id="analyze-all-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
@@ -464,12 +479,8 @@ ALLOWED = [
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
     pytest.param('git commit -m "make it faster"', id="quoted-prose-naming-no-target"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test>out.log",
         id="test-db-with-a-glued-redirect",
-    ),
-    pytest.param(
-        "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
-        id="test-db-as-a-make-variable",
     ),
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
