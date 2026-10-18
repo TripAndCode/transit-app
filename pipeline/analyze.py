@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 4
+ANALYZE_LOGIC_VERSION = 5
 
 # The service date of an observation, spliced into the builders below that
 # group or bucket raw `updates` rows by day (`pipeline.service_day`).
@@ -1478,41 +1478,31 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             logger.info("  agg_route_headway_daily: unchanged, not rebuilt")
         elif ingest_strategy in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
-            # that group's actual event times (seconds-of-day, scheduled_time
-            # parsed + dep_delay) -- cardinality is bounded by routes × stops
-            # × days, not by raw observation count, so it's safe to fetch as
-            # one block (ch_client.query(), not the streaming reader
-            # `_analyze_deduped` needs) even though the pre-aggregation
-            # GROUP BY underneath it scans the agency's full `updates`
-            # history. `argMax(..., (captured_at, file_name))` per
-            # (route_code, stop_id, date, trip_id, stop_sequence) is the SAME
-            # latest-observation-wins dedup rule as build_dedup_ch_sql --
-            # stop_sequence stays in this per-event key (matching
-            # build_dedup_ch_sql and agg_service_delivered_daily's own
-            # stop-level subquery) so a route that revisits the same
-            # physical stop_id twice within one trip keeps both visits as
-            # distinct events; only the outer SELECT below pools across
-            # stop_sequence (and across trips) at the physical-stop level.
+            # that group's actual event times (seconds into the service day:
+            # scheduled_sec + dep_delay) -- cardinality is bounded by routes ×
+            # stops × days, not by raw observation count, so it's safe to fetch
+            # as one block (ch_client.query(), not the streaming reader
+            # `_analyze_deduped` needs) even though the pre-aggregation GROUP BY
+            # underneath it scans the agency's full `updates` history.
             #
-            # scheduled_time is normalized "HH:MM[:SS]" text (see
-            # pipeline.strategies._time.normalize_departure_time) -- seconds
-            # are optional per that normalizer, so the parse below tolerates
-            # a 2-element split (defaulting seconds to 0) rather than
-            # indexing a possibly-absent third element.
+            # The per-event dedup is build_dedup_ch_sql's: implausible and NULL
+            # delays are dropped BEFORE the latest-observation-wins argMax, so a
+            # frozen-feed spike in an event's latest poll leaves its last
+            # plausible estimate rather than removing the event and merging its
+            # two neighbouring gaps. stop_sequence stays in the per-event key
+            # (as in build_dedup_ch_sql and agg_service_delivered_daily's own
+            # stop-level subquery) so a route that revisits the same physical
+            # stop_id within one trip keeps both visits as distinct events; only
+            # the outer SELECT pools across stop_sequence and trips.
             #
-            # `assumeNotNull(scheduled_time)` in the `filtered` CTE is
-            # load-bearing, not cosmetic: ClickHouse infers splitByChar's
-            # return type from its ARGUMENT's type, and `Array(...)` can
-            # never itself be `Nullable` (only its elements can) -- passing
-            # the raw `Nullable(String)` `scheduled_time` straight to
-            # splitByChar makes the planner try to type the result as
-            # `Nullable(Array(String))` and raises `ILLEGAL_TYPE_OF_ARGUMENT`
-            # at query-planning time, regardless of whether any row is
-            # actually NULL at runtime. The `filtered` CTE's own
-            # `scheduled_time IS NOT NULL` WHERE clause makes the
-            # assumeNotNull() call runtime-safe; it does nothing to satisfy
-            # the planner on its own; splitByChar needs a statically
-            # non-Nullable argument type.
+            # scheduled_sec, not scheduled_time, is the departure: static_join
+            # writes both, but leaves scheduled_time NULL for an extended-hour
+            # GTFS departure (24:30:00 is 88200 here), which the scheduled side
+            # counts through hms_to_sec_sql. It comes from the same latest poll
+            # as dep_delay: a static reload can move an event's schedule between
+            # polls, and nothing in this key separates the two. The filters are on `u.` columns
+            # because an unqualified name matching a SELECT alias in WHERE is
+            # replaced by that alias's aggregate (see build_dedup_ch_sql).
             ch_headway = _ch_query(
                 "agg_route_headway_daily: ClickHouse scan",
                 ch_client,
@@ -1522,34 +1512,21 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 + _SERVICE_DATE
                 + """ AS svc_date, trip_id,
                            stop_sequence,
-                           argMax(dep_delay, (captured_at, file_name)) AS dep_delay,
-                           argMax(scheduled_time, (captured_at, file_name)) AS scheduled_time
-                    FROM updates
-                    WHERE agency_id = {agency_id:UInt16} AND stop_id IS NOT NULL AND route_code IS NOT NULL"""
+                           argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
+                           argMax(u.scheduled_sec, (u.captured_at, u.file_name)) AS scheduled_sec
+                    FROM updates AS u
+                    WHERE u.agency_id = {agency_id:UInt16}
+                      AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL
+                      AND u.scheduled_sec IS NOT NULL
+                      AND u.dep_delay IS NOT NULL
+                      AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}"""
                 + date_where
                 + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
-                ),
-                filtered AS (
-                    SELECT route_code, stop_id, svc_date, dep_delay,
-                           assumeNotNull(scheduled_time) AS scheduled_time_nn
-                    FROM per_event
-                    WHERE dep_delay IS NOT NULL
-                      AND dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}
-                      AND scheduled_time IS NOT NULL
-                ),
-                timed AS (
-                    SELECT route_code, stop_id, svc_date,
-                           toInt64(dep_delay)
-                             + toInt64(splitByChar(':', scheduled_time_nn)[1]) * 3600
-                             + toInt64(splitByChar(':', scheduled_time_nn)[2]) * 60
-                             + if(length(splitByChar(':', scheduled_time_nn)) >= 3,
-                                  toInt64(splitByChar(':', scheduled_time_nn)[3]), 0) AS actual_sec
-                    FROM filtered
-                    WHERE length(splitByChar(':', scheduled_time_nn)) >= 2
                 )
-                SELECT route_code, stop_id, svc_date, groupArray(actual_sec) AS times
-                FROM timed
+                SELECT route_code, stop_id, svc_date,
+                       groupArray(toInt64(scheduled_sec) + toInt64(dep_delay)) AS times
+                FROM per_event
                 GROUP BY route_code, stop_id, svc_date
                 """,
                 {
