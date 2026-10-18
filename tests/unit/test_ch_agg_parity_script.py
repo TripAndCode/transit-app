@@ -27,14 +27,14 @@ def test_differences_ignore_float32_widening_and_the_timezone_an_instant_is_writ
     day = date(2026, 9, 1)
     ch = [(1, day, "R1", 0.029999999329447746, datetime(2026, 9, 1, 0, 0))]
     pg = [(1, day, "R1", 0.03, datetime(2026, 9, 1, 9, 0, tzinfo=timezone(timedelta(hours=9))))]
-    assert differences(ch, pg, {day}) == ([], [])
+    assert differences(ch, pg, {day}, date_at=1) == ([], [])
 
 
 def test_differences_report_each_side_and_skip_dates_not_compared():
     day = date(2026, 9, 1)
     ch = [(1, day, Decimal("0.03")), (1, date(2026, 9, 2), Decimal("9.99"))]
     pg = [(1, day, Decimal("0.02"))]
-    assert differences(ch, pg, {day}) == ([(1, day, Decimal("0.03"))], [(1, day, Decimal("0.02"))])
+    assert differences(ch, pg, {day}, date_at=1) == ([(1, day, Decimal("0.03"))], [(1, day, Decimal("0.02"))])
 
 
 class _Result:
@@ -102,8 +102,8 @@ def test_differences_compare_array_columns():
     day = date(2026, 9, 1)
     ch = [(1, day, "R1", [0, 2, 1])]
     pg = [(1, day, "R1", [0, 2, 1])]
-    assert differences(ch, pg, {day}) == ([], [])
-    only_ch, only_pg = differences(ch, [(1, day, "R1", [0, 1, 2])], {day})
+    assert differences(ch, pg, {day}, date_at=1) == ([], [])
+    only_ch, only_pg = differences(ch, [(1, day, "R1", [0, 1, 2])], {day}, date_at=1)
     assert only_ch == [(1, day, "R1", (0, 2, 1))]
     assert only_pg == [(1, day, "R1", (0, 1, 2))]
 
@@ -147,7 +147,7 @@ def test_parity_compares_the_static_joined_tables_once_the_schedule_is_mirrored(
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _Mirrored()
-    assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
+    parity(ch, _OnePerTable(day), 1)
     joined = [t for t in ch_aggregates.TABLES if t in ch_aggregates.STATIC_JOINED_TABLES]
     assert len([sql for sql in ch.queries if _joins_the_mirror(sql)]) == len(joined)
 
@@ -189,6 +189,42 @@ def test_parity_leaves_agg_stop_routes_until_the_schedule_is_mirrored(monkeypatc
     parity(ch, _Conn([(day, 5, 5)]), 1)
     assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
     assert len([sql for sql in ch.queries if "GROUP BY" in sql]) > len(ch_aggregates.TABLES)
+
+
+class _OnePerTable(_Conn):
+    """agg_feed_health holds one current date, and every aggregate one row on it."""
+
+    def __init__(self, day):
+        super().__init__([])
+        self._day = day
+
+    def cursor(self):
+        return _OnePerTableCursor(self._day)
+
+
+class _OnePerTableCursor(_Cursor):
+    def __init__(self, day):
+        super().__init__([])
+        self._day = day
+
+    def execute(self, sql, params=None):
+        table = sql.split(" FROM ")[1].split()[0]
+        if table == "agg_feed_health":
+            self._rows = [(self._day, 5, 5)]
+        else:
+            self._rows = [tuple(self._day if c == "date" else 0 for c in ch_aggregates.COLUMNS[table])]
+
+
+def test_parity_compares_each_table_on_its_own_date_column(capsys, monkeypatch):
+    """agg_stop_daily keeps its date third and agg_route_stop_daily fourth: read
+    from the second column, their rows would never be on a compared date."""
+    day = date(2026, 9, 1)
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
+    assert parity(_Mirrored(), _OnePerTable(day), 1) == 1
+    out = capsys.readouterr().out
+    for table in ch_aggregates.TABLES:
+        assert f"{table}: 1 Postgres rows compared" in out, table
+    assert f"parity: {len(ch_aggregates.TABLES)} differing rows" in out
 
 
 def test_a_stop_route_list_compares_whatever_its_order():
