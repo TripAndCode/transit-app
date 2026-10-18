@@ -38,6 +38,7 @@ describe("OperationsTripPanel", () => {
       progress={progress}
       progressLoading={false}
       progressError={null}
+      liveFailed={false}
       onRetryProgress={() => {}}
       onSelectDirection={() => {}}
       onSelectRoute={() => {}}
@@ -68,6 +69,7 @@ describe("OperationsTripPanel", () => {
       progress={undefined}
       progressLoading={false}
       progressError={null}
+      liveFailed={false}
       onRetryProgress={() => {}}
       onSelectDirection={() => {}}
       onSelectRoute={() => {}}
@@ -90,14 +92,38 @@ describe("OperationsTripPanel", () => {
       progress={undefined}
       progressLoading={false}
       progressError={new Error("progress failed")}
+      liveFailed={false}
       onRetryProgress={retry}
       onSelectDirection={() => {}}
       onSelectRoute={() => {}}
       onSelectTrip={() => {}}
       t={t}
     />);
-    expect(screen.getByText("operations.trip_panel.progress_error")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "common.retry" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("operations.trip_panel.progress_error");
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the current trips failed to load, rather than that none report yet", () => {
+    render(<OperationsTripPanel
+      routeName="All routes"
+      reporting={false}
+      activeRoutes={[]}
+      directions={[]}
+      selectedDirection={null}
+      trips={[]}
+      selectedTripId={null}
+      progress={undefined}
+      progressLoading={false}
+      progressError={null}
+      liveFailed
+      onRetryProgress={() => {}}
+      onSelectDirection={() => {}}
+      onSelectRoute={() => {}}
+      onSelectTrip={() => {}}
+      t={t}
+    />);
+    expect(screen.getByText("operations.trip_panel.live_error")).toBeInTheDocument();
+    expect(screen.queryByText("operations.trip_panel.none_reporting")).toBeNull();
   });
 });

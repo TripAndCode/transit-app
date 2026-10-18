@@ -591,6 +591,7 @@ export function MapTab() {
           progressLoading={progressQuery.isLoading}
           progressError={progressQuery.error}
           onRetryProgress={() => { void progressQuery.refetch(); }}
+          liveFailed={!!liveQuery.error}
           onSelectDirection={(key) => patchSelection({ direction: key, trip: null })}
           onSelectRoute={focusRoute}
           onSelectTrip={(trip) => {

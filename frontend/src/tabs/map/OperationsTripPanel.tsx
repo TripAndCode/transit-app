@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { BusFront, ChevronRight, MapPin, Radio, Route as RouteIcon, TrendingDown, TrendingUp } from "lucide-react";
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { relativeTime } from "../../utils/relativeTime";
 import { signedMin } from "../live/signedMin";
 import { hhmm } from "./format";
@@ -21,6 +22,8 @@ type Props = {
   progressLoading: boolean;
   progressError: unknown;
   onRetryProgress: () => void;
+  /** The live-trips fetch failed, so an empty list says nothing about what is reporting. */
+  liveFailed: boolean;
   onSelectDirection: (key: string) => void;
   onSelectRoute: (routeCode: string) => void;
   onSelectTrip: (trip: LiveTrip) => void;
@@ -88,6 +91,7 @@ export function OperationsTripPanel({
   progressLoading,
   progressError,
   onRetryProgress,
+  liveFailed,
   onSelectDirection,
   onSelectRoute,
   onSelectTrip,
@@ -157,10 +161,7 @@ export function OperationsTripPanel({
           </div>
           {progressLoading && <div className="ops-progress-loading">{t("operations.trip_panel.progress_loading")}</div>}
           {!progressLoading && !progress && !!progressError && (
-            <div className="ops-progress-loading" role="status">
-              <span>{t("operations.trip_panel.progress_error")}</span>
-              <button type="button" className="btn-ghost" onClick={onRetryProgress}>{t("common.retry")}</button>
-            </div>
+            <ErrorBanner error={progressError} onRetry={onRetryProgress} message={t("operations.trip_panel.progress_error")} />
           )}
           {!progressLoading && progress && progress.stops.length === 0 && <div className="ops-progress-loading">{t("operations.trip_panel.no_progress")}</div>}
           {progress && progress.stops.length > 0 && (
@@ -180,7 +181,7 @@ export function OperationsTripPanel({
         </section>
       ) : (
         <div className="ops-trip-panel__empty">
-          {t(reporting ? "operations.trip_panel.select_route" : "operations.trip_panel.none_reporting")}
+          {t(reporting ? "operations.trip_panel.select_route" : liveFailed ? "operations.trip_panel.live_error" : "operations.trip_panel.none_reporting")}
         </div>
       )}
 

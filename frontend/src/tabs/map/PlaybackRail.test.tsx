@@ -133,12 +133,6 @@ describe("PlaybackRail", () => {
     expect(c.retry).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a loaded day playable when a later refetch fails", () => {
-    renderRail({ error: new Error("refetch failed") });
-    expect(screen.getByRole("slider")).toBeTruthy();
-    expect(screen.queryByText("operations.playback.error")).toBeNull();
-  });
-
   it("leaves playback mode through its own control", async () => {
     const c = controller();
     const onExit = vi.fn();

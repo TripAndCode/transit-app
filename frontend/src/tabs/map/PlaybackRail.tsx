@@ -93,8 +93,8 @@ export function PlaybackRail({
       </div>
 
       {/* A failed fetch also leaves no frames, so it is told apart from a day
-          that has none; a refetch that fails over loaded frames keeps them. */}
-      {!loading && frames.length === 0 && error ? (
+          that has none. */}
+      {!loading && error ? (
         <p className="ops-playback__status" role="status">
           {t("operations.playback.error")}{" "}
           <button type="button" className="btn-ghost" onClick={controller.retry}>{t("common.retry")}</button>

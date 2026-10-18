@@ -135,6 +135,17 @@ describe("useDayPlayback", () => {
     expect(result.current.playing).toBe(false);
   });
 
+  it("reports no failure once a day has loaded, even an empty one whose refetch failed", () => {
+    vi.spyOn(hooks, "useTimeline").mockReturnValue({
+      data: { date: "2026-03-04", step_minutes: 60, frames: [] },
+      isLoading: false,
+      error: new Error("refetch failed"),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof hooks.useTimeline>);
+    const { result } = renderHook(() => useDayPlayback(1, true));
+    expect(result.current.error).toBeNull();
+  });
+
   it("retries the day's fetch through its query", () => {
     const refetch = vi.fn();
     vi.spyOn(hooks, "useTimeline").mockReturnValue({
