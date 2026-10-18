@@ -63,8 +63,7 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Per store, the variable that points it and the throwaway value of it. Read
 # from the NAME=value assignments of the same simple command, so a throwaway
 # port named anywhere else (another command, a comment) points nothing at it.
-# For a make target only make's own variables count: the Makefile includes
-# `.env`, whose assignments outrank the environment, an env prefix included.
+# For a make target, only make's own variables count (see _segment_writes_dev).
 THROWAWAY = {
     # The port of the URL's host, not a ":5544" anywhere in it (a password).
     "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
@@ -547,7 +546,7 @@ def _segment_writes_dev(segment: list[str]) -> bool:
     for i, tok in enumerate(segment):
         name = tok.rsplit("/", 1)[-1]
         if name in _MAKE_NAMES:
-            args = make_args(segment[i + 1 :])
+            args = segment[i + 1 :]
             writes = {store for target in make_targets(args) for store in DESTRUCTIVE_TARGETS.get(target, set())}
             # The Makefile includes and exports `.env`, whose assignments outrank the
             # environment, an env prefix included. Only make's own command-line
@@ -578,14 +577,6 @@ def _points_at_dev(writes: set[str], scope: list[str]) -> bool:
 
 # `make` options whose value is the next argument, not a target.
 _MAKE_VALUE_FLAGS = {"-c", "-f", "-o", "--directory", "--file", "--makefile"}
-
-
-def make_args(tokens: list[str]) -> list[str]:
-    """`make`'s own arguments: the tokens after it, up to the next shell separator."""
-    for i, tok in enumerate(tokens):
-        if _is_separator(tok):
-            return tokens[:i]
-    return tokens
 
 
 def make_targets(args: list[str]) -> list[str]:

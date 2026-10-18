@@ -68,7 +68,7 @@ BLOCKED = [
     pytest.param("make prune-query-log", id="make-prune-query-log"),
     pytest.param("make -C . prune-admin-audit", id="make-dir-flag-prune-admin-audit"),
     pytest.param("make ch-bootstrap", id="make-ch-bootstrap"),
-    pytest.param("CLICKHOUSE_PORT=8123 make ch-bootstrap", id="make-ch-bootstrap-dev-port"),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8123", id="make-ch-bootstrap-dev-port"),
     pytest.param("make migrate", id="make-migrate"),
     pytest.param("make db", id="make-db"),
     pytest.param("make analyze-all", id="make-analyze-all"),
@@ -86,8 +86,8 @@ BLOCKED = [
     ),
     # The last of two assignments is the one the command sees.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit",
         id="later-assignment-points-back-at-dev",
     ),
     # A separator glued to a word still ends the simple command.
@@ -97,7 +97,7 @@ BLOCKED = [
     pytest.param('bash -c "make prune-query-log;ls"', id="glued-semicolon-inside-bash-c"),
     # :5544 in the password is not the port the URL connects to.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:5544@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:5544@localhost:5433/transit",
         id="throwaway-port-only-in-the-password",
     ),
     # An env prefix loses to `.env`, which the Makefile includes and exports: the
@@ -299,7 +299,7 @@ BLOCKED = [
     pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
     pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
     pytest.param(
-        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 CLICKHOUSE_PORT=8124",
         id="throwaway-url-overridden-by-port-query",
     ),
     # clickhouse-client's native port, which compose.yml says can be published.
