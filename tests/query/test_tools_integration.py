@@ -6,7 +6,7 @@ import pytest
 from api.range import RangeCtx
 from pipeline.query.tools import _is_route_registered, dispatch
 from tests.conftest import _test_pool
-from tests.query.test_tool_queries import jst_midday
+from tests.fixtures.clock import jst_midday
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 

@@ -9,8 +9,8 @@ from api.middleware.ratelimit import limiter
 from api.range import jst_today
 from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
+from tests.fixtures.clock import jst_midday
 from tests.fixtures.stop_clusters import rebuild_stop_clusters
-from tests.query.test_tool_queries import jst_midday
 
 
 @pytest.fixture(autouse=True)
@@ -642,6 +642,7 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
     """When static_trips.shape_id resolves to a static_shapes row, the
     endpoint returns a GeoJSON LineString."""
     app, agency_id = map_app_ch
+    day = jst_today()
     pool = app.state.pool
     async with pool.acquire() as conn:
         await _seed_route_existence(conn, agency_id, "R1")
@@ -667,9 +668,10 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00'), "
-            "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
+            "VALUES ($1, 'T1', 'R1', 1, 60, $2, 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, $2, 'test.pb', 'weekday', '09:05:00')",
             agency_id,
+            jst_midday(day),
         )
         await conn.execute(
             "INSERT INTO static_shapes (agency_id, shape_id, geom) "
@@ -682,7 +684,7 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
     mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -701,6 +703,7 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
     """A stop whose stops.txt row carries no name still gets the sequence-based
     name an observed stop falls back to, so the stop chart always has a label."""
     app, agency_id = map_app_ch
+    day = jst_today()
     async with app.state.pool.acquire() as conn:
         await _seed_route_existence(conn, agency_id, "R1")
         await conn.execute(
@@ -724,7 +727,7 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
             "file_name, service_type, scheduled_time) "
             "VALUES ($1, 'T1', 'R1', 1, 60, $2, 'test.pb', 'weekday', '09:00:00')",
             agency_id,
-            jst_midday(),
+            jst_midday(day),
         )
         await conn.execute(
             "INSERT INTO static_shapes (agency_id, shape_id, geom) "
@@ -737,8 +740,7 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
     mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        today = jst_today().isoformat()
-        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={today}&to={today}")
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
 
     assert resp.status_code == 200
     unobserved = resp.json()["unobserved_stops"]
@@ -938,6 +940,7 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
     (`(shape_counts[sid], sid)` descending) — the lexicographically LARGER
     id (`S_Z` > `S_A`) must always sort first here."""
     app, agency_id = map_app_ch
+    day = jst_today()
     pool = app.state.pool
     async with pool.acquire() as conn:
         await _seed_route_existence(conn, agency_id, "R_TIE2")
@@ -956,16 +959,17 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) VALUES "
-            "($1, 'TA', 'R_TIE2', 1, 30, NOW(), 'a.pb', 'weekday', '09:00:00'), "
-            "($1, 'TZ', 'R_TIE2', 1, 30, NOW(), 'z.pb', 'weekday', '09:00:00')",
+            "($1, 'TA', 'R_TIE2', 1, 30, $2, 'a.pb', 'weekday', '09:00:00'), "
+            "($1, 'TZ', 'R_TIE2', 1, 30, $2, 'z.pb', 'weekday', '09:00:00')",
             agency_id,
+            jst_midday(day),
         )
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/route-shape?route=R_TIE2")
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R_TIE2&from={day}&to={day}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["geometry"] is not None, body
