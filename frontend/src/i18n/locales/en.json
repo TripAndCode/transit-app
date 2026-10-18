@@ -658,6 +658,8 @@
       "progress_disclosure": "How the live reports progressed",
       "progress_loading": "Loading report history…",
       "no_progress": "No report history is available for this trip yet",
+      "progress_error": "Couldn't load this trip's report history.",
+      "live_error": "Couldn't load the trips reporting now.",
       "select_route": "Select a route or a trip on the map to see its details.",
       "choose_route": "Choose an active route",
       "choose_route_hint": "Select a route to see its directions and concurrent trips.",
@@ -687,6 +689,7 @@
       "exit": "Leave playback and return to current observations",
       "loading": "Loading the day",
       "empty": "No observations for this day",
+      "error": "Couldn't load this day's observations",
       "toggle_on": "Play the day",
       "toggle_off": "Back to current observations"
     }
