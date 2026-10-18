@@ -256,3 +256,11 @@ async def test_explicit_all_services_survives_canonicalization_and_dispatches_th
     await tools._tool_top_n(canonical, ctx, None, 1, "en")
     await tools._tool_top_n({"metric": "avg_delay"}, ctx, None, 1, "en")
     assert seen == ["all", "all", "平日"]
+
+
+@pytest.mark.parametrize("window", [["last_7_days"], {"days": 7}])
+def test_a_time_window_that_is_not_a_string_is_kept_as_unrecognised(window):
+    """Only a string names a relative-time token; any other value hashes as given."""
+    out = canonicalize("top_n", {"metric": "avg_delay", "time_window": window}, _ctx())
+    assert out["time_window"] == window
+    assert "from_date" not in out

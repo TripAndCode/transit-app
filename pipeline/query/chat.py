@@ -101,6 +101,17 @@ def _allowed_providers() -> set[str] | None:
 _BUILD_SENTINEL = "__build__"
 
 
+def _as_args(value: Any) -> dict:
+    """Tool arguments as a dict, or {} for anything else.
+
+    A model can hand back non-object arguments -- null, a string, a list -- and
+    a cached row can carry them too. The tool handlers and ``canonicalize`` all
+    call ``args.get(...)``, so each such value runs the tool with no arguments
+    (likely a "missing required arg" empty result) rather than a 500.
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
     """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
 
@@ -798,7 +809,7 @@ async def chat_with_tools(
             # Exact same question seen before — skip LLM entirely.
             _log.debug("Intent cache pre-hit for question %r (sig=%s)", question[:60], pre_row["signature_hash"])
             name = pre_row["tool"]
-            args = pre_row["args"] if isinstance(pre_row["args"], dict) else {}
+            args = _as_args(pre_row["args"])
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
             if not _skip_cache_write:
@@ -848,7 +859,7 @@ async def chat_with_tools(
                 if isinstance(payload, dict) and _names_a_tool(payload.get("tool")):
                     sig = IntentSignature(
                         tool=str(payload["tool"]),
-                        args=payload.get("args") or {},
+                        args=_as_args(payload.get("args")),
                         confidence=float(payload.get("confidence") or 0.0),
                         rationale=str(payload.get("rationale") or ""),
                     )
@@ -903,7 +914,7 @@ async def chat_with_tools(
         cache_row = await _cache_lookup(conn, sig_hash, agency_id)
         if cache_row is not None:
             name = cache_row["tool"]
-            args = cache_row["args"] if isinstance(cache_row["args"], dict) else {}
+            args = _as_args(cache_row["args"])
             cache_outcome = "hit"
         else:
             name = sig.tool
@@ -992,16 +1003,7 @@ async def chat_with_tools(
             call.function.arguments,
         )
         args = {}
-    # Some LLMs occasionally hand back ``arguments`` as a non-object JSON
-    # value — null (None after json.loads), a string ('"foo"'), or a list
-    # ('[]'). All of these would crash the downstream ``args.get(...)``
-    # calls in the tool handlers. Normalise everything that isn't a dict
-    # to ``{}`` so the handler still runs (likely returning a "missing
-    # required arg" empty result, which is the correct UX).
-    if not isinstance(args, dict):
-        args = {}
-
-    return await _dispatch_and_respond(name, args, ctx, conn, agency_id, locale, ch)
+    return await _dispatch_and_respond(name, _as_args(args), ctx, conn, agency_id, locale, ch)
 
 
 def _result_to_dict(r: ToolResult) -> dict:
