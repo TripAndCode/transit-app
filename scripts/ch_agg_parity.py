@@ -20,8 +20,11 @@ paying the dedup column's figure plus the cost of writing it; a month only one
 table needs is built straight from `updates`.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
-that adds them is applied. Both connections are read-only: ClickHouse with
-readonly=1, Postgres in a read-only session.
+that adds them is applied. The static-joined tables join ClickHouse's
+static_stop_times, the schedule mirror that schema adds and only an analyze
+fills, so both modes skip them until it holds the agency's schedule. Both
+connections are read-only: ClickHouse with readonly=1, Postgres in a read-only
+session.
 """
 
 from __future__ import annotations
@@ -84,6 +87,18 @@ def differences(ch_rows, pg_rows, dates) -> tuple[list, list]:
     return sorted(ch - pg, key=str), sorted(pg - ch, key=str)
 
 
+def unmirrored(ch, agency_id: int) -> frozenset[str]:
+    """The static-joined tables while ClickHouse holds no schedule for the agency, else none."""
+    mirror = ch.query(
+        "SELECT 1 FROM system.tables WHERE database = currentDatabase() AND name = {name:String}",
+        parameters={"name": ch_aggregates.STATIC_STOP_TIMES},
+    ).result_rows
+    if mirror and ch_aggregates.static_mirror_fingerprint(ch, agency_id) is not None:
+        return frozenset()
+    print(f"{', '.join(sorted(ch_aggregates.STATIC_JOINED_TABLES))}: skipped; no schedule mirror until an analyze")
+    return ch_aggregates.STATIC_JOINED_TABLES
+
+
 def _pg_month(conn, table: str, agency_id: int, month: int) -> list:
     first, following = ch_aggregates.month_bounds(month)
     with conn.cursor() as cur:
@@ -105,8 +120,11 @@ def parity(ch, conn, agency_id: int) -> int:
     if not dates:
         print("parity: nothing to compare: no ledger date matches ClickHouse's counts")
         return 1
+    skipped = unmirrored(ch, agency_id)
     failures = 0
     for table in ch_aggregates.TABLES:
+        if table in skipped:
+            continue
         compared = 0
         for month in ch_aggregates.months_of(dates):
             sql, params = ch_aggregates.select_sql(table, month)
@@ -151,7 +169,9 @@ def _timed(ch, sql: str, params: dict) -> float:
 def timing(ch, agency_id: int) -> int:
     months = ch_aggregates.source_months(ch, agency_id)
     print(f"agency {agency_id}: {len(months)} months")
-    totals = dict.fromkeys(["dedup", *ch_aggregates.MONTHLY_TABLES], 0.0)
+    skipped = unmirrored(ch, agency_id)
+    tables = [table for table in ch_aggregates.MONTHLY_TABLES if table not in skipped]
+    totals = dict.fromkeys(["dedup", *tables], 0.0)
     for month in months:
         where, params = ch_aggregates.month_where(month)
         line = {
@@ -159,7 +179,7 @@ def timing(ch, agency_id: int) -> int:
                 ch, build_dedup_ch_sql(extra_where=where, include_captured_at=True), {"agency_id": agency_id, **params}
             )
         }
-        for table in ch_aggregates.MONTHLY_TABLES:
+        for table in tables:
             sql, month_params = ch_aggregates.select_sql(table, month)
             line[table] = _timed(ch, sql, {"agency_id": agency_id, **month_params})
         for key, seconds in line.items():

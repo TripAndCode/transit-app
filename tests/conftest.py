@@ -319,7 +319,7 @@ def _ch_schema() -> None:
         client.command("DROP TABLE IF EXISTS updates_live")
         client.command("DROP TABLE IF EXISTS updates")
         _drop_ch_work_tables(client)
-        for table in ch_aggregates.ALL_TABLES:
+        for table in (*ch_aggregates.ALL_TABLES, ch_aggregates.STATIC_STOP_TIMES):
             client.command(f"DROP TABLE IF EXISTS {table}")
         _apply_ch_schema(client)
     finally:
@@ -348,7 +348,7 @@ def ch_client(_ch_schema):
     client = _ch_test_client()
     client.command("TRUNCATE TABLE IF EXISTS updates")
     client.command("TRUNCATE TABLE IF EXISTS updates_live")
-    for table in ch_aggregates.ALL_TABLES:
+    for table in (*ch_aggregates.ALL_TABLES, ch_aggregates.STATIC_STOP_TIMES):
         client.command(f"TRUNCATE TABLE IF EXISTS {table}")
     _drop_ch_work_tables(client)
     yield client
