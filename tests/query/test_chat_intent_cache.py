@@ -486,7 +486,7 @@ async def test_switching_the_ask_llm_off_also_stops_the_cacheless_path(pool_with
 @pytest.mark.parametrize("bad_args", ["metric=avg_delay", ["22171"]])
 @pytest.mark.asyncio
 async def test_a_signature_whose_args_are_not_an_object_still_answers(bad_args, pool_with_agency, monkeypatch):
-    """The native tool-call path already reads such arguments as {}; JSON mode must too."""
+    """JSON mode, like the native tool-call path, runs the tool with no arguments rather than failing."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(_sig_message(tool="top_n", args=bad_args)))
