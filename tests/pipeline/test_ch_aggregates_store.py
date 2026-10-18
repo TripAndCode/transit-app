@@ -353,10 +353,20 @@ def test_dropping_an_agencys_work_tables_covers_the_counts_and_whole_history_tab
     assert work_tables(ch_client) == []
 
 
-def test_every_copied_table_names_two_columns_its_store_check_sums(ch_client):
+def test_every_whole_history_table_names_an_internal_source_with_a_reference(ch_client):
+    for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        source = ch_aggregates.whole_history_source(table)
+        assert source in ch_aggregates.INTERNAL_TABLES, table
+        assert source in ch_aggregates.REFERENCES, table
+
+
+def test_store_figures_pair_a_clickhouse_and_a_postgres_expression(ch_client):
     for table in ch_aggregates.COPIED_TABLES:
-        first, second = ch_aggregates.sum_columns(table)
-        assert {first, second} <= set(ch_aggregates.COLUMNS[table]), table
+        (ch_first, pg_first), (ch_second, pg_second) = ch_aggregates.store_figures(table)
+        assert all(isinstance(e, str) and e for e in (ch_first, pg_first, ch_second, pg_second)), table
+    for table in ch_aggregates.INTERNAL_TABLES:
+        with pytest.raises(ValueError, match="REFERENCES"):
+            ch_aggregates.store_figures(table)
 
 
 def test_the_static_joined_tables_are_those_whose_select_joins_the_schedule_mirror():
@@ -365,4 +375,5 @@ def test_the_static_joined_tables_are_those_whose_select_joins_the_schedule_mirr
         for table in ch_aggregates.MONTHLY_TABLES
         if ch_aggregates.STATIC_STOP_TIMES in ch_aggregates.select_sql(table, 202609)[0]
     }
+    joined |= {t for t in ch_aggregates.WHOLE_HISTORY_TABLES if ch_aggregates.whole_history_source(t) in joined}
     assert joined == ch_aggregates.STATIC_JOINED_TABLES

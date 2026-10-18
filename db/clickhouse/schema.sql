@@ -211,6 +211,27 @@ CREATE TABLE IF NOT EXISTS agg_route_hour_dow (
 PARTITION BY agency_id
 ORDER BY (agency_id, route_code, service_type, dow, hour);
 
+-- The distinct (stop, route) pairs each service date observed, from every
+-- `updates` row with a route, delay or not, joined to the mirrored schedule.
+-- ClickHouse only. agg_stop_routes is finalized from it.
+CREATE TABLE IF NOT EXISTS stop_route_days (
+    agency_id  Int32,
+    date       Date,
+    stop_id    String,
+    route_code String
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, stop_id, route_code);
+
+-- route_codes is byte-sorted here. The Postgres copy re-sorts it in Postgres's collation.
+CREATE TABLE IF NOT EXISTS agg_stop_routes (
+    agency_id   Int32,
+    stop_id     String,
+    route_codes String
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, stop_id);
+
 -- The agency's Postgres static_stop_times, mirrored for the aggregates that join
 -- the schedule. One partition per agency, replaced whole. `fingerprint` is the
 -- analyze fingerprint the copy was taken under, which changes whenever the

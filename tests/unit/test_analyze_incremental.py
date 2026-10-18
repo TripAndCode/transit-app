@@ -59,6 +59,9 @@ class FakeClickHouse:
             return _FakeResult([(name,) for name in self._tables])
         if sql.startswith("SELECT count(), sum("):
             return _FakeResult([self._totals])
+        # An internal table's reference figure: the counts' is their totals' samples.
+        if any(sql.startswith(f"SELECT {e} FROM {t} ") for t, (_, e, _) in ch_aggregates.REFERENCES.items()):
+            return _FakeResult([(self._totals[1],)])
         # A work table holds the month of the ledger's date once built, so a
         # swap replaces that month rather than dropping it.
         if "toYYYYMM(date)" in sql and "__work_a" in sql:
@@ -84,9 +87,10 @@ class FakeClickHouse:
         """Each INSERT into an aggregate or dedup work table."""
         return [c for c in self.commands if c[0].startswith("INSERT INTO") and "__work_a" in c[0]]
 
-    @property
-    def stop_routes_scans(self) -> list[str]:
-        return [s for s in self.streams if "SELECT DISTINCT route_code" in s]
+    def stop_route_days_builds(self) -> list[str]:
+        return [
+            sql for sql, _ in self.ch_agg_builds if sql.startswith(f"INSERT INTO {ch_aggregates.ROUTE_STOP_DAYS}__")
+        ]
 
     @property
     def service_delivered_builds(self) -> list[tuple[str, dict]]:
@@ -156,9 +160,13 @@ class FakeConn:
         if sql.startswith("DELETE FROM"):
             self._purged.add(sql.split()[2])
         # A Postgres copy's totals: what it held, until its own purge emptied it.
-        if "), 0)::bigint, coalesce(sum(" in sql:
+        if sql.startswith("SELECT count(*), coalesce(") and "::bigint FROM " in sql:
             table = sql.split(" FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
+        # A reference table's figure, as an internal table's store check reads it.
+        for reference, _, expression in ch_aggregates.REFERENCES.values():
+            if sql.startswith(f"SELECT coalesce({expression}, 0)::bigint FROM {reference} "):
+                return ((0 if reference in self._purged else self._pg_totals[1]),), []
         if "FROM static_stops" in sql:
             return ((1,) if self._has_static else None), []
         if sql.startswith("SELECT EXISTS (SELECT 1 FROM static_stop_times"):
@@ -223,16 +231,17 @@ def _changed_run(**kw):
     )
 
 
-# ── The whole-history aggregates, finalized from ClickHouse's counts ──────
+# ── The whole-history aggregates, finalized from ClickHouse's internal tables ──
 
 
-def test_a_changed_run_finalizes_the_whole_history_tables_from_the_counts_not_from_updates():
+def test_a_changed_run_finalizes_the_whole_history_tables_from_their_internal_tables_not_from_updates():
     """Reading `updates` for them would reread the agency's whole history."""
     _, ch = _changed_run()
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
         builds = [sql for sql, _ in ch.commands if sql.startswith(f"INSERT INTO {table}__work_a")]
         assert len(builds) == 1, (table, builds)
-        assert f"FROM {ch_aggregates.COUNTS}" in builds[0] and "FROM updates" not in builds[0], table
+        source = ch_aggregates.whole_history_source(table)
+        assert f"FROM {source}" in builds[0] and "FROM updates" not in builds[0], table
 
 
 def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():
@@ -242,11 +251,16 @@ def test_a_noop_run_neither_purges_nor_rebuilds_a_whole_history_aggregate():
         assert not [s for s in conn.executed if f"DELETE FROM {table}" in s], table
         assert not [s for s in conn.executed if f"INSERT INTO {table}" in s], table
         assert not [c for c in ch.commands if f"{table}__work_a" in c[0]], table
-        # Read only by store checks' totals probes: its own, and agg_route_stats's
-        # once more as the counts' reference, the table covering their population.
+        # Read only by store checks' probes: its own totals, and once more when it
+        # is an internal table's reference, the table covering its population.
         reads = [s for s in conn.executed if f"FROM {table} " in s and s.lstrip().startswith("SELECT")]
-        assert len(reads) == (2 if table == "agg_route_stats" else 1), (table, reads)
-        assert all("coalesce(sum(sum_delay_sec), 0)" in s for s in reads), reads
+        (_, first), (_, second) = ch_aggregates.store_figures(table)
+        probes = [f"SELECT count(*), coalesce({first}, 0)::bigint, coalesce({second}, 0)::bigint FROM {table} "]
+        probes += [
+            f"SELECT coalesce({e}, 0)::bigint FROM {r} " for r, _, e in ch_aggregates.REFERENCES.values() if r == table
+        ]
+        assert len(reads) == len(probes), (table, reads)
+        assert all(s.startswith(tuple(probes)) for s in reads), reads
 
 
 @pytest.mark.parametrize("table", ch_aggregates.WHOLE_HISTORY_TABLES)
@@ -259,30 +273,18 @@ def test_a_run_with_a_changed_date_replaces_a_whole_history_aggregate_whole(tabl
 # ── The scans the ledger now speaks for ───────────────────────────────────
 
 
-def test_a_noop_run_does_not_scan_the_stop_route_keys():
-    """The key scan reads every row the agency has, with no dep_delay filter.
-    It can be skipped only because total_rows counts those same rows."""
+def test_a_noop_run_builds_no_stop_route_days():
+    """They read every row the agency has, with no dep_delay filter. A run may
+    skip them only because total_rows counts those same rows."""
     _, ch = _noop_run(has_static=True)
-    assert ch.stop_routes_scans == []
+    assert ch.stop_route_days_builds() == []
 
 
-def test_a_run_with_a_changed_date_scans_the_stop_route_keys_whole():
+def test_a_changed_date_rebuilds_its_stop_route_days_from_every_row_of_it():
     _, ch = _changed_run(has_static=True)
-    (scan,) = ch.stop_routes_scans
-    assert "rebuild_dates" not in scan
-
-
-def test_agg_stop_routes_is_skippable_but_never_date_scoped():
-    """Keyed by stop, valued over all of history: a no-change run may leave
-    it standing, but a changed date can only mean a whole rebuild."""
-    assert "agg_stop_routes" in analyze_mod._NOOP_SKIPPABLE_AGG_TABLES
-    assert "agg_stop_routes" not in analyze_mod._INCREMENTAL_AGG_TABLES
-
-
-def test_a_noop_run_neither_purges_nor_rebuilds_agg_stop_routes():
-    conn, _ = _noop_run(has_static=True)
-    assert not [s for s in conn.executed if "DELETE FROM agg_stop_routes" in s]
-    assert not [s for s in conn.executed if "INSERT INTO agg_stop_routes" in s]
+    fresh = [sql for sql in ch.stop_route_days_builds() if "FROM updates" in sql]
+    assert len(fresh) == 1, ch.stop_route_days_builds()
+    assert "dep_delay" not in fresh[0] and "day_start_0" in fresh[0]
 
 
 # The scheduled headway's median reads the static schedule and nothing else.
@@ -344,7 +346,7 @@ def test_a_date_that_lost_only_delayless_rows_is_rebuilt():
         stored=[(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)],
         has_static=True,
     )
-    assert len(ch.stop_routes_scans) == 1
+    assert len([sql for sql in ch.stop_route_days_builds() if "FROM updates" in sql]) == 1
     assert [s for s in conn.executed if "DELETE FROM agg_feed_health WHERE agency_id = %s AND date = ANY(%s)" in s]
 
 
@@ -459,14 +461,19 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
     recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
     assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
-    assert recomputed == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * tables
+    # stop_route_days reads every `updates` row of the date itself, not the dedup.
+    assert recomputed == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - 1)
+    raw = f"INSERT INTO {ch_aggregates.ROUTE_STOP_DAYS}__"
+    fresh = [params for sql, params in ch.ch_agg_builds if sql.startswith(raw) and "FROM updates" in sql]
+    assert fresh == [{"agency_id": AGENCY_ID, **day}]
     assert len([sql for sql, _ in ch.commands if "REPLACE PARTITION (7, 202601)" in sql]) == tables
 
 
 def test_a_store_disagreement_rebuilds_the_clickhouse_aggregates_whole_but_not_the_agency():
     conn, ch = _noop_run(pg_totals=(1, 1, 60))
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
-    assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.MONTHLY_TABLES)
+    assert len([sql for sql, _ in ch.ch_agg_builds if f"FROM {dedup}" in sql]) == len(ch_aggregates.MONTHLY_TABLES) - 1
+    assert len(ch.stop_route_days_builds()) == 1
     for table in ch_aggregates.COPIED_TABLES:
         assert f"DELETE FROM {table} WHERE agency_id = %s" in conn.executed, table
 

@@ -7,6 +7,7 @@ from pipeline import ch_aggregates
 from scripts import ch_agg_parity
 from scripts.ch_agg_parity import (
     _timed,
+    comparable,
     comparable_dates,
     differences,
     normalized,
@@ -130,7 +131,7 @@ def test_parity_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(c
     ch = _ClickHouse()
     assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
     assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
-    assert len(ch.queries) == len(ch_aggregates.TABLES) - len(ch_aggregates.STATIC_JOINED_TABLES) + 1
+    assert len(ch.queries) == len([t for t in ch_aggregates.TABLES if t not in ch_aggregates.STATIC_JOINED_TABLES]) + 1
     assert "no schedule mirror" in capsys.readouterr().out
 
 
@@ -147,7 +148,8 @@ def test_parity_compares_the_static_joined_tables_once_the_schedule_is_mirrored(
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _Mirrored()
     assert parity(ch, _Conn([(day, 5, 5)]), 1) == 0
-    assert len([sql for sql in ch.queries if _joins_the_mirror(sql)]) == len(ch_aggregates.STATIC_JOINED_TABLES)
+    joined = [t for t in ch_aggregates.TABLES if t in ch_aggregates.STATIC_JOINED_TABLES]
+    assert len([sql for sql in ch.queries if _joins_the_mirror(sql)]) == len(joined)
 
 
 def test_timing_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(capsys, monkeypatch):
@@ -156,7 +158,9 @@ def test_timing_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(c
     ch = _ClickHouse()
     assert timing(ch, 1) == 0
     assert [sql for sql in ch.raw if _joins_the_mirror(sql)] == []
-    assert len(ch.raw) == 1 + len(ch_aggregates.MONTHLY_TABLES) - len(ch_aggregates.STATIC_JOINED_TABLES)
+    assert len(ch.raw) == 1 + len(
+        [t for t in ch_aggregates.MONTHLY_TABLES if t not in ch_aggregates.STATIC_JOINED_TABLES]
+    )
     assert "no schedule mirror" in capsys.readouterr().out
 
 
@@ -175,6 +179,24 @@ def test_both_modes_run_before_the_schema_adds_the_schedule_mirror(monkeypatch):
     monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
     assert parity(_Unmigrated(), _Conn([(day, 5, 5)]), 1) == 0
     assert timing(_Unmigrated(), 1) == 0
+
+
+def test_parity_leaves_agg_stop_routes_until_the_schedule_is_mirrored(monkeypatch):
+    """Every date is current, so the whole-history tables are compared, all but this one."""
+    day = date(2026, 9, 1)
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5)})
+    ch = _ClickHouse()
+    parity(ch, _Conn([(day, 5, 5)]), 1)
+    assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
+    assert len([sql for sql in ch.queries if "GROUP BY" in sql]) > len(ch_aggregates.TABLES)
+
+
+def test_a_stop_route_list_compares_whatever_its_order():
+    """ClickHouse sorts a stop's routes by bytes, the Postgres copy by its collation."""
+    assert comparable("agg_stop_routes", (1, "S1", "r1,R1,2507 9")) == comparable(
+        "agg_stop_routes", (1, "S1", "2507 9,R1,r1")
+    )
+    assert comparable("agg_stop_routes", (1, "S1", "R1")) != comparable("agg_stop_routes", (1, "S1", "R1,r1"))
 
 
 def test_a_postgres_time_compares_equal_to_its_clickhouse_text():

@@ -641,7 +641,7 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
 def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
     """A stop served by 2+ distinct routes must comma-join them, alphabetically
-    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path, not
+    ordered — guards the ClickHouse-built stop_route_days path, not
     just the single-route case test_analyze_builds_agg_stop_routes already
     covers."""
     with pg_conn.cursor() as cur:
@@ -677,9 +677,9 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     table is about which routes serve a stop, independent of whether any
     observation happened to carry a numeric delay.
 
-    So agg_stop_routes must come from the ClickHouse-sourced
-    _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
-    only and never touches dep_delay — not from _analyze_deduped, whose
+    So agg_stop_routes must come from stop_route_days, which reads every
+    `updates` row's route_code/trip_id/stop_sequence and never touches
+    dep_delay — not from the dedup, whose
     `dep_delay IS NOT NULL` pre-filter silently drops this exact case (a
     real, non-trivial share of keys, enough to lose stops' entire route
     coverage in practice)."""
@@ -1964,13 +1964,15 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
     aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
-    # The counts hold a row per delay value of every stop event, so the counts and
-    # the tables finalized from them may be read only by the store check's totals probe.
-    totals_reads = tuple(f"FROM {t} " for t in (ch_aggregates.COUNTS, *ch_aggregates.WHOLE_HISTORY_TABLES))
+    # The internal tables hold a row per delay value, or per observed pair, of every
+    # date, so they and the tables finalized from them may be read only by store
+    # checks' probes: a table's totals, or an internal table's reference figure.
+    totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
+    probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or any(r in s for r in aggregate_reads)
-        or (any(r in s for r in totals_reads) and s.startswith("SELECT count(), sum(samples), sum(sum_delay_sec)"))
+        or (any(r in s for r in totals_reads) and s.startswith(probes))
         for s in others
     ), others
 

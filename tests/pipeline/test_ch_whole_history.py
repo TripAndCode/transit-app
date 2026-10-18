@@ -73,7 +73,8 @@ def _hour_dow(ch_client, table: str = HOUR_DOW, agency_id: int = AGENCY) -> list
 
 
 def _finalize(ch_client, counts_months=None, agency_id: int = AGENCY) -> None:
-    ch_aggregates.build_whole_history(ch_client, agency_id, [HOUR_DOW], counts_months)
+    recounted = {ch_aggregates.COUNTS: counts_months} if counts_months else {}
+    ch_aggregates.build_whole_history(ch_client, agency_id, [HOUR_DOW], recounted)
     ch_aggregates.swap_whole_history(ch_client, HOUR_DOW, agency_id)
 
 
@@ -150,7 +151,7 @@ def _values(route: str, delays: list[int]) -> list[tuple]:
 
 
 def _finalize_table(ch_client, table: str, agency_id: int = AGENCY) -> None:
-    ch_aggregates.build_whole_history(ch_client, agency_id, [table], None)
+    ch_aggregates.build_whole_history(ch_client, agency_id, [table], {})
     ch_aggregates.swap_whole_history(ch_client, table, agency_id)
 
 
