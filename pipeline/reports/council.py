@@ -44,6 +44,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_in_range,
 )
+from pipeline.query.formatter import format_day_marker
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
@@ -216,10 +217,6 @@ async def compute_council_summary(
     }
 
 
-# The marker a shifted clock time carries when it crosses midnight, per language.
-_DAY_MARKER = {"ja": "({offset:+d}日)", "en": " ({offset:+d} day)"}
-
-
 def shift_time_str(time_str: str, delta_sec: int, locale: str = "ja") -> str:
     """Shift a zero-padded ``"HH:MM[:SS]"`` clock string by ``delta_sec``
     seconds, wrapping at 24h. Returns ``"HH:MM:SS"`` (always with seconds,
@@ -241,7 +238,7 @@ def shift_time_str(time_str: str, delta_sec: int, locale: str = "ja") -> str:
     base = f"{hh:02d}:{mm:02d}:{ss:02d}"
     if day_offset == 0:
         return base
-    return base + _DAY_MARKER.get(locale, _DAY_MARKER["ja"]).format(offset=day_offset)
+    return base + format_day_marker(day_offset, locale)
 
 
 async def compute_delay_certificate(
