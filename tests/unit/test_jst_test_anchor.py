@@ -1,6 +1,6 @@
-"""The JST anchor the query-tool fixtures seed from.
+"""The JST anchor that date-sensitive fixtures seed from.
 
-Those fixtures insert a row per minute and then assert per-day groupings.
+The query-tool fixtures insert a row per minute and then assert per-day groupings.
 The queries bucket by ``api.range.jst_today``, or pair a trip's stops within
 one service date, so an anchor taken from the wall clock straddles JST
 midnight, or the 04:00 JST service-day cutover, whenever CI runs just before
@@ -14,7 +14,7 @@ from datetime import timedelta, timezone
 
 from api.range import jst_today
 from pipeline.service_day import service_date_of
-from tests.query.test_tool_queries import jst_midday
+from tests.fixtures.clock import jst_midday
 
 JST = timezone(timedelta(hours=9))
 
