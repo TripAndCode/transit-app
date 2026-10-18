@@ -564,11 +564,20 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bo
             # The Makefile's `-include .env` outranks the environment, so an env
             # prefix does not repoint a make target; only make's own VAR=value
             # arguments do.
-            targets, assignments, trusted = make_args(segment[i + 1 :])
+            args = segment[i + 1 :]
+            targets, assignments, trusted = make_args(args)
+            run = _in_command_position(segment, i)
+            if run and _MAKE_INFO_FLAGS & set(args):
+                continue
             writes: set[str] = set()
-            for target in targets or ["all"]:
-                writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
-            if writes and (make_controlled or multiline or not trusted):
+            # Only a make that runs has a default goal (`all`, also an English
+            # word in prose), or can run one a flag's value or an expansion hid.
+            for target in targets or (["all"] if run else []):
+                if run or target.lower() != "all":
+                    writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
+            if run and not trusted:
+                writes |= DESTRUCTIVE_TARGETS["all"]
+            if writes and (make_controlled or (multiline and run) or not trusted):
                 return True
             if _points_at_dev(writes, assignments):
                 return True
@@ -582,6 +591,23 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bo
     return False
 
 
+# Words before `make` that still leave it the command being run.
+_COMMAND_PREFIXES = frozenset({"env", "do", "then", "else", "!", "{", "time", "exec", "nohup", "nice", "xargs"})
+# Flags with which make only prints information and runs no target.
+_MAKE_INFO_FLAGS = frozenset({"-v", "--version", "-h", "--help"})
+
+
+def _in_command_position(segment: list[str], i: int) -> bool:
+    """Whether segment[i] is the program the simple command runs: only
+    assignments, a run-through prefix (`env`, `time`, a loop's `do` ...) or that
+    prefix's flags come before it. `command -v make` and prose naming make do
+    not run it."""
+    for tok in segment[:i]:
+        if not (_ASSIGNMENT.match(tok) or tok in _COMMAND_PREFIXES or (tok.startswith("-") and segment[0] == "env")):
+            return False
+    return True
+
+
 def _points_at_dev(writes: set[str], words: list[str]) -> bool:
     """Whether any store in *writes* is left pointed at dev by the NAME=value
     assignments among *words*. Later assignments win."""
@@ -589,8 +615,9 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
     for store in writes:
         name, throwaway = THROWAWAY[store]
         value = assigned.get(name, "").lower()
-        # A throwaway host:port whose `?port=` query overrides it is the dev store.
-        if not _SAFE_VALUE.fullmatch(value) or not throwaway.match(value) or PORT_KEY.search(value):
+        # libpq lets a URL query (`?port=05433`, `?host=`) override the host:port,
+        # and parses it loosely, so a throwaway URL carries none.
+        if not _SAFE_VALUE.fullmatch(value) or not throwaway.match(value) or "?" in value:
             return True
     return False
 
@@ -601,6 +628,8 @@ def _points_at_dev(writes: set[str], words: list[str]) -> bool:
 # such word makes the whole command untrusted (a false block is the cheap
 # direction). `-C` takes the directory after it.
 _SAFE_MAKE_FLAG = re.compile(r"-[sk]+|-j[0-9]*|--silent|--keep-going|--no-print-directory|--jobs(?:=[0-9]+)?")
+# `-j`/`--jobs` take an optional job count, which may be the next word.
+_SHORT_JOBS_FLAG = re.compile(r"-[sk]*j")
 # Make pastes a variable's value into recipe shell text, and the shell expands an
 # env-prefix value, so only URL-safe characters are trusted in either.
 _SAFE_VALUE = re.compile(r"[A-Za-z0-9_.,:/@%+=?~-]*")
@@ -636,15 +665,23 @@ def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
     assignments: list[str] = []
     trusted = True
     after_directory_flag = False
+    after_jobs_flag = False
     for arg in args:
         if _is_separator(arg):
             break
-        if arg.startswith("#"):
+        if after_jobs_flag:
+            after_jobs_flag = False
+            if arg.isdigit():
+                continue
+        # The shell expands `$` and backticks into words the guard never sees.
+        if arg.startswith("#") or "$" in arg or "`" in arg:
             trusted = False
         elif after_directory_flag:
             after_directory_flag = False
         elif arg == "-C":
             after_directory_flag = True
+        elif arg == "--jobs" or _SHORT_JOBS_FLAG.fullmatch(arg):
+            after_jobs_flag = True
         elif arg.startswith("-"):
             trusted = trusted and bool(_SAFE_MAKE_FLAG.fullmatch(arg))
         elif "=" in arg:
@@ -735,8 +772,9 @@ def main() -> int:
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
             "so run it as its own call. A destructive make target runs only as "
             "`make <target> DATABASE_URL=...:5544/... CLICKHOUSE_PORT=8124` (an env prefix before `make` loses "
-            "to .env; flags limited to -s, -k, -j, -C <dir>, --no-print-directory), and a gtfs_pipeline "
-            "subcommand only with those assigned as its env prefix, for each store it writes. See AGENTS.md.\n"
+            "to .env; one line, flags limited to -s, -k, -j, -C <dir>, --no-print-directory, setting only "
+            "variables its recipes read, with URL-safe values), and a gtfs_pipeline subcommand only with those "
+            "assigned as its env prefix, for each store it writes. See AGENTS.md.\n"
         )
         return 2
     return 0

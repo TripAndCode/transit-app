@@ -11,6 +11,7 @@ is touched.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -32,6 +33,13 @@ def _documented_command() -> str:
     matches = [s for s in spans if "make analyze-all" in s and ":5544/" in s]
     assert len(matches) == 1, f"expected one throwaway analyze-all command in AGENTS.md, got {matches}"
     return matches[0]
+
+
+def test_documented_throwaway_analyze_all_passes_the_dev_db_guard():
+    payload = json.dumps({"tool_input": {"command": _documented_command()}})
+    hook = REPO_ROOT / ".claude" / "hooks" / "guard-dev-db.sh"
+    result = subprocess.run([str(hook)], input=payload, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_documented_throwaway_analyze_all_reaches_the_throwaway_stores(tmp_path):

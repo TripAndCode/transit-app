@@ -270,6 +270,40 @@ BLOCKED = [
     ),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
+    # A word make takes as a flag's value, or one the shell expands, can leave the
+    # default goal to run or set any variable.
+    pytest.param("make -j 4", id="separate-job-count-runs-the-default-goal"),
+    pytest.param("make --jobs 4", id="separate-long-job-count-runs-the-default-goal"),
+    pytest.param("make -f Makefile", id="makefile-flag-runs-the-default-goal"),
+    pytest.param("make -I x", id="include-flag-runs-the-default-goal"),
+    pytest.param(
+        "make -j 4 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="job-count-and-postgres-only-runs-the-default-goal-on-dev-clickhouse",
+    ),
+    pytest.param(
+        "X=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit; "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test $X",
+        id="expanded-word-after-the-throwaway-assignment",
+    ),
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "$(printf 'DATABASE_URL=x')",
+        id="command-substitution-after-the-throwaway-assignment",
+    ),
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test `echo x`",
+        id="backticks-after-the-throwaway-assignment",
+    ),
+    pytest.param("T=migrate-down; make $T CONFIRM=1", id="expanded-target"),
+    pytest.param("for t in analyze-all; do make $t; done", id="loop-variable-target"),
+    # libpq parses the query's port as an integer and lets it override the host's.
+    *[
+        pytest.param(
+            f"make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test?{query}",
+            id=f"query-overrides-the-throwaway-port-{case}",
+        )
+        for case, query in (("zero-padded", "port=05433"), ("plus-signed", "port=+5433"), ("encoded", "p%6Frt=5433"))
+    ],
     # The default goal is `all: bootstrap`.
     pytest.param("make", id="bare-make-runs-the-default-goal"),
     pytest.param("make all", id="make-all"),
@@ -658,7 +692,8 @@ ALLOWED = [
     ),
     # A newline elsewhere in the command does not block a non-destructive one.
     pytest.param("make lint\nmake check-aggs", id="multi-line-read-only-make"),
-    # A flag that takes no argument does not swallow the assignment after it.
+    # An allowlisted flag does not swallow the assignment after it; `-j`/`--jobs`
+    # take only a number.
     *[
         pytest.param(
             f"make prune-query-log {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
@@ -666,6 +701,27 @@ ALLOWED = [
         )
         for flag in ("-s", "-sk", "-j", "-j4", "--no-print-directory", "--jobs=2")
     ],
+    pytest.param(
+        "make -j 4 analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="test-db-make-variables-after-a-separate-job-count",
+    ),
+    # A `make` that is not the command run (prose, another program's argument)
+    # runs nothing, so it has no default goal; only a named destructive target in
+    # it counts.
+    pytest.param("which make", id="which-make"),
+    pytest.param("command -v make", id="command-v-make"),
+    pytest.param("brew install make", id="brew-install-make"),
+    pytest.param("git log --grep make", id="git-log-grep-make"),
+    pytest.param('git commit -m "ci: run make"', id="commit-message-naming-make"),
+    pytest.param('git commit -m "fix: make all tests pass"', id="commit-message-saying-make-all"),
+    pytest.param("make --version", id="make-version"),
+    pytest.param(
+        "git commit -m \"$(cat <<'EOF'\nfix(guard): note\n\nRun make analyze-all "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 instead.\n\n"
+        '[skip ci]\nEOF\n)"',
+        id="multi-line-commit-message-quoting-the-throwaway-command",
+    ),
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
         id="copy-to-reads-data-out",
