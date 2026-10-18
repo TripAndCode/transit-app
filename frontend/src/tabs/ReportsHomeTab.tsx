@@ -41,7 +41,7 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
   { header: "observations", value: (r) => r[5] },
 ];
 
-/** A summary meant to be printed or exported lists every route, not a first page. */
+/** The API's longest ranking, so a summary meant to be printed or exported is not cut at the default first page. */
 const RANKING_OPTIONS = { limit: REPORT_ROWS_MAX };
 
 export function ReportsHomeTab() {

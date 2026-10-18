@@ -112,7 +112,7 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("asks for the API's longest ranking list, so the summary carries every route", () => {
+  it("asks for the API's longest ranking list, not its default first page", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
     const rankingCall = vi.mocked(hooks.useReport).mock.calls.find((call) => call[1] === "ranking");
@@ -127,8 +127,12 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByText("Showing 1 of 600")).toBeInTheDocument();
     const section = screen.getByRole("heading", { name: "Mean delay by service pattern" }).closest("section") as HTMLElement;
     await userEvent.click(within(section).getByRole("button", { name: "Download CSV" }));
-    const [, csvRows] = download.mock.calls[0];
-    expect(csvRows).toContainEqual(["rows_shown", "1", "rows_total", "600"]);
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Download CSV" }));
+    expect(download).toHaveBeenCalledTimes(2);
+    for (const [, csvRows] of download.mock.calls) {
+      expect(csvRows).toContainEqual(["rows_shown", "1", "rows_total", "600"]);
+    }
   });
 
   it("says nothing about coverage when every route is listed", () => {
