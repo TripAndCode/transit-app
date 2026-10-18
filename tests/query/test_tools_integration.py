@@ -6,6 +6,7 @@ import pytest
 from api.range import RangeCtx
 from pipeline.query.tools import _is_route_registered, dispatch
 from tests.conftest import _test_pool
+from tests.query.test_tool_queries import jst_midday
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -465,7 +466,7 @@ async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_cli
     registered-by-observation route must return a table flagging the
     stop-to-stop segment where delay is systematically ADDED (it answers:
     is the timetable itself too tight?)."""
-    now = datetime.now(timezone.utc)
+    start = jst_midday()  # the tool pairs a trip's stops within one service date
     for i in range(6):
         trip = f"trip_grow_{i}"
         await aconn.execute(
@@ -477,15 +478,15 @@ async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_cli
             "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
             aagency_id,
             f"pb_grow_a_{i}",
-            now + timedelta(minutes=i),
+            start + timedelta(minutes=i),
             trip,
             f"pb_grow_b_{i}",
-            now + timedelta(minutes=i, seconds=30),
+            start + timedelta(minutes=i, seconds=30),
         )
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
-    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    ctx = RangeCtx(from_date=(start.date() - timedelta(days=1)), to_date=(start.date() + timedelta(days=1)))
     result = await dispatch(
         "schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
     )

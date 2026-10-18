@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 
 from api.range import jst_today
+from pipeline.service_day import service_date_of
 from tests.query.test_tool_queries import jst_midday
 
 JST = timezone(timedelta(hours=9))
@@ -27,5 +28,6 @@ def test_a_fixtures_worth_of_offsets_cannot_cross_the_boundary():
     edge, which is what made the wall-clock version fragile."""
     anchor = jst_midday()
     for minutes in (-120, -60, -1, 0, 1, 60, 120):
-        shifted = (anchor + timedelta(minutes=minutes)).astimezone(JST).date()
-        assert shifted == jst_today(), f"{minutes:+} min crosses the JST day boundary"
+        shifted = anchor + timedelta(minutes=minutes)
+        assert shifted.astimezone(JST).date() == jst_today(), f"{minutes:+} min crosses the JST day boundary"
+        assert service_date_of(shifted) == service_date_of(anchor), f"{minutes:+} min crosses the service-day cutover"
