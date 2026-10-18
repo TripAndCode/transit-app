@@ -30,6 +30,7 @@ vi.mock("../api/auth", () => ({
 const mockApiGet = vi.fn().mockResolvedValue([]);
 vi.mock("../api/client", () => ({
   apiGet: (...args: unknown[]) => mockApiGet(...args),
+  apiUrl: (path: string) => `https://api.example.test${path}`,
 }));
 
 function renderAccount() {
@@ -44,6 +45,13 @@ function renderAccount() {
     </I18nextProvider>
   );
 }
+
+describe("AccountPage data export", () => {
+  it("downloads the account's data from the API's origin", () => {
+    renderAccount();
+    expect(screen.getByRole("link", { name: "Download my data" })).toHaveAttribute("href", "https://api.example.test/api/me/export");
+  });
+});
 
 describe("AccountPage logout", () => {
   beforeEach(() => {

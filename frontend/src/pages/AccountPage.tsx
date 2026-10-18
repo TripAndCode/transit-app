@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
-import { ApiError, apiDelete, apiErrorDetail, apiGet, apiPut } from "../api/client";
+import { ApiError, apiDelete, apiErrorDetail, apiGet, apiPut, apiUrl } from "../api/client";
 import { formatDateTime } from "../utils/format";
 import { describeUserAgent } from "../utils/userAgent";
 import { useAgencies } from "../api/hooks";
@@ -133,7 +133,7 @@ function DataSection() {
   return (
     <Section title={t("account.data.title")} description={t("account.data.description")}>
       <Toolbar>
-        <a href="/api/me/export" download>
+        <a href={apiUrl("/api/me/export")} download>
           {t("account.data.export")}
         </a>
       </Toolbar>
