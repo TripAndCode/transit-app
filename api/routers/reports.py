@@ -1038,7 +1038,10 @@ async def get_report(
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
-        rows, rows_total = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
+        # The CSV is Japanese-only, its actual_time day marker included.
+        rows, rows_total = await compute_delay_certificate(
+            agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n, locale="ja" if format == "csv" else locale
+        )
         text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale)
         if format == "csv":
             # Japanese-only preamble, matching council_summary's CSV branch

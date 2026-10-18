@@ -31,3 +31,8 @@ def test_shift_time_str_crossing_midnight_backward_gets_day_marker():
 
 def test_shift_time_str_no_shift_at_all_has_no_day_marker():
     assert shift_time_str("12:00:00", 0) == "12:00:00"
+
+
+def test_shift_time_str_names_the_day_marker_in_english():
+    assert shift_time_str("23:50:00", 1200, locale="en") == "00:10:00 (+1 day)"
+    assert shift_time_str("00:05:00", -600, locale="en") == "23:55:00 (-1 day)"
