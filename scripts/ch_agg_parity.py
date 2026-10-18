@@ -87,13 +87,11 @@ def whole_history_current(stored: dict, live: dict) -> bool:
     return stored == live
 
 
-def differences(ch_rows, pg_rows, dates) -> tuple[list, list]:
-    """Rows only ClickHouse has and rows only Postgres has, on *dates*.
-
-    Every row's second column is its date, as in ch_aggregates.COLUMNS.
-    """
-    ch = {tuple(map(normalized, row)) for row in ch_rows if row[1] in dates}
-    pg = {tuple(map(normalized, row)) for row in pg_rows if row[1] in dates}
+def differences(ch_rows, pg_rows, dates, *, date_at: int) -> tuple[list, list]:
+    """Rows only ClickHouse has and rows only Postgres has, on *dates*; each
+    row's date is its column *date_at*."""
+    ch = {tuple(map(normalized, row)) for row in ch_rows if row[date_at] in dates}
+    pg = {tuple(map(normalized, row)) for row in pg_rows if row[date_at] in dates}
     return sorted(ch - pg, key=str), sorted(pg - ch, key=str)
 
 
@@ -136,12 +134,13 @@ def parity(ch, conn, agency_id: int) -> int:
         if table in skipped:
             continue
         compared = 0
+        date_at = ch_aggregates.COLUMNS[table].index("date")
         for month in ch_aggregates.months_of(dates):
             sql, params = ch_aggregates.select_sql(table, month)
             ch_rows = ch.query(sql, parameters={"agency_id": agency_id, **params}).result_rows
             pg_rows = _pg_month(conn, table, agency_id, month)
-            only_ch, only_pg = differences(ch_rows, pg_rows, dates)
-            compared += sum(1 for row in pg_rows if row[1] in dates)
+            only_ch, only_pg = differences(ch_rows, pg_rows, dates, date_at=date_at)
+            compared += sum(1 for row in pg_rows if row[date_at] in dates)
             for label, rows in (("only in ClickHouse", only_ch), ("only in Postgres", only_pg)):
                 for row in rows[:5]:
                     print(f"  {table} {month} {label}: {row}")
