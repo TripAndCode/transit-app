@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
-import { useAgencies, useReport } from "../api/hooks";
+import { REPORT_ROWS_MAX, useAgencies, useReport } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useUrlState } from "../api/useUrlState";
@@ -15,6 +15,7 @@ import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/cs
 import { ExportMenu } from "../components/ExportMenu";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
 import { PeriodChart } from "../components/analysis/PeriodChart";
+import { RowsShown } from "../components/analysis/RankingCoverage";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
@@ -40,6 +41,9 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
   { header: "observations", value: (r) => r[5] },
 ];
 
+/** The API's longest ranking, so a summary meant to be printed or exported is not cut at the default first page. */
+const RANKING_OPTIONS = { limit: REPORT_ROWS_MAX };
+
 export function ReportsHomeTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
@@ -49,7 +53,7 @@ export function ReportsHomeTab() {
   const savedTab = doc === "saved";
   const navigate = useNavigate();
   const trend = useReport(id, savedTab ? null : "trend", ctx);
-  const ranking = useReport(id, savedTab ? null : "ranking", ctx);
+  const ranking = useReport(id, savedTab ? null : "ranking", ctx, RANKING_OPTIONS);
   const agencies = useAgencies();
   const names = useRouteNames(id);
   const [saved, setSaved] = useState(readAnalyses);
@@ -59,6 +63,9 @@ export function ReportsHomeTab() {
   const trendPayload = trend.data?.report_type === "trend" ? trend.data.rows[0] : undefined;
   const days = (trendPayload?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
   const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
+  const rowsTotal = ranking.data?.rows_total ?? null;
+  const truncated = rowsTotal != null && rowsTotal > rows.length;
+  const coverageCsv = truncated ? [["rows_shown", String(rows.length), "rows_total", String(rowsTotal)]] : [];
   const queryString = scopeToQueryString(ctx);
   const chartWrapRef = useRef<HTMLDivElement>(null);
   // Shared by both the trend and ranking EmptyStates below -- same ctx, same
@@ -81,7 +88,7 @@ export function ReportsHomeTab() {
           rows: days,
           columns: daysColumns,
           ctx,
-          extraRows: [[], ...buildCsv(rows, rankingColumns)],
+          extraRows: [[], ...coverageCsv, ...buildCsv(rows, rankingColumns)],
         }}
       />
     </div>}
@@ -104,7 +111,7 @@ export function ReportsHomeTab() {
         {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { range: formatDateRange(days[0]?.date ?? "", days.at(-1)?.date ?? "") })}</p><div ref={chartWrapRef} className="focus-chart-scroll"><PeriodChart days={days} /></div></>}
       </AsyncSection></section>
       <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
-        ["definition", JSON.stringify(ranking.data?.definition)], [], ...buildCsv(rows, rankingColumns, ctx),
+        ["definition", JSON.stringify(ranking.data?.definition)], ...coverageCsv, [], ...buildCsv(rows, rankingColumns, ctx),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
@@ -113,6 +120,7 @@ export function ReportsHomeTab() {
           </td></tr>)}
         </tbody></table></div>}
       </AsyncSection>
+      {truncated && <RowsShown shown={rows.length} total={rowsTotal} />}
       {ranking.data?.reliable_min_samples != null && <p className="focus-muted">{t("routesFloor", { floor: ranking.data.reliable_min_samples })}</p>}
       </section>
       <p className="focus-muted">{t("reportNote")}</p>

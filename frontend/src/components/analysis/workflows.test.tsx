@@ -57,6 +57,7 @@ vi.mock("../../api/auth", async (importOriginal) => ({
   useSession: () => ({ data: null, isPending: false }),
 }));
 vi.mock("../../api/hooks", () => ({
+  REPORT_ROWS_MAX: 500,
   useRoutes: () => ({ data: [
     { route_id: "a", route_code: "101", route_long_name: "Coast", route_short_name: "1", trip_headsigns: [] },
     { route_id: "b", route_code: "999", route_long_name: "Coast", route_short_name: "9", trip_headsigns: [] },
