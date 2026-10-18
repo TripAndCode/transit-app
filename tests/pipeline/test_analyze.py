@@ -1,10 +1,11 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
 from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.strategies._time import parse_departure_time
 from tests.conftest import mirror_updates_to_ch
 
 
@@ -1163,6 +1164,7 @@ def _ch_headway_row(
     *,
     stop_id,
     scheduled_time="08:00:00",
+    scheduled_sec=None,
     dep_delay=0,
     file_name="f.pb",
     route_code="R1",
@@ -1170,7 +1172,10 @@ def _ch_headway_row(
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields agg_route_headway_daily reads
-    populated."""
+    populated. `scheduled_sec` follows `scheduled_time` as static_join writes it,
+    unless given: an extended-hour departure carries it alone."""
+    if scheduled_sec is None and scheduled_time is not None:
+        scheduled_sec = parse_departure_time(scheduled_time)[2]
     return (
         file_name,
         captured_at,
@@ -1185,6 +1190,7 @@ def _ch_headway_row(
         None,  # schedule_relationship_trip
         None,  # schedule_relationship_stop
         None,  # feed_timestamp
+        scheduled_sec,
     )
 
 
@@ -1255,6 +1261,64 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     # No static schedule seeded for R1 in this fixture -> no scheduled
     # median to compare against -> nothing is countable as "long" yet.
     assert long_gap_count == 0
+
+
+def _actual_headway_row(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
+            "WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        return cur.fetchone()
+
+
+def test_analyze_reconstructs_actual_headway_from_extended_hour_departures(pg_conn, agency_id, ch_client):
+    """GTFS writes a departure after midnight as 24:30:00. static_join stores
+    that in scheduled_sec alone, with scheduled_time NULL; the late-night gaps
+    still count, as they do on the scheduled side."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    night = datetime(2026, 4, 1, 15, 40, tzinfo=timezone.utc)  # 00:40 JST, still the 1 April service day
+    rows = [
+        _ch_headway_row("T1", night, stop_id="s1", scheduled_time=None, scheduled_sec=88200, file_name="a.pb"),
+        _ch_headway_row("T2", night, stop_id="s1", scheduled_time=None, scheduled_sec=88680, file_name="b.pb"),
+        _ch_headway_row("T3", night, stop_id="s1", scheduled_time=None, scheduled_sec=89160, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 2
+    assert abs(median_sec - 480) <= 1
+
+
+def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is_implausible(
+    pg_conn, agency_id, ch_client
+):
+    """A frozen-feed spike in an event's latest poll is dropped before the
+    latest-observation-wins dedup, as build_dedup_ch_sql drops it, so the event
+    keeps its last plausible estimate instead of vanishing and merging its two
+    neighbouring gaps into one."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
+        _ch_headway_row(
+            "T2", day + timedelta(minutes=1), stop_id="s1", scheduled_time="08:08:00", dep_delay=9000, file_name="c.pb"
+        ),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:00", file_name="d.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 2
+    assert abs(median_sec - 480) <= 1
 
 
 def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
