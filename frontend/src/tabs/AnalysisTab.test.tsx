@@ -236,6 +236,18 @@ describe("AnalysisTab", () => {
     expect(screen.getByText("No matching data")).toBeInTheDocument();
   });
 
+  it("downloads a report's CSV from the API's origin", () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test");
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("ranking")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const ranking = { ...reportResponse("ranking"), rows: [["39061", "平日", 5.2, 3.1, 8.4, 120]] } as ReportResponse; // i18n-ignore: GTFS service name
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: ranking, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/rider?report=ranking");
+    const csvLink = screen.getAllByRole("link").find((a) => a.getAttribute("href")?.includes("format=csv"));
+    expect(csvLink?.getAttribute("href")).toMatch(/^https:\/\/api\.example\.test\/api\/1\/reports\/ranking\?/);
+    vi.unstubAllEnvs();
+  });
+
   it("keeps a report's raw rows for admins, out of everyone else's way", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("ranking")], isLoading: false, error: null, refetch: vi.fn() } as never);

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiGetOrNull, apiPost } from "./client";
+import { apiGetOrNull, apiPost, apiUrl } from "./client";
 
 type Identity = { provider: "google" | "github"; email_at_link: string | null };
 
@@ -44,5 +44,5 @@ export function loginUrl(
   provider: "google" | "github",
   next: string = window.location.pathname + window.location.search + window.location.hash,
 ) {
-  return `/api/auth/${provider}/login?next=${encodeURIComponent(next)}`;
+  return apiUrl(`/api/auth/${provider}/login?next=${encodeURIComponent(next)}`);
 }

@@ -1,6 +1,11 @@
 import i18n from "../i18n";
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+/** `path` on the API's origin, which VITE_API_BASE_URL names when the API and the SPA are
+ *  served from different origins. Every URL the browser fetches or navigates to on the API
+ *  goes through it: a bare "/api/..." href resolves against the SPA's origin instead. */
+export function apiUrl(path: string): string {
+  return `${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -236,5 +241,5 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   };
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
-  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include", signal });
+  return fetch(apiUrl(path), { ...init, headers, credentials: "include", signal });
 }
