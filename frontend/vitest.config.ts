@@ -1,25 +1,12 @@
-import { realpathSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { fileURLToPath } from "node:url";
-import { searchForWorkspaceRoot } from "vite";
 import { defineConfig } from "vitest/config";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
+import { servedRoots } from "./scripts/servedRoots.mjs";
 
 export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
-  server: {
-    fs: {
-      // A worktree may link another checkout's node_modules (the push gate links
-      // the main checkout's into one that has none). A `?url` import resolves to
-      // the link's real path, outside this workspace, and Vite refuses to serve
-      // it unless that path is allowed too.
-      allow: [
-        searchForWorkspaceRoot(process.cwd()),
-        realpathSync(fileURLToPath(new URL("./node_modules", import.meta.url))),
-      ],
-    },
-  },
+  server: { fs: { allow: servedRoots() } },
   test: {
     environment: "jsdom",
     globals: true,
