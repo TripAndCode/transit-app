@@ -120,7 +120,10 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
             "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
             "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
             "AND service_date > now()::date AND service_date <= now()::date + $3::int "
-            "AND origin_date >= now()::date - $4::int",
+            "AND origin_date >= now()::date - $4::int "
+            # A run starting after midnight of its service day keeps an hour of
+            # 24 or more. No band covers it, and the baseline leaves it out too.
+            "AND hour < 24",
             agency_id,
             route_code,
             _ML_HORIZON_DAYS,
