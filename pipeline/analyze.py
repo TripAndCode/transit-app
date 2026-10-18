@@ -1498,7 +1498,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # scheduled_sec, not scheduled_time, is the departure: static_join
             # writes both, but leaves scheduled_time NULL for an extended-hour
             # GTFS departure (24:30:00 is 88200 here), which the scheduled side
-            # counts through hms_to_sec_sql. The filters are on `u.` columns
+            # counts through hms_to_sec_sql. It comes from the same latest poll
+            # as dep_delay: a static reload can move an event's schedule between
+            # polls, and this key, unlike build_dedup_ch_sql's, does not split
+            # them. The filters are on `u.` columns
             # because an unqualified name matching a SELECT alias in WHERE is
             # replaced by that alias's aggregate (see build_dedup_ch_sql).
             ch_headway = _ch_query(
@@ -1511,7 +1514,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                           any(u.scheduled_sec) AS scheduled_sec
+                           argMax(u.scheduled_sec, (u.captured_at, u.file_name)) AS scheduled_sec
                     FROM updates AS u
                     WHERE u.agency_id = {agency_id:UInt16}
                       AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL

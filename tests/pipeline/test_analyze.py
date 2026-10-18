@@ -1321,6 +1321,31 @@ def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is
     assert abs(median_sec - 480) <= 1
 
 
+def test_analyze_reconstructs_actual_headway_takes_the_schedule_from_the_latest_poll(pg_conn, agency_id, ch_client):
+    """A static reload can move an event's scheduled departure between two of
+    its polls. The event's time pairs the latest poll's delay with that same
+    poll's schedule, never an older one."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
+        _ch_headway_row("T2", day + timedelta(minutes=1), stop_id="s1", scheduled_time="08:10:00", file_name="c.pb"),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:00", file_name="d.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_sumsq_sec2 FROM agg_route_headway_daily WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        (sumsq_sec2,) = cur.fetchone()
+    # 08:00 -> 08:10 -> 08:16 is 600s then 360s; the older 08:08 would give 480s twice.
+    assert sumsq_sec2 == 600**2 + 360**2
+
+
 def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
     """A looping/branching route can visit the same physical stop_id twice
     within one trip, at two different stop_sequence values. The per-event
@@ -1364,13 +1389,7 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
-            "WHERE agency_id = %s AND route_code = 'R1'",
-            (agency_id,),
-        )
-        row = cur.fetchone()
+    row = _actual_headway_row(pg_conn, agency_id)
     assert row is not None
     median_sec, samples = row
     # 3 distinct events (08:00, 08:10, 08:20) -> 2 consecutive gaps. A buggy
