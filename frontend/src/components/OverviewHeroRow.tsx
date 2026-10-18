@@ -12,7 +12,7 @@ import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
-import { EM_DASH, formatDateRange, formatHourRange, formatReportTime } from "../utils/format";
+import { EM_DASH, fixedTenth, formatDateRange, formatHourRange, formatReportTime } from "../utils/format";
 
 /** A hero fact row, named for the card that explains it. */
 export type HeroFact = "peak_hour" | "concentration" | "late_routes";
@@ -169,12 +169,12 @@ export function OverviewHeroRow({
             {t("overview.hero_row.avg_delay_label", { range })}
           </div>
           <div className="ov-kpi-value num">
-            {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
+            {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
             <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
           </div>
           {sparklineMean != null && (
             <div className="ov-hero-baseline">
-              {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
+              {t("overview.hero_row.sparkline_baseline", { value: fixedTenth(sparklineMean) })}
             </div>
           )}
           <div className="ov-hero-feed">

@@ -1,4 +1,5 @@
 import { HEAT_RAMP, delayRampVar } from "../../styles/tokens";
+import { fixedTenth } from "../../utils/format";
 
 export const RIBBON_W = 960;
 export const RIBBON_H = 160;
@@ -22,9 +23,9 @@ export function pulsePaths(byHour: readonly (number | null)[]): PulsePaths {
   const maxMin = HEAT_RAMP.maxMin;
   // Clamped to the ramp's ceiling: a 9-minute hour is still "the top".
   const yOf = (v: number) =>
-    (RIBBON_H - PAD_BOTTOM - (Math.min(Math.max(v, 0), maxMin) / maxMin) * (RIBBON_H - PAD_TOP - PAD_BOTTOM)).toFixed(1);
+    fixedTenth((RIBBON_H - PAD_BOTTOM - (Math.min(Math.max(v, 0), maxMin) / maxMin) * (RIBBON_H - PAD_TOP - PAD_BOTTOM)));
   // Whole numbers print bare ("0", "960"), the rest to one decimal.
-  const xOf = (i: number) => ((i / n) * RIBBON_W).toFixed(1).replace(/\.0$/, "");
+  const xOf = (i: number) => fixedTenth(((i / n) * RIBBON_W)).replace(/\.0$/, "");
   const line: string[] = [];
   const area: string[] = [`M0,${RIBBON_H}`];
   let pen = false;

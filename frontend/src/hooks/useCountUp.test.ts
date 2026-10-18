@@ -101,6 +101,17 @@ describe("useCountUp", () => {
     expect(result.current).toBe(10);
   });
 
+  it("settles a negative half on the tenth every other delay figure rounds it to", () => {
+    const raf = mockRaf();
+    const { result, rerender } = renderHook(({ value }) => useCountUp(value, { duration: 600, decimals: 1 }), {
+      initialProps: { value: 0 },
+    });
+    rerender({ value: -1.25 });
+    raf.flush(0);
+    raf.flush(600);
+    expect(result.current).toBe(-1.3);
+  });
+
   it("continues from where it was when the value changes mid-tween, never falling back", () => {
     // A refetch or an agency switch can land inside a running tween. The
     // next tween has to start from the figure on screen; starting from the

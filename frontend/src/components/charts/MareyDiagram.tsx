@@ -4,7 +4,7 @@ import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import "../../styles/scrubber.css";
-import { formatDate } from "../../utils/format";
+import { fixedTenth, formatDate } from "../../utils/format";
 import { StopRibbon } from "./StopRibbon";
 import { defaultScrubSec, positionsAt, scrubBounds, tripsCrossing } from "./mareyScrub";
 import {
@@ -66,7 +66,7 @@ function tripRow(trip: RouteTrip, axis: MareyStop[]): TripRow {
     departure: departure == null ? NO_VALUE : formatClock(departure),
     firstStop: names[0] ?? NO_VALUE,
     lastStop: names.length > 0 ? names[names.length - 1] : NO_VALUE,
-    delayMin: terminal == null ? NO_VALUE : (terminal / 60).toFixed(1),
+    delayMin: terminal == null ? NO_VALUE : fixedTenth((terminal / 60)),
   };
 }
 
@@ -75,7 +75,7 @@ function tripSummary(trip: RouteTrip, t: (key: string) => string): string {
   const terminal = tripTerminalDelay(trip);
   return (
     `${t("mareyDeparture")} ${departure == null ? NO_VALUE : formatClock(departure)} · ` +
-    `${t("mareyTerminal")} ${terminal == null ? NO_VALUE : (terminal / 60).toFixed(1)} ${t("minutes")}`
+    `${t("mareyTerminal")} ${terminal == null ? NO_VALUE : fixedTenth((terminal / 60))} ${t("minutes")}`
   );
 }
 

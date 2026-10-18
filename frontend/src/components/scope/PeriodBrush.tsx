@@ -2,7 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "
 import { useTranslation } from "react-i18next";
 import type { ScopeSummary } from "../../api/types";
 import { delayRampVar } from "../../styles/tokens";
-import { formatDate } from "../../utils/format";
+import { fixedTenth, formatDate } from "../../utils/format";
 import { calendarDays, dayIndexAt, rangeFrom } from "./brushMath";
 
 const DAY_W = 8;
@@ -199,7 +199,7 @@ export function PeriodBrush({
                 height={h}
                 fill={delayRampVar(day.avg_min)}
               >
-                <title>{`${md(date)} · ${t("scope.control.mean_min", { n: day.avg_min.toFixed(1) })}`}</title>
+                <title>{`${md(date)} · ${t("scope.control.mean_min", { n: fixedTenth(day.avg_min) })}`}</title>
               </rect>
             );
           })}

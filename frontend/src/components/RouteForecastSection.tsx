@@ -31,7 +31,7 @@ import { onActivateKey } from "../utils/a11y";
 import { useRovingCells } from "../hooks/useRovingCells";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
-import { formatNumber, formatMinutes } from "../utils/format";
+import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { avgDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
@@ -133,7 +133,7 @@ function RankedRoutes({
             <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showEndDot={false} />
           </span>
           <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
-            {r.expected_avg_min.toFixed(1)}
+            {fixedTenth(r.expected_avg_min)}
             {axisMin}
           </b>
         </div>
@@ -442,7 +442,7 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
       grid.push({
         dow,
         band,
-        expected_avg_min: mlMean != null ? Math.round(mlMean * 10) / 10 : a && n ? Math.round((a.sum / n) * 10) / 10 : null,
+        expected_avg_min: mlMean != null ? roundTenth(mlMean) : a && n ? roundTenth(a.sum / n) : null,
         samples: n,
         low_confidence: mlMean != null ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
         source: mlMean != null ? "ml" : "baseline",

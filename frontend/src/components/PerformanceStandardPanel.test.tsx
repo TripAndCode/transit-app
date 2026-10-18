@@ -70,6 +70,31 @@ describe("PerformanceStandardPanel", () => {
     expect(screen.getByText("−500.0")).toBeInTheDocument(); // R200 deduction estimate
   });
 
+  it("prints an estimate that rounds to zero without a minus sign", () => {
+    mockRoutes();
+    mockPerformanceStandards({
+      data: {
+        rows: [
+          {
+            route_code: "100",
+            metric_type: "ewt_sec",
+            metric_scope: "route",
+            threshold_value: 50,
+            bonus_malus_rate: 1000,
+            actual_value: 50.00002,
+            achievement_rate: 0.99999,
+            estimated_bonus_deduction: -0.04,
+          },
+        ],
+        ctx: CTX,
+        disclaimer: "simulation",
+      },
+    });
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("0.0")).toBeInTheDocument();
+    expect(screen.queryByText("−0.0")).toBeNull();
+  });
+
   it("labels an agency-scoped row instead of implying a route-specific figure", () => {
     mockRoutes();
     mockPerformanceStandards({

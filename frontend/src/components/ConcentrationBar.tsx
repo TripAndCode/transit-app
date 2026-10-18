@@ -7,6 +7,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
 import { RouteLabel } from "./RouteLabel";
 import { CONCENTRATION_TOP_N } from "./overview/concentrationTopN";
+import { fixedTenth } from "../utils/format";
 
 type Props = {
   concentration: OverviewConcentration;
@@ -144,7 +145,7 @@ export function ConcentrationBar({
                 } as CSSProperties}
               />
             </div>
-            <div className="ov-pareto-pct num">{r.share_pct.toFixed(1)}%</div>
+            <div className="ov-pareto-pct num">{fixedTenth(r.share_pct)}%</div>
           </div>
         );
       })}
@@ -152,7 +153,7 @@ export function ConcentrationBar({
         <p className="ov-pareto-rest">
           {t("overview.concentration_rest", {
             count: restCount,
-            rest: restSharePct.toFixed(1),
+            rest: fixedTenth(restSharePct),
           })}
         </p>
       )}
@@ -223,7 +224,7 @@ function buildLorenzCurve(
   // Y axis is inverted: 100% at top, 0% at bottom.
   const toY = (yp: number) => LZ_PAD_TOP + (1 - yp / 100) * innerH;
   const pathStr = xs
-    .map((xp, i) => `${i === 0 ? "M" : "L"} ${toX(xp).toFixed(1)},${toY(ys[i]).toFixed(1)}`)
+    .map((xp, i) => `${i === 0 ? "M" : "L"} ${fixedTenth(toX(xp))},${fixedTenth(toY(ys[i]))}`)
     .join(" ");
 
   // "top 20% of routes carry X% of delay" — read the curve at x=80%

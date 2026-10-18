@@ -14,6 +14,7 @@ import { RailTooltip } from "./RailTooltip";
 import { RAIL_STOPS, railPlace } from "./railStops";
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
 import "./sidebarLineMap.css";
+import { fixedTenth } from "../utils/format";
 
 const chordFor = (to: string) => GO_TO_TARGETS.find((target) => target.to === to)?.chordKey;
 
@@ -58,7 +59,7 @@ export function SidebarLineMap({
   const meanMinutes = todayMeanMinutes(today?.routes);
   const unusual = unusualRouteCount(today?.routes);
   const figures: Partial<Record<Destination, string>> = {
-    pulse: meanMinutes == null ? undefined : t("nav.station_figure_mean", { delay: t("common.minutes_value", { value: meanMinutes.toFixed(1) }) }),
+    pulse: meanMinutes == null ? undefined : t("nav.station_figure_mean", { delay: t("common.minutes_value", { value: fixedTenth(meanMinutes) }) }),
     live: unusual > 0 ? t("nav.station_figure_unusual", { n: unusual }) : undefined,
   };
 
