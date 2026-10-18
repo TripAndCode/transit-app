@@ -60,6 +60,37 @@ HIGH_FREQUENCY_HEADWAY_SEC = 12 * 60
 LONG_GAP_MULTIPLIER = 1.75
 
 
+def dominant_service_ctes(agency: str) -> str:
+    """CTEs naming each route's dominant service: the static service_id running
+    the most of its trips, the lowest service_id on a tie.
+
+    The scheduled headway is read from that service alone, so a comparison of
+    actual days with it must know which service it is. *agency* is the query's
+    own placeholder for the agency id. Defines route_map, trips_with_route,
+    service_trip_counts and dominant_service, each keyed by route_code.
+    """
+    return f"""route_map AS (
+                    SELECT route_id, regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code
+                    FROM static_routes WHERE agency_id = {agency}
+                ),
+                trips_with_route AS (
+                    SELECT t.trip_id, t.service_id, rm.route_code
+                    FROM static_trips t
+                    JOIN route_map rm ON rm.route_id = t.route_id
+                    WHERE t.agency_id = {agency}
+                ),
+                service_trip_counts AS (
+                    SELECT route_code, service_id, COUNT(DISTINCT trip_id) AS trip_count
+                    FROM trips_with_route
+                    GROUP BY route_code, service_id
+                ),
+                dominant_service AS (
+                    SELECT DISTINCT ON (route_code) route_code, service_id
+                    FROM service_trip_counts
+                    ORDER BY route_code, trip_count DESC, service_id
+                )"""
+
+
 def reconstruct_headways(event_times_sec: Sequence[float]) -> list[float]:
     """Return the consecutive gaps between sorted *event_times_sec*.
 

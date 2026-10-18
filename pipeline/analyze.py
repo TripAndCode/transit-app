@@ -87,7 +87,7 @@ from pipeline import ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
-from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, reconstruct_headways
+from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, dominant_service_ctes, reconstruct_headways
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.locks import agency_ingest_lock
 from pipeline.service_day import service_date_ch
@@ -1151,26 +1151,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # of static times).
             hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
             sql = f"""
-                WITH route_map AS (
-                    SELECT route_id, regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code
-                    FROM static_routes WHERE agency_id = %(agency_id)s
-                ),
-                trips_with_route AS (
-                    SELECT t.trip_id, t.service_id, rm.route_code
-                    FROM static_trips t
-                    JOIN route_map rm ON rm.route_id = t.route_id
-                    WHERE t.agency_id = %(agency_id)s
-                ),
-                service_trip_counts AS (
-                    SELECT route_code, service_id, COUNT(DISTINCT trip_id) AS trip_count
-                    FROM trips_with_route
-                    GROUP BY route_code, service_id
-                ),
-                dominant_service AS (
-                    SELECT DISTINCT ON (route_code) route_code, service_id
-                    FROM service_trip_counts
-                    ORDER BY route_code, trip_count DESC, service_id
-                ),
+                WITH {dominant_service_ctes("%(agency_id)s")},
                 scheduled_departures AS (
                     SELECT twr.route_code, sst.stop_id,
                         {hms_to_sec_sql("sst.departure_time")} AS dep_sec

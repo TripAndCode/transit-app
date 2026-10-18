@@ -18,6 +18,7 @@ import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber, fmtRatioPct } from "../utils/format";
+import { DAY_TYPE_KEY } from "./dayTypeKey";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -42,7 +43,17 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       {isLoading && <Skeleton height={80} />}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && data.rows.length === 0 && (
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{t("reports.headway_quality.empty")}</p>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+          {t((data.routes_off_timetable ?? 0) > 0 ? "reports.headway_quality.empty_off_timetable" : "reports.headway_quality.empty")}
+        </p>
+      )}
+      {data && data.rows.some((r) => r.day_type) && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>{t("reports.headway_quality.day_type_note")}</p>
+      )}
+      {data && data.rows.length > 0 && (data.routes_off_timetable ?? 0) > 0 && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.some_off_timetable", { count: data.routes_off_timetable })}
+        </p>
       )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
@@ -59,7 +70,12 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
             <tbody>
               {data.rows.map((r) => (
                 <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
+                  <td style={{ ...td(), fontWeight: 500 }}>
+                    <RouteLabel code={r.route_code} names={routeNames} compact />
+                    {r.day_type && (
+                      <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
+                    )}
+                  </td>
                   <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
                   <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
                   <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>

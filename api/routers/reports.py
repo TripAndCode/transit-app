@@ -24,6 +24,7 @@ from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_loc
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
+from pipeline.day_types import DayType
 from pipeline.flags import aflag
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
@@ -45,7 +46,7 @@ from pipeline.reports import (
     compute_delay_certificate,
     compute_dow_ranking,
     compute_dwell_run_decomposition,
-    compute_headway_quality,
+    compute_headway_quality_report,
     compute_hourly_heatmap,
     compute_on_time,
     compute_performance_standards,
@@ -258,8 +259,8 @@ async def list_reports(
 
 class HeadwayQualityRow(BaseModel):
     """One high-frequency route's pooled Excess Waiting Time / coefficient of
-    variation / long-gap rate over the request's range — see
-    ``pipeline.reports.headway_quality.compute_headway_quality``.
+    variation / long-gap rate over the request's range, on the days of its
+    ``day_type`` — see ``pipeline.reports.headway_quality.compute_headway_quality_report``.
 
     ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
     nullable together: a route can appear here (it's classified
@@ -275,6 +276,8 @@ class HeadwayQualityRow(BaseModel):
     cov: float | None
     long_gap_rate: float | None
     samples: int
+    # The class of day pooled (the route's dominant timetable's), or None for every day.
+    day_type: DayType | None = None
 
 
 class HeadwayQualityResponse(BaseModel):
@@ -283,6 +286,8 @@ class HeadwayQualityResponse(BaseModel):
     (not instead of) the ``on_time`` report for the same range."""
 
     rows: list[HeadwayQualityRow]
+    # High-frequency routes with data in range, none of it on a day of their class.
+    routes_off_timetable: int = 0
     ctx: ReportCtx
     scope_applied: dict[str, bool]
 
@@ -302,9 +307,12 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
-    rows = await compute_headway_quality(agency_id, ctx, conn)
+    rows, off_timetable = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
-        rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx), scope_applied=_HEADWAY_SCOPE
+        rows=[HeadwayQualityRow(**r) for r in rows],
+        routes_off_timetable=off_timetable,
+        ctx=_report_ctx(ctx),
+        scope_applied=_HEADWAY_SCOPE,
     )
 
 
