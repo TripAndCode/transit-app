@@ -11,7 +11,7 @@ import { sinceStart } from "./brushMath";
 import { PeriodBrush } from "./PeriodBrush";
 import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
-import { fixedTenth } from "../../utils/format";
+import { fixedTenth, roundTenth } from "../../utils/format";
 
 export type ControlProps = {
   scope: Scope;
@@ -306,7 +306,7 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
           </div>
           <p className="scope-readout">
             {t("scope.control.readout", {
-              n: Math.round((value / 60) * 10) / 10,
+              n: roundTenth(value / 60),
               pct: Math.round(shareAt(summary.tolerance, value) ?? 0),
             })}
           </p>

@@ -14,9 +14,13 @@ import config from "../../eslint.config.js";
 describe("the toFixed(1) ban fires on what it names and nothing else", () => {
   const linter = new Linter({ configType: "flat" });
 
+  /** The rule ids of the messages this ban raised: no-restricted-syntax holds other selectors too. */
   function ruleIds(code: string): string[] {
     const messages = linter.verify(code, config, { filename: "src/__fixture__.ts" });
-    return messages.map((m) => m.ruleId).filter((id): id is string => id !== null);
+    return messages
+      .filter((m) => m.ruleId !== "no-restricted-syntax" || m.message.includes("fixedTenth"))
+      .map((m) => m.ruleId)
+      .filter((id): id is string => id !== null);
   }
 
   test.each([

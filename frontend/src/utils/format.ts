@@ -42,10 +42,11 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return format;
 }
 
-/** Round to one decimal. Derive a displayed sign from this value, not the raw one,
- *  so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
+/** Round to one decimal, a half away from zero as Intl and the API round, with zero
+ *  always positive. Derive a displayed sign from this value, not the raw one, so a
+ *  tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
 export function roundTenth(v: number): number {
-  return Math.round(v * 10) / 10;
+  return (Math.sign(v) * Math.round(Math.abs(v) * 10)) / 10 || 0;
 }
 
 /** `v` with one decimal, rounded first so a figure that rounds to zero prints "0.0", never "-0.0".
@@ -58,7 +59,8 @@ export function fixedTenth(v: number): string {
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
-  return numberFormat(opts).format(n);
+  // Intl prints a negative zero as "-0"; the API sends one for a figure that rounds to zero.
+  return numberFormat(opts).format(n === 0 ? 0 : n);
 }
 
 // Intl.DateTimeFormat renders a date-only string when given no component

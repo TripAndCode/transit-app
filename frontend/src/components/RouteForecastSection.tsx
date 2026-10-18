@@ -31,7 +31,7 @@ import { onActivateKey } from "../utils/a11y";
 import { useRovingCells } from "../hooks/useRovingCells";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
-import { fixedTenth, formatMinutes, formatNumber } from "../utils/format";
+import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { avgDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
@@ -442,7 +442,7 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
       grid.push({
         dow,
         band,
-        expected_avg_min: mlMean != null ? Math.round(mlMean * 10) / 10 : a && n ? Math.round((a.sum / n) * 10) / 10 : null,
+        expected_avg_min: mlMean != null ? roundTenth(mlMean) : a && n ? roundTenth(a.sum / n) : null,
         samples: n,
         low_confidence: mlMean != null ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
         source: mlMean != null ? "ml" : "baseline",

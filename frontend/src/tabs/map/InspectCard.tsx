@@ -5,7 +5,7 @@ import { InlineSparkline } from "../../components/InlineSparkline";
 import { Tooltip } from "../../components/Tooltip";
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
 import "./inspectCard.css";
-import { fixedTenth } from "../../utils/format";
+import { fixedTenth, roundTenth } from "../../utils/format";
 
 /** Mean delay in minutes for each hour the trip reported in, oldest first.
  *  Buckets on absolute hour boundaries rather than a parsed local hour, so
@@ -81,7 +81,7 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
   onUnpin: () => void;
   t: TFunction;
 }) {
-  const shownDelayMin = Math.round((trip.dep_delay / 60) * 10) / 10;
+  const shownDelayMin = roundTenth(trip.dep_delay / 60);
   const hourly = pinned ? hourlyDelayMinutes(progress) : [];
   const segment = pinned ? worstSegment(progress) : null;
 

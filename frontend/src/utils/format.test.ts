@@ -254,9 +254,21 @@ describe("fixedTenth", () => {
   it("prints one decimal with no negative zero for a figure that rounds to zero", () => {
     expect(fixedTenth(-0.04)).toBe("0.0");
     expect(fixedTenth(-2 / 60)).toBe("0.0");
-    expect(fixedTenth(-0.05)).toBe("0.0");
     expect(fixedTenth(-0.06)).toBe("-0.1");
-    expect(fixedTenth(1.25)).toBe("1.3");
     expect(fixedTenth(12)).toBe("12.0");
+  });
+
+  it("rounds a half away from zero on either side, as Intl and the API do", () => {
+    expect(fixedTenth(1.25)).toBe("1.3");
+    expect(fixedTenth(-1.25)).toBe("-1.3");
+    expect(fixedTenth(-0.05)).toBe("-0.1");
+    expect(roundTenth(-0.25)).toBe(-0.3);
+    expect(Object.is(roundTenth(-0.04), 0)).toBe(true);
+  });
+});
+
+describe("formatNumber", () => {
+  it("prints a negative zero as zero", () => {
+    expect(formatNumber(-0)).toBe("0");
   });
 });
