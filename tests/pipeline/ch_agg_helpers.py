@@ -27,6 +27,21 @@ def update_row(
     return (name, captured, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay)
 
 
+def seed_schedule(pg_conn, agency_id: int, trip_ids: list[str]) -> None:
+    """A static schedule visiting stop S1 at `update_row`'s default stop_sequence on each trip.
+
+    It is what makes analyze build the static-joined aggregates for the agency.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'S1')", (agency_id,))
+        for trip_id in trip_ids:
+            cur.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s, %s, 1, 'S1')",
+                (agency_id, trip_id),
+            )
+    pg_conn.commit()
+
+
 def work_tables(ch_client) -> list[str]:
     """Every aggregate work table in the test database."""
     rows = ch_client.query(

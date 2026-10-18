@@ -83,7 +83,6 @@ from statistics import median
 
 import psycopg2.extras
 
-from api.range import time_band_case_sql
 from pipeline import ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
@@ -800,9 +799,10 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
         bounds = [ch_aggregates.month_bounds(month) for month in months]
         where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
         params += [day for pair in bounds for day in pair]
+    first, second = ch_aggregates.sum_columns(table)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT count(*), coalesce(sum(samples), 0)::bigint, coalesce(sum(sum_delay_sec), 0)::bigint "
+            f"SELECT count(*), coalesce(sum({first}), 0)::bigint, coalesce(sum({second}), 0)::bigint "
             f"FROM {table} WHERE {where}",
             params,
         )
@@ -847,6 +847,41 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
             f"{table}: Postgres copy {actual} does not match ClickHouse {expected} for agency {agency_id}"
         )
     logger.info(f"  {table}: {copied} rows")
+
+
+def _has_stop_times(conn, agency_id: int) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT EXISTS (SELECT 1 FROM static_stop_times WHERE agency_id = %s)", (agency_id,))
+        return bool(cur.fetchone()[0])
+
+
+def _mirror_static_stop_times(agency_id: int, conn, ch_client, has_static: bool, fingerprint: str) -> None:
+    """Bring ClickHouse's copy of the agency's static_stop_times up to the Postgres one.
+
+    The copy records the fingerprint it was taken under. The fingerprint covers
+    static_stop_times, so a changed schedule always differs from the copy, and a
+    matching one is current: no row is read then. An agency without a schedule,
+    or whose schedule has no stop times, has no copy, which is what no copy reads
+    as.
+    """
+    wanted = fingerprint if has_static else None
+    mirrored = ch_aggregates.static_mirror_fingerprint(ch_client, agency_id)
+    if mirrored == wanted or (mirrored is None and not _has_stop_times(conn, agency_id)):
+        return
+    with _step("static_stop_times: mirror into ClickHouse"):
+        if not has_static:
+            ch_aggregates.replace_static_stop_times(ch_client, agency_id, [], fingerprint)
+            logger.info("  static_stop_times: no schedule; ClickHouse copy dropped")
+            return
+        with conn.cursor(name="static_stop_times_mirror") as cur:
+            cur.itersize = 50_000
+            cur.execute(
+                "SELECT agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time "
+                "FROM static_stop_times WHERE agency_id = %s",
+                (agency_id,),
+            )
+            copied = ch_aggregates.replace_static_stop_times(ch_client, agency_id, cur, fingerprint)
+    logger.info(f"  static_stop_times: {copied} rows mirrored into ClickHouse")
 
 
 def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> None:
@@ -1063,46 +1098,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
                 )
 
-        # The dedup load keeps rows with no route_code, because agg_stop_daily
-        # must keep a stop's traffic when the route is unknown. Each route-keyed
-        # builder filters `route_code IS NOT NULL` in its own CTE instead: a NULL
+        # The dedup load keeps rows with no route_code. Each route-keyed builder
+        # below filters `route_code IS NOT NULL` in its own query instead: a NULL
         # key would otherwise abort the whole-agency transaction.
-
-        # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
-        # Reads the deduped temp (one row per trip-stop event, latest estimate,
-        # already clamped via build_dedup_ch_sql) — NOT raw `updates`. So
-        # `samples` counts observations, not feed polls (a frozen/heavily-polled
-        # trip no longer inflates the count), and the per-stop mean matches the
-        # reports/route-summary surfaces, which read the same deduped set.
         if has_static:
-            # Same expr in SELECT and GROUP BY — one call keeps them in sync.
-            # Built UNTYPED like agg_route_stop_daily below: NULL service_type is
-            # kept as a '' sentinel (COALESCE), not filtered out, so a stop whose
-            # traffic is entirely NULL-service still shows on the default (no
-            # route filter) heatmap instead of silently reading as zero activity.
-            # COALESCE repeated in GROUP BY so the grouped column binds the
-            # sentinel, not the raw NULL.
-            band_case = time_band_case_sql("d.scheduled_time")
-            sql = f"""
-                WITH deduped AS (SELECT * FROM _analyze_deduped)
-                INSERT INTO agg_stop_daily
-                    (agency_id, stop_id, date, service_type, time_band, delay_sum, samples)
-                SELECT
-                    %(agency_id)s, sst.stop_id, d.date, COALESCE(d.service_type, ''),
-                    {band_case} AS time_band,
-                    SUM(d.dep_delay)::bigint, COUNT(*)
-                FROM deduped d
-                JOIN static_stop_times sst
-                  ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = d.trip_id
-                 AND sst.stop_sequence = d.stop_sequence
-                GROUP BY sst.stop_id, d.date, COALESCE(d.service_type, ''), {band_case}
-            """
-            with conn.cursor() as cur:
-                with _step("agg_stop_daily: build+insert"):
-                    cur.execute(sql, p)
-                logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
-
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
             # Needs a JOIN against Postgres static_stop_times, so — mirroring the
             # _analyze_deduped pattern — fetch the distinct raw keys from
@@ -1185,35 +1184,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     with _step("agg_stop_routes: build+insert"):
                         cur.execute(sql, p)
                     logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
-
-            # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
-            # Same deduped source as agg_stop_daily, plus route_code in the grain.
-            # Built UNTYPED: NULL service_type is kept as '' sentinel (reads the full
-            # deduped set, no service_type filter) so a route's NULL-service rows still
-            # show. COALESCE repeated in GROUP BY so the grouped column binds the
-            # sentinel, not the raw NULL.
-            band_case = time_band_case_sql("d.scheduled_time")
-            sql = f"""
-                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
-                INSERT INTO agg_route_stop_daily
-                    (agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples)
-                SELECT
-                    %(agency_id)s, d.route_code, sst.stop_id, d.date,
-                    COALESCE(d.service_type, '') AS service_type,
-                    {band_case} AS time_band,
-                    SUM(d.dep_delay)::bigint, COUNT(*)
-                FROM deduped d
-                JOIN static_stop_times sst
-                  ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = d.trip_id
-                 AND sst.stop_sequence = d.stop_sequence
-                GROUP BY d.route_code, sst.stop_id, d.date,
-                         COALESCE(d.service_type, ''), {band_case}
-            """
-            with conn.cursor() as cur:
-                with _step("agg_route_stop_daily: build+insert"):
-                    cur.execute(sql, p)
-                logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
             # ── agg_route_headway (scheduled-headway classification) ─────
             # Supports classifying routes by scheduled frequency for later
@@ -1829,6 +1799,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # Last, so a Postgres builder that fails above leaves ClickHouse
         # untouched too.
+        _mirror_static_stop_times(agency_id, conn, ch_client, has_static, static_fingerprint)
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes)
 
         # ── agg_meta: record of this build ───────────────────────────────

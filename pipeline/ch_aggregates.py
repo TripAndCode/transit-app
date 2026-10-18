@@ -1,9 +1,11 @@
 """Aggregates computed and stored in ClickHouse.
 
 Three kinds of table live here. The date-keyed aggregates (TABLES) are built
-from `updates` by a ClickHouse GROUP BY. COUNTS, also date-keyed and built the
-same way, holds the exact delay distribution and exists only in ClickHouse. The
-whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized from COUNTS. Each
+from `updates` by a ClickHouse GROUP BY; STATIC_JOINED_TABLES also join
+STATIC_STOP_TIMES, a copy of the agency's Postgres schedule. COUNTS, also
+date-keyed and built the same way, holds the exact delay distribution and exists
+only in ClickHouse. The whole-history aggregates (WHOLE_HISTORY_TABLES) are
+finalized from COUNTS. Each
 table in COPIED_TABLES has the name and columns of a Postgres counterpart;
 `pipeline.analyze` drives the builds and copies the agency's rows of each into
 the Postgres table the API reads. This module is the ClickHouse side only.
@@ -30,6 +32,7 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
+from api.range import TIME_BAND_RANGES
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
 from pipeline.histogram import (
@@ -41,6 +44,10 @@ from pipeline.histogram import (
     WIDTH,
 )
 from pipeline.service_day import service_date_ch, service_day_start_utc
+
+# The agency's Postgres static_stop_times, mirrored for the aggregates that join the schedule.
+STATIC_STOP_TIMES = "static_stop_times"
+_STATIC_STOP_TIMES_COLUMNS = ("agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time")
 
 
 def months_of(dates: Iterable[date]) -> list[int]:
@@ -216,6 +223,60 @@ def _route_delay_counts(source: str) -> str:
     """
 
 
+def _clock_sec(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 3600 + int(minutes) * 60
+
+
+# time_band_case_sql on the scheduled time's seconds: the first range holding it,
+# 'none' for no scheduled time or none of them.
+_TIME_BAND = (
+    f"multiIf({_SCHEDULED_SEC} IS NULL, 'none', "
+    + ", ".join(
+        f"{_SCHEDULED_SEC} >= {_clock_sec(start)} AND {_SCHEDULED_SEC} < {_clock_sec(end)}, '{band}'"
+        for band, (start, end) in TIME_BAND_RANGES.items()
+    )
+    + ", 'none')"
+)
+
+# The agency's mirrored schedule, joined on the stop event's trip and sequence.
+_STATIC_JOIN = (
+    f"INNER JOIN (SELECT trip_id, stop_sequence, stop_id FROM {STATIC_STOP_TIMES} "
+    "WHERE agency_id = {agency_id:UInt16}) AS st "
+    "ON st.trip_id = d.trip_id AND st.stop_sequence = toInt32(d.stop_sequence)"
+)
+
+
+def _stop_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date, service_type, time_band,
+               s AS delay_sum, toInt32(n) AS samples
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, ifNull(d.service_type, '') AS service_type,
+                   {_TIME_BAND} AS time_band, sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
+            FROM ({source}) AS d
+            {_STATIC_JOIN}
+            GROUP BY stop_id, date, service_type, time_band
+        )
+    """
+
+
+def _route_stop_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, stop_id, date, service_type, time_band,
+               s AS delay_sum, toInt64(n) AS samples
+        FROM (
+            SELECT assumeNotNull(d.route_code) AS route_code, st.stop_id AS stop_id, d.date AS date,
+                   ifNull(d.service_type, '') AS service_type, {_TIME_BAND} AS time_band,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
+            FROM ({source}) AS d
+            {_STATIC_JOIN}
+            WHERE d.route_code IS NOT NULL
+            GROUP BY route_code, stop_id, date, service_type, time_band
+        )
+    """
+
+
 def _pctl(p: str) -> str:
     """Postgres's PERCENTILE_DISC(*p*) over `dist`, sorted (value, count) pairs whose counts sum to `n`.
 
@@ -312,6 +373,9 @@ def _route_hour_dow(source: str) -> str:
 class _Spec(NamedTuple):
     columns: tuple[str, ...]
     select: Callable[[str], str]
+    # The two integer columns whose agency sums, with the row count, are what a
+    # store check compares between ClickHouse and the Postgres copy.
+    sums: tuple[str, str] = ("samples", "sum_delay_sec")
 
 
 # Build and swap order. Each copied table's columns are its Postgres table's, in
@@ -351,6 +415,16 @@ _SPECS: dict[str, _Spec] = {
         _route_daily_dist,
     ),
     "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "agg_stop_daily": _Spec(
+        ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
+        _stop_daily,
+        ("samples", "delay_sum"),
+    ),
+    "agg_route_stop_daily": _Spec(
+        ("agency_id", "route_code", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
+        _route_stop_daily,
+        ("samples", "delay_sum"),
+    ),
     "route_delay_counts": _Spec(
         (
             "agency_id",
@@ -369,6 +443,8 @@ COUNTS = "route_delay_counts"
 # The date-keyed tables copied into Postgres; `build` fills these and COUNTS month by month.
 TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name != COUNTS)
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, COUNTS)
+# The tables whose rows join the agency's mirrored schedule, so an agency has none until analyze mirrors it.
+STATIC_JOINED_TABLES: frozenset[str] = frozenset({"agg_stop_daily", "agg_route_stop_daily"})
 
 # Whole-history tables, finalized from COUNTS by `build_whole_history`. Build and swap order.
 _WHOLE_SPECS: dict[str, _Spec] = {
@@ -673,8 +749,56 @@ def months_for(ch, table: str, agency_id: int, changed: list[date] | None) -> li
 def drop_work_tables(ch, agency_id: int) -> None:
     """Drop the agency's work tables and its dedup table. SYNC, so their disk is
     freed now rather than after the Atomic database's drop delay."""
-    for name in (*(work_table(table, agency_id) for table in ALL_TABLES), dedup_table(agency_id)):
+    for name in (
+        *(work_table(table, agency_id) for table in ALL_TABLES),
+        dedup_table(agency_id),
+        _static_work(agency_id),
+    ):
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
+
+
+def _static_work(agency_id: int) -> str:
+    return f"{STATIC_STOP_TIMES}__work_a{int(agency_id)}"
+
+
+def static_mirror_fingerprint(ch, agency_id: int) -> str | None:
+    """The fingerprint the agency's mirrored schedule was copied under, or None when it has none."""
+    rows = ch.query(
+        f"SELECT fingerprint FROM {STATIC_STOP_TIMES} WHERE agency_id = {{agency_id:Int32}} LIMIT 1",
+        parameters={"agency_id": agency_id},
+    ).result_rows
+    return rows[0][0] if rows else None
+
+
+def replace_static_stop_times(ch, agency_id: int, rows: Iterable[tuple], fingerprint: str) -> int:
+    """Replace the agency's mirrored schedule with *rows*, tagged *fingerprint*; return how many.
+
+    Built in a work table and swapped in whole, so a join never sees half a schedule.
+    No rows drops the agency's partition.
+    """
+    work = _static_work(agency_id)
+    columns = [*_STATIC_STOP_TIMES_COLUMNS, "fingerprint"]
+    ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+    ch.command(f"CREATE TABLE {work} AS {STATIC_STOP_TIMES}")
+    copied = 0
+    try:
+        batch: list[tuple] = []
+        for row in rows:
+            batch.append((*row, fingerprint))
+            if len(batch) == 50_000:
+                ch.insert(work, batch, column_names=columns)
+                copied += len(batch)
+                batch = []
+        if batch:
+            ch.insert(work, batch, column_names=columns)
+            copied += len(batch)
+        if copied:
+            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} REPLACE PARTITION {int(agency_id)} FROM {work}")
+        else:
+            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} DROP PARTITION {int(agency_id)}")
+    finally:
+        ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+    return copied
 
 
 def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:
@@ -692,11 +816,17 @@ def rows_sql(table: str, agency_id: int, months: list[int] | None) -> tuple[str,
     return _agency_rows(", ".join(COLUMNS[table]), table, agency_id, months)
 
 
+def sum_columns(table: str) -> tuple[str, str]:
+    """The two columns *table*'s store check sums."""
+    return {**_SPECS, **_WHOLE_SPECS}[_checked(table)].sums
+
+
 def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
-    """(rows, sum of samples, sum of sum_delay_sec) for the agency over *months*,
-    or all of them when None: the figures a store check compares, with *table*'s
+    """(rows, and the sums of sum_columns(table)) for the agency over *months*, or
+    all of them when None: the figures a store check compares, with *table*'s
     Postgres copy or, for COUNTS, with the table pipeline.analyze names."""
-    sql, params = _agency_rows("count(), sum(samples), sum(sum_delay_sec)", table, agency_id, months)
+    first, second = sum_columns(table)
+    sql, params = _agency_rows(f"count(), sum({first}), sum({second})", table, agency_id, months)
     count, samples, delay = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(samples), int(delay)
 
