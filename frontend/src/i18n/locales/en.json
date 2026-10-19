@@ -1060,6 +1060,7 @@
       "date_filter_aria": "Filter to {{date}}",
       "tooltip_hour": "{{hour}}:00 · avg",
       "tooltip_metrics": "{{min}} · {{count}} obs.",
+      "cell_empty_aria": "{{date}} {{hour}}:00 · no data",
       "ramp_max": "{{min}} min and over",
       "severe_outline": "outlined = {{min}} min and over"
     },

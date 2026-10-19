@@ -10,12 +10,13 @@ import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "reac
  * the composite-widget pattern ARIA has for that.
  *
  * `slots` is row-major and may hold `null` where a position renders nothing
- * focusable; navigation skips those rather than landing on them.
+ * focusable; navigation skips those rather than landing on them. The
+ * container is a div by default, or an SVG group for a chart drawn in SVG.
  */
-export function useRovingCells(slots: (string | null)[], columns: number) {
+export function useRovingCells<Container extends Element = HTMLDivElement>(slots: (string | null)[], columns: number) {
   const firstFilled = slots.findIndex((slot) => slot !== null);
   const [requested, setRequested] = useState(firstFilled);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<Container>(null);
   // Derived, not synchronised: the data can shrink under a held index, and an
   // effect correcting it afterwards would render one frame with no tab stop.
   const active = slots[requested] != null ? requested : firstFilled;
