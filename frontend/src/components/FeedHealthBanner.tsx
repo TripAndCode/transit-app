@@ -10,8 +10,8 @@
  * latest day) because these freezes recur across days. Renders only when
  * something was actually filtered.
  *
- * Dismissible for the agency it is shown for, and back on a full page reload,
- * like the staleness banner, so the signal is never permanently hidden.
+ * Dismissible for the agency it is shown for, for as long as the page stays
+ * loaded, like the staleness banner: a full reload shows it again.
  */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
@@ -19,15 +19,15 @@ import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 
-export function FeedHealthBanner() {
+export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
   const { agencyId: raw } = useParams();
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
-  const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
+  const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
   const [dismissedFor, setDismissedFor] = useState<ReadonlySet<number>>(() => new Set());
   const { messageProps } = useTapToExpandBanner();
 
-  if (agencyId == null) return null;
+  if (hidden || agencyId == null) return null;
   const count = data?.clamp_count ?? 0;
   if (count <= 0) return null;
   if (dismissedFor.has(agencyId)) return null;

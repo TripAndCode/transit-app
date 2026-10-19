@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
@@ -27,10 +27,6 @@ function renderBanner() {
     </MemoryRouter>,
   );
 }
-
-beforeEach(() => {
-  sessionStorage.clear();
-});
 
 function hoursAgoIso(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -96,7 +92,10 @@ describe("DataStalenessBanner dismissal", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/9"]}>
         <Routes>
-          <Route path="/:agencyId" element={<><DataStalenessBanner /><Link to="/10">other agency</Link></>} />
+          <Route
+            path="/:agencyId"
+            element={<><DataStalenessBanner /><Link to="/10">other agency</Link><Link to="/9">first agency</Link></>}
+          />
         </Routes>
       </MemoryRouter>,
     );
@@ -109,9 +108,11 @@ describe("DataStalenessBanner dismissal", () => {
     expect(screen.queryByRole("status")).toBeNull();
     await userEvent.click(screen.getByRole("link", { name: "other agency" }));
     expect(screen.getByRole("status")).toBeTruthy();
+    await userEvent.click(screen.getByRole("link", { name: "first agency" }));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("shows again after a full reload", async () => {
+  it("shows again once the page is loaded afresh", async () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ latest_captured_at: hoursAgoIso(48) }) } as never);
     renderBanner();
     await userEvent.click(screen.getByRole("button"));

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
@@ -27,10 +27,6 @@ function renderBanner() {
     </MemoryRouter>,
   );
 }
-
-beforeEach(() => {
-  sessionStorage.clear();
-});
 
 // Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
 // max-width:640px query used by useTapToExpandBanner.
@@ -97,7 +93,10 @@ describe("FeedHealthBanner dismissal", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/9"]}>
         <Routes>
-          <Route path="/:agencyId" element={<><FeedHealthBanner /><Link to="/10">other agency</Link></>} />
+          <Route
+            path="/:agencyId"
+            element={<><FeedHealthBanner /><Link to="/10">other agency</Link><Link to="/9">first agency</Link></>}
+          />
         </Routes>
       </MemoryRouter>,
     );
@@ -110,9 +109,11 @@ describe("FeedHealthBanner dismissal", () => {
     expect(screen.queryByRole("status")).toBeNull();
     await userEvent.click(screen.getByRole("link", { name: "other agency" }));
     expect(screen.getByRole("status")).toBeTruthy();
+    await userEvent.click(screen.getByRole("link", { name: "first agency" }));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("shows again after a full reload", async () => {
+  it("shows again once the page is loaded afresh", async () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ clamp_count: 5 }) } as never);
     renderBanner();
     await userEvent.click(screen.getByRole("button"));

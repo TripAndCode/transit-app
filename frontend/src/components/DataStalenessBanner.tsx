@@ -7,9 +7,11 @@
  * content so users know they're looking at historical data even when the
  * rest of the UI reads as live.
  *
- * Dismissible for the agency it is shown for, and back on a full page reload,
- * so the signal is never permanently hidden. The dismissal lives in state, not
- * storage, which is also why a browser that blocks site data cannot break it.
+ * Dismissible for the agency it is shown for, for as long as the page stays
+ * loaded; a full reload shows it again, so the signal is never permanently
+ * hidden. The dismissal lives in state, not storage, so a browser that blocks
+ * site data cannot break it, and `hidden` keeps the component mounted on the
+ * tabs that do not show it (see NoticeStack).
  */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
@@ -30,16 +32,16 @@ function relativeAgeHours(iso: string, now: Date): number {
   return (now.getTime() - captured) / (1000 * 60 * 60);
 }
 
-export function DataStalenessBanner() {
+export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
   const { agencyId: raw } = useParams();
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
-  const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
+  const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
   const now = useNow(AGE_RECHECK_MS);
   const [dismissedFor, setDismissedFor] = useState<ReadonlySet<number>>(() => new Set());
   const { messageProps } = useTapToExpandBanner();
 
-  if (agencyId == null) return null;
+  if (hidden || agencyId == null) return null;
   const captured = data?.latest_captured_at;
   if (!captured) return null;
   const ageH = relativeAgeHours(captured, now);
