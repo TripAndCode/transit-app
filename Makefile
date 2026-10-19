@@ -229,7 +229,8 @@ migrate-down:
 # History lives in Cloudflare R2, not on the VM: the VM's own cron uploads
 # each archive (oracle_cloud/v3/bin/sync-r2.sh), then spool-cleanup.sh deletes
 # it from the VM once R2 holds it. So `fetch` copies only the few archives not
-# yet uploaded, and cannot rebuild a local copy of history. For that, sync
+# yet uploaded, plus each agency's current static zip, and cannot rebuild a
+# local copy of history. For that, sync
 # from the bucket's rt/<id>/ and static/<id>/ prefixes instead. The aws CLI
 # reads only AWS_* credentials, so map .env's OBJECT_STORE_* onto them first:
 #   AWS_ACCESS_KEY_ID="$OBJECT_STORE_ACCESS_KEY_ID" \

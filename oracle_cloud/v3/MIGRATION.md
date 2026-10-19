@@ -73,9 +73,9 @@ Every job in the snippet is live once installed, `prune.sh`, `prune-r2.sh` and
     make fetch
 
 `make fetch` copies only what is still on the VM. `spool-cleanup.sh` deletes each
-archive there once R2 holds it, so VM and workstation counts stop matching after
-its first run, and comparing them is not a parity check. Nothing is pruned until
-`sync-r2.sh` has succeeded instead (step 9 and 9b).
+archive there once its own R2 listing confirms it, so VM and workstation counts
+stop matching after its first run, and comparing them is not a parity check. The
+weekly prune is the step gated on `sync-r2.sh` having succeeded (step 9 and 9b).
 
 ## 8. Verify cron fired (next morning JST, on VM)
     tail -20 /home/opc/collector/cron.log     # expect static-fetch + rotate lines

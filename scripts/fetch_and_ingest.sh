@@ -3,9 +3,10 @@
 # to ClickHouse; timetable and aggregate data to Postgres).
 # Local-dev replay of recent days only: requires SSH access to the Oracle VM,
 # which keeps just the archives not yet uploaded to R2, plus each agency's
-# current static zip (spool-cleanup.sh deletes every other one once R2 holds it). Production history comes from the live
-# path instead (collector pushes into updates_live, promoted daily by the
-# cron), and older days are in R2 for backfill (see docs/deploy-railway.md).
+# current static zip (spool-cleanup.sh deletes every other one once R2 holds
+# it). Production history comes from the live path instead (collector pushes
+# into updates_live, promoted daily by the cron), and older days are in R2 for
+# backfill (see docs/deploy-railway.md).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
 # Each agency's archives ingest before its newest local timetable loads: a
 # load replaces the timetable wholesale, and archived days should join the one
