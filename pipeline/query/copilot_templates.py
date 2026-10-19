@@ -58,12 +58,17 @@ def _render_overview_top_delay_route(payload: dict, locale: str) -> RenderedInsi
     top_avg = f"{top['avg_min']:g}"
     delayed_count = payload["top_delayed"]["delayed_count"]
     cite = _summary("copilot_overview_top_delay_cite", locale, samples=f"{headline['samples']:,}")
-    if headline.get("delta_pct") is None or headline.get("baseline_avg_min") is None:
+    if headline.get("baseline_avg_min") is None:
         # No earlier window had data (a new agency, a feed gap), so nothing is
-        # known about what is typical: name the route and compare nothing.
+        # known about what is typical: name the route and say so.
         text = _summary(
             "copilot_overview_top_delay_no_baseline", locale, name=name, top_avg=top_avg, delayed_count=delayed_count
         )
+        return {"text": text, "cite": cite}
+    if headline.get("delta_pct") is None:
+        # The earlier window had data, but no percentage follows from it: its
+        # average was zero, or the current window has none. Name the route only.
+        text = _summary("copilot_overview_top_route", locale, name=name, top_avg=top_avg, delayed_count=delayed_count)
         return {"text": text, "cite": cite}
     # The sign is carried by the localized direction word, so the percentage is
     # rendered unsigned — otherwise "-12.3% down" would double-state it.
@@ -92,8 +97,8 @@ def _render_no_signal(payload: dict, locale: str) -> RenderedInsight:
 NO_SIGNAL_TEMPLATE_ID = "no_signal"
 
 TEMPLATES: dict[str, Template] = {
-    # Names the longest-delay route and compares the all-route average with
-    # its baseline.
+    # Names the longest-delay route and, when the earlier window gives a
+    # percentage, compares the all-route average with its baseline.
     "overview_top_delay_route": Template(
         id="overview_top_delay_route",
         tab="overview",

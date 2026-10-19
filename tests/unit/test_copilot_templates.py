@@ -46,6 +46,21 @@ def test_overview_top_delay_route_names_the_route_when_there_is_no_baseline(loca
         assert match in allowed, f"unexplained number {match!r} in {rendered['text']!r}"
 
 
+@pytest.mark.parametrize(
+    "headline",
+    [
+        {"avg_min": 6.4, "baseline_avg_min": 0.0, "delta_min": 6.4, "delta_pct": None, "samples": 812},
+        {"avg_min": None, "baseline_avg_min": 4.1, "delta_min": None, "delta_pct": None, "samples": 812},
+    ],
+    ids=["zero baseline", "no current average"],
+)
+def test_overview_top_delay_route_does_not_deny_an_earlier_period_that_had_data(headline):
+    """No percentage can be given, but the earlier window did have data."""
+    rendered = render_template("overview_top_delay_route", {**OVERVIEW_PAYLOAD, "headline": headline}, "en")
+    assert "14.2" in rendered["text"]
+    assert "earlier period" not in rendered["text"]
+
+
 def test_overview_top_delay_route_defaults_to_japanese():
     """Default locale is ja, matching pipeline.query.tools._summary."""
     explicit = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "ja")
