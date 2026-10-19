@@ -28,7 +28,10 @@ def _modules() -> list[str]:
 
 def _import_error(module: str) -> str | None:
     proc = subprocess.run([sys.executable, "-c", f"import {module}"], cwd=ROOT, capture_output=True, text=True)
-    return None if proc.returncode == 0 else f"{module}: {proc.stderr.strip().splitlines()[-1]}"
+    if proc.returncode == 0:
+        return None
+    last_line = (proc.stderr.strip().splitlines() or [f"exit code {proc.returncode}"])[-1]
+    return f"{module}: {last_line}"
 
 
 def test_every_query_and_reports_module_imports_in_a_fresh_interpreter():
