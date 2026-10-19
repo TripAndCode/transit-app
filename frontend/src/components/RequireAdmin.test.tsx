@@ -39,9 +39,8 @@ describe("RequireAdmin", () => {
     const { container } = renderGuarded();
     expect(screen.queryByText("admin content")).toBeNull();
     expect(screen.queryByText("login page")).toBeNull();
-    // Negative assertions alone would still pass if this regressed to
-    // `return null` (the exact "R5 P1" blank-flash bug RequireAdmin's own
-    // comment guards against) — assert the placeholder actually renders.
+    // Negative assertions alone would still pass if the guard rendered
+    // nothing while it waits; assert the placeholder actually renders.
     expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
   });
 
