@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
@@ -45,6 +46,7 @@ function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; 
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
+  const routeNames = useRouteNames(agencyId);
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
   const navigate = useNavigate();
@@ -126,7 +128,7 @@ export function OverviewTab() {
   ) : (
     <EmptyState
       title={t("overview.empty")}
-      reasons={buildFilterCtxReasons(ctx, t)}
+      reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
       recoveries={buildFilterCtxRecoveries({
         ctx,
         onClearRoutes: () => update({ routes: null }),
