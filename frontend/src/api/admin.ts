@@ -64,8 +64,7 @@ function invalidateUserEffects(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["adminBoard"] });
 }
 
-/** Mutation: PATCH a user's role/suspended flag; invalidates the user list,
- *  detail, sessions and board queries on success. */
+/** Mutation: PATCH a user's role/suspended flag. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
@@ -81,8 +80,7 @@ export function usePatchUser() {
   });
 }
 
-/** Mutation: PATCH one patch across many users in a single transaction;
- * invalidates the user list, detail, sessions and board queries on success. The undo flow
+/** Mutation: PATCH one patch across many users in a single transaction. The undo flow
  * (AdminUsersPage) re-invokes this with the inverse patch over the same ids. */
 export function useBulkPatchUsers() {
   const qc = useQueryClient();
@@ -96,8 +94,7 @@ export function useBulkPatchUsers() {
   });
 }
 
-/** Mutation: soft-delete a user; invalidates the user list, sessions and board
- *  queries and evicts the detail query on success. */
+/** Mutation: soft-delete a user. */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
