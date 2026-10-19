@@ -26,8 +26,11 @@ export type CardTemplate = {
   fixed_args?: Record<string, unknown>;
   /** Parameter inputs to render. */
   params: ParamSpec[];
-  /** Renders the user_summary preview string from current values. */
-  buildSummary: (values: Record<string, unknown>, t: TFunction) => string;
+  /** Renders the user_summary from current values. It becomes the user's
+   *  question in the thread and a new thread's title, so a route reads by
+   *  `routeName` (the caller's `useRouteNames().format`); the args keep the
+   *  route_code. */
+  buildSummary: (values: Record<string, unknown>, t: TFunction, routeName: (code: string) => string) => string;
   /** i18n key for an illustrative example-answer line shown under the
    *  question on the landing card (instant-run templates only — a static
    *  example wouldn't make sense before a route is picked on the
@@ -51,7 +54,8 @@ export function buildCardTemplates(): CardTemplate[] {
       icon: Rows3,
       tool: "route_stop_patterns",
       params: [{ kind: "route", name: "route", required: true }],
-      buildSummary: (v, t) => v.route ? t("ask.card.stop_patterns.summary", { route: v.route }) : t("ask.card.stop_patterns.title"),
+      buildSummary: (v, t, routeName) =>
+        v.route ? t("ask.card.stop_patterns.summary", { route: routeName(String(v.route)) }) : t("ask.card.stop_patterns.title"),
     },
     {
       id: "stop_hotspots",
@@ -59,8 +63,8 @@ export function buildCardTemplates(): CardTemplate[] {
       icon: MapPin,
       tool: "segment_hotspots",
       params: [{ kind: "route", name: "route", required: true }],
-      buildSummary: (v, t) => v.route
-        ? t("ask.card.stop_hotspots.summary", { route: v.route })
+      buildSummary: (v, t, routeName) => v.route
+        ? t("ask.card.stop_hotspots.summary", { route: routeName(String(v.route)) })
         : t("ask.card.stop_hotspots.title"),
     },
     {
@@ -111,10 +115,10 @@ export function buildCardTemplates(): CardTemplate[] {
         { kind: "route", name: "route_code", required: true },
         { kind: "granularity", name: "granularity", default: "week" },
       ],
-      buildSummary: (v, t) =>
+      buildSummary: (v, t, routeName) =>
         v.route_code
           ? t("ask.card.route_trend.summary", {
-              route: v.route_code,
+              route: routeName(String(v.route_code)),
               gran: t(
                 `ask.card.param.granularity.${(v.granularity as string) ?? "week"}`,
               ),
@@ -128,9 +132,9 @@ export function buildCardTemplates(): CardTemplate[] {
       tool: "cmp_service",
       fixed_args: { metric: "avg_delay" },
       params: [{ kind: "route", name: "route_code", required: true }],
-      buildSummary: (v, t) =>
+      buildSummary: (v, t, routeName) =>
         v.route_code
-          ? t("ask.card.weekday_vs_weekend.summary", { route: v.route_code })
+          ? t("ask.card.weekday_vs_weekend.summary", { route: routeName(String(v.route_code)) })
           : t("ask.card.weekday_vs_weekend.placeholder"),
     },
     {
@@ -140,9 +144,9 @@ export function buildCardTemplates(): CardTemplate[] {
       tool: "route_stats",
       fixed_args: {},
       params: [{ kind: "route", name: "route_code", required: true }],
-      buildSummary: (v, t) =>
+      buildSummary: (v, t, routeName) =>
         v.route_code
-          ? t("ask.card.route_overview.summary", { route: v.route_code })
+          ? t("ask.card.route_overview.summary", { route: routeName(String(v.route_code)) })
           : t("ask.card.route_overview.placeholder"),
     },
   ];
