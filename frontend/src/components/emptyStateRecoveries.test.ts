@@ -4,7 +4,7 @@ import { buildFilterCtxReasons, buildFilterCtxRecoveries } from "./emptyStateRec
 
 const t = i18n.getFixedT("en");
 // A caller whose own `useTranslation("design")` default namespace is NOT
-// "translation" (AnalysisTab, RouteAnalysisTab, ReportsHomeTab) must still
+// "translation" (RouteAnalysisTab, ReportsHomeTab) must still
 // resolve real copy, not the bare key -- this module always targets the
 // "translation" namespace explicitly regardless of the caller's default.
 const tDesignNs = i18n.getFixedT("en", "design");
