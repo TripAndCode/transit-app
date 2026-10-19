@@ -54,21 +54,31 @@ def _render_overview_top_delay_route(payload: dict, locale: str) -> RenderedInsi
         raise KeyError("top_delayed.routes is empty")
     top = routes[0]
     headline = payload["headline"]
+    name = top["route_short_name"] or top["route_code"]
+    top_avg = f"{top['avg_min']:g}"
+    delayed_count = payload["top_delayed"]["delayed_count"]
+    cite = _summary("copilot_overview_top_delay_cite", locale, samples=f"{headline['samples']:,}")
+    if headline.get("delta_pct") is None or headline.get("baseline_avg_min") is None:
+        # No earlier window had data (a new agency, a feed gap), so nothing is
+        # known about what is typical: name the route and compare nothing.
+        text = _summary(
+            "copilot_overview_top_delay_no_baseline", locale, name=name, top_avg=top_avg, delayed_count=delayed_count
+        )
+        return {"text": text, "cite": cite}
     # The sign is carried by the localized direction word, so the percentage is
     # rendered unsigned — otherwise "-12.3% down" would double-state it.
     direction_key = "copilot_delta_up" if headline["delta_pct"] >= 0 else "copilot_delta_down"
     text = _summary(
         "copilot_overview_top_delay",
         locale,
-        name=top["route_short_name"] or top["route_code"],
-        top_avg=f"{top['avg_min']:g}",
+        name=name,
+        top_avg=top_avg,
         avg=f"{headline['avg_min']:g}",
         baseline=f"{headline['baseline_avg_min']:g}",
         delta=f"{abs(headline['delta_pct']):g}",
         direction=_summary(direction_key, locale),
-        delayed_count=payload["top_delayed"]["delayed_count"],
+        delayed_count=delayed_count,
     )
-    cite = _summary("copilot_overview_top_delay_cite", locale, samples=f"{headline['samples']:,}")
     return {"text": text, "cite": cite}
 
 
