@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { GripHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap";
@@ -6,11 +6,16 @@ import { clampRatio, nextSnap, SNAP_HEIGHT_VH, SNAP_ORDER, SNAP_RATIO, type Snap
 
 export type { SnapPoint };
 
-/** A press that never strays this far from where it began is a tap: the
- *  click that follows it steps the snap, so a tap, Enter, Space and a
- *  screen reader's activation all act alike. A press that does is a drag,
- *  and the click ending it is ignored. */
+/** A press that never moves this far up or down from where it began is a
+ *  tap: the click that follows it steps the snap, so a tap, Enter, Space and
+ *  a screen reader's activation all act alike. A press that does is a drag,
+ *  which settles the snap itself. */
 const TAP_SLOP_PX = 6;
+
+/** A click this soon after a drag's release is the drag's own click and is
+ *  ignored. A window rather than a flag, so a drag whose click never arrives
+ *  cannot swallow a later, unrelated activation. */
+const DRAG_CLICK_WINDOW_MS = 250;
 
 type Props = {
   snap: SnapPoint;
@@ -41,7 +46,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     restingHeight: number;
     moved: boolean;
   } | null>(null);
-  const ignoreClickRef = useRef(false);
+  const dragEndedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const isFull = snap === "full";
 
@@ -65,7 +70,6 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     e.currentTarget.setPointerCapture(e.pointerId);
     const now = performance.now();
     const viewportH = window.innerHeight || 1;
-    ignoreClickRef.current = false;
     dragStateRef.current = {
       startY: e.clientY,
       startTime: now,
@@ -94,7 +98,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
       setDragRatio(null);
       return;
     }
-    ignoreClickRef.current = e.type === "pointerup";
+    if (e.type === "pointerup") dragEndedAtRef.current = e.timeStamp;
     const ratio = ratioFromClientY(e.clientY);
     const dt = Math.max(1, drag.lastTime - drag.startTime);
     // Velocity in the same units as position -- ratios of the peek-to-full
@@ -108,16 +112,12 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     onSnapChange(nextSnap(ratio, velocity));
   }
 
-  function onHandleClick() {
-    if (ignoreClickRef.current) {
-      ignoreClickRef.current = false;
-      return;
-    }
+  function onHandleClick(e: ReactMouseEvent<HTMLButtonElement>) {
+    if (e.timeStamp - dragEndedAtRef.current < DRAG_CLICK_WINDOW_MS) return;
     onSnapChange(SNAP_ORDER[(SNAP_ORDER.indexOf(snap) + 1) % SNAP_ORDER.length]);
   }
 
   function onHandleKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>) {
-    ignoreClickRef.current = false;
     const idx = SNAP_ORDER.indexOf(snap);
     if (e.key === "ArrowUp" && idx < SNAP_ORDER.length - 1) {
       e.preventDefault();

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { useState } from "react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BottomSheet } from "./BottomSheet";
@@ -178,7 +178,7 @@ describe("BottomSheet", () => {
     expect(handle).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("steps peek → half → full → peek when the handle is activated, as Enter, Space or a screen reader's tap do", () => {
+  it("steps peek → half → full → peek on each click of the handle", () => {
     render(<Harness initial="peek" />);
     const handle = grabHandle();
     const sheet = screen.getByLabelText("Trips to check");
@@ -217,16 +217,33 @@ describe("BottomSheet", () => {
     expect(screen.getByLabelText("Trips to check")).not.toHaveAttribute("aria-modal");
   });
 
-  it("still steps on Enter after a drag whose click never reached the handle", () => {
+  it("still acts on a later activation after a drag whose own click never arrived", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      render(<Harness initial="peek" />);
+      const handle = grabHandle();
+
+      pointer(handle, "pointerdown", 600);
+      pointer(handle, "pointermove", 350);
+      pointer(handle, "pointerup", 350);
+      vi.setSystemTime(Date.now() + 1000);
+      fireEvent.click(handle);
+
+      expect(screen.getByLabelText("Trips to check")).toHaveAttribute("aria-modal", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("steps the snap on Enter and on Space", async () => {
+    const user = userEvent.setup();
     render(<Harness initial="peek" />);
     const handle = grabHandle();
+    handle.focus();
 
-    pointer(handle, "pointerdown", 600);
-    pointer(handle, "pointermove", 350);
-    pointer(handle, "pointerup", 350);
-    fireEvent.keyDown(handle, { key: "Enter" });
-    fireEvent.click(handle);
-
+    await user.keyboard("{Enter}");
+    expect(handle).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard(" ");
     expect(screen.getByLabelText("Trips to check")).toHaveAttribute("aria-modal", "true");
   });
 
