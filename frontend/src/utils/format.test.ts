@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import i18n from "../i18n";
-import { EM_DASH, FILTER_SEPARATOR, fixedTenth, fmtPct, fmtRatioPct, formatDate, formatDateRange, formatDateTime, formatDuration, formatHourRange, formatMinutes, formatNumber, formatReportTime, formatShortDate, roundTenth } from "./format";
+import { EM_DASH, FILTER_SEPARATOR, fixedTenth, fmtPct, fmtRatioPct, formatDate, formatDateRange, formatDateTime, formatDuration, formatHourRange, formatMinutes, formatNumber, formatReportDateTime, formatReportTime, formatShortDate, roundTenth } from "./format";
 
 describe("formatNumber", () => {
   afterEach(async () => {
@@ -174,6 +174,18 @@ describe("formatDate and formatShortDate", () => {
     expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("Tue, Sep 29");
     await i18n.changeLanguage("ja");
     expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("9月29日(火)");
+  });
+});
+
+describe("formatReportDateTime", () => {
+  afterEach(() => vi.useRealTimers());
+  const plain = (s: string) => s.replace(/\s/g, " ");
+
+  it("gives a report its date and time in JST even when it arrived today", async () => {
+    await i18n.changeLanguage("en");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z")); // 22:24 JST
+    expect(plain(formatReportDateTime("2026-10-03T12:41:00Z"))).toBe("Oct 3, 2026, 9:41 PM JST");
   });
 });
 

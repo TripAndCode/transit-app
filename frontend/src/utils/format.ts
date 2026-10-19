@@ -90,11 +90,13 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
  *  calendar day than the one it is judged against. The result carries a "JST"
  *  suffix so a viewer in another zone knows which clock it is. */
 export function formatReportTime(iso: string): string {
-  const time = formatDateTime(
-    iso,
-    isToday(iso) ? { timeStyle: "short", timeZone: JST_TZ } : { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ },
-  );
-  return i18n.t("common.report_time_jst", { time });
+  if (!isToday(iso)) return formatReportDateTime(iso);
+  return i18n.t("common.report_time_jst", { time: formatDateTime(iso, { timeStyle: "short", timeZone: JST_TZ }) });
+}
+
+/** {@link formatReportTime} with the date always shown, for a place that states it in full. */
+export function formatReportDateTime(iso: string): string {
+  return i18n.t("common.report_time_jst", { time: formatDateTime(iso, { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ }) });
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the
