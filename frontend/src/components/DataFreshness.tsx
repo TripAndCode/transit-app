@@ -2,7 +2,7 @@ import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
-import { EM_DASH, FILTER_SEPARATOR, formatDate, formatDateTime, formatNumber, formatReportTime } from "../utils/format";
+import { EM_DASH, FILTER_SEPARATOR, formatDate, formatNumber, formatReportDateTime, formatReportTime } from "../utils/format";
 import { isToday } from "../utils/threadDateBuckets";
 
 /** The one place that says how recent the agency's data is: the last service
@@ -47,7 +47,7 @@ export function DataFreshness({ agencyId, through }: { agencyId: number; through
             <dt>{t("topbar.freshness.reports")}</dt>
             <dd>{t("topbar.freshness.reports_through", { date: formatDate(through, { weekday: true }) })}</dd>
             <dt>{t("topbar.freshness.live")}</dt>
-            <dd>{lastReading ? formatDateTime(lastReading) : data ? t("topbar.freshness.live_none") : EM_DASH}</dd>
+            <dd>{lastReading ? formatReportDateTime(lastReading) : data ? t("topbar.freshness.live_none") : EM_DASH}</dd>
             <dt>{t("topbar.freshness.readings")}</dt>
             <dd>{data ? formatNumber(data.raw_samples) : EM_DASH}</dd>
             <dt>{t("topbar.freshness.set_aside")}</dt>
