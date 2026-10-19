@@ -19,7 +19,8 @@ import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, field_validator
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
@@ -103,7 +104,8 @@ class AskResponse(BaseModel):
     """Response schema for ``POST /ask``.
 
     Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
-    ``cache_outcome``) are populated only when ``ASK_INTENT_CACHE_ENABLED=true``
+    ``cache_outcome``) are populated only when the ``ask_intent_cache_enabled``
+    flag is on (``pipeline.flags``: a DB override, else ``ASK_INTENT_CACHE_ENABLED``)
     and the request went through the LLM Stage-3 path.  They are ``None`` on the
     Stage-1 / Stage-2 router paths and when the flag is off.
     """
@@ -117,6 +119,13 @@ class AskResponse(BaseModel):
     confidence: float | None = None
     canonical_args: dict | None = None
     cache_outcome: str | None = None
+
+    @field_serializer("result")
+    def _result_as_stored(self, result: dict | None) -> Any:
+        # Pydantic dumps a Decimal inside an untyped dict as a string. FastAPI's
+        # encoder sends it as a number, as the conversation store keeps it, so
+        # an anonymous thread, which keeps this payload, charts it too.
+        return jsonable_encoder(result)
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:

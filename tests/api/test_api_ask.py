@@ -1,8 +1,12 @@
+from datetime import date
+from decimal import Decimal
+
 import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.query.results import ToolResult
 from tests.conftest import TEST_ORIGIN, _test_pool
 
 
@@ -152,6 +156,52 @@ async def test_ask_rejects_cross_origin(ask_client, monkeypatch):
         headers={"Origin": "https://evil.example.com"},
     )
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text[:200]}"
+
+
+@pytest.mark.asyncio
+async def test_ask_sends_an_llm_answers_decimal_cells_as_numbers(ask_client, monkeypatch):
+    """Tool rows carry NUMERIC as Decimal. /ask sends them as JSON numbers, as the
+    conversation store does, so an anonymous thread's chart reads them."""
+    client, agency_id = ask_client
+
+    async def mock_chat(question, ctx, conn, agency_id, **kwargs):
+        return {
+            "answer": "a",
+            "tool_call": {"name": "route_stop_patterns", "arguments": {}},
+            "result": {
+                "kind": "table",
+                "summary": "s",
+                "rows": [["S1", Decimal("3.40"), Decimal("10"), date(2026, 4, 1)]],
+                "columns": ["stop", "avg_min", "samples", "date"],
+                "series": [],
+                "pairs": [],
+            },
+            "success": True,
+        }
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", mock_chat)
+    resp = await client.post(
+        f"/api/{agency_id}/ask", json={"question": "どこで遅れる？"}, headers={"Origin": TEST_ORIGIN}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["result"]["rows"] == [["S1", 3.4, 10, "2026-04-01"]]
+
+
+@pytest.mark.asyncio
+async def test_ask_sends_a_rule_answers_decimal_cells_as_numbers(ask_client, monkeypatch):
+    """The rule and embedding stages build the same result, and send numbers too."""
+    client, agency_id = ask_client
+
+    async def fake_dispatch(tool, args, ctx, conn, agency_id, **kwargs):
+        return ToolResult(kind="table", summary="s", rows=[["R1", Decimal("2.50")]], columns=["route", "avg_min"])
+
+    monkeypatch.setattr("api.routers.ask.dispatch", fake_dispatch)
+    resp = await client.post(
+        f"/api/{agency_id}/ask", json={"question": "どんな路線がある？"}, headers={"Origin": TEST_ORIGIN}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["router_stage"] == "rules"
+    assert resp.json()["result"]["rows"] == [["R1", 2.5]]
 
 
 @pytest.mark.asyncio
