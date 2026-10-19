@@ -179,6 +179,44 @@ def test_a_fresh_worktree_with_no_commits_and_no_pr_is_retained():
     assert "under 24h" in decision.reason
 
 
+def test_a_fresh_worktree_at_a_tip_another_branchs_pr_merged_is_retained():
+    """main -> production sync PRs end with their head at main's tip, so a branch
+    cut from main right after one shares that tip without being that PR's work."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            head_prs=(cleanup.PullRequest(593, "MERGED", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+
+
+def test_a_fresh_worktree_reusing_an_old_branch_name_is_retained():
+    """A merged PR under the same name proves nothing about a new tip."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            pull_requests=(cleanup.PullRequest(1200, "MERGED", "b" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+
+
+def test_the_primary_checkout_has_no_creation_age(tmp_path: Path):
+    """The primary checkout's .git is a directory that ordinary git commands touch."""
+
+    (tmp_path / ".git").mkdir()
+    assert cleanup.worktree_age_hours(cleanup.Worktree(tmp_path, "main")) is None
+
+
 def test_a_day_old_worktree_with_no_commits_and_no_pr_is_deletable():
     decision = cleanup.decide_branch(
         facts(ancestor_of_base=True, worktree=cleanup.Worktree(Path("/w"), "feature"), worktree_age_hours=30)
