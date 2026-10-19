@@ -7,6 +7,8 @@
  * search box.
  */
 
+import { searchKey } from "../utils/searchText";
+
 export type Searchable = {
   label: string;
   sublabel?: string;
@@ -19,8 +21,8 @@ export type Searchable = {
  * precise, short label outranks a long one that merely contains the query.
  */
 export function scoreMatch(query: string, target: string): number | null {
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
+  const q = searchKey(query);
+  const t = searchKey(target);
   if (t.startsWith(q)) return 300 - t.length;
   const idx = t.indexOf(q);
   if (idx >= 0) return 200 - idx - t.length * 0.01;

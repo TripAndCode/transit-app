@@ -21,6 +21,7 @@ import { FILTER_SEPARATOR } from "../utils/format";
 import { dowValueLabel } from "../utils/filterValueLabels";
 import { menuItems, nextMenuItem } from "./menuKeys";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
+import { searchKey } from "../utils/searchText";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -200,11 +201,11 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }
 
   // Filter by the search query, then group the surviving conversations
-  const query = search.normalize("NFKC").trim().toLocaleLowerCase();
+  const query = searchKey(search);
   const matching = conversations.filter((c) =>
     // Codes stay searchable beside the labels shown.
-    [c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format, anchorDay)]
-      .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
+    searchKey([c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format, anchorDay)].join(" "))
+      .includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
   const unpinned = matching.filter((c) => !c.pinned);

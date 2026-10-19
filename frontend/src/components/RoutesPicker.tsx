@@ -8,6 +8,7 @@ import { routeWhereText, useRouteNames } from "../api/useRouteNames";
 import type { Route } from "../api/types";
 import { FILTER_SEPARATOR } from "../utils/format";
 import { RoutePartsLabel } from "./RouteLabel";
+import { searchKey } from "../utils/searchText";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
 type RouteGroup = {
@@ -107,25 +108,25 @@ export function RoutesPicker({
 
   const groups: RouteGroup[] = buildRouteGroups(data);
 
-  const filterQuery = filter.trim().toLowerCase();
+  const filterQuery = searchKey(filter);
   const filteredGroups = filterQuery
     ? groups
         .map((g) => {
           const variants = g.variants.filter((v) => {
-            const blob = (
+            const blob = searchKey(
               g.name +
               " " +
               (v.long_name || "") +
               " " +
               v.headsigns.join(" ") +
               " " +
-              v.code
-            ).toLowerCase();
+              v.code,
+            );
             return blob.includes(filterQuery);
           });
           return { ...g, variants };
         })
-        .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(filterQuery))
+        .filter((g) => g.variants.length > 0 || searchKey(g.name).includes(filterQuery))
     : groups;
 
   function toggleCode(code: string) {

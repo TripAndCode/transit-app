@@ -25,6 +25,7 @@ import { Drawer } from "../../components/admin/Drawer";
 import { AgencyDiagnosticsDrawer } from "./AgencyDiagnosticsDrawer";
 import { AgencyRunCard, DataStage, RunChain, TimetableStage } from "./AgencyRuns";
 import { ClampSparkline } from "./ClampSparkline";
+import { searchKey } from "../../utils/searchText";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -299,7 +300,7 @@ export function AdminAgenciesPage() {
   const healthById = new Map((health ?? []).map((h) => [h.agency_id, h]));
 
   const filtered = (agencies ?? []).filter((a) => {
-    if (!a.agency_name.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    if (!searchKey(a.agency_name).includes(searchKey(search))) return false;
     const h = healthById.get(a.agency_id);
     if (view === "stale") return h?.freshness === "stale";
     if (view === "rt_incomplete") return h != null && (!h.rt_coverage.probed || !h.rt_coverage.complete);
