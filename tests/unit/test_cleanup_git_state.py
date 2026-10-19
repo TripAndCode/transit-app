@@ -692,6 +692,33 @@ def test_a_merged_branch_in_the_primary_checkout_is_kept_when_run_from_a_linked_
     assert "primary worktree" in decision.reason
 
 
+def test_a_branch_checked_out_twice_is_kept_whichever_worktree_holds_the_primary(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`worktree add --force` can check one branch out twice; removing one copy leaves
+    the branch undeletable, and the apply would abort midway."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    forced = tmp_path / "forced"
+    git(repository, "worktree", "add", "--force", str(forced), "feat")
+    git(repository, "branch", "twice", "main")
+    one, two = tmp_path / "one", tmp_path / "two"
+    git(repository, "worktree", "add", str(one), "twice")
+    git(repository, "worktree", "add", "--force", str(two), "twice")
+    age_worktrees(forced, one, two)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    reasons = {d.branch: (d.action, d.reason) for d in plan}
+
+    assert reasons["feat"][0] == "keep"
+    assert "primary worktree" in reasons["feat"][1]
+    assert reasons["twice"][0] == "keep"
+    assert "more than one worktree" in reasons["twice"][1]
+
+
 def test_a_branch_named_like_a_tag_is_planned_under_its_own_name(repository: Path, monkeypatch: pytest.MonkeyPatch):
     """`refname:short` writes such a branch as `heads/<name>`, which names no branch.
 

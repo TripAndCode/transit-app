@@ -486,7 +486,7 @@ def test_gather_stale_branches_excludes_branches_missing_from_truncated_protecti
 
 
 def test_gather_stale_branches_caps_at_max_branches_oldest_first():
-    lines = [f"origin/branch-{i}\t2026-01-01T00:00:00+00:00" for i in range(15)]
+    lines = [f"branch-{i}\t2026-01-01T00:00:00+00:00" for i in range(15)]
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout="\n".join(lines))})
     stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),

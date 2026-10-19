@@ -73,6 +73,9 @@ class BranchFacts:
     """Hours since the branch's linked worktree was created; None without one."""
     primary: bool = False
     """Checked out in the primary worktree, which Git refuses to remove."""
+    shared: bool = False
+    """Checked out in more than one worktree (`worktree add --force`): removing one
+    copy would leave the branch undeletable mid-apply."""
 
 
 @dataclass(frozen=True)
@@ -221,6 +224,8 @@ def decide_branch(facts: BranchFacts) -> Decision:
         return Decision(facts.branch, facts.head, "keep", "checked out in the invoking worktree", facts.worktree)
     if facts.primary:
         return Decision(facts.branch, facts.head, "keep", "checked out in the primary worktree", facts.worktree)
+    if facts.shared:
+        return Decision(facts.branch, facts.head, "keep", "checked out in more than one worktree", facts.worktree)
 
     # An open PR under this branch's name may still receive local work, so it always
     # protects the branch. One matched only by head protects commits the base does
@@ -584,7 +589,11 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
 
     current_path = Path(run_git(repo, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
     worktrees = parse_worktrees(run_git(repo, "worktree", "list", "--porcelain").stdout)
-    by_branch = {worktree.branch: worktree for worktree in worktrees if worktree.branch is not None}
+    checkouts: dict[str, list[Worktree]] = {}
+    for checkout in worktrees:
+        if checkout.branch is not None:
+            checkouts.setdefault(checkout.branch, []).append(checkout)
+    by_branch = {branch: held[-1] for branch, held in checkouts.items()}
     pull_requests = load_pull_requests(repo)
     base_tree = run_git(repo, "rev-parse", f"refs/heads/{base}^{{tree}}").stdout.strip()
 
@@ -650,14 +659,16 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
     decisions: list[Decision] = []
     for branch, head in sorted(branches.items()):
         worktree = by_branch.get(branch)
+        held = checkouts.get(branch, [])
         decisions.append(
             decide_branch(
                 BranchFacts(
                     branch=branch,
                     head=head,
                     protected=branch in protected,
-                    current=worktree is not None and worktree.path == current_path,
-                    primary=worktree is not None and worktree.path == primary_path,
+                    current=any(item.path == current_path for item in held),
+                    primary=any(item.path == primary_path for item in held),
+                    shared=len(held) > 1,
                     ancestor_of_base=ancestor_of_base[branch],
                     tree_matches_base=tree_matches_base[branch],
                     pull_requests=pull_requests.get(branch, ()),
