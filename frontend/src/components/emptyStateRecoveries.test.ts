@@ -8,23 +8,30 @@ const t = i18n.getFixedT("en");
 // resolve real copy, not the bare key -- this module always targets the
 // "translation" namespace explicitly regardless of the caller's default.
 const tDesignNs = i18n.getFixedT("en", "design");
+const routeName = (code: string) => ({ A05: "Asahi Line", K12: "Kita Loop" })[code] ?? code;
 
 describe("buildFilterCtxReasons", () => {
   it("returns no reasons when every dimension is at its default", () => {
-    expect(buildFilterCtxReasons({ service: "all", routes: [], dow: "all", time_band: "all" }, t)).toEqual([]);
+    expect(buildFilterCtxReasons({ service: "all", routes: [], dow: "all", time_band: "all" }, t, routeName)).toEqual([]);
   });
 
   it("names each non-default dimension", () => {
     const reasons = buildFilterCtxReasons(
       { service: "平日", routes: ["A05", "K12"], dow: "weekend", time_band: "morning" },
       t,
+      routeName,
     );
     expect(reasons).toEqual([
       "Day: Weekend/Holiday",
       "Time band: Morning (05–09)",
       "Service: Weekday",
-      "Route: A05, K12",
+      "Route: Asahi Line, Kita Loop",
     ]);
+  });
+
+  it("joins the route names with the locale's list separator", () => {
+    const [reason] = buildFilterCtxReasons({ routes: ["A05", "K12"] }, i18n.getFixedT("ja"), routeName);
+    expect(reason).toContain("Asahi Line・Kita Loop");
   });
 });
 
@@ -110,7 +117,7 @@ describe("buildFilterCtxRecoveries", () => {
       "Reset service type to all",
       "Jump to the latest data",
     ]);
-    expect(buildFilterCtxReasons({ service: "平日", dow: "weekend" }, tDesignNs)).toEqual([
+    expect(buildFilterCtxReasons({ service: "平日", dow: "weekend" }, tDesignNs, routeName)).toEqual([
       "Day: Weekend/Holiday",
       "Service: Weekday",
     ]);
