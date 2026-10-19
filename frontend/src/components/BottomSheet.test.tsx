@@ -54,7 +54,7 @@ function Harness({ initial = "peek" as SnapPoint }: { initial?: SnapPoint }) {
 }
 
 function grabHandle(): HTMLElement {
-  const handle = screen.getByRole("button", { name: /expand|collapse|handle/i });
+  const handle = screen.getByRole("button", { name: "Resize the sheet" });
   handle.setPointerCapture = () => {};
   return handle;
 }
@@ -74,13 +74,13 @@ function pointer(el: HTMLElement, type: string, clientY: number): void {
 describe("BottomSheet", () => {
   it("renders a drag handle and the sheet content at every snap point", () => {
     render(<Harness />);
-    expect(screen.getByRole("button", { name: /expand|collapse|handle/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resize the sheet" })).toBeTruthy();
     expect(screen.getByText("first row")).toBeTruthy();
   });
 
   it("advances one snap point when ArrowUp is pressed on the handle", () => {
     render(<Harness initial="peek" />);
-    const handle = screen.getByRole("button", { name: /expand|collapse|handle/i });
+    const handle = screen.getByRole("button", { name: "Resize the sheet" });
     expect(handle).toHaveAttribute("aria-expanded", "false");
     fireEvent.keyDown(handle, { key: "ArrowUp" });
     expect(handle).toHaveAttribute("aria-expanded", "true");
@@ -104,7 +104,7 @@ describe("BottomSheet", () => {
     render(<Harness initial="full" />);
     screen.getByText("last row").focus();
     await user.tab();
-    expect(screen.getByRole("button", { name: /expand|collapse|handle/i })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Resize the sheet" })).toHaveFocus();
   });
 
   /** The sheet is laid out at its full height and slid down; this is how far
@@ -176,6 +176,58 @@ describe("BottomSheet", () => {
     pointer(handle, "pointerup", 500);
 
     expect(handle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("steps peek → half → full → peek when the handle is activated, as Enter, Space or a screen reader's tap do", () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+    const sheet = screen.getByLabelText("Trips to check");
+
+    fireEvent.click(handle);
+    expect(handle).toHaveAttribute("aria-expanded", "true");
+    expect(sheet).not.toHaveAttribute("aria-modal");
+    fireEvent.click(handle);
+    expect(sheet).toHaveAttribute("aria-modal", "true");
+    fireEvent.click(handle);
+    expect(handle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("advances one snap point on a tap in place, not two", () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+
+    pointer(handle, "pointerdown", 600);
+    pointer(handle, "pointerup", 600);
+    fireEvent.click(handle);
+
+    expect(handle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Trips to check")).not.toHaveAttribute("aria-modal");
+  });
+
+  it("ignores the click that ends a real drag, so the drag alone decides the snap", () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+
+    pointer(handle, "pointerdown", 600);
+    pointer(handle, "pointermove", 350);
+    pointer(handle, "pointerup", 350);
+    fireEvent.click(handle);
+
+    expect(handle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Trips to check")).not.toHaveAttribute("aria-modal");
+  });
+
+  it("still steps on Enter after a drag whose click never reached the handle", () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+
+    pointer(handle, "pointerdown", 600);
+    pointer(handle, "pointermove", 350);
+    pointer(handle, "pointerup", 350);
+    fireEvent.keyDown(handle, { key: "Enter" });
+    fireEvent.click(handle);
+
+    expect(screen.getByLabelText("Trips to check")).toHaveAttribute("aria-modal", "true");
   });
 
   it("collapses from full to half on Escape, moving focus back to the handle", () => {

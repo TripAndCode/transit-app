@@ -6,6 +6,12 @@ import { clampRatio, nextSnap, SNAP_HEIGHT_VH, SNAP_ORDER, SNAP_RATIO, type Snap
 
 export type { SnapPoint };
 
+/** A press that never strays this far from where it began is a tap: the
+ *  click that follows it steps the snap, so a tap, Enter, Space and a
+ *  screen reader's activation all act alike. A press that does is a drag,
+ *  and the click ending it is ignored. */
+const TAP_SLOP_PX = 6;
+
 type Props = {
   snap: SnapPoint;
   onSnapChange: (next: SnapPoint) => void;
@@ -33,7 +39,9 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     /** The sheet's visible height when the drag began, from the snap table:
      *  the box itself is always laid out at the full height and translated. */
     restingHeight: number;
+    moved: boolean;
   } | null>(null);
+  const ignoreClickRef = useRef(false);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const isFull = snap === "full";
 
@@ -57,12 +65,14 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     e.currentTarget.setPointerCapture(e.pointerId);
     const now = performance.now();
     const viewportH = window.innerHeight || 1;
+    ignoreClickRef.current = false;
     dragStateRef.current = {
       startY: e.clientY,
       startTime: now,
       lastY: e.clientY,
       lastTime: now,
       restingHeight: viewportH * (SNAP_HEIGHT_VH[snap] / 100),
+      moved: false,
     };
     setDragRatio(SNAP_RATIO[snap]);
   }
@@ -72,6 +82,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     const now = performance.now();
     dragStateRef.current.lastY = e.clientY;
     dragStateRef.current.lastTime = now;
+    if (Math.abs(e.clientY - dragStateRef.current.startY) >= TAP_SLOP_PX) dragStateRef.current.moved = true;
     setDragRatio(ratioFromClientY(e.clientY));
   }
 
@@ -79,6 +90,11 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     const drag = dragStateRef.current;
     dragStateRef.current = null;
     if (!drag) return;
+    if (!drag.moved && Math.abs(e.clientY - drag.startY) < TAP_SLOP_PX) {
+      setDragRatio(null);
+      return;
+    }
+    ignoreClickRef.current = e.type === "pointerup";
     const ratio = ratioFromClientY(e.clientY);
     const dt = Math.max(1, drag.lastTime - drag.startTime);
     // Velocity in the same units as position -- ratios of the peek-to-full
@@ -92,7 +108,16 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     onSnapChange(nextSnap(ratio, velocity));
   }
 
+  function onHandleClick() {
+    if (ignoreClickRef.current) {
+      ignoreClickRef.current = false;
+      return;
+    }
+    onSnapChange(SNAP_ORDER[(SNAP_ORDER.indexOf(snap) + 1) % SNAP_ORDER.length]);
+  }
+
   function onHandleKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>) {
+    ignoreClickRef.current = false;
     const idx = SNAP_ORDER.indexOf(snap);
     if (e.key === "ArrowUp" && idx < SNAP_ORDER.length - 1) {
       e.preventDefault();
@@ -135,6 +160,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
         onPointerMove={onHandlePointerMove}
         onPointerUp={onHandlePointerUp}
         onPointerCancel={onHandlePointerUp}
+        onClick={onHandleClick}
         onKeyDown={onHandleKeyDown}
       >
         <GripHorizontal size={16} strokeWidth={1.5} aria-hidden="true" />
