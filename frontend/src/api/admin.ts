@@ -56,7 +56,16 @@ async function bulkPatchUsers(ids: number[], patch: UserPatchBody) {
   return apiPatch<AdminUser[]>("/api/admin/users/bulk", { ids, patch });
 }
 
-/** Mutation: PATCH a user's role/suspended flag; invalidates the user list and detail queries on success. */
+/** Server-side effects of a user mutation beyond the user rows: a suspend or a
+ *  delete ends the user's sessions, and an approval, a suspend or a delete
+ *  changes the board's pending-approvals count. */
+function invalidateUserEffects(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["adminUserSessions"] });
+  qc.invalidateQueries({ queryKey: ["adminBoard"] });
+}
+
+/** Mutation: PATCH a user's role/suspended flag; invalidates the user list,
+ *  detail, sessions and board queries on success. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
@@ -67,12 +76,13 @@ export function usePatchUser() {
       // cheap, and it doesn't depend on the detail page's uid key staying a
       // string (unlike reconstructing ["adminUser", String(uid)] here).
       qc.invalidateQueries({ queryKey: ["adminUser"] });
+      invalidateUserEffects(qc);
     },
   });
 }
 
 /** Mutation: PATCH one patch across many users in a single transaction;
- * invalidates the user list and detail queries on success. The undo flow
+ * invalidates the user list, detail, sessions and board queries on success. The undo flow
  * (AdminUsersPage) re-invokes this with the inverse patch over the same ids. */
 export function useBulkPatchUsers() {
   const qc = useQueryClient();
@@ -81,11 +91,13 @@ export function useBulkPatchUsers() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
       qc.invalidateQueries({ queryKey: ["adminUser"] });
+      invalidateUserEffects(qc);
     },
   });
 }
 
-/** Mutation: soft-delete a user; invalidates the user list and evicts the detail query on success. */
+/** Mutation: soft-delete a user; invalidates the user list, sessions and board
+ *  queries and evicts the detail query on success. */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
@@ -96,6 +108,7 @@ export function useDeleteUser() {
       // detail page on delete, so refetching the just-deleted row first
       // would only be a wasted request.
       qc.removeQueries({ queryKey: ["adminUser"] });
+      invalidateUserEffects(qc);
     },
   });
 }
@@ -127,6 +140,15 @@ type AgencyPatch = Partial<Omit<AgencyCreate, "agency_name"> & { agency_name: st
 
 // ── Agency admin hooks ───────────────────────────────────────────────────
 
+/** Re-reads the health snapshot and diagnostics bundle after any change to
+ *  what they report. Repointing a feed discards its recorded RT-coverage
+ *  verdicts, a new agency has no health row until the snapshot is re-read,
+ *  and the health list carries deleted agencies too. */
+function invalidateAgencyDiagnostics(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["adminAgencyDiagnostics"] });
+  qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] });
+}
+
 /** Admin list of ALL agencies including soft-deleted. */
 export function useAdminAgencies() {
   return useQuery({
@@ -143,6 +165,7 @@ export function useCreateAgencyAdmin() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminAgencies"] });
       qc.invalidateQueries({ queryKey: ["agencies"] });
+      invalidateAgencyDiagnostics(qc);
     },
   });
 }
@@ -156,6 +179,7 @@ export function usePatchAgency() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminAgencies"] });
       qc.invalidateQueries({ queryKey: ["agencies"] });
+      invalidateAgencyDiagnostics(qc);
     },
   });
 }
@@ -168,6 +192,7 @@ export function useDeleteAgency() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminAgencies"] });
       qc.invalidateQueries({ queryKey: ["agencies"] });
+      invalidateAgencyDiagnostics(qc);
     },
   });
 }
@@ -180,6 +205,7 @@ export function useRestoreAgency() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminAgencies"] });
       qc.invalidateQueries({ queryKey: ["agencies"] });
+      invalidateAgencyDiagnostics(qc);
     },
   });
 }
@@ -521,11 +547,6 @@ export function useAgencyDiagnostics(agencyId: number | null, runFinishedAt: str
 type StandardsPatch = { upsert?: AgencyStandard[]; delete?: AgencyStandard[] };
 type WeightsPatch = { upsert?: AgencyWeight[]; delete?: AgencyWeight[] };
 
-function invalidateAgencyDiagnostics(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["adminAgencyDiagnostics"] });
-  qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] });
-}
-
 /** Mutation: replace/remove `route_performance_standards` rows for an agency. */
 export function usePatchAgencyStandards() {
   const qc = useQueryClient();
@@ -625,12 +646,14 @@ export function useUserActivity(uid: number) {
   });
 }
 
-/** Mutation: revoke one session by its prefix; refetches the session list. */
+/** Mutation: revoke one session by its prefix; refetches the session list
+ *  either way, since a failure is usually a 404 for a session that already
+ *  ended (expired, signed out, or ended by a suspend). */
 export function useRevokeSession(uid: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (sidPrefix: string) => apiDelete(`/api/admin/users/${uid}/sessions/${sidPrefix}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
   });
 }
 

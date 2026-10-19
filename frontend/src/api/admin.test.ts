@@ -7,8 +7,15 @@ import {
   healthRefetchInterval,
   useAckBoardAlert,
   useAgencyDiagnostics,
+  useBulkPatchUsers,
+  useCreateAgencyAdmin,
+  useDeleteAgency,
+  useDeleteUser,
+  usePatchAgency,
   usePatchUser,
   useRefreshAgencyStatic,
+  useRestoreAgency,
+  useRevokeSession,
   useUpdateAgency,
   type AdminBoard,
   type AgencyHealthRow,
@@ -17,7 +24,9 @@ import {
 const mockApiPatch = vi.fn();
 const mockApiPost = vi.fn();
 const mockApiGet = vi.fn();
+const mockApiDelete = vi.fn();
 vi.mock("./client", () => ({
+  apiDelete: (...args: unknown[]) => mockApiDelete(...args),
   apiGet: (...args: unknown[]) => mockApiGet(...args),
   apiPatch: (...args: unknown[]) => mockApiPatch(...args),
   apiPost: (...args: unknown[]) => mockApiPost(...args),
@@ -61,6 +70,125 @@ describe("usePatchUser", () => {
     });
 
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+});
+
+function renderWithClient<T>(hook: () => T) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+  const { result } = renderHook(hook, {
+    wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+  });
+  return { result, invalidateSpy };
+}
+
+type MutationCall = () => () => Promise<unknown>;
+
+describe.each<[string, MutationCall]>([
+  [
+    "usePatchUser",
+    () => {
+      const m = usePatchUser();
+      return () => m.mutateAsync({ uid: 5, body: { suspended: true } });
+    },
+  ],
+  [
+    "useBulkPatchUsers",
+    () => {
+      const m = useBulkPatchUsers();
+      return () => m.mutateAsync({ ids: [5, 6], patch: { suspended: true } });
+    },
+  ],
+  [
+    "useDeleteUser",
+    () => {
+      const m = useDeleteUser();
+      return () => m.mutateAsync(5);
+    },
+  ],
+])("%s", (_name, hook) => {
+  afterEach(() => {
+    mockApiPatch.mockReset();
+    mockApiDelete.mockReset();
+  });
+
+  it("refetches the sessions and the board, which a suspend, an approval or a delete changes server-side", async () => {
+    mockApiPatch.mockResolvedValue({});
+    mockApiDelete.mockResolvedValue(undefined);
+    const { result, invalidateSpy } = renderWithClient(hook);
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminUserSessions"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminBoard"] });
+  });
+});
+
+describe.each<[string, MutationCall]>([
+  [
+    "useCreateAgencyAdmin",
+    () => {
+      const m = useCreateAgencyAdmin();
+      return () => m.mutateAsync({ agency_name: "A", feed_url: "https://x/rt" });
+    },
+  ],
+  [
+    "usePatchAgency",
+    () => {
+      const m = usePatchAgency();
+      return () => m.mutateAsync({ id: 8, body: { feed_url: "https://y/rt" } });
+    },
+  ],
+  [
+    "useDeleteAgency",
+    () => {
+      const m = useDeleteAgency();
+      return () => m.mutateAsync(8);
+    },
+  ],
+  [
+    "useRestoreAgency",
+    () => {
+      const m = useRestoreAgency();
+      return () => m.mutateAsync(8);
+    },
+  ],
+])("%s", (_name, hook) => {
+  afterEach(() => {
+    mockApiPatch.mockReset();
+    mockApiPost.mockReset();
+    mockApiDelete.mockReset();
+  });
+
+  it("refetches the RT-coverage health and diagnostics, which a new or repointed feed changes", async () => {
+    mockApiPatch.mockResolvedValue({});
+    mockApiPost.mockResolvedValue({});
+    mockApiDelete.mockResolvedValue(undefined);
+    const { result, invalidateSpy } = renderWithClient(hook);
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminAgenciesHealth"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminAgencyDiagnostics"] });
+  });
+});
+
+describe("useRevokeSession", () => {
+  afterEach(() => mockApiDelete.mockReset());
+
+  it("refetches the session list when the revoke fails, since a 404 means the row is already gone", async () => {
+    mockApiDelete.mockRejectedValue(new Error("session not found"));
+    const { result, invalidateSpy } = renderWithClient(() => useRevokeSession(5));
+
+    await act(async () => {
+      await expect(result.current.mutateAsync("abcd1234")).rejects.toThrow("session not found");
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["adminUserSessions", 5] });
   });
 });
 
