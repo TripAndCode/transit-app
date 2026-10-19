@@ -44,7 +44,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_in_range,
 )
-from pipeline.query.formatter import format_day_marker
+from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
@@ -238,7 +238,9 @@ def shift_time_str(time_str: str, delta_sec: int, locale: str = "ja") -> str:
     base = f"{hh:02d}:{mm:02d}:{ss:02d}"
     if day_offset == 0:
         return base
-    return base + format_day_marker(day_offset, locale)
+    # Looked up at call time: formatter imports pipeline.reports, whose package
+    # init imports this module, so the name is not bound yet while it loads.
+    return base + formatter.format_day_marker(day_offset, locale)
 
 
 async def compute_delay_certificate(
