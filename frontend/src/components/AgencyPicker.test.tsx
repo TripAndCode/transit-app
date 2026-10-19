@@ -75,4 +75,13 @@ describe("AgencyPicker", () => {
     expect(container.querySelector(".ticket-agency")).not.toBeNull();
     expect(container.querySelector(".ticket-agency button")?.getAttribute("style") ?? null).toBeNull();
   });
+
+  it("finds an agency typed with full-width letters", async () => {
+    const user = userEvent.setup();
+    renderPicker("/agencies/1/pulse");
+    await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
+    await user.type(screen.getByPlaceholderText("Search..."), "ｈｉｒｏ");
+    expect(screen.getByRole("option", { name: "Hiroshima Bus" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Aomori City Bus" })).toBeNull();
+  });
 });

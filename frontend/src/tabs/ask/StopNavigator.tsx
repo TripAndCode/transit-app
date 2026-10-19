@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { StopEvidence } from "./stopEvidence";
+import { searchKey } from "../../utils/searchText";
 
 export function StopNavigator({ points, start, size, low, high, onStart, onSize, onPick }: {
   points: StopEvidence[]; start: number; size: number; low: number; high: number;
@@ -8,10 +9,9 @@ export function StopNavigator({ points, start, size, low, high, onStart, onSize,
 }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
-  const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase().trim();
-  const query = normalize(search);
+  const query = searchKey(search);
   const matches = points.map((point, index) => ({ point, index })).filter(({ point }) =>
-    normalize(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
+    searchKey(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
   const total = points.length;
   const end = Math.min(total, start + size);
   return <div className="stop-navigator">

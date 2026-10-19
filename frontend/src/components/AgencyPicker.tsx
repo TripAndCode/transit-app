@@ -8,15 +8,16 @@ import { onActivateKey } from "../utils/a11y";
 import { Z_INDEX } from "../styles/zIndex";
 import { agencySwitchHref } from "../routes/destinations";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
+import { searchKey } from "../utils/searchText";
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
 // preferred over an inline immediately-invoked function expression.
 function filterAgencies(agencies: Agency[] | undefined, filter: string): Agency[] {
   if (!agencies) return [];
-  const q = filter.trim().toLowerCase();
+  const q = searchKey(filter);
   if (!q) return agencies;
-  return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
+  return agencies.filter((a) => searchKey(a.agency_name).includes(q));
 }
 
 const FIELD_TRIGGER_STYLE: CSSProperties = {
