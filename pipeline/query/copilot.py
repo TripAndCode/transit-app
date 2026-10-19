@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from api.triage import LOW_CONFIDENCE_SAMPLES
 from pipeline.flags import aflag, flag
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
@@ -64,5 +65,13 @@ async def generate_proactive_insight(tab: str, view_payload: dict, *, locale: st
         logger.warning("copilot: template render failed for template_id=%r, falling back", template_id)
         rendered = render_template(NO_SIGNAL_TEMPLATE_ID, view_payload, locale)
 
-    low_confidence = bool(view_payload.get("low_confidence", False))
-    return {"text": rendered["text"], "cite": rendered["cite"], "low_confidence": low_confidence}
+    return {"text": rendered["text"], "cite": rendered["cite"], "low_confidence": _thin_payload(view_payload)}
+
+
+def _thin_payload(view_payload: dict) -> bool:
+    """Whether the payload rests on fewer observations than the triage trusts.
+    The overview states how much data stands behind it as its headline's sample
+    count; a payload without one claims nothing either way."""
+    headline = view_payload.get("headline")
+    samples = headline.get("samples") if isinstance(headline, dict) else None
+    return isinstance(samples, (int, float)) and samples < LOW_CONFIDENCE_SAMPLES

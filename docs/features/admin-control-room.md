@@ -145,6 +145,44 @@ into that table (`api/activity.py`, flushed every 30 s), attributing
 API-key requests to the key's owner. It stores route templates and days
 only — never raw paths, query text, or finer timestamps.
 
+## Ops
+
+Route: `/admin/ops`, backed by `AdminOpsPage`.
+
+Endpoint: `GET /api/admin/ops` — a read-only health snapshot with two
+sub-checks, each degrading on its own (the response is still 200, and the
+page shows that check as unknown rather than as healthy):
+- migration status (`pipeline.health.migration_status`): the on-disk
+  migration files against `schema_migrations`, as the latest applied
+  version and how many are pending;
+- aggregate freshness (`pipeline.health.aggregate_freshness`, read live —
+  the board's staleness alerts come from the same check): per active agency,
+  its last analyze time (`agg_meta`), the newest completed day in ClickHouse
+  `updates`, how many days its newest `agg_route_daily` date trails that day
+  and whether that makes it stale, and its recent clamp rate
+  (`agg_feed_health`).
+
+The page shows a status strip for the two checks and a per-agency table
+(agency, last analyzed, freshness, data through, implausible %).
+
+## Architecture
+
+Route: `/admin/architecture`, backed by `AdminArchitecturePage`.
+
+The page shows a Mermaid data-flow diagram of `AGENTS.md`'s "Architecture
+pointers", kept in sync with that section by hand (nothing derives it), and
+an index of `docs/features/*.md` with the selected doc rendered beside it.
+
+Endpoints:
+- `GET /api/admin/architecture/docs` — every `docs/features/*.md` file's slug
+  and `# Title`, sorted by filename; files holding only HTML comments or
+  whitespace are left out.
+- `GET /api/admin/architecture/docs/{slug}` — one doc's raw Markdown; a
+  malformed slug, one that would resolve outside that directory, a missing
+  file and a comment-only file each answer 404.
+
+Both read the filesystem on every request and touch no database.
+
 ## Audit log
 
 Route: `/admin/audit`, backed by `AdminAuditPage`.
@@ -165,12 +203,18 @@ Endpoints:
   env default, override provenance).
 - `PATCH /api/admin/flags/{key}` — set or replace this flag's DB override;
   `reason` is mandatory.
+- `DELETE /api/admin/flags/{key}` — clear this flag's DB override, returning
+  it to its env resolution (the page's way back to the deployment's own
+  setting). Idempotent: a flag with no override row succeeds unchanged. An
+  unregistered key answers 404 on both writes.
 
 Tables: reads and writes `feature_flags` (one row per overridden key,
-upserted — no history, only the latest reason/actor/timestamp per key);
-every PATCH also records an `admin_audit` entry. See `pipeline/flags.py`
-for the registry, precedence, and cache TTL, and `README.md`'s kill-switch
-section for the full key list.
+upserted on PATCH and deleted on clear — no history, only the latest
+reason/actor/timestamp per key). Every PATCH records an `admin_audit` entry
+(`flag.set`), and a clear that removed a row records `flag.cleared`. Both
+invalidate the flag cache immediately. See `pipeline/flags.py` for the
+registry, precedence, and cache TTL, and `README.md`'s kill-switch section
+for the full key list.
 
 `login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
 every `/api/*` route except the sign-in flow and `/api/config` refuses a

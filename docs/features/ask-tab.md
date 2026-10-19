@@ -38,14 +38,16 @@ What the user sees/does:
 
 - **Empty thread (landing state)** —
   `frontend/src/tabs/ask/AskLandingCards.tsx`: `buildCardTemplates()`
-  (`frontend/src/components/askCardTemplates.ts`) defines 5 templates
-  total, split by `needsRoute()` into 2 instant-run cards that need no
-  route ("🏆 Top-N delays" / `top_delay`, "🎯 On-time rate" /
-  `ontime_rank`) which dispatch immediately on click, and 3 route-requiring
-  "pills" ("📈 Route delay trend" / `route_trend`, "⚖️ Weekday vs Weekend" /
-  `weekday_vs_weekend`, "🚏 Route overview" / `route_overview`) that open
-  an inline parameter picker (`frontend/src/components/ParamStrip.tsx`)
-  before running.
+  (`frontend/src/components/askCardTemplates.ts`) defines the templates,
+  each labelled with a line icon from the app's set, split by
+  `needsRoute()` into instant-run cards that need no route ("Top-N delays"
+  / `top_delay`, "On-time rate ranking" / `ontime_rank`) which dispatch
+  immediately on click, and route-requiring "pills" ("Explore all stops by
+  pattern" / `stop_patterns`, "Which stops have larger delays?" /
+  `stop_hotspots`, "Route delay trend" / `route_trend`, "Weekday vs
+  Weekend" / `weekday_vs_weekend`, "Route overview" / `route_overview`)
+  that open an inline parameter picker
+  (`frontend/src/components/ParamStrip.tsx`) before running.
 - **Bottom dock** — `frontend/src/components/QuestionDock.tsx`: persistent
   chip toolbar (visible once a thread has messages) to start a new
   templated question; renders `ParamStrip` when a chip is "composing".
@@ -53,13 +55,17 @@ What the user sees/does:
   bubbles; assistant bubbles render `frontend/src/tabs/ask/RichResult.tsx`
   (table / kv / chart depending on `result.kind`), with a collapsible
   "details" JSON dump of tool/args/result.
-- **Follow-up chips** —
-  `frontend/src/tabs/ask/FollowupChipsRow.tsx`: 5 canned chips (why /
-  reliability / slice / summarize / next) plus a free-text box, shown
-  under the latest assistant message with a tool result. Gated by
-  `ASK_FOLLOWUP_ENABLED` (`useFollowupEnabled` hook).
+- **Follow-up box** —
+  `frontend/src/tabs/ask/FollowupChipsRow.tsx`: a free-text input and send
+  button, grounded on the selected stop when one is selected, otherwise on
+  the latest assistant message with a tool result. An unselected
+  `route_stop_patterns` result shows a select-a-stop prompt
+  (`ask.evidence.select_to_ask`) in its place. Shown only when
+  `ASK_FOLLOWUP_ENABLED` is on (`useFollowupEnabled` hook) and the
+  signed-in caller is `llm_approved` (see "Who may reach the Stage-3 LLM"
+  below).
 - There is **no free-text primary input** in the current UI — the primary
-  path is entirely the 5 parameterized card/chip templates
+  path is entirely the parameterized card/chip templates
   (`frontend/src/components/askCardTemplates.ts`). Free text only appears
   in the follow-up box, plus internally via the anonymous `__build__`
   sentinel (see below).
@@ -207,7 +213,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/tabs/ask/AskLandingCards.tsx` | Empty-thread landing cards/pills |
 | `frontend/src/tabs/ask/MessageList.tsx` | Message bubble list |
 | `frontend/src/tabs/ask/RichResult.tsx` | Renders table/kv/series tool results |
-| `frontend/src/tabs/ask/FollowupChipsRow.tsx` | Follow-up chips + free-text box |
+| `frontend/src/tabs/ask/FollowupChipsRow.tsx` | Follow-up free-text box |
 | `frontend/src/tabs/ask/filterCtx.ts` | `FilterCtx` <-> `RangeCtx` helpers |
 | `frontend/src/components/QuestionDock.tsx` | Bottom dock state machine (idle/composing/busy) |
 | `frontend/src/components/ParamStrip.tsx` | Inline parameter composer for a chip template |
@@ -291,9 +297,10 @@ so it is a separate mechanism to build, not a knob to turn on.
 1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
    `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
    exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
-   `.env.example` local-dev default, so follow-up chips work out of the
-   box; set it `false` to verify the kill-switch (chips hidden,
-   `POST /followup` returns 503).
+   `.env.example` local-dev default, so the follow-up box works out of the
+   box for a signed-in user an admin has marked `llm_approved`; set it
+   `false` to verify the kill-switch (box hidden, `POST /followup` returns
+   503).
 2. `make bootstrap && make serve` (FastAPI on `:8000`), or add
    `make frontend-dev` for hot reload on `:5173` (Vite proxies `/api`).
    `make bootstrap` alone leaves the DB empty — load data before clicking
@@ -315,16 +322,16 @@ so it is a separate mechanism to build, not a knob to turn on.
    there too). Click the top bar's search field (or press ⌘K), choose "Ask",
    and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
 5. On the empty-thread landing view, click an instant card (e.g.
-   "🏆 Top-N delays") — expect an immediate assistant bubble with a ranked
+   "Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,
    no LLM).
-6. Click a route-requiring pill (e.g. "📈 Route delay trend"), pick a
+6. Click a route-requiring pill (e.g. "Route delay trend"), pick a
    route, then run it from the `ParamStrip` — expect a trend chart bubble.
-7. After any answer, use a follow-up chip ("Why this pattern?") or type
-   free text in the follow-up box — expect a short LLM-generated
-   explanation grounded only in the prior table.
+7. After any answer (for "Explore all stops by pattern", after selecting a
+   stop), type a question in the follow-up box and send it — expect a
+   short LLM-generated explanation grounded only in the prior result.
 8. To exercise the 3-stage NL router directly (not reachable from the
-   current chip-only UI), call the API directly:
+   current template-only UI), call the API directly:
    ```bash
    # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
    # While sign-in is required, also pass a session cookie from a signed-in
@@ -349,11 +356,12 @@ so it is a separate mechanism to build, not a knob to turn on.
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`). Notable subtrees: `ask.landing.*`, `ask.card.*`
   (including `ask.card.param.*` option labels), `ask.dock.*`,
-  `ask.followup_*` / `ask.followup_chips.*` (the 5 canned chip
-  label/prompt pairs), `ask.col.*` (table column headers),
+  `ask.followup_*` (the follow-up box's placeholder and send label),
+  `ask.evidence.*` (stop-evidence views and the follow-up box's
+  selected-stop context), `ask.col.*` (table column headers),
   `ask.build_labels.*` (anon `__build__` summary / builder-schema UI),
-  `ask.ctx.*` (filter-context chips). New templates/params need matching
-  keys in both locale files.
+  `ask.filter_bar.*` (the filter-context bar). New templates/params need
+  matching keys in both locale files.
 - **Server-side**: `pipeline/query/tools.py`'s
   `_LOCALES: dict[tuple[str, str], str]` holds every user-facing string
   the tool handlers can emit, keyed `(template_name, locale)` with
