@@ -50,7 +50,7 @@
     "subtitle_reports": "A summary for a council or board, and proof of a late departure."
   },
   "sheet": {
-    "handle": "Sheet handle"
+    "handle": "Resize the sheet"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
@@ -964,17 +964,17 @@
       },
       "route_trend": {
         "title": "Route delay trend",
-        "summary": "Route {{route}} — {{gran}} buckets",
+        "summary": "{{route}} — {{gran}} buckets",
         "placeholder": "Select a route"
       },
       "weekday_vs_weekend": {
         "title": "Weekday vs Weekend",
-        "summary": "Route {{route}}: weekday vs weekend comparison",
+        "summary": "{{route}}: weekday vs weekend comparison",
         "placeholder": "Select a route"
       },
       "route_overview": {
         "title": "Route overview",
-        "summary": "Route {{route}} overview",
+        "summary": "Overview of {{route}}",
         "placeholder": "Select a route"
       }
     },
