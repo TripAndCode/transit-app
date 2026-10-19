@@ -13,6 +13,7 @@ import itertools
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Container, Iterable, Literal, Sequence
@@ -67,6 +68,8 @@ class BranchFacts:
     head_prs: tuple[PullRequest, ...] = ()
     """PRs of any branch name whose head is exactly this tip."""
     ancestor_of_merged: tuple[int, ...] = ()
+    worktree_age_hours: float | None = None
+    """Hours since the branch's worktree was created; None without one."""
     """Merged PRs whose head descends from this tip."""
 
 
@@ -184,6 +187,20 @@ def load_pull_requests(repo: Path) -> dict[str, tuple[PullRequest, ...]]:
     return {branch: tuple(records) for branch, records in grouped.items()}
 
 
+FRESH_WORKTREE_HOURS = 24
+
+
+def worktree_age_hours(worktree: Worktree | None) -> float | None:
+    """Hours since `git worktree add` wrote the checkout's `.git` file."""
+    if worktree is None:
+        return None
+    try:
+        created = (worktree.path / ".git").stat().st_mtime
+    except OSError:
+        return None
+    return (time.time() - created) / 3600
+
+
 def decide_branch(facts: BranchFacts) -> Decision:
     """Return a deletion decision based only on explicit recoverability evidence."""
 
@@ -217,6 +234,24 @@ def decide_branch(facts: BranchFacts) -> Decision:
             facts.worktree,
         )
 
+    # A worktree cut from the base a moment ago has no commits of its own, so its
+    # tip already reads as merged: another session may be starting work there.
+    # Only a PR proves the work done, so without one it waits out a day first.
+    if (
+        in_base
+        and facts.worktree is not None
+        and facts.worktree_age_hours is not None
+        and facts.worktree_age_hours < FRESH_WORKTREE_HOURS
+        and not facts.pull_requests
+        and not facts.head_prs
+    ):
+        return Decision(
+            facts.branch,
+            facts.head,
+            "keep",
+            f"worktree is under {FRESH_WORKTREE_HOURS}h old, with no commits of its own and no PR yet",
+            facts.worktree,
+        )
     if facts.ancestor_of_base:
         return Decision(facts.branch, facts.head, "delete", "tip is already an ancestor of the base", facts.worktree)
     if facts.tree_matches_base:
@@ -613,6 +648,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
                     dirty=is_dirty(worktree),
                     head_prs=tuple(by_head.get(head, ())),
                     ancestor_of_merged=merged_heads.descendants_of(head),
+                    worktree_age_hours=worktree_age_hours(worktree),
                 )
             )
         )
