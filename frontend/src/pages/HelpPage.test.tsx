@@ -233,6 +233,17 @@ describe("HelpPage", () => {
   });
 
   describe("search", () => {
+    it("matches a query typed with full-width letters", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.type(screen.getByRole("searchbox"), "Ｏｔｈｅｒ　ｍａｎｕａｌ");
+
+      expect(screen.queryByRole("button", { name: "Section one" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Section two" })).toBeInTheDocument();
+    });
+
     it("narrows the sidebar and content to sections matching the query text", async () => {
       const user = userEvent.setup();
       renderWithProviders(<HelpPage />);

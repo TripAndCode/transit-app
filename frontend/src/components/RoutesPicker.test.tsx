@@ -109,4 +109,10 @@ describe("RoutesPicker group checkbox", () => {
     expect(lineName).not.toBe("");
     expect(screen.getByRole("checkbox", { name: lineName })).toBe(checkbox);
   });
+
+  it("finds a line typed with full-width characters", async () => {
+    renderPicker();
+    await userEvent.type(screen.getByLabelText("Search routes"), "Ｃ１２");
+    expect(screen.getByRole("button", { name: "Expand" })).toBeInTheDocument();
+  });
 });

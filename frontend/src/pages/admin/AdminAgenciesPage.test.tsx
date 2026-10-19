@@ -511,6 +511,14 @@ describe("AdminAgenciesPage", () => {
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
   });
 
+  it("filters by a name typed with full-width letters", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.type(screen.getByPlaceholderText("Search by name"), "Ｄｅｌｅｔｅｄ");
+    expect(screen.queryByText("Aomori Bus")).toBeNull();
+    expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
   it("does not claim there are no agencies while loading or after a failed load", () => {
     agenciesOverride = { data: undefined, isLoading: true, error: null };
     const { unmount } = wrap(<AdminAgenciesPage />);

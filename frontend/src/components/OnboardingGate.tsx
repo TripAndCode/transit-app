@@ -10,6 +10,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import type { Agency } from "../api/types";
 import { formatDate } from "../utils/format";
 import { LanguageToggle } from "./LanguageToggle";
+import { searchKey } from "../utils/searchText";
 
 // Selection→navigate delay: must stay >= --transition (global.css) so the
 // dim/highlight finishes before the route changes. Not derived from the CSS
@@ -86,9 +87,9 @@ export function OnboardingGate() {
   }
 
   const searchable = agencies.length >= SEARCH_MIN_AGENCIES;
-  const needle = query.normalize("NFKC").trim().toLocaleLowerCase();
+  const needle = searchKey(query);
   const shown = byDataFirst(agencies).filter(
-    (a) => !searchable || a.agency_name.normalize("NFKC").toLocaleLowerCase().includes(needle),
+    (a) => !searchable || searchKey(a.agency_name).includes(needle),
   );
 
   return (

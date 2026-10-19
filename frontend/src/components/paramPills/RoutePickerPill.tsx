@@ -23,6 +23,7 @@ import { delayColor } from "../../styles/tokens";
 import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import "./RoutePickerPill.css";
 import { fixedTenth } from "../../utils/format";
+import { searchKey } from "../../utils/searchText";
 
 /** Popover's own rendered height (search input + max-height list + padding/border),
  *  matching RoutePickerPill.css's .rp-list max-height (280px) plus chrome. Used to
@@ -85,13 +86,13 @@ export function RoutePickerPill({
 
   usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
-  const ql = q.trim().toLowerCase();
+  const ql = searchKey(q);
   const filteredList = (ql
     ? routes.filter(
         (r) =>
-          (r.route_code ?? "").toLowerCase().includes(ql) ||
-          (r.route_long_name ?? "").toLowerCase().includes(ql) ||
-          (r.route_short_name ?? "").toLowerCase().includes(ql),
+          searchKey(r.route_code ?? "").includes(ql) ||
+          searchKey(r.route_long_name ?? "").includes(ql) ||
+          searchKey(r.route_short_name ?? "").includes(ql),
       )
     : routes
   ).filter((r) => r.route_code != null);
