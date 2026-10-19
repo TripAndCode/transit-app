@@ -410,16 +410,19 @@ function populatedRange<T extends { expected_avg_min: number | null }>(
  * Collapse a per-route 7×24 heatmap into a 7×5 band grid, mirroring
  * pipeline/reports/forecast.py::summarize_agency_overview's own split: the
  * baseline pool is sample-weighted, the ML pool is a plain mean across
- * whatever ML cells land in the band (an ML cell carries no sample count of
- * its own to weight by). `samples`/`low_confidence` always come from the
- * baseline side — see that function's docstring for why.
+ * whatever ML cells land in the band (an ML cell's `samples` is its hour's
+ * baseline count, not a weight for the forecast). `samples`/`low_confidence`
+ * come from those baseline counts, pooled over every cell in the band, an ML
+ * one included — see that function's docstring for why.
  */
 function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell[] {
   const baseline = new Map<string, { sum: number; n: number }>();
   const ml = new Map<string, number[]>();
+  const counts = new Map<string, number>();
   for (const c of cells) {
     if (c.expected_avg_min == null) continue;
     const key = `${c.dow}-${bandOf(c.hour)}`;
+    if (c.samples) counts.set(key, (counts.get(key) ?? 0) + c.samples);
     if (c.source === "ml") {
       const values = ml.get(key) ?? [];
       values.push(c.expected_avg_min);
@@ -436,13 +439,13 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
     for (const band of BAND_ORDER) {
       const key = `${dow}-${band}`;
       const a = baseline.get(key);
-      const n = a?.n ?? 0;
+      const n = counts.get(key) ?? 0;
       const mlValues = ml.get(key);
       const mlMean = mlValues?.length ? mlValues.reduce((sum, v) => sum + v, 0) / mlValues.length : null;
       grid.push({
         dow,
         band,
-        expected_avg_min: mlMean != null ? roundTenth(mlMean) : a && n ? roundTenth(a.sum / n) : null,
+        expected_avg_min: mlMean != null ? roundTenth(mlMean) : a?.n ? roundTenth(a.sum / a.n) : null,
         samples: n,
         low_confidence: mlMean != null ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
         source: mlMean != null ? "ml" : "baseline",
