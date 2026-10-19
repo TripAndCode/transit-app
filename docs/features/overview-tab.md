@@ -42,15 +42,19 @@ What the user sees/does:
 - **Routes to check** — `frontend/src/components/RoutesToCheckList.tsx`: the
   top-5 routes by absolute avg delay over the same 7-day window as the
   headline.
-- **Details toggle** (a native `<details>`) reveals up to three collapsed
-  modules, each clickable to open a bigger `frontend/src/components/OverviewModal.tsx`
-  view:
+- **Module sections** — up to three modules, each rendered inline and
+  always visible when it has data, wrapped in
+  `frontend/src/components/overview/RevealSection.tsx`, which animates it
+  in as it scrolls into view. Clicking a module's card opens a bigger
+  `frontend/src/components/OverviewModal.tsx` view:
   - `frontend/src/components/ConcentrationBar.tsx` — Pareto-style "which
     routes account for most of the delay" bar (card shows 5, modal shows the
     top 20 + a Lorenz-curve overlay), plus the worsening/improving movers list.
   - `frontend/src/components/PeakHourRibbon.tsx` — 24-hour avg-delay ribbon;
-    clicking an hour opens `frontend/src/components/PeakHourModal.tsx` with
-    the top routes for that hour (optionally split by day-of-week).
+    clicking an hour bar that has data opens
+    `frontend/src/components/PeakHourModal.tsx` with the top routes for that
+    hour (optionally split by day-of-week) instead of the card's
+    `OverviewModal`.
   - `frontend/src/components/ServiceSplit.tsx` — avg delay per day type
     (card) or a per-day history (modal). Each date is filed under the
     timetable class its agency's calendar runs that day
@@ -86,6 +90,7 @@ What the user sees/does:
 | `frontend/src/components/PeakHourModal.tsx` | Per-hour (optionally per-DOW) top-routes drill-down |
 | `frontend/src/components/ServiceSplit.tsx` | Day-type split (card/modal variants) |
 | `frontend/src/components/OverviewModal.tsx` | Shared modal chrome each expandable card opens into |
+| `frontend/src/components/overview/RevealSection.tsx` | Scroll-triggered, staggered entrance for each module section; content stays visible at rest |
 | `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useOverviewSummary`, `usePeakHourBreakdown` |
 | `frontend/src/styles/overview.css` | Overview-specific layout/spacing |
@@ -124,14 +129,14 @@ alone for single-origin):
    elsewhere, click "Pulse" in the rail.
 3. Expect the hero row (headline delta + sparkline) and a "Routes to check"
    list once data exists; with no data yet, expect the empty state instead.
-4. Click the details `<summary>` toggle — expect the concentration bar, peak
-   hour ribbon, and service split to expand.
-5. Click the concentration bar, the service split, or a bar on the peak-hour
-   ribbon — expect `OverviewModal` to open with the larger variant of that
-   module.
-6. Click an individual hour on the peak-hour ribbon — expect `PeakHourModal`
-   to open with that hour's top routes.
-7. Change the filter bar's date range / dow / time_band / route selection —
+   Below them, expect the concentration bar, peak-hour ribbon, and service
+   split already visible.
+4. Click the concentration bar card, the service split card, or the
+   peak-hour card outside an hour bar — expect `OverviewModal` to open with
+   the larger variant of that module.
+5. Click an individual hour bar on the peak-hour ribbon — expect
+   `PeakHourModal` to open with that hour's top routes.
+6. Change the filter bar's date range / dow / time_band / route selection —
    expect every module to refetch via `useOverviewSummary`.
 
 ## i18n

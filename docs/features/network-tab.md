@@ -17,31 +17,36 @@ compares to the whole network at a glance.
   `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`
   (to the last-used agency, or to `/` when none is remembered).
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
-  tab, it does **not** show the scope sentence or use the shared
-  dow/service/time_band/route filters — only a plain `from`/`to` date-range
-  pair (whole-agency comparison, per the endpoint's own docstring).
+  tab, it does **not** show the scope sentence, and the board's endpoint reads
+  only the scope's `from`/`to` date range (whole-agency comparison, per the
+  endpoint's own docstring) — the shared dow/service/time_band/route filters
+  do not change the figures. The other scope params stay in the URL.
 
 What the user sees/does:
 
 - **Eyebrow + title + help text**, and a collapsible "how to read this"
   `<details>` explaining each column (avg delay, on-time %, samples, feed
   health, freshness, coverage).
-- **From/to date pickers** — plain HTML `<input type="date">` elements,
-  independent of the shared range context.
-- **Ranked agency card list** — one card per agency, sorted worst-avg-delay
-  first (server-side order), each showing: rank, agency name (links to that
-  agency's Live view, carrying the current date range), avg delay (color
+- **From/to date pickers** — HTML `<input type="date">` elements that read
+  and write the scope's `from`/`to` URL params through `useScope`, as every
+  scoped screen does.
+- **Ranked agency card list** — one card per agency, sorted client-side
+  worst-avg-delay first, agencies with no data in range last
+  (`byDelayDescending`), each showing: agency name (links to that
+  agency's Live view, carrying the current scope minus its `routes` and
+  `stop` params, which name one agency's codes), avg delay (color
   by `delayColor()`) + on-time % + service-delivered % (executed trips ÷
   planned trips from the static GTFS schedule — reads "—" rather than a
   misleading 100% for an agency whose feed doesn't report cancellations),
   a relative delay bar (scaled to the worst agency in the list), sample
   count, and two optional flags: a red dot when `clamp_pct`
-  (implausible/clamped readings) is ≥1%, and a "stale" badge when the feed
+  (implausible/clamped readings) is above 1%, and a "stale" badge when the feed
   hasn't reported recently. The current agency's own card is visually
   highlighted with a "YOU" badge.
-- **Definition metadata block** (`DefinitionMetaBlock`, always visible,
-  above the card list) — states the on-time/late tolerance, measurement
-  point, dedup rule, and exclusion threshold behind every card's on-time %,
+- **Definition metadata block** (`DefinitionMetaBlock`, a collapsed
+  `<details>` disclosure above the card list) — states the on-time/late
+  tolerance, measurement point, dedup rule, and exclusion threshold behind
+  every card's on-time %,
   from the response's `definition` field (`pipeline/reports/definition.py`).
   This board has no tolerance query param of its own, so it always resolves
   to the `legacy_60s` preset — surfaced explicitly so it can be checked
@@ -111,11 +116,12 @@ What the user sees/does:
 3. Expect a ranked card list, worst-avg-delay first, with the current
    agency's card visually highlighted and tagged "YOU".
 4. Click another agency's name — expect navigation to that agency's
-   Live view, carrying the same date range in the URL query string.
-5. Change the from/to date pickers — expect the whole list to refetch and
-   re-rank (note: this does **not** honor the dow/service/time_band/route
-   filters used elsewhere, by design).
-6. If any agency has a clamp rate ≥1% or a stale feed, expect the red dot /
+   Live view, carrying the same scope in the URL query string minus
+   `routes` and `stop`.
+5. Change the from/to date pickers — expect the URL's `from`/`to` to update
+   and the whole list to refetch and re-rank (note: the figures do **not**
+   honor the dow/service/time_band/route filters used elsewhere, by design).
+6. If any agency has a clamp rate above 1% or a stale feed, expect the red dot /
    "stale" badge to render on that card; hover the badge for its tooltip
    text.
 7. Visit the bare `/network` URL directly — expect an immediate redirect to
