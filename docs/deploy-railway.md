@@ -294,13 +294,17 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 3. `ingest` → **Settings → Build**: Dockerfile builder (same image as `app`).
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
-5. `ingest` → **Settings → Deploy → Start Command** — pull the day's zips from
-   object storage, then ingest/analyze/prune. Sketch (adjust to your bucket
-   client; the image needs an S3 client + `postgresql-client` added to the
-   Dockerfile for this service):
+5. `ingest` → **Settings → Deploy → Start Command** — pull the last two UTC
+   days' realtime archives from object storage, then ingest/analyze/prune.
+   The collector uploads each agency's day as `rt/<id>/<YYYYMMDD>.tar.gz`.
+   Sketch (adjust to your bucket client; the image needs an S3 client +
+   `postgresql-client` added to the Dockerfile for this service):
    ```bash
-   for day in "$(date -u -d '2 days ago' +%F)" "$(date -u -d yesterday +%F)"; do
-     aws s3 sync "s3://$OBJECT_STORE_BUCKET/$day" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
+   for id in $AGENCY_IDS; do
+     aws s3 sync "s3://$OBJECT_STORE_BUCKET/rt/$id/" "/tmp/zips/$id" \
+       --endpoint-url "$OBJECT_STORE_ENDPOINT" --exclude '*' \
+       --include "$(date -u -d '2 days ago' +%Y%m%d).tar.gz" \
+       --include "$(date -u -d yesterday +%Y%m%d).tar.gz"
    done
    for id in $AGENCY_IDS; do
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
@@ -345,14 +349,15 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > failed iteration is swallowed and the loop moves to the next `$id`
 > automatically, same effect as `scripts/fetch_and_ingest.sh`'s explicit
 > `continue` on exit 75. But unlike that script's local replay, this job's
-> `/tmp/zips` is on **ephemeral** compute and the bucket pull is
-> **date-partitioned** (`$(date -u +%F)`) — a skipped agency isn't
-> retried tomorrow, because tomorrow's sync only pulls tomorrow's prefix.
-> That day's archive for that agency is gone. Given a lock collision is
-> the one failure mode in this loop that's known to be transient, add a
-> short bounded retry around each `ingest` call (the zips are still local
-> for the rest of this job's run) rather than relying on "next scheduled
-> run" to recover it, e.g.:
+> `/tmp/zips` is on **ephemeral** compute and the bucket pull is a
+> **two-day window** (the two UTC days before the run) — a skipped
+> agency's newer day is pulled once more by the next run, but its older day
+> then leaves the window, and no later run of this job pulls it again. The
+> archive stays in the bucket, so only a manual pull and `ingest` recovers
+> it. Given a lock collision is the one failure mode in this loop that's
+> known to be transient, add a short bounded retry around each `ingest`
+> call (the archives are still local for the rest of this job's run)
+> rather than relying on "next scheduled run" to recover it, e.g.:
 > ```bash
 > for id in $AGENCY_IDS; do
 >   for attempt in 1 2 3; do
