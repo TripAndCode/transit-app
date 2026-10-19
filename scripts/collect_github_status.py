@@ -267,7 +267,9 @@ def gather_stale_branches(
                 "-C",
                 str(repo),
                 "for-each-ref",
-                "--format=%(refname:short)\t%(committerdate:iso-strict)",
+                # lstrip, not short: a local branch called `origin/<name>` makes
+                # `refname:short` write `remotes/origin/<name>` for the remote one.
+                "--format=%(refname:lstrip=3)\t%(committerdate:iso-strict)",
                 "refs/remotes/origin",
             ]
         )
@@ -283,9 +285,6 @@ def gather_stale_branches(
         name, sep, date_str = line.partition("\t")
         if not sep:
             continue
-        if name == "origin":
-            continue  # the `origin/HEAD` symref resolves to bare "origin", not a branch
-        name = name.removeprefix("origin/")
         if not name or name == "HEAD":
             continue
         if name in protected_names:

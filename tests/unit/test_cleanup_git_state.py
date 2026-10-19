@@ -90,6 +90,7 @@ def facts(**overrides: object):
     [
         ({"protected": True}, "protected"),
         ({"current": True}, "invoking worktree"),
+        ({"primary": True}, "primary worktree"),
         ({"pull_requests": (cleanup.PullRequest(10, "OPEN", "a" * 40),)}, "open PR #10"),
         (
             {"worktree": cleanup.Worktree(Path("/tmp/locked"), "feature", locked=True)},
@@ -672,6 +673,40 @@ def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(
 
     assert feature.action == "keep"
     assert "local tip differs" in feature.reason
+
+
+def test_a_merged_branch_in_the_primary_checkout_is_kept_when_run_from_a_linked_worktree(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Git refuses to remove the main working tree, so planning it would abort the apply midway."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "feat")
+
+    assert decision.action == "keep"
+    assert "primary worktree" in decision.reason
+
+
+def test_a_branch_named_like_a_tag_is_planned_under_its_own_name(repository: Path, monkeypatch: pytest.MonkeyPatch):
+    """`refname:short` writes such a branch as `heads/<name>`, which names no branch.
+
+    Deleting it removes the branch only; the tag of the same name stays."""
+
+    git(repository, "branch", "v1.0", "main")
+    git(repository, "tag", "v1.0", "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    assert {d.branch: d.action for d in plan}.get("v1.0") == "delete"
+
+    cleanup.apply_plan(repository, plan)
+    assert git(repository, "branch", "--list", "v1.0") == ""
+    assert git(repository, "tag", "--list", "v1.0") == "v1.0"
 
 
 def test_a_worktree_created_moments_ago_is_kept_in_the_plan(

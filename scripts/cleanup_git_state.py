@@ -71,6 +71,8 @@ class BranchFacts:
     """Merged PRs whose head descends from this tip."""
     worktree_age_hours: float | None = None
     """Hours since the branch's linked worktree was created; None without one."""
+    primary: bool = False
+    """Checked out in the primary worktree, which Git refuses to remove."""
 
 
 @dataclass(frozen=True)
@@ -146,7 +148,9 @@ def parse_worktrees(output: str) -> list[Worktree]:
 def local_branches(repo: Path) -> dict[str, str]:
     """Return local branch names and full tip OIDs."""
 
-    output = run_git(repo, "for-each-ref", "--format=%(refname:short)\t%(objectname)", "refs/heads").stdout
+    # lstrip, not short: `refname:short` writes `heads/<name>` for a branch that
+    # shares its name with a tag or another ref, which names no branch.
+    output = run_git(repo, "for-each-ref", "--format=%(refname:lstrip=2)\t%(objectname)", "refs/heads").stdout
     return dict(line.split("\t", 1) for line in output.splitlines() if line)
 
 
@@ -215,6 +219,8 @@ def decide_branch(facts: BranchFacts) -> Decision:
         return Decision(facts.branch, facts.head, "keep", "protected branch", facts.worktree)
     if facts.current:
         return Decision(facts.branch, facts.head, "keep", "checked out in the invoking worktree", facts.worktree)
+    if facts.primary:
+        return Decision(facts.branch, facts.head, "keep", "checked out in the primary worktree", facts.worktree)
 
     # An open PR under this branch's name may still receive local work, so it always
     # protects the branch. One matched only by head protects commits the base does
@@ -640,6 +646,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
             and worktree_is_dirty(repo, worktree)
         )
 
+    primary_path = worktrees[0].path if worktrees else None
     decisions: list[Decision] = []
     for branch, head in sorted(branches.items()):
         worktree = by_branch.get(branch)
@@ -650,6 +657,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
                     head=head,
                     protected=branch in protected,
                     current=worktree is not None and worktree.path == current_path,
+                    primary=worktree is not None and worktree.path == primary_path,
                     ancestor_of_base=ancestor_of_base[branch],
                     tree_matches_base=tree_matches_base[branch],
                     pull_requests=pull_requests.get(branch, ()),
@@ -662,7 +670,6 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
             )
         )
 
-    primary_path = worktrees[0].path if worktrees else None
     for worktree in worktrees:
         if worktree.branch is not None:
             continue
