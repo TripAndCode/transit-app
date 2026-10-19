@@ -29,6 +29,38 @@ def test_overview_top_delay_route_interpolates_only_payload_numbers(locale):
         assert match in PAYLOAD_NUMBERS, f"unexplained number {match!r} in {rendered['text']!r}"
 
 
+NO_BASELINE_PAYLOAD: dict[str, Any] = {
+    **OVERVIEW_PAYLOAD,
+    "headline": {"avg_min": 6.4, "baseline_avg_min": None, "delta_min": None, "delta_pct": None, "samples": 812},
+}
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+def test_overview_top_delay_route_names_the_route_when_there_is_no_baseline(locale):
+    """With no earlier window, the route is still named, and nothing is compared."""
+    rendered = render_template("overview_top_delay_route", NO_BASELINE_PAYLOAD, locale)
+    assert "14.2" in rendered["text"]
+    assert "None" not in rendered["text"]
+    allowed = PAYLOAD_NUMBERS - {"4.1", "2.3", "56.1"}
+    for match in re.findall(r"\d+\.?\d*", rendered["text"]):
+        assert match in allowed, f"unexplained number {match!r} in {rendered['text']!r}"
+
+
+@pytest.mark.parametrize(
+    "headline",
+    [
+        {"avg_min": 6.4, "baseline_avg_min": 0.0, "delta_min": 6.4, "delta_pct": None, "samples": 812},
+        {"avg_min": None, "baseline_avg_min": 4.1, "delta_min": None, "delta_pct": None, "samples": 812},
+    ],
+    ids=["zero baseline", "no current average"],
+)
+def test_overview_top_delay_route_does_not_deny_an_earlier_period_that_had_data(headline):
+    """No percentage can be given, but the earlier window did have data."""
+    rendered = render_template("overview_top_delay_route", {**OVERVIEW_PAYLOAD, "headline": headline}, "en")
+    assert "14.2" in rendered["text"]
+    assert "earlier period" not in rendered["text"]
+
+
 def test_overview_top_delay_route_defaults_to_japanese():
     """Default locale is ja, matching pipeline.query.tools._summary."""
     explicit = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "ja")

@@ -8,6 +8,7 @@ import pytest
 
 from pipeline.query import copilot
 from pipeline.query.llm_client import LLMClient
+from pipeline.query.tools import _summary
 
 _ROUTE = {"route_code": "R12", "route_short_name": "12", "avg_min": 14.2}
 
@@ -33,10 +34,20 @@ async def test_generate_proactive_insight_interpolates_from_payload():
     assert "Pulse summary" in result["cite"]
 
 
-async def test_low_confidence_comes_from_the_payload():
-    payload = {**OVERVIEW_PAYLOAD, "low_confidence": True}
-    result = await copilot.generate_proactive_insight("overview", payload, locale="en")
+async def test_low_confidence_follows_the_headline_sample_count():
+    thin = {**OVERVIEW_PAYLOAD, "headline": {**OVERVIEW_PAYLOAD["headline"], "samples": 12}}
+    result = await copilot.generate_proactive_insight("overview", thin, locale="en")
     assert result["low_confidence"] is True
+
+
+async def test_an_overview_without_a_baseline_still_names_the_top_route():
+    """A new agency or a feed gap leaves the earlier window empty; the delayed
+    route is still the insight, not "nothing stands out"."""
+    headline = {**OVERVIEW_PAYLOAD["headline"], "baseline_avg_min": None, "delta_min": None, "delta_pct": None}
+    payload = {**OVERVIEW_PAYLOAD, "headline": headline}
+    result = await copilot.generate_proactive_insight("overview", payload, locale="en")
+    assert "14.2" in result["text"]
+    assert result["text"] != _summary("copilot_no_signal", "en")
 
 
 async def test_generate_proactive_insight_rejects_missing_payload():
