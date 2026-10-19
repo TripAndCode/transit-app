@@ -72,6 +72,13 @@ describe("ReportsHomeTab", () => {
     expect(definitions).not.toHaveTextContent("2026-08-12");
   });
 
+  it("names the filtered routes in its definitions, not by their bare route codes", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?routes=A05,K12");
+    const definitions = screen.getByText("View filters and definitions").closest("details") as HTMLElement;
+    expect(definitions).toHaveTextContent("Route A05, Route K12");
+  });
+
   it("leaves the page heading to the Reports shell", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();

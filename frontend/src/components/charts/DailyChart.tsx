@@ -445,7 +445,7 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
                   route: routeName ? routeName(o.route_code) : t("common.route_code_fallback", { code: o.route_code }),
                   min: formatMinutes(o.avg_min),
                 }))
-                .join(", ")}
+                .join(t("common.list_separator"))}
             </div>
           )}
         </div>
