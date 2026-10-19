@@ -7,41 +7,42 @@
  * content so users know they're looking at historical data even when the
  * rest of the UI reads as live.
  *
- * Dismissible per session — re-appears on full page reload to avoid
- * permanently hiding the signal.
+ * Dismissible for the agency it is shown for, for as long as the page stays
+ * loaded; a full reload shows it again, so the signal is never permanently
+ * hidden (see BannerDismissals).
  */
-import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
+import { useBannerDismissal } from "./bannerDismissalsContext";
+import { useNow } from "../hooks/useNow";
 
 const STALE_THRESHOLD_HOURS = 24;
-const SESSION_DISMISS_KEY = "ds_banner_dismissed_at";
+/** The banner sits in the app shell and its query does not poll, so the feed's
+ *  age is re-read on this clock: a page left open warns within a minute of the
+ *  threshold passing. */
+const AGE_RECHECK_MS = 60_000;
 
-function relativeAgeHours(iso: string): number {
+function relativeAgeHours(iso: string, now: Date): number {
   const captured = new Date(iso).getTime();
   if (!Number.isFinite(captured)) return 0;
-  return (Date.now() - captured) / (1000 * 60 * 60);
+  return (now.getTime() - captured) / (1000 * 60 * 60);
 }
 
-export function DataStalenessBanner() {
+export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
   const { agencyId: raw } = useParams();
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
-  const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
-  // sessionStorage is only ever written by handleDismiss in this same tab,
-  // so a lazy initializer + the handler's own setState cover every path —
-  // the previous re-read effect was a no-op (the key is agency-independent).
-  const [dismissed, setDismissed] = useState(
-    () => sessionStorage.getItem(SESSION_DISMISS_KEY) != null,
-  );
+  const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
+  const now = useNow(AGE_RECHECK_MS);
+  const [dismissed, dismiss] = useBannerDismissal("data_stale", agencyId);
   const { messageProps } = useTapToExpandBanner();
 
-  if (agencyId == null) return null;
+  if (hidden || agencyId == null) return null;
   const captured = data?.latest_captured_at;
   if (!captured) return null;
-  const ageH = relativeAgeHours(captured);
+  const ageH = relativeAgeHours(captured, now);
   if (ageH < STALE_THRESHOLD_HOURS) return null;
   if (dismissed) return null;
 
@@ -51,10 +52,6 @@ export function DataStalenessBanner() {
       ? t("common.rel_days_ago", { count: days })
       : t("common.rel_hours_ago", { count: Math.floor(ageH) });
 
-  function handleDismiss() {
-    sessionStorage.setItem(SESSION_DISMISS_KEY, String(Date.now()));
-    setDismissed(true);
-  }
 
   // Choose a calm warm-tan color (max saturation 50%) — never alarm red.
   const bg = "hsl(38, 50%, 95%)";
@@ -66,6 +63,7 @@ export function DataStalenessBanner() {
       role="status"
       aria-live="polite"
       lang={i18n.language}
+      data-shell-banner=""
       style={{
         background: bg,
         color: fg,
@@ -82,7 +80,7 @@ export function DataStalenessBanner() {
       <span {...messageProps}>{t("app.data_stale.banner", { when: ageLabel })}</span>
       <button
         type="button"
-        onClick={handleDismiss}
+        onClick={dismiss}
         aria-label={t("app.data_stale.dismiss_aria")}
         style={{
           background: "transparent",

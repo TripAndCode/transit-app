@@ -3,10 +3,8 @@ import { Outlet, useMatch, useLocation, useMatches } from "react-router-dom";
 import { AgencyDataEndProvider } from "./api/AgencyDataEndProvider";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useAgencyId } from "./api/useAgencyId";
-import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
-import { DataStalenessBanner } from "./components/DataStalenessBanner";
-import { FeedHealthBanner } from "./components/FeedHealthBanner";
+import { NoticeStack } from "./components/NoticeStack";
 import { HelpHint } from "./components/HelpHint";
 import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
@@ -47,15 +45,7 @@ export default function App() {
           <Sidebar />
           <main ref={mainRef} className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
             {agencyIdNum != null && <TopBar />}
-            {/* Scoped to the content area, not the whole app shell — these are
-                notices about the agency data being viewed, not app-wide chrome,
-                so they shouldn't span above the sidebar (a full-height nav rail
-                that has nothing to do with feed staleness or in-flight mutations). */}
-            <div className="app-notice-stack">
-              {!focused && <DataStalenessBanner />}
-              {!focused && <FeedHealthBanner />}
-              <ActivityStrip />
-            </div>
+            <NoticeStack focused={focused} />
             {!focused && <HelpHint />}
             {/* flex: 1, not height: "100%" — main is now a flex column whose
                 other children (the banners/strip above) take variable height, so

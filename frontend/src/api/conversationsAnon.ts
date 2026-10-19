@@ -76,5 +76,7 @@ export const conversationsAnon = {
 
   exportAll(): AnonThread[] { return read(); },
 
-  clearAll(): void { localStorage.removeItem(KEY); },
+  clearAll(): void {
+    try { localStorage.removeItem(KEY); } catch { /* blocked storage holds no threads */ }
+  },
 };
