@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { RequireAdmin } from "./RequireAdmin";
 
@@ -38,10 +39,19 @@ describe("RequireAdmin", () => {
     const { container } = renderGuarded();
     expect(screen.queryByText("admin content")).toBeNull();
     expect(screen.queryByText("login page")).toBeNull();
-    // Negative assertions alone would still pass if this regressed to
-    // `return null` (the exact "R5 P1" blank-flash bug RequireAdmin's own
-    // comment guards against) — assert the placeholder actually renders.
+    // Negative assertions alone would still pass if the guard rendered
+    // nothing while it waits; assert the placeholder actually renders.
     expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
+  });
+
+  it("shows a failed session probe with a retry, rather than sending a signed-in admin to /login", async () => {
+    const refetch = vi.fn();
+    mockUseSession.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error("probe failed"), refetch });
+    renderGuarded();
+    expect(screen.queryByText(/login page/)).toBeNull();
+    expect(screen.queryByText("admin content")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it("redirects an unauthenticated visitor to /login, keeping where they were going", () => {

@@ -1,8 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useConfig } from "../api/config";
 import { useSession } from "../api/auth";
-import { ErrorBanner } from "./ErrorBanner";
-import { Skeleton } from "./Skeleton";
+import { GuardPlaceholder, ProbeError } from "./guardStates";
 
 /** Route guard for the app shell. When the API requires sign-in, a
  *  signed-out visitor at `/` goes to the landing page and anywhere else to
@@ -26,21 +25,4 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (location.pathname === "/") return <Navigate to="/welcome" replace />;
   const next = location.pathname + location.search + location.hash;
   return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
-}
-
-function ProbeError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <div style={{ padding: 24 }}>
-      <ErrorBanner error={error} onRetry={onRetry} />
-    </div>
-  );
-}
-
-function GuardPlaceholder() {
-  return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}>
-      <Skeleton height={28} width="40%" />
-      <Skeleton height={200} />
-    </div>
-  );
 }

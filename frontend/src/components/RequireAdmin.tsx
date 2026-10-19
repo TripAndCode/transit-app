@@ -1,27 +1,21 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useSession } from "../api/auth";
-import { Skeleton } from "./Skeleton";
+import { GuardPlaceholder, ProbeError } from "./guardStates";
 
 /** Route guard: sends unauthenticated callers to ``/login`` (keeping their URL as ``next``) and signed-in
- *  non-admins to ``/``. Only ``role=admin`` reaches the wrapped children. */
+ *  non-admins to ``/``. Only ``role=admin`` reaches the wrapped children. A session probe that fails
+ *  before producing any value is shown with a retry, as RequireAuth shows it, rather than read as
+ *  signed out: with sign-in not enforced, RequireAuth lets this guard meet that failure first. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { data: session, isLoading } = useSession();
-  if (isLoading) {
-    // The session query is a useQuery, so ActivityStrip (mutation-only) won't
-    // fire. Without a placeholder the admin page renders blank — the user
-    // can't tell the gate is still resolving (R5 P1 regression fix).
-    return (
-      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}>
-        <Skeleton height={28} width="40%" />
-        <Skeleton height={200} />
-      </div>
-    );
+  const session = useSession();
+  if (session.data === undefined) {
+    return session.isError ? <ProbeError error={session.error} onRetry={() => void session.refetch()} /> : <GuardPlaceholder />;
   }
-  if (!session) {
+  if (!session.data) {
     const next = location.pathname + location.search + location.hash;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
-  if (session.role !== "admin") return <Navigate to="/" replace />;
+  if (session.data.role !== "admin") return <Navigate to="/" replace />;
   return <>{children}</>;
 }
