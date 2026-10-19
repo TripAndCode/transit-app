@@ -24,15 +24,17 @@ export function useRovingCells<Container extends Element = HTMLDivElement>(slots
   const held = requested == null ? -1 : slots.indexOf(requested);
   const active = held >= 0 ? held : firstFilled;
 
-  function step(from: number, delta: number): number | null {
-    if (Math.abs(delta) === 1) {
+  // The axis is passed, not read off the step's size: in a one-column grid a
+  // move to the next row is also a step of one.
+  function step(from: number, delta: 1 | -1, along: "row" | "column"): number | null {
+    if (along === "row") {
       const row = Math.floor(from / columns);
       for (let i = from + delta; i >= 0 && i < slots.length && Math.floor(i / columns) === row; i += delta) {
         if (slots[i] !== null) return i;
       }
       return null;
     }
-    const target = from + delta;
+    const target = from + delta * columns;
     if (target < 0 || target >= slots.length || slots[target] === null) return null;
     return target;
   }
@@ -49,13 +51,13 @@ export function useRovingCells<Container extends Element = HTMLDivElement>(slots
   function onKeyDown(event: ReactKeyboardEvent) {
     const next =
       event.key === "ArrowRight"
-        ? step(active, 1)
+        ? step(active, 1, "row")
         : event.key === "ArrowLeft"
-          ? step(active, -1)
+          ? step(active, -1, "row")
           : event.key === "ArrowDown"
-            ? step(active, columns)
+            ? step(active, 1, "column")
             : event.key === "ArrowUp"
-              ? step(active, -columns)
+              ? step(active, -1, "column")
               : event.key === "Home"
                 ? edgeOfRow(active, "first")
                 : event.key === "End"

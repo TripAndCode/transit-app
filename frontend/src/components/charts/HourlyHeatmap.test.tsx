@@ -184,6 +184,22 @@ describe("HourlyHeatmap cells from the keyboard", () => {
     expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 09:00 · avg 1.0 min · 10 obs." })).toHaveFocus();
   });
 
+  it("moves between hours with the up and down arrows when the grid has a single date", async () => {
+    await i18n.changeLanguage("en");
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.filter((c) => c.date === "2026-06-01")} />
+      </MemoryRouter>,
+    );
+    screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." }).focus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 09:00 · avg 1.0 min · 10 obs." })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." })).toHaveFocus();
+  });
+
   it("drills to the cell's day and time band on Enter, as a click does", async () => {
     await i18n.changeLanguage("en");
     const user = userEvent.setup();
