@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -54,6 +56,13 @@ def repository(tmp_path: Path) -> Path:
     # any" (the clone's current branch was never actually named "main").
     git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
     return repo
+
+
+def age_worktrees(*paths: Path) -> None:
+    """Make each worktree look two days old: a fresh one is kept on purpose."""
+    two_days_ago = time.time() - 2 * 24 * 3600
+    for path in paths:
+        os.utime(path / ".git", (two_days_ago, two_days_ago))
 
 
 def facts(**overrides: object):
@@ -156,6 +165,80 @@ def test_a_tip_that_heads_an_open_pr_under_another_name_is_retained():
 
     assert decision.action == "keep"
     assert "open PR #640" in decision.reason
+
+
+def test_a_fresh_worktree_with_no_commits_and_no_pr_is_retained():
+    """A worktree cut from main a moment ago has no commits of its own yet, so its
+    tip is already in the base; another session may be starting work there."""
+
+    decision = cleanup.decide_branch(
+        facts(ancestor_of_base=True, worktree=cleanup.Worktree(Path("/w"), "feature"), worktree_age_hours=0.5)
+    )
+
+    assert decision.action == "keep"
+    assert "under 24h" in decision.reason
+
+
+def test_a_fresh_worktree_at_a_tip_another_branchs_pr_merged_is_retained():
+    """main -> production sync PRs end with their head at main's tip, so a branch
+    cut from main right after one shares that tip without being that PR's work."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            head_prs=(cleanup.PullRequest(593, "MERGED", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+    assert "no PR of this branch" in decision.reason
+
+
+def test_a_fresh_worktree_reusing_an_old_branch_name_is_retained():
+    """A merged PR under the same name proves nothing about a new tip."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            pull_requests=(cleanup.PullRequest(1200, "MERGED", "b" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+
+
+def test_the_primary_checkout_has_no_creation_age(tmp_path: Path):
+    """The primary checkout's .git is a directory that ordinary git commands touch."""
+
+    (tmp_path / ".git").mkdir()
+    assert cleanup.worktree_age_hours(cleanup.Worktree(tmp_path, "main")) is None
+
+
+def test_a_day_old_worktree_with_no_commits_and_no_pr_is_deletable():
+    decision = cleanup.decide_branch(
+        facts(ancestor_of_base=True, worktree=cleanup.Worktree(Path("/w"), "feature"), worktree_age_hours=30)
+    )
+
+    assert decision.action == "delete"
+
+
+def test_a_fresh_worktree_of_a_merged_pr_is_deletable():
+    """A merged PR is the evidence that the work is done, however new the checkout."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            tree_matches_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            pull_requests=(cleanup.PullRequest(1336, "MERGED", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "delete"
 
 
 def test_a_base_tip_is_deletable_even_when_an_open_pr_is_headed_there():
@@ -281,6 +364,7 @@ def test_build_and_apply_plan_remove_only_clean_recoverable_state(
     git(repository, "branch", "stale-branch", "main")
     git(repository, "worktree", "add", "-b", "stale-worktree", str(clean_path), "main")
     git(repository, "worktree", "add", "-b", "dirty-worktree", str(dirty_path), "main")
+    age_worktrees(clean_path, dirty_path)
     (dirty_path / "notes.txt").write_text("do not discard\n", encoding="utf-8")
     git(repository, "switch", "-c", "unique-work")
     (repository / "tracked.txt").write_text("unique\n", encoding="utf-8")
@@ -325,6 +409,7 @@ def test_a_worktree_holding_ignored_work_is_kept_but_regenerable_files_are_not(
     planned, env_only, cached = tmp_path / "planned", tmp_path / "env-only", tmp_path / "cached"
     for branch, path in (("planned", planned), ("env-only", env_only), ("cached", cached)):
         git(repository, "worktree", "add", "-q", "-b", branch, str(path), "main")
+    age_worktrees(planned, env_only, cached)
     (planned / "docs" / "superpowers").mkdir(parents=True)
     (planned / "docs" / "superpowers" / "plan.md").write_text("plan\n", encoding="utf-8")
     (env_only / ".env").write_text("KEY=1\n", encoding="utf-8")
@@ -589,11 +674,27 @@ def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(
     assert "local tip differs" in feature.reason
 
 
+def test_a_worktree_created_moments_ago_is_kept_in_the_plan(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A session that has just cut a branch from main has nothing committed yet."""
+
+    worktree_path = tmp_path / "just-started"
+    git(repository, "worktree", "add", "-q", "-b", "just-started", str(worktree_path), "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+
+    decision = next(d for d in plan if getattr(d, "branch", None) == "just-started")
+    assert decision.action == "keep"
+    assert "under 24h" in decision.reason
+
+
 def test_apply_aborts_if_a_worktree_becomes_dirty(repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The apply phase rechecks worktree state after displaying its plan."""
 
     worktree_path = tmp_path / "raced-tree"
     git(repository, "worktree", "add", "-b", "raced", str(worktree_path), "main")
+    age_worktrees(worktree_path)
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
     (worktree_path / "late.txt").write_text("appeared after planning\n", encoding="utf-8")
