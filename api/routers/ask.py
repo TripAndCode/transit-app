@@ -104,7 +104,8 @@ class AskResponse(BaseModel):
     """Response schema for ``POST /ask``.
 
     Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
-    ``cache_outcome``) are populated only when ``ASK_INTENT_CACHE_ENABLED=true``
+    ``cache_outcome``) are populated only when the ``ask_intent_cache_enabled``
+    flag is on (``pipeline.flags``: a DB override, else ``ASK_INTENT_CACHE_ENABLED``)
     and the request went through the LLM Stage-3 path.  They are ``None`` on the
     Stage-1 / Stage-2 router paths and when the flag is off.
     """
