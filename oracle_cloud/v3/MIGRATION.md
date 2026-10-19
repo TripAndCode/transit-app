@@ -6,10 +6,12 @@ Aomori RT gap: < 1 minute (step 4). Old tree left intact 1 week as fallback.
 Agency 1 (Aomori) has NO direct static zip URL — its `static_url` is an
 opendata index page consumed by the `aomori_index_scrape` strategy in the
 Python pipeline. The v3 VM collector therefore does NOT fetch Aomori static
-(empty `static_url` column in `agencies.tsv`). After cutover, Aomori static is
-collected workstation-side by `gtfs_pipeline.py refresh-static` /
-`make fetch-ingest`, which scrape the source directly. Hiroshima (8/9/10)
-static IS collected on the VM via `direct_url` curl.
+(empty `static_url` column in `agencies.tsv`). After cutover, a new Aomori
+timetable comes only from the workstation, by
+`poetry run python gtfs_pipeline.py refresh-static --agency-id 1`, which
+scrapes the source directly. `make fetch-ingest` does not refresh it: it loads
+the zips already mirrored from the VM, which never receives a new Aomori one.
+Hiroshima (8/9/10) static IS collected on the VM via `direct_url` curl.
 
 ## 0. Prereqs
 - [ ] Create 4 checks at https://healthchecks.io (period 10 min, grace 5 min); note ping URLs.
@@ -51,32 +53,43 @@ static IS collected on the VM via `direct_url` curl.
     journalctl -u rt-poller@1 -n 5   # expect OK lines
 
 ## 5. Replace crontab (on VM)
+Every job in the snippet is live once installed, `prune.sh`, `prune-r2.sh` and
+`spool-cleanup.sh` included, so set `OBJECT_STORE_*` and
+`SPOOL_DISK_BUDGET_BYTES` in `/etc/environment` first (see 9b).
+
     crontab -l > /tmp/crontab.backup.$(date +%s)
-    crontab /home/opc/crontab.snippet   # prune line stays commented
+    crontab /home/opc/crontab.snippet
 
 ## 6. Start Hiroshima
     sudo systemctl enable --now rt-poller@8 rt-poller@9 rt-poller@10
     journalctl -u rt-poller@8 -n 5
 
-## 7. Workstation: v3 fetch + parity gate
+## 7. Workstation: per-agency mirror layout
     # .env: add COLLECTOR_DATA_DIR=/home/opc/collector/data
-    # FIRST move the pre-existing local flat mirror into per-agency dirs:
+    # Move the pre-existing local flat mirror into per-agency dirs:
     mkdir -p raw_archives/1 && mv raw_archives/*.tar.gz raw_archives/1/ 2>/dev/null || true
     mkdir -p raw_archives_static/1 && mv raw_archives_static/*.zip raw_archives_static/1/ 2>/dev/null || true
     make fetch
-    # parity check (counts must match):
-    ssh -i $KEY $VM 'ls /home/opc/collector/data/1/rt/*.tar.gz | wc -l'
-    ls raw_archives/1/*.tar.gz | wc -l
+
+`make fetch` copies only what is still on the VM. `spool-cleanup.sh` deletes each
+archive there once R2 holds it, so VM and workstation counts stop matching after
+its first run, and comparing them is not a parity check. Parity is checked against
+R2 instead, by `verify-r2.sh` (9b).
 
 ## 8. Verify cron fired (next morning JST, on VM)
     tail -20 /home/opc/collector/cron.log     # expect static-fetch + rotate lines
     ls /home/opc/collector/data/1/rt/         # yesterday tarred, today live dir
     systemctl status 'rt-poller@*' --no-pager # all active
 
-## 9. Enable prune (ONLY after step 7 parity + step 8 verification)
-    crontab -e   # uncomment the prune line
+## 9. Prune
+There is nothing to enable: step 5 installed `prune.sh` and `prune-r2.sh` live.
+Each refuses to run (exit 65) unless `sync-r2.sh`'s `.sync-r2.last-ok` marker is
+fresh, which is the gate a manual parity check used to be (9b). Before their first
+Sunday run, confirm the marker is from this morning:
 
-## 9b. Direct-to-R2 sync (supersedes step 7's manual gate)
+    ls -l /home/opc/collector/.sync-r2.last-ok
+
+## 9b. Direct-to-R2 sync
 `bin/sync-r2.sh` now runs daily in cron (see `crontab.snippet`), mirroring
 this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 — no more
 manual `make fetch` + `make sync-r2` from a workstation as prune's parity

@@ -2,11 +2,12 @@
 #
 # Install (on the DB/app host):
 #   1. Set the real repo path in WorkingDirectory + ExecStart and the User below.
-#   2. Create the env file (NOT committed) with the deployed DB connstring:
-#        sudo install -m 600 -o root -g transit /dev/null /etc/transit/drift-check.env
-#        echo 'DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/transit' | sudo tee /etc/transit/drift-check.env
-#      Point it at the DEPLOYED DB — do not reuse the local dev :5433 string.
-#      (see deploy/systemd/drift-check.env.example)
+#   2. Create the env file (NOT committed) from the example, then fill in the
+#      deployed Postgres and ClickHouse settings:
+#        sudo install -m 600 -o root -g transit deploy/systemd/drift-check.env.example /etc/transit/drift-check.env
+#        sudoedit /etc/transit/drift-check.env
+#      Point it at the DEPLOYED stores — do not reuse the local dev :5433 string.
+#      The run exits 2 if any ClickHouse credential is missing.
 #   3. sudo cp deploy/systemd/transit-drift-check.{service,timer} /etc/systemd/system/
 #   4. sudo systemctl daemon-reload && sudo systemctl enable --now transit-drift-check.timer
 # Inspect: systemctl status transit-drift-check.timer ; journalctl -u transit-drift-check.service
