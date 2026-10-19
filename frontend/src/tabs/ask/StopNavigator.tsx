@@ -9,10 +9,9 @@ export function StopNavigator({ points, start, size, low, high, onStart, onSize,
 }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
-  const normalize = searchKey;
-  const query = normalize(search);
+  const query = searchKey(search);
   const matches = points.map((point, index) => ({ point, index })).filter(({ point }) =>
-    normalize(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
+    searchKey(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
   const total = points.length;
   const end = Math.min(total, start + size);
   return <div className="stop-navigator">

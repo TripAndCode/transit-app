@@ -21,7 +21,11 @@ export type Searchable = {
  * precise, short label outranks a long one that merely contains the query.
  */
 export function scoreMatch(query: string, target: string): number | null {
-  const q = searchKey(query);
+  return scoreKey(searchKey(query), target);
+}
+
+/** {@link scoreMatch} for a query already through `searchKey`. */
+function scoreKey(q: string, target: string): number | null {
   const t = searchKey(target);
   if (t.startsWith(q)) return 300 - t.length;
   const idx = t.indexOf(q);
@@ -36,9 +40,9 @@ export function scoreMatch(query: string, target: string): number | null {
 }
 
 /** Best score for an item across its label and optional sublabel. */
-function bestScore(item: Searchable, query: string): number | null {
-  const labelScore = scoreMatch(query, item.label);
-  const subScore = item.sublabel ? scoreMatch(query, item.sublabel) : null;
+function bestScore(item: Searchable, queryKey: string): number | null {
+  const labelScore = scoreKey(queryKey, item.label);
+  const subScore = item.sublabel ? scoreKey(queryKey, item.sublabel) : null;
   if (labelScore == null) return subScore;
   if (subScore == null) return labelScore;
   return Math.max(labelScore, subScore);
@@ -50,7 +54,7 @@ function bestScore(item: Searchable, query: string): number | null {
  * "browse everything" view before the user types anything.
  */
 export function filterItems<T extends Searchable>(items: readonly T[], query: string): T[] {
-  const q = query.trim();
+  const q = searchKey(query);
   if (!q) return [...items];
   const scored: { item: T; score: number }[] = [];
   for (const item of items) {

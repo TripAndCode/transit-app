@@ -299,8 +299,9 @@ export function AdminAgenciesPage() {
 
   const healthById = new Map((health ?? []).map((h) => [h.agency_id, h]));
 
+  const searchQuery = searchKey(search);
   const filtered = (agencies ?? []).filter((a) => {
-    if (!searchKey(a.agency_name).includes(searchKey(search))) return false;
+    if (!searchKey(a.agency_name).includes(searchQuery)) return false;
     const h = healthById.get(a.agency_id);
     if (view === "stale") return h?.freshness === "stale";
     if (view === "rt_incomplete") return h != null && (!h.rt_coverage.probed || !h.rt_coverage.complete);
