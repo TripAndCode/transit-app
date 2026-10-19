@@ -211,6 +211,25 @@ describe("HourlyHeatmap cells from the keyboard", () => {
     const ring = container.querySelector("[data-testid='heat-focus-ring']")!;
     expect(Number(ring.getAttribute("y")) + 0.5).toBe(Number(focused().getAttribute("y")));
     expect(Number(ring.getAttribute("x")) + 0.5).toBe(Number(focused().getAttribute("x")));
+    expect(focused()).toHaveAttribute("tabindex", "0");
+    expect(container.querySelectorAll("[role='gridcell'][tabindex='0']")).toHaveLength(1);
+  });
+
+  it("clears the tooltip on blur after the cells are refetched as new objects", async () => {
+    await i18n.changeLanguage("en");
+    const { rerender } = renderGrid();
+    const name = "Jun 2, 2026 08:00 · avg 4.5 min · 20 obs.";
+    fireEvent.focus(screen.getByRole("gridcell", { name }));
+
+    rerender(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.map((c) => ({ ...c }))} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    fireEvent.blur(screen.getByRole("gridcell", { name }));
+
+    expect(screen.queryByText(/4\.5 min · 20 obs\./)).toBeNull();
   });
 
   it("names a cell with no average as having no data, and shows it no tooltip", async () => {

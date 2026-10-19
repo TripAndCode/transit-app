@@ -75,7 +75,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   // Every cell, empty ones included, is a slot: a keyboard or screen-reader
   // user reads what the tooltip shows a pointer, with one tab stop for the
   // grid. Row-major by hour, matching the rows the grid exposes.
-  const slots = Array.from({ length: 24 * dates.length }, (_, k) => String(k));
+  const slots = Array.from({ length: 24 * dates.length }, (_, k) => `${dates[k % dates.length]}|${Math.floor(k / dates.length)}`);
   const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells<SVGGElement>(slots, dates.length);
   // Keyed by date and hour, not by slot index: a redraw with other dates
   // moves every index, and the ring must stay on the cell that has focus.
@@ -260,7 +260,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                   setFocus({ source: "hourly", hour: shown.hour, dow: isoDow(shown.date) });
                 };
                 const hide = () => {
-                  setHover((v) => (v === shown ? null : v));
+                  setHover((v) => (v && v.date === d && v.hour === h ? null : v));
                   setFocus(null);
                 };
                 const handleCellClick = () => {
@@ -285,7 +285,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                     data-cell={index}
                     role="gridcell"
                     aria-label={label}
-                    tabIndex={activeSlot === String(index) ? 0 : -1}
+                    tabIndex={activeSlot === `${d}|${h}` ? 0 : -1}
                     x={x + 0.5}
                     y={y + 0.5}
                     width={Math.max(1, cellW - 1)}
