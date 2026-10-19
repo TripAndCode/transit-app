@@ -195,6 +195,36 @@ describe("HourlyHeatmap cells from the keyboard", () => {
     expect(search).toContain("time_band=morning");
   });
 
+  it("keeps the focus ring on the focused cell when the grid redraws with fewer dates", async () => {
+    await i18n.changeLanguage("en");
+    const { container, rerender } = renderGrid();
+    const focused = () => container.querySelector("[data-testid='heat-cell'][data-date='2026-06-02'][data-hour='8']")!;
+    fireEvent.focus(focused());
+
+    rerender(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.filter((c) => c.date === "2026-06-02")} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const ring = container.querySelector("[data-testid='heat-focus-ring']")!;
+    expect(Number(ring.getAttribute("y")) + 0.5).toBe(Number(focused().getAttribute("y")));
+    expect(Number(ring.getAttribute("x")) + 0.5).toBe(Number(focused().getAttribute("x")));
+  });
+
+  it("names a cell with no average as having no data, and shows it no tooltip", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={[...CELLS, { date: "2026-06-02", hour: 9, avg_min: null, samples: 4 }]} />
+      </MemoryRouter>,
+    );
+    const cell = screen.getByRole("gridcell", { name: "Jun 2, 2026 09:00 · no data" });
+    fireEvent.focus(cell);
+    expect(screen.queryByText(/obs\./)).toBeNull();
+  });
+
   it("shows the cell's tooltip and a focus ring while it holds focus", async () => {
     await i18n.changeLanguage("en");
     const { container } = renderGrid();

@@ -64,7 +64,7 @@ export function useRovingCells<Container extends Element = HTMLDivElement>(slots
     // Focused straight from the handler rather than from an effect on
     // `active`: an effect would also fire on first render and pull focus into
     // the grid before anyone asked for it.
-    containerRef.current?.querySelector<HTMLElement>(`[data-cell="${next}"]`)?.focus();
+    containerRef.current?.querySelector<HTMLElement | SVGElement>(`[data-cell="${next}"]`)?.focus();
   }
 
   return { containerRef, activeSlot: slots[active], onKeyDown, onCellFocus: setRequested };

@@ -77,7 +77,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   // grid. Row-major by hour, matching the rows the grid exposes.
   const slots = Array.from({ length: 24 * dates.length }, (_, k) => String(k));
   const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells<SVGGElement>(slots, dates.length);
-  const [focusedCell, setFocusedCell] = useState<number | null>(null);
+  // Keyed by date and hour, not by slot index: a redraw with other dates
+  // moves every index, and the ring must stay on the cell that has focus.
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
 
   if (dates.length === 0) {
     return (
@@ -103,6 +105,10 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const chartHeight = padT + padB + 24 * cellH;
   const innerW = Math.max(360, dates.length * 14);
   const cellW = innerW / dates.length;
+  const dateLabels = dates.map((d) => formatDate(d));
+  const severe = cells.filter((c) => c.avg_min != null && c.avg_min >= DELAY_THRESHOLDS.severe);
+  const focusedCol = focusedKey == null ? -1 : dates.indexOf(focusedKey.split("|")[0]);
+  const focusedRow = focusedKey == null ? -1 : Number(focusedKey.split("|")[1]);
 
   return (
     <div data-focus-viewer="hourly" style={{ position: "relative", width: "100%", marginTop: 16 }}>
@@ -224,11 +230,15 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
           ref={containerRef}
           role="grid"
           aria-label={t("reports.heatmap.title")}
+          tabIndex={-1}
           aria-rowcount={24}
           aria-colcount={dates.length}
           onKeyDown={onKeyDown}
         >
-          {Array.from({ length: 24 }, (_, h) => (
+          {Array.from({ length: 24 }, (_, h) => {
+            const hourText = String(h).padStart(2, "0");
+            const hourLabel = t("reports.heatmap.tooltip_hour", { hour: hourText });
+            return (
             <g key={`row-${h}`} role="row">
               {dates.map((d, i) => {
                 const c = map.get(`${d}|${h}`);
@@ -238,18 +248,19 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 const fill = value != null ? "var(--accent)" : "var(--bg-soft)";
                 const opacity = value != null ? heatOpacity(value) : 0.35;
                 const index = h * dates.length + i;
-                const hourText = String(h).padStart(2, "0");
-                const label =
-                  c && value != null
-                    ? `${formatDate(d)} ${t("reports.heatmap.tooltip_hour", { hour: hourText })} ${t("reports.heatmap.tooltip_metrics", { min: formatMinutes(value), count: formatNumber(c.samples) })}`
-                    : t("reports.heatmap.cell_empty_aria", { date: formatDate(d), hour: hourText });
+                // One "has data" gate for the name and the tooltip, so a cell
+                // read out as having no data never shows a 0-minute tooltip.
+                const shown = c && value != null ? c : null;
+                const label = shown
+                  ? `${dateLabels[i]} ${hourLabel} ${t("reports.heatmap.tooltip_metrics", { min: formatMinutes(value as number), count: formatNumber(shown.samples) })}`
+                  : t("reports.heatmap.cell_empty_aria", { date: dateLabels[i], hour: hourText });
                 const show = () => {
-                  if (!c) return;
-                  setHover(c);
-                  setFocus({ source: "hourly", hour: c.hour, dow: isoDow(c.date) });
+                  if (!shown) return;
+                  setHover(shown);
+                  setFocus({ source: "hourly", hour: shown.hour, dow: isoDow(shown.date) });
                 };
                 const hide = () => {
-                  setHover((v) => (v === c ? null : v));
+                  setHover((v) => (v === shown ? null : v));
                   setFocus(null);
                 };
                 const handleCellClick = () => {
@@ -293,11 +304,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                     onMouseLeave={hide}
                     onFocus={() => {
                       onCellFocus(index);
-                      setFocusedCell(index);
+                      setFocusedKey(`${d}|${h}`);
                       show();
                     }}
                     onBlur={() => {
-                      setFocusedCell(null);
+                      setFocusedKey(null);
                       hide();
                     }}
                     onClick={handleCellClick}
@@ -306,40 +317,35 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 );
               })}
             </g>
-          ))}
+            );
+          })}
         </g>
         {/* Annotations drawn over the ramp at full opacity, so they survive
             however faint their cell happens to be. */}
         <g aria-hidden="true">
-          {dates.flatMap((d, i) =>
-            Array.from({ length: 24 }, (_, h) => {
-              const value = map.get(`${d}|${h}`)?.avg_min ?? null;
-              if (value == null || value < DELAY_THRESHOLDS.severe) return [];
-              return [
-                <rect
-                  key={`severe-${d}|${h}`}
-                  data-testid="heat-severe-outline"
-                  data-mark-date={d}
-                  data-mark-dow={isoDow(d)}
-                  className="chart-focus-dimmable focus-dim-stroke"
-                  pointerEvents="none"
-                  x={padL + i * cellW + 0.5}
-                  y={padT + h * cellH + 0.5}
-                  width={Math.max(1, cellW - 1)}
-                  height={Math.max(1, cellH - 1)}
-                  fill="none"
-                  stroke="var(--delay-severe)"
-                  strokeWidth="1"
-                />,
-              ];
-            }),
-          )}
-          {focusedCell != null && (
+          {severe.map((c) => (
+            <rect
+              key={`severe-${c.date}|${c.hour}`}
+              data-testid="heat-severe-outline"
+              data-mark-date={c.date}
+              data-mark-dow={isoDow(c.date)}
+              className="chart-focus-dimmable focus-dim-stroke"
+              pointerEvents="none"
+              x={padL + dates.indexOf(c.date) * cellW + 0.5}
+              y={padT + c.hour * cellH + 0.5}
+              width={Math.max(1, cellW - 1)}
+              height={Math.max(1, cellH - 1)}
+              fill="none"
+              stroke="var(--delay-severe)"
+              strokeWidth="1"
+            />
+          ))}
+          {focusedCol >= 0 && (
             <rect
               data-testid="heat-focus-ring"
               pointerEvents="none"
-              x={padL + (focusedCell % dates.length) * cellW}
-              y={padT + Math.floor(focusedCell / dates.length) * cellH}
+              x={padL + focusedCol * cellW}
+              y={padT + focusedRow * cellH}
               width={cellW}
               height={cellH}
               fill="none"
