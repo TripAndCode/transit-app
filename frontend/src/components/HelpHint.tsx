@@ -8,6 +8,24 @@ const DISMISSED_KEY = "help_hint_dismissed";
 const SHOW_AFTER_MS = 3_000;
 const HIDE_AFTER_MS = 5 * 60 * 1000;
 
+// Storage throws where site data is blocked. The hint then treats every visit
+// as a first one, and a dismissal lasts until the next mount.
+function readFlag(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeFlag(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Nothing persists in blocked storage.
+  }
+}
+
 /**
  * One-time, dismissable hint pointing a brand-new visitor at the User Manual
  * (`/help`) — today it's only reachable via the account-menu popover
@@ -27,12 +45,12 @@ export function HelpHint() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    if (readFlag(DISMISSED_KEY)) return;
 
-    let firstVisit = parseInt(localStorage.getItem(FIRST_VISIT_KEY) || "0", 10);
+    let firstVisit = parseInt(readFlag(FIRST_VISIT_KEY) || "0", 10);
     if (!firstVisit) {
       firstVisit = Date.now();
-      localStorage.setItem(FIRST_VISIT_KEY, String(firstVisit));
+      writeFlag(FIRST_VISIT_KEY, String(firstVisit));
     }
 
     const elapsed = Date.now() - firstVisit;
@@ -55,7 +73,7 @@ export function HelpHint() {
   if (!show) return null;
 
   function dismiss() {
-    localStorage.setItem(DISMISSED_KEY, "1");
+    writeFlag(DISMISSED_KEY, "1");
     setShow(false);
   }
 

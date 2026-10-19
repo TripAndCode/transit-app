@@ -10,8 +10,8 @@
  * latest day) because these freezes recur across days. Renders only when
  * something was actually filtered.
  *
- * Dismissible per session — re-appears on full page reload, like the staleness
- * banner, so the signal is never permanently hidden.
+ * Dismissible for the agency it is shown for, and back on a full page reload,
+ * like the staleness banner, so the signal is never permanently hidden.
  */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
@@ -19,27 +19,20 @@ import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 
-const SESSION_DISMISS_KEY = "fh_banner_dismissed_at";
-
 export function FeedHealthBanner() {
   const { agencyId: raw } = useParams();
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
   const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
-  const [dismissed, setDismissed] = useState(
-    () => sessionStorage.getItem(SESSION_DISMISS_KEY) != null,
-  );
+  const [dismissedFor, setDismissedFor] = useState<ReadonlySet<number>>(() => new Set());
   const { messageProps } = useTapToExpandBanner();
 
   if (agencyId == null) return null;
   const count = data?.clamp_count ?? 0;
   if (count <= 0) return null;
-  if (dismissed) return null;
+  if (dismissedFor.has(agencyId)) return null;
 
-  function handleDismiss() {
-    sessionStorage.setItem(SESSION_DISMISS_KEY, String(Date.now()));
-    setDismissed(true);
-  }
+  const handleDismiss = () => setDismissedFor(new Set(dismissedFor).add(agencyId));
 
   // Same calm warm-tan palette as DataStalenessBanner — never alarm red.
   const bg = "hsl(38, 50%, 95%)";
@@ -51,6 +44,7 @@ export function FeedHealthBanner() {
       role="status"
       aria-live="polite"
       lang={i18n.language}
+      data-shell-banner=""
       style={{
         background: bg,
         color: fg,

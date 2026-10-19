@@ -3,6 +3,7 @@ import { screen, act, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { HelpHint } from "./HelpHint";
+import { blockStorage } from "../test/blockStorage";
 
 function renderHint() {
   renderWithProviders(
@@ -64,6 +65,17 @@ describe("HelpHint", () => {
     act(() => {
       vi.advanceTimersByTime(3_000);
     });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("still offers the hint, and dismisses it, where site data is blocked", () => {
+    blockStorage("localStorage");
+    vi.useFakeTimers();
+    renderHint();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss help hint" }));
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
