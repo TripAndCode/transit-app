@@ -13,26 +13,25 @@
  * Dismissible for the agency it is shown for, for as long as the page stays
  * loaded, like the staleness banner: a full reload shows it again.
  */
-import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
+import { useBannerDismissal } from "./bannerDismissalsContext";
 
 export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
   const { agencyId: raw } = useParams();
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
   const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
-  const [dismissedFor, setDismissedFor] = useState<ReadonlySet<number>>(() => new Set());
+  const [dismissed, dismiss] = useBannerDismissal("feed_health", agencyId);
   const { messageProps } = useTapToExpandBanner();
 
   if (hidden || agencyId == null) return null;
   const count = data?.clamp_count ?? 0;
   if (count <= 0) return null;
-  if (dismissedFor.has(agencyId)) return null;
+  if (dismissed) return null;
 
-  const handleDismiss = () => setDismissedFor(new Set(dismissedFor).add(agencyId));
 
   // Same calm warm-tan palette as DataStalenessBanner — never alarm red.
   const bg = "hsl(38, 50%, 95%)";
@@ -61,7 +60,7 @@ export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
       <span {...messageProps}>{t("app.feed_health.banner", { count })}</span>
       <button
         type="button"
-        onClick={handleDismiss}
+        onClick={dismiss}
         aria-label={t("app.feed_health.dismiss_aria")}
         style={{
           background: "transparent",

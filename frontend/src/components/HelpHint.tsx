@@ -8,13 +8,15 @@ const DISMISSED_KEY = "help_hint_dismissed";
 const SHOW_AFTER_MS = 3_000;
 const HIDE_AFTER_MS = 5 * 60 * 1000;
 
-// Storage throws where site data is blocked. The hint then treats every visit
-// as a first one, and a dismissal lasts until the next mount.
+// Storage throws where site data is blocked. The flags then live in memory, so
+// a dismissal and the first-visit clock last until the page reloads.
+const blockedStorageFlags = new Map<string, string>();
+
 function readFlag(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch {
-    return null;
+    return blockedStorageFlags.get(key) ?? null;
   }
 }
 
@@ -22,7 +24,7 @@ function writeFlag(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch {
-    // Nothing persists in blocked storage.
+    blockedStorageFlags.set(key, value);
   }
 }
 

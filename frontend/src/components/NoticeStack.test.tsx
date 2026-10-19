@@ -39,6 +39,17 @@ describe("NoticeStack", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
   });
 
+  it("keeps a banner's dismissal when the app shell is unmounted and mounted again", async () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: staleSummary() } as never);
+    const { rerender } = renderWithProviders(stack(false));
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    // A route outside the shell, such as the legal pages, unmounts all of it.
+    rerender(<MemoryRouter initialEntries={["/9"]}><p>terms</p></MemoryRouter>);
+    rerender(stack(false));
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
   it("shows no banner on a focused tab", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: staleSummary() } as never);
     renderWithProviders(stack(true));

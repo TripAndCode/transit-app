@@ -9,15 +9,13 @@
  *
  * Dismissible for the agency it is shown for, for as long as the page stays
  * loaded; a full reload shows it again, so the signal is never permanently
- * hidden. The dismissal lives in state, not storage, so a browser that blocks
- * site data cannot break it, and `hidden` keeps the component mounted on the
- * tabs that do not show it (see NoticeStack).
+ * hidden (see BannerDismissals).
  */
-import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
+import { useBannerDismissal } from "./bannerDismissalsContext";
 import { useNow } from "../hooks/useNow";
 
 const STALE_THRESHOLD_HOURS = 24;
@@ -38,7 +36,7 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
   const { t, i18n } = useTranslation();
   const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
   const now = useNow(AGE_RECHECK_MS);
-  const [dismissedFor, setDismissedFor] = useState<ReadonlySet<number>>(() => new Set());
+  const [dismissed, dismiss] = useBannerDismissal("data_stale", agencyId);
   const { messageProps } = useTapToExpandBanner();
 
   if (hidden || agencyId == null) return null;
@@ -46,7 +44,7 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
   if (!captured) return null;
   const ageH = relativeAgeHours(captured, now);
   if (ageH < STALE_THRESHOLD_HOURS) return null;
-  if (dismissedFor.has(agencyId)) return null;
+  if (dismissed) return null;
 
   const days = Math.floor(ageH / 24);
   const ageLabel =
@@ -54,7 +52,6 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
       ? t("common.rel_days_ago", { count: days })
       : t("common.rel_hours_ago", { count: Math.floor(ageH) });
 
-  const handleDismiss = () => setDismissedFor(new Set(dismissedFor).add(agencyId));
 
   // Choose a calm warm-tan color (max saturation 50%) — never alarm red.
   const bg = "hsl(38, 50%, 95%)";
@@ -83,7 +80,7 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
       <span {...messageProps}>{t("app.data_stale.banner", { when: ageLabel })}</span>
       <button
         type="button"
-        onClick={handleDismiss}
+        onClick={dismiss}
         aria-label={t("app.data_stale.dismiss_aria")}
         style={{
           background: "transparent",

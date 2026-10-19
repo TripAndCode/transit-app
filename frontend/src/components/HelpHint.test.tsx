@@ -68,14 +68,26 @@ describe("HelpHint", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("still offers the hint, and dismisses it, where site data is blocked", () => {
+  // One test, because blocked storage keeps the flags in module memory for the
+  // page's life, which a second test in this file would inherit.
+  it("offers the hint where site data is blocked, and keeps its dismissal through a remount", () => {
     blockStorage("localStorage");
     vi.useFakeTimers();
+    const first = renderWithProviders(
+      <MemoryRouter>
+        <HelpHint />
+      </MemoryRouter>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss help hint" }));
+    expect(screen.queryByRole("status")).toBeNull();
+    first.unmount();
     renderHint();
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss help hint" }));
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
