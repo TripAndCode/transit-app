@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import { buildCardTemplates } from "./askCardTemplates";
 
+const routeName = (code: string) => (code === "1001_2345" ? "70-3 Asahi Line" : `Route ${code}`);
+
 function summary(id: string, values: Record<string, unknown>) {
   const tpl = buildCardTemplates().find((card) => card.id === id);
   if (!tpl) throw new Error(`no ${id} card`);
-  return tpl.buildSummary(values, i18n.t.bind(i18n));
+  return tpl.buildSummary(values, i18n.t.bind(i18n), routeName);
 }
 
 describe("ranking card summaries, which also become the question in the conversation", () => {
@@ -25,5 +27,27 @@ describe("ranking card summaries, which also become the question in the conversa
     await i18n.changeLanguage("ja");
     expect(summary("top_delay", { k: 5, service_type: "all" })).toBe("遅延の大きい路線：上位5件"); // i18n-ignore: expected copy
     expect(summary("top_delay", { k: 5, service_type: "weekday" })).toBe("遅延の大きい路線：上位5件（平日）"); // i18n-ignore: expected copy
+  });
+});
+
+describe("route card summaries", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  const routeCards = buildCardTemplates().flatMap((tpl) =>
+    tpl.params.flatMap((p) => (p.kind === "route" ? [[tpl.id, p.name] as const] : [])),
+  );
+
+  it.each(routeCards)("%s names the route rather than its route_code", (id, param) => {
+    const text = summary(id, { [param]: "1001_2345" });
+    expect(text).toContain("70-3 Asahi Line");
+    expect(text).not.toContain("1001_2345");
+  });
+
+  it.each(routeCards)("%s does not say Route twice for a route known only by its code", async (id, param) => {
+    expect(summary(id, { [param]: "9" })).not.toMatch(/Route\s+Route/);
+    await i18n.changeLanguage("ja");
+    expect(summary(id, { [param]: "9" })).not.toMatch(/路線\s*路線/); // i18n-ignore: expected copy
   });
 });
