@@ -65,4 +65,7 @@ remote clone must already contain `scripts/cleanup_git_state.py`; if it does not
   (`.worktrees/review-*`), open PRs, dirty/locked worktrees, and unmerged work are
   retained. A local tip that differs from its merged
   PR head is retained unless that head descends from it (a pre-merge snapshot).
+- A linked worktree under 24h old (its `.git` file's mtime) whose tip adds nothing to
+  the base is retained too, unless a PR of that branch has that exact head: a session
+  may have cut it a moment ago and not committed yet.
 - Additional named keepers use `--protect <branch>`; do not weaken the built-in rules.
