@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import { buildCardTemplates } from "./askCardTemplates";
 
-const routeName = (code: string) => (code === "1001_2345" ? "70-3 Asahi Line" : `Route ${code}`);
+const routeName = (code: string) =>
+  code === "1001_2345" ? "70-3 Asahi Line" : i18n.t("common.route_code_fallback", { code });
 
 function summary(id: string, values: Record<string, unknown>) {
   const tpl = buildCardTemplates().find((card) => card.id === id);
