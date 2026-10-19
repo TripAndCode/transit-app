@@ -21,6 +21,7 @@ import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
+import { translationT as tt } from "../utils/filterValueLabels";
 import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import "../styles/focusedAnalysis.css";
 
@@ -70,7 +71,7 @@ export function ReportsHomeTab() {
   const chartWrapRef = useRef<HTMLDivElement>(null);
   // Shared by both the trend and ranking EmptyStates below -- same ctx, same
   // way out either way.
-  const emptyReasons = buildFilterCtxReasons(ctx, t);
+  const emptyReasons = buildFilterCtxReasons(ctx, t, names.format);
   const emptyRecoveries = buildFilterCtxRecoveries({
     ctx,
     onClearRoutes: () => update({ routes: null }),
@@ -125,7 +126,7 @@ export function ReportsHomeTab() {
       </section>
       <p className="focus-muted">{t("reportNote")}</p>
       {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
-      <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.map(names.format).join(tt(t, "common.list_separator")) || t("allPatterns")}</p>
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}

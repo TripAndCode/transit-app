@@ -137,6 +137,30 @@ describe("DailyChart tooltip", () => {
     fireEvent.mouseEnter(dayRects(container)[0]);
     expect(screen.getByText(/70-3 あさひが丘線 \(4\.8 min\)/)).toBeInTheDocument();
   });
+
+  it("joins the worst routes with the locale's list separator", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      const { container } = renderChart(
+        <DailyChart
+          days={[
+            day({
+              date: "2026-05-18",
+              top_offenders: [
+                { route_code: "R1", avg_min: 4.75, samples: 10 },
+                { route_code: "R2", avg_min: 3.5, samples: 10 },
+              ],
+            }),
+          ]}
+          routeName={(code) => code}
+        />,
+      );
+      fireEvent.mouseEnter(dayRects(container)[0]);
+      expect(screen.getByText(/R1.+・R2/)).toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
 });
 
 describe("DailyChart bars outside the stylesheet", () => {

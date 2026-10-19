@@ -88,6 +88,7 @@ export function AnalysisTab({
   const [searchParams, setSearchParams] = useSearchParams();
   const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
+  const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   function selectReport(type: string) {
@@ -271,7 +272,7 @@ export function AnalysisTab({
               <EmptyState
                 title={t("reports.no_data.title")}
                 hint={t("reports.no_data.hint")}
-                reasons={buildFilterCtxReasons(ctx, t)}
+                reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
                 recoveries={buildFilterCtxRecoveries({
                   ctx,
                   onClearRoutes: () => update({ routes: null }),
@@ -455,7 +456,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <EmptyState
         title={t("reports.no_data.title")}
         hint={t("reports.no_data.hint")}
-        reasons={buildFilterCtxReasons(ctx, t)}
+        reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
         recoveries={buildFilterCtxRecoveries({
           ctx,
           onClearRoutes: () => update({ routes: null }),
