@@ -257,7 +257,8 @@ def decide_branch(facts: BranchFacts) -> Decision:
             facts.branch,
             facts.head,
             "keep",
-            f"worktree is under {FRESH_WORKTREE_HOURS}h old and adds nothing the base lacks, with no PR at this tip",
+            f"worktree is under {FRESH_WORKTREE_HOURS}h old and adds nothing the base lacks,"
+            " with no PR of this branch at this tip",
             facts.worktree,
         )
     if facts.ancestor_of_base:

@@ -193,6 +193,7 @@ def test_a_fresh_worktree_at_a_tip_another_branchs_pr_merged_is_retained():
     )
 
     assert decision.action == "keep"
+    assert "no PR of this branch" in decision.reason
 
 
 def test_a_fresh_worktree_reusing_an_old_branch_name_is_retained():
