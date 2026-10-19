@@ -48,10 +48,11 @@ returns to `:5173` instead of `:8000`.
 The bootstrap database is empty. Choose one path:
 
 ```bash
-# Fallback: load each agency's timetable, then sample the current agency feeds.
+# Fallback: load each agency's timetable, sample the current agency feeds,
+# then build every agency's aggregates.
 poetry run python gtfs_pipeline.py refresh-static
 poetry run python gtfs_pipeline.py ingest_live
-make analyze
+make analyze-all
 
 # Primary development path: replay dense archives from the Oracle collector.
 make fetch-ingest
