@@ -178,7 +178,7 @@ export function RouteAnalysisTab() {
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />
     {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
-      reasons={buildFilterCtxReasons(ctx, t)}
+      reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({
         ctx: pageRoute == null ? ctx : { ...ctx, routes: [] },
         onClearRoutes: () => update({ routes: null }),
