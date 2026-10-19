@@ -230,7 +230,10 @@ migrate-down:
 # each archive (oracle_cloud/v3/bin/sync-r2.sh), then spool-cleanup.sh deletes
 # it from the VM once R2 holds it. So `fetch` copies only the few archives not
 # yet uploaded, and cannot rebuild a local copy of history. For that, sync
-# from the bucket's rt/<id>/ and static/<id>/ prefixes instead, e.g.
+# from the bucket's rt/<id>/ and static/<id>/ prefixes instead. The aws CLI
+# reads only AWS_* credentials, so map .env's OBJECT_STORE_* onto them first:
+#   AWS_ACCESS_KEY_ID="$OBJECT_STORE_ACCESS_KEY_ID" \
+#   AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY" \
 #   aws s3 sync "s3://$OBJECT_STORE_BUCKET/rt/<id>" raw_archives/<id> \
 #     --endpoint-url "$OBJECT_STORE_ENDPOINT"
 # `sync-r2` is a manual fallback for an upload the VM did not make.
@@ -242,8 +245,7 @@ fetch-ingest:
 	bash scripts/fetch_and_ingest.sh
 
 # Mirror local raw_archives/raw_archives_static to Cloudflare R2 (see .env's
-# OBJECT_STORE_* vars). Run after `make fetch`. Manual fallback only — see the
-# note above.
+# OBJECT_STORE_* vars). Run after `make fetch`.
 sync-r2:
 	bash scripts/sync_archives_to_r2.sh
 

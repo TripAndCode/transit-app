@@ -7,10 +7,11 @@ Agency 1 (Aomori) has NO direct static zip URL — its `static_url` is an
 opendata index page consumed by the `aomori_index_scrape` strategy in the
 Python pipeline. The v3 VM collector therefore does NOT fetch Aomori static
 (empty `static_url` column in `agencies.tsv`). After cutover, a new Aomori
-timetable comes only from the workstation, by
-`poetry run python gtfs_pipeline.py refresh-static --agency-id 1`, which
-scrapes the source directly. `make fetch-ingest` does not refresh it: it loads
-the zips already mirrored from the VM, which never receives a new Aomori one.
+timetable comes only from `refresh_static`, which scrapes the source directly:
+`poetry run python gtfs_pipeline.py refresh-static --agency-id 1`, or the admin
+control room's refresh-static action, which runs the same code. Never from the
+VM. `make fetch-ingest` does not refresh it either: it loads the zips already
+mirrored from the VM, which never receives a new Aomori one.
 Hiroshima (8/9/10) static IS collected on the VM via `direct_url` curl.
 
 ## 0. Prereqs
@@ -73,8 +74,8 @@ Every job in the snippet is live once installed, `prune.sh`, `prune-r2.sh` and
 
 `make fetch` copies only what is still on the VM. `spool-cleanup.sh` deletes each
 archive there once R2 holds it, so VM and workstation counts stop matching after
-its first run, and comparing them is not a parity check. Parity is checked against
-R2 instead, by `verify-r2.sh` (9b).
+its first run, and comparing them is not a parity check. Nothing is pruned until
+`sync-r2.sh` has succeeded instead (step 9 and 9b).
 
 ## 8. Verify cron fired (next morning JST, on VM)
     tail -20 /home/opc/collector/cron.log     # expect static-fetch + rotate lines
@@ -82,10 +83,9 @@ R2 instead, by `verify-r2.sh` (9b).
     systemctl status 'rt-poller@*' --no-pager # all active
 
 ## 9. Prune
-There is nothing to enable: step 5 installed `prune.sh` and `prune-r2.sh` live.
-Each refuses to run (exit 65) unless `sync-r2.sh`'s `.sync-r2.last-ok` marker is
-fresh, which is the gate a manual parity check used to be (9b). Before their first
-Sunday run, confirm the marker is from this morning:
+There is nothing to enable: step 5 installed `prune.sh` and `prune-r2.sh` live,
+gated on `sync-r2.sh`'s success marker (9b). Before their first Sunday run,
+confirm the marker is from this morning:
 
     ls -l /home/opc/collector/.sync-r2.last-ok
 

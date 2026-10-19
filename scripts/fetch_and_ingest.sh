@@ -2,8 +2,8 @@
 # Fetch archives from Oracle Cloud server then ingest them (raw RT updates go
 # to ClickHouse; timetable and aggregate data to Postgres).
 # Local-dev replay of recent days only: requires SSH access to the Oracle VM,
-# which keeps just the archives not yet uploaded to R2 (spool-cleanup.sh
-# deletes each one once R2 holds it). Production history comes from the live
+# which keeps just the archives not yet uploaded to R2, plus each agency's
+# current static zip (spool-cleanup.sh deletes every other one once R2 holds it). Production history comes from the live
 # path instead (collector pushes into updates_live, promoted daily by the
 # cron), and older days are in R2 for backfill (see docs/deploy-railway.md).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
