@@ -58,10 +58,10 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
   return { route: "100", cells, disclaimer: "test disclaimer" };
 }
 
-function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "") {
+function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "", hm = heatmap()) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
-  vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: heatmap(), isPending: false, error: null, refetch: vi.fn() } as never);
+  vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: hm, isPending: false, error: null, refetch: vi.fn() } as never);
   const initialEntries = [`/agencies/1/analysis/route_forecast${initialRoute ? `?routes=${initialRoute}` : ""}`];
   renderWithProviders(
     <MemoryRouter initialEntries={initialEntries}>
@@ -260,19 +260,11 @@ describe("RouteForecastSection", () => {
   });
 
   it("labels the detail's count as past observations when the forecast comes from the ML model", () => {
-    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: overview(), isPending: false, error: null, refetch: vi.fn() } as never);
     const ml = heatmap();
     ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
-    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: ml, isPending: false, error: null, refetch: vi.fn() } as never);
-    renderWithProviders(
-      <MemoryRouter initialEntries={["/agencies/1/analysis/route_forecast?routes=100"]}>
-        <RouteForecastSection aid={1} />
-      </MemoryRouter>,
-    );
+    renderSection(overview(), "100", ml);
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
     const dialog = screen.getByRole("dialog");
-    // An ML cell's count is its hour's past observations, not measurements behind the forecast.
     expect(within(dialog).getByText("Past observations")).toBeInTheDocument();
     expect(within(dialog).queryByText("Measurements")).toBeNull();
   });
