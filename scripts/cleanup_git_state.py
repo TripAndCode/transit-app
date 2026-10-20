@@ -71,6 +71,11 @@ class BranchFacts:
     """Merged PRs whose head descends from this tip."""
     worktree_age_hours: float | None = None
     """Hours since the branch's linked worktree was created; None without one."""
+    primary: bool = False
+    """Checked out in the primary worktree, which Git refuses to remove."""
+    shared: bool = False
+    """Checked out in more than one worktree (`worktree add --force`): removing one
+    copy would leave the branch undeletable mid-apply."""
 
 
 @dataclass(frozen=True)
@@ -146,7 +151,9 @@ def parse_worktrees(output: str) -> list[Worktree]:
 def local_branches(repo: Path) -> dict[str, str]:
     """Return local branch names and full tip OIDs."""
 
-    output = run_git(repo, "for-each-ref", "--format=%(refname:short)\t%(objectname)", "refs/heads").stdout
+    # lstrip, not short: `refname:short` writes `heads/<name>` for a branch that
+    # shares its name with a tag or another ref, which names no branch.
+    output = run_git(repo, "for-each-ref", "--format=%(refname:lstrip=2)\t%(objectname)", "refs/heads").stdout
     return dict(line.split("\t", 1) for line in output.splitlines() if line)
 
 
@@ -215,6 +222,10 @@ def decide_branch(facts: BranchFacts) -> Decision:
         return Decision(facts.branch, facts.head, "keep", "protected branch", facts.worktree)
     if facts.current:
         return Decision(facts.branch, facts.head, "keep", "checked out in the invoking worktree", facts.worktree)
+    if facts.primary:
+        return Decision(facts.branch, facts.head, "keep", "checked out in the primary worktree", facts.worktree)
+    if facts.shared:
+        return Decision(facts.branch, facts.head, "keep", "checked out in more than one worktree", facts.worktree)
 
     # An open PR under this branch's name may still receive local work, so it always
     # protects the branch. One matched only by head protects commits the base does
@@ -578,7 +589,19 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
 
     current_path = Path(run_git(repo, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
     worktrees = parse_worktrees(run_git(repo, "worktree", "list", "--porcelain").stdout)
-    by_branch = {worktree.branch: worktree for worktree in worktrees if worktree.branch is not None}
+    checkouts: dict[str, list[Worktree]] = {}
+    for checkout in worktrees:
+        if checkout.branch is not None:
+            checkouts.setdefault(checkout.branch, []).append(checkout)
+    primary_path = worktrees[0].path if worktrees else None
+
+    def shown_checkout(held: list[Worktree]) -> Worktree:
+        # The checkout a keep reason names, so the dry run's path agrees with it.
+        return next((item for item in held if item.path == current_path), None) or next(
+            (item for item in held if item.path == primary_path), held[-1]
+        )
+
+    by_branch = {branch: shown_checkout(held) for branch, held in checkouts.items()}
     pull_requests = load_pull_requests(repo)
     base_tree = run_git(repo, "rev-parse", f"refs/heads/{base}^{{tree}}").stdout.strip()
 
@@ -643,13 +666,16 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
     decisions: list[Decision] = []
     for branch, head in sorted(branches.items()):
         worktree = by_branch.get(branch)
+        held = checkouts.get(branch, [])
         decisions.append(
             decide_branch(
                 BranchFacts(
                     branch=branch,
                     head=head,
                     protected=branch in protected,
-                    current=worktree is not None and worktree.path == current_path,
+                    current=any(item.path == current_path for item in held),
+                    primary=any(item.path == primary_path for item in held),
+                    shared=len(held) > 1,
                     ancestor_of_base=ancestor_of_base[branch],
                     tree_matches_base=tree_matches_base[branch],
                     pull_requests=pull_requests.get(branch, ()),
@@ -662,7 +688,6 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
             )
         )
 
-    primary_path = worktrees[0].path if worktrees else None
     for worktree in worktrees:
         if worktree.branch is not None:
             continue
@@ -708,7 +733,10 @@ def apply_plan(repo: Path, decisions: list[Decision]) -> None:
             if decision.worktree.path == invoking_path:
                 raise CleanupError(f"refusing to remove the invoking worktree: {invoking_path}")
             current_worktrees = parse_worktrees(run_git(repo, "worktree", "list", "--porcelain").stdout)
-            current = next((item for item in current_worktrees if item.branch == decision.branch), None)
+            # Exactly the one planned checkout: a second, forced one would leave the
+            # branch undeletable after this worktree was already removed.
+            held = [item for item in current_worktrees if item.branch == decision.branch]
+            current = held[0] if len(held) == 1 else None
             if current is None or current.path != decision.worktree.path or current.locked or current.prunable:
                 raise CleanupError(f"{decision.branch} worktree changed after planning; rerun cleanup")
             if worktree_is_dirty(repo, current):

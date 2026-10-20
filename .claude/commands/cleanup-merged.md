@@ -61,9 +61,9 @@ remote clone must already contain `scripts/cleanup_git_state.py`; if it does not
 - Delete only entries marked `DELETE` by `cleanup_git_state.py` or by
   `daily_git_hygiene.py --venvs-only`.
 - Never delete remote/GitHub branches, push, force-push, reset, stash, or discard files.
-- `main`, `production`, the invoking and primary worktrees, `/review-pr` worktrees
-  (`.worktrees/review-*`), open PRs, dirty/locked worktrees, and unmerged work are
-  retained. A local tip that differs from its merged
+- `main`, `production`, the invoking and primary worktrees, a branch checked out in
+  more than one worktree, `/review-pr` worktrees (`.worktrees/review-*`), open PRs,
+  dirty/locked worktrees, and unmerged work are retained. A local tip that differs from its merged
   PR head is retained unless that head descends from it (a pre-merge snapshot).
 - A linked worktree under 24h old (its `.git` file's mtime) whose tip adds nothing to
   the base is retained too, unless a PR of that branch has that exact head: a session
