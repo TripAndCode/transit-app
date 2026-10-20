@@ -1,15 +1,13 @@
-"""The follow-up's provider allow-list, read from ``ASK_FOLLOWUP_PROVIDERS``."""
+"""The follow-up's provider allow-list, read from ``ASK_FOLLOWUP_PROVIDERS``.
+
+The unset default is pinned in tests/query/test_llm_client.py.
+"""
 
 from __future__ import annotations
 
 import pytest
 
 from pipeline.query.followup import _allowed_providers
-
-
-def test_unset_allows_the_verified_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ASK_FOLLOWUP_PROVIDERS", raising=False)
-    assert _allowed_providers() == {"gemini", "openai"}
 
 
 def test_empty_allows_no_provider(monkeypatch: pytest.MonkeyPatch) -> None:
