@@ -1,11 +1,12 @@
 """ja/en parity of the server-side template tables keyed by ``(key, lang)``.
 
-In most of them a key present in one locale only silently serves the other
-(the lookup falls back to ja); the report-definition tables index directly
-and raise only when a report in that locale renders. A placeholder that
-exists in one locale's template but not the other's is swallowed by the
-formatting helpers' ``KeyError`` guards, or raises where a helper has none, so
-no failure surfaces before the affected text is rendered.
+A key missing from one locale does not fail where it is added. Most of these
+lookups fall back to ja, so a missing en entry serves the ja text and a missing
+ja entry serves the bare key; the report-definition tables raise ``KeyError``
+when footnotes in the missing locale render (their ja side is also read at
+import). A placeholder that exists in one locale's template but not
+the other's is swallowed by the formatting helpers' ``KeyError`` guards, or
+raises where a helper has none. These tests catch both before anything renders.
 """
 
 import string
