@@ -766,6 +766,15 @@ def test_fetch_block_reads_a_response_http_client_cannot_parse_as_not_ready(monk
     assert _fetch_block("99999", _DAY, 0, 1024) is None
 
 
+def test_fetch_block_reads_a_body_nested_past_the_recursion_limit_as_not_ready(monkeypatch):
+    """A small body can still nest deeply enough that json.loads raises RecursionError."""
+    import pipeline.weather as weather
+
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: _JSONResp(b"[" * 100_000))
+
+    assert _fetch_block("99999", _DAY, 0, 1024 * 1024) is None
+
+
 def test_fetch_block_rejects_a_mapping_that_exceeds_the_shape_cap(monkeypatch):
     """A block whose parsed mapping has far more entries than a real 3-hour
     block ever would is rejected on its shape, independent of its wire size --
