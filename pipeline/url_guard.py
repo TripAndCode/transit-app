@@ -16,6 +16,7 @@ a new host is never re-validated by plain ``urlopen``, and an unbounded
 response body can OOM the ingest process (a huge or zip-bomb'd payload).
 """
 
+import http.client
 import ipaddress
 import re
 import socket
@@ -32,6 +33,13 @@ DEFAULT_MAX_BYTES = 200 * 1024 * 1024  # generous cap for GTFS-RT pb / static zi
 
 class FeedURLError(ValueError):
     """Raised when a ``feed_url`` is unsafe to fetch."""
+
+
+#: What a fetch through ``safe_urlopen`` raises when the request failed: an
+#: HTTP error status or a network error (``URLError``, and the timeouts and
+#: resets a body read raises outside it, are all ``OSError``), a response
+#: ``http.client`` could not parse, or a URL the SSRF guard rejected.
+FETCH_ERRORS: tuple[type[BaseException], ...] = (OSError, http.client.HTTPException, FeedURLError)
 
 
 def redact_url(url: str) -> str:
