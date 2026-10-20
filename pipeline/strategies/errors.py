@@ -47,7 +47,7 @@ def _is_http_url(url: str) -> bool:
 
 
 def fetch_failed(url: str, exc: BaseException) -> StaticFetchError:
-    """The :class:`StaticFetchError` for one of :data:`FETCH_ERRORS` raised fetching ``url``."""
+    """The :class:`StaticFetchError` for one of :data:`pipeline.url_guard.FETCH_ERRORS` raised fetching ``url``."""
     where = redact_url(url)
     if isinstance(exc, urllib.error.HTTPError):
         try:
