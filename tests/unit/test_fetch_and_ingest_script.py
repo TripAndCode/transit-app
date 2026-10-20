@@ -126,6 +126,28 @@ def test_a_genuine_ingest_failure_still_stops_the_run(tmp_path):
     assert result.returncode == 1
 
 
+def test_an_agency_the_collector_does_not_hold_is_not_ingested(tmp_path):
+    """fetch_archives.sh names the ids it skipped, so they never reach ingest's no-timetable refusal."""
+    _tree(tmp_path, [])
+    (tmp_path / "repo" / "scripts" / "fetch_archives.sh").write_text('echo 11 >> "$SKIPPED_AGENCIES_FILE"\n')
+
+    result, calls = _run(tmp_path, COLLECTOR_DATA_DIR="/data", AGENCY_IDS="8 11 9")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == ["ingest 8", "analyze 8", "ingest 9", "analyze 9"]
+
+
+def test_a_failed_fetch_still_ingests_every_agency_and_fails_the_run_at_the_end(tmp_path):
+    _tree(tmp_path, [])
+    (tmp_path / "repo" / "scripts" / "fetch_archives.sh").write_text("exit 1\n")
+
+    result, calls = _run(tmp_path, COLLECTOR_DATA_DIR="/data", AGENCY_IDS="8 9")
+
+    assert calls == ["ingest 8", "analyze 8", "ingest 9", "analyze 9"]
+    assert result.returncode == 1
+    assert "fetch" in result.stderr.splitlines()[-1]
+
+
 def test_the_single_agency_path_ingests_before_loading_the_timetable(tmp_path):
     _tree(tmp_path, ["raw_archives_static"])
 
