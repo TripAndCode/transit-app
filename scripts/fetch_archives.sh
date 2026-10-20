@@ -79,26 +79,44 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     # COLLECTOR_DATA_DIR points at /home/opc/collector/data on the remote.
     # AGENCY_IDS defaults to ids parsed from agencies.csv rows with a feed_url.
     AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$(dirname "$0")/../agencies.csv" | tr '\n' ' ')}"
+    # The collector holds only the agencies its own agencies.tsv polls, so an id
+    # from agencies.csv with no directory there is skipped, not failed. An RT
+    # fetch that fails for an agency it does hold is recorded, and the rest still
+    # run before the script exits nonzero.
+    COLLECTED="$(rsync --list-only ${RSYNC_E[@]+"${RSYNC_E[@]}"} "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/" \
+        | awk '$1 ~ /^d/ && $NF != "." { print $NF }')"
+    FAILED=""
     for id in $AGENCY_IDS; do
+        if ! printf '%s\n' "$COLLECTED" | grep -qx "$id"; then
+            echo "==> [a$id] not collected on the VM — skipping"
+            continue
+        fi
         echo "==> [a$id] RT archives${SINCE:+ from $SINCE}"
         mkdir -p "$LOCAL_RT_DIR/$id" "$LOCAL_STATIC_DIR/$id"
         if [ -n "${SINCE:-}" ]; then
             # Day archives are named YYYYMMDD.tar.gz, so the name orders them.
+            LISTING_FILE="$(mktemp)"
             WANTED_FILE="$(mktemp)"
-            rsync --list-only ${RSYNC_E[@]+"${RSYNC_E[@]}"} "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
-                | awk -v since="$SINCE" '{ n = $NF } n ~ /^[0-9]{8}\.tar\.gz$/ && substr(n, 1, 8) >= since { print n }' \
-                > "$WANTED_FILE"
-            if [ -s "$WANTED_FILE" ]; then
-                rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} --files-from="$WANTED_FILE" \
-                    "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
-                    "$LOCAL_RT_DIR/$id/"
+            if rsync --list-only ${RSYNC_E[@]+"${RSYNC_E[@]}"} "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+                > "$LISTING_FILE"; then
+                awk -v since="$SINCE" '{ n = $NF } n ~ /^[0-9]{8}\.tar\.gz$/ && substr(n, 1, 8) >= since { print n }' \
+                    "$LISTING_FILE" > "$WANTED_FILE"
+                if [ -s "$WANTED_FILE" ]; then
+                    rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} --files-from="$WANTED_FILE" \
+                        "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+                        "$LOCAL_RT_DIR/$id/" \
+                        || FAILED="$FAILED $id"
+                fi
+            else
+                FAILED="$FAILED $id"
             fi
-            rm -f "$WANTED_FILE"
+            rm -f "$LISTING_FILE" "$WANTED_FILE"
         else
             rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
                 --include="*.tar.gz" --exclude="*" \
                 "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
-                "$LOCAL_RT_DIR/$id/"
+                "$LOCAL_RT_DIR/$id/" \
+                || FAILED="$FAILED $id"
         fi
         echo "==> [a$id] static archives"
         rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
@@ -107,6 +125,10 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
             "$LOCAL_STATIC_DIR/$id/" \
             || echo "  (no static for agency $id — skipping)"
     done
+    if [ -n "$FAILED" ]; then
+        echo "RT fetch failed for agencies:$FAILED" >&2
+        exit 1
+    fi
 else
     # ── legacy flat layout (unchanged behavior) ───────────────────────────
     if [ -n "${SINCE:-}" ]; then

@@ -65,3 +65,36 @@ def test_a_malformed_since_is_refused_before_anything_is_fetched(tmp_path):
     assert result.returncode == 2
     assert "SINCE" in result.stderr
     assert not (tmp_path / "rt").exists(), "refused before any local directory is made"
+
+
+def _remote_agency(tmp_path: Path, agency: str, *, rt: bool = True) -> None:
+    base = tmp_path / "remote" / agency
+    base.mkdir(parents=True, exist_ok=True)
+    if rt:
+        (base / "rt").mkdir(exist_ok=True)
+        (base / "rt" / "20261001.tar.gz").write_bytes(agency.encode())
+
+
+def test_an_agency_the_collector_does_not_poll_is_skipped_and_later_ones_still_come(tmp_path):
+    """AGENCY_IDS defaults to every agencies.csv row, but the VM holds only the agencies it polls."""
+    _remote_agency(tmp_path, "1")
+    result = _run(tmp_path, AGENCY_IDS="1 11 8")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "rt" / "1" / "20261001.tar.gz").exists()
+    assert _fetched(tmp_path) == [f"{d}.tar.gz" for d in DAYS], "agency 8, after the absent 11, is still fetched"
+    assert "11" in result.stdout
+
+
+def test_an_absent_agency_is_skipped_under_since_too(tmp_path):
+    result = _run(tmp_path, AGENCY_IDS="11 8", SINCE="20261001")
+    assert result.returncode == 0, result.stderr
+    assert _fetched(tmp_path) == ["20261001.tar.gz"]
+
+
+def test_a_failed_fetch_is_reported_after_every_other_agency_is_fetched(tmp_path):
+    """An agency the VM holds whose RT fetch fails is a real failure, but not one that stops the rest."""
+    _remote_agency(tmp_path, "9", rt=False)
+    result = _run(tmp_path, AGENCY_IDS="9 8")
+    assert result.returncode != 0
+    assert "9" in result.stderr
+    assert _fetched(tmp_path) == [f"{d}.tar.gz" for d in DAYS]
