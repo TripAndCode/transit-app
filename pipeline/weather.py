@@ -32,6 +32,7 @@ figure derived from these rows.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import math
@@ -365,9 +366,11 @@ def _fetch_block(
         else:
             logger.warning("weather: HTTP %s fetching station %s %s hour %02d", e.code, station_id, day, hour)
         return None
-    except (FeedURLError, OSError, ValueError, UnicodeDecodeError) as e:
+    except (FeedURLError, OSError, http.client.HTTPException, ValueError, UnicodeDecodeError) as e:
         # ValueError covers json.JSONDecodeError; OSError covers URLError and
-        # socket timeouts.
+        # socket timeouts; HTTPException covers a response http.client could
+        # not parse (a bad status line, an over-long header, a truncated chunked
+        # body), which urllib does not wrap in URLError.
         logger.warning("weather: failed to read station %s %s hour %02d: %s", station_id, day, hour, e)
         return None
     if not isinstance(payload, dict):
