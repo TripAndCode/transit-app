@@ -69,7 +69,9 @@ def _allowed_providers() -> set[str]:
     changes or the probe set grows; a prior pass is not evidence once either
     changes. Defaults to both so an unverified operator's follow-up never
     silently answers from an injection-prone provider; operators widen it
-    explicitly (and re-verify) via env. Empty/unset → the default.
+    explicitly (and re-verify) via env. Unset → the default; an empty value
+    allows no provider, so the follow-up answers nothing. Turn the feature off
+    with the ``ask_followup_enabled`` flag instead.
     """
     raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "gemini,openai")
     return {n.strip().lower() for n in raw.split(",") if n.strip()}
