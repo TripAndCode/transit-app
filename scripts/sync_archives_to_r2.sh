@@ -4,10 +4,9 @@
 # long-term history. Run after `make fetch`. `aws s3 sync` only transfers
 # new/changed objects, so reruns are cheap and idempotent.
 #
-# Manual/disaster-recovery fallback since 2026-08-29: the collector VM's
-# oracle_cloud/v3/bin/sync-r2.sh now runs this same sync directly in cron
-# on the VM itself, so this script is no longer required for the VM's R2
-# mirror to stay current (see oracle_cloud/v3/MIGRATION.md's 9b).
+# A manual fallback: the collector VM's oracle_cloud/v3/bin/sync-r2.sh runs
+# this same sync in cron on the VM itself, so this script is not needed for
+# R2 to stay current (see oracle_cloud/v3/MIGRATION.md's 9b).
 #
 # Required env (see .env.example):
 #   OBJECT_STORE_ENDPOINT, OBJECT_STORE_BUCKET,

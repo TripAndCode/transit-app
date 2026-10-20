@@ -50,7 +50,7 @@
     "subtitle_reports": "協議会や役員会向けのまとめと、遅延の証明です。"
   },
   "sheet": {
-    "handle": "シートの持ち手"
+    "handle": "シートの高さを変える"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
@@ -1060,6 +1060,7 @@
       "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
+      "cell_empty_aria": "{{date}} {{hour}}時 ・ データなし",
       "ramp_max": "{{min}}分以上",
       "severe_outline": "枠線 = {{min}}分以上"
     },

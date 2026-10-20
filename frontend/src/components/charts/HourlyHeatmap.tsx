@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useScope, type TimeBand } from "../../api/scope";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
 import { useFirstData } from "../../hooks/useFirstData";
+import { useRovingCells } from "../../hooks/useRovingCells";
 import { staggerDelay } from "./ChartEnter";
 import { isoDow, useTrendFocus } from "./trendFocus";
 import { onActivateKey } from "../../utils/a11y";
@@ -71,6 +72,15 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const map = new Map<string, HourlyCell>();
   for (const c of cells) map.set(`${c.date}|${c.hour}`, c);
 
+  // Every cell, empty ones included, is a slot: a keyboard or screen-reader
+  // user reads what the tooltip shows a pointer, with one tab stop for the
+  // grid. Row-major by hour, matching the rows the grid exposes.
+  const slots = Array.from({ length: 24 * dates.length }, (_, k) => `${dates[k % dates.length]}|${Math.floor(k / dates.length)}`);
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells<SVGGElement>(slots, dates.length);
+  // Keyed by date and hour, not by slot index: a redraw with other dates
+  // moves every index, and the ring must stay on the cell that has focus.
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+
   if (dates.length === 0) {
     return (
       <div style={{ padding: 24, color: "var(--text-tertiary)", textAlign: "center" }}>
@@ -95,6 +105,10 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const chartHeight = padT + padB + 24 * cellH;
   const innerW = Math.max(360, dates.length * 14);
   const cellW = innerW / dates.length;
+  const dateLabels = dates.map((d) => formatDate(d));
+  const severe = cells.filter((c) => c.avg_min != null && c.avg_min >= DELAY_THRESHOLDS.severe);
+  const focusedCol = focusedKey == null ? -1 : dates.indexOf(focusedKey.split("|")[0]);
+  const focusedRow = focusedKey == null ? -1 : Number(focusedKey.split("|")[1]);
 
   return (
     <div data-focus-viewer="hourly" style={{ position: "relative", width: "100%", marginTop: 16 }}>
@@ -212,82 +226,134 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             </text>
           );
         })}
-        {dates.flatMap((d, i) =>
-          Array.from({ length: 24 }, (_, h) => {
-            const c = map.get(`${d}|${h}`);
-            const x = padL + i * cellW;
-            const y = padT + h * cellH;
-            const value = c?.avg_min ?? null;
-            const fill = value != null ? "var(--accent)" : "var(--bg-soft)";
-            const opacity = value != null ? heatOpacity(value) : 0.35;
-            const handleCellClick = () => {
-              if (!c) return;
-              const b = bandFor(c.hour);
-              setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
-            };
-            // Two independent channels, deliberately: `opacity` carries the
-            // magnitude ramp (and is what the staggered entrance fades to via
-            // --cell-opacity), `fill-opacity` carries the crossfilter dim,
-            // which `.focus-dim-fill` reads from --focus-dim. The dim is not
-            // transitioned: the inline per-cell delay would apply to it too,
-            // and on a grid this size that is most of a second.
-            const cell = (
-              <rect
-                key={`${d}|${h}`}
-                data-testid="heat-cell"
-                data-date={d}
-                data-hour={h}
-                data-mark-date={d}
-                data-mark-dow={isoDow(d)}
-                x={x + 0.5}
-                y={y + 0.5}
-                width={Math.max(1, cellW - 1)}
-                height={Math.max(1, cellH - 1)}
-                opacity={opacity}
-                className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable focus-dim-fill`}
-                style={
-                  {
-                    fill,
-                    cursor: c ? "pointer" : "default",
-                    "--cell-opacity": opacity,
-                    ...staggerDelay(i * 24 + h),
-                  } as CSSProperties
-                }
-                onMouseEnter={() => {
-                  if (!c) return;
-                  setHover(c);
-                  setFocus({ source: "hourly", hour: c.hour, dow: isoDow(c.date) });
-                }}
-                onMouseLeave={() => {
-                  setHover((v) => (v === c ? null : v));
+        <g
+          ref={containerRef}
+          role="grid"
+          aria-label={t("reports.heatmap.title")}
+          tabIndex={-1}
+          aria-rowcount={24}
+          aria-colcount={dates.length}
+          onKeyDown={onKeyDown}
+        >
+          {Array.from({ length: 24 }, (_, h) => {
+            const hourText = String(h).padStart(2, "0");
+            const hourLabel = t("reports.heatmap.tooltip_hour", { hour: hourText });
+            return (
+            <g key={`row-${h}`} role="row">
+              {dates.map((d, i) => {
+                const c = map.get(`${d}|${h}`);
+                const x = padL + i * cellW;
+                const y = padT + h * cellH;
+                const value = c?.avg_min ?? null;
+                const fill = value != null ? "var(--accent)" : "var(--bg-soft)";
+                const opacity = value != null ? heatOpacity(value) : 0.35;
+                const index = h * dates.length + i;
+                // One "has data" gate for the name and the tooltip, so a cell
+                // read out as having no data never shows a 0-minute tooltip.
+                const shown = c && value != null ? c : null;
+                const label = shown
+                  ? `${dateLabels[i]} ${hourLabel} ${t("reports.heatmap.tooltip_metrics", { min: formatMinutes(value as number), count: formatNumber(shown.samples) })}`
+                  : t("reports.heatmap.cell_empty_aria", { date: dateLabels[i], hour: hourText });
+                const show = () => {
+                  if (!shown) return;
+                  setHover(shown);
+                  setFocus({ source: "hourly", hour: shown.hour, dow: isoDow(shown.date) });
+                };
+                const hide = () => {
+                  setHover((v) => (v && v.date === d && v.hour === h ? null : v));
                   setFocus(null);
-                }}
-                onClick={handleCellClick}
-              />
+                };
+                const handleCellClick = () => {
+                  if (!c) return;
+                  const b = bandFor(c.hour);
+                  setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
+                };
+                // Two independent channels, deliberately: `opacity` carries the
+                // magnitude ramp (and is what the staggered entrance fades to via
+                // --cell-opacity), `fill-opacity` carries the crossfilter dim,
+                // which `.focus-dim-fill` reads from --focus-dim. The dim is not
+                // transitioned: the inline per-cell delay would apply to it too,
+                // and on a grid this size that is most of a second.
+                return (
+                  <rect
+                    key={d}
+                    data-testid="heat-cell"
+                    data-date={d}
+                    data-hour={h}
+                    data-mark-date={d}
+                    data-mark-dow={isoDow(d)}
+                    data-cell={index}
+                    role="gridcell"
+                    aria-label={label}
+                    tabIndex={activeSlot === `${d}|${h}` ? 0 : -1}
+                    x={x + 0.5}
+                    y={y + 0.5}
+                    width={Math.max(1, cellW - 1)}
+                    height={Math.max(1, cellH - 1)}
+                    opacity={opacity}
+                    className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable focus-dim-fill`}
+                    style={
+                      {
+                        fill,
+                        cursor: c ? "pointer" : "default",
+                        "--cell-opacity": opacity,
+                        ...staggerDelay(i * 24 + h),
+                      } as CSSProperties
+                    }
+                    onMouseEnter={show}
+                    onMouseLeave={hide}
+                    onFocus={() => {
+                      onCellFocus(index);
+                      setFocusedKey(`${d}|${h}`);
+                      show();
+                    }}
+                    onBlur={() => {
+                      setFocusedKey(null);
+                      hide();
+                    }}
+                    onClick={handleCellClick}
+                    onKeyDown={onActivateKey(handleCellClick)}
+                  />
+                );
+              })}
+            </g>
             );
-            if (value == null || value < DELAY_THRESHOLDS.severe) return [cell];
-            // The threshold is an annotation drawn over the ramp, at full
-            // opacity, so it survives however faint its cell happens to be.
-            return [
-              cell,
-              <rect
-                key={`severe-${d}|${h}`}
-                data-testid="heat-severe-outline"
-                data-mark-date={d}
-                data-mark-dow={isoDow(d)}
-                className="chart-focus-dimmable focus-dim-stroke"
-                pointerEvents="none"
-                x={x + 0.5}
-                y={y + 0.5}
-                width={Math.max(1, cellW - 1)}
-                height={Math.max(1, cellH - 1)}
-                fill="none"
-                stroke="var(--delay-severe)"
-                strokeWidth="1"
-              />,
-            ];
-          }),
-        )}
+          })}
+        </g>
+        {/* Annotations drawn over the ramp at full opacity, so they survive
+            however faint their cell happens to be. */}
+        <g aria-hidden="true">
+          {severe.map((c) => (
+            <rect
+              key={`severe-${c.date}|${c.hour}`}
+              data-testid="heat-severe-outline"
+              data-mark-date={c.date}
+              data-mark-dow={isoDow(c.date)}
+              className="chart-focus-dimmable focus-dim-stroke"
+              pointerEvents="none"
+              x={padL + dates.indexOf(c.date) * cellW + 0.5}
+              y={padT + c.hour * cellH + 0.5}
+              width={Math.max(1, cellW - 1)}
+              height={Math.max(1, cellH - 1)}
+              fill="none"
+              stroke="var(--delay-severe)"
+              strokeWidth="1"
+            />
+          ))}
+          {focusedCol >= 0 && (
+            <rect
+              data-testid="heat-focus-ring"
+              pointerEvents="none"
+              x={padL + focusedCol * cellW}
+              y={padT + focusedRow * cellH}
+              width={cellW}
+              height={cellH}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="2"
+            />
+          )}
+        </g>
       </svg>
       </div>
       {hover && (
