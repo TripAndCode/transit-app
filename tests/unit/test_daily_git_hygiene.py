@@ -860,17 +860,18 @@ def test_run_orphaned_venv_pruning_prunes_nothing_for_an_in_project_venv_with_no
 def test_run_orphaned_venv_pruning_anchors_an_in_project_checkout_on_a_live_worktrees_venv(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A venv a live worktree's predicted name matches confirms Poetry's naming, so an
-    in-project checkout's orphans can still be pruned."""
+    """Poetry resolving a live worktree to the venv its name predicts confirms the naming,
+    so an in-project checkout's orphans can still be pruned."""
 
     in_project = repository / ".venv"
     in_project.mkdir()
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: in_project.resolve())
     linked = tmp_path / "linked-worktree"
     git(repository, "worktree", "add", "-b", "fix/item-98", str(linked), "main")
     venv_root = tmp_path / "virtualenvs"
     live = _make_fake_venv(venv_root, _main_venv_name(linked), age_hours=100)
     orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+    resolved = {repository.resolve(): in_project.resolve(), linked.resolve(): live.resolve()}
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda location: resolved.get(location.resolve()))
 
     all_clean = hygiene.run_orphaned_venv_pruning(
         repository, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=tmp_path / "log"
@@ -879,6 +880,68 @@ def test_run_orphaned_venv_pruning_anchors_an_in_project_checkout_on_a_live_work
     assert all_clean is True
     assert live.is_dir()
     assert not orphan.exists()
+
+
+def test_run_orphaned_venv_pruning_refuses_an_in_project_anchor_poetry_names_differently(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A venv that only matches a predicted name may predate a change in Poetry's naming;
+    when Poetry itself resolves that worktree elsewhere, nothing can be attributed."""
+
+    in_project = repository / ".venv"
+    in_project.mkdir()
+    linked = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-97", str(linked), "main")
+    venv_root = tmp_path / "virtualenvs"
+    _make_fake_venv(venv_root, _main_venv_name(linked), age_hours=100)
+    renamed = _make_fake_venv(venv_root, "transit-delay-app-NEWHASH0-py3.12", age_hours=100)
+    resolved = {repository.resolve(): in_project.resolve(), linked.resolve(): renamed.resolve()}
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda location: resolved.get(location.resolve()))
+
+    with pytest.raises(hygiene.HygieneError, match="naming has changed"):
+        hygiene.run_orphaned_venv_pruning(
+            repository,
+            venv_root=venv_root,
+            min_age_hours=24,
+            max_deletes_per_run=10,
+            apply=True,
+            log_file=tmp_path / "log",
+        )
+    assert renamed.is_dir()
+
+
+def test_run_orphaned_venv_pruning_rechecks_an_in_project_checkout_before_apply(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The apply-time re-read covers the in-project path too."""
+
+    in_project = repository / ".venv"
+    in_project.mkdir()
+    linked = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-96", str(linked), "main")
+    venv_root = tmp_path / "virtualenvs"
+    live = _make_fake_venv(venv_root, _main_venv_name(linked), age_hours=100)
+    adopted = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+    resolved = {repository.resolve(): in_project.resolve(), linked.resolve(): live.resolve()}
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda location: resolved.get(location.resolve()))
+    real_owned = hygiene.venvs_owned_by_worktrees
+    calls = {"n": 0}
+
+    def _owned(repo: Path, *, venv_root: Path) -> set[Path]:
+        calls["n"] += 1
+        # Planning sees `adopted` as orphaned; the re-check sees it adopted by a new worktree.
+        return real_owned(repo, venv_root=venv_root) | ({adopted.resolve()} if calls["n"] > 1 else set())
+
+    monkeypatch.setattr(hygiene, "venvs_owned_by_worktrees", _owned)
+    log_path = tmp_path / "git-hygiene.log"
+
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=log_path
+    )
+
+    assert all_clean is True
+    assert adopted.is_dir()
+    assert "SKIPPED" in log_path.read_text(encoding="utf-8")
 
 
 def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_real_venv_exists_elsewhere(
