@@ -6,8 +6,9 @@ Usage:
 
 Per target: POST /api/debug/perf/reset (clears perf registry + lru caches)
 -> 1 cold request -> N warm requests -> report cold ms / warm p50 / warm p95.
-Read-only traffic; safe against the dev DB. Requires PERF_DEBUG_ENABLED
-(default on) on the server.
+Read-only traffic; safe against the dev DB. Requires PERF_DEBUG_ENABLED on the
+server (off by default), and ``--cookie`` must be an admin session: the reset
+is admin-only and CSRF-guarded, so the script also sends the server's Origin.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import argparse
 import statistics
 import sys
 import time
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -43,13 +45,28 @@ def _request_ms(client: httpx.Client, url: str) -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
+def _origin(base_url: str) -> str:
+    """The Origin a browser on ``base_url`` would send: scheme and host, no path."""
+    parts = urlsplit(base_url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _reset_refusal(status: int) -> str:
+    """Why the reset was refused, by the status the debug router answers with."""
+    if status == 404:
+        return "the perf debug surface is off: set PERF_DEBUG_ENABLED=true on the server"
+    if status in (401, 403):
+        return "the reset needs an admin session: pass --cookie with one"
+    return "is the server up?"
+
+
 def main() -> int:
     """Run the bench against every TARGET and print a cold/p50/p95 table."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--agency", type=int, default=1)
     ap.add_argument("--runs", type=int, default=10)
-    ap.add_argument("--cookie", default=None, help="optional Cookie header for authed servers")
+    ap.add_argument("--cookie", default=None, help="Cookie header carrying an admin session (the reset needs one)")
     ap.add_argument("--markdown", action="store_true", help="emit a GFM table")
     args = ap.parse_args()
 
@@ -59,12 +76,10 @@ def main() -> int:
     with httpx.Client(base_url=args.base_url, headers=headers, timeout=60.0) as client:
         for name, path in TARGETS:
             url = path.format(agency=args.agency)
-            reset = client.post("/api/debug/perf/reset")
+            reset = client.post("/api/debug/perf/reset", headers={"Origin": _origin(args.base_url)})
             if reset.status_code != 200:
-                print(
-                    f"FATAL: reset returned {reset.status_code} — is the server up with PERF_DEBUG_ENABLED?",
-                    file=sys.stderr,
-                )
+                reason = _reset_refusal(reset.status_code)
+                print(f"FATAL: reset returned {reset.status_code} — {reason}", file=sys.stderr)
                 return 1
             try:
                 cold = _request_ms(client, url)
