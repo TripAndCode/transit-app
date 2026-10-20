@@ -37,11 +37,19 @@ def test_the_reset_carries_the_servers_origin_as_the_csrf_guard_requires(monkeyp
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
-    [(401, "admin session"), (403, "admin session"), (404, "PERF_DEBUG_ENABLED")],
+    ("status", "detail", "expected"),
+    [
+        (401, "auth required", "admin session"),
+        (403, "admin only", "admin session"),
+        (403, "origin required", "PUBLIC_BASE_URL"),
+        (403, "cross-origin request denied", "PUBLIC_BASE_URL"),
+        (404, "Not Found", "PERF_DEBUG_ENABLED"),
+        (500, "Internal Server Error", "server error"),
+    ],
 )
 def test_a_refused_reset_names_its_real_cause(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], status: int, expected: str
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], status: int, detail: str, expected: str
 ):
-    assert _run(monkeypatch, lambda _request: httpx.Response(status)) == 1
+    """A 403 comes from the admin check or the origin check; the server's detail tells them apart."""
+    assert _run(monkeypatch, lambda _request: httpx.Response(status, json={"detail": detail})) == 1
     assert expected in capsys.readouterr().err

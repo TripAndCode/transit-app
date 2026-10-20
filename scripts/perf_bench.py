@@ -2,13 +2,14 @@
 
 Usage:
     poetry run python scripts/perf_bench.py --agency 1 [--base-url http://localhost:8000]
-        [--runs 10] [--cookie "session=..."] [--markdown]
+        [--runs 10] [--cookie "sid=<admin session id>"] [--markdown]
 
 Per target: POST /api/debug/perf/reset (clears perf registry + lru caches)
 -> 1 cold request -> N warm requests -> report cold ms / warm p50 / warm p95.
 Read-only traffic; safe against the dev DB. Requires PERF_DEBUG_ENABLED on the
 server (off by default), and ``--cookie`` must be an admin session: the reset
-is admin-only and CSRF-guarded, so the script also sends the server's Origin.
+is admin-only and CSRF-guarded. The script sends ``--base-url``'s origin with
+it, which the server accepts only when PUBLIC_BASE_URL or CORS_ORIGINS lists it.
 """
 
 from __future__ import annotations
@@ -51,13 +52,24 @@ def _origin(base_url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def _reset_refusal(status: int) -> str:
-    """Why the reset was refused, by the status the debug router answers with."""
-    if status == 404:
+_ORIGIN_REFUSALS = frozenset({"origin required", "cross-origin request denied"})
+
+
+def _reset_refusal(response: httpx.Response) -> str:
+    """Why the reset was refused. A 403 comes from either the admin check or the
+    origin check, so the server's ``detail`` tells the two apart."""
+    if response.status_code == 404:
         return "the perf debug surface is off: set PERF_DEBUG_ENABLED=true on the server"
-    if status in (401, 403):
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if response.status_code == 403 and detail in _ORIGIN_REFUSALS:
+        return "the server refused --base-url's origin: list it in PUBLIC_BASE_URL or CORS_ORIGINS"
+    if response.status_code in (401, 403):
         return "the reset needs an admin session: pass --cookie with one"
-    return "is the server up?"
+    return "unexpected server error"
 
 
 def main() -> int:
@@ -78,7 +90,7 @@ def main() -> int:
             url = path.format(agency=args.agency)
             reset = client.post("/api/debug/perf/reset", headers={"Origin": _origin(args.base_url)})
             if reset.status_code != 200:
-                reason = _reset_refusal(reset.status_code)
+                reason = _reset_refusal(reset)
                 print(f"FATAL: reset returned {reset.status_code} — {reason}", file=sys.stderr)
                 return 1
             try:
