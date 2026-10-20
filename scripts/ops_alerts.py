@@ -49,15 +49,20 @@ alerts if too much time has passed since that timestamp. That heartbeat
 bookkeeping is intentionally the only thing written on a quiet run --
 `main`'s exit code and stdout stay boring (0, one plain summary line) so
 routine polling traffic never looks like a notification. A poll that finds
-something worth surfacing instead prints an `ALERT`-prefixed block and
-exits 1, so the scheduled run's own failure is the notification.
+something new to surface prints an `ALERT`-prefixed block. The exit code
+follows current health rather than whether anything new was printed: 1 while
+any component is bad or the monitor went silent, including a repeat the dedup
+window suppressed (one "ongoing" line), and 0 for a poll whose only news is a
+recovery, so the scheduled run fails for as long as the incident lasts.
 
 `_deliver_ping` additionally forwards every poll's outcome to an optional
 external endpoint, reusing the same healthchecks.io-style convention
 `oracle_cloud/v3/bin/alert-lib.sh` already implements for the Oracle
-collector side: a bare ping to `OPS_ALERT_PING_URL` means "quiet poll", a
-ping to `<url>/fail` (with the rendered notification as the request body)
-means "something is wrong". Leaving the variable unset is a supported
+collector side: a bare ping to `OPS_ALERT_PING_URL` means "nothing is bad
+right now", a ping to `<url>/fail` (with the rendered notification, or the
+ongoing summary, as the request body) means "something is bad". Like the exit
+code, it follows current health, so a deduplicated poll mid-incident never
+sends a false all-clear. Leaving the variable unset is a supported
 configuration -- delivery becomes a no-op and `main`'s own exit code stays
 the only signal, exactly as before this was added. Delivery is always
 best-effort: a network failure while posting is logged to stderr and
@@ -485,6 +490,13 @@ def _deliver_ping(ping_url: str | None, *, ok: bool, body: str, post=None) -> No
         print(f"ops-alerts: failed to deliver ping to the configured endpoint: {type(exc).__name__}", file=sys.stderr)
 
 
+def _unhealthy_components(document: Mapping[str, object]) -> list[tuple[str, str]]:
+    """Every component the combined document currently reports in a BAD_STATES state."""
+    components = document.get("components", [])
+    assert isinstance(components, list)
+    return [(c["component"], c["state"]) for c in components if c["state"] in BAD_STATES]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point, meant to run on a short, fixed schedule (cron/systemd
     timer). Exit code: 0 on a quiet poll (no alert -- ordinary heartbeat
@@ -536,7 +548,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     ping_url = os.environ.get(PING_URL_ENV_VAR)
 
-    if notification.is_empty:
+    # The ping and the exit code follow current health, as the collector's
+    # health-check.sh does, not whether this poll produced a notification: a
+    # repeat of an ongoing failure inside the dedup window produces none, and a
+    # poll whose only alert is a recovery is healthy.
+    ongoing = _unhealthy_components(document)
+    healthy = not ongoing and monitor_silence is None
+
+    if not notification.is_empty:
+        _deliver_ping(ping_url, ok=healthy, body=notification.render_text())
+        if args.format == "json":
+            print(json.dumps(notification.to_dict(), indent=2))
+        else:
+            sys.stdout.write(notification.render_text())
+        return 0 if healthy else 1
+
+    if healthy:
         _deliver_ping(ping_url, ok=True, body=f"ops-alerts generated_at={notification.generated_at} no anomalies")
         if args.format == "json":
             print(json.dumps({"generated_at": notification.generated_at, "alert": False}))
@@ -544,11 +571,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"ops-alerts  generated_at={notification.generated_at}  no anomalies")
         return 0
 
-    _deliver_ping(ping_url, ok=False, body=notification.render_text())
+    summary = "ongoing (already alerted): " + " ".join(f"{name}={state}" for name, state in ongoing)
+    _deliver_ping(ping_url, ok=False, body=f"ops-alerts generated_at={notification.generated_at} {summary}")
     if args.format == "json":
-        print(json.dumps(notification.to_dict(), indent=2))
+        print(json.dumps({"generated_at": notification.generated_at, "alert": False, "ongoing": dict(ongoing)}))
     else:
-        sys.stdout.write(notification.render_text())
+        print(f"ops-alerts  generated_at={notification.generated_at}  {summary}")
     return 1
 
 
