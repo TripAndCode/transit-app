@@ -8,7 +8,7 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -373,15 +373,41 @@ def test_summarize_prs_counts_dirty_merge_state_as_conflicting_even_when_mergeab
 
 FOR_EACH_REF_FIXTURE = "\n".join(
     [
-        "origin\t2026-09-11T22:01:27+09:00",
-        "origin/HEAD\t2026-09-11T22:01:27+09:00",
-        "origin/main\t2026-09-11T12:00:00+00:00",
-        "origin/production\t2026-08-01T00:00:00+00:00",
-        "origin/fix/dark-mode-ui-pass\t2026-09-10T12:00:00+00:00",
-        "origin/fix/item-1\t2026-06-01T00:00:00+00:00",
-        "origin/fix/item-2\t2026-07-01T00:00:00+00:00",
+        "HEAD\t2026-09-11T22:01:27+09:00",
+        "main\t2026-09-11T12:00:00+00:00",
+        "production\t2026-08-01T00:00:00+00:00",
+        "fix/dark-mode-ui-pass\t2026-09-10T12:00:00+00:00",
+        "fix/item-1\t2026-06-01T00:00:00+00:00",
+        "fix/item-2\t2026-07-01T00:00:00+00:00",
     ]
 )
+
+
+def test_gather_stale_branches_names_a_remote_branch_shadowed_by_a_local_one(tmp_path: Path):
+    """A local branch called `origin/<name>` makes `refname:short` write `remotes/origin/<name>`."""
+
+    def git(cwd: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    remote, repo = tmp_path / "remote.git", tmp_path / "repo"
+    git(tmp_path, "init", "--bare", str(remote))
+    git(tmp_path, "init", "-b", "main", str(repo))
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", "initial")
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "main:old-feature")
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "branch", "origin/old-feature", "main")
+
+    stale, _ = collector.gather_stale_branches(
+        repo=repo,
+        now=datetime.now(timezone.utc) + timedelta(days=60),
+        protected_names=frozenset({"main"}),
+        remote_protection={},
+        stale_days=30.0,
+        max_branches=10,
+    )
+
+    assert stale == ("old-feature",)
 
 
 def test_gather_stale_branches_filters_protected_and_recent():
@@ -460,7 +486,7 @@ def test_gather_stale_branches_excludes_branches_missing_from_truncated_protecti
 
 
 def test_gather_stale_branches_caps_at_max_branches_oldest_first():
-    lines = [f"origin/branch-{i}\t2026-01-01T00:00:00+00:00" for i in range(15)]
+    lines = [f"branch-{i}\t2026-01-01T00:00:00+00:00" for i in range(15)]
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout="\n".join(lines))})
     stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
