@@ -593,7 +593,15 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
     for checkout in worktrees:
         if checkout.branch is not None:
             checkouts.setdefault(checkout.branch, []).append(checkout)
-    by_branch = {branch: held[-1] for branch, held in checkouts.items()}
+    primary_path = worktrees[0].path if worktrees else None
+
+    def shown_checkout(held: list[Worktree]) -> Worktree:
+        # The checkout a keep reason names, so the dry run's path agrees with it.
+        return next((item for item in held if item.path == current_path), None) or next(
+            (item for item in held if item.path == primary_path), held[-1]
+        )
+
+    by_branch = {branch: shown_checkout(held) for branch, held in checkouts.items()}
     pull_requests = load_pull_requests(repo)
     base_tree = run_git(repo, "rev-parse", f"refs/heads/{base}^{{tree}}").stdout.strip()
 
@@ -655,7 +663,6 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
             and worktree_is_dirty(repo, worktree)
         )
 
-    primary_path = worktrees[0].path if worktrees else None
     decisions: list[Decision] = []
     for branch, head in sorted(branches.items()):
         worktree = by_branch.get(branch)
@@ -726,7 +733,10 @@ def apply_plan(repo: Path, decisions: list[Decision]) -> None:
             if decision.worktree.path == invoking_path:
                 raise CleanupError(f"refusing to remove the invoking worktree: {invoking_path}")
             current_worktrees = parse_worktrees(run_git(repo, "worktree", "list", "--porcelain").stdout)
-            current = next((item for item in current_worktrees if item.branch == decision.branch), None)
+            # Exactly the one planned checkout: a second, forced one would leave the
+            # branch undeletable after this worktree was already removed.
+            held = [item for item in current_worktrees if item.branch == decision.branch]
+            current = held[0] if len(held) == 1 else None
             if current is None or current.path != decision.worktree.path or current.locked or current.prunable:
                 raise CleanupError(f"{decision.branch} worktree changed after planning; rerun cleanup")
             if worktree_is_dirty(repo, current):

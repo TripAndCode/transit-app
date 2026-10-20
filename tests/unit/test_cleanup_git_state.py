@@ -768,6 +768,45 @@ def test_apply_aborts_if_a_worktree_becomes_dirty(repository: Path, tmp_path: Pa
     assert git(repository, "branch", "--list", "raced")
 
 
+def test_apply_aborts_if_the_branch_gains_a_second_checkout(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A forced second checkout after planning leaves the branch undeletable, so nothing goes."""
+
+    # The forced copy sorts after the planned one, so the planned one is the
+    # first porcelain match for the branch.
+    planned, forced = tmp_path / "a-planned-tree", tmp_path / "z-forced-tree"
+    git(repository, "worktree", "add", "-b", "raced", str(planned), "main")
+    age_worktrees(planned)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    git(repository, "worktree", "add", "--force", str(forced), "raced")
+
+    with pytest.raises(cleanup.CleanupError, match="worktree changed"):
+        cleanup.apply_plan(repository, plan)
+
+    assert planned.exists()
+    assert git(repository, "branch", "--list", "raced")
+
+
+def test_a_kept_branch_names_the_checkout_its_reason_is_about(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The dry run is what an operator reads, so a primary keep shows the primary's path."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    git(repository, "worktree", "add", "--force", str(tmp_path / "forced"), "feat")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "feat")
+
+    assert decision.worktree is not None
+    assert decision.worktree.path == repository.resolve()
+
+
 def test_apply_aborts_if_a_detached_worktree_moves(repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A detached worktree whose HEAD changed after planning is not removed."""
 
