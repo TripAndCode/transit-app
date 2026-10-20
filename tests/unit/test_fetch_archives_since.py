@@ -65,3 +65,53 @@ def test_a_malformed_since_is_refused_before_anything_is_fetched(tmp_path):
     assert result.returncode == 2
     assert "SINCE" in result.stderr
     assert not (tmp_path / "rt").exists(), "refused before any local directory is made"
+
+
+def _remote_agency(tmp_path: Path, agency: str, *, rt: bool = True) -> None:
+    base = tmp_path / "remote" / agency
+    base.mkdir(parents=True, exist_ok=True)
+    if rt:
+        (base / "rt").mkdir(exist_ok=True)
+        (base / "rt" / "20261001.tar.gz").write_bytes(agency.encode())
+
+
+def test_an_agency_the_collector_does_not_poll_is_skipped_and_later_ones_still_come(tmp_path):
+    """AGENCY_IDS defaults to every agencies.csv row with a feed_url, but the VM holds only the
+    agencies it polls."""
+    _remote_agency(tmp_path, "1")
+    skipped = tmp_path / "skipped"
+    result = _run(tmp_path, AGENCY_IDS="1 11 8", SKIPPED_AGENCIES_FILE=str(skipped))
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "rt" / "1" / "20261001.tar.gz").exists()
+    assert _fetched(tmp_path) == [f"{d}.tar.gz" for d in DAYS], "agency 8, after the absent 11, is still fetched"
+    assert "[a11] not collected" in result.stdout
+    assert skipped.read_text().split() == ["11"], "the caller learns which ids were skipped"
+
+
+def test_an_absent_agency_is_skipped_under_since_too(tmp_path):
+    result = _run(tmp_path, AGENCY_IDS="11 8", SINCE="20261001")
+    assert result.returncode == 0, result.stderr
+    assert _fetched(tmp_path) == ["20261001.tar.gz"]
+
+
+def test_a_failed_fetch_is_reported_after_every_other_agency_is_fetched(tmp_path):
+    """An agency the VM holds whose RT fetch fails is a real failure, but not one that stops the rest."""
+    _remote_agency(tmp_path, "9", rt=False)
+    result = _run(tmp_path, AGENCY_IDS="9 8")
+    assert result.returncode == 1
+    assert "RT fetch failed for agencies: 9" in result.stderr
+    assert _fetched(tmp_path) == [f"{d}.tar.gz" for d in DAYS]
+
+
+def test_a_data_directory_holding_none_of_the_agencies_is_an_error_not_a_quiet_skip(tmp_path):
+    """A wrong COLLECTOR_DATA_DIR must not read as "nothing is collected" and succeed."""
+    (tmp_path / "empty").mkdir()
+    result = _run(tmp_path, COLLECTOR_DATA_DIR=str(tmp_path / "empty"))
+    assert result.returncode == 1
+    assert "holds none of" in result.stderr
+
+
+def test_an_unreadable_data_directory_is_named(tmp_path):
+    result = _run(tmp_path, COLLECTOR_DATA_DIR=str(tmp_path / "missing"))
+    assert result.returncode == 1
+    assert "could not list" in result.stderr
