@@ -11,8 +11,8 @@ Usage:
 Exit codes:
     0 — every probe passed
     1 — at least one probe failed (faithfulness/injection/grounding regression)
-    2 — no LLM provider usable (keys absent, or none ASK_FOLLOWUP_PROVIDERS
-        allows) — gate skipped, not failed
+    2 — no LLM provider usable (none in CHAT_PROVIDERS has a key, or none of
+        those ASK_FOLLOWUP_PROVIDERS allows) — gate skipped, not failed
 """
 
 from __future__ import annotations
@@ -151,7 +151,8 @@ async def main() -> int:
     allowed = _allowed_providers()
     if not any(provider.name in allowed for provider in get_client().providers()):
         print(
-            f"no LLM provider ASK_FOLLOWUP_PROVIDERS allows ({', '.join(sorted(allowed))}) has a key — gate skipped",
+            "no provider in CHAT_PROVIDERS with a key is one ASK_FOLLOWUP_PROVIDERS allows "
+            f"({', '.join(sorted(allowed))}) — gate skipped",
             file=sys.stderr,
         )
         return 2

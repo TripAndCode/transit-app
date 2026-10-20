@@ -53,3 +53,19 @@ def test_skips_when_no_provider_is_configured_at_all(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(llm_client, "get_client", lambda: _client_with())
 
     assert asyncio.run(followup_eval.main()) == 2
+
+
+def test_runs_the_probes_when_an_allowed_provider_has_a_key(monkeypatch: pytest.MonkeyPatch):
+    """The skip must not swallow a usable provider: the gate then really probes it."""
+    calls: list[object] = []
+
+    async def _recording(**kwargs: object) -> tuple[str, None]:
+        calls.append(kwargs)
+        return "", None
+
+    monkeypatch.delenv("ASK_FOLLOWUP_PROVIDERS", raising=False)
+    monkeypatch.setattr(llm_client, "get_client", lambda: _client_with("gemini"))
+    monkeypatch.setattr(followup, "answer_followup", _recording)
+
+    assert asyncio.run(followup_eval.main()) != 2
+    assert calls
