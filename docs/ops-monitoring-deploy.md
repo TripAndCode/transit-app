@@ -95,9 +95,11 @@ limit would otherwise guard against.
 `scripts/ops_alerts.py` can forward every poll's outcome to an external
 endpoint via `OPS_ALERT_PING_URL`, reusing the same healthchecks.io-style
 convention `oracle_cloud/v3/bin/alert-lib.sh` already uses on the Oracle
-collector side: a bare ping to the configured URL means "quiet poll", a ping
-to `<url>/fail` (carrying the rendered alert text as the POST body) means
-"something is wrong". To set it up:
+collector side: a bare ping to the configured URL means "nothing is bad right
+now", a ping to `<url>/fail` (carrying the rendered alert text, or a summary of
+what is still bad, as the POST body) means "something is bad". Both follow the
+current health, so a poll inside the dedup window during an outage still
+sends `/fail`. To set it up:
 
 1. Create a check at a healthchecks.io-compatible provider (or point the
    variable at any endpoint that accepts a plain POST body).
