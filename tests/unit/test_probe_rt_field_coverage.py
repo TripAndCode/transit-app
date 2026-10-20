@@ -215,3 +215,21 @@ def test_assess_flags_implausible_feed_timestamp():
     }
     result = _assess(cov)
     assert result["matches_confirmed_agencies"]["feed_timestamp"] is False
+
+
+def test_a_response_http_client_cannot_parse_is_reported_as_a_failed_fetch(monkeypatch, capsys):
+    """These are not OSError, so the probe must name them as a failed fetch, not crash."""
+    import http.client
+    import sys
+
+    def _raise(_url):
+        raise http.client.BadStatusLine("garbled")
+
+    monkeypatch.setattr(probe, "_fetch", _raise)
+    monkeypatch.setattr(sys, "argv", ["probe_rt_field_coverage.py", "--url", "https://example.invalid/rt"])
+
+    with pytest.raises(SystemExit) as exc:
+        probe.main()
+
+    assert exc.value.code == 1
+    assert "FETCH FAILED" in capsys.readouterr().err
