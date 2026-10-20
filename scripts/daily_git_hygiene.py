@@ -247,6 +247,9 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
 # ---------------------------------------------------------------------------
 
 
+_ACTIVE_ENV_VARS = frozenset({"VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"})
+
+
 def poetry_env_path(location: Path) -> Path | None:
     """Return the poetry virtualenv path active at `location`, or None if
     poetry can't resolve one there.
@@ -264,6 +267,10 @@ def poetry_env_path(location: Path) -> Path | None:
     indefinitely and block every later run.
     """
 
+    # Inside an activated environment Poetry answers with that environment for
+    # any project, so the activation variables are left out: the answer must be
+    # the venv `location` itself owns.
+    env = {key: value for key, value in os.environ.items() if key not in _ACTIVE_ENV_VARS}
     try:
         result = subprocess.run(
             ("poetry", "env", "info", "--path"),
@@ -271,6 +278,7 @@ def poetry_env_path(location: Path) -> Path | None:
             capture_output=True,
             text=True,
             timeout=POETRY_COMMAND_TIMEOUT_SECONDS,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -383,7 +391,9 @@ def confirm_in_project_naming(checkout: Path, *, venv_root: Path) -> set[Path] |
         if not any(path.name.startswith(prefix) for path in owned):
             continue
         resolved = poetry_env_path(worktree.path)
-        if resolved is None:
+        # A worktree with its own `.venv` resolves there, which says nothing
+        # about the naming under `venv_root`.
+        if resolved is None or resolved == (worktree.path / ".venv").resolve():
             continue
         if resolved not in owned or not resolved.name.startswith(prefix):
             raise HygieneError(

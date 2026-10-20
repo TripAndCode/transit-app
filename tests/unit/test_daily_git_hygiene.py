@@ -944,6 +944,58 @@ def test_run_orphaned_venv_pruning_rechecks_an_in_project_checkout_before_apply(
     assert "SKIPPED" in log_path.read_text(encoding="utf-8")
 
 
+def test_run_orphaned_venv_pruning_skips_a_worktree_using_its_own_in_project_venv(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A linked worktree with its own `.venv` resolves there, which says nothing about the
+    naming under the root; another worktree can still confirm it."""
+
+    in_project = repository / ".venv"
+    in_project.mkdir()
+    # Worktrees are listed by path, so the one with its own .venv is asked first.
+    own = tmp_path / "a-own-venv-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-95", str(own), "main")
+    (own / ".venv").mkdir()
+    linked = tmp_path / "z-linked-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-94", str(linked), "main")
+    venv_root = tmp_path / "virtualenvs"
+    _make_fake_venv(venv_root, _main_venv_name(own), age_hours=100)
+    live = _make_fake_venv(venv_root, _main_venv_name(linked), age_hours=100)
+    orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+    resolved = {
+        repository.resolve(): in_project.resolve(),
+        own.resolve(): (own / ".venv").resolve(),
+        linked.resolve(): live.resolve(),
+    }
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda location: resolved.get(location.resolve()))
+
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=tmp_path / "log"
+    )
+
+    assert all_clean is True
+    assert live.is_dir()
+    assert not orphan.exists()
+
+
+def test_poetry_env_path_ignores_an_activated_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Inside an activated venv Poetry answers with that venv for any project, which would
+    misreport every worktree's venv."""
+
+    seen: dict[str, object] = {}
+
+    def _run(args, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout=f"{tmp_path}\n", stderr="")
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/somewhere/.venv")
+    monkeypatch.setattr(hygiene.subprocess, "run", _run)
+
+    hygiene.poetry_env_path(tmp_path)
+
+    assert "VIRTUAL_ENV" not in seen["env"]
+
+
 def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_real_venv_exists_elsewhere(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
