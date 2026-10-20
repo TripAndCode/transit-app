@@ -328,17 +328,14 @@ def primary_worktree(repo: Path) -> Path:
     return worktrees[0].path
 
 
-def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, venv_root: Path) -> set[Path]:
-    """`main_venv` plus every venv under `venv_root` that a current worktree of `repo` owns.
+def venvs_owned_by_worktrees(repo: Path, *, venv_root: Path) -> set[Path]:
+    """Every venv under `venv_root` whose name a current worktree of `repo` predicts.
 
     Ownership is read from Poetry's deterministic venv naming instead of asking
     `poetry env info` in each worktree. A worktree that never created a venv
     (the norm when `poetry run` is routed to the main checkout's environment)
     owns no candidate, and one whose venv exists owns it by name even when
-    poetry cannot be spawned there. `main_venv`, resolved by poetry itself for
-    `repo`, is the positive control: if its name does not carry the prefix
-    computed for `repo`, Poetry's naming has changed, and no venv can be
-    attributed safely.
+    poetry cannot be spawned there.
 
     A `prunable` entry (its directory is gone and only git's administrative
     record remains) owns nothing. A locked worktree keeps its venvs even when
@@ -349,12 +346,6 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, venv_root: Path)
     independent clone's venvs carry its own path hash and look orphaned here.
     """
 
-    expected_prefix = poetry_venv_name_prefix(repo)
-    if not main_venv.name.startswith(expected_prefix):
-        raise HygieneError(
-            f"this checkout's own venv {main_venv.name!r} does not start with {expected_prefix!r}, the name "
-            "Poetry's path hashing predicts for it; refusing to attribute any venv to a worktree"
-        )
     worktrees = cleanup_git_state.parse_worktrees(
         cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
     )
@@ -363,12 +354,28 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, venv_root: Path)
         for worktree in worktrees
         if not worktree.prunable and (worktree.locked or worktree.path.exists())
     )
-    owned = {
+    return {
         candidate.resolve()
         for candidate in venv_root.glob(POETRY_VENV_GLOB)
         if candidate.name.startswith(owned_prefixes)
     }
-    return {main_venv, *owned}
+
+
+def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, venv_root: Path) -> set[Path]:
+    """`main_venv` plus every venv under `venv_root` that a current worktree of `repo` owns.
+
+    `main_venv`, resolved by poetry itself for `repo`, is the positive control:
+    if its name does not carry the prefix computed for `repo`, Poetry's naming
+    has changed, and no venv can be attributed safely.
+    """
+
+    expected_prefix = poetry_venv_name_prefix(repo)
+    if not main_venv.name.startswith(expected_prefix):
+        raise HygieneError(
+            f"this checkout's own venv {main_venv.name!r} does not start with {expected_prefix!r}, the name "
+            "Poetry's path hashing predicts for it; refusing to attribute any venv to a worktree"
+        )
+    return {main_venv, *venvs_owned_by_worktrees(repo, venv_root=venv_root)}
 
 
 def run_orphaned_venv_pruning(
@@ -428,6 +435,24 @@ def run_orphaned_venv_pruning(
             "prune without the naming check that venv anchors"
         )
 
+    # Poetry uses the checkout's own `.venv` whenever one exists, so then nothing
+    # under `venv_root` carries the checkout's name to anchor the naming check.
+    # A venv whose name a live worktree predicts confirms the naming instead;
+    # without one, no venv can be called an orphan, and nothing is pruned.
+    in_project = main_venv == (checkout / ".venv").resolve()
+
+    def in_use_now() -> set[Path]:
+        if in_project:
+            return {main_venv, *venvs_owned_by_worktrees(checkout, venv_root=venv_root)}
+        return compute_in_use_poetry_venvs(checkout, main_venv, venv_root=venv_root)
+
+    if in_project and not venvs_owned_by_worktrees(checkout, venv_root=venv_root):
+        print(
+            f"This checkout's poetry venv is in-project ({main_venv}), and no venv under {venv_root} has a "
+            "current worktree's name to confirm Poetry's naming; nothing pruned"
+        )
+        return True
+
     # Self-validating positive control: if `--venv-root` is misconfigured (wrong
     # platform default, including simply not existing) or `POETRY_VENV_GLOB` no
     # longer matches (a renamed project), this stage would otherwise "succeed" by
@@ -437,13 +462,13 @@ def run_orphaned_venv_pruning(
     # a separate parent-path/glob string comparison) means this control can
     # never pass while the real enumeration it's meant to certify comes back
     # empty or wrong.
-    if not any(candidate.resolve() == main_venv for candidate in candidates):
+    if not in_project and not any(candidate.resolve() == main_venv for candidate in candidates):
         raise HygieneError(
             f"--venv-root {venv_root} does not enumerate this checkout's own poetry venv "
             f"({main_venv}) via {POETRY_VENV_GLOB!r}; refusing to prune what may be the wrong directory entirely"
         )
 
-    in_use = compute_in_use_poetry_venvs(checkout, main_venv, venv_root=venv_root)
+    in_use = in_use_now()
     decisions: list[VenvDecision] = []
     for candidate in candidates:
         resolved = candidate.resolve()
@@ -481,7 +506,7 @@ def run_orphaned_venv_pruning(
     # catch a worktree created during planning. Only worth the extra `git
     # worktree list` when there's actually something to delete (delete_count == 0
     # already returned above).
-    fresh_in_use = compute_in_use_poetry_venvs(checkout, main_venv, venv_root=venv_root)
+    fresh_in_use = in_use_now()
     for decision in decisions:
         if decision.action != "delete":
             continue

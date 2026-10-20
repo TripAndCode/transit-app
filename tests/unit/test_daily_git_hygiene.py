@@ -835,6 +835,52 @@ def test_run_orphaned_venv_pruning_anchors_on_the_primary_worktree_when_invoked_
     assert not orphan.exists()
 
 
+def test_run_orphaned_venv_pruning_prunes_nothing_for_an_in_project_venv_with_no_anchor(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """Poetry uses a checkout's own `.venv` when one exists, so nothing under the root carries
+    the checkout's name. With no live worktree's venv to confirm the naming either, no venv can
+    be called an orphan, and the stage passes rather than failing every run."""
+
+    in_project = repository / ".venv"
+    in_project.mkdir()
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: in_project.resolve())
+    venv_root = tmp_path / "virtualenvs"
+    unattributable = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=tmp_path / "log"
+    )
+
+    assert all_clean is True
+    assert unattributable.is_dir()
+    assert "in-project" in capsys.readouterr().out
+
+
+def test_run_orphaned_venv_pruning_anchors_an_in_project_checkout_on_a_live_worktrees_venv(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A venv a live worktree's predicted name matches confirms Poetry's naming, so an
+    in-project checkout's orphans can still be pruned."""
+
+    in_project = repository / ".venv"
+    in_project.mkdir()
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: in_project.resolve())
+    linked = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-98", str(linked), "main")
+    venv_root = tmp_path / "virtualenvs"
+    live = _make_fake_venv(venv_root, _main_venv_name(linked), age_hours=100)
+    orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=tmp_path / "log"
+    )
+
+    assert all_clean is True
+    assert live.is_dir()
+    assert not orphan.exists()
+
+
 def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_real_venv_exists_elsewhere(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
