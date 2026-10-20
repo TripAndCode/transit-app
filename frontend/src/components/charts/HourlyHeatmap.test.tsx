@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
@@ -142,5 +143,131 @@ describe("HourlyHeatmap keyboard access", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("HourlyHeatmap cells from the keyboard", () => {
+  const CELLS: HourlyCell[] = [
+    { date: "2026-06-01", hour: 8, avg_min: 2.0, samples: 50 },
+    { date: "2026-06-02", hour: 8, avg_min: 4.5, samples: 20 },
+    { date: "2026-06-01", hour: 9, avg_min: 1.0, samples: 10 },
+  ];
+
+  function renderGrid() {
+    return renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+  }
+
+  it("names each cell with its date, hour, average and sample count, and an empty one as having no data", async () => {
+    await i18n.changeLanguage("en");
+    renderGrid();
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." })).toBeInTheDocument();
+    expect(screen.getByRole("gridcell", { name: "Jun 2, 2026 09:00 · no data" })).toBeInTheDocument();
+  });
+
+  it("is one tab stop, moved between hours and dates by the arrow keys", async () => {
+    await i18n.changeLanguage("en");
+    const user = userEvent.setup();
+    renderGrid();
+    const grid = screen.getByRole("grid", { name: "Time-band heatmap" });
+    expect(grid.querySelectorAll("[tabindex='0']")).toHaveLength(1);
+
+    const start = screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." });
+    start.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("gridcell", { name: "Jun 2, 2026 08:00 · avg 4.5 min · 20 obs." })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}{ArrowDown}");
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 09:00 · avg 1.0 min · 10 obs." })).toHaveFocus();
+  });
+
+  it("moves between hours with the up and down arrows when the grid has a single date", async () => {
+    await i18n.changeLanguage("en");
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.filter((c) => c.date === "2026-06-01")} />
+      </MemoryRouter>,
+    );
+    screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." }).focus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 09:00 · avg 1.0 min · 10 obs." })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." })).toHaveFocus();
+  });
+
+  it("drills to the cell's day and time band on Enter, as a click does", async () => {
+    await i18n.changeLanguage("en");
+    const user = userEvent.setup();
+    renderGrid();
+    screen.getByRole("gridcell", { name: "Jun 1, 2026 08:00 · avg 2.0 min · 50 obs." }).focus();
+    await user.keyboard("{Enter}");
+    const search = screen.getByTestId("loc").textContent ?? "";
+    expect(search).toContain("from=2026-06-01");
+    expect(search).toContain("time_band=morning");
+  });
+
+  it("keeps the focus ring on the focused cell when the grid redraws with fewer dates", async () => {
+    await i18n.changeLanguage("en");
+    const { container, rerender } = renderGrid();
+    const focused = () => container.querySelector("[data-testid='heat-cell'][data-date='2026-06-02'][data-hour='8']")!;
+    fireEvent.focus(focused());
+
+    rerender(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.filter((c) => c.date === "2026-06-02")} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const ring = container.querySelector("[data-testid='heat-focus-ring']")!;
+    expect(Number(ring.getAttribute("y")) + 0.5).toBe(Number(focused().getAttribute("y")));
+    expect(Number(ring.getAttribute("x")) + 0.5).toBe(Number(focused().getAttribute("x")));
+    expect(focused()).toHaveAttribute("tabindex", "0");
+    expect(container.querySelectorAll("[role='gridcell'][tabindex='0']")).toHaveLength(1);
+  });
+
+  it("clears the tooltip on blur after the cells are refetched as new objects", async () => {
+    await i18n.changeLanguage("en");
+    const { rerender } = renderGrid();
+    const name = "Jun 2, 2026 08:00 · avg 4.5 min · 20 obs.";
+    fireEvent.focus(screen.getByRole("gridcell", { name }));
+
+    rerender(
+      <MemoryRouter>
+        <HourlyHeatmap cells={CELLS.map((c) => ({ ...c }))} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    fireEvent.blur(screen.getByRole("gridcell", { name }));
+
+    expect(screen.queryByText(/4\.5 min · 20 obs\./)).toBeNull();
+  });
+
+  it("names a cell with no average as having no data, and shows it no tooltip", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProviders(
+      <MemoryRouter>
+        <HourlyHeatmap cells={[...CELLS, { date: "2026-06-02", hour: 9, avg_min: null, samples: 4 }]} />
+      </MemoryRouter>,
+    );
+    const cell = screen.getByRole("gridcell", { name: "Jun 2, 2026 09:00 · no data" });
+    fireEvent.focus(cell);
+    expect(screen.queryByText(/obs\./)).toBeNull();
+  });
+
+  it("shows the cell's tooltip and a focus ring while it holds focus", async () => {
+    await i18n.changeLanguage("en");
+    const { container } = renderGrid();
+    const cell = screen.getByRole("gridcell", { name: "Jun 2, 2026 08:00 · avg 4.5 min · 20 obs." });
+    fireEvent.focus(cell);
+    expect(screen.getByText(/4\.5 min · 20 obs\./)).toBeInTheDocument();
+    expect(container.querySelector("[data-testid='heat-focus-ring']")).not.toBeNull();
+    fireEvent.blur(cell);
+    expect(container.querySelector("[data-testid='heat-focus-ring']")).toBeNull();
   });
 });
