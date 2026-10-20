@@ -46,7 +46,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from pipeline.flags import get_flag_state
-from pipeline.url_guard import FeedURLError, safe_urlopen
+from pipeline.url_guard import FETCH_ERRORS, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +309,13 @@ def aggregate_daily(
     )
 
 
+#: Every way reading one block can fail: FETCH_ERRORS for the request,
+#: including a response http.client could not parse, which urllib does not wrap
+#: in URLError; ValueError for json.JSONDecodeError and UnicodeDecodeError;
+#: RecursionError for a small body nested deeper than json.loads can follow.
+_BLOCK_READ_ERRORS: tuple[type[BaseException], ...] = (*FETCH_ERRORS, ValueError, RecursionError)
+
+
 def _fetch_block(
     station_id: str,
     day: date,
@@ -365,9 +372,7 @@ def _fetch_block(
         else:
             logger.warning("weather: HTTP %s fetching station %s %s hour %02d", e.code, station_id, day, hour)
         return None
-    except (FeedURLError, OSError, ValueError, UnicodeDecodeError) as e:
-        # ValueError covers json.JSONDecodeError; OSError covers URLError and
-        # socket timeouts.
+    except _BLOCK_READ_ERRORS as e:
         logger.warning("weather: failed to read station %s %s hour %02d: %s", station_id, day, hour, e)
         return None
     if not isinstance(payload, dict):

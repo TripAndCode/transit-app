@@ -6,17 +6,10 @@ so a dead source is never recorded as an up-to-date one.
 """
 
 import http
-import http.client
 import urllib.error
 import urllib.parse
 
 from pipeline.url_guard import FeedURLError, redact_url, redact_urls_in_text
-
-#: What a fetch through ``safe_urlopen`` raises when the request failed: an
-#: HTTP error status or a network error (``URLError``, and the timeouts and
-#: resets a body read raises outside it, are all ``OSError``), a response
-#: ``http.client`` could not parse, or a URL the SSRF guard rejected.
-FETCH_ERRORS: tuple[type[BaseException], ...] = (OSError, http.client.HTTPException, FeedURLError)
 
 
 class StaticFetchError(RuntimeError):
@@ -54,7 +47,7 @@ def _is_http_url(url: str) -> bool:
 
 
 def fetch_failed(url: str, exc: BaseException) -> StaticFetchError:
-    """The :class:`StaticFetchError` for one of :data:`FETCH_ERRORS` raised fetching ``url``."""
+    """The :class:`StaticFetchError` for one of :data:`pipeline.url_guard.FETCH_ERRORS` raised fetching ``url``."""
     where = redact_url(url)
     if isinstance(exc, urllib.error.HTTPError):
         try:

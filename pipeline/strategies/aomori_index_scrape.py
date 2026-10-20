@@ -15,8 +15,8 @@ import urllib.parse
 from datetime import datetime
 from typing import Optional
 
-from pipeline.strategies.errors import FETCH_ERRORS, StaticFetchError, fetch_failed, require_http_url
-from pipeline.url_guard import redact_url, safe_urlopen
+from pipeline.strategies.errors import StaticFetchError, fetch_failed, require_http_url
+from pipeline.url_guard import FETCH_ERRORS, redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
