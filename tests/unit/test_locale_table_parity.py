@@ -1,20 +1,30 @@
-"""ja/en parity of the server-side template tables.
+"""ja/en parity of the server-side template tables keyed by ``(key, lang)``.
 
-A key present in one locale only silently serves the other (the lookup falls
-back to ja), and a placeholder that exists in one locale's template but not
-the other's is swallowed by the ``KeyError`` guard in the formatting helpers,
-so neither failure shows up as an error at runtime.
+A key missing from one locale does not fail where it is added. Most of these
+lookups fall back to ja, so a missing en entry serves the ja text and a missing
+ja entry serves the bare key; the report-definition tables raise ``KeyError``
+when footnotes in the missing locale render (their ja side is also read at
+import). A placeholder that exists in one locale's template but not
+the other's is swallowed by the formatting helpers' ``KeyError`` guards, or
+raises where a helper has none. These tests catch both before anything renders.
 """
 
 import string
 
 import pytest
 
-from pipeline.query import formatter, tools
+from pipeline.digest import render as digest_render
+from pipeline.query import chat, formatter, tools
+from pipeline.reports import definition, forecast
 
 _TABLES = {
     "tools._LOCALES": tools._LOCALES,
     "formatter._LOCALES": formatter._LOCALES,
+    "chat._CHAT_STRINGS": chat._CHAT_STRINGS,
+    "digest.render._DIGEST_LOCALES": digest_render._DIGEST_LOCALES,
+    "forecast._DISCLAIMER": forecast._DISCLAIMER,
+    "definition._MEASUREMENT_POINT_TEXT": definition._MEASUREMENT_POINT_TEXT,
+    "definition._DEDUP_RULE_TEXT": definition._DEDUP_RULE_TEXT,
 }
 
 
