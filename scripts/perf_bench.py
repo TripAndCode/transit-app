@@ -59,7 +59,10 @@ def _reset_refusal(response: httpx.Response) -> str:
     """Why the reset was refused. A 403 comes from either the admin check or the
     origin check, so the server's ``detail`` tells the two apart."""
     if response.status_code == 404:
-        return "the perf debug surface is off: set PERF_DEBUG_ENABLED=true on the server"
+        return (
+            "the perf debug surface is off: set PERF_DEBUG_ENABLED=true on the server, or clear a "
+            "perf_debug_enabled override in feature_flags, which wins over it"
+        )
     try:
         body = response.json()
     except ValueError:
