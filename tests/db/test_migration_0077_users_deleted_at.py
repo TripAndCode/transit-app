@@ -2,6 +2,7 @@
 old soft-delete already anonymized, keeps each of them suspended, and masks and
 revokes those users' keys."""
 
+import json
 from datetime import datetime, timezone
 
 from db import migrate
@@ -9,6 +10,7 @@ from db import migrate
 _DELETED_EVENT_AT = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
 _UPDATED_AT = datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc)
 _REVOKED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_AFTER_THE_DELETE = datetime(2026, 4, 1, tzinfo=timezone.utc)
 
 
 def test_the_down_is_marked_destructive():
@@ -28,10 +30,11 @@ def _anonymize(cur, uid):
     )
 
 
-def _insert_key(cur, key_hash, owner, email, revoked_at=None):
+def _insert_key(cur, key_hash, owner, email, revoked_at=None, created_at=_REVOKED_AT):
     cur.execute(
-        "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at) VALUES (%s, %s, %s, %s)",
-        (key_hash, owner, email, revoked_at),
+        "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at, created_at)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (key_hash, owner, email, revoked_at, created_at),
     )
 
 
@@ -47,6 +50,13 @@ def test_up_backfills_deleted_users_and_retires_their_keys(pg_conn):
                 "INSERT INTO login_events (user_id, kind, created_at) VALUES (%s, 'deleted', %s)",
                 (with_event, _DELETED_EVENT_AT),
             )
+            # The only surviving record of the address a legacy ownerless key
+            # is matched by, in whatever case the row held it.
+            cur.execute(
+                "INSERT INTO admin_audit (action, target_type, target_id, before, at)"
+                " VALUES ('user.deleted', 'user', %s, %s::jsonb, %s)",
+                (str(with_event), json.dumps({"email": "With-Event@X"}), _DELETED_EVENT_AT),
+            )
             without_event = _insert_user(cur, "without-event@x")
             _anonymize(cur, without_event)
             resumed = _insert_user(cur, "resumed@x")
@@ -60,6 +70,11 @@ def test_up_backfills_deleted_users_and_retires_their_keys(pg_conn):
             _insert_key(cur, "h-revoked-key", with_event, "with-event@x", _REVOKED_AT)
             _insert_key(cur, "h-decoy-key", decoy, "decoy@x")
             _insert_key(cur, "h-other-key", live, "live@x")
+            _insert_key(cur, "h-legacy-key", None, "with-event@x")
+            # Inserted after the delete: it belongs to whoever holds the address now.
+            _insert_key(cur, "h-legacy-later-key", None, "with-event@x", created_at=_AFTER_THE_DELETE)
+            # No audit row names this user's original address, so nothing can match it.
+            _insert_key(cur, "h-legacy-unaudited-key", None, "without-event@x")
         pg_conn.commit()
 
         migrate.migrate_up(pg_conn)
@@ -81,6 +96,10 @@ def test_up_backfills_deleted_users_and_retires_their_keys(pg_conn):
         assert keys["h-revoked-key"] == (f"deleted-{with_event}@local", _REVOKED_AT)
         assert keys["h-decoy-key"] == ("decoy@x", None)
         assert keys["h-other-key"] == ("live@x", None)
+        assert keys["h-legacy-key"][0] == f"deleted-{with_event}@local"
+        assert keys["h-legacy-key"][1] is not None
+        assert keys["h-legacy-later-key"] == ("with-event@x", None)
+        assert keys["h-legacy-unaudited-key"] == ("without-event@x", None)
     finally:
         pg_conn.rollback()
         migrate.migrate_up(pg_conn)

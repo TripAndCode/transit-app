@@ -13,6 +13,8 @@ from typing import Any
 
 import asyncpg
 
+from pipeline.api_key_ownership import OWNED_BY_USER
+
 
 def _parsed(value: str | None) -> Any:
     return json.loads(value) if value is not None else None
@@ -54,11 +56,9 @@ async def collect_user_data(conn: asyncpg.Connection, user_id: int) -> dict[str,
         user_id,
     )
     llm_key = await conn.fetchrow("SELECT provider, key_suffix FROM user_llm_keys WHERE user_id = $1", user_id)
-    # The same ownership erase_user deletes by: issued to the account, or a
-    # legacy ownerless key recorded under its address, in whatever case.
     api_keys = await conn.fetch(
         "SELECT label, tier, created_at, expires_at, revoked_at FROM api_keys"
-        " WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND lower(owner_email) = lower($2)) ORDER BY created_at",
+        f" WHERE {OWNED_BY_USER} ORDER BY created_at",
         user_id,
         profile["email"] if profile else None,
     )

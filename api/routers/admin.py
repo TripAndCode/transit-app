@@ -28,8 +28,10 @@ provider sub creates a fresh user. The user's API keys are revoked and
 their recorded owner address is replaced with the anonymized one.
 
 A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
-is reversible, and lifting it would bring the account's keys back, so every
-mutating route refuses a deleted row with a 409.
+is reversible, and lifting it would bring the account's keys back, so the
+routes that change a user or give it credentials refuse a deleted row with a
+409: the single and bulk PATCH, DELETE, and API-key issue. Revoking a
+session or a key only takes access away and needs no such guard.
 """
 
 import asyncio
@@ -67,6 +69,7 @@ from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
 from pipeline.admin_users import session_id_prefix, unique_prefix_match
+from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
@@ -532,12 +535,6 @@ async def patch_user(
     return UserRow(**dict(out))
 
 
-# The keys a user owns, by the same rule `pipeline.account_erasure` and
-# `pipeline.account_export` use: issued to the account, or a legacy ownerless
-# key recorded under its address in any case. $1 is the user_id, $2 the email.
-_OWNED_KEYS = "owner_user_id = $1 OR (owner_user_id IS NULL AND lower(owner_email) = lower($2))"
-
-
 @router.delete("/users/{uid}", status_code=204)
 async def delete_user(
     uid: int,
@@ -568,11 +565,11 @@ async def delete_user(
         # Revoke before masking: a legacy ownerless key is matched by the
         # address the mask replaces.
         revoked = await conn.fetch(
-            f"UPDATE api_keys SET revoked_at = now() WHERE ({_OWNED_KEYS}) AND revoked_at IS NULL RETURNING id",
+            f"UPDATE api_keys SET revoked_at = now() WHERE {OWNED_BY_USER} AND revoked_at IS NULL RETURNING id",
             uid,
             row["email"],
         )
-        await conn.execute(f"UPDATE api_keys SET owner_email = $3 WHERE {_OWNED_KEYS}", uid, row["email"], anonymized)
+        await conn.execute(f"UPDATE api_keys SET owner_email = $3 WHERE {OWNED_BY_USER}", uid, row["email"], anonymized)
         deleted_at = await conn.fetchval(
             """
             UPDATE users
