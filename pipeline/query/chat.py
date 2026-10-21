@@ -240,10 +240,6 @@ def _completion_with_key(
     classifies it into the same ``error_kind`` vocabulary the shared-client
     ladder uses. Never logs ``api_key`` — callers must only ever log whether
     a per-user key was used, not its value.
-
-    ``base_url``/``model`` come from
-    :func:`~pipeline.query.llm_client.provider_endpoint`, so an operator's
-    ``GEMINI_MODEL`` override, say, applies on the BYOK path too.
     """
     import openai
 

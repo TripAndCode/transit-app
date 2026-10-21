@@ -30,9 +30,9 @@ _log = logging.getLogger(__name__)
 # far longer than any Ask/Copilot/follow-up caller waits.
 REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
-# Built-in defaults for each provider we support. Operator overrides
-# any field via env (e.g. GEMINI_BASE_URL=...). The "key_env" is the
-# env-var name that holds the provider's API key.
+# Built-in defaults for each provider we support; provider_endpoint applies
+# the operator's base_url/model overrides. The "key_env" is the env-var name
+# that holds the provider's API key.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "gemini": {
         "key_env": "GEMINI_API_KEY",
