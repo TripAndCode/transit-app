@@ -1,11 +1,12 @@
 """Retention windows and the DELETE text that enforces them.
 
-Each window can be pruned by hand with its `gtfs_pipeline.py` command. Every
-period the privacy policy states -- per-user usage counts and login history
-(``PERSONAL_DATA_RETENTION_MONTHS``), sessions past their expiry, the unlinked
-Ask question log and the admin audit log -- is also pruned daily by the API
-process (``api/retention.py`` via ``policy_prune_sql``), so the stated periods
-hold without an external scheduler.
+Every period the privacy policy states -- per-user usage counts and login
+history (``PERSONAL_DATA_RETENTION_MONTHS``), sessions past their expiry, the
+unlinked Ask questions (the question log and the intent cache's question
+text) and the admin audit log -- is pruned daily by the API process
+(``api/retention.py`` via ``policy_prune_sql``), so the stated periods hold
+without an external scheduler. Most windows can also be pruned by hand with
+their `gtfs_pipeline.py` command.
 
 Intervals are embedded as text rather than bound as parameters: asyncpg has
 no placeholder for an INTERVAL literal. Each builder applies ``int()`` itself
@@ -40,6 +41,13 @@ def prune_query_log_sql(days: int) -> str:
     return f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{int(days)} days'"
 
 
+def prune_intent_cache_sql(days: int) -> str:
+    """DELETE text for the `ask_intent_cache` retention prune. A promoted row
+    stays: its `rag_chunks` suggestion resolves its tool and args from it."""
+    cutoff = f"now() - INTERVAL '{int(days)} days'"
+    return f"DELETE FROM ask_intent_cache WHERE last_used_at < {cutoff} AND promoted_at IS NULL"
+
+
 PERSONAL_DATA_RETENTION_MONTHS = 25
 
 
@@ -60,5 +68,6 @@ def policy_prune_sql() -> list[str]:
     return [
         *personal_data_prune_sql(PERSONAL_DATA_RETENTION_MONTHS),
         prune_query_log_sql(QUERY_LOG_RETENTION_DAYS),
+        prune_intent_cache_sql(QUERY_LOG_RETENTION_DAYS),
         prune_admin_audit_sql(ADMIN_AUDIT_RETENTION_DAYS),
     ]

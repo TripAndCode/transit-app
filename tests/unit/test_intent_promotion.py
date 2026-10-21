@@ -50,7 +50,7 @@ class _FakeConn:
 def mark_promoted_calls(monkeypatch):
     calls: list[tuple[str, int]] = []
 
-    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None):
+    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None, question=None):
         calls.append((signature_hash, agency_id))
 
     monkeypatch.setattr(intent_promotion.intent_cache, "mark_promoted", fake_mark_promoted)
@@ -99,7 +99,7 @@ async def test_promote_signature_false_when_no_cache_row(monkeypatch):
         return None
 
     monkeypatch.setattr(intent_promotion.intent_cache, "lookup", fake_lookup)
-    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder())
+    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder(), question="Q?")
     assert ok is False
 
 
@@ -108,7 +108,7 @@ async def test_promote_signature_false_when_already_promoted(monkeypatch):
         return _candidate(promoted_at="2026-01-01T00:00:00Z")
 
     monkeypatch.setattr(intent_promotion.intent_cache, "lookup", fake_lookup)
-    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder())
+    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder(), question="Q?")
     assert ok is False
 
 
@@ -117,7 +117,7 @@ async def test_promote_signature_false_for_undispatchable_tool(monkeypatch):
         return _candidate(tool="not_a_real_tool")
 
     monkeypatch.setattr(intent_promotion.intent_cache, "lookup", fake_lookup)
-    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder())
+    ok = await intent_promotion.promote_signature(_FakeConn(), "aaaa", 1, _FakeEmbedder(), question="Q?")
     assert ok is False
 
 
@@ -127,6 +127,7 @@ async def test_promote_signature_promotes_eligible_row(monkeypatch, mark_promote
 
     monkeypatch.setattr(intent_promotion.intent_cache, "lookup", fake_lookup)
     conn = _FakeConn()
-    ok = await intent_promotion.promote_signature(conn, "aaaa", 1, _FakeEmbedder())
+    ok = await intent_promotion.promote_signature(conn, "aaaa", 1, _FakeEmbedder(), question="Reviewed Q")
     assert ok is True
     assert mark_promoted_calls == [("aaaa", 1)]
+    assert conn.insert_calls[0][2] == "Reviewed Q", "publishes the reviewed text, not the row's last_question"

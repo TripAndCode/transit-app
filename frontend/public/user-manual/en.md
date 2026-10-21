@@ -306,7 +306,7 @@ The analyses you saved with **Save analysis** on a route’s page. Click one to 
 
 The list on the left holds **Council report** and **Delay certificate**.
 
-**Council report** is a period summary written for a council or board: four headline figures (“On time”, “Average delay”, “Departures observed”, “Planned trips”), a written summary with its notes, and **Print / Save as PDF**.
+**Council report** is a period summary written for a council or board: four headline figures (“On time”, “Average delay”, “Departures observed”, “Planned trips”), a written summary with its notes, and **Print / Save as PDF**. Planned trips, the service-delivered rate and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tile and the summary say “whole agency”.
 
 **Delay certificate** gives a passenger proof of a late departure:
 

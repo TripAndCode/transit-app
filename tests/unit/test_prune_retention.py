@@ -54,7 +54,13 @@ def test_the_prune_builders_coerce_the_interval_they_interpolate():
     string. A non-numeric day count must not be able to reach the text at
     all -- not be escaped, not be quoted, but fail.
     """
-    for builder in (gtfs_pipeline.prune_pipeline_runs_sql, gtfs_pipeline.prune_admin_audit_sql):
+    from pipeline import retention
+
+    for builder in (
+        gtfs_pipeline.prune_pipeline_runs_sql,
+        gtfs_pipeline.prune_admin_audit_sql,
+        retention.prune_intent_cache_sql,
+    ):
         assert "INTERVAL '7 days'" in builder("7"), "a numeric string is still a day count"
         with pytest.raises(ValueError):
             builder("1 days'; DROP TABLE admin_audit; --")
@@ -95,3 +101,19 @@ def test_every_prune_builder_lives_in_pipeline_retention():
     )
     assert gtfs_pipeline.prune_pipeline_runs_sql is retention.prune_pipeline_runs_sql
     assert gtfs_pipeline.prune_admin_audit_sql is retention.prune_admin_audit_sql
+
+
+def test_intent_cache_prune_keeps_promoted_rows():
+    """A promoted row is where its rag_chunks suggestion resolves its tool and
+    args, so it outlives the question window."""
+    from pipeline import retention
+
+    assert retention.prune_intent_cache_sql(90) == (
+        "DELETE FROM ask_intent_cache WHERE last_used_at < now() - INTERVAL '90 days' AND promoted_at IS NULL"
+    )
+
+
+def test_intent_cache_questions_share_the_question_log_window():
+    from pipeline import retention
+
+    assert retention.prune_intent_cache_sql(retention.QUERY_LOG_RETENTION_DAYS) in retention.policy_prune_sql()

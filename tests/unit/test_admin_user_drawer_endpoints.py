@@ -38,6 +38,7 @@ class _FakeConn:
         self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
         self.events: list[tuple] = []
         self.audit: list[tuple] = []
+        self.invites: list[tuple] = []
 
     def transaction(self):
         """The handlers wrap their write and its audit entry together; this
@@ -71,6 +72,9 @@ class _FakeConn:
         if "FROM users WHERE user_id=$1" in sql:
             (uid,) = args
             return 1 if uid in self.users else None
+        if "FROM users WHERE email = lower($1)" in sql:
+            (email,) = args
+            return 1 if email.lower() in self.users.values() else None
         raise AssertionError(f"unexpected fetchval: {sql}")
 
     async def fetchrow(self, sql, *args):
@@ -98,6 +102,7 @@ class _FakeConn:
             return None
         if "INSERT INTO user_invites" in sql:
             email, role, llm_approved, _invited_by = args
+            self.invites.append(args)
             return {
                 "invite_id": 1,
                 "email": email,
@@ -376,6 +381,23 @@ def test_create_invite_rejects_invalid_role():
     conn = _FakeConn()
     r = _client(conn).post("/api/admin/invites", json={"email": "x@example.com", "role": "superadmin"}, headers=_ORIGIN)
     assert r.status_code == 400
+
+
+def test_create_invite_refuses_an_email_that_already_has_an_account():
+    """An invite is applied only when sign-in creates a new account, so one
+    for an existing account could never take effect. The admin is told so,
+    and nothing is written."""
+    conn = _FakeConn(users={1: "admin@example.com", 2: "member@example.com"})
+    r = _client(conn).post(
+        "/api/admin/invites",
+        json={"email": "Member@Example.com", "role": "admin", "llm_approved": True},
+        headers=_ORIGIN,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "account_exists"
+    assert conn.invites == []
+    assert conn.events == []
+    assert conn.audit == []
 
 
 def test_issuing_a_key_audits_the_action_without_the_key_itself():
