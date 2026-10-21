@@ -73,8 +73,9 @@ export function SessionsSection({ uid }: { uid: number }) {
 
 /** API keys issued for one user: list + revoke, and an "issue" flow that
  * shows the raw key exactly once (in a copy box, from the mutation
- * response) -- it is never persisted client-side and never refetchable. */
-export function ApiKeysSection({ uid }: { uid: number }) {
+ * response) -- it is never persisted client-side and never refetchable.
+ * `canIssue` is false for an account the server will not issue to. */
+export function ApiKeysSection({ uid, canIssue = true }: { uid: number; canIssue?: boolean }) {
   const { t } = useTranslation();
   const { data, isLoading, error } = useApiKeys(uid);
   const issue = useIssueApiKey(uid);
@@ -150,9 +151,11 @@ export function ApiKeysSection({ uid }: { uid: number }) {
           )}
         </div>
       ))}
-      <AdminButton variant="secondary" disabled={issue.isPending} onClick={handleIssue} style={{ marginTop: 8 }}>
-        {t("admin.user_detail.api_key_issue")}
-      </AdminButton>
+      {canIssue && (
+        <AdminButton variant="secondary" disabled={issue.isPending} onClick={handleIssue} style={{ marginTop: 8 }}>
+          {t("admin.user_detail.api_key_issue")}
+        </AdminButton>
+      )}
       {issue.error && (
         <div role="alert" style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
           {formatApiError(issue.error)}

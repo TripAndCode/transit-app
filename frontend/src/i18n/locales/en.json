@@ -1281,7 +1281,8 @@
       },
       "status": {
         "suspended": "Suspended",
-        "active": "Active"
+        "active": "Active",
+        "deleted": "Deleted"
       },
       "llm_approved": {
         "yes": "Approved",

@@ -68,12 +68,12 @@ class _FakeConn:
         raise AssertionError(f"unexpected fetch: {sql}")
 
     async def fetchval(self, sql, *args):
-        if "FROM users WHERE user_id=$1" in sql:
-            (uid,) = args
-            return 1 if uid in self.users else None
         raise AssertionError(f"unexpected fetchval: {sql}")
 
     async def fetchrow(self, sql, *args):
+        if "FROM users WHERE user_id=$1" in sql:
+            (uid,) = args
+            return {"deleted_at": None} if uid in self.users else None
         if "INSERT INTO api_keys" in sql:
             digest, owner_user_id, tier, label, expires_at = args
             row = {
