@@ -1,4 +1,6 @@
 import os
+import runpy
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import clickhouse_connect
@@ -9,27 +11,44 @@ from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
 from pipeline import ch_aggregates
+from tests.postgres_ports import candidate_ports
 from tests.sharding import assign_shards, shard_from_env
 
-# Host ports the dev Postgres is published on (see .claude/hooks/guard_dev_db.py).
-_DEV_POSTGRES_PORTS = frozenset({"5433", "5543"})
+
+def _dev_ports() -> frozenset[int]:
+    """The dev-DB guard hook's ``DEV_PORTS``, the one list of ports a dev store
+    is published on. Its ClickHouse ports are refused too, which is harmless.
+    A missing or broken hook fails the session rather than leaving the list
+    empty."""
+    path = Path(__file__).resolve().parents[1] / ".claude" / "hooks" / "guard_dev_db.py"
+    return frozenset(int(port) for port in runpy.run_path(str(path))["DEV_PORTS"])
+
+
+_DEV_PORTS = _dev_ports()
 
 
 def _refuse_dev_postgres_port(url: str, var: str) -> None:
-    """Raise ``pytest.UsageError`` when ``url`` targets a dev Postgres port.
+    """Raise ``pytest.UsageError`` when ``url`` can reach a dev Postgres port,
+    or has a port that cannot be read.
 
     Renaming the database does not move the suite off the dev server: the
     ``CREATE DATABASE``, the migrations and the per-test table reset would all
-    run on it. Runs before any connection is opened.
+    run on it. Runs before any connection is opened, and checks every port
+    libpq or asyncpg could take from the URL, PGPORT or PGHOST, since the
+    fixtures connect through both.
     """
-    port = urlsplit(url).port
-    if str(port) in _DEV_POSTGRES_PORTS:
-        raise pytest.UsageError(
-            f"{var} points at the dev Postgres port {port}; the suite "
-            "writes to its database and must only run against a throwaway instance. "
-            "Use scripts/run_integration_tests.sh, or point DATABASE_URL (or "
-            "TEST_DATABASE_URL) at the throwaway Postgres."
-        )
+    advice = (
+        "the suite writes to its database and must only run against a throwaway instance. "
+        "Use scripts/run_integration_tests.sh, or point DATABASE_URL (or "
+        "TEST_DATABASE_URL) at the throwaway Postgres."
+    )
+    try:
+        reached = candidate_ports(url, os.environ) & _DEV_PORTS
+    except ValueError as exc:
+        raise pytest.UsageError(f"{var} has a port the guard cannot read ({exc}); {advice}") from None
+    if reached:
+        ports = ", ".join(str(port) for port in sorted(reached))
+        raise pytest.UsageError(f"{var} points at the dev Postgres port {ports} (counting PGPORT and PGHOST); {advice}")
 
 
 def _redirect_to_test_db() -> None:
@@ -39,17 +58,16 @@ def _redirect_to_test_db() -> None:
     so tests using ASGITransport (base_url=http://test) can pass csrf_guard
     without that origin being trusted in production.
 
-    Every test fixture in this suite empties the schema between tests.
-    Sharing the dev DB meant every ``make test`` run nuked the operator's
-    map heatmap data — a constant source of "the page is empty" bug
-    reports. Redirect once at collection time so pytest never touches the
-    dev DB; create the sibling on first run if it's missing.
+    Every test fixture in this suite empties the schema between tests, so the
+    suite must never reach a database holding real data. Redirect once at
+    collection time so pytest never touches the dev DB; create the sibling on
+    first run if it's missing.
 
     Opt-out: set ``DATABASE_URL`` to a name already ending in ``_test``,
-    or set ``TEST_DATABASE_URL`` explicitly. Either variable on a dev Postgres
-    port is refused outright.
+    or set ``TEST_DATABASE_URL`` explicitly. ``_refuse_dev_postgres_port``
+    vets either variable first.
 
-    Robustness notes (review feedback):
+    Robustness notes:
     - Parsing via ``urllib.parse.urlsplit`` instead of a hand-rolled regex
       so trailing slashes and querystrings don't silently bypass the
       redirect (which would let pytest nuke the dev DB).
