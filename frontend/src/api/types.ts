@@ -174,6 +174,8 @@ type ResponseCtx = {
   to: string;
   dow: string;
   time_band: string;
+  service?: string;
+  routes?: readonly string[];
 };
 
 /** Every report `GET /api/{agency_id}/reports/{report_type}` serves --
@@ -341,7 +343,9 @@ type DowRankingRow = [
   samples: number,
 ];
 
-/** `council_summary` -- exactly one agency-wide row.
+/** `council_summary` -- exactly one row. `on_time_pct`/`avg_delay_min`/
+ *  `samples` follow the whole scope (`scope_applied`); `planned_trips` onward
+ *  cover the whole agency for the dates (`delivered_scope_applied`).
  *  `on_time_pct`/`avg_delay_min` are null together when nothing matched the
  *  range; `executed_trips`/`service_delivered_pct` are null together when the
  *  delivered ratio isn't computable, which is never the same as zero. */
@@ -404,6 +408,9 @@ type ScopeApplied = Partial<Record<string, boolean>>;
 
 type ReportEnvelope<T extends ReportType, Row> = {
   scope_applied?: ScopeApplied;
+  /** council_summary only: the scope its planned/executed/delivered figures
+   *  honoured, narrower than `scope_applied`. Null for every other report. */
+  delivered_scope_applied?: ScopeApplied | null;
   report_type: T;
   rendered_at: string;
   text: string;

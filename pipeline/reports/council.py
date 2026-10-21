@@ -2,9 +2,13 @@
 audience, plus a per-trip "delay certificate" export.
 
 ``compute_council_summary`` pools the on-time/late tolerance resolved by
-:mod:`pipeline.reports.definition` and the service-delivered rate from
-:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`
-into ONE whole-agency figure for ``ctx``'s range -- unlike
+:mod:`pipeline.reports.definition` into ONE figure across every route matching
+``ctx``, beside the service-delivered rate from
+:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`.
+That rate, its planned/executed counts and the data-quality share come from
+per-agency aggregates, so they always cover the whole agency for ``ctx``'s
+dates, whatever route/dow/service/time_band filter narrows the on-time figures
+(:func:`on_time_filter_narrows`) -- unlike
 :func:`pipeline.reports.rankings.compute_on_time`, which reports per-route,
 and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
 on-time figure is always the ``legacy_60s`` exact column with no tolerance
@@ -73,7 +77,7 @@ async def _agency_on_time_pooled(
     """``(on_time_pct, avg_delay_min, samples)`` pooled across EVERY
     route matching ``ctx`` -- the same tolerance semantics
     :func:`pipeline.reports.rankings.compute_on_time` resolves per-route,
-    collapsed to one agency-wide figure. ``(None, None, 0)`` when nothing
+    collapsed to one figure. ``(None, None, 0)`` when nothing
     matches ``ctx`` at all.
     """
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
@@ -142,6 +146,15 @@ async def _agency_on_time_pooled(
     )
 
 
+def on_time_filter_narrows(ctx: RangeCtx) -> bool:
+    """Whether ``ctx`` narrows the council summary's on-time figures to part
+    of the agency while its delivered/planned/executed/data-quality figures
+    stay agency-wide. ``hour``/``stop``/``dir`` do not count: neither figure
+    group honours them.
+    """
+    return bool(ctx.routes) or ctx.dow != "all" or ctx.time_band != "all" or ctx.service != "all"
+
+
 async def compute_council_summary(
     agency_id: int,
     ctx: RangeCtx,
@@ -150,9 +163,9 @@ async def compute_council_summary(
     early_tolerance_sec: int | None = None,
     late_tolerance_sec: int | None = None,
 ) -> dict:
-    """Whole-agency monthly/annual figures for ``ctx``'s range: pooled
-    on-time rate + the agency's service-delivered rate + the freshness/quality
-    signals a council audience needs before trusting either, all in ONE
+    """Monthly/annual figures for ``ctx``'s range: the on-time rate pooled
+    over ``ctx``'s filter + the whole agency's service-delivered rate + the
+    freshness/quality signals a council audience needs before trusting either, all in ONE
     dict. This function only computes numbers -- footnote/headline TEXT is
     rendered separately by
     :func:`pipeline.query.formatter.format_council_summary_text` from this
@@ -160,7 +173,10 @@ async def compute_council_summary(
     (:func:`~pipeline.reports.definition.resolve_definition_meta`).
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
-    "executed_trips", "service_delivered_pct", "is_stale", "clamp_pct"}``.
+    "executed_trips", "service_delivered_pct", "is_stale", "clamp_pct",
+    "filtered"}``. ``filtered`` is :func:`on_time_filter_narrows`: true when
+    the first three cover less of the agency than the planned/executed/delivered
+    figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     exactly when :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`
     says so (see that module). ``clamp_pct`` is ``None`` when this agency has
@@ -214,6 +230,7 @@ async def compute_council_summary(
         "service_delivered_pct": d["service_delivered_pct"],
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
+        "filtered": on_time_filter_narrows(ctx),
     }
 
 

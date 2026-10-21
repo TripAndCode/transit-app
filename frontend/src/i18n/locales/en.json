@@ -1219,7 +1219,8 @@
       "on_time": "On time",
       "avg_delay": "Average delay",
       "departures": "Departures observed",
-      "planned_trips": "Planned trips"
+      "planned_trips": "Planned trips",
+      "planned_trips_agency_wide": "Planned trips (whole agency)"
     },
     "print": "Print / Save as PDF",
     "certificate": {

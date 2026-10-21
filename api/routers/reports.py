@@ -192,6 +192,9 @@ _STANDARDS_SCOPE = scope_applied("from", "to")
 _WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
 _FORECAST_HEATMAP_SCOPE = scope_applied("routes")
 _FORECAST_OVERVIEW_SCOPE = scope_applied()
+# council_summary's planned/executed/service-delivered figures and its
+# data-quality caveat come from per-agency aggregates keyed by date only.
+_COUNCIL_DELIVERED_SCOPE = scope_applied("from", "to")
 
 
 class ReportMeta(BaseModel):
@@ -233,6 +236,10 @@ class ReportResponse(BaseModel):
     # instead of assuming it does.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
+    # council_summary only (None elsewhere): the scope its planned/executed/
+    # service-delivered figures and data-quality caveat honoured. `scope_applied`
+    # is the scope of its on-time figures, which follow the whole filter.
+    delivered_scope_applied: dict[str, bool] | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (ranking, ranking_best, compare_ranking and delay_certificate;
     # None elsewhere), and, for ranking/ranking_best only, the observation
@@ -1035,6 +1042,7 @@ async def get_report(
             ctx=_report_ctx(ctx),
             definition=definition,
             scope_applied=report_scope_applied(report_type),
+            delivered_scope_applied=_COUNCIL_DELIVERED_SCOPE,
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
