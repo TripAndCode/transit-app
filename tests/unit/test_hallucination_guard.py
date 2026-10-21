@@ -137,3 +137,13 @@ def test_japanese_date_of_an_ungrounded_day_fails_even_when_its_numbers_are_grou
     grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2, "trips": 6, "route": 9}]}
     assert verify_numeric_claims("9月6日が最も遅れ", grounding) is False
     assert verify_numeric_claims("9月6日が最も遅れ", {"series": [{"date": "2026-09-05"}]}) is False
+
+
+def test_japanese_date_named_only_in_the_echoed_question_is_grounded():
+    # The follow-up's grounding is its context block plus the user's question.
+    grounding = {
+        "context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}',
+        "question": "9月6日はどうでしたか",
+    }
+    assert verify_numeric_claims("9月6日のデータは表にありません", grounding) is True
+    assert verify_numeric_claims("9月7日のデータは表にありません", grounding) is False

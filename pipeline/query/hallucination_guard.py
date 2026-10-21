@@ -63,8 +63,10 @@ def _extract_claims(text: str) -> list[tuple[float, bool]]:
     return [(float(m.group()), bool(_PERCENT_SIGN_RE.match(text, m.end()))) for m in _NUMBER_RE.finditer(text)]
 
 
-def _grounded_dates(value: object) -> set[tuple[int, int, int]]:
-    out: set[tuple[int, int, int]] = set()
+def _grounded_dates(value: object) -> set[tuple[int | None, int, int]]:
+    """The days *value* names, as ISO dates or in Japanese (the echoed question
+    names them so); a Japanese date without a year matches any year."""
+    out: set[tuple[int | None, int, int]] = set()
     if isinstance(value, dict):
         for v in value.values():
             out |= _grounded_dates(v)
@@ -73,6 +75,7 @@ def _grounded_dates(value: object) -> set[tuple[int, int, int]]:
             out |= _grounded_dates(v)
     elif isinstance(value, str):
         out.update((int(y), int(m), int(d)) for y, m, d in _DATE_RE.findall(value))
+        out.update((int(y) if y else None, int(m), int(d)) for y, m, d in _JA_DATE_RE.findall(value))
     return out
 
 
@@ -88,7 +91,7 @@ def _without_grounded_dates(answer: str, grounding: dict) -> str | None:
     def strip_grounded(match: re.Match[str]) -> str:
         nonlocal ungrounded
         year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
-        if any(m == month and d == day and (year is None or int(year) == y) for y, m, d in dates):
+        if any(m == month and d == day and (year is None or y is None or int(year) == y) for y, m, d in dates):
             return " "
         ungrounded = True
         return match.group()
