@@ -1,5 +1,5 @@
-import importlib.util
 import os
+import runpy
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -21,11 +21,7 @@ def _dev_ports() -> frozenset[int]:
     A missing or broken hook fails the session rather than leaving the list
     empty."""
     path = Path(__file__).resolve().parents[1] / ".claude" / "hooks" / "guard_dev_db.py"
-    spec = importlib.util.spec_from_file_location("guard_dev_db", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return frozenset(int(port) for port in module.DEV_PORTS)
+    return frozenset(int(port) for port in runpy.run_path(str(path))["DEV_PORTS"])
 
 
 _DEV_PORTS = _dev_ports()
@@ -62,17 +58,16 @@ def _redirect_to_test_db() -> None:
     so tests using ASGITransport (base_url=http://test) can pass csrf_guard
     without that origin being trusted in production.
 
-    Every test fixture in this suite empties the schema between tests.
-    Sharing the dev DB meant every ``make test`` run nuked the operator's
-    map heatmap data — a constant source of "the page is empty" bug
-    reports. Redirect once at collection time so pytest never touches the
-    dev DB; create the sibling on first run if it's missing.
+    Every test fixture in this suite empties the schema between tests, so the
+    suite must never reach a database holding real data. Redirect once at
+    collection time so pytest never touches the dev DB; create the sibling on
+    first run if it's missing.
 
     Opt-out: set ``DATABASE_URL`` to a name already ending in ``_test``,
-    or set ``TEST_DATABASE_URL`` explicitly. Either variable on a dev Postgres
-    port is refused outright.
+    or set ``TEST_DATABASE_URL`` explicitly. ``_refuse_dev_postgres_port``
+    vets either variable first.
 
-    Robustness notes (review feedback):
+    Robustness notes:
     - Parsing via ``urllib.parse.urlsplit`` instead of a hand-rolled regex
       so trailing slashes and querystrings don't silently bypass the
       redirect (which would let pytest nuke the dev DB).
