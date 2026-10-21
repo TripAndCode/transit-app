@@ -44,7 +44,19 @@ const ERROR_KEYS: Record<string, string> = {
   no_email: "account.login.error.no_email",
   provider_down: "account.login.error.provider_down",
   local_account_conflict: "account.login.error.local_account_conflict",
+  suspended: "account.login.error.suspended",
 };
+
+/** The `error` code of a username-form refusal, e.g. `{"error": "suspended"}`.
+ * Other 403s (the CSRF guard) carry `detail` instead, so they yield `null`. */
+function localLoginErrorCode(err: ApiError): string | null {
+  try {
+    const parsed = JSON.parse(err.body);
+    return typeof parsed?.error === "string" ? parsed.error : null;
+  } catch {
+    return null;
+  }
+}
 
 export function LoginPage() {
   const { t } = useTranslation();
@@ -79,6 +91,8 @@ export function LoginPage() {
         setLocalError(t("account.login.error.too_many_attempts"));
       } else if (err instanceof ApiError && err.status === 401) {
         setLocalError(t("account.login.error.invalid_credentials"));
+      } else if (err instanceof ApiError && err.status === 403 && localLoginErrorCode(err) === "suspended") {
+        setLocalError(t("account.login.error.suspended"));
       } else {
         setLocalError(t("account.login.error.generic"));
       }
