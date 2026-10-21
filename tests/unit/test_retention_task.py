@@ -20,7 +20,7 @@ class _RecordingPool:
 def test_one_failing_statement_does_not_stop_the_others():
     pool = _RecordingPool(fail_on="login_events")
     asyncio.run(retention.prune_once(pool))
-    assert len(pool.executed) == 5
+    assert len(pool.executed) == 6
     assert any("sessions" in sql for sql in pool.executed)
 
 
@@ -28,4 +28,11 @@ def test_daily_prune_covers_every_table_with_a_stated_period():
     pool = _RecordingPool()
     asyncio.run(retention.prune_once(pool))
     tables = {sql.split()[2] for sql in pool.executed}
-    assert tables == {"user_activity_daily", "login_events", "sessions", "ask_query_log", "admin_audit"}
+    assert tables == {
+        "user_activity_daily",
+        "login_events",
+        "sessions",
+        "ask_query_log",
+        "ask_intent_cache",
+        "admin_audit",
+    }

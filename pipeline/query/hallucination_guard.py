@@ -26,7 +26,7 @@ _NUMBER_RE = re.compile(r"(?<!\w)-\d+\.?\d*|\d+\.?\d*")
 # allowed number set as spurious grounded values — a small date component
 # coinciding with a genuinely fabricated number in the answer would otherwise
 # let that fabrication pass verification.
-_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
 _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
@@ -35,6 +35,11 @@ _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
 # space, since "1.5" opening a line is a value; a full-width one is never part
 # of a number.
 _LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILINE)
+# A Japanese date ("9月5日", "2026年9月5日"), not one read out of a longer
+# number, a decimal or a year that is not four digits. One naming a grounded day leaves the claims, since the
+# grounding's ISO dates are stripped before number extraction.
+_JA_DATE_RE = re.compile(r"(?<!\d)(?<!\d[.,-])(?<!\d年)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
+_PERCENT_SIGN_RE = re.compile(r"[ \t]?[%％]")
 
 
 def _without_list_ordinals(answer: str) -> str:
@@ -48,9 +53,63 @@ def _without_list_ordinals(answer: str) -> str:
 
 
 def _extract_numbers(text: str) -> list[float]:
-    text = _DATE_RE.sub(" ", text)
+    return [value for value, _ in _extract_claims(text)]
+
+
+def _extract_claims(text: str) -> list[tuple[float, bool]]:
+    """Each number in *text*, and whether a percent sign follows it."""
+    # A non-word, non-blank placeholder: numbers read around it as around a
+    # space, but no percent sign past a stripped date attaches to them.
+    text = _DATE_RE.sub("\x00", text)
     text = _THOUSANDS_SEP_RE.sub("", text)
-    return [float(m) for m in _NUMBER_RE.findall(text)]
+    return [(float(m.group()), bool(_PERCENT_SIGN_RE.match(text, m.end()))) for m in _NUMBER_RE.finditer(text)]
+
+
+def _grounded_dates(value: object) -> set[tuple[int | None, int, int]]:
+    """The days *value* names, as ISO dates or in Japanese (the echoed question
+    names them so). A grounded date without a year grounds only an answer's
+    date without one."""
+    out: set[tuple[int | None, int, int]] = set()
+    if isinstance(value, dict):
+        for v in value.values():
+            out |= _grounded_dates(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            out |= _grounded_dates(v)
+    elif isinstance(value, str):
+        out.update((int(y), int(m), int(d)) for y, m, d in _DATE_RE.findall(value))
+        out.update((int(y) if y else None, int(m), int(d)) for y, m, d in _JA_DATE_RE.findall(value))
+    return out
+
+
+def _without_grounded_dates(answer: str, grounding: dict) -> str:
+    """``answer`` with each Japanese date of a grounded day removed. Any other
+    date stays, so its month and day are still claims that must trace to the
+    grounding like any number."""
+    dates = _grounded_dates(grounding)
+
+    def strip_grounded(match: re.Match[str]) -> str:
+        year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
+        if any(m == month and d == day and (year is None or (y is not None and int(year) == y)) for y, m, d in dates):
+            # The date's own last character, not a space: what follows it then
+            # reads as it did unstripped (a "-7" stays a range, not a sign, and
+            # a percent sign past it attaches to no number before it).
+            return "日"
+        return match.group()
+
+    return _JA_DATE_RE.sub(strip_grounded, answer) if dates else answer
+
+
+def _traces_to(number: float, allowed: set[float]) -> bool:
+    # Exact match, or a rounded display of an allowed value (nearest int, or
+    # nearest 0.1) -- a model paraphrasing "14.2" as "about 14" is not a
+    # hallucination.
+    return any(
+        math.isclose(number, a, abs_tol=1e-9)
+        or math.isclose(number, round(a), abs_tol=1e-9)
+        or math.isclose(number, round(a, 1), abs_tol=1e-9)
+        for a in allowed
+    )
 
 
 def _flatten_numbers(value: object) -> set[float]:
@@ -71,7 +130,7 @@ def _flatten_numbers(value: object) -> set[float]:
 
 
 def verify_numeric_claims(answer: str, grounding: dict) -> bool:
-    claimed = _extract_numbers(_without_list_ordinals(answer))
+    claimed = _extract_claims(_without_grounded_dates(_without_list_ordinals(answer), grounding))
     if not claimed:
         return True
     allowed = _flatten_numbers(grounding)
@@ -82,16 +141,12 @@ def verify_numeric_claims(answer: str, grounding: dict) -> bool:
         # 3); deciding that case belongs in a mechanism that constrains what
         # the model may return, not in a verifier.
         return True
-    for number in claimed:
-        # Exact match, or a rounded display of an allowed value (nearest int,
-        # or nearest 0.1) — a model paraphrasing "14.2" as "about 14" is not
-        # a hallucination.
-        if any(
-            math.isclose(number, a, abs_tol=1e-9)
-            or math.isclose(number, round(a), abs_tol=1e-9)
-            or math.isclose(number, round(a, 1), abs_tol=1e-9)
-            for a in allowed
-        ):
+    # A rate grounded as a fraction (0.35) is fairly written as a percentage
+    # (35%), but only with the percent sign: a bare 35 claims something else,
+    # and a whole number (a count of 3) is no rate to write as 300%.
+    as_percent = {a * 100 for a in allowed if 0 < a < 1}
+    for number, is_percent in claimed:
+        if _traces_to(number, allowed) or (is_percent and _traces_to(number, as_percent)):
             continue
         return False
     return True

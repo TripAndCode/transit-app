@@ -109,7 +109,9 @@ async def _promote_one(
             version,
         )
 
-    await intent_cache.mark_promoted(conn, candidate["signature_hash"], agency_id, embedding_version=version)
+    await intent_cache.mark_promoted(
+        conn, candidate["signature_hash"], agency_id, embedding_version=version, question=content
+    )
     _log.info(
         "promoted %s → %s(%s)",
         candidate["signature_hash"],
@@ -147,8 +149,12 @@ async def promote_signature(
     signature_hash: str,
     agency_id: int,
     embedder: SupportsEmbed,
+    *,
+    question: str,
 ) -> bool:
-    """Promote one specific cache row on admin request.
+    """Promote one specific cache row on admin request, publishing
+    ``question`` -- the text the admin reviewed -- rather than the row's
+    last_question, which a later asker of the same intent may have rewritten.
 
     Bypasses the ``hit_threshold``/``quiet_days`` eligibility gate the
     scheduled batch job (:func:`promote`) applies — an admin explicitly
@@ -165,4 +171,5 @@ async def promote_signature(
     candidate = await intent_cache.lookup(conn, signature_hash, agency_id)
     if candidate is None or candidate["promoted_at"] is not None:
         return False
+    candidate = {**candidate, "last_question": question}
     return await _promote_one(conn, embedder, candidate, agency_id, dispatchable_tools=_DISPATCHABLE_TOOLS)

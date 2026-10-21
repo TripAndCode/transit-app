@@ -71,7 +71,13 @@ async def upsert(
     *,
     question: str,
 ) -> None:
-    """Insert a new cache row OR increment hit_count + refresh last_question/used_at."""
+    """Insert a new cache row OR increment hit_count + refresh last_question/used_at.
+
+    A promoted row keeps its last_question: that text is what its
+    ``rag_chunks`` suggestion published (and what /ask/suggest joins on), and
+    the row is exempt from the retention prune, so a later asker's wording
+    must not land in it.
+    """
     await conn.execute(
         """
         INSERT INTO ask_intent_cache
@@ -79,7 +85,9 @@ async def upsert(
         VALUES ($1, $2, $3::jsonb, $4, 1, $5, $6)
         ON CONFLICT (signature_hash, agency_id) DO UPDATE
           SET hit_count    = ask_intent_cache.hit_count + 1,
-              last_question = EXCLUDED.last_question,
+              last_question = CASE WHEN ask_intent_cache.promoted_at IS NULL
+                                   THEN EXCLUDED.last_question
+                                   ELSE ask_intent_cache.last_question END,
               last_used_at  = now(),
               confidence    = GREATEST(ask_intent_cache.confidence, EXCLUDED.confidence)
         """,
@@ -147,17 +155,24 @@ async def mark_promoted(
     signature_hash: str,
     agency_id: int,
     embedding_version: str | None = None,
+    question: str | None = None,
 ) -> None:
     """Mark a cache row as promoted to rag_chunks (called by the promotion job).
 
     ``embedding_version`` records which embedder built the promoted chunk, so a
     later model or library change can tell which promotions need redoing. NULL
     means the promotion predates stamping.
+
+    ``question`` is the text the chunk published. The row keeps it as
+    last_question, which /ask/suggest joins on and later hits no longer
+    replace; None leaves last_question as it is.
     """
     await conn.execute(
-        "UPDATE ask_intent_cache SET promoted_at = now(), embedding_version = $3 "
+        "UPDATE ask_intent_cache SET promoted_at = now(), embedding_version = $3, "
+        "last_question = COALESCE($4, last_question) "
         "WHERE signature_hash = $1 AND agency_id = $2",
         signature_hash,
         agency_id,
         embedding_version,
+        question,
     )
