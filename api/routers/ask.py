@@ -38,7 +38,7 @@ from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
-from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
+from pipeline.query.router import _load_golden, is_follow_up, needs_previous_turn, route_or_examples
 from pipeline.query.tools import _summary, dispatch, render_tool_result
 
 _log = logging.getLogger(__name__)
@@ -182,10 +182,11 @@ async def ask(
     log_enabled = await aflag("ask_query_log_enabled")
     router_enabled = await aflag("ask_router_enabled")
 
-    # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
-    # they skip the stateless router and go straight to the LLM with the
-    # last few turns attached. Slice before dumping: the rest is discarded,
-    # so serializing it first is work spent on data that never leaves here.
+    # With history attached, a follow-up ("次の50件", "もっと") skips Stages
+    # 1-2: a stateless rule or embedding match cannot see the turn it
+    # continues, so it goes straight to the LLM with the last few turns.
+    # Slice before dumping: the rest is discarded, so serializing it first is
+    # work spent on data that never leaves here.
     history = [t.model_dump() for t in body.history[-HISTORY_TURNS_USED:]] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
     # A forced tool call only makes sense when there is an actual prior tool
@@ -207,8 +208,10 @@ async def ask(
     # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
     # continue: short-circuit to a gentle prompt. Otherwise the question
     # falls to the open LLM with no examples, which hallucinates a page the
-    # user never asked for (e.g. describe_data(routes, offset=100)).
-    if history_enabled and not history and is_follow_up(body.question):
+    # user never asked for (e.g. describe_data(routes, offset=100)). Only a
+    # running router can answer one on its own; see needs_previous_turn().
+    previous_turn_needed = needs_previous_turn(body.question) if router_enabled else is_follow_up(body.question)
+    if history_enabled and not history and previous_turn_needed:
         msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
         if log_enabled:
