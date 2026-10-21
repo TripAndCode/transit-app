@@ -26,7 +26,7 @@ _NUMBER_RE = re.compile(r"(?<!\w)-\d+\.?\d*|\d+\.?\d*")
 # allowed number set as spurious grounded values — a small date component
 # coinciding with a genuinely fabricated number in the answer would otherwise
 # let that fabrication pass verification.
-_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
 _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
@@ -39,8 +39,7 @@ _LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILIN
 # ISO strings, which are stripped before number extraction, so a date written
 # this way is checked against the grounded dates instead of as loose numbers.
 _JA_DATE_RE = re.compile(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
-_ISO_DATE_PARTS_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
-_PERCENT_SIGNS = ("%", "％")
+_PERCENT_SIGN_RE = re.compile(r"[ \t]*[%％]")
 
 
 def _without_list_ordinals(answer: str) -> str:
@@ -61,7 +60,7 @@ def _extract_claims(text: str) -> list[tuple[float, bool]]:
     """Each number in *text*, and whether a percent sign follows it."""
     text = _DATE_RE.sub(" ", text)
     text = _THOUSANDS_SEP_RE.sub("", text)
-    return [(float(m.group()), text[m.end() : m.end() + 1] in _PERCENT_SIGNS) for m in _NUMBER_RE.finditer(text)]
+    return [(float(m.group()), bool(_PERCENT_SIGN_RE.match(text, m.end()))) for m in _NUMBER_RE.finditer(text)]
 
 
 def _grounded_dates(value: object) -> set[tuple[int, int, int]]:
@@ -73,22 +72,29 @@ def _grounded_dates(value: object) -> set[tuple[int, int, int]]:
         for v in value:
             out |= _grounded_dates(v)
     elif isinstance(value, str):
-        out.update((int(y), int(m), int(d)) for y, m, d in _ISO_DATE_PARTS_RE.findall(value))
+        out.update((int(y), int(m), int(d)) for y, m, d in _DATE_RE.findall(value))
     return out
 
 
-def _without_grounded_dates(answer: str, grounding: dict) -> str:
-    """``answer`` with each Japanese date of a grounded day removed. A date of
-    no grounded day stays, so its numbers are still claims that must match."""
+def _without_grounded_dates(answer: str, grounding: dict) -> str | None:
+    """``answer`` with each Japanese date of a grounded day removed, or None
+    when one names a day the grounding does not hold. Without grounded dates
+    there is nothing to check a date against, so its numbers stay claims."""
     dates = _grounded_dates(grounding)
     if not dates:
         return answer
+    ungrounded = False
 
-    def grounded(match: re.Match[str]) -> bool:
+    def strip_grounded(match: re.Match[str]) -> str:
+        nonlocal ungrounded
         year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
-        return any(m == month and d == day and (year is None or int(year) == y) for y, m, d in dates)
+        if any(m == month and d == day and (year is None or int(year) == y) for y, m, d in dates):
+            return " "
+        ungrounded = True
+        return match.group()
 
-    return _JA_DATE_RE.sub(lambda match: " " if grounded(match) else match.group(), answer)
+    stripped = _JA_DATE_RE.sub(strip_grounded, answer)
+    return None if ungrounded else stripped
 
 
 def _traces_to(number: float, allowed: set[float]) -> bool:
@@ -121,7 +127,10 @@ def _flatten_numbers(value: object) -> set[float]:
 
 
 def verify_numeric_claims(answer: str, grounding: dict) -> bool:
-    claimed = _extract_claims(_without_grounded_dates(_without_list_ordinals(answer), grounding))
+    text = _without_grounded_dates(_without_list_ordinals(answer), grounding)
+    if text is None:
+        return False
+    claimed = _extract_claims(text)
     if not claimed:
         return True
     allowed = _flatten_numbers(grounding)
@@ -133,8 +142,9 @@ def verify_numeric_claims(answer: str, grounding: dict) -> bool:
         # the model may return, not in a verifier.
         return True
     # A rate grounded as a fraction (0.35) is fairly written as a percentage
-    # (35%), but only with the percent sign: a bare 35 claims something else.
-    as_percent = {a * 100 for a in allowed}
+    # (35%), but only with the percent sign: a bare 35 claims something else,
+    # and a whole number (a count of 3) is no rate to write as 300%.
+    as_percent = {a * 100 for a in allowed if 0 < a < 1}
     for number, is_percent in claimed:
         if _traces_to(number, allowed) or (is_percent and _traces_to(number, as_percent)):
             continue

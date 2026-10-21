@@ -121,3 +121,19 @@ def test_percentage_of_an_ungrounded_rate_still_fails():
     assert verify_numeric_claims("時刻調整の割合は40%です", grounding) is False
     # A rate's scaled form is only a percentage's, not a bare number's.
     assert verify_numeric_claims("時刻調整は35回です", grounding) is False
+
+
+def test_percentage_matches_only_a_grounded_fraction():
+    # A grounded count of 3 or 1 is not a rate, so 300% or 100% traces to nothing.
+    assert verify_numeric_claims("定時率は300%です", {"trips": 3}) is False
+    assert verify_numeric_claims("定時率は100%です", {"context": "- 1 | 2 | 7 | 0.35"}) is False
+
+
+def test_percentage_sign_may_follow_a_space():
+    assert verify_numeric_claims("The adjustment rate is 35 %.", {"time_adjustment_rate": 0.35}) is True
+
+
+def test_japanese_date_of_an_ungrounded_day_fails_even_when_its_numbers_are_grounded():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2, "trips": 6, "route": 9}]}
+    assert verify_numeric_claims("9月6日が最も遅れ", grounding) is False
+    assert verify_numeric_claims("9月6日が最も遅れ", {"series": [{"date": "2026-09-05"}]}) is False
