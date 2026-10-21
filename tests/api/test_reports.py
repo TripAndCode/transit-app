@@ -1948,6 +1948,48 @@ async def test_council_summary_service_delivered_available_when_static_join_and_
 
 
 @pytest.mark.asyncio
+async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_route_filter(reports_client, ch_client):
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await confirm_rt_field_coverage(pool, agency_id)
+    day = "2026-06-16"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 10)
+    _run_analyze(agency_id, ch_client)
+    await _seed_static_schedule(
+        pool, agency_id, service_id="WD", trip_ids=["T1", "T2", "T3", "T4"], svc_date="20260616"
+    )
+    await _set_ingest_strategy(pool, agency_id, "static_join")
+    await _seed_service_delivered_daily(pool, agency_id, [(day, 1)])
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&routes=R1")
+    assert resp.status_code == 200
+    body = resp.json()
+    row = body["rows"][0]
+    assert row[2] == 25  # samples: R1 only
+    assert row[3] == 4  # planned_trips: the whole agency
+    assert body["scope_applied"]["routes"] is True
+    delivered_scope = body["delivered_scope_applied"]
+    assert {f for f, on in delivered_scope.items() if on} == {"from", "to"}
+    assert "運行実績率 75.0%（事業者全体）" in body["text"]
+    assert "事業者全体の値です" in body["text"]
+
+    unfiltered = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")).json()
+    assert "事業者全体" not in unfiltered["text"]
+    assert unfiltered["delivered_scope_applied"] == delivered_scope
+
+    csv_resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&routes=R1&format=csv")
+    rows = list(csv.reader(io.StringIO(csv_resp.text)))
+    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    assert any("事業者全体の値です" in r[0] for r in rows[1:header_idx])
+
+    other = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()
+    assert other["delivered_scope_applied"] is None
+
+
+@pytest.mark.asyncio
 async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_client, ch_client):
     import csv
     import io

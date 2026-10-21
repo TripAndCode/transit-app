@@ -682,7 +682,10 @@ describe("AnalysisTab council report", () => {
     vi.restoreAllMocks();
   });
 
-  function showCouncil() {
+  const ALL_SIX = { from: true, to: true, dow: true, time_band: true, service: true, routes: true };
+  const DATES_ONLY = { from: true, to: true, dow: false, time_band: false, service: false, routes: false };
+
+  function showCouncil(routes: string[] = []) {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
@@ -690,6 +693,9 @@ describe("AnalysisTab council report", () => {
         ...reportResponse("council_summary"),
         rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6]],
         text: "Aomori, 9/1 – 9/28\nOn time 22.6%, average delay 2.5 min.\n* On time means within 1 min.",
+        ctx: { from: "2026-09-01", to: "2026-09-28", dow: "all", time_band: "all", service: "all", routes },
+        scope_applied: ALL_SIX,
+        delivered_scope_applied: DATES_ONLY,
       },
       isFetching: false,
       error: null,
@@ -708,6 +714,14 @@ describe("AnalysisTab council report", () => {
     expect(screen.getByText("On time 22.6%, average delay 2.5 min.")).toBeInTheDocument();
     expect(screen.queryByRole("grid")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("labels planned trips as the whole agency's only when a route filter narrows the on-time figures", () => {
+    showCouncil();
+    expect(screen.getByRole("list", { name: "Headline figures" })).not.toHaveTextContent("whole agency");
+    cleanup();
+    showCouncil(["R1"]);
+    expect(screen.getByRole("list", { name: "Headline figures" })).toHaveTextContent("Planned trips (whole agency)");
   });
 
   it("offers to print the report or save it as a PDF", async () => {
