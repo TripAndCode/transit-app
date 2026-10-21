@@ -84,10 +84,178 @@ BLOCKED = [
         "make prune-query-log && psql postgresql://transit:transit@localhost:5544/transit_test -c 'SELECT 1'",
         id="throwaway-port-only-in-another-command",
     ),
+    # make's `-include .env` outranks the environment, so an env prefix does not
+    # repoint a make target; only a VAR=value argument after `make` does.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        id="env-prefix-migrate-down",
+    ),
+    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="env-prefix-ch-bootstrap"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        id="env-prefix-analyze-all",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        id="env-prefix-with-a-glued-redirect",
+    ),
+    # Environment variable names are case-sensitive too.
+    pytest.param(
+        "database_url=postgresql://transit:transit@localhost:5544/transit_test python gtfs_pipeline.py migrate down",
+        id="lowercase-cli-env-prefix-name",
+    ),
+    # Make variable names are case-sensitive: a lowercase one sets a different variable.
+    pytest.param(
+        "make analyze-all database_url=postgresql://transit:transit@localhost:5544/transit_test clickhouse_port=8124",
+        id="lowercase-make-variable-names",
+    ),
+    # A flag outside the short allowlist may consume the next word as a file
+    # name, so an assignment-shaped word after it points nothing.
+    *[
+        pytest.param(
+            f"make {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test prune-query-log",
+            id=f"assignment-shaped-value-of-{flag.strip('-')}",
+        )
+        for flag in (
+            "-o",
+            "-W",
+            "--what-if",
+            "-I",
+            "--include-dir",
+            "--new-file",
+            "--old-file",
+            "--eval",
+            "-E",
+            "-sW",
+            "-kI",
+            "--what",
+            "-f",
+        )
+    ],
+    # A word make may expand or re-parse -- another assignment form, a `$`,
+    # `--eval` text, a make-control variable -- can set any variable, wherever
+    # it stands; a flag outside the allowlist may take no value at all and leave
+    # the dev word after it live.
+    *[
+        pytest.param(
+            f"make prune-query-log {before}DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test{after}",
+            id=f"{order}-word-points-back-at-dev-{case}",
+        )
+        for case, word in (
+            ("colon", "DATABASE_URL:=postgresql://transit:transit@localhost:5433/transit"),
+            ("double-colon", "DATABASE_URL::=postgresql://transit:transit@localhost:5433/transit"),
+            ("triple-colon", "DATABASE_URL:::=postgresql://transit:transit@localhost:5433/transit"),
+            ("plus", "DATABASE_URL+=x"),
+            ("question", "DATABASE_URL?=x"),
+            ("bang", "DATABASE_URL!=echo x"),
+            ("spaced", "'DATABASE_URL = postgresql://transit:transit@localhost:5433/transit'"),
+            ("expanded-name", "'DATA$()BASE_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("expanded-name-braces", "'DATABASE${E}_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("eval-in-a-value", "'X=$(eval override DATABASE_URL:=postgresql://transit:transit@localhost:5433/t)'"),
+            ("eval-flag", "--eval 'override DATABASE_URL=postgresql://transit:transit@localhost:5433/transit'"),
+            ("glued-eval-flag", "'--eval=override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("glued-short-eval", "'-Eoverride DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("abbreviated-eval", "'--ev=override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("abbreviated-eval-word", "--eva 'override DATABASE_URL=postgresql://transit:transit@localhost:5433/t'"),
+            ("makeflags", "MAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("gnumakeflags", "GNUMAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("no-arg-flag-unlisted", "-L DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+            ("output-sync", "-O DATABASE_URL=postgresql://transit:transit@localhost:5433/transit"),
+        )
+        for order, before, after in (("later", "", f" {word}"), ("earlier", f"{word} ", ""))
+    ],
+    # Only the variables destructive recipes read may be set: another name can
+    # repoint a recipe (`db_url`), its shell (`SHELL`) or a sub-make (`MAKE`).
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "db_url=postgresql://transit:transit@otherhost/transit",
+        id="recipe-internal-variable",
+    ),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8124 'SHELL=env -u CLICKHOUSE_PORT /bin/sh'", id="shell-variable"),
+    pytest.param(
+        "make bootstrap DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
+        "'MAKE=make CLICKHOUSE_PORT='",
+        id="sub-make-variable",
+    ),
+    # A recipe pastes make variable values into shell text, and the shell expands
+    # an env-prefix value: anything beyond URL-safe characters can run a command.
+    pytest.param(
+        "make prune-query-log 'DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test;"
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit'",
+        id="semicolon-inside-a-make-value",
+    ),
+    pytest.param(
+        "make prune-query-log 'DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`id`'",
+        id="backticks-inside-a-make-value",
+    ),
+    pytest.param(
+        "make ingest 'FOLDER=raw;id' DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="semicolon-inside-another-make-value",
+    ),
+    pytest.param(
+        "DATABASE_URL='postgresql://transit:transit@localhost:5544/transit_test`id`' "
+        "python gtfs_pipeline.py migrate down",
+        id="backticks-inside-a-cli-env-prefix",
+    ),
+    # Bash ends the command at an unquoted comment; words after it never reach make.
+    pytest.param(
+        "make prune-query-log # DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignment-inside-a-comment",
+    ),
+    # A destructive command spanning lines is blocked outright: where bash ends a
+    # line (continuation, escaped backslash, a comment holding a quote) is not
+    # worth re-deriving. The throwaway form fits on one line.
+    pytest.param(
+        "make analyze-all \\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\\n"
+        "  CLICKHOUSE_PORT=8124",
+        id="multi-line-make-command",
+    ),
+    pytest.param(
+        "make prune-query-log \\\\\n  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="escaped-backslash-before-a-newline",
+    ),
+    pytest.param(
+        "make prune-query-log\\\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="continuation-with-no-space",
+    ),
+    pytest.param(
+        "make prune-query-log # don't run yet\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="comment-with-a-quote-before-a-newline",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test\n"
+        "poetry run python gtfs_pipeline.py migrate down",
+        id="cli-env-prefix-on-the-line-before",
+    ),
+    pytest.param(
+        "make prune-query-log\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignment-on-the-next-line",
+    ),
+    pytest.param(
+        "make analyze-all\nDATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124",
+        id="both-assignments-on-the-next-line",
+    ),
+    # A make-control variable set anywhere in the command reaches make too.
+    pytest.param(
+        "MAKEFLAGS=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="makeflags-env-prefix",
+    ),
+    pytest.param(
+        "export GNUMAKEFLAGS=--eval=x; "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="makeflags-exported-earlier",
+    ),
+    pytest.param(
+        "MAKEFILES=extra.mk bash -c "
+        "'make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test'",
+        id="makefiles-around-a-quoted-script",
+    ),
     # The last of two assignments is the one the command sees.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5433/transit",
         id="later-assignment-points-back-at-dev",
     ),
     # A separator glued to a word still ends the simple command.
@@ -97,19 +265,95 @@ BLOCKED = [
     pytest.param('bash -c "make prune-query-log;ls"', id="glued-semicolon-inside-bash-c"),
     # :5544 in the password is not the port the URL connects to.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:5544@localhost:5433/transit make prune-query-log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:5544@localhost:5433/transit",
         id="throwaway-port-only-in-the-password",
     ),
     # bootstrap runs `$(MAKE) db` and `$(MAKE) seed-agencies`.
     pytest.param("make bootstrap", id="make-bootstrap"),
+    # A word make takes as a flag's value, or one the shell expands, can leave the
+    # default goal to run or set any variable.
+    pytest.param("make -j 4", id="separate-job-count-runs-the-default-goal"),
+    pytest.param("make --jobs 4", id="separate-long-job-count-runs-the-default-goal"),
+    pytest.param("make -f Makefile", id="makefile-flag-runs-the-default-goal"),
+    pytest.param("make -I x", id="include-flag-runs-the-default-goal"),
+    pytest.param(
+        "make -j 4 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="job-count-and-postgres-only-runs-the-default-goal-on-dev-clickhouse",
+    ),
+    pytest.param(
+        "X=DATABASE_URL=postgresql://transit:transit@localhost:5433/transit; "
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test $X",
+        id="expanded-word-after-the-throwaway-assignment",
+    ),
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "$(printf 'DATABASE_URL=x')",
+        id="command-substitution-after-the-throwaway-assignment",
+    ),
+    pytest.param(
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test `echo x`",
+        id="backticks-after-the-throwaway-assignment",
+    ),
+    pytest.param("T=migrate-down; make $T CONFIRM=1", id="expanded-target"),
+    pytest.param("for t in analyze-all; do make $t; done", id="loop-variable-target"),
+    # libpq parses the query's port as an integer and lets it override the host's.
+    *[
+        pytest.param(
+            f"make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test?{query}",
+            id=f"query-overrides-the-throwaway-port-{case}",
+        )
+        for case, query in (("zero-padded", "port=05433"), ("plus-signed", "port=+5433"), ("encoded", "p%6Frt=5433"))
+    ],
+    # The default goal is `all: bootstrap`.
+    pytest.param("make", id="bare-make-runs-the-default-goal"),
+    pytest.param("make all", id="make-all"),
+    pytest.param("make -j2", id="flags-only-make-runs-the-default-goal"),
+    # A wrapper that runs its arguments, with or without its own flags, still runs make.
+    *[
+        pytest.param(command, id=f"wrapped-make-runs-the-default-goal-{command.split()[0]}-{i}")
+        for i, command in enumerate(
+            (
+                "timeout 60 make",
+                "sudo make",
+                "caffeinate -s -i make",
+                "stdbuf -oL make",
+                "nice -n 10 make",
+                "time -p make",
+                "env -u DATABASE_URL make",
+                "timeout 60 make all",
+                "timeout 60 make $TARGET",
+                "for t in bootstrap; do sudo make $t; done",
+                "sudo -u transit nice -n 5 make",
+                "if make; then :; fi",
+                "while make; do :; done",
+                "until make; do :; done",
+                "eval make",
+                "env -v make",
+                "time -v make",
+            )
+        )
+    ],
+    # A one-word shell script is still a command line.
+    pytest.param("bash -c make", id="one-word-shell-script-runs-make"),
+    pytest.param("sh -c 'make'", id="quoted-one-word-shell-script-runs-make"),
+    # xargs appends words from stdin the guard never sees, which can repoint the target.
+    pytest.param(
+        "echo DATABASE_URL=postgresql://transit:transit@localhost:5433/transit | xargs make prune-query-log "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="xargs-appends-unseen-make-arguments",
+    ),
+    pytest.param(
+        "make DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="assignments-only-make-runs-the-default-goal-on-dev-clickhouse",
+    ),
     # ingest writes both stores; pointing Postgres away leaves ClickHouse on dev.
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-ingest-postgres-redirected-only",
     ),
     # analyze writes ClickHouse too (pipeline/ch_aggregates.py).
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="make-analyze-all-postgres-redirected-only",
     ),
     pytest.param(
@@ -287,7 +531,7 @@ BLOCKED = [
     pytest.param('export PGPORT=5433; psql -c "TRUNCATE agg_x"', id="exported-pgport"),
     pytest.param("bash -c \"PGPORT=5543 psql -c 'TRUNCATE agg_x'\"", id="pgport-inside-shell-string"),
     pytest.param(
-        "DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433 make analyze-all",
+        "make prune-query-log DATABASE_URL=postgresql://localhost:5544/transit_test?port=5433",
         id="throwaway-url-overridden-by-port-query",
     ),
     # clickhouse-client's native port, which compose.yml says can be published.
@@ -409,7 +653,7 @@ ALLOWED = [
     pytest.param("ls -la", id="unrelated"),
     pytest.param('echo "DROP TABLE updates"', id="write-without-target"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make migrate-down CONFIRM=1",
+        "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="migrate-down-pointed-at-test-db",
     ),
     pytest.param(
@@ -417,14 +661,14 @@ ALLOWED = [
         "migrate down",
         id="cli-migrate-down-pointed-at-test-db",
     ),
-    pytest.param("CLICKHOUSE_PORT=8124 make ch-bootstrap", id="ch-bootstrap-pointed-at-test-ch"),
+    pytest.param("make ch-bootstrap CLICKHOUSE_PORT=8124", id="ch-bootstrap-pointed-at-test-ch"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 "
-        "make ingest FOLDER=raw",
+        "make ingest FOLDER=raw DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
         id="ingest-pointed-at-both-test-stores",
     ),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 make analyze-all",
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124",
         id="analyze-all-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
@@ -464,12 +708,60 @@ ALLOWED = [
     pytest.param("make test && make lint", id="make-throwaway-and-static-targets"),
     pytest.param('git commit -m "make it faster"', id="quoted-prose-naming-no-target"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test make prune-query-log>out.log",
+        "make prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test>out.log",
         id="test-db-with-a-glued-redirect",
     ),
     pytest.param(
         "make migrate-down CONFIRM=1 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="test-db-as-a-make-variable",
+    ),
+    pytest.param(
+        "make -C . prune-query-log DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="test-db-make-variable-after-a-directory-flag",
+    ),
+    pytest.param(
+        "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test AGENCY_ID=1 FULL=1",
+        id="documented-throwaway-analyze-all-with-recipe-variables",
+    ),
+    # A newline elsewhere in the command does not block a non-destructive one.
+    pytest.param("make lint\nmake check-aggs", id="multi-line-read-only-make"),
+    # An allowlisted flag does not swallow the assignment after it; `-j`/`--jobs`
+    # take only a number.
+    *[
+        pytest.param(
+            f"make prune-query-log {flag} DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+            id=f"test-db-make-variable-after-{flag.strip('-')}",
+        )
+        for flag in ("-s", "-sk", "-j", "-j4", "--no-print-directory", "--jobs=2")
+    ],
+    pytest.param(
+        "make -j 4 analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="test-db-make-variables-after-a-separate-job-count",
+    ),
+    # A `make` that is not the command run (prose, another program's argument)
+    # runs nothing, so it has no default goal; only a named destructive target in
+    # it counts.
+    pytest.param("which make", id="which-make"),
+    pytest.param("command -v make", id="command-v-make"),
+    # A run-through prefix runs the program after it, which here is not make.
+    pytest.param("sudo apt install make", id="sudo-runs-apt-not-make"),
+    pytest.param("time git log --grep make", id="time-runs-git-not-make"),
+    pytest.param("env LC_ALL=C grep -n make", id="env-runs-grep-not-make"),
+    # Only a shell's -c takes a script; grep's counts.
+    pytest.param("grep -c make Makefile", id="grep-count-flag-is-no-script"),
+    pytest.param("git grep -c make", id="git-grep-count-flag-is-no-script"),
+    pytest.param("brew install make", id="brew-install-make"),
+    pytest.param("git log --grep make", id="git-log-grep-make"),
+    pytest.param('git commit -m "ci: run make"', id="commit-message-naming-make"),
+    pytest.param('git commit -m "fix: make all tests pass"', id="commit-message-saying-make-all"),
+    pytest.param("make --version", id="make-version"),
+    pytest.param(
+        "git commit -m \"$(cat <<'EOF'\nfix(guard): note\n\nRun make analyze-all "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 instead.\n\n"
+        '[skip ci]\nEOF\n)"',
+        id="multi-line-commit-message-quoting-the-throwaway-command",
     ),
     pytest.param(
         r"psql postgresql://transit:transit@localhost:5433/transit -c \copy stops to '/tmp/stops.csv' csv",
@@ -616,13 +908,27 @@ READ_ONLY_TARGETS = {
 READ_ONLY_SUBCOMMANDS = {"check_aggs", "check_migrations", "digest"}
 
 
+def _make_prerequisites() -> dict[str, set[str]]:
+    import re
+
+    prerequisites: dict[str, set[str]] = {}
+    for line in (HOOK.parents[2] / "Makefile").read_text().splitlines():
+        if (match := re.match(r"^([A-Za-z0-9_-][A-Za-z0-9_.-]*):(?!=)(.*)$", line)) is not None:
+            prerequisites[match[1]] = set(match[2].split("#", 1)[0].split())
+    return prerequisites
+
+
 def _targets_reaching_a_store() -> set[str]:
     """Targets whose recipe runs against $(db_url) or the ClickHouse client,
-    directly or through a `$(MAKE) <target>` it calls."""
+    directly, through a `$(MAKE) <target>` it calls, or through a prerequisite."""
     import re
 
     recipes = _make_recipes()
-    calls = {target: set(re.findall(r"\$\(MAKE\)\s+([A-Za-z0-9_.-]+)", recipe)) for target, recipe in recipes.items()}
+    prerequisites = _make_prerequisites()
+    calls = {
+        target: set(re.findall(r"\$\(MAKE\)\s+([A-Za-z0-9_.-]+)", recipe)) | prerequisites.get(target, set())
+        for target, recipe in recipes.items()
+    }
     reaching = {
         target
         for target, recipe in recipes.items()
