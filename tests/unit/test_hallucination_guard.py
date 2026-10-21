@@ -96,3 +96,28 @@ def test_a_marker_shape_that_numbers_no_list_is_still_a_claim():
 def test_a_number_starting_a_line_without_a_list_marker_is_still_a_claim():
     assert verify_numeric_claims("22.9 minutes late on route 12.", GROUNDING) is False
     assert verify_numeric_claims("1.5 minutes late on route 12.", GROUNDING) is False
+
+
+def test_japanese_date_of_a_grounded_day_passes():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2}]}
+    assert verify_numeric_claims("9月5日が最も遅れ（平均3.2分）", grounding) is True
+    assert verify_numeric_claims("2026年9月5日が最も遅れ", grounding) is True
+
+
+def test_japanese_date_of_an_ungrounded_day_still_fails():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2}]}
+    assert verify_numeric_claims("9月6日が最も遅れ", grounding) is False
+    assert verify_numeric_claims("2025年9月5日が最も遅れ", grounding) is False
+
+
+def test_percentage_of_a_grounded_rate_passes():
+    grounding = {"time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("時刻調整の割合は35%です", grounding) is True
+    assert verify_numeric_claims("時刻調整の割合は35％です", grounding) is True
+
+
+def test_percentage_of_an_ungrounded_rate_still_fails():
+    grounding = {"time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("時刻調整の割合は40%です", grounding) is False
+    # A rate's scaled form is only a percentage's, not a bare number's.
+    assert verify_numeric_claims("時刻調整は35回です", grounding) is False
