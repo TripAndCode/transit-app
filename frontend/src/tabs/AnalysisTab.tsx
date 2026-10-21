@@ -226,7 +226,7 @@ export function AnalysisTab({
             ) : detail.data.report_type === "dwell_run" ? (
               <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
-              <CouncilSummaryBlock row={detail.data.rows[0]} text={detail.data.text} />
+              <CouncilSummaryBlock report={detail.data} />
             ) : detail.data.report_type === "delay_certificate" && id != null ? (
               <>
                 <DelayCertificateLookup aid={id} />
