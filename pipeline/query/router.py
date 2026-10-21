@@ -122,8 +122,9 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(全体|データセット).*?(概要|概況)|概要を"),
         tool="describe_data",
         args={"kind": "overview"},
-        # A delay or on-time word or a named route asks about one route, not
-        # the dataset. A bare digit run may be a date, so it does not count.
+        # A delay or on-time word marks a metric question and a named route a
+        # single-route one; neither asks about the dataset. A bare digit run
+        # may be a date, so it does not count.
         unless=re.compile(r"遅延|遅れ|遅く|定時率|(?:路線|系統)\s*\d+"),
     ),
     Rule(
@@ -226,6 +227,11 @@ def _validate_rules() -> None:
 _validate_rules()
 
 
+# Phrasings that point back at the previous turn's result ("that", "the same",
+# "earlier"). A first turn has no result for them to point at, so a rule
+# matching the rest of the question would answer something else.
+_BACK_REFERENCE_WORDS = r"他には|さっき|前の(?:やつ|結果|に戻)|同じ(?:条件|系統|の|こと)|それを|そのまま"
+
 # Phrasings that only make sense against the previous turn (pagination,
 # re-sort, "show me more"). Four alternatives are narrowed because a
 # self-contained question can contain a look-alike word:
@@ -237,18 +243,18 @@ _validate_rules()
 #     content words like "same-day" or "next stop".
 _FOLLOW_UP_RE = re.compile(
     r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
-    r"|もう少し|続き|つづき|さらに|残り|他には|さっき"
+    r"|もう少し|続き|つづき|さらに|残り"
     r"|次の(?:\d+件|\d*ページ|やつ|分(?!.*停留所)|ぶん)|次のページ|\d+ページ目"  # 次の<page-ish>, not 次の停留所
-    r"|前の(?:\d+件|やつ|結果|に戻)"  # 前の<continuation>, not 前の停留所
-    r"|同じ(?:条件|系統|の|こと)"
+    r"|前の\d+件"  # 前の<page>, not 前の停留所
+    rf"|{_BACK_REFERENCE_WORDS}"
     r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
     r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
-    r"|それを|そのまま"
     # English follow-ups only when trailing (whole-word, end of query) — so
     # "next"/"more" count but content words like "same-day comparison" or
     # "next stop information" do not (favors false-negatives, which are safe).
     r"|\b(?:more|next|again|continue|previous|same|reverse)\b\s*[.!?]?\s*$"
 )
+_BACK_REFERENCE_RE = re.compile(_BACK_REFERENCE_WORDS)
 
 
 def is_follow_up(question: str) -> bool:
@@ -262,9 +268,16 @@ def is_follow_up(question: str) -> bool:
 
 
 def needs_previous_turn(question: str) -> bool:
-    """True when a follow-up question cannot be answered on its own: no
-    Stage-1 rule answers it. Meaningful only when the router will run."""
-    return is_follow_up(question) and _match_rules(question) is None
+    """True when a follow-up question cannot be answered on its own.
+
+    A back-reference always needs a previous turn. Other follow-up wording
+    (pagination, re-sort, filter) needs one unless a Stage-1 rule answers
+    the question. Meaningful only when the router will run.
+    """
+    text = (question or "").strip()
+    if _BACK_REFERENCE_RE.search(text):
+        return True
+    return is_follow_up(text) and _match_rules(text) is None
 
 
 def _match_rules(question: str) -> RouterDecision | None:

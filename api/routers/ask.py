@@ -182,10 +182,11 @@ async def ask(
     log_enabled = await aflag("ask_query_log_enabled")
     router_enabled = await aflag("ask_router_enabled")
 
-    # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
-    # they skip the stateless router and go straight to the LLM with the
-    # last few turns attached. Slice before dumping: the rest is discarded,
-    # so serializing it first is work spent on data that never leaves here.
+    # With history attached, a follow-up ("次の50件", "もっと") skips Stages
+    # 1-2: a stateless rule or embedding match cannot see the turn it
+    # continues, so it goes straight to the LLM with the last few turns.
+    # Slice before dumping: the rest is discarded, so serializing it first is
+    # work spent on data that never leaves here.
     history = [t.model_dump() for t in body.history[-HISTORY_TURNS_USED:]] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
     # A forced tool call only makes sense when there is an actual prior tool

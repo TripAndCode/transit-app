@@ -649,6 +649,22 @@ def test_needs_previous_turn_true(q):
 @pytest.mark.parametrize(
     "q",
     [
+        "同じ条件で遅延ワースト10",
+        "さっきの定時率TOP5",
+        "それを定時率ランキングで",
+        "前の結果の遅延ワースト5",
+    ],
+)
+def test_a_back_reference_needs_a_previous_turn_even_when_a_rule_matches(q):
+    """A rule would answer the agency-wide ranking, not the result the
+    question points back at, so a first turn cannot answer it."""
+    assert _match_rules(q) is not None
+    assert needs_previous_turn(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
         "平日に絞り込んで遅延ワースト10",
         "定時率の低い順に並べ替えて",
         "逆に定時率が高い路線は",
