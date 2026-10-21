@@ -35,10 +35,10 @@ _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
 # space, since "1.5" opening a line is a value; a full-width one is never part
 # of a number.
 _LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILINE)
-# A Japanese date ("9月5日", "2026年9月5日"). The grounding carries dates only as
-# ISO strings, which are stripped before number extraction, so a date written
-# this way is checked against the grounded dates instead of as loose numbers.
-_JA_DATE_RE = re.compile(r"(?<!\d)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
+# A Japanese date ("9月5日", "2026年9月5日"), not one read out of a longer
+# number or a decimal. One naming a grounded day leaves the claims, since the
+# grounding's ISO dates are stripped before number extraction.
+_JA_DATE_RE = re.compile(r"(?<!\d)(?<!\d[.,])(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
 _PERCENT_SIGN_RE = re.compile(r"[ \t]*[%％]")
 
 

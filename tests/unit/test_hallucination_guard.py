@@ -159,3 +159,8 @@ def test_a_year_less_grounded_date_does_not_ground_a_wrong_year():
 def test_a_japanese_date_is_not_read_out_of_a_longer_number():
     grounding = {"series": [{"date": "2026-09-05", "avg_min": 1.0}]}
     assert verify_numeric_claims("12026年9月5日のデータです", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_a_decimal():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.0}]}
+    assert verify_numeric_claims("3.9月5日のデータです。", grounding) is False
