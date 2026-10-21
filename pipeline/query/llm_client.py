@@ -30,9 +30,9 @@ _log = logging.getLogger(__name__)
 # far longer than any Ask/Copilot/follow-up caller waits.
 REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
-# Built-in defaults for each provider we support. Operator overrides
-# any field via env (e.g. GEMINI_BASE_URL=...). The "key_env" is the
-# env-var name that holds the provider's API key.
+# Built-in defaults for each provider we support; provider_endpoint applies
+# the operator's base_url/model overrides. The "key_env" is the env-var name
+# that holds the provider's API key.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "gemini": {
         "key_env": "GEMINI_API_KEY",
@@ -74,16 +74,28 @@ class ProviderConfig:
         return bool(self.api_key)
 
 
+def provider_endpoint(name: str) -> tuple[str, str]:
+    """The base URL and model *name* is called with: the operator's
+    ``{PROVIDER}_BASE_URL``/``{PROVIDER}_MODEL`` override, else the built-in
+    default. Every call to a provider -- the shared ladder, a user's own key,
+    and that key's validation -- resolves them here, so all three hit the same
+    endpoint."""
+    defaults = _PROVIDER_DEFAULTS[name]
+    upper = name.upper()
+    return (
+        os.environ.get(f"{upper}_BASE_URL", defaults["base_url"]),
+        os.environ.get(f"{upper}_MODEL", defaults["model"]),
+    )
+
+
 def _load_provider(name: str) -> ProviderConfig | None:
     """Resolve env-vars for one provider; return None if missing entirely."""
     defaults = _PROVIDER_DEFAULTS.get(name)
     if defaults is None:
         _log.warning("CHAT_PROVIDERS lists unknown provider %r — skipping", name)
         return None
-    upper = name.upper()
     key = os.environ.get(defaults["key_env"])
-    base = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
-    model = os.environ.get(f"{upper}_MODEL", defaults["model"])
+    base, model = provider_endpoint(name)
     cfg = ProviderConfig(name=name, api_key=key, base_url=base, model=model)
     if not cfg.is_usable:
         _log.info("provider %s skipped — no api key configured", name)
