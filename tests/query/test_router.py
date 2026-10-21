@@ -144,6 +144,10 @@ async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks,
         ("計算できる指標は？", "describe_data", "metrics"),
         ("サンプル数の多い系統", "describe_data", "sample_counts"),
         ("サンプル数が多い路線の一覧", "describe_data", "sample_counts"),
+        # A calendar year is not a route code.
+        ("2025年の全体の概要を", "describe_data", "overview"),
+        ("2024年10月のデータセットの概要", "describe_data", "overview"),
+        ("2025年にどんな路線がある？", "describe_data", "routes"),
     ],
 )
 def test_rule_meta_dispatch(question, expected_tool, expected_kind):
@@ -628,6 +632,9 @@ def test_is_follow_up_false(q):
         "さっきの続きを",
         "じゃあ別の系統で同じこと",
         "show me more",
+        "降順",
+        "さらに",
+        "絞り込んで",
     ],
 )
 def test_needs_previous_turn_true(q):
@@ -637,17 +644,14 @@ def test_needs_previous_turn_true(q):
 @pytest.mark.parametrize(
     "q",
     [
-        "遅延の多い路線を降順で",
         "平日に絞り込んで遅延ワースト10",
         "定時率の低い順に並べ替えて",
-        "さらに定時率の低い路線",
         "逆に定時率が高い路線は",
-        "別の路線と比較したい",
         "定時率TOP10",
         "",
     ],
 )
 def test_needs_previous_turn_false(q):
-    """Sort, filter and contrast words also open self-contained questions, so
-    only continuation wording that no Stage-1 rule answers needs a prior turn."""
+    """Follow-up wording around a question a Stage-1 rule answers on its own
+    does not need a prior turn."""
     assert needs_previous_turn(q) is False

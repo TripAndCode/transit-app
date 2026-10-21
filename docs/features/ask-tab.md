@@ -100,8 +100,9 @@ sentinel:
 
 1. `api/routers/ask.py: ask()` resolves `RangeCtx`, checks `is_follow_up()`
    (pagination-style phrases route straight to the LLM with history; with no
-   history, a question that `needs_previous_turn()` gets the `no_history`
-   prompt instead), then calls `pipeline/query/router.py: route_or_examples(question, conn, agency_id, k=3)`.
+   history they get the `no_history` prompt instead, unless the router is on
+   and a Stage-1 rule answers them, per `needs_previous_turn()`), then
+   calls `pipeline/query/router.py: route_or_examples(question, conn, agency_id, k=3)`.
 2. **Stage 1 — rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
    `top_n`). A match dispatches immediately via `pipeline.query.tools.dispatch`.
 3. **Stage 2 — embedding NN**: no rule match → embed the question with
