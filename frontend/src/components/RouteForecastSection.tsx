@@ -676,6 +676,9 @@ function RouteDetail({
 
   const { populated, min, max } = populatedRange(cells);
   const totalN = populated.reduce((a, c) => a + c.samples, 0);
+  // An ML cell's `samples` is its hour's past observations, not measurements
+  // behind the forecast, so the count is labelled for what it is.
+  const mlBacked = populated.some((c) => c.source === "ml");
   const mean = totalN ? populated.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / totalN : 0;
   const allNull = data != null && populated.length === 0;
 
@@ -778,7 +781,7 @@ function RouteDetail({
                     { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
                     { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
                     { label: t("forecast.stat_mean"), value: formatMinutes(mean) },
-                    { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
+                    { label: t(mlBacked ? "forecast.stat_samples_history" : "forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
                 <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />

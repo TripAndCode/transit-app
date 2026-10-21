@@ -58,10 +58,10 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
   return { route: "100", cells, disclaimer: "test disclaimer" };
 }
 
-function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "") {
+function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "", hm = heatmap()) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
-  vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: heatmap(), isPending: false, error: null, refetch: vi.fn() } as never);
+  vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: hm, isPending: false, error: null, refetch: vi.fn() } as never);
   const initialEntries = [`/agencies/1/analysis/route_forecast${initialRoute ? `?routes=${initialRoute}` : ""}`];
   renderWithProviders(
     <MemoryRouter initialEntries={initialEntries}>
@@ -257,6 +257,22 @@ describe("RouteForecastSection", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
+  });
+
+  it("labels the detail's count as past observations when the forecast comes from the ML model", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    renderSection(overview(), "100", ml);
+    fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Past observations")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Measurements")).toBeNull();
+  });
+
+  it("keeps calling the detail's count measurements for a baseline forecast", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
+    expect(within(screen.getByRole("dialog")).getByText("Measurements")).toBeInTheDocument();
   });
 
   it("opens a summary card from an explicit Expand button, once, and leaves the card itself non-interactive", () => {
