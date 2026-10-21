@@ -239,6 +239,24 @@ def test_collect_all_old_failed_heartbeat_stays_failed(monkeypatch):
     assert doc["state"] == "failed"
 
 
+def test_collect_all_old_never_succeeded_heartbeat_stays_unknown(monkeypatch):
+    published_at = T0 - timedelta(hours=4)
+    status = build_status(
+        component="r2",
+        observed_at=published_at,
+        last_success_at=None,
+        healthy_max_age_seconds=3600,
+        stale_max_age_seconds=7200,
+        details={},
+        now=published_at,
+    )
+
+    doc = _collect_with_replay(monkeypatch, "collect_r2_status", R2StatusReplayed, status)["r2"]
+
+    assert doc["state"] == "unknown"
+    assert "heartbeat_age_seconds" not in doc["details"]
+
+
 def test_unknown_status_reason_is_bounded_and_single_line():
     reason = "boom: " + ("x" * 500) + "\nsome traceback line"
     doc = ops_status_page._unknown_status("r2", now=T0, reason=reason)

@@ -306,9 +306,10 @@ _SPECIFIC_REASON_BUILDERS: Mapping[str, Callable[[Mapping[str, object]], str | N
 
 def reason_for(document: dict) -> str | None:
     """A short, human-facing explanation for a non-healthy component, or `None` for a
-    healthy one. Prefers a component-specific reason mined from its own `details`
-    (e.g. which PRs are conflicting, which feed is stale); falls back to a generic
-    state-based explanation when no specific detail applies."""
+    healthy one. In order: the collector's own error, a heartbeat that aged stale
+    for want of a newer one, a component-specific reason mined from its `details`
+    (e.g. which PRs are conflicting, which feed is stale), then a generic
+    state-based explanation."""
 
     state = document["state"]
     if state == "healthy":
