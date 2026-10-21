@@ -387,7 +387,8 @@
     "settings_title": "Settings",
     "settings_api_key_label": "API key",
     "settings_api_key_placeholder": "All features work without one",
-    "settings_api_key_hint": "Not needed for typical use. Only set this if you need the Pro tier (rate limit 60 → 600 req/min)."
+    "settings_api_key_hint": "Not needed for typical use. Only set this if you need the Pro tier (rate limit 60 → 600 req/min).",
+    "settings_api_key_rejected": "The saved API key was not accepted, so it has been removed. If it should still work, enter it again in Settings."
   },
   "common": {
     "cancel": "Cancel",
