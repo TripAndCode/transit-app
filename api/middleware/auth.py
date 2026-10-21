@@ -31,13 +31,15 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     ``POST /api/admin/api-keys``, and older rows were inserted by hand with
     only an owner email. The table's ``tier`` column defaults to ``'pro'``.
 
-    A key is only as live as the account behind it. Suspending or
-    soft-deleting a user kills their sessions, and both set
-    ``users.suspended_at``, so the owner's state is checked here rather than
-    by revoking every key at suspension time -- that keeps the decision
-    reversible (restoring the account restores its keys) and leaves no way
-    to miss a key issued through some later path. A row with no owner is a
-    legacy hand-inserted key and stands on its own columns alone.
+    A key is only as live as the account behind it. Suspending a user kills
+    their sessions and sets ``users.suspended_at``, so the owner's state is
+    checked here rather than by revoking every key at suspension time --
+    that keeps a suspension reversible (lifting it restores the keys) and
+    leaves no way to miss a key issued through some later path. A soft-delete
+    is not reversible: it also sets ``suspended_at``, but revokes the user's
+    keys outright, and the admin API refuses to lift a deleted user's
+    suspension. A row with no owner is a legacy hand-inserted key and stands
+    on its own columns alone.
 
     The stored column is ``key_hash``, the SHA-256 digest of the key; the
     operator issuing a key keeps the only copy of the raw string. Revocation

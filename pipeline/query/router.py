@@ -91,7 +91,9 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(どんな.*?(路線|系統))|((路線|系統).*?(一覧|リスト))|(何.*?路線.*?(ある|登録))"),
         tool="describe_data",
         args={"kind": "routes"},
-        unless=re.compile(_ANALYTIC_WORDS),
+        # An on-time list is ranking-on-time's to answer, a sample-count list
+        # meta-sample-counts'.
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数"),
     ),
     Rule(
         name="meta-date-range",
@@ -120,6 +122,10 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(全体|データセット).*?(概要|概況)|概要を"),
         tool="describe_data",
         args={"kind": "overview"},
+        # A delay or on-time word marks a metric question and a named route a
+        # single-route one; neither asks about the dataset. A bare digit run
+        # may be a date, so it does not count.
+        unless=re.compile(r"遅延|遅れ|遅く|定時率|(?:路線|系統)\s*\d+"),
     ),
     Rule(
         name="meta-metrics",
@@ -221,38 +227,57 @@ def _validate_rules() -> None:
 _validate_rules()
 
 
+# Phrasings that point back at the previous turn's result ("that", "the same",
+# "earlier"). A first turn has no result for them to point at, so a rule
+# matching the rest of the question would answer something else.
+_BACK_REFERENCE_WORDS = r"他には|さっき|前の(?:やつ|結果|に戻)|同じ(?:条件|系統|の|こと)|それを|そのまま"
+
 # Phrasings that only make sense against the previous turn (pagination,
-# re-sort, "show me more"). Tightened to avoid two classes of false
-# positives that forced needless/failing LLM calls:
+# re-sort, "show me more"). Four alternatives are narrowed because a
+# self-contained question can contain a look-alike word:
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
+#   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ).
 #   * bare English words must be whole words (\b), so they don't fire inside
 #     content words like "same-day" or "next stop".
 _FOLLOW_UP_RE = re.compile(
     r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
-    r"|もう少し|続き|つづき|さらに|残り|他には|さっき"
+    r"|もう少し|続き|つづき|さらに|残り"
     r"|次の(?:\d+件|\d*ページ|やつ|分(?!.*停留所)|ぶん)|次のページ|\d+ページ目"  # 次の<page-ish>, not 次の停留所
-    r"|前の(?:\d+件|やつ|結果|に戻)"  # 前の<continuation>, not 前の停留所
-    r"|同じ(?:条件|系統|の)"
+    r"|前の\d+件"  # 前の<page>, not 前の停留所
+    rf"|{_BACK_REFERENCE_WORDS}"
     r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
-    r"|別の(?!府)"  # 別の but NOT 別府 (place name)
-    r"|それを|そのまま"
+    r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
     # English follow-ups only when trailing (whole-word, end of query) — so
     # "next"/"more" count but content words like "same-day comparison" or
     # "next stop information" do not (favors false-negatives, which are safe).
     r"|\b(?:more|next|again|continue|previous|same|reverse)\b\s*[.!?]?\s*$"
 )
+_BACK_REFERENCE_RE = re.compile(_BACK_REFERENCE_WORDS)
 
 
 def is_follow_up(question: str) -> bool:
-    """True when a question only makes sense against the previous turn.
+    """True when a question's wording reads as a continuation of the previous turn.
 
-    Stateless Stages 1-2 cannot resolve these (a bare "もっと" has no
-    standalone tool mapping), so the API routes them straight to the LLM
-    stage with conversation history attached.
+    With history present the API sends such a question straight to the LLM
+    stage with that history attached, since a stateless rule or embedding
+    match cannot see what it continues.
     """
     return bool(_FOLLOW_UP_RE.search((question or "").strip()))
+
+
+def needs_previous_turn(question: str) -> bool:
+    """True when a follow-up question cannot be answered on its own.
+
+    A back-reference always needs a previous turn. Other follow-up wording
+    (pagination, re-sort, filter) needs one unless a Stage-1 rule answers
+    the question. Meaningful only when the router will run.
+    """
+    text = (question or "").strip()
+    if _BACK_REFERENCE_RE.search(text):
+        return True
+    return is_follow_up(text) and _match_rules(text) is None
 
 
 def _match_rules(question: str) -> RouterDecision | None:

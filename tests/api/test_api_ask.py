@@ -574,6 +574,59 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("question", ["平日に絞り込んで遅延ワースト10", "定時率の低い順に並べ替えて"])
+async def test_first_turn_follow_up_wording_a_rule_answers_reaches_the_router(ask_client, monkeypatch, question):
+    """A Stage-1 rule answers these on their own, so a first turn using them
+    is routed, not answered with the no-history prompt."""
+    client, agency_id = ask_client
+    routed: list[str] = []
+
+    async def no_decision(q, *a, **k):
+        routed.append(q)
+        return (None, [])
+
+    async def fake_chat(*a, **k):
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": question},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert routed == [question]
+    assert resp.json()["router_stage"] == "llm"
+
+
+@pytest.mark.asyncio
+async def test_first_turn_follow_up_gets_the_no_history_prompt_when_the_router_is_off(ask_client, monkeypatch):
+    """With the router off no Stage-1 rule will answer the question, so a
+    first-turn follow-up gets the no-history prompt even when a rule matches it."""
+    client, agency_id = ask_client
+
+    async def flags(key):
+        return key != "ask_router_enabled"
+
+    async def boom(*a, **k):
+        raise AssertionError("neither the router nor the LLM may run for a no-history follow-up")
+
+    monkeypatch.setattr("api.routers.ask.aflag", flags)
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", boom)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "平日に絞り込んで遅延ワースト10"},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["router_stage"] == "no_history"
+
+
+@pytest.mark.asyncio
 async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(ask_client, monkeypatch):
     """An unrelated in-scope question with no follow-up phrasing, but with
     unrelated history from a prior ``top_n`` ranking turn attached, must
