@@ -7,6 +7,7 @@ import pytest_asyncio
 from pipeline.query.router import (
     _match_rules,
     is_follow_up,
+    needs_previous_turn,
     retrieve_examples,
     route_question,
     set_golden_set_path,
@@ -142,6 +143,7 @@ async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks,
         ("全体の概要を", "describe_data", "overview"),
         ("計算できる指標は？", "describe_data", "metrics"),
         ("サンプル数の多い系統", "describe_data", "sample_counts"),
+        ("サンプル数が多い路線の一覧", "describe_data", "sample_counts"),
     ],
 )
 def test_rule_meta_dispatch(question, expected_tool, expected_kind):
@@ -177,6 +179,8 @@ def test_rule_no_match(question):
         "停留所ごとの遅延一覧",
         "22171の遅延が多い停留所TOP5",
         "停留所別の定時率ワースト5",
+        "22171の遅延の概要を教えて",
+        "路線22171の概要を教えて",
     ],
 )
 def test_analytic_questions_are_not_answered_by_a_meta_or_route_ranking_rule(question):
@@ -231,6 +235,8 @@ def test_rule_default_n_when_no_digit():
         ("定時率TOP5", "on_time_rate", None, 5),
         ("定時率が高い路線TOP3", "on_time_rate", None, 3),
         ("定時率ランキング", "on_time_rate", None, 10),
+        ("定時率TOP5の路線一覧", "on_time_rate", None, 5),
+        ("定時率が高い路線の一覧", "on_time_rate", None, 10),
         ("5分超の遅延が多い路線TOP3", "worst_5min", None, 3),
         ("5分以上の遅れが多い系統TOP10", "worst_5min", None, 10),
         ("5分以上の遅れが多い系統", "worst_5min", None, 10),
@@ -607,3 +613,41 @@ def test_is_follow_up_true(q):
 )
 def test_is_follow_up_false(q):
     assert is_follow_up(q) is False
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "もっと見せて",
+        "続き",
+        "次の50件",
+        "2ページ目",
+        "前のと逆順で並べて",
+        "同じ条件で先月",
+        "それを詳しく",
+        "さっきの続きを",
+        "じゃあ別の系統で同じこと",
+        "show me more",
+    ],
+)
+def test_needs_previous_turn_true(q):
+    assert needs_previous_turn(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "遅延の多い路線を降順で",
+        "平日に絞り込んで遅延ワースト10",
+        "定時率の低い順に並べ替えて",
+        "さらに定時率の低い路線",
+        "逆に定時率が高い路線は",
+        "別の路線と比較したい",
+        "定時率TOP10",
+        "",
+    ],
+)
+def test_needs_previous_turn_false(q):
+    """Sort, filter and contrast words also open self-contained questions, so
+    only continuation wording that no Stage-1 rule answers needs a prior turn."""
+    assert needs_previous_turn(q) is False

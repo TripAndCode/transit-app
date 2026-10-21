@@ -76,10 +76,11 @@ _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 _DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 
 # The meta rules answer questions about what the dataset holds (routes, date
-# range, stops). A delay word or a route code (4+ digits) marks an analytic
-# question about the data itself, which the meta answers would replace with an
-# answer to a different question, so such a question is left to the later stages.
-_ANALYTIC_WORDS = r"遅延|遅れ|遅く|\d{4,}"
+# range, stops, overview). A delay or on-time word or a route code (4+ digits)
+# marks an analytic question about the data itself, which the meta answers would
+# replace with an answer to a different question, so such a question is left to
+# the ranking rules or the later stages.
+_ANALYTIC_WORDS = r"遅延|遅れ|遅く|定時率|\d{4,}"
 # The ranking rules rank routes; a question about stops has no rule here.
 _STOP_WORDS = r"停留所|バス停"
 
@@ -91,7 +92,8 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(どんな.*?(路線|系統))|((路線|系統).*?(一覧|リスト))|(何.*?路線.*?(ある|登録))"),
         tool="describe_data",
         args={"kind": "routes"},
-        unless=re.compile(_ANALYTIC_WORDS),
+        # A sample-count question is meta-sample-counts' to answer.
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|サンプル数"),
     ),
     Rule(
         name="meta-date-range",
@@ -120,6 +122,7 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(全体|データセット).*?(概要|概況)|概要を"),
         tool="describe_data",
         args={"kind": "overview"},
+        unless=re.compile(_ANALYTIC_WORDS),
     ),
     Rule(
         name="meta-metrics",
@@ -221,38 +224,53 @@ def _validate_rules() -> None:
 _validate_rules()
 
 
-# Phrasings that only make sense against the previous turn (pagination,
-# re-sort, "show me more"). Tightened to avoid two classes of false
-# positives that forced needless/failing LLM calls:
+# Wording that continues or points back at the previous turn's result
+# (pagination, "show me more", "the same", "that"). Tightened to avoid two
+# classes of false positives that forced needless/failing LLM calls:
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
 #   * bare English words must be whole words (\b), so they don't fire inside
 #     content words like "same-day" or "next stop".
-_FOLLOW_UP_RE = re.compile(
+_PREVIOUS_TURN_WORDS = (
     r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
-    r"|もう少し|続き|つづき|さらに|残り|他には|さっき"
+    r"|もう少し|続き|つづき|残り|他には|さっき"
     r"|次の(?:\d+件|\d*ページ|やつ|分(?!.*停留所)|ぶん)|次のページ|\d+ページ目"  # 次の<page-ish>, not 次の停留所
     r"|前の(?:\d+件|やつ|結果|に戻)"  # 前の<continuation>, not 前の停留所
-    r"|同じ(?:条件|系統|の)"
-    r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
-    r"|別の(?!府)"  # 別の but NOT 別府 (place name)
+    r"|同じ(?:条件|系統|の|こと)"
+    r"|逆順"
     r"|それを|そのまま"
     # English follow-ups only when trailing (whole-word, end of query) — so
     # "next"/"more" count but content words like "same-day comparison" or
     # "next stop information" do not (favors false-negatives, which are safe).
     r"|\b(?:more|next|again|continue|previous|same|reverse)\b\s*[.!?]?\s*$"
 )
+# Sort, filter and contrast words. After a turn they usually rework its
+# result, but they also open self-contained questions ("遅延の多い路線を降順で").
+_REFINEMENT_WORDS = r"さらに|逆に|昇順|降順|並べ替え|並び替え|絞り込|別の(?!府)"  # 別の but NOT 別府
+
+_FOLLOW_UP_RE = re.compile(rf"{_PREVIOUS_TURN_WORDS}|{_REFINEMENT_WORDS}")
+_PREVIOUS_TURN_RE = re.compile(_PREVIOUS_TURN_WORDS)
 
 
 def is_follow_up(question: str) -> bool:
-    """True when a question only makes sense against the previous turn.
+    """True when a question reads as a continuation of the previous turn.
 
     Stateless Stages 1-2 cannot resolve these (a bare "もっと" has no
-    standalone tool mapping), so the API routes them straight to the LLM
-    stage with conversation history attached.
+    standalone tool mapping), so with history present the API routes them
+    straight to the LLM stage with conversation history attached.
     """
     return bool(_FOLLOW_UP_RE.search((question or "").strip()))
+
+
+def needs_previous_turn(question: str) -> bool:
+    """True when a question cannot be answered without a previous turn.
+
+    Its wording continues or points back at a result, and no Stage-1 rule
+    answers it on its own. Sort, filter and contrast words alone never make
+    a question need one, since they also open self-contained questions.
+    """
+    return bool(_PREVIOUS_TURN_RE.search((question or "").strip())) and _match_rules(question) is None
 
 
 def _match_rules(question: str) -> RouterDecision | None:

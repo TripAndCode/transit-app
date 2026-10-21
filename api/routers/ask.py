@@ -38,7 +38,7 @@ from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
-from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
+from pipeline.query.router import _load_golden, is_follow_up, needs_previous_turn, route_or_examples
 from pipeline.query.tools import _summary, dispatch, render_tool_result
 
 _log = logging.getLogger(__name__)
@@ -204,11 +204,13 @@ async def ask(
     _prior_tool = history[-1].get("tool") if follow_up else None
     force_tool_call = bool(_prior_tool) and "offset" in _PAGINATABLE_TOOL_DEFAULTS.get(_prior_tool or "", {})
 
-    # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
+    # Continuation phrasing ("もっと", "次の50件") with NO prior result to
     # continue: short-circuit to a gentle prompt. Otherwise the question
     # falls to the open LLM with no examples, which hallucinates a page the
-    # user never asked for (e.g. describe_data(routes, offset=100)).
-    if history_enabled and not history and is_follow_up(body.question):
+    # user never asked for (e.g. describe_data(routes, offset=100)). A
+    # question a Stage-1 rule answers, or one whose only follow-up wording is
+    # a sort or filter word, stands on its own and is routed as usual.
+    if history_enabled and not history and needs_previous_turn(body.question):
         msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
         if log_enabled:

@@ -574,6 +574,34 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("question", ["平日に絞り込んで遅延ワースト10", "遅延の多い路線を降順で"])
+async def test_first_turn_sort_or_filter_question_reaches_the_router(ask_client, monkeypatch, question):
+    """Sort and filter words also open self-contained questions, so a first
+    turn using them is routed, not answered with the no-history prompt."""
+    client, agency_id = ask_client
+    routed: list[str] = []
+
+    async def no_decision(q, *a, **k):
+        routed.append(q)
+        return (None, [])
+
+    async def fake_chat(*a, **k):
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": question},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert routed == [question]
+    assert resp.json()["router_stage"] == "llm"
+
+
+@pytest.mark.asyncio
 async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(ask_client, monkeypatch):
     """An unrelated in-scope question with no follow-up phrasing, but with
     unrelated history from a prior ``top_n`` ranking turn attached, must
