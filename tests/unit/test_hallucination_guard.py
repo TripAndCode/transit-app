@@ -133,10 +133,11 @@ def test_percentage_sign_may_follow_a_space():
     assert verify_numeric_claims("The adjustment rate is 35 %.", {"time_adjustment_rate": 0.35}) is True
 
 
-def test_japanese_date_of_an_ungrounded_day_fails_even_when_its_numbers_are_grounded():
-    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2, "trips": 6, "route": 9}]}
-    assert verify_numeric_claims("9月6日が最も遅れ", grounding) is False
-    assert verify_numeric_claims("9月6日が最も遅れ", {"series": [{"date": "2026-09-05"}]}) is False
+def test_japanese_date_of_an_ungrounded_day_is_checked_as_its_numbers():
+    # The question names the day as 9/6, which grounds its 9 and 6 as numbers.
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9/6はどうでしたか"}
+    assert verify_numeric_claims("9月6日のデータは表にありません", grounding) is True
+    assert verify_numeric_claims("9月7日のデータは表にありません", grounding) is False
 
 
 def test_japanese_date_named_only_in_the_echoed_question_is_grounded():

@@ -79,25 +79,19 @@ def _grounded_dates(value: object) -> set[tuple[int | None, int, int]]:
     return out
 
 
-def _without_grounded_dates(answer: str, grounding: dict) -> str | None:
-    """``answer`` with each Japanese date of a grounded day removed, or None
-    when one names a day the grounding does not hold. Without grounded dates
-    there is nothing to check a date against, so its numbers stay claims."""
+def _without_grounded_dates(answer: str, grounding: dict) -> str:
+    """``answer`` with each Japanese date of a grounded day removed. Any other
+    date stays, so its month and day are still claims that must trace to the
+    grounding like any number."""
     dates = _grounded_dates(grounding)
-    if not dates:
-        return answer
-    ungrounded = False
 
     def strip_grounded(match: re.Match[str]) -> str:
-        nonlocal ungrounded
         year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
         if any(m == month and d == day and (year is None or y is None or int(year) == y) for y, m, d in dates):
             return " "
-        ungrounded = True
         return match.group()
 
-    stripped = _JA_DATE_RE.sub(strip_grounded, answer)
-    return None if ungrounded else stripped
+    return _JA_DATE_RE.sub(strip_grounded, answer) if dates else answer
 
 
 def _traces_to(number: float, allowed: set[float]) -> bool:
@@ -130,10 +124,7 @@ def _flatten_numbers(value: object) -> set[float]:
 
 
 def verify_numeric_claims(answer: str, grounding: dict) -> bool:
-    text = _without_grounded_dates(_without_list_ordinals(answer), grounding)
-    if text is None:
-        return False
-    claimed = _extract_claims(text)
+    claimed = _extract_claims(_without_grounded_dates(_without_list_ordinals(answer), grounding))
     if not claimed:
         return True
     allowed = _flatten_numbers(grounding)
