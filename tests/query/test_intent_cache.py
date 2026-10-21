@@ -170,3 +170,19 @@ async def test_mark_promoted_sets_timestamp(conn_with_agency):
         row = await lookup(c, sig_hash, agency_id)
         assert row is not None
         assert row["promoted_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_upsert_keeps_a_promoted_rows_question(conn_with_agency):
+    """A promoted row's question is the reviewed suggestion text: a later
+    asker's wording must not replace it, though the hit still counts."""
+    pool, agency_id = conn_with_agency
+    sig_hash = "8888888888888888"
+    async with pool.acquire() as c:
+        await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="Promoted Q")
+        await mark_promoted(c, sig_hash, agency_id)
+        await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="A later Q")
+        row = await lookup(c, sig_hash, agency_id)
+        assert row is not None
+        assert row["last_question"] == "Promoted Q"
+        assert row["hit_count"] == 2
