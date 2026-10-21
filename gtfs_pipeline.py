@@ -268,8 +268,9 @@ def cmd_seed_agencies(args):
     the same ids, and an edited feed_url updates that agency in place. The
     primary key is never rewritten, because child tables reference it
     without ON UPDATE CASCADE. A row whose feed_url (UNIQUE) already belongs
-    to a different agency_id, or whose agency_id an earlier row of the same
-    CSV already used, is refused, and the whole seed is rolled back.
+    to a different agency_id, or whose agency_id or feed_url an earlier row
+    of the same CSV already used, is refused, and the whole seed is rolled
+    back.
     A row without an ``agency_id`` is keyed on feed_url and takes the next
     sequence value. Every explicit-id row is written first and the sequence
     is then realigned to ``MAX(agency_id)``, so a no-id row can never take an
@@ -281,6 +282,7 @@ def cmd_seed_agencies(args):
     explicit_rows: list[tuple] = []
     sequenced_rows: list[tuple] = []
     feed_by_explicit_id: dict[int, str] = {}
+    row_label_by_feed: dict[str, str] = {}
     with open(path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             name = row["agency_name"].strip()
@@ -296,6 +298,15 @@ def cmd_seed_agencies(args):
                 (row.get("static_strategy") or "").strip() or None,
             )
             aid_raw = (row.get("agency_id") or "").strip()
+            row_label = f"agency_id {int(aid_raw)}" if aid_raw.isdigit() else "no agency_id"
+            if feed in row_label_by_feed:
+                logger.error(
+                    f"seed_agencies: {path} lists feed_url {feed} twice, on a row with "
+                    f"{row_label_by_feed[feed]} and a row with {row_label}; nothing was written. "
+                    "Keep one row per feed_url."
+                )
+                sys.exit(1)
+            row_label_by_feed[feed] = row_label
             if aid_raw.isdigit():
                 explicit_id = int(aid_raw)
                 if explicit_id in feed_by_explicit_id:

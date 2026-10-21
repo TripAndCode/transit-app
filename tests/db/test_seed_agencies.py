@@ -181,3 +181,39 @@ def test_seed_agencies_refuses_an_agency_id_repeated_in_one_csv(pg_conn, tmp_pat
     with pg_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agencies")
         assert cur.fetchone() == (0,)
+
+
+@pytest.mark.parametrize(
+    ("first_id", "second_id", "first_label", "second_label"),
+    [
+        ("42", "", "agency_id 42", "no agency_id"),
+        ("", "", "no agency_id", "no agency_id"),
+        ("42", "43", "agency_id 42", "agency_id 43"),
+    ],
+    ids=["explicit-then-no-id", "two-no-id", "two-explicit"],
+)
+def test_seed_agencies_refuses_a_feed_url_repeated_in_one_csv(
+    pg_conn, tmp_path, monkeypatch, caplog, first_id, second_id, first_label, second_label
+):
+    monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
+
+    caplog.set_level(logging.ERROR, logger="gtfs_pipeline")
+    with pytest.raises(SystemExit) as excinfo:
+        _seed(
+            tmp_path,
+            "dup.csv",
+            [
+                [first_id, "一行目", "http://shared.example.com/feed.pb", "", "", ""],
+                [second_id, "二行目", "http://shared.example.com/feed.pb", "", "", ""],
+            ],
+        )
+
+    assert excinfo.value.code == 1
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert "http://shared.example.com/feed.pb" in errors[0]
+    assert first_label in errors[0]
+    assert second_label in errors[0]
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agencies")
+        assert cur.fetchone() == (0,)
