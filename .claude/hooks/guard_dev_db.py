@@ -633,8 +633,9 @@ _COMMAND_PREFIXES = frozenset(
 # A prefix's flags whose value is the next word (`sudo -u user`, `nice -n 5`,
 # `xargs -n 1`, `caffeinate -t 60` ...).
 _PREFIX_VALUE_FLAGS = frozenset({"-u", "-g", "-n", "-L", "-P", "-I", "-d", "-t", "-s", "-k", "-C", "-p"})
-# Prefixes whose -v/-V prints instead of running the command (`env -v` and
-# `time -v` still run it).
+# Prefixes whose -v/-V prints instead of running the command. `env -v` and an
+# external `time -v` still run it; the shell's `time` keyword cannot be told
+# from that here, so it counts as running too.
 _PRINTS_ON_V = frozenset({"command", "sudo"})
 # timeout's duration, the one bare value a prefix takes before its command.
 _DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?")
