@@ -873,12 +873,16 @@ async def create_invite(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> InviteOut:
     """Pre-approve a role (and optionally LLM access) for an email that
-    hasn't signed in yet. Honored by the OAuth callback on that email's
-    first login (see ``api/routers/auth.py``'s ``_upsert_user``)."""
+    hasn't signed in yet. Honored by the OAuth callback only when it creates
+    the account (see ``api/routers/auth.py``'s ``_upsert_user``), so an email
+    that already has an account is refused with 409 ``account_exists``: its
+    role and AI access are changed on its user row instead."""
     csrf_guard(request)
     async with conn.transaction():
         if body.role not in ("user", "admin"):
             raise HTTPException(400, "invalid role")
+        if await conn.fetchval("SELECT 1 FROM users WHERE email = lower($1)", body.email):
+            raise HTTPException(409, "account_exists")
         row = await conn.fetchrow(
             """
             INSERT INTO user_invites (email, role, llm_approved, invited_by)

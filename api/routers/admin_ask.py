@@ -256,7 +256,7 @@ async def promote_query_log(
 
     async with pool.acquire() as conn:
         log_row = await conn.fetchrow(
-            "SELECT agency_id, signature_hash FROM ask_query_log WHERE id=$1",
+            "SELECT agency_id, signature_hash, question FROM ask_query_log WHERE id=$1",
             body.query_log_id,
         )
     if log_row is None:
@@ -279,7 +279,9 @@ async def promote_query_log(
     # but still inside the transaction — bounded by one short question.
     async with pool.acquire() as conn:
         async with conn.transaction():
-            ok = await promote_signature(conn, log_row["signature_hash"], log_row["agency_id"], embedder)
+            ok = await promote_signature(
+                conn, log_row["signature_hash"], log_row["agency_id"], embedder, question=log_row["question"]
+            )
             if ok:
                 await record_admin_action(
                     conn,
