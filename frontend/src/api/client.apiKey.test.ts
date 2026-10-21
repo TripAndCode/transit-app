@@ -107,7 +107,6 @@ describe("a stored API key the server rejects", () => {
   });
 
   it("is sent trimmed and kept when it was stored with whitespace around it", async () => {
-    // Settings used to save the input as typed; fetch strips the whitespace.
     const storage = memoryStorage({ api_key: " pro-key \n" });
     vi.stubGlobal("localStorage", storage);
     const fetchMock = vi.fn().mockResolvedValue(json(200, { ok: 1 }));

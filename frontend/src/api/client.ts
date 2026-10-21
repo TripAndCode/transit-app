@@ -282,11 +282,12 @@ export function saveApiKey(key: string): void {
   }
 }
 
-/** The stored key, trimmed, if it can be sent at all. Whitespace around it is
- *  stripped from storage too (fetch strips it from the header anyway, and an
- *  older Settings saved it as typed). A key fetch would refuse as a header (a
- *  full-width character from an IME) fails every request before it leaves --
- *  the same lockout as a rejected key -- so it is dropped the same way. */
+/** The stored key, trimmed, if it can be sent at all. A stored key may carry
+ *  surrounding whitespace, some of which (a full-width space) a header cannot
+ *  hold, so the trimmed form is sent and written back. A key fetch would still
+ *  refuse as a header (a full-width character inside it, from an IME) fails
+ *  every request before it leaves -- the same lockout as a rejected key -- so
+ *  it is dropped the same way. */
 function sendableStoredApiKey(): string | null {
   const stored = storedApiKey();
   if (stored === null) return null;
