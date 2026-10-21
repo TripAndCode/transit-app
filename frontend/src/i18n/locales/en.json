@@ -504,7 +504,7 @@
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "data": {
       "title": "Your data",
-      "description": "Download everything this app holds about you.",
+      "description": "Download the data this app holds about you.",
       "export": "Download my data",
       "delete": "Delete account",
       "delete_title": "Delete your account?",
