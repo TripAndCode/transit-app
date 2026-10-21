@@ -45,6 +45,9 @@ Known gaps, still allowed:
   since the substitution check is not scoped to the client's own simple command.
 - A literal `|`, `&` or `;` argument on its own (`psql -F '|'`) reads as a shell
   operator, so it can block a read or split a command the hook then misjudges.
+- A bare `make` run through a wrapper outside the recognised prefixes
+  (`poetry run make`) or after a leading redirect (`</dev/null make`) is not
+  read as running its default goal; a named destructive target still blocks.
 """
 
 from __future__ import annotations
@@ -61,13 +64,13 @@ DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks, per store. Naming one exempts a destructive command, which
 # names no host of its own, from that store; it exempts nothing else.
 # Per store, the variable that points it and the throwaway value of it. Read
-# from the NAME=value assignments of the same simple command -- the env prefix
-# or a make variable -- so a throwaway port named anywhere else (another
-# command, a comment) points nothing at it.
+# only from the command's own assignments -- `make_args` for a make target, the
+# env prefix for a gtfs_pipeline call -- so a throwaway port named anywhere else
+# (another command, a comment) points nothing at it.
 THROWAWAY = {
     # The port of the URL's host, not a ":5544" anywhere in it (a password).
-    "pg": ("database_url", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
-    "ch": ("clickhouse_port", re.compile(r"8124$")),
+    "pg": ("DATABASE_URL", re.compile(r"[a-z0-9+.-]+://(?:[^@/]*@)?[^/@:]+:5544(?:/|$)")),
+    "ch": ("CLICKHOUSE_PORT", re.compile(r"8124$")),
 }
 # Container names the throwaway stack runs under (see the transit-app-gotchas skill).
 THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
@@ -76,13 +79,16 @@ THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
 REPLICA_COMPOSE_FILE = "deploy/vps/compose.yml"
 REPLICA_CONTAINER = re.compile(r"transit-ml-[a-z0-9_.-]+")
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
-# overrides nothing -- the Makefile's own defaults from .env, the shell's for
-# the CLI -- which are the real dev stores. They name no host, port or
+# overrides nothing -- for make the values .env sets, which outrank an env
+# prefix (only make's own VAR=value arguments beat them), the shell's for the
+# CLI -- which are the real dev stores. They name no host, port or
 # container, so nothing else here can recognise what they are aimed at, and
 # running one is the write: no SQL keyword shows on the command line. Each maps
 # to the stores it writes; it runs only when the command points every one of
 # them at the throwaway stack.
 DESTRUCTIVE_TARGETS = {
+    # `all: bootstrap` is also the default goal, which a make naming no target runs.
+    "all": {"pg", "ch"},
     "analyze": {"pg", "ch"},
     "bootstrap": {"pg", "ch"},
     "analyze-all": {"pg", "ch"},
@@ -483,19 +489,37 @@ def runs_default_clickhouse_client(cmd: str) -> bool:
     return False
 
 
-def runs_destructive_command(cmd: str) -> bool:
+# Variables that steer make itself. Set anywhere in a command -- an env prefix,
+# an earlier `export`, around a quoted script -- they reach every make in it and
+# can rewrite any variable, so no make target there counts as pointed.
+_MAKE_CONTROL = re.compile(r"\b(?:GNUMAKEFLAGS|MAKEFLAGS|MFLAGS|MAKEOVERRIDES|MAKEFILES)\b")
+
+
+def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline: bool = False) -> bool:
     """A destructive Make target or `gtfs_pipeline` subcommand, in any simple
     command, that writes a store its own assignments do not point at the
     throwaway stack.
 
     A token holding whitespace is a quoted script (`bash -c "..."`, `ssh host
-    "..."`) and is read as a command line of its own. Quoted prose naming a
-    destructive target is read the same way and blocked, the cheap direction.
+    "..."`) and is read as a command line of its own, as is the word after a
+    shell's `-c` (`bash -c make`). Quoted prose naming a destructive target is read the
+    same way and blocked, the cheap direction.
     """
-    for segment in _simple_commands(_shell_tokens(cmd.lower())):
-        if _segment_writes_dev(segment):
+    make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
+    # shlex reads a newline as plain whitespace, while bash ends a command there
+    # (or not: a continuation, an escaped backslash, a comment holding a quote).
+    # A destructive command spanning lines is blocked rather than re-derived.
+    multiline = multiline or "\n" in cmd
+    # Case is kept: make and the shell both match variable names case-sensitively.
+    for segment in _simple_commands(_shell_tokens(cmd)):
+        if _segment_writes_dev(segment, make_controlled, multiline):
             return True
-        if any(runs_destructive_command(tok) for tok in segment if any(c.isspace() for c in tok)):
+        quoted = (
+            tok
+            for j, tok in enumerate(segment)
+            if any(c.isspace() for c in tok) or (j > 1 and segment[j - 1] == "-c" and _runs_shell(segment[: j - 1]))
+        )
+        if any(runs_destructive_command(tok, make_controlled, multiline) for tok in quoted):
             return True
     return False
 
@@ -526,7 +550,7 @@ def _is_separator(tok: str) -> bool:
     return bool(tok) and set(tok) <= _OPERATOR_CHARS
 
 
-_ASSIGNMENT = re.compile(r"^[a-z_][a-z0-9_]*=")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _MAKE_NAMES = {"make", "gmake"}
 # `python gtfs_pipeline.py ...` and `python -m gtfs_pipeline ...`.
 _CLI_NAMES = {"gtfs_pipeline.py", "gtfs_pipeline"}
@@ -542,46 +566,204 @@ def _simple_commands(lowered: list[str]) -> list[list[str]]:
     return [segment for segment in segments if segment]
 
 
-def _segment_writes_dev(segment: list[str]) -> bool:
-    writes: set[str] = set()
+def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bool) -> bool:
     for i, tok in enumerate(segment):
-        name = tok.rsplit("/", 1)[-1]
+        name = tok.rsplit("/", 1)[-1].lower()
         if name in _MAKE_NAMES:
-            for target in make_targets(segment[i + 1 :]):
-                writes |= DESTRUCTIVE_TARGETS.get(target, set())
+            # The Makefile's `-include .env` outranks the environment, so an env
+            # prefix does not repoint a make target; only make's own VAR=value
+            # arguments do.
+            args = segment[i + 1 :]
+            targets, assignments, trusted = make_args(args)
+            # xargs appends words from its input after these, which can name a
+            # target or a later, winning assignment the guard never sees.
+            if any(tok.rsplit("/", 1)[-1].lower() == "xargs" for tok in segment[:i]):
+                trusted = False
+            run = _in_command_position(segment, i)
+            if run and _MAKE_INFO_FLAGS & set(args):
+                continue
+            writes: set[str] = set()
+            # Only a make that runs has a default goal (`all`, also an English
+            # word in prose), or can run one a flag's value or an expansion hid.
+            for target in targets or (["all"] if run else []):
+                if run or target.lower() != "all":
+                    writes |= DESTRUCTIVE_TARGETS.get(target.lower(), set())
+            if run and not trusted:
+                writes |= DESTRUCTIVE_TARGETS["all"]
+            if writes and (make_controlled or (multiline and run) or not trusted):
+                return True
+            if _points_at_dev(writes, assignments):
+                return True
         elif name in _CLI_NAMES and i + 1 < len(segment):
-            writes |= DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1], set())
-    # Later assignments win, as they do for the shell's env prefix and for
-    # make's own command-line variables, which also override the prefix.
-    assigned = dict(tok.split("=", 1) for tok in segment if _ASSIGNMENT.match(tok))
+            # Nothing loads `.env` for a direct CLI call, so its env prefix is its target.
+            cli_writes = DESTRUCTIVE_SUBCOMMANDS.get(segment[i + 1].lower(), set())
+            if cli_writes and multiline:
+                return True
+            if _points_at_dev(cli_writes, segment[:i]):
+                return True
+    return False
+
+
+# Shell words and programs that run the command after them.
+_COMMAND_PREFIXES = frozenset(
+    {
+        "env",
+        "do",
+        "then",
+        "else",
+        "elif",
+        "if",
+        "while",
+        "until",
+        "!",
+        "{",
+        "time",
+        "exec",
+        "eval",
+        "nohup",
+        "nice",
+        "xargs",
+        "timeout",
+        "sudo",
+        "caffeinate",
+        "stdbuf",
+        "command",
+    }
+)
+# A prefix's flags whose value is the next word (`sudo -u user`, `nice -n 5`,
+# `xargs -n 1`, `caffeinate -t 60` ...).
+_PREFIX_VALUE_FLAGS = frozenset({"-u", "-g", "-n", "-L", "-P", "-I", "-d", "-t", "-s", "-k", "-C", "-p"})
+# Prefixes whose -v/-V prints instead of running the command. `env -v` and an
+# external `time -v` still run it; the shell's `time` keyword cannot be told
+# from that here, so it counts as running too.
+_PRINTS_ON_V = frozenset({"command", "sudo"})
+# timeout's duration, the one bare value a prefix takes before its command.
+_DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+# Shells whose -c takes the script to run.
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+# Flags with which make only prints information and runs no target.
+_MAKE_INFO_FLAGS = frozenset({"-v", "--version", "-h", "--help"})
+
+
+def _in_command_position(segment: list[str], i: int) -> bool:
+    """Whether segment[i] is the program the simple command runs: every word
+    before it is an assignment, a run-through prefix (`env`, `sudo`, a loop's
+    `do` ...), or such a prefix's own flag, flag value or duration. Any other
+    word is the program run instead (`sudo apt install make`), and `command -v
+    make`, `which make` and prose naming make do not run it."""
+    after_prefix = False
+    expect_value = False
+    prefix = ""
+    for tok in segment[:i]:
+        name = tok.rsplit("/", 1)[-1].lower()
+        if expect_value:
+            expect_value = False
+        elif _ASSIGNMENT.match(tok):
+            pass
+        elif name in _COMMAND_PREFIXES:
+            after_prefix = True
+            prefix = name
+        elif prefix in _PRINTS_ON_V and tok in ("-v", "-V"):
+            return False
+        elif after_prefix and tok.startswith("-"):
+            expect_value = tok in _PREFIX_VALUE_FLAGS
+        elif after_prefix and _DURATION.fullmatch(tok):
+            pass
+        else:
+            return False
+    return True
+
+
+def _runs_shell(words: list[str]) -> bool:
+    """Whether the words before a `-c` end in a shell (`bash`, `sudo sh` ...)."""
+    return bool(words) and words[-1].rsplit("/", 1)[-1].lower() in _SHELLS
+
+
+def _points_at_dev(writes: set[str], words: list[str]) -> bool:
+    """Whether any store in *writes* is left pointed at dev by the NAME=value
+    assignments among *words*. Later assignments win."""
+    assigned = dict(tok.split("=", 1) for tok in words if _ASSIGNMENT.match(tok))
     for store in writes:
         name, throwaway = THROWAWAY[store]
-        value = assigned.get(name, "")
-        # A throwaway host:port whose `?port=` query overrides it is the dev store.
-        if not throwaway.match(value) or PORT_KEY.search(value):
+        value = assigned.get(name, "").lower()
+        # libpq lets a URL query (`?port=05433`, `?host=`) override the host:port,
+        # and parses it loosely, so a throwaway URL carries none.
+        if not _SAFE_VALUE.fullmatch(value) or not throwaway.match(value) or "?" in value:
             return True
     return False
 
 
-# `make` options whose value is the next argument, not a target.
-_MAKE_VALUE_FLAGS = {"-c", "-f", "-o", "--directory", "--file", "--makefile"}
+# The only make flags a destructive target may carry. Make can read a variable
+# from almost any other word -- an unlisted flag's value or the word after a flag
+# that takes none, `$` expansion, a non-plain `=` form, `--eval` text -- so any
+# such word makes the whole command untrusted (a false block is the cheap
+# direction). `-C` takes the directory after it.
+_SAFE_MAKE_FLAG = re.compile(r"-[sk]+|-j[0-9]*|--silent|--keep-going|--no-print-directory|--jobs(?:=[0-9]+)?")
+# `-j`/`--jobs` take an optional job count, which may be the next word.
+_SHORT_JOBS_FLAG = re.compile(r"-[sk]*j")
+# Make pastes a variable's value into recipe shell text, and the shell expands an
+# env-prefix value, so only URL-safe characters are trusted in either.
+_SAFE_VALUE = re.compile(r"[A-Za-z0-9_.,:/@%+=?~-]*")
+# The only variables a destructive make command may set: the ones its recipes
+# read. Any other can repoint a recipe (`db_url`), its shell (`SHELL`) or a
+# sub-make (`MAKE`).
+_SAFE_MAKE_VARIABLES = frozenset(
+    {
+        "DATABASE_URL",
+        "CLICKHOUSE_PORT",
+        "CLICKHOUSE_DATABASE",
+        "AGENCY_ID",
+        "CONFIRM",
+        "CSV",
+        "DAY",
+        "DAYS",
+        "FOLDER",
+        "FULL",
+        "LOCALE",
+        "STATIC_PATH",
+        "TARGET",
+    }
+)
 
 
-def make_targets(args: list[str]) -> list[str]:
-    """The targets in `make`'s own arguments: up to the next shell separator,
-    past its flags and VAR=value assignments."""
+def make_args(args: list[str]) -> tuple[list[str], list[str], bool]:
+    """The targets and the plain NAME=value assignments in `make`'s own
+    arguments, up to the next shell separator, and whether every word was one
+    of those (with an allowlisted name and a URL-safe value), an allowlisted
+    flag, or `-C <dir>`.
+    A `#` word starts a comment the guard cannot place, so it is untrusted."""
     targets: list[str] = []
-    skip = False
+    assignments: list[str] = []
+    trusted = True
+    after_directory_flag = False
+    after_jobs_flag = False
     for arg in args:
         if _is_separator(arg):
             break
-        if skip:
-            skip = False
+        if after_jobs_flag:
+            after_jobs_flag = False
+            if arg.isdigit():
+                continue
+        # The shell expands `$` and backticks into words the guard never sees.
+        if arg.startswith("#") or "$" in arg or "`" in arg:
+            trusted = False
+        elif after_directory_flag:
+            after_directory_flag = False
+        elif arg == "-C":
+            after_directory_flag = True
+        elif arg == "--jobs" or _SHORT_JOBS_FLAG.fullmatch(arg):
+            after_jobs_flag = True
         elif arg.startswith("-"):
-            skip = arg in _MAKE_VALUE_FLAGS
-        elif "=" not in arg:
+            trusted = trusted and bool(_SAFE_MAKE_FLAG.fullmatch(arg))
+        elif "=" in arg:
+            name, _, value = arg.partition("=")
+            if _ASSIGNMENT.match(arg) and name in _SAFE_MAKE_VARIABLES and _SAFE_VALUE.fullmatch(value):
+                assignments.append(arg)
+            else:
+                trusted = False
+        else:
             targets.append(arg)
-    return targets
+    return targets, assignments, trusted
 
 
 def targets_dev_db(tokens: list[str], cmd: str) -> bool:
@@ -659,9 +841,11 @@ def main() -> int:
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123/:9000 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
-            "so run it as its own call. A destructive make target or gtfs_pipeline subcommand runs only with "
-            "DATABASE_URL=...:5544/... and/or CLICKHOUSE_PORT=8124 assigned on that same command, for each store "
-            "it writes. See AGENTS.md.\n"
+            "so run it as its own call. A destructive make target runs only as "
+            "`make <target> DATABASE_URL=...:5544/... CLICKHOUSE_PORT=8124` (an env prefix before `make` loses "
+            "to .env; one line, flags limited to -s, -k, -j, -C <dir>, --no-print-directory, setting only "
+            "variables its recipes read, with URL-safe values), and a gtfs_pipeline subcommand only with those "
+            "assigned as its env prefix, for each store it writes. See AGENTS.md.\n"
         )
         return 2
     return 0
