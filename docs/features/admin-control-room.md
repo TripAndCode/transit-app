@@ -239,7 +239,8 @@ Endpoints:
 - `GET /api/admin/ask/funnel` — stage/success counts.
 - `POST /api/admin/ask/promote` — promote one Stage-3 ("rag") query's
   cached intent into the RAG index ahead of the scheduled batch job's own
-  hit-count/quiet-days gate.
+  hit-count/quiet-days gate. The suggestion it publishes is that query's own
+  question text, the one the admin reviewed.
 - `GET /api/admin/ask/eval` — latest local eval artifact, or `null` when
   nothing has produced one yet.
 
