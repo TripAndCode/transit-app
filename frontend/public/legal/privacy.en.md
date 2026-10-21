@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: September 30, 2026
+Last updated: October 21, 2026
 
 Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This page explains what information about you the Service handles and how. The Japanese version of this policy is the authoritative one.
 
@@ -19,7 +19,7 @@ Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This p
 | Sessions (IP address, browser type, last used) | While you use the Service | To keep you signed in, and to let you sign out other devices |
 | Daily usage counts (requests and errors per screen or API route, and the operator you were viewing) | While you use the Service | To understand usage, manage load, and plan pricing |
 | Saved filters and Ask conversations | When you save them | To provide those features |
-| Ask questions, not linked to your account | When you use Ask | To improve answers |
+| Ask questions, not linked to your account | When you use Ask | To improve answers. A question the operator adopts as a suggested question, including ones adopted automatically because they are asked often, may also be shown, as a suggestion, to other users viewing the same transit operator |
 | An LLM API key you register | When you register it | To use your key for Ask. It is stored encrypted |
 | Names and dates of API keys issued to you | When the operator issues them | To provide the API |
 
@@ -35,6 +35,7 @@ The Service shows no ads and uses no analytics tools. It sets only two cookies: 
 | Sign-in history | 25 months |
 | Daily usage counts | 25 months |
 | Ask questions not linked to your account | 90 days |
+| Ask questions the operator adopts as suggested questions, including ones adopted automatically because they are asked often | While they are used as suggestions |
 | The admin action log (including actions on your account) | 400 days |
 
 Records past their period are deleted automatically every day.
@@ -52,7 +53,7 @@ You can read about the United States' personal-information protection system in 
 ## What you can do
 
 - **Download your data:** from your account page, download the data the Service holds about you as JSON. The admin action log isn't included; request its disclosure through the contact above.
-- **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only Ask questions not linked to your account remain, until their 90 days pass.
+- **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only Ask questions not linked to your account remain, until their 90 days pass. A question the operator adopts as a suggested question, including one adopted automatically because it is asked often, remains while it is used as one.
 - **Other requests:** requests for disclosure, correction, suspension of use and the like go to the contact above.
 
 ## How we keep it safe

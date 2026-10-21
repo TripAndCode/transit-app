@@ -373,6 +373,41 @@ async def test_promote_success_marks_promoted_and_inserts_chunk(ask_ops_client):
 
 
 @pytest.mark.asyncio
+async def test_promote_publishes_the_reviewed_log_question_not_the_caches_latest(ask_ops_client):
+    """The admin reviews one log row's question; a later asker's wording on
+    the same signature must not be what reaches other users."""
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    sig = "dddddddddddddddd"
+    async with pool.acquire() as conn:
+        from pipeline.query import intent_cache
+        from pipeline.query.intent import IntentSignature
+
+        await intent_cache.upsert(
+            conn,
+            sig,
+            IntentSignature(tool="top_n", args={"metric": "avg_delay"}, confidence=0.9),
+            {"metric": "avg_delay"},
+            agency_id,
+            question="別の人が後から書いた質問",
+        )
+    log_id = await _insert_log(pool, agency_id, router_stage="llm", signature_hash=sig, question="遅延ランキング")
+
+    resp = await c.post(
+        "/api/admin/ask/promote",
+        json={"query_log_id": log_id},
+        cookies={"sid": sid},
+        headers={"Origin": "http://test"},
+    )
+    assert resp.json()["promoted"] is True
+
+    async with pool.acquire() as conn:
+        content = await conn.fetchval("SELECT content FROM rag_chunks WHERE chunk_id=$1", f"cache_{sig}")
+        last_question = await conn.fetchval("SELECT last_question FROM ask_intent_cache WHERE signature_hash=$1", sig)
+    assert content == "遅延ランキング"
+    assert last_question == "遅延ランキング"
+
+
+@pytest.mark.asyncio
 async def test_promote_idempotent_returns_already_promoted(ask_ops_client):
     c, sid, _uid, agency_id, pool = ask_ops_client
     async with pool.acquire() as conn:
