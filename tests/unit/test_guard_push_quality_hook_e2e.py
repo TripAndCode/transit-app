@@ -35,11 +35,14 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
+
+from tests.unit.test_guard_push_quality_hook import NOT_PUSHES, PUSH_SPELLINGS
 
 ROOT = Path(__file__).resolve().parents[2]
 HOOK_PATH = ROOT / ".claude" / "hooks" / "guard-push-quality.sh"
@@ -256,3 +259,87 @@ def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(f
     )
     assert result.returncode == 0, result.stderr
     assert "skipping the backend suite" in result.stderr
+
+
+def _run_hook_unscoped(command: str, *, cwd: str = "") -> subprocess.CompletedProcess:
+    """The hook with $CLAUDE_PROJECT_DIR unset: a command it takes for a push
+    blocks with the "unset" message, and any other leaves it silently."""
+    payload = json.dumps({"tool_input": {"command": command}, "cwd": cwd})
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    with tempfile.TemporaryDirectory() as tmp:
+        return subprocess.run(
+            ["bash", str(HOOK_PATH)], input=payload, capture_output=True, text=True, timeout=30, env=env, cwd=tmp
+        )
+
+
+@pytest.mark.parametrize("command", PUSH_SPELLINGS)
+def test_every_spelling_of_a_push_reaches_the_gate(command):
+    result = _run_hook_unscoped(command)
+    assert result.returncode == 2, result.stderr
+    assert "CLAUDE_PROJECT_DIR is unset" in result.stderr
+
+
+@pytest.mark.parametrize("command", NOT_PUSHES)
+def test_a_command_that_only_mentions_push_is_left_alone(command):
+    result = _run_hook_unscoped(command)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_an_unlexable_command_is_left_alone_when_only_its_cwd_mentions_push():
+    result = _run_hook_unscoped("echo it's done", cwd="/tmp/push-wt")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def _worktree_with_change(repo: Path, name: str, changed: str) -> Path:
+    """A worktree on branch `feature` whose one commit adds `changed`."""
+    _git("branch", "feature", cwd=repo)
+    worktree = repo.parent / name
+    _git("worktree", "add", "-q", str(worktree), "feature", cwd=repo)
+    (worktree / changed).write_text("VALUE = 2\n")
+    _git("add", changed, cwd=worktree)
+    _git("commit", "-q", "-m", "change", cwd=worktree)
+    return worktree
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [lambda p: f'"{p}"', shlex.quote, lambda p: p.replace(" ", "\\ ")],
+    ids=["double-quoted", "single-quoted", "backslash-escaped"],
+)
+def test_a_dash_c_path_holding_a_space_is_resolved(fake_repo, spell):
+    """Only Markdown changes, so no check runs: the banner alone shows the
+    gate resolved the worktree rather than skipping the push."""
+    worktree = _worktree_with_change(fake_repo, "feature worktree", "NOTES.md")
+    result = _run_hook(f"git -C {spell(str(worktree))} push origin feature", claude_project_dir=fake_repo)
+    assert result.returncode == 0, result.stderr
+    banner = result.stderr.splitlines()[0] if result.stderr else ""
+    assert banner.startswith("== push gate: files from"), result.stderr
+    assert worktree.name in banner, result.stderr
+
+
+def test_a_forced_refspec_resolves_the_worktree_holding_its_branch(fake_repo):
+    worktree = _worktree_with_change(fake_repo, "forced-worktree", "NOTES.md")
+    result = _run_hook("git push origin +feature", claude_project_dir=fake_repo, cwd=str(fake_repo))
+    assert result.returncode == 0, result.stderr
+    banner = result.stderr.splitlines()[0] if result.stderr else ""
+    assert banner.startswith("== push gate: files from"), result.stderr
+    assert worktree.name in banner, result.stderr
+
+
+def test_a_forced_refspec_from_the_wrong_directory_is_caught_by_the_safety_net(fake_repo):
+    _worktree_with_change(fake_repo, "forced-worktree", "existing.py")
+    result = _run_hook(f"git -C {fake_repo} push origin +feature", claude_project_dir=fake_repo)
+    assert result.returncode == 2, result.stderr
+    assert "nothing differs from" in result.stderr
+
+
+def test_a_push_command_that_cannot_be_tokenized_is_blocked(fake_repo):
+    """An apostrophe in the heredoc body leaves an unbalanced quote, so the
+    push's directory and refs cannot be read and nothing could be checked."""
+    worktree = _worktree_with_change(fake_repo, "heredoc-worktree", "existing.py")
+    command = f"git -C {worktree} commit -F - <<EOF\nit's done\nEOF\ngit -C {worktree} push origin feature"
+    result = _run_hook(command, claude_project_dir=fake_repo, cwd=str(fake_repo))
+    assert result.returncode == 2, result.stderr
+    assert "could not parse the push command" in result.stderr

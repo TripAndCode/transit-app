@@ -25,6 +25,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 HOOK_PATH = ROOT / ".claude" / "hooks" / "guard-push-quality.sh"
 SETTINGS_PATH = ROOT / ".claude" / "settings.json"
@@ -44,7 +46,10 @@ PARSER_SOURCE = _embedded_parser_source()
 
 
 def _parse(command: str) -> dict:
-    payload = json.dumps({"tool_input": {"command": command}})
+    return _parse_payload(json.dumps({"tool_input": {"command": command}}))
+
+
+def _parse_payload(payload: str) -> dict:
     result = subprocess.run(
         ["python3", "-c", PARSER_SOURCE],
         input=payload,
@@ -111,7 +116,109 @@ def test_newline_inside_a_quoted_string_is_not_treated_as_a_separator():
 
 def test_bare_push_has_no_directory_or_ref_information():
     parsed = _parse("git push")
-    assert parsed == {"dir": "", "cd_dir": "", "refs": [], "is_delete": False}
+    assert parsed == {"is_push": True, "dir": "", "cd_dir": "", "refs": [], "is_delete": False}
+
+
+@pytest.mark.parametrize(
+    "command",
+    ['git -C "/a b" push origin x', "git -C /a\\ b push origin x", "git -c 'user.name=A B' -C '/a b' push origin x"],
+)
+def test_a_quoted_or_escaped_flag_value_holding_a_space_arrives_intact(command):
+    parsed = _parse(command)
+    assert parsed["is_push"] is True
+    assert parsed["dir"] == "/a b"
+    assert parsed["refs"] == ["x"]
+
+
+#: Every shell spelling of a push the parser must recognise. It is the gate's
+#: only decision point, so a shape missing here is a push that skips every check.
+PUSH_SPELLINGS = [
+    "git push",
+    'git -C "/a b" push origin x',
+    "git -C /a\\ b push origin x",
+    "git -c 'user.name=A B' push",
+    "git push;echo done",
+    "echo hi;git push origin x",
+    "(cd /tmp/wt && git push origin x)",
+    "echo $(git push origin x)",
+    "echo `git push origin x`",
+    "/usr/bin/git push origin x",
+    "time git push origin x",
+    "env FOO=1 git push origin x",
+    "FOO=1 git push origin x",
+    "sudo -u me git push origin x",
+    "if git push origin x; then echo ok; fi",
+    "! git push origin x",
+    "{ git push origin x; }",
+    "git --no-pager push origin x",
+    "git --namespace ns push origin x",
+    "git --git-dir /r/.git --work-tree /r push origin x",
+    'bash -c "git push origin x"',
+    "sh -c 'cd /tmp/wt; git push origin x'",
+    "eval 'git push origin x'",
+]
+
+#: Commands that mention push without running a push.
+NOT_PUSHES = [
+    'git commit -m "fix push gate"',
+    "git log --grep=push",
+    "git log --grep push",
+    "git stash push -m wip",
+    "echo push",
+    "grep -rn push .claude/hooks",
+    "git -C /tmp/push-wt status",
+    # Unlexable (the apostrophe), but "push" is no word of its own anywhere.
+    "cat > /tmp/push-wt/notes <<EOF\nit's pushed\nEOF",
+]
+
+
+@pytest.mark.parametrize("command", PUSH_SPELLINGS)
+def test_a_push_is_found_in_every_statement_shape(command):
+    assert _parse(command)["is_push"] is True
+
+
+@pytest.mark.parametrize("command", NOT_PUSHES)
+def test_a_command_that_only_mentions_push_is_not_a_push(command):
+    assert _parse(command)["is_push"] is False
+
+
+def test_a_glued_separator_does_not_leak_into_the_refs():
+    parsed = _parse("(cd /tmp/wt && git push origin x);echo done")
+    assert parsed["cd_dir"] == "/tmp/wt"
+    assert parsed["refs"] == ["x"]
+
+
+def test_a_push_inside_a_nested_shell_reports_its_own_directory_and_refs():
+    parsed = _parse('cd /tmp/a && bash -c "cd /tmp/b && git push origin x"')
+    assert parsed["cd_dir"] == "/tmp/b"
+    assert parsed["refs"] == ["x"]
+    assert _parse('cd /tmp/a && bash -c "git push origin x"')["cd_dir"] == "/tmp/a"
+
+
+def test_a_push_quoted_inside_an_argument_yields_to_the_real_one():
+    parsed = _parse('git commit -m "git push origin other" && git push origin real')
+    assert parsed["refs"] == ["real"]
+
+
+def test_an_unlexable_command_holding_push_gets_no_verdict():
+    """An apostrophe in a heredoc body leaves shlex an unbalanced quote. The
+    hook blocks on a missing verdict, so the parser must not answer False."""
+    command = "git -C /wt commit -F - <<EOF\nit's done\nEOF\ngit -C /wt push origin feature"
+    assert _parse(command)["is_push"] is None
+
+
+def test_an_unlexable_command_without_push_is_not_a_push():
+    """The hook's substring prefilter also matches a cwd or description that
+    holds "push", so the command text itself decides."""
+    assert _parse("echo it's done")["is_push"] is False
+
+
+def test_an_unreadable_payload_gets_no_verdict():
+    assert _parse_payload('{"tool_input": {"command": "git push"')["is_push"] is None
+
+
+def test_forced_delete_refspec_sets_is_delete():
+    assert _parse("git push origin +:old-branch")["is_delete"] is True
 
 
 def test_push_origin_head_captures_head_literally():
@@ -140,15 +247,9 @@ def test_later_cd_overrides_an_earlier_one():
     assert parsed["cd_dir"] == "/tmp/b"
 
 
-def _bash_refspec_source_half(ref: str) -> str:
+def _bash_refspec_branch(ref: str) -> str:
     result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'ref="$1"; branch="${ref%%:*}"; branch="${branch#refs/heads/}"; printf "%s" "$branch"',
-            "--",
-            ref,
-        ],
+        ["bash", "-c", _function_source("refspec_branch") + 'refspec_branch "$1"', "--", ref],
         capture_output=True,
         text=True,
         timeout=5,
@@ -157,14 +258,22 @@ def _bash_refspec_source_half(ref: str) -> str:
     return result.stdout
 
 
-def test_refspec_source_half_extraction_takes_the_local_branch_not_the_remote_name():
-    """An explicit `src:dst` refspec must yield its source half -- the
-    actual local branch being pushed. The destination half (`${ref##*:}`)
-    is a remote-side name that typically isn't a local branch/worktree at
-    all."""
-    assert _bash_refspec_source_half("local-feature:renamed-remote-branch") == "local-feature"
-    assert _bash_refspec_source_half("refs/heads/local-feature:refs/heads/renamed") == "local-feature"
-    assert _bash_refspec_source_half("plain-branch") == "plain-branch"
+@pytest.mark.parametrize(
+    ("ref", "branch"),
+    [
+        ("local-feature:renamed-remote-branch", "local-feature"),
+        ("refs/heads/local-feature:refs/heads/renamed", "local-feature"),
+        ("plain-branch", "plain-branch"),
+        ("+feature", "feature"),
+        ("+feature:renamed", "feature"),
+        ("+refs/heads/feature:refs/heads/renamed", "feature"),
+    ],
+)
+def test_a_refspec_yields_the_local_branch_it_pushes(ref, branch):
+    """The source half names the local branch being pushed; the destination
+    half is a remote-side name that is usually no local branch at all. A
+    leading `+` only forces the update, so it is no part of the name."""
+    assert _bash_refspec_branch(ref) == branch
 
 
 def _frontend_gate_block() -> str:

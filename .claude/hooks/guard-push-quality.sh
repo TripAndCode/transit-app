@@ -29,21 +29,203 @@
 set -uo pipefail
 input="$(cat)"
 
-# Cheap pre-filter on the raw JSON before paying for a python3 spawn — the
-# command text is embedded verbatim, so a raw substring match is a safe
-# superset of the real check below (only skips the python3 spawn, never
-# skips the actual gate).
+# Cheap pre-filter on the raw JSON before paying for a python3 spawn: a payload
+# with no "push" anywhere in it cannot carry one. It only skips the spawn; the
+# parser below makes the actual decision.
 printf '%s' "$input" | grep -q 'push' || exit 0
 
-cmd="$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null)"
-# Anchored to "git" followed by zero or more flag tokens (short -x [value] or
-# long --flag[=value]) and then "push" as the next word — matches `git push`,
-# `git -C dir push`, `git -c x=y push`, `FOO=bar git push`, but not a bare
-# substring hit like `git commit -m "fix push gate"` or `git log --grep=push`,
-# where "push" isn't actually the git subcommand. Under-matching (missing a
-# real push) is worse than over-matching here, so this stays deliberately
-# permissive about flag shapes.
-printf '%s' "$cmd" | grep -Eq '\bgit\b(\s+-[A-Za-z](\s+\S+)?|\s+--[A-Za-z][A-Za-z-]*(=\S+)?)*\s+push\b' || exit 0
+# The parser is the one place that decides whether the command pushes, and it
+# reports the push's own `-C`, its refs and any preceding `cd` for the
+# directory resolution below. A regex over the raw text cannot tell where a
+# quoted value ends or which `git` invocation a flag belongs to, so the command
+# is tokenised with shlex, which applies the shell's own quoting rules: a quoted
+# or escaped path arrives intact, and `ls -C /tmp && git push` or a commit
+# message quoting `-C /tmp` is not read as a directive. Operator characters
+# split even when glued to a word, so `x;git push` and `(git push)` each yield
+# a statement of their own. Every token naming `git` is checked wherever it
+# sits, so `time`, `env`, `sudo` or `if` in front of it still counts, and an
+# argument holding whitespace (`bash -c "..."`) is parsed again as a command.
+# Over-matching costs an unneeded gate run while under-matching skips every
+# check, so wherever the two trade off the parser over-matches.
+#
+# `is_push` is True or False only when the command could be read. A command
+# that names push as a word but that shlex cannot tokenise (an unbalanced
+# quote, typically an apostrophe in a heredoc body) gets no verdict, and no
+# verdict blocks: its directory and refs are unknown, so nothing could be
+# checked.
+PARSED="$(
+  printf '%s' "$input" | python3 -c '
+import json, shlex, sys
+
+# Runs of these become tokens of their own, even glued to a word.
+OPERATOR_CHARS = "();<>|&`"
+# A token made only of these ends a statement: ;  &&  ||  |  &, a subshell or
+# substitution bracket, a backtick, or a run of them such as ");".
+SEPARATOR_CHARS = frozenset("();|&`")
+# Global options git reads a separate value for, ahead of the subcommand.
+GIT_VALUE_OPTIONS = {
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source",
+}
+
+
+def newlines_as_separators(text):
+    """An unquoted newline ends a statement exactly like ";", which shlex
+    treats as plain whitespace. A newline inside quotes (a multi-line commit
+    message) is content and stays, and an unquoted backslash-newline is a
+    line continuation, so both characters vanish. chr(34) and chr(39) stand
+    in for the quote characters because this script is itself a single-quoted
+    shell argument."""
+    dq, sq = chr(34), chr(39)
+    quote, chars = None, []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            chars.append(ch)
+            if ch == quote:
+                quote = None
+            elif ch == "\\" and quote == dq and i + 1 < n:
+                i += 1
+                chars.append(text[i])
+        elif ch == "\\" and i + 1 < n and text[i + 1] == "\n":
+            i += 1
+        elif ch == "\\" and i + 1 < n:
+            chars.append(ch)
+            i += 1
+            chars.append(text[i])
+        elif ch in (sq, dq):
+            quote = ch; chars.append(ch)
+        elif ch == "\n":
+            chars.append(" ; ")
+        else:
+            chars.append(ch)
+        i += 1
+    return "".join(chars)
+
+
+def shell_tokens(text):
+    lexer = shlex.shlex(newlines_as_separators(text), posix=True, punctuation_chars=OPERATOR_CHARS)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def argument_tokens(text):
+    """Tokens of a quoted argument parsed again as a command. Such an argument
+    is often prose, where an apostrophe is ordinary, so a lexing failure here
+    falls back to whitespace splitting instead of leaving the whole command
+    without a verdict."""
+    try:
+        return shell_tokens(text)
+    except ValueError:
+        return text.split()
+
+
+def statements(tokens):
+    result, current = [], []
+    for token in tokens:
+        if token and set(token) <= SEPARATOR_CHARS:
+            if current:
+                result.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        result.append(current)
+    return result
+
+
+def git_push(statement):
+    """(directory from -C, arguments after push) for a git push in the
+    statement, else None."""
+    for start, token in enumerate(statement):
+        if token.rsplit("/", 1)[-1] != "git":
+            continue
+        i, directory = start + 1, None
+        while i < len(statement) and statement[i].startswith("-"):
+            if statement[i] in GIT_VALUE_OPTIONS and i + 1 < len(statement):
+                if statement[i] == "-C":
+                    directory = statement[i + 1]
+                i += 2
+            else:
+                i += 1
+        if i < len(statement) and statement[i] == "push":
+            return directory, statement[i + 1 :]
+    return None
+
+
+def find_push(tokens, cd_dir):
+    """(cd_dir, directory, arguments) of the first push, else None. A push in
+    a statement of its own outranks one inside an argument. Recursion ends
+    because an argument holding whitespace is always shorter than the text it
+    was lexed from: its quotes or escapes are gone."""
+    nested = None
+    for statement in statements(tokens):
+        found = git_push(statement)
+        if found:
+            return (cd_dir, *found)
+        for token in statement:
+            if nested is None and any(c.isspace() for c in token):
+                nested = find_push(argument_tokens(token), cd_dir)
+        # A later cd overrides an earlier one, as it would in the shell.
+        if statement[:1] == ["cd"] and len(statement) > 1:
+            cd_dir = statement[1]
+    return nested
+
+
+def names_push(text):
+    """Whether push appears as a word of its own, with quotes, escapes and
+    operator characters taken as word breaks. Decides an unlexable command,
+    so a path or prose that only contains the letters (push-gate, pushed)
+    does not block."""
+    breaks = str.maketrans({c: " " for c in OPERATOR_CHARS + chr(34) + chr(39) + "\\"})
+    return "push" in text.translate(breaks).split()
+
+
+out = {"is_push": None, "dir": "", "cd_dir": "", "refs": [], "is_delete": False}
+try:
+    raw_cmd = str(json.load(sys.stdin).get("tool_input", {}).get("command") or "")
+    tokens = []
+    if "push" in raw_cmd:
+        try:
+            tokens = shell_tokens(raw_cmd)
+        except ValueError:
+            if names_push(raw_cmd):
+                raise
+    found = find_push(tokens, "")
+    out["is_push"] = found is not None
+    if found:
+        out["cd_dir"], directory, args = found
+        out["dir"] = directory or ""
+        unforced = [a[1:] if a.startswith("+") else a for a in args]
+        out["is_delete"] = any(a in ("--delete", "-d") for a in args) or any(
+            a.startswith(":") and len(a) > 1 for a in unforced
+        )
+        out["refs"] = [a for a in args if not a.startswith("-") and a != "origin"]
+except Exception:
+    out["is_push"] = None
+print(json.dumps(out))
+' 2>/dev/null
+)"
+[ -n "$PARSED" ] || PARSED='{}'
+
+read_parsed() {
+  printf '%s' "$PARSED" | python3 -c "import json,sys; v=json.load(sys.stdin).get('$1'); print('' if v is None else (' '.join(v) if isinstance(v, list) else v))" 2>/dev/null
+}
+
+# Only a literal False lets the command through: an empty or unreadable parse
+# is as unknown as a command shlex could not tokenise.
+case "$(read_parsed is_push)" in
+  False) exit 0 ;;
+  True) ;;
+  *)
+    echo "BLOCKED: git push — could not parse the push command, so this gate cannot tell which branch" >&2
+    echo "  it pushes and would check nothing. An unbalanced quote is the usual cause, such as an" >&2
+    echo "  apostrophe in a heredoc body or a comment. Run the push as a Bash call of its own, and pass" >&2
+    echo "  multi-line text through a file (git commit -F <file>) rather than a heredoc." >&2
+    exit 2
+    ;;
+esac
 
 if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
   echo "BLOCKED: git push — CLAUDE_PROJECT_DIR is unset, guard-push-quality.sh cannot locate the repo to run checks." >&2
@@ -66,125 +248,13 @@ same_repo() {
   [ "$theirs" = "$ours" ]
 }
 
-# The command is tokenised and its statements walked, rather than searched
-# with a regex. A regex over the raw text cannot tell which `git` invocation a
-# flag belongs to, so `ls -C /tmp && git push` or a commit message quoting
-# `-C /tmp` read as a directory directive, and `grep -C 3 …` read as one that
-# does not exist. shlex applies the shell's own quoting rules, so a quoted or
-# escaped path arrives intact, and walking the statement that actually carries
-# the `push` subcommand is what makes a flag elsewhere in the line irrelevant.
-PARSED="$(
-  printf '%s' "$input" | python3 -c '
-import json, shlex, sys
-
-SEPARATORS = {"&&", "||", ";", "|", "&"}
-out = {"dir": "", "cd_dir": "", "refs": [], "is_delete": False}
-try:
-    data = json.load(sys.stdin)
-    raw_cmd = data.get("tool_input", {}).get("command", "")
-    # A newline outside quotes is a statement separator exactly like ";" --
-    # shlex.split() alone treats it as ordinary whitespace, so a multi-line
-    # command (an entirely normal way to author a compound Bash-tool call,
-    # e.g. a "cd <worktree>" line followed by a "git push ..." line)
-    # collapses into a single unsplit statement, and every heuristic below
-    # that keys off a statement first token ("git", "cd") silently stops
-    # firing. A newline inside a quoted string (a multi-line commit message)
-    # is left alone so its content is not altered, and an unquoted
-    # backslash-newline pair (a real shell line continuation) is dropped
-    # entirely rather than turned into a literal newline character --
-    # shlex.split() has no concept of line continuation itself, so passing
-    # "\<newline>" straight through leaves a literal newline glued onto
-    # whatever token follows instead of eliding it the way a real shell
-    # would. chr(34)/chr(39) stand in for literal double/single-quote
-    # characters here because this whole script is itself embedded in a
-    # single-quoted shell argument.
-    dq, sq = chr(34), chr(39)
-    quote, chars = None, []
-    i, n = 0, len(raw_cmd)
-    while i < n:
-        ch = raw_cmd[i]
-        if quote:
-            chars.append(ch)
-            if ch == quote:
-                quote = None
-            elif ch == "\\" and quote == dq and i + 1 < n:
-                i += 1
-                chars.append(raw_cmd[i])
-        elif ch == "\\" and i + 1 < n and raw_cmd[i + 1] == "\n":
-            i += 1  # line continuation: both characters vanish
-        elif ch == "\\" and i + 1 < n:
-            chars.append(ch)
-            i += 1
-            chars.append(raw_cmd[i])
-        elif ch in (sq, dq):
-            quote = ch; chars.append(ch)
-        elif ch == "\n":
-            # Surrounding spaces matter: SEPARATORS below only matches a
-            # standalone ";" token, and shlex.split() has no idea ";" is
-            # special -- glued to a neighbour with no whitespace it is just
-            # another character in that word, same as "cmd1;cmd2" would be.
-            chars.append(" ; ")
-        else:
-            chars.append(ch)
-        i += 1
-    tokens = shlex.split("".join(chars))
-except Exception:
-    print(json.dumps(out)); raise SystemExit(0)
-
-statements, current = [], []
-for token in tokens:
-    if token in SEPARATORS:
-        if current:
-            statements.append(current)
-        current = []
-    else:
-        current.append(token)
-if current:
-    statements.append(current)
-
-
-def as_git(statement):
-    """(dir_from_dash_C, subcommand, args) for a git invocation, else None."""
-    i = 0
-    while i < len(statement) and "=" in statement[i] and not statement[i].startswith("-"):
-        i += 1  # leading VAR=value assignments
-    if i >= len(statement) or statement[i] != "git":
-        return None
-    i += 1
-    directory = None
-    while i < len(statement) and statement[i].startswith("-"):
-        if statement[i] in ("-C", "-c", "--git-dir", "--work-tree") and i + 1 < len(statement):
-            if statement[i] == "-C":
-                directory = statement[i + 1]
-            i += 2
-        else:
-            i += 1
-    if i >= len(statement):
-        return None
-    return directory, statement[i], statement[i + 1 :]
-
-
-for statement in statements:
-    parsed = as_git(statement)
-    if parsed and parsed[1] == "push":
-        directory, _, args = parsed
-        out["dir"] = directory or ""
-        out["is_delete"] = any(a in ("--delete", "-d") for a in args) or any(
-            a.startswith(":") and len(a) > 1 for a in args
-        )
-        out["refs"] = [a for a in args if not a.startswith("-") and a != "origin"]
-        break
-    # A later cd overrides an earlier one, as it would in the shell.
-    if statement[:1] == ["cd"] and len(statement) > 1:
-        out["cd_dir"] = statement[1]
-
-print(json.dumps(out))
-' 2>/dev/null
-)"
-[ -n "$PARSED" ] || PARSED='{}'
-
-read_parsed() {
-  printf '%s' "$PARSED" | python3 -c "import json,sys; v=json.load(sys.stdin).get('$1'); print('' if v is None else (' '.join(v) if isinstance(v, list) else v))" 2>/dev/null
+# The local branch a refspec pushes: its source half (the destination half is
+# a remote-side name), without the `+` that only forces the update or a
+# `refs/heads/` prefix.
+refspec_branch() {
+  local branch="${1%%:*}"
+  branch="${branch#+}"
+  printf '%s' "${branch#refs/heads/}"
 }
 
 # The push's own `-C` is the most explicit statement of where it runs, so it
@@ -209,7 +279,7 @@ if [ -n "$EXPLICIT_C_DIR" ]; then
   else
     echo "BLOCKED: git push — the command names directory '$EXPLICIT_C_DIR', which does not exist, so" >&2
     echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
-    echo "  written in a form it failed to read; pass it unquoted and absolute." >&2
+    echo "  written in a form it failed to read; pass it as a literal absolute path." >&2
     exit 2
   fi
 fi
@@ -221,10 +291,7 @@ fi
 # It also needs nothing from the command's shape.
 if [ -z "$GATE_DIR" ]; then
   for ref in $(read_parsed refs); do
-    # Take the SOURCE half of a `src:dst` refspec: that names the local
-    # branch/worktree actually being pushed, not where it lands remotely.
-    branch="${ref%%:*}"
-    branch="${branch#refs/heads/}"
+    branch="$(refspec_branch "$ref")"
     # A literal "HEAD" (`git push origin HEAD`) or an empty token can't be
     # resolved here -- this tier finds a directory FROM a branch name, and
     # neither is one. That's fine: it falls through to the `cd`/cwd tiers
@@ -260,19 +327,18 @@ fi
 
 # A named `cd` directory that did not match this repository is judged on
 # whether it exists at all. A path that does not exist is the signature of
-# parsing this gate got wrong — a spelling it does not cover (an escaped
-# space, a variable, a relative path) reduced to something meaningless —
-# and silently continuing from there is precisely how the original defect
-# behaved, so it is reported instead. A path that does exist is simply not
-# this repository's push, and gating someone else's repository is not this
-# hook's business.
+# parsing this gate got wrong — a spelling it does not cover (a variable, a
+# relative path) reduced to something meaningless — and silently continuing
+# from there would check the wrong tree, so it is reported instead. A path
+# that does exist is simply not this repository's push, and gating someone
+# else's repository is not this hook's business.
 if [ -z "$GATE_DIR" ] && [ -n "$CD_DIR" ]; then
   if [ -e "$CD_DIR" ]; then
     exit 0
   fi
   echo "BLOCKED: git push — the command names directory '$CD_DIR', which does not exist, so" >&2
   echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
-  echo "  written in a form it failed to read; pass it unquoted and absolute." >&2
+  echo "  written in a form it failed to read; pass it as a literal absolute path." >&2
   exit 2
 fi
 
@@ -556,10 +622,7 @@ if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 
   # written). This is a real, accepted gap, not something a smarter
   # regex or resolution step can close from parsing alone.
   for ref in $(read_parsed refs); do
-    # Take the SOURCE half of a `src:dst` refspec, then drop a
-    # `refs/heads/` prefix so the fully-qualified form resolves too.
-    branch="${ref%%:*}"
-    branch="${branch#refs/heads/}"
+    branch="$(refspec_branch "$ref")"
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
     # Filtered to the same pathspecs the scoped checks use (and with the
     # same --diff-filter=ACMR as PY_FILES/FE_FILES above): a branch whose
