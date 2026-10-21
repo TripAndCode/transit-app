@@ -308,6 +308,33 @@ BLOCKED = [
     pytest.param("make", id="bare-make-runs-the-default-goal"),
     pytest.param("make all", id="make-all"),
     pytest.param("make -j2", id="flags-only-make-runs-the-default-goal"),
+    # A wrapper that runs its arguments, with or without its own flags, still runs make.
+    *[
+        pytest.param(command, id=f"wrapped-make-runs-the-default-goal-{command.split()[0]}-{i}")
+        for i, command in enumerate(
+            (
+                "timeout 60 make",
+                "sudo make",
+                "caffeinate -s -i make",
+                "stdbuf -oL make",
+                "nice -n 10 make",
+                "time -p make",
+                "env -u DATABASE_URL make",
+                "timeout 60 make all",
+                "timeout 60 make $TARGET",
+                "for t in bootstrap; do sudo make $t; done",
+            )
+        )
+    ],
+    # A one-word shell script is still a command line.
+    pytest.param("bash -c make", id="one-word-shell-script-runs-make"),
+    pytest.param("sh -c 'make'", id="quoted-one-word-shell-script-runs-make"),
+    # xargs appends words from stdin the guard never sees, which can repoint the target.
+    pytest.param(
+        "echo DATABASE_URL=postgresql://transit:transit@localhost:5433/transit | xargs make prune-query-log "
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="xargs-appends-unseen-make-arguments",
+    ),
     pytest.param(
         "make DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
         id="assignments-only-make-runs-the-default-goal-on-dev-clickhouse",

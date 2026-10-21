@@ -76,8 +76,9 @@ THROWAWAY_CONTAINER = re.compile(r"transit-test-[a-z0-9_.-]+")
 REPLICA_COMPOSE_FILE = "deploy/vps/compose.yml"
 REPLICA_CONTAINER = re.compile(r"transit-ml-[a-z0-9_.-]+")
 # Commands that write through DATABASE_URL and CLICKHOUSE_* when the caller
-# overrides nothing -- the Makefile's own defaults from .env, the shell's for
-# the CLI -- which are the real dev stores. They name no host, port or
+# overrides nothing -- for make the values .env sets, which outrank an env
+# prefix (only make's own VAR=value arguments beat them), the shell's for the
+# CLI -- which are the real dev stores. They name no host, port or
 # container, so nothing else here can recognise what they are aimed at, and
 # running one is the write: no SQL keyword shows on the command line. Each maps
 # to the stores it writes; it runs only when the command points every one of
@@ -497,8 +498,9 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline:
     throwaway stack.
 
     A token holding whitespace is a quoted script (`bash -c "..."`, `ssh host
-    "..."`) and is read as a command line of its own. Quoted prose naming a
-    destructive target is read the same way and blocked, the cheap direction.
+    "..."`) and is read as a command line of its own, as is the word after a
+    `-c` (`bash -c make`). Quoted prose naming a destructive target is read the
+    same way and blocked, the cheap direction.
     """
     make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
     # shlex reads a newline as plain whitespace, while bash ends a command there
@@ -509,7 +511,9 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline:
     for segment in _simple_commands(_shell_tokens(cmd)):
         if _segment_writes_dev(segment, make_controlled, multiline):
             return True
-        quoted = (tok for tok in segment if any(c.isspace() for c in tok))
+        quoted = (
+            tok for j, tok in enumerate(segment) if any(c.isspace() for c in tok) or (j and segment[j - 1] == "-c")
+        )
         if any(runs_destructive_command(tok, make_controlled, multiline) for tok in quoted):
             return True
     return False
@@ -566,6 +570,10 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bo
             # arguments do.
             args = segment[i + 1 :]
             targets, assignments, trusted = make_args(args)
+            # xargs appends words from its input after these, which can name a
+            # target or a later, winning assignment the guard never sees.
+            if any(tok.rsplit("/", 1)[-1].lower() == "xargs" for tok in segment[:i]):
+                trusted = False
             run = _in_command_position(segment, i)
             if run and _MAKE_INFO_FLAGS & set(args):
                 continue
@@ -591,21 +599,45 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bo
     return False
 
 
-# Words before `make` that still leave it the command being run.
-_COMMAND_PREFIXES = frozenset({"env", "do", "then", "else", "!", "{", "time", "exec", "nohup", "nice", "xargs"})
+# Shell words and programs that run what follows them as a command. Whatever
+# comes between one and `make` -- its flags and their values, a duration, a
+# user -- still leaves make the program run.
+_COMMAND_PREFIXES = frozenset(
+    {
+        "env",
+        "do",
+        "then",
+        "else",
+        "!",
+        "{",
+        "time",
+        "exec",
+        "nohup",
+        "nice",
+        "xargs",
+        "timeout",
+        "sudo",
+        "caffeinate",
+        "stdbuf",
+        "command",
+    }
+)
 # Flags with which make only prints information and runs no target.
 _MAKE_INFO_FLAGS = frozenset({"-v", "--version", "-h", "--help"})
 
 
 def _in_command_position(segment: list[str], i: int) -> bool:
-    """Whether segment[i] is the program the simple command runs: only
-    assignments, a run-through prefix (`env`, `time`, a loop's `do` ...) or that
-    prefix's flags come before it. `command -v make` and prose naming make do
-    not run it."""
-    for tok in segment[:i]:
-        if not (_ASSIGNMENT.match(tok) or tok in _COMMAND_PREFIXES or (tok.startswith("-") and segment[0] == "env")):
-            return False
-    return True
+    """Whether segment[i] is the program the simple command runs: it is the
+    first word after the assignments, or that word is a run-through prefix
+    (`env`, `sudo`, `timeout 60`, a loop's `do` ...). `command -v make`,
+    `which make` and prose naming make do not run it."""
+    words = [tok for tok in segment[:i] if not _ASSIGNMENT.match(tok)]
+    if not words:
+        return True
+    first = words[0].rsplit("/", 1)[-1].lower()
+    if first == "command" and {"-v", "-V"} & set(words[1:]):
+        return False
+    return first in _COMMAND_PREFIXES
 
 
 def _points_at_dev(writes: set[str], words: list[str]) -> bool:
