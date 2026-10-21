@@ -38,7 +38,7 @@ _LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILIN
 # A Japanese date ("9月5日", "2026年9月5日"). The grounding carries dates only as
 # ISO strings, which are stripped before number extraction, so a date written
 # this way is checked against the grounded dates instead of as loose numbers.
-_JA_DATE_RE = re.compile(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
+_JA_DATE_RE = re.compile(r"(?<!\d)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
 _PERCENT_SIGN_RE = re.compile(r"[ \t]*[%％]")
 
 
@@ -65,7 +65,8 @@ def _extract_claims(text: str) -> list[tuple[float, bool]]:
 
 def _grounded_dates(value: object) -> set[tuple[int | None, int, int]]:
     """The days *value* names, as ISO dates or in Japanese (the echoed question
-    names them so); a Japanese date without a year matches any year."""
+    names them so). A grounded date without a year grounds only an answer's
+    date without one."""
     out: set[tuple[int | None, int, int]] = set()
     if isinstance(value, dict):
         for v in value.values():
@@ -87,7 +88,7 @@ def _without_grounded_dates(answer: str, grounding: dict) -> str:
 
     def strip_grounded(match: re.Match[str]) -> str:
         year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
-        if any(m == month and d == day and (year is None or y is None or int(year) == y) for y, m, d in dates):
+        if any(m == month and d == day and (year is None or (y is not None and int(year) == y)) for y, m, d in dates):
             return " "
         return match.group()
 

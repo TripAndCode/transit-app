@@ -148,3 +148,14 @@ def test_japanese_date_named_only_in_the_echoed_question_is_grounded():
     }
     assert verify_numeric_claims("9月6日のデータは表にありません", grounding) is True
     assert verify_numeric_claims("9月7日のデータは表にありません", grounding) is False
+
+
+def test_a_year_less_grounded_date_does_not_ground_a_wrong_year():
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9月5日はどうでしたか"}
+    assert verify_numeric_claims("2026年9月5日が最も遅れ", grounding) is True
+    assert verify_numeric_claims("2025年9月5日が最も遅れ", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_a_longer_number():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 1.0}]}
+    assert verify_numeric_claims("12026年9月5日のデータです", grounding) is False
