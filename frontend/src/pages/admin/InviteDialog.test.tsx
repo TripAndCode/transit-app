@@ -5,10 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { InviteDialog } from "./InviteDialog";
+import { ApiError } from "../../api/client";
 
 const apiPostMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../api/client", () => ({
+vi.mock("../../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/client")>()),
   apiGet: vi.fn(),
   apiPost: apiPostMock,
   apiPatch: vi.fn(),
@@ -66,6 +68,19 @@ describe("InviteDialog", () => {
       llm_approved: true,
     });
     expect(await screen.findByText(/new@example.com/)).toBeTruthy();
+  });
+
+  it("says an email that already has an account cannot be invited", async () => {
+    apiPostMock.mockRejectedValue(new ApiError(409, JSON.stringify({ detail: "account_exists" })));
+    const user = userEvent.setup();
+    renderDialog();
+    await user.type(screen.getByRole("textbox"), "member@example.com");
+    await user.click(screen.getByRole("button", { name: /send invite/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      i18n.t("admin.invite.error_account_exists", { email: "member@example.com" }),
+    );
+    expect(alert.textContent).toContain("member@example.com");
   });
 
   it("calls onClose when cancel is clicked", async () => {
