@@ -19,9 +19,11 @@ type ReasonCtx = {
 
 /** Short statements of which non-default filter dimensions are currently
  *  active, in the order they'd narrow a query: days, time, service, routes.
- *  Purely descriptive -- pair with {@link buildFilterCtxRecoveries} for the
- *  matching "do something about it" actions. */
-export function buildFilterCtxReasons(ctx: ReasonCtx, t: TFunction): string[] {
+ *  Routes are named by `routeName` (the caller's `useRouteNames().format`),
+ *  since a feed's route_code can be an opaque route_id. Purely descriptive --
+ *  pair with {@link buildFilterCtxRecoveries} for the matching "do something
+ *  about it" actions. */
+export function buildFilterCtxReasons(ctx: ReasonCtx, t: TFunction, routeName: (code: string) => string): string[] {
   const reasons: string[] = [];
   if (ctx.dow && ctx.dow !== "all") {
     reasons.push(tt(t, "empty_state.reason_format", { label: tt(t, "filters.dow.label"), value: dowValueLabel(ctx.dow, t) }));
@@ -40,7 +42,12 @@ export function buildFilterCtxReasons(ctx: ReasonCtx, t: TFunction): string[] {
     );
   }
   if (ctx.routes && ctx.routes.length > 0) {
-    reasons.push(tt(t, "empty_state.reason_format", { label: tt(t, "filters.routes.label"), value: ctx.routes.join(", ") }));
+    reasons.push(
+      tt(t, "empty_state.reason_format", {
+        label: tt(t, "filters.routes.label"),
+        value: ctx.routes.map(routeName).join(tt(t, "common.list_separator")),
+      }),
+    );
   }
   return reasons;
 }

@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { localeChunkMap } from "./scripts/localeChunkMap.mjs";
+import { servedRoots } from "./scripts/servedRoots.mjs";
 
 export default defineConfig(({ mode }) => {
   // loadEnv (not process.env) so a per-checkout .env.local can set this —
@@ -18,6 +19,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), babel({ presets: [reactCompilerPreset()] }), localeChunkMap()],
     server: {
       port: 5173,
+      fs: { allow: servedRoots() },
       // Backend lives under /api/* and /health. Anything else is owned by
       // the SPA — including /agencies/:id/map, which used to break in dev
       // because the proxy intercepted /agencies/* and forwarded it to

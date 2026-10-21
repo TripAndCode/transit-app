@@ -66,4 +66,9 @@ describe("filterItems", () => {
   it("excludes items that match neither label nor sublabel", () => {
     expect(filterItems(items, "存在しない")).toEqual([]);
   });
+
+  it("finds a route typed with full-width digits", () => {
+    const items = [{ label: "42 金沢港〜夕日寺" }, { label: "5 駅前" }];
+    expect(filterItems(items, "４２").map((item) => item.label)).toEqual(["42 金沢港〜夕日寺"]);
+  });
 });

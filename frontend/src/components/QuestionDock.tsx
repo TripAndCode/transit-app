@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useRouteNames } from "../api/useRouteNames";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
 import { CardTemplateIcon } from "./CardTemplateIcon";
@@ -44,6 +45,7 @@ export function QuestionDock({
   showToolbar,
 }: QuestionDockProps) {
   const { t } = useTranslation();
+  const routeNames = useRouteNames(agencyId);
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
   // directly on every render — no useMemo (see AGENTS.md).
@@ -57,7 +59,7 @@ export function QuestionDock({
     if (typeof args.best_first === "string") {
       args.best_first = args.best_first === "true";
     }
-    const summary = composing.buildSummary(values, t);
+    const summary = composing.buildSummary(values, t, routeNames.format);
     onSubmit({ tool: composing.tool, args, user_summary: summary });
     onRunComplete();
   }

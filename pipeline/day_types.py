@@ -32,6 +32,7 @@ from typing import Literal
 import jpholiday
 
 from pipeline.cache import async_lru_cache
+from pipeline.headways import dominant_service_ctes
 
 DayType = Literal["weekday", "saturday", "sunday_holiday", "weekend_holiday"]
 
@@ -131,10 +132,10 @@ def _majority(
         return fallback
     best = max(votes.values())
     tied = [cls for cls in _ORDER if votes.get(cls) == best]
-    return next((cls for cls in tied if _agrees(cls, fallback)), tied[0])
+    return next((cls for cls in tied if agrees(cls, fallback)), tied[0])
 
 
-def _agrees(a: DayType, b: DayType) -> bool:
+def agrees(a: DayType, b: DayType) -> bool:
     """Whether two classes name the same kind of day, 土日祝 standing for either weekend class."""
     weekend = {"saturday", "sunday_holiday", "weekend_holiday"}
     return a == b or ("weekend_holiday" in (a, b) and a in weekend and b in weekend)
@@ -252,8 +253,27 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)
 
 
+@async_lru_cache(maxsize=256, ttl_seconds=300)
+async def load_dominant_day_types(conn, agency_id: int) -> dict[str, DayType | None]:
+    """Each route's dominant service's class (see `pipeline.headways.dominant_service_ctes`),
+    as :func:`service_class` names it: None for a service it does not class, or
+    one with no weekly calendar. Cached like :func:`load_day_types`."""
+    rows = await conn.fetch(
+        f"""
+        WITH {dominant_service_ctes("$1")}
+        SELECT ds.route_code, c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday
+        FROM dominant_service ds
+        LEFT JOIN static_calendar c ON c.agency_id = $1 AND c.service_id = ds.service_id
+        """,
+        agency_id,
+    )
+    days = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    return {r["route_code"]: None if r["monday"] is None else service_class(tuple(r[d] for d in days)) for r in rows}
+
+
 def invalidate_day_types() -> None:
     """Forget every cached calendar read, after a load replaced an agency's
     calendar, so the next report splits days by the new one instead of waiting
     out the cache's TTL."""
     load_day_types.cache_clear()  # type: ignore[attr-defined]
+    load_dominant_day_types.cache_clear()  # type: ignore[attr-defined]

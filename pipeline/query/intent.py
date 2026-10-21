@@ -84,9 +84,13 @@ def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[s
 
     out: dict[str, Any] = {}
 
-    # 1. Resolve relative time tokens to absolute dates first.
-    if args.get("time_window") in _REL_TIME:
-        frm, to = _REL_TIME[args["time_window"]](ctx)
+    # 1. Resolve relative time tokens to absolute dates first. Only a string
+    # names a token; any other value is an unrecognised one.
+    window = args.get("time_window")
+    resolve = _REL_TIME.get(window) if isinstance(window, str) else None
+    resolved_time_window = resolve is not None
+    if resolve is not None:
+        frm, to = resolve(ctx)
         out["from_date"] = frm.isoformat() if isinstance(frm, date) else str(frm)
         out["to_date"] = to.isoformat() if isinstance(to, date) else str(to)
     else:
@@ -101,7 +105,6 @@ def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[s
     # token (already resolved above); an *unrecognised* value is preserved so
     # that e.g. a typo like ``"last_60_days"`` doesn't silently collapse to
     # the same hash as a query with no time_window at all.
-    resolved_time_window = args.get("time_window") in _REL_TIME
     for k, v in args.items():
         if k in ("from_date", "to_date"):
             continue

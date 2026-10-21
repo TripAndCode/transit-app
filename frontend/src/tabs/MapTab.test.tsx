@@ -76,6 +76,21 @@ describe("MapTab", () => {
     expect(screen.getByText("No vehicles are reporting right now")).toBeInTheDocument();
   });
 
+  it("leaves a failed live fetch to the error banner instead of saying no vehicle is reporting", () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: undefined,
+      error: new client.ApiError(500, ""),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("No vehicles are reporting right now")).toBeNull();
+  });
+
   it("does not show the empty state and counts observed trips once live rows arrive", () => {
     mockCommonHooks();
     const capturedAt = new Date().toISOString();

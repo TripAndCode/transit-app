@@ -7,13 +7,14 @@ type Props = {
   templates: CardTemplate[];
   onInstantSubmit: (tpl: CardTemplate) => void;
   onOpenChip: (tpl: CardTemplate) => void;
+  routeName: (code: string) => string;
   /** True while a dispatch is in flight — disables the buttons so a fast
    *  double-click on an instant card can't fire two conversation/message
    *  creates before the first one settles. */
   busy?: boolean;
 };
 
-export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy = false }: Props) {
+export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, routeName, busy = false }: Props) {
   const { t } = useTranslation();
   const instant = templates.filter((tpl) => !needsRoute(tpl));
   const pills = templates.filter(needsRoute);
@@ -76,7 +77,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                 }}
               >
                 <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>
-                  <CardTemplateIcon icon={tpl.icon} /> {tpl.buildSummary(defaultsFor(tpl), t)}
+                  <CardTemplateIcon icon={tpl.icon} /> {tpl.buildSummary(defaultsFor(tpl), t, routeName)}
                 </div>
                 {tpl.example_answer_key && (
                   <div

@@ -1,9 +1,9 @@
 # Reports tab
 
 Printable period summary: a daily mean-delay trend chart and a route ranking
-table over the shared filter range, filtered CSV downloads, a share-link
-copy button, browser print/PDF, and browser-local saved-analysis bookmarks —
-plus a link out to Time for deeper reports.
+table over the shared filter range, filtered CSV downloads, an Export menu
+(chart PNG, combined CSV, share link, browser print/PDF), and browser-local
+saved-analysis bookmarks — plus a link out to Time for deeper reports.
 
 ## How a user reaches it
 
@@ -37,25 +37,26 @@ plus a link out to Time for deeper reports.
 What the user sees/does:
 
 - **Summary view** (default):
+  - An **Export menu** in the header (`frontend/src/components/ExportMenu.tsx`)
+    holding the page-level actions: a PNG of the trend chart, a combined CSV
+    (trend + ranking rows), a "Create share link" item that copies the
+    current URL with its filter query string, and "Print / Save as PDF"
+    (`window.print()`).
   - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`,
     greying what the trend report's `scope_applied` did not use.
   - **Trend section** — a daily mean-delay line chart
     (`frontend/src/components/analysis/PeriodChart.tsx`) with a CSV download.
-  - **Routes-to-check section** — a ranked pattern table (route, days,
-    mean delay, samples), each row linking to that route's dossier
-    (`/agencies/:agencyId/routes/<route_code>`) with the active scope's query
-    string, `service` included when one is set, plus its own CSV
-    download.
-  - A **definitions** `<details>` showing the active filter window and a
-    `DefinitionMetaBlock` (on-time/late tolerance, measurement point, dedup
-    rule, exclusion threshold) from the trend report's `definition` field,
-    plus a **"Detailed reports →"** link to Time's `trend` report
-    (`/agencies/:agencyId/time?report=trend`) carrying the same filter.
-  - A **footer** with a combined CSV download (trend + ranking rows) and a
-    "copy share link" button that copies the current URL with its filter
-    query string.
-  - A **print** button in the header (`window.print()`) for browser
-    print/PDF.
+  - **Routes-to-check section** — a ranked pattern table (pattern, mean
+    delay, samples), each row's "Open analysis →" link opening that route's
+    dossier (`/agencies/:agencyId/routes/<route_code>`) with the active
+    scope's query string, `service` included when one is set, plus its own
+    CSV download.
+  - A `DefinitionMetaBlock`, its own collapsed disclosure (on-time/late
+    tolerance, measurement point, dedup rule, exclusion threshold) from the
+    trend report's `definition` field, then a **definitions** `<details>`
+    showing the active filter window and a **"Detailed reports →"** link to
+    Time's `trend` report (`/agencies/:agencyId/time?report=trend`) carrying
+    the same filter.
 - **Saved view** (`?doc=saved`) — lists this browser's saved analyses for
   the current agency (`frontend/src/components/analysis/savedAnalyses.ts`),
   each opening with its saved filter query through `routesHref`: one saved
@@ -73,9 +74,9 @@ What the user sees/does:
 | `useReport(agencyId, "ranking", ctx)` | `GET /api/{agency_id}/reports/ranking` (`api/routers/reports.py: get_report`) | `pipeline/reports/rankings.py: compute_ranking()` — same `agg_*`-fast-path-with-live-fallback pattern as `trend`. Takes the endpoint's default observation floor (`reliable_min_samples` in the response), which the section states under its table; the Routes screen's ranking is where thinly observed routes can be included. |
 | `useAgencies()` (only used for the current agency's display name in the section heading) | `GET /api/agencies` (`api/routers/agencies.py`, not scoped under `/api/{agency_id}`) | Static agency metadata from Postgres. |
 
-Saved-analysis reads/writes and the CSV/share-link/print actions are entirely
-client-side — they read `trend`/`ranking` data already in memory rather than
-issuing their own requests.
+Saved-analysis reads/writes and the CSV/PNG/share-link/print actions are
+entirely client-side — they read `trend`/`ranking` data already in memory rather
+than issuing their own requests.
 
 ## Key files
 
@@ -84,7 +85,8 @@ issuing their own requests.
 | File | Role |
 |---|---|
 | `frontend/src/tabs/SavedExportTab.tsx` | Reports shell: the `doc` strip, the `view` → `doc` replacement, and which screen each document renders |
-| `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend + ranking sections, saved-analysis list, CSV/share/print actions |
+| `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend + ranking sections, saved-analysis list, per-section CSV buttons |
+| `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print |
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
@@ -127,16 +129,20 @@ issuing their own requests.
    empty state with no data).
 3. Change the filter bar's date range / dow / time_band / route selection —
    expect both sections to refetch.
-4. Click a route in the routes-to-check table — expect navigation to that
-   route's dossier, `/agencies/:agencyId/routes/<route_code>`, carrying the
-   same filter.
+4. Click a row's "Open analysis →" link in the routes-to-check table —
+   expect navigation to that route's dossier,
+   `/agencies/:agencyId/routes/<route_code>`, carrying the same filter.
 5. Click "Detailed reports →" — expect navigation to
    `/agencies/:agencyId/time?report=trend` carrying the same filter.
-6. Click each CSV download button — expect a file per section plus one
-   combined file from the footer button.
-7. Click "Create share link" — expect a clipboard-copy confirmation; paste
-   the URL in a new tab and confirm the same filter loads.
-8. Click "Print / Save as PDF" — expect the browser print dialog.
+6. Click each section's CSV download button — expect a file per section;
+   then open the header's "Export" menu and choose "Download CSV" — expect
+   one combined file, and "Download PNG" — expect an image of the trend
+   chart.
+7. In the "Export" menu, choose "Create share link" — expect a
+   clipboard-copy confirmation; paste the URL in a new tab and confirm the
+   same filter loads.
+8. In the "Export" menu, choose "Print / Save as PDF" — expect the browser
+   print dialog.
 9. Switch to the "Saved analyses" view → URL
    `/agencies/:agencyId/reports?doc=saved`; expect any bookmarks saved from
    a route's dossier for this agency to appear, each linking back to that

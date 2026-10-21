@@ -135,6 +135,20 @@ describe("RouteForecastSection", () => {
     expect(screen.queryByText(/Back to overview/i)).not.toBeInTheDocument();
   });
 
+  it("keeps a route's worst window when its bands carry ML forecasts, counting their baseline samples", () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: overview(), isPending: false, error: null, refetch: vi.fn() } as never);
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: ml, isPending: false, error: null, refetch: vi.fn() } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/analysis/route_forecast?routes=100"]}>
+        <RouteForecastSection aid={1} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
+  });
+
   it("says how late the worst window runs in words, not as a signed figure", () => {
     renderSection();
     const headline = screen.getByTestId("worst-headline");

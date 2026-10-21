@@ -141,6 +141,18 @@ async def test_route_exactly_at_ewt_threshold_yields_zero_bonus_deduction(perf_c
     assert row["estimated_bonus_deduction"] == pytest.approx(0.0, abs=1e-9)
 
 
+async def test_an_ewt_standard_reads_every_day_of_the_range_whatever_the_page_dow(perf_client):
+    """The endpoint reads dates only: a page-wide weekday filter must not empty
+    a configured standard's actual value."""
+    client, aid, pool = perf_client
+    await _seed_standard(pool, aid, "R_AT", "ewt_sec", 50.0, 1000.0)
+
+    r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01&dow=weekend")
+    assert r.status_code == 200
+    row = next(x for x in r.json()["rows"] if x["route_code"] == "R_AT")
+    assert row["actual_value"] == pytest.approx(50.0, abs=1e-6)
+
+
 async def test_route_below_ewt_standard_yields_expected_deduction(perf_client):
     """R_BELOW's pooled actual ewt_sec is 150.0 against a threshold_value of
     100.0: relative_deviation = (100 - 150) / 100 = -0.5 (worse than

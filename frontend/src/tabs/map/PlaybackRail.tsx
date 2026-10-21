@@ -28,7 +28,7 @@ export function PlaybackRail({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const railRef = useRef<HTMLDivElement>(null);
-  const { frames, index, playing, speed, steppingOnly, loading, date } = controller;
+  const { frames, index, playing, speed, steppingOnly, loading, error, date } = controller;
   const frame = frames[index];
 
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
@@ -92,7 +92,14 @@ export function PlaybackRail({
         )}
       </div>
 
-      {loading || frames.length === 0 ? (
+      {/* A failed fetch also leaves no frames, so it is told apart from a day
+          that has none. */}
+      {!loading && error ? (
+        <p className="ops-playback__status" role="status">
+          {t("operations.playback.error")}{" "}
+          <button type="button" className="btn-ghost" onClick={controller.retry}>{t("common.retry")}</button>
+        </p>
+      ) : loading || frames.length === 0 ? (
         <p className="ops-playback__status" role="status">
           {loading ? t("operations.playback.loading") : t("operations.playback.empty")}
         </p>

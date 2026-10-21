@@ -8,6 +8,7 @@ import { delayRampVar } from "../styles/tokens";
 import { PendingNavLink } from "./navPending";
 import { RailTooltip } from "./RailTooltip";
 import "./sidebarLineMap.css";
+import { fixedTenth } from "../utils/format";
 
 /** The badge of a pinned route the static routes do not name yet. */
 const PLAIN_BADGE = "\u2022";
@@ -46,7 +47,7 @@ export function SidebarPinnedRoutes({
         const badge = parts?.plate ?? (parts?.line ? Array.from(parts.line)[0] : PLAIN_BADGE);
         const beside = !parts ? "" : parts.plate ? (routeWhereText(parts, t) ?? parts.line ?? "") : (parts.line ?? routeWhereText(parts, t) ?? "");
         const minutes = todayMeanMinutes(today?.routes, code);
-        const delay = minutes == null ? null : t("common.minutes_value", { value: minutes.toFixed(1) });
+        const delay = minutes == null ? null : t("common.minutes_value", { value: fixedTenth(minutes) });
         const label = delay == null ? name : t("nav.pinned_route_label", { route: name, delay });
         return (
           <RailTooltip key={code} collapsed={collapsed} label={label}>

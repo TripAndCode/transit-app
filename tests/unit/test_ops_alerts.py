@@ -486,6 +486,76 @@ def test_main_delivers_fail_ping_on_an_anomaly(tmp_path: Path, monkeypatch):
     assert "oracle_crawler" in calls[0][1]
 
 
+def _poll(tmp_path: Path, monkeypatch, capsys, states: dict[str, str]) -> tuple[int, list[tuple[str, str]], str]:
+    """One main() run against `states`, sharing the state file across calls."""
+    document = make_document(states, reasons={name: "RT feed is stale" for name in states})
+    monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
+    monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
+    monkeypatch.setenv(ops_alerts.PING_URL_ENV_VAR, "https://example.test/ping/check")
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(ops_alerts, "_http_post", lambda url, body: calls.append((url, body)))
+    exit_code = ops_alerts.main(["--state-path", str(tmp_path / "alert-state.json"), "--repo", str(tmp_path)])
+    return exit_code, calls, capsys.readouterr().out
+
+
+def test_an_outage_the_dedup_window_suppresses_still_pings_fail(tmp_path: Path, monkeypatch, capsys):
+    """A suppressed repeat produces no notification, but the component is still failed."""
+    _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed"})
+
+    exit_code, calls, out = _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed"})
+
+    assert exit_code == 1
+    assert calls[0][0] == "https://example.test/ping/check/fail"
+    assert "oracle_crawler" in calls[0][1]
+    assert "oracle_crawler" in out
+
+
+def test_a_poll_whose_only_alert_is_a_recovery_pings_success(tmp_path: Path, monkeypatch, capsys):
+    _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed"})
+
+    exit_code, calls, out = _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "healthy"})
+
+    assert exit_code == 0
+    assert calls[0][0] == "https://example.test/ping/check"
+    assert "recovered" in out
+
+
+def test_a_failed_component_that_turns_unknown_is_still_not_an_all_clear(tmp_path: Path, monkeypatch, capsys):
+    """An unknown reading is not a recovery: the outstanding alert keeps the check failing."""
+    _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed"})
+
+    exit_code, calls, _out = _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "unknown"})
+
+    assert exit_code == 1
+    assert calls[0][0] == "https://example.test/ping/check/fail"
+
+
+def test_a_recovery_beside_a_suppressed_failure_names_the_one_still_failing(tmp_path: Path, monkeypatch, capsys):
+    _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed", "r2": "failed"})
+
+    exit_code, calls, out = _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "healthy", "r2": "failed"})
+
+    assert exit_code == 1
+    assert calls[0][0] == "https://example.test/ping/check/fail"
+    assert "r2" in calls[0][1]
+    assert "r2" in out
+
+
+def test_the_json_output_of_a_suppressed_repeat_reports_it_unhealthy(tmp_path: Path, monkeypatch, capsys):
+    _poll(tmp_path, monkeypatch, capsys, {"oracle_crawler": "failed"})
+    document = make_document({"oracle_crawler": "failed"}, reasons={"oracle_crawler": "RT feed is stale"})
+    monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
+
+    exit_code = ops_alerts.main(
+        ["--state-path", str(tmp_path / "alert-state.json"), "--repo", str(tmp_path), "--format", "json"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["healthy"] is False
+    assert payload["ongoing"] == {"oracle_crawler": "failed"}
+
+
 def test_main_delivers_no_ping_when_url_unset(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "alert-state.json"
     document = make_document({"oracle_crawler": "healthy"})

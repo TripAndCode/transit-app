@@ -1,10 +1,11 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
 from pipeline import ch_aggregates
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.strategies._time import parse_departure_time
 from tests.conftest import mirror_updates_to_ch
 
 
@@ -641,7 +642,7 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
 def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
     """A stop served by 2+ distinct routes must comma-join them, alphabetically
-    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path, not
+    ordered — guards the ClickHouse-built stop_route_days path, not
     just the single-route case test_analyze_builds_agg_stop_routes already
     covers."""
     with pg_conn.cursor() as cur:
@@ -677,9 +678,9 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     table is about which routes serve a stop, independent of whether any
     observation happened to carry a numeric delay.
 
-    So agg_stop_routes must come from the ClickHouse-sourced
-    _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
-    only and never touches dep_delay — not from _analyze_deduped, whose
+    So agg_stop_routes must come from stop_route_days, which reads every
+    `updates` row's route_code/trip_id/stop_sequence and never touches
+    dep_delay — not from the dedup, whose
     `dep_delay IS NOT NULL` pre-filter silently drops this exact case (a
     real, non-trivial share of keys, enough to lose stops' entire route
     coverage in practice)."""
@@ -1163,6 +1164,7 @@ def _ch_headway_row(
     *,
     stop_id,
     scheduled_time="08:00:00",
+    scheduled_sec=None,
     dep_delay=0,
     file_name="f.pb",
     route_code="R1",
@@ -1170,7 +1172,10 @@ def _ch_headway_row(
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields agg_route_headway_daily reads
-    populated."""
+    populated. `scheduled_sec` follows `scheduled_time` as static_join writes it,
+    unless given: an extended-hour departure carries it alone."""
+    if scheduled_sec is None and scheduled_time is not None:
+        scheduled_sec = parse_departure_time(scheduled_time)[2]
     return (
         file_name,
         captured_at,
@@ -1185,6 +1190,7 @@ def _ch_headway_row(
         None,  # schedule_relationship_trip
         None,  # schedule_relationship_stop
         None,  # feed_timestamp
+        scheduled_sec,
     )
 
 
@@ -1257,6 +1263,89 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     assert long_gap_count == 0
 
 
+def _actual_headway_row(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
+            "WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        return cur.fetchone()
+
+
+def test_analyze_reconstructs_actual_headway_from_extended_hour_departures(pg_conn, agency_id, ch_client):
+    """GTFS writes a departure after midnight as 24:30:00. static_join stores
+    that in scheduled_sec alone, with scheduled_time NULL; the late-night gaps
+    still count, as they do on the scheduled side."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    night = datetime(2026, 4, 1, 15, 40, tzinfo=timezone.utc)  # 00:40 JST, still the 1 April service day
+    rows = [
+        _ch_headway_row("T1", night, stop_id="s1", scheduled_time=None, scheduled_sec=88200, file_name="a.pb"),
+        _ch_headway_row("T2", night, stop_id="s1", scheduled_time=None, scheduled_sec=88680, file_name="b.pb"),
+        _ch_headway_row("T3", night, stop_id="s1", scheduled_time=None, scheduled_sec=89160, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 2
+    assert abs(median_sec - 480) <= 1
+
+
+def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is_implausible(
+    pg_conn, agency_id, ch_client
+):
+    """A frozen-feed spike in an event's latest poll is dropped before the
+    latest-observation-wins dedup, as build_dedup_ch_sql drops it, so the event
+    keeps its last plausible estimate instead of vanishing and merging its two
+    neighbouring gaps into one."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
+        _ch_headway_row(
+            "T2", day + timedelta(minutes=1), stop_id="s1", scheduled_time="08:08:00", dep_delay=9000, file_name="c.pb"
+        ),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:00", file_name="d.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 2
+    assert abs(median_sec - 480) <= 1
+
+
+def test_analyze_reconstructs_actual_headway_takes_the_schedule_from_the_latest_poll(pg_conn, agency_id, ch_client):
+    """A static reload can move an event's scheduled departure between two of
+    its polls. The event's time pairs the latest poll's delay with that same
+    poll's schedule, never an older one."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
+        _ch_headway_row("T2", day + timedelta(minutes=1), stop_id="s1", scheduled_time="08:10:00", file_name="c.pb"),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:00", file_name="d.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_sumsq_sec2 FROM agg_route_headway_daily WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        (sumsq_sec2,) = cur.fetchone()
+    # 08:00 -> 08:10 -> 08:16 is 600s then 360s; the older 08:08 would give 480s twice.
+    assert sumsq_sec2 == 600**2 + 360**2
+
+
 def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
     """A looping/branching route can visit the same physical stop_id twice
     within one trip, at two different stop_sequence values. The per-event
@@ -1300,13 +1389,7 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
-            "WHERE agency_id = %s AND route_code = 'R1'",
-            (agency_id,),
-        )
-        row = cur.fetchone()
+    row = _actual_headway_row(pg_conn, agency_id)
     assert row is not None
     median_sec, samples = row
     # 3 distinct events (08:00, 08:10, 08:20) -> 2 consecutive gaps. A buggy
@@ -1964,13 +2047,15 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
     aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
-    # The counts hold a row per delay value of every stop event, so the counts and
-    # the tables finalized from them may be read only by the store check's totals probe.
-    totals_reads = tuple(f"FROM {t} " for t in (ch_aggregates.COUNTS, *ch_aggregates.WHOLE_HISTORY_TABLES))
+    # The internal tables hold a row per delay value, or per observed pair, of every
+    # date, so they and the tables finalized from them may be read only by store
+    # checks' probes: a table's totals, or an internal table's reference figure.
+    totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
+    probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or any(r in s for r in aggregate_reads)
-        or (any(r in s for r in totals_reads) and s.startswith("SELECT count(), sum(samples), sum(sum_delay_sec)"))
+        or (any(r in s for r in totals_reads) and s.startswith(probes))
         for s in others
     ), others
 

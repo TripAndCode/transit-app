@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -56,6 +58,13 @@ def repository(tmp_path: Path) -> Path:
     return repo
 
 
+def age_worktrees(*paths: Path) -> None:
+    """Make each worktree look two days old: a fresh one is kept on purpose."""
+    two_days_ago = time.time() - 2 * 24 * 3600
+    for path in paths:
+        os.utime(path / ".git", (two_days_ago, two_days_ago))
+
+
 def facts(**overrides: object):
     """Build minimal facts for decision-table tests."""
 
@@ -81,6 +90,7 @@ def facts(**overrides: object):
     [
         ({"protected": True}, "protected"),
         ({"current": True}, "invoking worktree"),
+        ({"primary": True}, "primary worktree"),
         ({"pull_requests": (cleanup.PullRequest(10, "OPEN", "a" * 40),)}, "open PR #10"),
         (
             {"worktree": cleanup.Worktree(Path("/tmp/locked"), "feature", locked=True)},
@@ -156,6 +166,80 @@ def test_a_tip_that_heads_an_open_pr_under_another_name_is_retained():
 
     assert decision.action == "keep"
     assert "open PR #640" in decision.reason
+
+
+def test_a_fresh_worktree_with_no_commits_and_no_pr_is_retained():
+    """A worktree cut from main a moment ago has no commits of its own yet, so its
+    tip is already in the base; another session may be starting work there."""
+
+    decision = cleanup.decide_branch(
+        facts(ancestor_of_base=True, worktree=cleanup.Worktree(Path("/w"), "feature"), worktree_age_hours=0.5)
+    )
+
+    assert decision.action == "keep"
+    assert "under 24h" in decision.reason
+
+
+def test_a_fresh_worktree_at_a_tip_another_branchs_pr_merged_is_retained():
+    """main -> production sync PRs end with their head at main's tip, so a branch
+    cut from main right after one shares that tip without being that PR's work."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            head_prs=(cleanup.PullRequest(593, "MERGED", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+    assert "no PR of this branch" in decision.reason
+
+
+def test_a_fresh_worktree_reusing_an_old_branch_name_is_retained():
+    """A merged PR under the same name proves nothing about a new tip."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            pull_requests=(cleanup.PullRequest(1200, "MERGED", "b" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+
+
+def test_the_primary_checkout_has_no_creation_age(tmp_path: Path):
+    """The primary checkout's .git is a directory that ordinary git commands touch."""
+
+    (tmp_path / ".git").mkdir()
+    assert cleanup.worktree_age_hours(cleanup.Worktree(tmp_path, "main")) is None
+
+
+def test_a_day_old_worktree_with_no_commits_and_no_pr_is_deletable():
+    decision = cleanup.decide_branch(
+        facts(ancestor_of_base=True, worktree=cleanup.Worktree(Path("/w"), "feature"), worktree_age_hours=30)
+    )
+
+    assert decision.action == "delete"
+
+
+def test_a_fresh_worktree_of_a_merged_pr_is_deletable():
+    """A merged PR is the evidence that the work is done, however new the checkout."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            tree_matches_base=True,
+            worktree=cleanup.Worktree(Path("/w"), "feature"),
+            worktree_age_hours=0.5,
+            pull_requests=(cleanup.PullRequest(1336, "MERGED", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "delete"
 
 
 def test_a_base_tip_is_deletable_even_when_an_open_pr_is_headed_there():
@@ -281,6 +365,7 @@ def test_build_and_apply_plan_remove_only_clean_recoverable_state(
     git(repository, "branch", "stale-branch", "main")
     git(repository, "worktree", "add", "-b", "stale-worktree", str(clean_path), "main")
     git(repository, "worktree", "add", "-b", "dirty-worktree", str(dirty_path), "main")
+    age_worktrees(clean_path, dirty_path)
     (dirty_path / "notes.txt").write_text("do not discard\n", encoding="utf-8")
     git(repository, "switch", "-c", "unique-work")
     (repository / "tracked.txt").write_text("unique\n", encoding="utf-8")
@@ -325,6 +410,7 @@ def test_a_worktree_holding_ignored_work_is_kept_but_regenerable_files_are_not(
     planned, env_only, cached = tmp_path / "planned", tmp_path / "env-only", tmp_path / "cached"
     for branch, path in (("planned", planned), ("env-only", env_only), ("cached", cached)):
         git(repository, "worktree", "add", "-q", "-b", branch, str(path), "main")
+    age_worktrees(planned, env_only, cached)
     (planned / "docs" / "superpowers").mkdir(parents=True)
     (planned / "docs" / "superpowers" / "plan.md").write_text("plan\n", encoding="utf-8")
     (env_only / ".env").write_text("KEY=1\n", encoding="utf-8")
@@ -589,11 +675,88 @@ def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(
     assert "local tip differs" in feature.reason
 
 
+def test_a_merged_branch_in_the_primary_checkout_is_kept_when_run_from_a_linked_worktree(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Git refuses to remove the main working tree, so planning it would abort the apply midway."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "feat")
+
+    assert decision.action == "keep"
+    assert "primary worktree" in decision.reason
+
+
+def test_a_branch_checked_out_twice_is_kept_whichever_worktree_holds_the_primary(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`worktree add --force` can check one branch out twice; removing one copy leaves
+    the branch undeletable, and the apply would abort midway."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    forced = tmp_path / "forced"
+    git(repository, "worktree", "add", "--force", str(forced), "feat")
+    git(repository, "branch", "twice", "main")
+    one, two = tmp_path / "one", tmp_path / "two"
+    git(repository, "worktree", "add", str(one), "twice")
+    git(repository, "worktree", "add", "--force", str(two), "twice")
+    age_worktrees(forced, one, two)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    reasons = {d.branch: (d.action, d.reason) for d in plan}
+
+    assert reasons["feat"][0] == "keep"
+    assert "primary worktree" in reasons["feat"][1]
+    assert reasons["twice"][0] == "keep"
+    assert "more than one worktree" in reasons["twice"][1]
+
+
+def test_a_branch_named_like_a_tag_is_planned_under_its_own_name(repository: Path, monkeypatch: pytest.MonkeyPatch):
+    """`refname:short` writes such a branch as `heads/<name>`, which names no branch.
+
+    Deleting it removes the branch only; the tag of the same name stays."""
+
+    git(repository, "branch", "v1.0", "main")
+    git(repository, "tag", "v1.0", "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    assert {d.branch: d.action for d in plan}.get("v1.0") == "delete"
+
+    cleanup.apply_plan(repository, plan)
+    assert git(repository, "branch", "--list", "v1.0") == ""
+    assert git(repository, "tag", "--list", "v1.0") == "v1.0"
+
+
+def test_a_worktree_created_moments_ago_is_kept_in_the_plan(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A session that has just cut a branch from main has nothing committed yet."""
+
+    worktree_path = tmp_path / "just-started"
+    git(repository, "worktree", "add", "-q", "-b", "just-started", str(worktree_path), "main")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+
+    decision = next(d for d in plan if getattr(d, "branch", None) == "just-started")
+    assert decision.action == "keep"
+    assert "under 24h" in decision.reason
+
+
 def test_apply_aborts_if_a_worktree_becomes_dirty(repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The apply phase rechecks worktree state after displaying its plan."""
 
     worktree_path = tmp_path / "raced-tree"
     git(repository, "worktree", "add", "-b", "raced", str(worktree_path), "main")
+    age_worktrees(worktree_path)
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
     (worktree_path / "late.txt").write_text("appeared after planning\n", encoding="utf-8")
@@ -603,6 +766,45 @@ def test_apply_aborts_if_a_worktree_becomes_dirty(repository: Path, tmp_path: Pa
 
     assert worktree_path.exists()
     assert git(repository, "branch", "--list", "raced")
+
+
+def test_apply_aborts_if_the_branch_gains_a_second_checkout(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A forced second checkout after planning leaves the branch undeletable, so nothing goes."""
+
+    # The forced copy sorts after the planned one, so the planned one is the
+    # first porcelain match for the branch.
+    planned, forced = tmp_path / "a-planned-tree", tmp_path / "z-forced-tree"
+    git(repository, "worktree", "add", "-b", "raced", str(planned), "main")
+    age_worktrees(planned)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    git(repository, "worktree", "add", "--force", str(forced), "raced")
+
+    with pytest.raises(cleanup.CleanupError, match="worktree changed"):
+        cleanup.apply_plan(repository, plan)
+
+    assert planned.exists()
+    assert git(repository, "branch", "--list", "raced")
+
+
+def test_a_kept_branch_names_the_checkout_its_reason_is_about(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The dry run is what an operator reads, so a primary keep shows the primary's path."""
+
+    git(repository, "switch", "-c", "feat")
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", str(linked), "main")
+    git(repository, "worktree", "add", "--force", str(tmp_path / "forced"), "feat")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(linked, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "feat")
+
+    assert decision.worktree is not None
+    assert decision.worktree.path == repository.resolve()
 
 
 def test_apply_aborts_if_a_detached_worktree_moves(repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

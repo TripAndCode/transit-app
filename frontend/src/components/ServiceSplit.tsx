@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewDayType, OverviewServiceSplitDay, OverviewServiceSplitEntry } from "../api/types";
-import { FILTER_SEPARATOR, formatMinutes, formatNumber, formatShortDate, roundTenth } from "../utils/format";
+import { FILTER_SEPARATOR, fixedTenth, formatMinutes, formatNumber, formatShortDate, roundTenth } from "../utils/format";
 import type { LabelT } from "../utils/filterValueLabels";
 import { niceAxis } from "./charts/niceAxis";
 import { showsLabel } from "./analysis/axisLabels";
+import { DAY_TYPE_KEY } from "./dayTypeKey";
 
 type Props = {
   /** Every bucket the agency is split into, in display order. */
@@ -14,13 +15,6 @@ type Props = {
   daily?: OverviewServiceSplitDay[];
   variant?: "card" | "modal";
   onClick?: () => void;
-};
-
-const DAY_TYPE_KEY: Record<OverviewDayType, string> = {
-  weekday: "overview.service_split.type.weekday",
-  saturday: "overview.service_split.type.saturday",
-  sunday_holiday: "overview.service_split.type.sunday_holiday",
-  weekend_holiday: "overview.service_split.type.weekend_holiday",
 };
 
 /** A bucket whose mean is drawn and compared: it has data, and enough of it. */
@@ -235,7 +229,7 @@ function ServiceSplitDailyChart({
   const points = daily.map((d, i) => ({ x: toX(i), y: toY(d.avg_min), type: d.day_type }));
   const buildPath = (pts: { x: number; y: number }[]) =>
     pts
-      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${fixedTenth(p.x)},${fixedTenth(p.y)}`)
       .join(" ");
 
   const dateLabels = daily.map((d) => formatShortDate(d.date));
@@ -358,7 +352,7 @@ function ServiceSplitDailyChart({
             left: `${((DC_PAD_LEFT - 6) / DC_W) * 100}%`,
           }}
         >
-          {v.toFixed(1)}
+          {fixedTenth(v)}
         </span>
       ))}
       {xs.map((x, i) => {

@@ -7,6 +7,7 @@ import { AskLandingCards } from "./AskLandingCards";
 import { buildCardTemplates, needsRoute } from "../../components/askCardTemplates";
 
 const templates = buildCardTemplates();
+const routeName = (code: string) => `Route ${code}`;
 
 // buildSummary() output can contain regex metacharacters (e.g. the "?" that
 // ends a question card's summary), so escape before feeding it to RegExp —
@@ -25,6 +26,7 @@ function setup(overrides: { busy?: boolean } = {}) {
         templates={templates}
         onInstantSubmit={onInstantSubmit}
         onOpenChip={onOpenChip}
+        routeName={routeName}
         {...overrides}
       />
     </I18nextProvider>,
@@ -39,7 +41,7 @@ describe("AskLandingCards", () => {
     expect(screen.getByText(i18n.t("ask.landing.cards_title"))).toBeInTheDocument();
     const topDelayTpl = templates.find((t) => t.id === "top_delay")!;
     expect(
-      screen.getByText(new RegExp(escapeRegExp(topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n))))),
+      screen.getByText(new RegExp(escapeRegExp(topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n), routeName)))),
     ).toBeInTheDocument();
   });
 
@@ -58,7 +60,7 @@ describe("AskLandingCards", () => {
     const user = userEvent.setup();
     const { onInstantSubmit } = setup();
     const topDelayTpl = templates.find((t) => t.id === "top_delay")!;
-    const label = topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n));
+    const label = topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n), routeName);
     await user.click(screen.getByText(new RegExp(escapeRegExp(label))));
     expect(onInstantSubmit).toHaveBeenCalledTimes(1);
     expect(onInstantSubmit.mock.calls[0][0].id).toBe("top_delay");
@@ -78,7 +80,7 @@ describe("AskLandingCards", () => {
     const user = userEvent.setup();
     const { onInstantSubmit, onOpenChip } = setup({ busy: true });
     const topDelayTpl = templates.find((t) => t.id === "top_delay")!;
-    const cardLabel = topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n));
+    const cardLabel = topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n), routeName);
     const card = screen.getByText(new RegExp(escapeRegExp(cardLabel))).closest("button")!;
     expect(card).toBeDisabled();
     await user.click(card);

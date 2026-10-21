@@ -2,6 +2,7 @@
 comparison's shaping -- no DB, no network (see `pipeline.weather` and
 `pipeline.reports.weather` for the invariants exercised here)."""
 
+import http.client
 import json
 from datetime import date, datetime, timedelta, timezone
 
@@ -741,6 +742,37 @@ def test_fetch_block_accepts_a_real_sized_block(monkeypatch):
     payload, n_bytes = fetched
     assert len(payload) == 18
     assert n_bytes == len(_block_body(18))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        http.client.BadStatusLine("garbled"),
+        http.client.LineTooLong("header line"),
+        http.client.IncompleteRead(b"partial", 100),
+    ],
+    ids=["bad-status-line", "line-too-long", "incomplete-read"],
+)
+def test_fetch_block_reads_a_response_http_client_cannot_parse_as_not_ready(monkeypatch, error):
+    """These are http.client errors, not OSError, and urllib does not wrap them; one
+    garbled block must not abandon the station's remaining days."""
+    import pipeline.weather as weather
+
+    def _raise(url, *, timeout, max_bytes):
+        raise error
+
+    monkeypatch.setattr(weather, "safe_urlopen", _raise)
+
+    assert _fetch_block("99999", _DAY, 0, 1024) is None
+
+
+def test_fetch_block_reads_a_body_nested_past_the_recursion_limit_as_not_ready(monkeypatch):
+    """A small body can still nest deeply enough that json.loads raises RecursionError."""
+    import pipeline.weather as weather
+
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: _JSONResp(b"[" * 100_000))
+
+    assert _fetch_block("99999", _DAY, 0, 1024 * 1024) is None
 
 
 def test_fetch_block_rejects_a_mapping_that_exceeds_the_shape_cap(monkeypatch):

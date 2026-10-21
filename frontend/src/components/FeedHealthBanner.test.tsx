@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { FeedHealthBanner } from "./FeedHealthBanner";
 import * as hooks from "../api/hooks";
@@ -28,10 +28,6 @@ function renderBanner() {
   );
 }
 
-beforeEach(() => {
-  sessionStorage.clear();
-});
-
 // Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
 // max-width:640px query used by useTapToExpandBanner.
 function mockMatchMedia(matches: boolean) {
@@ -55,6 +51,8 @@ describe("FeedHealthBanner", () => {
     renderBanner();
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("1,906");
+    // scripts/capture_user_manual_screenshots.py hides the shell banners by this attribute.
+    expect(banner).toHaveAttribute("data-shell-banner");
   });
 
   it("renders the message as a single tappable line on a narrow viewport", () => {
@@ -87,5 +85,41 @@ describe("FeedHealthBanner", () => {
     renderBanner();
     await userEvent.click(screen.getByRole("button"));
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("FeedHealthBanner dismissal", () => {
+  function renderSwitchable() {
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/9"]}>
+        <Routes>
+          <Route
+            path="/:agencyId"
+            element={<><FeedHealthBanner /><Link to="/10">other agency</Link><Link to="/9">first agency</Link></>}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("keeps a dismissal to the agency it was dismissed for", async () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ clamp_count: 5 }) } as never);
+    renderSwitchable();
+    await userEvent.click(screen.getByRole("button"));
+    expect(screen.queryByRole("status")).toBeNull();
+    await userEvent.click(screen.getByRole("link", { name: "other agency" }));
+    expect(screen.getByRole("status")).toBeTruthy();
+    await userEvent.click(screen.getByRole("link", { name: "first agency" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("shows again once the page is loaded afresh", async () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ clamp_count: 5 }) } as never);
+    renderBanner();
+    await userEvent.click(screen.getByRole("button"));
+    expect(screen.queryByRole("status")).toBeNull();
+    cleanup();
+    renderBanner();
+    expect(screen.getByRole("status")).toBeTruthy();
   });
 });

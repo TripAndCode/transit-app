@@ -24,6 +24,7 @@ from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_loc
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
+from pipeline.day_types import DayType
 from pipeline.flags import aflag
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
@@ -45,7 +46,7 @@ from pipeline.reports import (
     compute_delay_certificate,
     compute_dow_ranking,
     compute_dwell_run_decomposition,
-    compute_headway_quality,
+    compute_headway_quality_report,
     compute_hourly_heatmap,
     compute_on_time,
     compute_performance_standards,
@@ -120,7 +121,10 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
             "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
             "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
             "AND service_date > now()::date AND service_date <= now()::date + $3::int "
-            "AND origin_date >= now()::date - $4::int",
+            "AND origin_date >= now()::date - $4::int "
+            # A run starting after midnight of its service day keeps an hour of
+            # 24 or more. No band covers it, and the baseline leaves it out too.
+            "AND hour < 24",
             agency_id,
             route_code,
             _ML_HORIZON_DAYS,
@@ -255,8 +259,8 @@ async def list_reports(
 
 class HeadwayQualityRow(BaseModel):
     """One high-frequency route's pooled Excess Waiting Time / coefficient of
-    variation / long-gap rate over the request's range — see
-    ``pipeline.reports.headway_quality.compute_headway_quality``.
+    variation / long-gap rate over the request's range, on the days of its
+    ``day_type`` — see ``pipeline.reports.headway_quality.compute_headway_quality_report``.
 
     ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
     nullable together: a route can appear here (it's classified
@@ -272,6 +276,8 @@ class HeadwayQualityRow(BaseModel):
     cov: float | None
     long_gap_rate: float | None
     samples: int
+    # The class of day pooled (the route's dominant timetable's), or None for every day.
+    day_type: DayType | None = None
 
 
 class HeadwayQualityResponse(BaseModel):
@@ -280,6 +286,8 @@ class HeadwayQualityResponse(BaseModel):
     (not instead of) the ``on_time`` report for the same range."""
 
     rows: list[HeadwayQualityRow]
+    # High-frequency routes with data in range, none of it on a day of their class.
+    routes_off_timetable: int = 0
     ctx: ReportCtx
     scope_applied: dict[str, bool]
 
@@ -299,9 +307,12 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
-    rows = await compute_headway_quality(agency_id, ctx, conn)
+    rows, off_timetable = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
-        rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx), scope_applied=_HEADWAY_SCOPE
+        rows=[HeadwayQualityRow(**r) for r in rows],
+        routes_off_timetable=off_timetable,
+        ctx=_report_ctx(ctx),
+        scope_applied=_HEADWAY_SCOPE,
     )
 
 
@@ -1027,11 +1038,13 @@ async def get_report(
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
-        rows, rows_total = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
+        # The CSV is Japanese-only, its rows' day markers and its preamble alike,
+        # matching council_summary's CSV branch and format_definition_csv_line.
+        rows, rows_total = await compute_delay_certificate(
+            agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n, locale="ja" if format == "csv" else locale
+        )
         text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale)
         if format == "csv":
-            # Japanese-only preamble, matching council_summary's CSV branch
-            # and format_definition_csv_line's existing convention.
             footnotes = format_delay_certificate_footnotes(threshold, len(rows), rows_total, locale="ja")
             return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
         return ReportResponse(

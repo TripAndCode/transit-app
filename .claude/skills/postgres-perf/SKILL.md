@@ -31,10 +31,10 @@ become Nullable.
   `pipeline/db.py::build_dedup_ch_sql`, streamed in blocks (not `.query()`, which
   buffers the whole result in memory, scaling with the agency's row count), and
   every builder reads that temp table instead of re-scanning ClickHouse.
-  Exception: `agg_stop_routes` reads a separate unfiltered ClickHouse scan
-  (`_analyze_raw_keys`) — `_analyze_deduped` is pre-filtered by the delay clamp
-  below, which would silently drop stops whose every observation was
-  NULL/implausible delay (a real, non-trivial share of keys).
+  Exception: `agg_stop_routes` is finalized in ClickHouse from `stop_route_days`,
+  which reads every `updates` row rather than the dedup — the dedup is
+  pre-filtered by the delay clamp below, which would silently drop stops whose
+  every observation was NULL/implausible delay (a real, non-trivial share of keys).
 - Data-quality clamp lives in `build_dedup_ch_sql` (`MAX_PLAUSIBLE_DELAY_SEC`,
   120min): frozen/stale-feed delay spikes (e.g. 976min) are dropped before any
   averaging, so they can't skew means/counts on any surface.

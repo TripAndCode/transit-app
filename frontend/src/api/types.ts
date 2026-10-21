@@ -442,11 +442,15 @@ type HeadwayQualityRow = {
   cov: number | null;
   long_gap_rate: number | null;
   samples: number;
+  /** The class of day pooled, its main timetable's; null when every day is. */
+  day_type?: OverviewDayType | null;
 };
 
 export type HeadwayQualityResponse = {
   scope_applied?: ScopeApplied;
   rows: HeadwayQualityRow[];
+  /** Routes with data in range but none of it on a day of their main timetable. */
+  routes_off_timetable?: number;
   ctx: ResponseCtx;
 };
 

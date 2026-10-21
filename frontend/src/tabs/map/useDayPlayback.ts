@@ -16,12 +16,15 @@ export type PlaybackController = {
    *  and the rail offers stepping instead. */
   steppingOnly: boolean;
   loading: boolean;
+  /** Why no day could load. A failed refetch of a day already loaded keeps that
+   *  day, so it reports no failure. */
   error: unknown;
   setIndex: (index: number) => void;
   step: (delta: number) => void;
   toggle: () => void;
   pause: () => void;
   cycleSpeed: () => void;
+  retry: () => void;
 };
 
 /** How often the clock re-reads the playhead. Well inside one frame's dwell,
@@ -90,7 +93,7 @@ export function useDayPlayback(
     speed,
     steppingOnly,
     loading: query.isLoading,
-    error: query.error,
+    error: query.data === undefined ? query.error : null,
     setIndex: (next) => seek(clampFrameIndex(next, frameCount)),
     step: (delta) => {
       setPlaying(false);
@@ -107,5 +110,6 @@ export function useDayPlayback(
       originRef.current = performance.now() - (safeIndex * FRAME_MS) / next;
       setSpeed(next);
     },
+    retry: () => void query.refetch(),
   };
 }

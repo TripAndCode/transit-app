@@ -32,6 +32,12 @@ _ALLTIME_COLUMNS = (
     "route_code text, service_type text, scheduled_time time, trip_id text, date date, stop_sequence int, dep_delay int"
 )
 _ALLTIME_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
+# agg_stop_routes' key scan: every routed `updates` row, delay or not, loaded into _analyze_raw_keys.
+_RAW_KEYS_SQL = (
+    "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
+    "WHERE agency_id = {agency_id:UInt16} AND route_code IS NOT NULL"
+)
+_RAW_KEYS_COLUMNS = "route_code text, trip_id text, stop_sequence int"
 # agg_stop_daily's and agg_route_stop_daily's builders read their band CASE through this name.
 band_case = time_band_case_sql("d.scheduled_time")
 # agg_route_stats's builder read its two thresholds through these names.
@@ -46,6 +52,16 @@ _BUCKET_EXPR = (
 _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
 
 LEGACY_SQL = {
+    "agg_stop_routes": """
+                        SELECT %(agency_id)s, sst.stop_id,
+                               string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
+                        FROM _analyze_raw_keys k
+                        JOIN static_stop_times sst
+                          ON sst.agency_id = %(agency_id)s
+                         AND sst.trip_id = k.trip_id
+                         AND sst.stop_sequence = k.stop_sequence
+                        GROUP BY sst.stop_id
+                    """,
     "agg_route_daily_dist": f"""
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL),
             bucketed AS (
@@ -238,21 +254,22 @@ def legacy_rows(conn, ch_client, agency_id: int, table: str) -> list[str]:
     """
     columns = ", ".join(ch_aggregates.COLUMNS[table])
     placeholders = ", ".join(["%s"] * len(ch_aggregates.COLUMNS[table]))
-    alltime = table in _ALLTIME_TABLES
+    if table == "agg_stop_routes":
+        load = {"table": "_analyze_raw_keys", "columns": _RAW_KEYS_COLUMNS, "ch_sql": _RAW_KEYS_SQL}
+    elif table in _ALLTIME_TABLES:
+        load = {
+            "table": "_analyze_alltime",
+            "columns": _ALLTIME_COLUMNS,
+            "ch_sql": build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL"),
+        }
+    else:
+        load = {
+            "table": "_analyze_deduped",
+            "columns": _DEDUPED_COLUMNS,
+            "ch_sql": build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True),
+        }
     with conn.cursor() as cur:
-        _load_temp_table(
-            cur,
-            ch_client,
-            table="_analyze_alltime" if alltime else "_analyze_deduped",
-            columns=_ALLTIME_COLUMNS if alltime else _DEDUPED_COLUMNS,
-            ch_sql=(
-                build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL")
-                if alltime
-                else build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True)
-            ),
-            parameters={"agency_id": agency_id},
-            label="parity",
-        )
+        _load_temp_table(cur, ch_client, **load, parameters={"agency_id": agency_id}, label="parity")
         cur.execute(LEGACY_SQL[table], {"agency_id": agency_id})
         rows = cur.fetchall()
         cur.execute(f"CREATE TEMP TABLE _parity_{table} (LIKE {table}) ON COMMIT DROP")

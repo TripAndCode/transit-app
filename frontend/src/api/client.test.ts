@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
 import i18n from "../i18n";
-import { ApiError, REQUEST_TIMEOUT_MS, apiGet, apiPatch, formatApiError, isAggregateNotReady } from "./client";
+import { ApiError, REQUEST_TIMEOUT_MS, apiGet, apiPatch, apiUrl, formatApiError, isAggregateNotReady } from "./client";
 import { classifyError } from "./errorClass";
 
 describe("isAggregateNotReady", () => {
@@ -229,5 +229,31 @@ describe("formatApiError", () => {
 
   it("keeps a non-API error's own message", () => {
     expect(formatApiError(new Error("boom"))).toBe("boom");
+  });
+});
+
+describe("apiUrl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("puts a path on the API's origin when VITE_API_BASE_URL names one", () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test");
+    expect(apiUrl("/api/me/export")).toBe("https://api.example.test/api/me/export");
+  });
+
+  it("leaves a path on the page's own origin when the API shares it", () => {
+    vi.stubEnv("VITE_API_BASE_URL", "");
+    expect(apiUrl("/api/me/export")).toBe("/api/me/export");
+  });
+
+  it("is where every request goes", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    await apiGet("/api/agencies");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/agencies");
   });
 });

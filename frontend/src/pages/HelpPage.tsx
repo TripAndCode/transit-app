@@ -9,6 +9,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
 import { PageHeader } from "../components/ui/PageHeader";
 import { coalesceToFrame } from "../utils/frameCoalesce";
+import { searchKey } from "../utils/searchText";
 
 const MANUAL_BASE = "/user-manual";
 
@@ -160,13 +161,13 @@ export function HelpPage() {
   // Client-side filter over the loaded manual's own sections -- title and
   // body text, in whichever locale is currently fetched (see `fetchManual`
   // above; only one locale's markdown is ever in memory at a time).
-  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const normalizedQuery = searchKey(searchQuery);
   const isSearching = normalizedQuery !== "";
   const matchedIndices = isSearching
     ? navIndices.filter(
         (i) =>
-          sections[i].title.toLowerCase().includes(normalizedQuery) ||
-          sections[i].markdown.toLowerCase().includes(normalizedQuery),
+          searchKey(sections[i].title).includes(normalizedQuery) ||
+          searchKey(sections[i].markdown).includes(normalizedQuery),
       )
     : navIndices;
   const hasMatches = matchedIndices.length > 0;

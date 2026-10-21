@@ -15,8 +15,9 @@
 #   4. sudo systemctl daemon-reload && sudo systemctl enable --now ops-alerts.timer
 # Inspect: systemctl status ops-alerts.timer ops-alerts.service ; journalctl -u ops-alerts.service
 #
-# Exit code 1 (an anomaly notification was produced) makes this run show as a
-# *failed* systemd unit -- `systemctl status`/`journalctl -p err` surface it
+# Exit code 1 (a component is bad or still carries an unrecovered alert, or the
+# monitor went silent) makes this run show as a *failed* systemd unit for as
+# long as that lasts -- `systemctl status`/`journalctl -p err` surface it
 # without any extra plumbing. `scripts/ops_alerts.py` also delivers the same
 # outcome directly to OPS_ALERT_PING_URL when configured (see that module's
 # docstring), so an OnFailure= unit is not required for basic notification.

@@ -34,6 +34,7 @@ import { ToastProvider } from "./components/ui/Toast";
 import { ApiKeyRejectedNotice } from "./components/ApiKeyRejectedNotice";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
+import { BannerDismissalsProvider } from "./components/BannerDismissals";
 
 // Tabs and pages are code-split per route — MapTab alone pulls in
 // maplibre-gl (~800 KB), which nothing else needs. The tab loaders live in
@@ -192,7 +193,9 @@ void i18nReady.then((stringsLoaded) => {
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
             <ApiKeyRejectedNotice />
-            <RouterProvider router={router} />
+            <BannerDismissalsProvider>
+              <RouterProvider router={router} />
+            </BannerDismissalsProvider>
           </ToastProvider>
         </QueryClientProvider>
       ) : (

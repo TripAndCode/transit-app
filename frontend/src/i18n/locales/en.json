@@ -50,7 +50,7 @@
     "subtitle_reports": "A summary for a council or board, and proof of a late departure."
   },
   "sheet": {
-    "handle": "Sheet handle"
+    "handle": "Resize the sheet"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
@@ -659,6 +659,8 @@
       "progress_disclosure": "How the live reports progressed",
       "progress_loading": "Loading report history…",
       "no_progress": "No report history is available for this trip yet",
+      "progress_error": "Couldn't load this trip's report history.",
+      "live_error": "Couldn't load the trips reporting now.",
       "select_route": "Select a route or a trip on the map to see its details.",
       "choose_route": "Choose an active route",
       "choose_route_hint": "Select a route to see its directions and concurrent trips.",
@@ -688,6 +690,7 @@
       "exit": "Leave playback and return to current observations",
       "loading": "Loading the day",
       "empty": "No observations for this day",
+      "error": "Couldn't load this day's observations",
       "toggle_on": "Play the day",
       "toggle_off": "Back to current observations"
     }
@@ -962,17 +965,17 @@
       },
       "route_trend": {
         "title": "Route delay trend",
-        "summary": "Route {{route}} — {{gran}} buckets",
+        "summary": "{{route}} — {{gran}} buckets",
         "placeholder": "Select a route"
       },
       "weekday_vs_weekend": {
         "title": "Weekday vs Weekend",
-        "summary": "Route {{route}}: weekday vs weekend comparison",
+        "summary": "{{route}}: weekday vs weekend comparison",
         "placeholder": "Select a route"
       },
       "route_overview": {
         "title": "Route overview",
-        "summary": "Route {{route}} overview",
+        "summary": "Overview of {{route}}",
         "placeholder": "Select a route"
       }
     },
@@ -1058,6 +1061,7 @@
       "date_filter_aria": "Filter to {{date}}",
       "tooltip_hour": "{{hour}}:00 · avg",
       "tooltip_metrics": "{{min}} · {{count}} obs.",
+      "cell_empty_aria": "{{date}} {{hour}}:00 · no data",
       "ramp_max": "{{min}} min and over",
       "severe_outline": "outlined = {{min}} min and over"
     },
@@ -1123,6 +1127,10 @@
       "title": "Headway quality",
       "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
       "empty": "No high-frequency route has enough data in this range yet.",
+      "day_type_note": "Each route is compared only on the days that run its main timetable, named beside it.",
+      "empty_off_timetable": "There are high-frequency routes, but none of them runs its main timetable on the selected days.",
+      "some_off_timetable_one": "{{count}} more high-frequency route runs no day of its main timetable on the selected days, so it is left out.",
+      "some_off_timetable_other": "{{count}} more high-frequency routes run no day of their main timetable on the selected days, so they are left out.",
       "col": {
         "ewt": "Excess wait",
         "cov": "Spacing CoV",

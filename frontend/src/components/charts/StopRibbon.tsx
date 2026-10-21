@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { segmentColor, type StopRibbonSegment } from "./mareyLayout";
+import { fixedTenth } from "../../utils/format";
 
 const RIBBON_WIDTH = 780;
 
@@ -42,7 +43,7 @@ export function StopRibbon({
           <title>
             {segment.delay_sec == null
               ? `${segment.stop_name}: ${t("missing")}`
-              : `${segment.stop_name}: ${(segment.delay_sec / 60).toFixed(1)} ${t("minutes")}`}
+              : `${segment.stop_name}: ${fixedTenth((segment.delay_sec / 60))} ${t("minutes")}`}
           </title>
         </rect>
       ))}

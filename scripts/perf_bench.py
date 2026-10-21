@@ -2,12 +2,14 @@
 
 Usage:
     poetry run python scripts/perf_bench.py --agency 1 [--base-url http://localhost:8000]
-        [--runs 10] [--cookie "session=..."] [--markdown]
+        [--runs 10] [--cookie "sid=<admin session id>"] [--markdown]
 
 Per target: POST /api/debug/perf/reset (clears perf registry + lru caches)
 -> 1 cold request -> N warm requests -> report cold ms / warm p50 / warm p95.
-Read-only traffic; safe against the dev DB. Requires PERF_DEBUG_ENABLED
-(default on) on the server.
+Read-only traffic; safe against the dev DB. Requires PERF_DEBUG_ENABLED on the
+server (off by default), and ``--cookie`` must be an admin session: the reset
+is admin-only and CSRF-guarded. The script sends ``--base-url``'s origin with
+it, which the server accepts only when PUBLIC_BASE_URL or CORS_ORIGINS lists it.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import argparse
 import statistics
 import sys
 import time
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -43,13 +46,42 @@ def _request_ms(client: httpx.Client, url: str) -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
+def _origin(base_url: str) -> str:
+    """The Origin a browser on ``base_url`` would send: scheme and host, no path."""
+    parts = urlsplit(base_url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+_ORIGIN_REFUSALS = frozenset({"origin required", "cross-origin request denied"})
+
+
+def _reset_refusal(response: httpx.Response) -> str:
+    """Why the reset was refused. A 403 comes from either the admin check or the
+    origin check, so the server's ``detail`` tells the two apart."""
+    if response.status_code == 404:
+        return (
+            "the perf debug surface is off: set PERF_DEBUG_ENABLED=true on the server, or clear a "
+            "perf_debug_enabled override in feature_flags, which wins over it"
+        )
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if response.status_code == 403 and detail in _ORIGIN_REFUSALS:
+        return "the server refused --base-url's origin: list it in PUBLIC_BASE_URL or CORS_ORIGINS"
+    if response.status_code in (401, 403):
+        return "the reset needs an admin session: pass --cookie with one"
+    return "unexpected server error"
+
+
 def main() -> int:
     """Run the bench against every TARGET and print a cold/p50/p95 table."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--agency", type=int, default=1)
     ap.add_argument("--runs", type=int, default=10)
-    ap.add_argument("--cookie", default=None, help="optional Cookie header for authed servers")
+    ap.add_argument("--cookie", default=None, help="Cookie header carrying an admin session (the reset needs one)")
     ap.add_argument("--markdown", action="store_true", help="emit a GFM table")
     args = ap.parse_args()
 
@@ -59,12 +91,10 @@ def main() -> int:
     with httpx.Client(base_url=args.base_url, headers=headers, timeout=60.0) as client:
         for name, path in TARGETS:
             url = path.format(agency=args.agency)
-            reset = client.post("/api/debug/perf/reset")
+            reset = client.post("/api/debug/perf/reset", headers={"Origin": _origin(args.base_url)})
             if reset.status_code != 200:
-                print(
-                    f"FATAL: reset returned {reset.status_code} — is the server up with PERF_DEBUG_ENABLED?",
-                    file=sys.stderr,
-                )
+                reason = _reset_refusal(reset)
+                print(f"FATAL: reset returned {reset.status_code} — {reason}", file=sys.stderr)
                 return 1
             try:
                 cold = _request_ms(client, url)

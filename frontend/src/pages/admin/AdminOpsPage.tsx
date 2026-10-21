@@ -2,11 +2,12 @@ import { useTranslation } from "react-i18next";
 import { useAdminOps, type AgencyFreshnessItem } from "../../api/admin";
 import { StatusChip } from "./adminControls";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { fixedTenth } from "../../utils/format";
 
 function formatAge(t: ReturnType<typeof useTranslation>["t"], ageHours: number | null): string {
   if (ageHours === null) return t("admin.ops.unknown");
   if (ageHours < 1) return t("admin.ops.age_minutes", { m: Math.round(ageHours * 60) });
-  return t("admin.ops.age_hours", { h: ageHours.toFixed(1) });
+  return t("admin.ops.age_hours", { h: fixedTenth(ageHours) });
 }
 
 function FreshnessChip({ row, t }: { row: AgencyFreshnessItem; t: ReturnType<typeof useTranslation>["t"] }) {

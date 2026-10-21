@@ -18,7 +18,14 @@ from pipeline.histogram import N_BUCKETS, bucketize
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, run_pattern
-from tests.pipeline.ch_agg_helpers import JST, edge_rows, histogram_edge_rows, seed_schedule, whole_history_rows
+from tests.pipeline.ch_agg_helpers import (
+    JST,
+    edge_rows,
+    histogram_edge_rows,
+    seed_schedule,
+    update_row,
+    whole_history_rows,
+)
 from tests.pipeline.ch_parity import legacy_rows, stored_rows
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -160,3 +167,20 @@ def test_route_daily_dist_bins_the_bucket_edges_like_postgres(pg_conn, agency_id
         assert on_time == sum(1 for delay in kept if delay <= 60)
         assert late5 == sum(1 for delay in kept if delay > 300)
         assert list(hist) == expected
+
+
+def test_stop_routes_lists_routes_in_postgres_order(tmp_path, pg_conn, agency_id, ch_client):
+    """en_US ignores the space and puts lower case first; byte order does neither."""
+    run_pattern(ALL_PATTERNS[0](), tmp_path, pg_conn, agency_id, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT trip_id, stop_sequence FROM static_stop_times WHERE agency_id = %s LIMIT 1", (agency_id,))
+        trip_id, sequence = cur.fetchone()
+    day = datetime(2026, 9, 14, 8, 0)
+    codes = ["2507 9", "25071", "R1", "r1"]
+    rows = [
+        update_row(day, trip_id, 30, route_code=code, stop_sequence=sequence, file_name=f"o{i}.pb")
+        for i, code in enumerate(codes)
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+    _assert_parity(pg_conn, ch_client, agency_id, static=True)

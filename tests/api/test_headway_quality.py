@@ -111,6 +111,7 @@ async def test_headway_quality_even_fixture_yields_zero_ewt_and_cov(headway_clie
     assert even["cov"] == pytest.approx(0.0, abs=1e-6)
     assert even["long_gap_rate"] == pytest.approx(0.0, abs=1e-6)
     assert even["samples"] == 4
+    assert even["day_type"] is None  # no calendar loaded: every day is pooled
 
 
 async def test_headway_quality_bunched_fixture_yields_positive_ewt_and_long_gap_rate(headway_client):
@@ -213,3 +214,64 @@ async def test_headway_quality_unconfirmed_static_join_agency_returns_no_rows(he
     r = await client.get(f"/api/{unconfirmed_aid}/headway_quality?from=2026-04-01&to=2026-04-02")
     assert r.status_code == 200
     assert r.json()["rows"] == []
+
+
+async def _seed_weekday_dominant_route(aid: int) -> None:
+    """R_DAY runs every 10 min on its weekday (dominant) timetable and every 20 min
+    at weekends, exactly to schedule on both days seeded below."""
+    from api.main import app
+
+    pool = app.state.pool
+    await pool.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'R_DAY')", aid)
+    await pool.executemany(
+        "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1, $2, 'R_DAY', $3)",
+        [(aid, f"wk{i}", "WK") for i in range(6)] + [(aid, f"we{i}", "WE") for i in range(3)],
+    )
+    await pool.executemany(
+        "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+        "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $3, $3, $3, $3, $4, $4, $5, $6, $7)",
+        [
+            (aid, "WK", True, False, date(2026, 1, 1), date(2026, 12, 31), 6),
+            (aid, "WE", False, True, date(2026, 1, 1), date(2026, 12, 31), 3),
+        ],
+    )
+    await pool.execute(
+        "INSERT INTO agg_route_headway (agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
+        "is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_DAY', 600.0, 10, TRUE, 300.0)",
+        aid,
+    )
+    await pool.executemany(
+        "INSERT INTO agg_route_headway_daily (agency_id, route_code, date, actual_headway_median_sec, "
+        "actual_samples, actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count) "
+        "VALUES ($1, 'R_DAY', $2, $3, 2, $4, $5, $6)",
+        [
+            (aid, date(2026, 4, 1), 600.0, 1200.0, 720000.0, 0),  # Wednesday: [600, 600]
+            (aid, date(2026, 4, 4), 1200.0, 2400.0, 2880000.0, 2),  # Saturday: [1200, 1200], each past 1.75 x 600
+        ],
+    )
+
+
+async def test_a_weekend_on_its_own_timetable_does_not_read_as_late_against_the_weekday_one(headway_client):
+    client, aid = headway_client
+    await _seed_weekday_dominant_route(aid)
+
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-05")
+
+    assert r.status_code == 200
+    row = next(row for row in r.json()["rows"] if row["route_code"] == "R_DAY")
+    assert row["ewt_sec"] == pytest.approx(0.0, abs=1e-6)
+    assert row["long_gap_rate"] == pytest.approx(0.0, abs=1e-6)
+    assert row["samples"] == 2
+    assert row["day_type"] == "weekday"
+
+
+async def test_a_route_with_no_day_of_its_timetable_in_range_is_counted_off_timetable(headway_client):
+    client, aid = headway_client
+    await _seed_weekday_dominant_route(aid)
+
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-05&dow=weekend")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert "R_DAY" not in {row["route_code"] for row in body["rows"]}
+    assert body["routes_off_timetable"] == 1
