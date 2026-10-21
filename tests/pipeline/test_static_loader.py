@@ -308,3 +308,28 @@ def test_load_static_clears_the_calendar_when_a_feed_drops_calendar_txt(pg_conn,
     with pg_conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM static_calendar WHERE agency_id = %s", (agency_id,))
         assert cur.fetchone()[0] == 0
+
+
+def test_load_static_clears_calendar_dates_when_a_feed_drops_calendar_dates_txt(pg_conn, agency_id, tmp_path):
+    """A feed without calendar_dates.txt leaves no earlier feed's exceptions
+    behind to add or remove a reused service_id on this feed's dates."""
+    calendar = (
+        "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+        "WD,1,1,1,1,1,0,0,20260401,20270331\n"
+    )
+    with_dates = tmp_path / "with_dates_static.zip"
+    with zipfile.ZipFile(with_dates, "w") as zf:
+        zf.writestr("calendar.txt", calendar)
+        zf.writestr("calendar_dates.txt", "service_id,date,exception_type\nWD,20260429,2\nWD,20260502,1\n")
+    load_static(str(with_dates), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_calendar_dates WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 2
+
+    without_dates = tmp_path / "without_dates_static.zip"
+    with zipfile.ZipFile(without_dates, "w") as zf:
+        zf.writestr("calendar.txt", calendar)
+    load_static(str(without_dates), agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_calendar_dates WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 0
