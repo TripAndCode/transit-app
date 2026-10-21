@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, useNavigate, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
+import { blockStorage } from "../test/blockStorage";
 
 const useSessionMock = vi.fn();
 vi.mock("./auth", () => ({
@@ -76,6 +77,15 @@ describe("useAnonymousFilterPersistence", () => {
     time.unmount();
     renderProbe(1, "/agencies/1/routes");
     expect(screen.getByTestId("params")).toHaveTextContent("dow=weekend");
+  });
+
+  it("leaves the URL alone where site data is blocked", () => {
+    blockStorage("localStorage");
+    const first = renderProbe(1, "/agencies/1/routes?dow=weekend");
+    expect(screen.getByTestId("params")).toHaveTextContent("dow=weekend");
+    first.unmount();
+    renderProbe(1, "/agencies/1/routes");
+    expect(screen.getByTestId("params")).toHaveTextContent("");
   });
 
   it("leaves a page under a screen alone, such as a route dossier", () => {

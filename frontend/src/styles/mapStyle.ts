@@ -1,4 +1,5 @@
 import type { StyleSpecification } from "maplibre-gl";
+import { readStorage, writeStorage } from "../utils/safeStorage";
 
 export type MapStyleId = "osm" | "pale" | "std" | "photo";
 
@@ -121,22 +122,14 @@ const PREF_KEY = "transit.mapStyle";
 
 /** Read the persisted style id, validated against the catalog. */
 export function readMapStylePref(): MapStyleId {
-  try {
-    const v = localStorage.getItem(PREF_KEY);
-    if (v && MAP_STYLES.some((s) => s.id === v)) return v as MapStyleId;
-  } catch {
-    /* localStorage unavailable — fall through */
-  }
+  const v = readStorage("localStorage", PREF_KEY);
+  if (v && MAP_STYLES.some((s) => s.id === v)) return v as MapStyleId;
   return DEFAULT_MAP_STYLE_ID;
 }
 
 /** Persist the chosen style id. No-ops if localStorage is unavailable. */
 export function writeMapStylePref(id: MapStyleId): void {
-  try {
-    localStorage.setItem(PREF_KEY, id);
-  } catch {
-    /* ignore */
-  }
+  writeStorage("localStorage", PREF_KEY, id);
 }
 
 /** Slider ceiling for the basemap dim (`useBasemapDim`'s `dimAmount`): a
@@ -153,22 +146,14 @@ const DIM_PREF_KEY = "transit.mapDim";
 
 /** Read the persisted basemap-dim amount, clamped to [0, MAX_DIM_AMOUNT]. */
 export function readMapDimPref(): number {
-  try {
-    const v = localStorage.getItem(DIM_PREF_KEY);
-    const n = v == null ? NaN : Number(v);
-    if (Number.isFinite(n)) return Math.min(Math.max(n, 0), MAX_DIM_AMOUNT);
-  } catch {
-    /* localStorage unavailable — fall through */
-  }
+  const v = readStorage("localStorage", DIM_PREF_KEY);
+  const n = v == null ? NaN : Number(v);
+  if (Number.isFinite(n)) return Math.min(Math.max(n, 0), MAX_DIM_AMOUNT);
   return DEFAULT_DIM_AMOUNT;
 }
 
 /** Persist the chosen basemap-dim amount, clamped to [0, MAX_DIM_AMOUNT].
  *  No-ops if localStorage is unavailable. */
 export function writeMapDimPref(amount: number): void {
-  try {
-    localStorage.setItem(DIM_PREF_KEY, String(Math.min(Math.max(amount, 0), MAX_DIM_AMOUNT)));
-  } catch {
-    /* ignore */
-  }
+  writeStorage("localStorage", DIM_PREF_KEY, String(Math.min(Math.max(amount, 0), MAX_DIM_AMOUNT)));
 }

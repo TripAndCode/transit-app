@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { withStorage, writeStorage } from "../utils/safeStorage";
 
 /** The routes a visitor pins for each agency, listed on the rail. Kept per
  *  browser (localStorage) rather than per account, so pins work the same
@@ -33,12 +34,8 @@ function parse(raw: string | null): Pins {
 }
 
 function snapshot(): Pins {
-  let raw: string | null;
-  try {
-    raw = localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return pins;
-  }
+  // A refused read keeps the page's own pins rather than reading them as none.
+  const raw = withStorage("localStorage", (storage) => storage.getItem(STORAGE_KEY), pinsRaw);
   if (raw !== pinsRaw) {
     pinsRaw = raw;
     pins = parse(raw);
@@ -71,13 +68,8 @@ export function togglePinnedRoute(agencyId: string | number, code: string): void
   else if (list.length < MAX_PINNED_ROUTES) next = [...list, code];
   else return;
   pins = { ...current, [key]: next };
-  try {
-    const raw = JSON.stringify(pins);
-    localStorage.setItem(STORAGE_KEY, raw);
-    pinsRaw = raw;
-  } catch {
-    /* localStorage unavailable: keep the pins for this page only. */
-  }
+  const raw = JSON.stringify(pins);
+  if (writeStorage("localStorage", STORAGE_KEY, raw)) pinsRaw = raw;
   notify();
 }
 

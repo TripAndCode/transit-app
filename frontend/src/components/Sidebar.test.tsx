@@ -13,6 +13,7 @@ import * as config from "../api/config";
 import { rememberScreenScope } from "../api/screenScope";
 import * as hooks from "../api/hooks";
 import { togglePinnedRoute } from "../api/pinnedRoutes";
+import { blockStorage } from "../test/blockStorage";
 
 const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
 
@@ -199,6 +200,16 @@ describe("Sidebar", () => {
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
       expect(screen.getByText("Live")).toBeTruthy();
+    });
+
+    it("renders expanded, and still collapses for the page, where site data is blocked", async () => {
+      blockStorage("localStorage");
+      blockStorage("sessionStorage");
+      const user = userEvent.setup();
+      renderSidebar();
+      expect(screen.getByText("Live")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.queryByText("Live")).toBeNull();
     });
 
     it("persists the collapsed state to localStorage and restores it on remount", () => {

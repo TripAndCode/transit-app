@@ -39,6 +39,15 @@ const shadowBindingSelector = [
   .map((position) => `${position}[name=/^(window|document)$/]`)
   .join(', ')
 
+// Web storage throws on every access where site data is blocked, and on a
+// write once the store is full. src/utils/safeStorage.ts catches both, so a
+// blocked store reads as empty instead of failing a render or a request.
+const storageMessage =
+  'Do not touch web storage directly — use readStorage/writeStorage/removeStorage/withStorage from src/utils/safeStorage.ts, which survive a browser that blocks site data.'
+const storageProperties = ['window', 'globalThis'].flatMap((object) =>
+  ['localStorage', 'sessionStorage'].map((property) => ({ object, property, message: storageMessage })),
+)
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -227,8 +236,19 @@ export default tseslint.config(
           property: 'memo',
           message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
         },
+        ...storageProperties,
+      ],
+      'no-restricted-globals': [
+        'error',
+        ...['localStorage', 'sessionStorage'].map((name) => ({ name, message: storageMessage })),
       ],
     },
+  },
+  {
+    // The helper is the one place that touches web storage; tests seed and
+    // inspect it directly.
+    files: ['src/utils/safeStorage.ts', 'src/**/*.test.{ts,tsx}', 'src/test/**'],
+    rules: { 'no-restricted-globals': 'off' },
   },
   {
     // The entry module bootstraps the app through createRoot and exports

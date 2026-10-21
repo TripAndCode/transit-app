@@ -5,6 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { InsightPanel } from "./InsightPanel";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
+import { blockStorage } from "../test/blockStorage";
 
 function renderPanel(agencyId = "1") {
   const router = createMemoryRouter(
@@ -227,5 +228,31 @@ describe("InsightPanel", () => {
     fireEvent.click(screen.getByLabelText("Collapse insight panel"));
     expect(screen.queryByText("Route R1 is anomalous")).toBeNull();
     expect(localStorage.getItem("transit.insightPanelCollapsed")).toBe("1");
+  });
+
+  it("stays off where site data is blocked, even in a dev build", () => {
+    blockStorage("localStorage");
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "trend", route_code: "R1", reason_text: "should not show", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-15" },
+      isPending: false,
+      error: null,
+    } as never);
+    const { container } = renderPanel();
+    expect(container.textContent).toBe("");
+    expect(spy).toHaveBeenCalledWith(null, []);
+  });
+
+  it("still opens a suggestion when session storage is blocked", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    blockStorage("sessionStorage");
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "trend", route_code: "R1", reason_text: "Route R1 is anomalous", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-15" },
+      isPending: false,
+      error: null,
+    } as never);
+    const { router } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open route detail" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/routes/R1");
+    expect(spy).toHaveBeenLastCalledWith(1, []);
   });
 });

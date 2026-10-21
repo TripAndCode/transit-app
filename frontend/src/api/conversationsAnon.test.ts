@@ -112,4 +112,11 @@ describe("conversationsAnon", () => {
     blockStorage("localStorage");
     expect(() => conversationsAnon.clearAll()).not.toThrow();
   });
+
+  it("lists nothing and still hands back a new thread where site data is blocked", () => {
+    blockStorage("localStorage");
+    expect(conversationsAnon.list(1)).toEqual([]);
+    expect(conversationsAnon.create(1, "A").title).toBe("A");
+    expect(conversationsAnon.exportAll()).toEqual([]);
+  });
 });

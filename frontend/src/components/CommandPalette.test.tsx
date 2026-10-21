@@ -7,6 +7,7 @@ import { CommandPalette } from "./CommandPalette";
 import * as hooks from "../api/hooks";
 import type { Agency, Route as ApiRoute } from "../api/types";
 import { rememberScreenScope } from "../api/screenScope";
+import { blockStorage } from "../test/blockStorage";
 
 const agencies: Agency[] = [
   { agency_id: 1, agency_name: "Hokuriku Transit", feed_url: "", static_url: null, latest_data_date: null },
@@ -351,6 +352,17 @@ describe("CommandPalette", () => {
     expect(stored.length).toBe(8);
     expect(stored[0]).toBe("nav:pulse");
     expect(stored).not.toContain("action:theme");
+  });
+
+  it("opens and runs a command where site data is blocked", async () => {
+    const user = userEvent.setup();
+    blockStorage("localStorage");
+    blockStorage("sessionStorage");
+    renderPalette();
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Pulse");
+    await user.click(screen.getByText("Pulse"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/pulse");
   });
 
   it("does not crash when localStorage throws (private browsing / quota)", async () => {

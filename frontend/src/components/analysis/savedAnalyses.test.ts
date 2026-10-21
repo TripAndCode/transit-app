@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readAnalyses, saveAnalysis, deleteAnalysis } from "./savedAnalyses";
 import type { Scope } from "../../api/scope";
 import { SCOPE_EXTRAS_NONE } from "../../api/scope";
+import { blockStorage } from "../../test/blockStorage";
 
 const ctx: Scope = { ...SCOPE_EXTRAS_NONE, from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
 
@@ -40,6 +41,12 @@ describe("savedAnalyses (localStorage)", () => {
     expect(() => deleteAnalysis(row.id)).not.toThrow();
     expect(deleteAnalysis(row.id)).toBe(false);
     spy.mockRestore();
+  });
+
+  it("reads none and reports a refused save where site data is blocked", () => {
+    blockStorage("localStorage");
+    expect(readAnalyses()).toEqual([]);
+    expect(saveAnalysis(1, "Coast mornings", ctx, false)).toBe(false);
   });
 
   it("falls back to a non-crypto id when crypto.randomUUID is unavailable", () => {
