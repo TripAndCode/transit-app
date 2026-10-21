@@ -144,10 +144,15 @@ async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks,
         ("計算できる指標は？", "describe_data", "metrics"),
         ("サンプル数の多い系統", "describe_data", "sample_counts"),
         ("サンプル数が多い路線の一覧", "describe_data", "sample_counts"),
-        # A calendar year is not a route code.
+        # A date's digits are not a route reference.
         ("2025年の全体の概要を", "describe_data", "overview"),
         ("2024年10月のデータセットの概要", "describe_data", "overview"),
-        ("2025年にどんな路線がある？", "describe_data", "routes"),
+        ("2025/10の全体の概要を", "describe_data", "overview"),
+        ("2025-10-01のデータセットの概要", "describe_data", "overview"),
+        ("20251001の概要を", "describe_data", "overview"),
+        # An on-time word does not keep a date-range question from its rule.
+        ("定時率のデータはいつから？", "describe_data", "date_range"),
+        ("定時率は何件くらいの観測がある？", "describe_data", "date_range"),
     ],
 )
 def test_rule_meta_dispatch(question, expected_tool, expected_kind):

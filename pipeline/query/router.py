@@ -76,11 +76,10 @@ _LITTLE_DELAY_WORDS = r"少な|短い|小さい|低い"
 _DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 
 # The meta rules answer questions about what the dataset holds (routes, date
-# range, stops, overview). A delay or on-time word or a route code (4+ digits,
-# not a calendar year) marks an analytic question about the data itself, which
-# the meta answers would replace with an answer to a different question, so such
-# a question is left to the ranking rules or the later stages.
-_ANALYTIC_WORDS = r"遅延|遅れ|遅く|定時率|\d{4,}(?![\d年])"
+# range, stops). A delay word or a route code (4+ digits) marks an analytic
+# question about the data itself, which the meta answers would replace with an
+# answer to a different question, so such a question is left to the later stages.
+_ANALYTIC_WORDS = r"遅延|遅れ|遅く|\d{4,}"
 # The ranking rules rank routes; a question about stops has no rule here.
 _STOP_WORDS = r"停留所|バス停"
 
@@ -92,8 +91,9 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(どんな.*?(路線|系統))|((路線|系統).*?(一覧|リスト))|(何.*?路線.*?(ある|登録))"),
         tool="describe_data",
         args={"kind": "routes"},
-        # A sample-count question is meta-sample-counts' to answer.
-        unless=re.compile(rf"{_ANALYTIC_WORDS}|サンプル数"),
+        # An on-time list is ranking-on-time's to answer, a sample-count list
+        # meta-sample-counts'.
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数"),
     ),
     Rule(
         name="meta-date-range",
@@ -122,7 +122,9 @@ _RULES: list[Rule] = [
         pattern=re.compile(r"(全体|データセット).*?(概要|概況)|概要を"),
         tool="describe_data",
         args={"kind": "overview"},
-        unless=re.compile(_ANALYTIC_WORDS),
+        # A delay or on-time word or a named route asks about one route, not
+        # the dataset. A bare digit run may be a date, so it does not count.
+        unless=re.compile(r"遅延|遅れ|遅く|定時率|(?:路線|系統)\s*\d+"),
     ),
     Rule(
         name="meta-metrics",
@@ -225,11 +227,12 @@ _validate_rules()
 
 
 # Phrasings that only make sense against the previous turn (pagination,
-# re-sort, "show me more"). Each alternative is narrowed so that a look-alike
-# word in a self-contained question does not match it:
+# re-sort, "show me more"). Four alternatives are narrowed because a
+# self-contained question can contain a look-alike word:
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
+#   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ).
 #   * bare English words must be whole words (\b), so they don't fire inside
 #     content words like "same-day" or "next stop".
 _FOLLOW_UP_RE = re.compile(
@@ -239,7 +242,7 @@ _FOLLOW_UP_RE = re.compile(
     r"|前の(?:\d+件|やつ|結果|に戻)"  # 前の<continuation>, not 前の停留所
     r"|同じ(?:条件|系統|の|こと)"
     r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
-    r"|別の(?!府)"  # 別の but NOT 別府 (place name)
+    r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
     r"|それを|そのまま"
     # English follow-ups only when trailing (whole-word, end of query) — so
     # "next"/"more" count but content words like "same-day comparison" or
