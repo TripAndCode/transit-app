@@ -328,6 +328,8 @@ BLOCKED = [
                 "while make; do :; done",
                 "until make; do :; done",
                 "eval make",
+                "env -v make",
+                "time -v make",
             )
         )
     ],

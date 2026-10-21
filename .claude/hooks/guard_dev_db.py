@@ -633,6 +633,9 @@ _COMMAND_PREFIXES = frozenset(
 # A prefix's flags whose value is the next word (`sudo -u user`, `nice -n 5`,
 # `xargs -n 1`, `caffeinate -t 60` ...).
 _PREFIX_VALUE_FLAGS = frozenset({"-u", "-g", "-n", "-L", "-P", "-I", "-d", "-t", "-s", "-k", "-C", "-p"})
+# Prefixes whose -v/-V prints instead of running the command (`env -v` and
+# `time -v` still run it).
+_PRINTS_ON_V = frozenset({"command", "sudo"})
 # timeout's duration, the one bare value a prefix takes before its command.
 _DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?")
 # Shells whose -c takes the script to run.
@@ -649,6 +652,7 @@ def _in_command_position(segment: list[str], i: int) -> bool:
     make`, `which make` and prose naming make do not run it."""
     after_prefix = False
     expect_value = False
+    prefix = ""
     for tok in segment[:i]:
         name = tok.rsplit("/", 1)[-1].lower()
         if expect_value:
@@ -657,7 +661,8 @@ def _in_command_position(segment: list[str], i: int) -> bool:
             pass
         elif name in _COMMAND_PREFIXES:
             after_prefix = True
-        elif after_prefix and tok in ("-v", "-V"):
+            prefix = name
+        elif prefix in _PRINTS_ON_V and tok in ("-v", "-V"):
             return False
         elif after_prefix and tok.startswith("-"):
             expect_value = tok in _PREFIX_VALUE_FLAGS
