@@ -78,3 +78,17 @@ async def test_other_api_error_returns_true():
 @pytest.mark.asyncio
 async def test_unsupported_provider_returns_false():
     assert await validate_provider_key("not_a_provider", "x") is False
+
+
+@pytest.mark.asyncio
+async def test_validates_against_the_operator_endpoint_and_model(monkeypatch):
+    # Saved keys are used against {PROVIDER}_BASE_URL/_MODEL, so they are validated there too.
+    monkeypatch.setenv("GEMINI_BASE_URL", "https://proxy.example/v1")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-operator-pick")
+    with patch("openai.AsyncOpenAI") as mock_openai:
+        create = AsyncMock(return_value=object())
+        mock_openai.return_value.chat.completions.create = create
+        mock_openai.return_value.close = AsyncMock()
+        assert await validate_provider_key("gemini", "test-valid") is True
+    assert mock_openai.call_args.kwargs["base_url"] == "https://proxy.example/v1"
+    assert create.call_args.kwargs["model"] == "gemini-operator-pick"
