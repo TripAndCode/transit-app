@@ -277,6 +277,73 @@ def test_cli_stale_candidates_never_gates(repository):
     assert run_cli("--root", str(repository), "--stale-candidates", "HEAD~1").returncode == 0
 
 
+def test_cli_stale_candidates_sees_an_uncommitted_edit(repository):
+    """A review fix iteration never commits, so the edit it leaves beside an
+    unchanged comment is what the comments dimension has to judge."""
+
+    (repository / "mod.py").write_text("# explains the call\nvalue = 3\n")
+    result = run_cli("--root", str(repository), "--stale-candidates", "HEAD")
+    assert "mod.py:1" in result.stdout
+    assert "stale-candidate" in result.stdout
+
+
+@pytest.mark.parametrize("setting", ["diff.mnemonicPrefix", "diff.noprefix"])
+def test_cli_stale_candidates_survive_a_diff_prefix_setting(repository, setting):
+    """Either setting rewrites the `b/` prefix a working-tree diff's file headers
+    are parsed by, which would leave every hunk unmatched and the run "clean"."""
+
+    git(repository, "config", setting, "true")
+    (repository / "mod.py").write_text("# explains the call\nvalue = 3\n")
+    result = run_cli("--root", str(repository), "--stale-candidates", "HEAD")
+    assert "mod.py:1" in result.stdout
+
+
+def test_cli_stale_candidates_line_numbers_follow_the_working_tree(tmp_path):
+    """Hunks taken from HEAD but applied to a working tree whose lines shifted
+    would point at a comment in an unrelated function and miss the real one."""
+
+    repo = tmp_path / "shifted"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "Test")
+    body = "import os\n\n\ndef first():\n    # explains first\n    return os.sep\n\n\ndef second():\n"
+    target = repo / "mod.py"
+    target.write_text(body + "    # explains second\n    return 2\n")
+    git(repo, "add", "mod.py")
+    git(repo, "commit", "-qm", "base")
+    target.write_text(body + "    # explains second\n    return 20\n")
+    git(repo, "commit", "-qam", "committed change")
+    target.write_text("# module notes\n# more notes\n# last note\n" + target.read_text())
+
+    result = run_cli("--root", str(repo), "--stale-candidates", "HEAD~1")
+
+    assert "mod.py:13" in result.stdout
+    assert "mod.py:8 " not in result.stdout
+    assert "1 finding(s)" in result.stdout
+
+
+def test_cli_stale_candidates_accepts_a_tree_baseline(repository):
+    """The follow-up delta scan passes a replayed tree rather than a commit."""
+
+    tree = subprocess.run(
+        ("git", "-C", str(repository), "rev-parse", "HEAD~1^{tree}"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = run_cli("--root", str(repository), "--stale-candidates", tree)
+    assert result.returncode == 0
+    assert "mod.py:1" in result.stdout
+
+
+def test_cli_diff_mode_ignores_uncommitted_edits(repository):
+    """The pre-push hook reads what is being pushed, so `--diff` stays committed-only."""
+
+    (repository / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
+    assert run_cli("--root", str(repository), "--diff", "HEAD~1").returncode == 0
+
+
 def test_cli_diff_mode_gates_on_a_violation(repository):
     (repository / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
     git(repository, "commit", "-qam", "banner")

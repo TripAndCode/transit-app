@@ -322,7 +322,12 @@ def main(argv=None):
         const="auto",
         help="only lines added since BASE ('auto': origin/HEAD, master, main)",
     )
-    mode.add_argument("--stale-candidates", metavar="BASE", dest="stale")
+    mode.add_argument(
+        "--stale-candidates",
+        metavar="BASE",
+        dest="stale",
+        help="unchanged comments beside lines changed between BASE, used as given, and the working tree",
+    )
     parser.add_argument("--radius", type=int, default=3)
     parser.add_argument("--warn", action="store_true", help="report but never fail the gate")
     args = parser.parse_args(argv)
@@ -350,8 +355,14 @@ def main(argv=None):
             file=sys.stderr,
         )
         return 0
+    # Stale candidates feed a review of the working tree, so their hunks must
+    # describe the files `_read` opens. `--diff` runs at push time and stays on
+    # the commits being pushed.
+    revisions = [base] if args.stale else [f"{base}...HEAD"]
+    # `_DIFF_FILE` parses `b/` headers, which either setting would rewrite.
+    pinned_prefixes = ["-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"]
     try:
-        diff = _git(["diff", "-U0", f"{base}...HEAD"], root)
+        diff = _git([*pinned_prefixes, "diff", "-U0", *revisions], root)
     except (subprocess.CalledProcessError, OSError) as error:
         print(
             f"comment policy: skipped ({error.__class__.__name__})",
