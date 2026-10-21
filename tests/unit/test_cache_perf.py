@@ -1,6 +1,8 @@
 """async_lru_cache emits hit/miss to pipeline.perf and supports clear_all()."""
 
 import asyncio
+import sys
+import threading
 
 import pytest
 
@@ -138,3 +140,125 @@ def test_keyable_still_handles_connection_like_and_plain_hashable_args():
     assert cache._keyable(42) == 42
     assert cache._keyable("s") == "s"
     assert cache._keyable((1, 2)) == (1, 2)
+
+
+def test_compute_in_flight_across_clear_is_not_cached():
+    """A compute that read its inputs before cache_clear() must not store that
+    pre-clear value, or the next caller is served data the clear invalidated."""
+    calls = {"n": 0}
+    source = {"value": "before"}
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+        async def fn(x):
+            calls["n"] += 1
+            seen = source["value"]
+            started.set()
+            await release.wait()
+            return seen
+
+        leader = asyncio.create_task(fn(1))
+        await asyncio.wait_for(started.wait(), 1)
+        source["value"] = "after"
+        fn.cache_clear()
+        release.set()
+        assert await asyncio.wait_for(leader, 1) == "before"
+        assert await asyncio.wait_for(fn(1), 1) == "after"
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_compute_in_flight_across_a_clear_from_a_worker_thread_is_not_cached():
+    """The clear's thread does not matter to the ownership check; the lock that
+    makes it atomic across threads is not exercised here."""
+    source = {"value": "before"}
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+        async def fn(x):
+            seen = source["value"]
+            started.set()
+            await release.wait()
+            return seen
+
+        leader = asyncio.create_task(fn(1))
+        await asyncio.wait_for(started.wait(), 1)
+        source["value"] = "after"
+        await asyncio.to_thread(fn.cache_clear)
+        release.set()
+        assert await asyncio.wait_for(leader, 1) == "before"
+        assert await asyncio.wait_for(fn(1), 1) == "after"
+
+    asyncio.run(run())
+
+
+def test_hits_survive_clears_racing_from_another_thread():
+    async def run():
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=0)
+        async def fn(x):
+            return x
+
+        stop = threading.Event()
+
+        def clear_forever():
+            while not stop.is_set():
+                fn.cache_clear()
+
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        clearer = threading.Thread(target=clear_forever)
+        clearer.start()
+        try:
+            # A zero TTL sends every second call down the expired-entry path.
+            for _ in range(20000):
+                assert await fn(1) == 1
+        finally:
+            stop.set()
+            clearer.join()
+            sys.setswitchinterval(previous)
+
+    asyncio.run(run())
+
+
+def test_leader_from_before_clear_leaves_newer_leader_inflight():
+    """A leader that finishes after cache_clear() must not remove the in-flight
+    entry of a leader started after the clear, so later callers still join it."""
+    calls = {"n": 0}
+
+    async def run():
+        entered = [asyncio.Event() for _ in range(3)]
+        gates = [asyncio.Event() for _ in range(3)]
+
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+        async def fn(x):
+            i = calls["n"]
+            calls["n"] += 1
+            entered[i].set()
+            await gates[i].wait()
+            return f"compute-{i}"
+
+        a = asyncio.create_task(fn(1))
+        await asyncio.wait_for(entered[0].wait(), 1)
+        fn.cache_clear()
+        b = asyncio.create_task(fn(1))
+        await asyncio.wait_for(entered[1].wait(), 1)
+        gates[0].set()
+        assert await asyncio.wait_for(a, 1) == "compute-0"
+
+        c = asyncio.create_task(fn(1))
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert calls["n"] == 2
+        gates[1].set()
+        gates[2].set()
+        assert await asyncio.wait_for(b, 1) == "compute-1"
+        assert await asyncio.wait_for(c, 1) == "compute-1"
+
+    asyncio.run(run())
