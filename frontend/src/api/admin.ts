@@ -12,6 +12,9 @@ export type AdminUser = {
   avatar_url: string | null;
   role: "user" | "admin";
   suspended_at: string | null;
+  /** Set by an admin soft-delete, which is final: the server refuses any
+   *  further change to the row, so the UI offers none. */
+  deleted_at: string | null;
   llm_approved: boolean;
   created_at: string;
 };

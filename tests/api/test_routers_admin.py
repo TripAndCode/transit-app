@@ -3,6 +3,8 @@ the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonym
 """
 
 import asyncio
+import json
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -537,3 +539,141 @@ async def test_suspension_transitions_still_stamp_and_clear_suspended_at(admin_c
     )
     assert r.status_code == 200
     assert await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid) > _ORIGINAL_SUSPENSION
+
+
+_HEADERS = {"Origin": "http://test"}
+
+
+async def _seed_key(conn, *, owner_user_id, owner_email, revoked_at=None):
+    raw = f"sk_{secrets.token_urlsafe(16)}"
+    key_id = await conn.fetchval(
+        "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at) VALUES ($1, $2, $3, $4) RETURNING id",
+        token_hash(raw),
+        owner_user_id,
+        owner_email,
+        revoked_at,
+    )
+    return key_id, raw
+
+
+async def _delete(client, sid, uid):
+    return await client.delete(f"/api/admin/users/{uid}", cookies={"sid": sid}, headers=_HEADERS)
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_client, aconn):
+    """Ownership is what erase_user and the account export use: a key issued
+    to the account, or a legacy ownerless key recorded under its address in
+    any case. An already-revoked key keeps the time it was revoked."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="keyed@x")
+    _, uid_other, _ = await _seed(aconn, email="other@x")
+    live_id, live_raw = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x")
+    revoked_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x", revoked_at=_ORIGINAL_SUSPENSION)
+    legacy_id, legacy_raw = await _seed_key(aconn, owner_user_id=None, owner_email="Keyed@X")
+    other_id, other_raw = await _seed_key(aconn, owner_user_id=uid_other, owner_email="other@x")
+    assert (await admin_client.get("/health", headers={"X-API-Key": legacy_raw})).status_code == 200
+
+    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
+
+    keys = {r["id"]: r for r in await aconn.fetch("SELECT id, owner_email, revoked_at FROM api_keys")}
+    for key_id in (live_id, revoked_id, legacy_id):
+        assert keys[key_id]["owner_email"] == f"deleted-{uid}@local"
+        assert keys[key_id]["revoked_at"] is not None
+    assert keys[revoked_id]["revoked_at"] == _ORIGINAL_SUSPENSION
+    assert keys[other_id]["owner_email"] == "other@x"
+    assert keys[other_id]["revoked_at"] is None
+    for raw in (live_raw, legacy_raw):
+        assert (await admin_client.get("/health", headers={"X-API-Key": raw})).status_code == 401
+    assert (await admin_client.get("/health", headers={"X-API-Key": other_raw})).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_marks_the_row_deleted_and_audits_the_revoked_keys(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="marked@x")
+    key_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="marked@x")
+    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
+    assert await aconn.fetchval("SELECT deleted_at FROM users WHERE user_id=$1", uid) is not None
+    after = await aconn.fetchval(
+        "SELECT after::text FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid)
+    )
+    assert json.loads(after)["api_keys_revoked"] == [key_id]
+    assert "marked@x" not in after
+
+
+@pytest.mark.asyncio
+async def test_user_rows_report_deleted_at(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_live, _ = await _seed(aconn, email="live@x")
+    _, uid_gone, _ = await _seed(aconn, email="gone@x")
+    assert (await _delete(admin_client, sid_admin, uid_gone)).status_code == 204
+    listed = (await admin_client.get("/api/admin/users", cookies={"sid": sid_admin})).json()["users"]
+    by_id = {u["user_id"]: u for u in listed}
+    assert by_id[uid_live]["deleted_at"] is None
+    assert by_id[uid_gone]["deleted_at"] is not None
+    detail = (await admin_client.get(f"/api/admin/users/{uid_gone}", cookies={"sid": sid_admin})).json()
+    assert detail["deleted_at"] is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{"suspended": False}, {"llm_approved": True}, {"role": "admin"}])
+async def test_a_deleted_user_cannot_be_patched(admin_client, aconn, body):
+    """Unsuspending would bring a deleted account's credentials back; no
+    other edit to it means anything either."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn)
+    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
+    before = await aconn.fetchrow("SELECT role, suspended_at, llm_approved FROM users WHERE user_id=$1", uid)
+    r = await admin_client.patch(f"/api/admin/users/{uid}", json=body, cookies={"sid": sid_admin}, headers=_HEADERS)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "user is deleted"
+    after = await aconn.fetchrow("SELECT role, suspended_at, llm_approved FROM users WHERE user_id=$1", uid)
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_refuses_a_batch_holding_a_deleted_user(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_live, _ = await _seed(aconn, suspended=True)
+    _, uid_gone, _ = await _seed(aconn)
+    assert (await _delete(admin_client, sid_admin, uid_gone)).status_code == 204
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_live, uid_gone], "patch": {"suspended": False}},
+        cookies={"sid": sid_admin},
+        headers=_HEADERS,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "user is deleted"
+    rows = await aconn.fetch("SELECT suspended_at FROM users WHERE user_id = ANY($1::int[])", [uid_live, uid_gone])
+    assert all(row["suspended_at"] is not None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_user_cannot_be_deleted_again(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn)
+    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
+    r = await _delete(admin_client, sid_admin, uid)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "user is deleted"
+    assert (
+        await aconn.fetchval(
+            "SELECT count(*) FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid)
+        )
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_key_can_be_issued_to_a_deleted_user(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn)
+    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
+    r = await admin_client.post(
+        "/api/admin/api-keys", json={"owner_user_id": uid}, cookies={"sid": sid_admin}, headers=_HEADERS
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "user is deleted"
+    assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE owner_user_id=$1", uid) == 0

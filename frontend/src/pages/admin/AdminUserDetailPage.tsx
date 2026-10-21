@@ -17,6 +17,7 @@ type AdminUserDetail = {
   avatar_url: string | null;
   role: "user" | "admin";
   suspended_at: string | null;
+  deleted_at: string | null;
   llm_approved: boolean;
   created_at: string;
   identities: { provider: string; provider_sub: string; email_at_link: string | null; created_at: string }[];
@@ -116,6 +117,9 @@ function AdminUserDetailBody({
 }) {
   const { t } = useTranslation();
   const isMutating = patch.isPending || del.isPending;
+  const isDeleted = data.deleted_at != null;
+  // A deleted account accepts no further change; the server refuses every one.
+  const locked = isSelf || isMutating || isDeleted;
 
   function handleRoleChange(nextRole: string) {
     if (nextRole === "admin" && !confirm(t("admin.users.confirm_promote", { email: data.email }))) return;
@@ -164,7 +168,11 @@ function AdminUserDetailBody({
           </div>
           <div>
             {t("admin.user_detail.status_label")}:{" "}
-            {data.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
+            {isDeleted
+              ? t("admin.users.status.deleted")
+              : data.suspended_at
+                ? t("admin.users.status.suspended")
+                : t("admin.users.status.active")}
           </div>
           <div>
             {t("admin.users.col.llm_approved")}:{" "}
@@ -205,7 +213,7 @@ function AdminUserDetailBody({
             id="detail-role"
             value={data.role}
             style={{ width: "100%" }}
-            disabled={isSelf || isMutating}
+            disabled={locked}
             onChange={(e) => handleRoleChange(e.target.value)}
           >
             <option value="user">{t("account.role.user")}</option>
@@ -215,19 +223,21 @@ function AdminUserDetailBody({
         <AdminButton
           variant="secondary"
           style={{ marginBottom: 8, marginRight: 8 }}
-          disabled={isSelf || isMutating}
+          disabled={locked}
           onClick={handleLlmApprovedToggle}
         >
           {data.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
         </AdminButton>
-        <AdminButton
-          variant="secondary"
-          style={{ marginBottom: 24 }}
-          disabled={isSelf || isMutating}
-          onClick={handleSuspendToggle}
-        >
-          {data.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
-        </AdminButton>
+        {!isDeleted && (
+          <AdminButton
+            variant="secondary"
+            style={{ marginBottom: 24 }}
+            disabled={locked}
+            onClick={handleSuspendToggle}
+          >
+            {data.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
+          </AdminButton>
+        )}
         {(patch.error || del.error) && (
           <div
             role="alert"
@@ -245,7 +255,7 @@ function AdminUserDetailBody({
         )}
 
         <SessionsSection uid={data.user_id} />
-        <ApiKeysSection uid={data.user_id} />
+        <ApiKeysSection uid={data.user_id} canIssue={!isDeleted} />
         <ActivitySection uid={data.user_id} />
 
         <section style={{ marginBottom: 24 }}>
@@ -281,7 +291,7 @@ function AdminUserDetailBody({
           <h2 style={{ fontSize: 16, marginBottom: 8, color: "var(--delay-severe)" }}>
             {t("admin.user_detail.danger_zone_title")}
           </h2>
-          <AdminButton variant="danger" disabled={isSelf || isMutating} onClick={handleDelete}>
+          <AdminButton variant="danger" disabled={locked} onClick={handleDelete}>
             {t("admin.users.action.delete")}
           </AdminButton>
         </section>

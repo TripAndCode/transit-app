@@ -198,17 +198,20 @@ export function AdminUsersPage() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  function isSelectable(uid: number) {
+  function isSelectable(user: AdminUser) {
     // The signed-in admin's own row can't be bulk-mutated (mirrors the
     // per-row disable below), so it's excluded from selection entirely
-    // rather than relying only on the endpoint's self-guard.
-    return uid !== me?.user_id;
+    // rather than relying only on the endpoint's self-guard. A deleted row
+    // accepts no change, and the server refuses a whole batch holding one.
+    return user.user_id !== me?.user_id && user.deleted_at == null;
   }
 
-  function isRowLocked(uid: number) {
+  function isRowLocked(user: AdminUser) {
+    const uid = user.user_id;
     return (
       isPlaceholderData ||
       uid === me?.user_id ||
+      user.deleted_at != null ||
       (patch.isPending && patch.variables?.uid === uid) ||
       (del.isPending && del.variables === uid) ||
       // A row in a bulk request that has not answered yet: a per-row action
@@ -240,7 +243,7 @@ export function AdminUsersPage() {
   function runBulkAction(action: BulkAction, ids: number[]) {
     const targets = ids.filter((uid) => {
       const user = rows.find((u) => u.user_id === uid);
-      return isSelectable(uid) && user != null && !BULK_ALREADY[action](user);
+      return user != null && isSelectable(user) && !BULK_ALREADY[action](user);
     });
     if (targets.length === 0) return;
     bulkPatch.mutate(
@@ -263,7 +266,10 @@ export function AdminUsersPage() {
   // users meant answering ten identical prompts -- which trains an operator
   // to dismiss the eleventh without reading it.
   function requestBulkDelete(ids: number[]) {
-    const targets = ids.filter(isSelectable);
+    const targets = ids.filter((uid) => {
+      const user = rows.find((u) => u.user_id === uid);
+      return user != null && isSelectable(user);
+    });
     if (targets.length > 0) setBulkDeleteIds(targets);
   }
 
@@ -413,7 +419,7 @@ export function AdminUsersPage() {
       render: (u) => (
         <select
           value={u.role}
-          disabled={isRowLocked(u.user_id)}
+          disabled={isRowLocked(u)}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => handleRoleChange(u.user_id, u.email, e.target.value)}
         >
@@ -426,8 +432,12 @@ export function AdminUsersPage() {
       key: "status",
       header: t("admin.users.col.status"),
       render: (u) => (
-        <StatusChip tone={u.suspended_at ? "warn" : "good"}>
-          {u.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
+        <StatusChip tone={u.deleted_at ? "neutral" : u.suspended_at ? "warn" : "good"}>
+          {u.deleted_at
+            ? t("admin.users.status.deleted")
+            : u.suspended_at
+              ? t("admin.users.status.suspended")
+              : t("admin.users.status.active")}
         </StatusChip>
       ),
     },
@@ -448,7 +458,7 @@ export function AdminUsersPage() {
         <span style={{ whiteSpace: "nowrap" }}>
           <AdminButton
             variant="secondary"
-            disabled={isRowLocked(u.user_id)}
+            disabled={isRowLocked(u)}
             onClick={(e) => {
               e.stopPropagation();
               handleLlmApprovedToggle(u.user_id, u.llm_approved);
@@ -457,20 +467,22 @@ export function AdminUsersPage() {
           >
             {u.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
           </AdminButton>
-          <AdminButton
-            variant="secondary"
-            disabled={isRowLocked(u.user_id)}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleSuspendToggle(u.user_id, u.suspended_at);
-            }}
-            style={{ marginRight: 8 }}
-          >
-            {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
-          </AdminButton>
+          {u.deleted_at == null && (
+            <AdminButton
+              variant="secondary"
+              disabled={isRowLocked(u)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSuspendToggle(u.user_id, u.suspended_at);
+              }}
+              style={{ marginRight: 8 }}
+            >
+              {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
+            </AdminButton>
+          )}
           <AdminButton
             variant="danger"
-            disabled={isRowLocked(u.user_id)}
+            disabled={isRowLocked(u)}
             onClick={(e) => {
               e.stopPropagation();
               handleDelete(u.user_id, u.email);
@@ -531,7 +543,7 @@ export function AdminUsersPage() {
         rowKey={(u) => String(u.user_id)}
         rowLabel={(u) => u.email}
         selectable
-        isRowSelectable={(u) => isSelectable(u.user_id)}
+        isRowSelectable={isSelectable}
         selectedIds={selectedKeys}
         onSelectionChange={(next) => setSelected(new Set([...next].map(Number)))}
         onOpen={(u) => navigate(`/admin/users/${u.user_id}`, { state: { listSearch: searchParams.toString() } })}

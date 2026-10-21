@@ -14,7 +14,8 @@ const mockDetail = vi.hoisted(() => ({
   name: "A B",
   avatar_url: null,
   role: "user" as const,
-  suspended_at: null,
+  suspended_at: null as string | null,
+  deleted_at: null as string | null,
   created_at: "2026-01-01T00:00:00Z",
   identities: [],
   recent_events: [],
@@ -192,6 +193,38 @@ describe("AdminUserDetailPage", () => {
     await screen.findByText("a@b.com");
     await user.click(screen.getByRole("button", { name: "Suspend" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("error");
+  });
+
+  it("shows a deleted user as deleted, with no Resume and nothing left to change", async () => {
+    apiGetMock.mockImplementation((url: string) => {
+      if (url.includes("/sessions")) return Promise.resolve([]);
+      if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
+      if (url.includes("/activity")) return Promise.resolve([]);
+      return Promise.resolve({
+        ...mockDetail,
+        email: "deleted-1@local",
+        suspended_at: "2026-02-01T00:00:00Z",
+        deleted_at: "2026-02-01T00:00:00Z",
+      });
+    });
+    try {
+      renderPage();
+      await screen.findByText(/Deleted/);
+      expect(screen.queryByText(/Suspended/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Suspend" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Issue" })).toBeNull();
+      expect(screen.getByLabelText("Role")).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Approve AI access" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
+    } finally {
+      apiGetMock.mockImplementation((url: string) => {
+        if (url.includes("/sessions")) return Promise.resolve([]);
+        if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
+        if (url.includes("/activity")) return Promise.resolve([]);
+        return Promise.resolve(mockDetail);
+      });
+    }
   });
 
   it("disables role/suspend/delete when the signed-in admin views their own record", async () => {

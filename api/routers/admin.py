@@ -24,7 +24,14 @@ Soft-delete preserves the audit trail: rows in ``login_events`` survive
 (FK is ``ON DELETE SET NULL``), but the user's PII is anonymized
 (``email -> deleted-{uid}@local``, name/avatar nulled), sessions are
 killed, and OAuth identities are removed so re-login under the same
-provider sub creates a fresh user.
+provider sub creates a fresh user. The user's API keys are revoked and
+their recorded owner address is replaced with the anonymized one.
+
+A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
+is reversible, and lifting it would bring the account's keys back, so the
+routes that change a user or give it credentials refuse a deleted row with a
+409: the single and bulk PATCH, DELETE, and API-key issue. Revoking a
+session or a key only takes access away and needs no such guard.
 """
 
 import asyncio
@@ -62,6 +69,7 @@ from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
 from pipeline.admin_users import session_id_prefix, unique_prefix_match
+from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
@@ -76,6 +84,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 MAX_BULK_USER_IDS = 200
 MAX_API_KEYS_LISTED = 500
+USER_DELETED = "user is deleted"
 
 
 class UserRow(BaseModel):
@@ -87,6 +96,7 @@ class UserRow(BaseModel):
     avatar_url: str | None
     role: str
     suspended_at: Any
+    deleted_at: Any
     llm_approved: bool
     created_at: Any
 
@@ -144,7 +154,7 @@ async def list_users(
     total = await conn.fetchval(f"SELECT count(*) FROM users {where_sql}", *args)
     rows = await conn.fetch(
         f"""
-        SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at
+        SELECT user_id, email, name, avatar_url, role, suspended_at, deleted_at, llm_approved, created_at
         FROM users {where_sql}
         ORDER BY created_at DESC
         LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
@@ -178,7 +188,7 @@ async def user_detail(
     string-of-json quirk.
     """
     row = await conn.fetchrow(
-        "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+        "SELECT user_id, email, name, avatar_url, role, suspended_at, deleted_at, llm_approved, created_at "
         "FROM users WHERE user_id=$1",
         uid,
     )
@@ -278,7 +288,7 @@ async def bulk_patch_users(
     async with conn.transaction():
         rows = await conn.fetch(
             """
-            SELECT user_id, email, role, suspended_at, llm_approved FROM users
+            SELECT user_id, email, role, suspended_at, deleted_at, llm_approved FROM users
             WHERE user_id = ANY($1::int[]) OR (role='admin' AND suspended_at IS NULL)
             ORDER BY user_id
             FOR UPDATE
@@ -289,6 +299,8 @@ async def bulk_patch_users(
         missing = [uid for uid in ids if uid not in by_id]
         if missing:
             raise HTTPException(404, f"user(s) not found: {missing}")
+        if any(by_id[uid]["deleted_at"] is not None for uid in ids):
+            raise HTTPException(409, USER_DELETED)
 
         target_ids = set(ids)
         remaining_active_admins = 0
@@ -360,7 +372,7 @@ async def bulk_patch_users(
                 )
 
         out_rows = await conn.fetch(
-            "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+            "SELECT user_id, email, name, avatar_url, role, suspended_at, deleted_at, llm_approved, created_at "
             "FROM users WHERE user_id = ANY($1::int[]) ORDER BY user_id",
             ids,
         )
@@ -415,7 +427,7 @@ async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> 
     """
     rows = await conn.fetch(
         """
-        SELECT user_id, email, role, suspended_at, llm_approved FROM users
+        SELECT user_id, email, role, suspended_at, deleted_at, llm_approved FROM users
         WHERE user_id = $1 OR (role='admin' AND suspended_at IS NULL)
         ORDER BY user_id
         FOR UPDATE
@@ -456,6 +468,8 @@ async def patch_user(
         row, other_active_admins = await _lock_target_and_active_admins(conn, uid)
         if not row:
             raise HTTPException(404, "user not found")
+        if row["deleted_at"] is not None:
+            raise HTTPException(409, USER_DELETED)
         old_role = row["role"]
         old_suspended = row["suspended_at"] is not None
         old_llm_approved = row["llm_approved"]
@@ -514,7 +528,7 @@ async def patch_user(
             )
 
         out = await conn.fetchrow(
-            "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+            "SELECT user_id, email, name, avatar_url, role, suspended_at, deleted_at, llm_approved, created_at "
             "FROM users WHERE user_id=$1",
             uid,
         )
@@ -528,8 +542,9 @@ async def delete_user(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Soft-delete: anonymize PII, suspend, drop sessions + identities,
-    keep ``login_events`` intact for audit.
+    """Soft-delete: anonymize PII, suspend, mark deleted, revoke and
+    anonymize API keys, drop sessions + identities, keep ``login_events``
+    intact for audit.
 
     Last-admin guard fires only if the target is currently an active
     admin (i.e. role=admin AND not suspended) — suspending an already-
@@ -542,16 +557,28 @@ async def delete_user(
         row, other_active_admins = await _lock_target_and_active_admins(conn, uid)
         if not row:
             raise HTTPException(404, "user not found")
+        if row["deleted_at"] is not None:
+            raise HTTPException(409, USER_DELETED)
         if row["role"] == "admin" and row["suspended_at"] is None and other_active_admins == 0:
             raise HTTPException(400, "would leave no admins")
-        await conn.execute(
+        anonymized = f"deleted-{uid}@local"
+        # Revoke before masking: a legacy ownerless key is matched by the
+        # address the mask replaces.
+        revoked = await conn.fetch(
+            f"UPDATE api_keys SET revoked_at = now() WHERE {OWNED_BY_USER} AND revoked_at IS NULL RETURNING id",
+            uid,
+            row["email"],
+        )
+        await conn.execute(f"UPDATE api_keys SET owner_email = $3 WHERE {OWNED_BY_USER}", uid, row["email"], anonymized)
+        deleted_at = await conn.fetchval(
             """
             UPDATE users
             SET email = $1, name = NULL, avatar_url = NULL,
-                suspended_at = COALESCE(suspended_at, now()), updated_at = now()
+                suspended_at = COALESCE(suspended_at, now()), deleted_at = now(), updated_at = now()
             WHERE user_id = $2
+            RETURNING deleted_at
             """,
-            f"deleted-{uid}@local",
+            anonymized,
             uid,
         )
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
@@ -569,7 +596,11 @@ async def delete_user(
                 "suspended_at": row["suspended_at"],
                 "llm_approved": row["llm_approved"],
             },
-            after={"email": f"deleted-{uid}@local"},
+            after={
+                "email": anonymized,
+                "deleted_at": deleted_at,
+                "api_keys_revoked": sorted(r["id"] for r in revoked),
+            },
             ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
@@ -778,9 +809,13 @@ async def issue_api_key(
     through the same ``key_hash`` lookup as any other row in the table."""
     csrf_guard(request)
     async with conn.transaction():
-        owner = await conn.fetchval("SELECT 1 FROM users WHERE user_id=$1", body.owner_user_id)
+        # FOR UPDATE: a concurrent delete_user either finishes first and is
+        # seen here, or waits and then revokes this key along with the rest.
+        owner = await conn.fetchrow("SELECT deleted_at FROM users WHERE user_id=$1 FOR UPDATE", body.owner_user_id)
         if not owner:
             raise HTTPException(404, "owner user not found")
+        if owner["deleted_at"] is not None:
+            raise HTTPException(409, USER_DELETED)
         raw_key = f"sk_{secrets.token_urlsafe(32)}"
         digest = token_hash(raw_key)
         row = await conn.fetchrow(
