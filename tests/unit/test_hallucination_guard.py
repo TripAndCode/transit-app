@@ -178,3 +178,13 @@ def test_stripping_a_grounded_date_leaves_its_neighbours_read_as_before():
     # A percent sign beyond a stripped date is not attached to the number before it.
     rated = {"series": [{"date": "2026-09-05", "avg_min": 3.2}], "time_adjustment_rate": 0.35}
     assert verify_numeric_claims("35 9月5日 %", rated) is False
+
+
+def test_an_iso_date_between_a_number_and_a_percent_sign_attaches_nothing():
+    grounding = {"context": "Pairs:\n- rate: 0.35", "question": ""}
+    assert verify_numeric_claims("35 2099-01-01 %", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_an_iso_date():
+    grounding = {"context": 'Series:\n- {"date": "2026-05-06", "avg_min": 6.0}', "question": ""}
+    assert verify_numeric_claims("2026-09-05月6日", grounding) is True

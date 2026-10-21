@@ -38,8 +38,8 @@ _LIST_ORDINAL_RE = re.compile(r"^[ \t]*(\d+)(?:[.)][ \t]|[．）])", re.MULTILIN
 # A Japanese date ("9月5日", "2026年9月5日"), not one read out of a longer
 # number, a decimal or a year that is not four digits. One naming a grounded day leaves the claims, since the
 # grounding's ISO dates are stripped before number extraction.
-_JA_DATE_RE = re.compile(r"(?<!\d)(?<!\d[.,])(?<!\d年)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
-_PERCENT_SIGN_RE = re.compile(r"[ \t]*[%％]")
+_JA_DATE_RE = re.compile(r"(?<!\d)(?<!\d[.,-])(?<!\d年)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日")
+_PERCENT_SIGN_RE = re.compile(r"[ \t]?[%％]")
 
 
 def _without_list_ordinals(answer: str) -> str:
@@ -58,7 +58,9 @@ def _extract_numbers(text: str) -> list[float]:
 
 def _extract_claims(text: str) -> list[tuple[float, bool]]:
     """Each number in *text*, and whether a percent sign follows it."""
-    text = _DATE_RE.sub(" ", text)
+    # A non-word, non-blank placeholder: numbers read around it as around a
+    # space, but no percent sign past a stripped date attaches to them.
+    text = _DATE_RE.sub("\x00", text)
     text = _THOUSANDS_SEP_RE.sub("", text)
     return [(float(m.group()), bool(_PERCENT_SIGN_RE.match(text, m.end()))) for m in _NUMBER_RE.finditer(text)]
 
