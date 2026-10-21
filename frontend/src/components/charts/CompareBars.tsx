@@ -14,12 +14,13 @@ import { RouteLabel } from "../RouteLabel";
 import { PERIODS, deltaFor, orderByPeriod, otherPeriod, parseCompareRows, type Period } from "./compareBarMath";
 import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "./delayAxis";
 import "./compareBars.css";
+import { fixedTenth, roundTenth } from "../../utils/format";
 
 const ROWS_CAP = 200;
 
 function Figure({ value }: { value: number }) {
   const shown = useCountUp(value, { decimals: 1 });
-  return <>{shown.toFixed(1)}</>;
+  return <>{fixedTenth(shown)}</>;
 }
 
 /**
@@ -84,7 +85,7 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
               <span className="compare-bar__value num" style={{ color: v == null ? undefined : delayTextColor(v) }}>
                 {v == null ? "—" : <Figure value={v} />}
               </span>
-              <span className={`compare-bar__delta num${tone}`}>{d == null ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(1)}`}</span>
+              <span className={`compare-bar__delta num${tone}`}>{d == null ? "—" : `${roundTenth(d) > 0 ? "+" : ""}${fixedTenth(d)}`}</span>
             </div>
           );
         })}

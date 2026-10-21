@@ -57,7 +57,7 @@ from pipeline.strategies.static_join import (  # noqa: E402  (sys.path injection
     field_coverage,
     record_field_coverage_probe,
 )
-from pipeline.url_guard import FeedURLError, safe_urlopen  # noqa: E402
+from pipeline.url_guard import FETCH_ERRORS, FeedURLError, safe_urlopen  # noqa: E402
 
 # A feed_timestamp is a whole-feed field rather than a per-stop_time_update
 # one, so it is reported but never recorded in the per-field registry. The
@@ -166,7 +166,7 @@ def main() -> None:
         except FeedURLError as e:
             print(f"BLOCKED: {e}", file=sys.stderr)
             sys.exit(1)
-        except OSError as e:
+        except FETCH_ERRORS as e:
             print(f"FETCH FAILED: {e}", file=sys.stderr)
             sys.exit(1)
     else:

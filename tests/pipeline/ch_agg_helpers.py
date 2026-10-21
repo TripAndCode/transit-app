@@ -90,10 +90,19 @@ def normalized(value):
     return value
 
 
+def _comparable(table: str, row) -> str:
+    """*row* normalized and rendered, agg_stop_routes' route list as a sorted tuple of
+    codes: ClickHouse orders it by bytes, the Postgres copy by its collation."""
+    values = tuple(map(normalized, row))
+    if table == "agg_stop_routes":
+        values = (*values[:-1], tuple(sorted(values[-1].split(","))))
+    return str(values)
+
+
 def ch_rows(ch_client, agency_id: int, table: str) -> list[str]:
     """The agency's rows of *table* in ClickHouse, normalized, sorted and rendered with str()."""
     sql, params = ch_aggregates.rows_sql(table, agency_id, None)
-    return sorted(str(tuple(map(normalized, row))) for row in ch_client.query(sql, parameters=params).result_rows)
+    return sorted(_comparable(table, row) for row in ch_client.query(sql, parameters=params).result_rows)
 
 
 def pg_rows(conn, agency_id: int, table: str) -> list[str]:
@@ -101,7 +110,7 @@ def pg_rows(conn, agency_id: int, table: str) -> list[str]:
     columns = ", ".join(ch_aggregates.COLUMNS[table])
     with conn.cursor() as cur:
         cur.execute(f"SELECT {columns} FROM {table} WHERE agency_id = %s", (agency_id,))
-        return sorted(str(tuple(map(normalized, row))) for row in cur.fetchall())
+        return sorted(_comparable(table, row) for row in cur.fetchall())
 
 
 def record_builds(monkeypatch) -> list[tuple[str, list[int]]]:

@@ -16,17 +16,17 @@ import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { delayColor } from "../styles/tokens";
 import { SHARED_TABLE, th, td } from "./tableStyles";
-import { formatNumber, roundTenth } from "../utils/format";
+import { fixedTenth, formatNumber, roundTenth } from "../utils/format";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
-  return `${roundTenth(v).toFixed(1)}${t("common.unit_sec")}`;
+  return `${fixedTenth(v)}${t("common.unit_sec")}`;
 }
 
 function fmtDeltaSec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
   const r = roundTenth(v);
-  return t("common.unit_sec_signed", { sign: r < 0 ? "-" : "+", value: Math.abs(r).toFixed(1) });
+  return t("common.unit_sec_signed", { sign: r < 0 ? "-" : "+", value: fixedTenth(Math.abs(r)) });
 }
 
 export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {

@@ -1,5 +1,6 @@
 import type { Scope } from "../../api/scope";
 import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, type LabelT } from "../../utils/filterValueLabels";
+import { roundTenth } from "../../utils/format";
 
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
@@ -23,7 +24,7 @@ function dateLabel(iso: string, withYear: boolean): string {
 
 function secondsLabel(sec: number, t: LabelT, minKey: string, secKey: string): string {
   if (sec < 60) return translationT(t, secKey, { n: sec });
-  return translationT(t, minKey, { n: Math.round((sec / 60) * 10) / 10 });
+  return translationT(t, minKey, { n: roundTenth(sec / 60) });
 }
 
 export function toleranceLabel(sec: number, t: LabelT): string {

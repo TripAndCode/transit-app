@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { conversationsAnon } from "./conversationsAnon";
+import { blockStorage } from "../test/blockStorage";
 import type { ConvMessage } from "./types";
 
 function message(id: number): ConvMessage {
@@ -105,5 +106,10 @@ describe("conversationsAnon", () => {
     expect(conversationsAnon.exportAll()).toHaveLength(2);
     conversationsAnon.clearAll();
     expect(conversationsAnon.exportAll()).toHaveLength(0);
+  });
+
+  it("clearAll leaves nothing to throw where site data is blocked", () => {
+    blockStorage("localStorage");
+    expect(() => conversationsAnon.clearAll()).not.toThrow();
   });
 });

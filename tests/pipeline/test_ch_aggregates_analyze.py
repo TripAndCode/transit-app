@@ -101,6 +101,21 @@ def test_a_table_clickhouse_lost_is_rebuilt_whole_without_rebuilding_the_agency(
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) == served[table], table
 
 
+def test_a_stop_seen_only_on_an_empty_route_code_is_copied_and_stays_settled(
+    pg_conn, agency_id, ch_client, monkeypatch
+):
+    """Postgres splits '' into no element at all: the copy's re-sort and the reference
+    check must still read that stop's one route, as the Postgres builder stored it."""
+    seed_schedule(pg_conn, agency_id, ["a"])
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60, route_code="")])
+    analyze(agency_id, pg_conn, ch_client)
+    table = "agg_stop_routes"
+    assert stored_rows(pg_conn, agency_id, table) == legacy_rows(pg_conn, ch_client, agency_id, table) != []
+    built = record_builds(monkeypatch)
+    analyze(agency_id, pg_conn, ch_client)  # nothing changed
+    assert built == []
+
+
 def test_a_table_the_agency_has_no_rows_for_is_not_rebuilt_on_every_run(pg_conn, agency_id, ch_client, monkeypatch):
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60, scheduled_time=None)])
     analyze(agency_id, pg_conn, ch_client)
@@ -142,7 +157,8 @@ def test_a_postgres_copy_that_disagrees_with_clickhouse_rolls_the_run_back(pg_co
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 14, 8, 0), "a", 60)])
     analyze(agency_id, pg_conn, ch_client)
     before = {table: pg_rows(pg_conn, agency_id, table) for table in ch_aggregates.COPIED_TABLES}
-    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
+    # A new route, so every table changes: agg_stop_routes lists routes, not observations.
+    insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180, route_code="R2")])
     real = ch_aggregates.rows_sql
 
     def rows_sql(table, agency, months):

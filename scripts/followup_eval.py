@@ -11,7 +11,8 @@ Usage:
 Exit codes:
     0 — every probe passed
     1 — at least one probe failed (faithfulness/injection/grounding regression)
-    2 — no LLM provider usable (keys absent) — gate skipped, not failed
+    2 — no LLM provider usable (none in CHAT_PROVIDERS has a key, or none of
+        those ASK_FOLLOWUP_PROVIDERS allows) — gate skipped, not failed
 """
 
 from __future__ import annotations
@@ -135,16 +136,25 @@ async def _ask(question: str, locale: str, context: dict) -> tuple[str, str | No
 async def main() -> int:
     """Run every probe against the live provider ladder; return the exit code.
 
-    Skips (returns 2) when no provider is configured. Otherwise runs a no-API
+    Skips (returns 2) when no provider the follow-up may use is configured. Otherwise runs a no-API
     negative control, then each probe as a tuple of
     ``(name, question, locale, context, grader(answer, err) -> (ok, note))``.
     """
     _load_env()
 
+    from pipeline.query.followup import _allowed_providers
     from pipeline.query.llm_client import get_client
 
-    if not get_client().providers():
-        print("no LLM provider configured (keys absent) — gate skipped", file=sys.stderr)
+    # The same filter answer_followup applies: a key held only by a provider
+    # outside ASK_FOLLOWUP_PROVIDERS leaves nothing to probe, which is a skipped
+    # gate, not a failed one.
+    allowed = _allowed_providers()
+    if not any(provider.name in allowed for provider in get_client().providers()):
+        print(
+            "no provider in CHAT_PROVIDERS with a key is one ASK_FOLLOWUP_PROVIDERS allows "
+            f"({', '.join(sorted(allowed))}) — gate skipped",
+            file=sys.stderr,
+        )
         return 2
 
     # Negative control (no API): prove the grounding grader actually rejects a

@@ -64,6 +64,19 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   exists only when you pass `COVERAGE=1` here. Nothing gates on it. The instrumentation adds minutes per run, and this gate is
   often paid more than once per branch. Frontend coverage does gate: CI's `frontend`
   job runs `npm run test:coverage` against `vitest.config.ts`'s thresholds on every PR.
+- A fixture whose rows a date bucket, a service day or a date window will judge
+  reads the clock once, as `day = jst_today()`. It seeds at `jst_midday(day)`
+  (`tests/fixtures/clock.py`), never `NOW()` or `datetime.now()`, and names the same
+  `day` as the request's `from`/`to`.
+  - The wall clock eventually straddles JST midnight or the 04:00 JST service-day
+    cutover, and that splits a day's group.
+  - A request with no `from`/`to` ends on the last closed JST day
+    (`api.range.last_closed_jst_day`). A row seeded at `NOW()` is inside it only on a
+    run that starts between 00:00 and 04:00 JST, so one green run proves nothing
+    about the other twenty hours.
+  - Asking for today works only because a test writes `updates` directly. In
+    production, data reaches `updates` only once its day has closed.
+  - `tests/unit/test_jst_test_anchor.py` keeps the anchor clear of both edges.
 
 ## Frontend dev proxy
 - `frontend/vite.config.ts` is the only dev-proxy config; `tsc -b` emits into

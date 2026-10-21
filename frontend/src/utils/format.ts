@@ -42,16 +42,32 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return format;
 }
 
-/** Round to one decimal. Derive a displayed sign from this value, not the raw one,
- *  so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
+/** Round to `digits` decimals, a half away from zero as Intl and the API round, with
+ *  zero always positive. */
+export function roundTo(v: number, digits: number): number {
+  const scale = 10 ** digits;
+  // Adding 0 turns -0 into 0 and, unlike `|| 0`, leaves NaN visible as bad data.
+  return (Math.sign(v) * Math.round(Math.abs(v) * scale)) / scale + 0;
+}
+
+/** {@link roundTo} one decimal. Derive a displayed sign from this value, not the raw
+ *  one, so a tiny negative figure that rounds to zero prints "0.0" rather than "-0.0". */
 export function roundTenth(v: number): number {
-  return Math.round(v * 10) / 10;
+  return roundTo(v, 1);
+}
+
+/** `v` with one decimal, rounded first so a figure that rounds to zero prints "0.0", never "-0.0".
+ *  Use it instead of `.toFixed(1)`, which a lint rule bans for that reason. */
+export function fixedTenth(v: number): string {
+  // eslint-disable-next-line no-restricted-syntax -- the one place a tenth is printed, after rounding
+  return roundTenth(v).toFixed(1);
 }
 
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
-  return numberFormat(opts).format(n);
+  // Intl prints a negative zero as "-0"; the API sends one for a figure that rounds to zero.
+  return numberFormat(opts).format(n === 0 ? 0 : n);
 }
 
 // Intl.DateTimeFormat renders a date-only string when given no component
@@ -74,11 +90,13 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
  *  calendar day than the one it is judged against. The result carries a "JST"
  *  suffix so a viewer in another zone knows which clock it is. */
 export function formatReportTime(iso: string): string {
-  const time = formatDateTime(
-    iso,
-    isToday(iso) ? { timeStyle: "short", timeZone: JST_TZ } : { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ },
-  );
-  return i18n.t("common.report_time_jst", { time });
+  if (!isToday(iso)) return formatReportDateTime(iso);
+  return i18n.t("common.report_time_jst", { time: formatDateTime(iso, { timeStyle: "short", timeZone: JST_TZ }) });
+}
+
+/** {@link formatReportTime} with the date always shown, for a place that states it in full. */
+export function formatReportDateTime(iso: string): string {
+  return i18n.t("common.report_time_jst", { time: formatDateTime(iso, { ...DEFAULT_DATETIME_OPTS, timeZone: JST_TZ }) });
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the
@@ -88,21 +106,22 @@ export function fmtPct(v: unknown, _t: TFunction): string {
   if (v == null) return EM_DASH;
   const n = Number(v);
   if (!isFinite(n)) return EM_DASH;
-  return `${n.toFixed(1)}%`;
+  return `${fixedTenth(n)}%`;
 }
 
 /** Formats a 0..1 ratio (e.g. `long_gap_rate`) as a percentage. Not
  *  interchangeable with {@link fmtPct}, which expects its input already
  *  scaled to 0-100. */
 export function fmtRatioPct(v: number | null): string {
-  return v == null ? EM_DASH : `${(v * 100).toFixed(1)}%`;
+  return v == null ? EM_DASH : `${fixedTenth(v * 100)}%`;
 }
 
 /** Minutes with the unit spaced as the language spaces it ("6.3 min",
  *  "6.3分"), at one decimal: the precision every delay figure uses. */ // i18n-ignore: JSDoc examples
 export function formatMinutes(v: number | null | undefined, digits = 1): string {
   if (v == null || !isFinite(v)) return EM_DASH;
-  const value = formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  // Intl keeps the sign of a value that rounds to zero ("-0.0"); rounding first prints it unsigned.
+  const value = formatNumber(roundTo(v, digits), { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return i18n.t("common.minutes_value", { value });
 }
 

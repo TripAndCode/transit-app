@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Fetch archives from Oracle Cloud server then ingest them (raw RT updates go
 # to ClickHouse; timetable and aggregate data to Postgres).
-# Local-dev replay path: requires SSH access to the Oracle VM. Production
-# history comes from the live path instead (collector pushes into
-# updates_live, promoted daily by the cron); the same archives reach R2/S3 for
+# Local-dev replay of recent days only: requires SSH access to the Oracle VM,
+# which keeps just the archives not yet uploaded to R2, plus each agency's
+# current static zip (spool-cleanup.sh deletes every other one once R2 holds
+# it). Production history comes from the live path instead (collector pushes
+# into updates_live, promoted daily by the cron), and older days are in R2 for
 # backfill (see docs/deploy-railway.md).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
 # Each agency's archives ingest before its newest local timetable loads: a
@@ -11,7 +13,9 @@
 # already loaded. An agency ingest refuses for having no timetable loaded
 # (exit 78; REQUIRES_STATIC_TIMETABLE in pipeline/strategies/__init__.py) gets
 # its local timetable loaded first and one retry. One still refused is skipped, the rest still run, and the
-# script exits 78 once they are done.
+# script exits 78 once they are done. In the per-agency layout a fetch that
+# fails for some agencies still ingests every agency from what is local, then
+# exits with the fetch's code, which takes precedence over 78.
 #
 # Env vars: everything from fetch_archives.sh plus:
 #   DATABASE_URL   Postgres connection string
@@ -45,14 +49,24 @@ ingest_agency() {
 
 echo "=== fetch_and_ingest started at $(date -u) ==="
 
-# 1. Pull latest archives from Oracle Cloud server
-bash "$SCRIPT_DIR/fetch_archives.sh"
-
 if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     # ── v3: per-agency ingest ────────────────────────────────────────────
+    # 1. Pull the latest archives. A fetch that fails for some agencies still
+    #    fetched the rest, and ingest is idempotent over what is already local,
+    #    so every agency is ingested before the run reports the fetch failure.
+    #    An agency the collector does not hold is skipped, not ingested: it has
+    #    nothing new, and its ingest would only refuse for having no timetable.
+    SKIPPED_AGENCIES_FILE="$(mktemp)"
+    export SKIPPED_AGENCIES_FILE
+    trap 'rm -f "$SKIPPED_AGENCIES_FILE"' EXIT
+    fetch_code=0
+    bash "$SCRIPT_DIR/fetch_archives.sh" || fetch_code=$?
     AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$SCRIPT_DIR/../agencies.csv" | tr '\n' ' ')}"
     no_timetable=""
     for id in $AGENCY_IDS; do
+        if grep -qx "$id" "$SKIPPED_AGENCIES_FILE"; then
+            continue
+        fi
         STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
         echo "==> [a$id] Ingesting RT archives"
         # gtfs_pipeline.py's ingest/analyze exit 75 (EX_TEMPFAIL) on ingest/
@@ -96,9 +110,18 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     done
     if [ -n "$no_timetable" ]; then
         echo "=== fetch_and_ingest skipped agencies with no timetable loaded:$no_timetable (load it, then rerun) ===" >&2
+    fi
+    if [ "$fetch_code" -ne 0 ]; then
+        echo "=== fetch_and_ingest: fetching archives failed (exit $fetch_code); ingested what was already local ===" >&2
+        exit "$fetch_code"
+    fi
+    if [ -n "$no_timetable" ]; then
         exit 78
     fi
 else
+    # 1. Pull latest archives from Oracle Cloud server
+    bash "$SCRIPT_DIR/fetch_archives.sh"
+
     # ── legacy single-agency path ──────────────────────────────────
     STATIC_DIR="$SCRIPT_DIR/../raw_archives_static"
 

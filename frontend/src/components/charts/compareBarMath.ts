@@ -1,3 +1,4 @@
+import { roundTenth } from "../../utils/format";
 export type Period = "weekday" | "weekend";
 export const PERIODS: readonly Period[] = ["weekday", "weekend"];
 
@@ -40,6 +41,6 @@ export function deltaFor(row: CompareRow, period: Period): number | null {
   const a = row[period];
   const b = row[otherPeriod(period)];
   if (a == null || b == null) return null;
-  const tenths = Math.round((Number(a.toFixed(1)) - Number(b.toFixed(1))) * 10);
+  const tenths = Math.round((roundTenth(a) - roundTenth(b)) * 10);
   return tenths === 0 ? 0 : tenths / 10;
 }

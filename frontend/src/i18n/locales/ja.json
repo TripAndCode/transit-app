@@ -50,7 +50,7 @@
     "subtitle_reports": "協議会や役員会向けのまとめと、遅延の証明です。"
   },
   "sheet": {
-    "handle": "シートの持ち手"
+    "handle": "シートの高さを変える"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
@@ -658,6 +658,8 @@
       "progress_disclosure": "リアルタイム報告の推移",
       "progress_loading": "報告履歴を取得中…",
       "no_progress": "この便の報告履歴はまだありません",
+      "progress_error": "この便の報告履歴を読み込めませんでした。",
+      "live_error": "走行中の便を読み込めませんでした。",
       "select_route": "路線を選ぶか、地図上の便を押すと詳細を表示します。",
       "choose_route": "運行中の路線から選択",
       "choose_route_hint": "路線を選ぶと、方面と同時運行中の便を表示します。",
@@ -687,6 +689,7 @@
       "exit": "再生を終了して現在の運行に戻る",
       "loading": "1日分のデータを読み込んでいます",
       "empty": "この日の観測データはありません",
+      "error": "この日の観測データを読み込めませんでした",
       "toggle_on": "1日の動きを再生",
       "toggle_off": "現在の運行に戻る"
     }
@@ -961,17 +964,17 @@
       },
       "route_trend": {
         "title": "路線の遅延推移",
-        "summary": "路線 {{route}} の {{gran}}ごとの推移",
+        "summary": "{{route}}の{{gran}}ごとの推移",
         "placeholder": "路線を選択してください"
       },
       "weekday_vs_weekend": {
         "title": "平日 vs 土日祝",
-        "summary": "路線 {{route}}: 平日と土日祝の比較",
+        "summary": "{{route}}: 平日と土日祝の比較",
         "placeholder": "路線を選択してください"
       },
       "route_overview": {
         "title": "路線の概況",
-        "summary": "路線 {{route}} の概況",
+        "summary": "{{route}}の概況",
         "placeholder": "路線を選択してください"
       }
     },
@@ -1057,6 +1060,7 @@
       "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
+      "cell_empty_aria": "{{date}} {{hour}}時 ・ データなし",
       "ramp_max": "{{min}}分以上",
       "severe_outline": "枠線 = {{min}}分以上"
     },
@@ -1122,6 +1126,10 @@
       "title": "運行間隔の質",
       "subtitle": "この事業者の高頻度路線（計画運行間隔12分以内）について、超過待ち時間・間隔のばらつき・大きな間隔あきの発生率を表示します。",
       "empty": "この期間で十分なデータがある高頻度路線がありません。",
+      "day_type_note": "各路線は、主となるダイヤが走る日だけで比べています（路線名の横に表示）。",
+      "empty_off_timetable": "高頻度路線はありますが、選んだ曜日に主となるダイヤで走る路線がありません。",
+      "some_off_timetable_one": "ほかに{{count}}路線の高頻度路線は、選んだ曜日に主となるダイヤで走らないため除いています。",
+      "some_off_timetable_other": "ほかに{{count}}路線の高頻度路線は、選んだ曜日に主となるダイヤで走らないため除いています。",
       "col": {
         "ewt": "超過待ち時間",
         "cov": "間隔のばらつき(CoV)",

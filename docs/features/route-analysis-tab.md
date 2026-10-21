@@ -23,13 +23,12 @@ saved-analysis bookmarks — scoped to exactly one selected route.
   the Routes list. `tab` names a dossier tab (`RouteTab` in
   `destinations.ts`) for links; the dossier has one view, so nothing reads
   it, and `sub_tab` alone picks the panel.
-- Reached from the rail's Routes entry (`nav.routes`) and then the list's
-  route opener (`routesIndex.open_route`, a `<select>` plus an Open button
-  in `frontend/src/tabs/RoutesIndex.tsx`; it leaves only on Open, so the
-  keyboard can browse the list), or from links that open a route
-  directly, all built by `routeHref`/`routesHref` in
-  `frontend/src/routes/destinations.ts`: the command palette's route items
-  (with the active scope), the Live trip panel
+- Reached from the rail's Routes entry (`nav.routes`) and then a route name
+  in one of the list's ranking rows (`RouteCell` in
+  `frontend/src/components/ReportTable.tsx`, with the active scope), or
+  from other links that open a route directly, all built by
+  `routeHref`/`routesHref` in `frontend/src/routes/destinations.ts`: the
+  command palette's route items (with the active scope), the Live trip panel
   (`routes/<route_code>?tab=stops`), and Reports' routes-to-check rows and
   saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
@@ -122,7 +121,7 @@ What the user sees/does:
   `frontend/src/tabs/RouteDossier.test.tsx` (the path's route without a
   `routes` param, following a picked route without remounting, and the
   hand-off to the Routes list), `frontend/src/tabs/RoutesIndex.test.tsx`
-  (the route opener),
+  (the ranking reports it hosts, with no separate route picker),
   `frontend/src/routes/legacyRedirects.test.tsx` (the `route-analysis` and
   `analysis/where` redirects),
   `frontend/src/components/analysis/StopChart.test.ts`,
@@ -139,8 +138,8 @@ What the user sees/does:
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data first: `make fetch-ingest` (or `make load_static` before `ingest_live`),
    then `make analyze` for the agency.
-2. Click "Routes" in the rail → URL `/agencies/:agencyId/routes`; choose a
-   route in "Open a route" → URL `/agencies/:agencyId/routes/<route_code>`.
+2. Click "Routes" in the rail → URL `/agencies/:agencyId/routes`; click a
+   route name in the ranking → URL `/agencies/:agencyId/routes/<route_code>`.
 3. Expect the stop chart, Marey diagram, map, and by-stop table to
    populate; switch between the four sub-tabs. Pick one different route in
    the filter — expect the path to move to that route; pick several —

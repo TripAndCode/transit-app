@@ -14,7 +14,7 @@ import {
   type HeroLabels,
   type HeroPalette,
 } from "./heroCanvas";
-import { formatNumber } from "../../utils/format";
+import { fixedTenth, formatNumber } from "../../utils/format";
 import { clamp01, expoInOut, expoOut, lerp, segment, withAlpha } from "./heroMapMath";
 import {
   FIRST_SERVICE_HOUR,
@@ -333,7 +333,7 @@ function drawOverview(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, p: Pan
   setFont(ctx, 700, 12 * s, palette.fontBody);
   ctx.fillStyle = palette.muted;
   ctx.fillText(labels.overviewAverage, p.ix, p.y + 78 * s);
-  const value = (OVERVIEW.networkAvg * expoOut(segment(since, 0.2, 1.0))).toFixed(1);
+  const value = fixedTenth((OVERVIEW.networkAvg * expoOut(segment(since, 0.2, 1.0))));
   setFont(ctx, 800, 64 * s, palette.fontBody);
   ctx.fillStyle = palette.text;
   ctx.fillText(value, p.ix - 2 * s, p.y + 146 * s);

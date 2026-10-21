@@ -8,7 +8,7 @@ and compares its rows with the Postgres table's on the dates whose aggregates ar
 current: those whose Postgres ledger (agg_feed_health) still matches ClickHouse's
 per-date counts. A date ingested or changed since the last analyze would differ
 for that reason alone. The whole-history tables are computed in the query from
-the agency's whole-history dedup and compared whole, and only when every date is
+the agency's whole history and compared whole, and only when every date is
 current, since each of their rows spans every date.
 
 --time-only skips the comparison and times each month's build instead: the dedup
@@ -17,7 +17,8 @@ the server. Each table's SELECT dedups `updates` itself there, so the per-table
 figures are what an unshared build would pay. A run instead fills one dedup per
 month into a table the tables needing that month share (`ch_aggregates.build`),
 paying the dedup column's figure plus the cost of writing it; a month only one
-table needs is built straight from `updates`.
+table needs is built straight from `updates`. A raw table reads `updates`
+without the dedup either way.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
 that adds them is applied. The static-joined tables join ClickHouse's
@@ -65,6 +66,15 @@ def normalized(value):
     return value
 
 
+def comparable(table: str, row) -> tuple:
+    """*row* normalized, with agg_stop_routes' route list as a sorted tuple of codes:
+    ClickHouse orders the list by bytes, the Postgres copy by its collation."""
+    values = tuple(map(normalized, row))
+    if table == "agg_stop_routes":
+        return (*values[:-1], tuple(sorted(values[-1].split(","))))
+    return values
+
+
 def comparable_dates(stored: dict, live: dict) -> set:
     """The dates whose ledger row matches ClickHouse's counts, so their aggregates are current."""
     return {day for day, counts in stored.items() if live.get(day) == counts}
@@ -77,13 +87,11 @@ def whole_history_current(stored: dict, live: dict) -> bool:
     return stored == live
 
 
-def differences(ch_rows, pg_rows, dates) -> tuple[list, list]:
-    """Rows only ClickHouse has and rows only Postgres has, on *dates*.
-
-    Every row's second column is its date, as in ch_aggregates.COLUMNS.
-    """
-    ch = {tuple(map(normalized, row)) for row in ch_rows if row[1] in dates}
-    pg = {tuple(map(normalized, row)) for row in pg_rows if row[1] in dates}
+def differences(ch_rows, pg_rows, dates, *, date_at: int) -> tuple[list, list]:
+    """Rows only ClickHouse has and rows only Postgres has, on *dates*; each
+    row's date is its column *date_at*."""
+    ch = {tuple(map(normalized, row)) for row in ch_rows if row[date_at] in dates}
+    pg = {tuple(map(normalized, row)) for row in pg_rows if row[date_at] in dates}
     return sorted(ch - pg, key=str), sorted(pg - ch, key=str)
 
 
@@ -126,18 +134,21 @@ def parity(ch, conn, agency_id: int) -> int:
         if table in skipped:
             continue
         compared = 0
+        date_at = ch_aggregates.COLUMNS[table].index("date")
         for month in ch_aggregates.months_of(dates):
             sql, params = ch_aggregates.select_sql(table, month)
             ch_rows = ch.query(sql, parameters={"agency_id": agency_id, **params}).result_rows
             pg_rows = _pg_month(conn, table, agency_id, month)
-            only_ch, only_pg = differences(ch_rows, pg_rows, dates)
-            compared += sum(1 for row in pg_rows if row[1] in dates)
+            only_ch, only_pg = differences(ch_rows, pg_rows, dates, date_at=date_at)
+            compared += sum(1 for row in pg_rows if row[date_at] in dates)
             for label, rows in (("only in ClickHouse", only_ch), ("only in Postgres", only_pg)):
                 for row in rows[:5]:
                     print(f"  {table} {month} {label}: {row}")
             failures += len(only_ch) + len(only_pg)
         print(f"{table}: {compared} Postgres rows compared")
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
+        if table in skipped:
+            continue
         if not whole_history_current(stored, live):
             print(f"{table}: skipped; a whole-history row spans every date, and not every date is current")
             continue
@@ -147,8 +158,8 @@ def parity(ch, conn, agency_id: int) -> int:
                 f"SELECT {', '.join(ch_aggregates.COLUMNS[table])} FROM {table} WHERE agency_id = %s", (agency_id,)
             )
             pg_rows = cur.fetchall()
-        ch_set = {tuple(map(normalized, row)) for row in ch_rows}
-        pg_set = {tuple(map(normalized, row)) for row in pg_rows}
+        ch_set = {comparable(table, row) for row in ch_rows}
+        pg_set = {comparable(table, row) for row in pg_rows}
         for label, differing in (("only in ClickHouse", ch_set - pg_set), ("only in Postgres", pg_set - ch_set)):
             for row in sorted(differing, key=str)[:5]:
                 print(f"  {table} {label}: {row}")

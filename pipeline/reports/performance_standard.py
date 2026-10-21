@@ -125,12 +125,13 @@ async def compute_performance_standards(agency_id: int, ctx: RangeCtx, conn) -> 
     # every other Analysis-tab panel). Resolving ewt_sec with the caller's
     # ctx as-is would silently blank out a configured route's actual value
     # to None whenever the page's route filter happens to exclude it --
-    # indistinguishable from genuinely insufficient data. A route-filter-free
-    # copy of ctx keeps a configured standard's actual value resolved
+    # indistinguishable from genuinely insufficient data. The page's weekday
+    # filter would do the same, and this endpoint reads dates only. A copy of
+    # ctx free of both keeps a configured standard's actual value resolved
     # regardless of the page filter.
     ewt_by_route: dict[str, float | None] = {}
     if any(r["metric_type"] == "ewt_sec" for r in rows):
-        unfiltered_ctx = dataclasses.replace(ctx, routes=())
+        unfiltered_ctx = dataclasses.replace(ctx, routes=(), dow="all")
         quality_rows = await compute_headway_quality(agency_id, unfiltered_ctx, conn)
         ewt_by_route = {q["route_code"]: q["ewt_sec"] for q in quality_rows}
 

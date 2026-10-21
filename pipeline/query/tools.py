@@ -319,6 +319,21 @@ _LOCALES: dict[tuple[str, str], str] = {
         "Across all routes the average is {avg} min this week, {direction} {delta}% "
         "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
     ),
+    ("copilot_overview_top_delay_no_baseline", "ja"): (
+        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
+        "比べられる前の期間のデータはまだありません。"
+    ),
+    ("copilot_overview_top_delay_no_baseline", "en"): (
+        "Route {name} is running the longest average delay right now, at {top_avg} min "
+        "({delayed_count} routes currently delayed). There is no earlier period to compare it with yet."
+    ),
+    ("copilot_overview_top_route", "ja"): (
+        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
+    ),
+    ("copilot_overview_top_route", "en"): (
+        "Route {name} is running the longest average delay right now, at {top_avg} min "
+        "({delayed_count} routes currently delayed)."
+    ),
     ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
     ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
     ("copilot_delta_up", "ja"): "増加",
@@ -938,8 +953,7 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency avoids that: it doesn't depend on which route or which window
     # was asked about, so it can't reintroduce the conflation, and it's
     # tighter than a fixed constant (typically "yesterday", not 30 days
-    # back). Residual gap, same shape as agg_stop_routes' own NULL/implausible-
-    # delay trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # back). Residual gap: a route whose EVERY observation ever
     # recorded was NULL/implausible delay (permanently invisible to
     # agg_route_daily's dedup filter, regardless of recency) still reads as
     # unregistered if its last observation predates the horizon. Accepted —

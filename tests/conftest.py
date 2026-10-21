@@ -377,7 +377,7 @@ def mirror_updates_to_ch(ch_client, agency_id, *, table: str = "updates") -> Non
     """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
 
     analyze() now reads ALL of its `updates` access from ClickHouse (dedup
-    materialization, agg_feed_health, agg_stop_routes' _analyze_raw_keys,
+    materialization, agg_feed_health, the ClickHouse-computed aggregates,
     agg_meta's max_updates_captured_at — see pipeline/analyze.py); nothing
     in it reads Postgres `updates` any more. Many fixtures across this
     suite pre-date that migration and still seed Postgres `updates` directly

@@ -8,6 +8,26 @@ const DISMISSED_KEY = "help_hint_dismissed";
 const SHOW_AFTER_MS = 3_000;
 const HIDE_AFTER_MS = 5 * 60 * 1000;
 
+// Storage throws where site data is blocked. The flags then live in memory, so
+// a dismissal and the first-visit clock last until the page reloads.
+const blockedStorageFlags = new Map<string, string>();
+
+function readFlag(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return blockedStorageFlags.get(key) ?? null;
+  }
+}
+
+function writeFlag(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    blockedStorageFlags.set(key, value);
+  }
+}
+
 /**
  * One-time, dismissable hint pointing a brand-new visitor at the User Manual
  * (`/help`) — today it's only reachable via the account-menu popover
@@ -27,12 +47,12 @@ export function HelpHint() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    if (readFlag(DISMISSED_KEY)) return;
 
-    let firstVisit = parseInt(localStorage.getItem(FIRST_VISIT_KEY) || "0", 10);
+    let firstVisit = parseInt(readFlag(FIRST_VISIT_KEY) || "0", 10);
     if (!firstVisit) {
       firstVisit = Date.now();
-      localStorage.setItem(FIRST_VISIT_KEY, String(firstVisit));
+      writeFlag(FIRST_VISIT_KEY, String(firstVisit));
     }
 
     const elapsed = Date.now() - firstVisit;
@@ -55,7 +75,7 @@ export function HelpHint() {
   if (!show) return null;
 
   function dismiss() {
-    localStorage.setItem(DISMISSED_KEY, "1");
+    writeFlag(DISMISSED_KEY, "1");
     setShow(false);
   }
 

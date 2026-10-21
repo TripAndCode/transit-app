@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { useState } from "react";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +6,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { QuestionDock } from "./QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "./askCardTemplates";
 import i18n from "../i18n";
+import * as hooks from "../api/hooks";
 
 const templates = buildCardTemplates();
 
@@ -72,6 +73,8 @@ function setup(overrides: { busy?: boolean; showToolbar?: boolean } = {}) {
 }
 
 describe("QuestionDock", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("renders one chip per template inside the question-picker toolbar", () => {
     setup();
     const toolbar = screen.getByRole("toolbar", {
@@ -139,6 +142,37 @@ describe("QuestionDock", () => {
     });
     expect(typeof payload.user_summary).toBe("string");
     expect(payload.user_summary.length).toBeGreaterThan(0);
+  });
+
+  it("asks about a route by its name, while the tool still gets its route_code", async () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [
+        { route_id: "1001_2345", route_code: "1001_2345", route_short_name: "70-3", route_long_name: "Asahi Line", trip_headsigns: [] },
+      ],
+      isLoading: false,
+    } as never);
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithProviders(
+      <QuestionDock
+        agencyId={1}
+        busy={false}
+        onSubmit={onSubmit}
+        composingId="route_overview"
+        values={{ route_code: "1001_2345" }}
+        onChipTap={vi.fn()}
+        onValueChange={vi.fn()}
+        onRunComplete={vi.fn()}
+        showToolbar={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: i18n.t("ask.dock.run") }));
+
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.args.route_code).toBe("1001_2345");
+    expect(payload.user_summary).toContain("70-3");
+    expect(payload.user_summary).not.toContain("1001_2345");
   });
 
   it("coerces the best_first metric string to a boolean in args", async () => {

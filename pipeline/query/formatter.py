@@ -98,6 +98,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
     ("council_service_delivered_unavailable", "ja"): "運行実績率: この事業者のフィードでは計測できません。",
     ("council_service_delivered_unavailable", "en"): "Service-delivered rate: not available for this agency's feed.",
+    ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",
+    ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
     ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
     ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
@@ -431,6 +433,11 @@ def format_delay_certificate_footnotes(threshold_sec: int, shown: int, total: in
     if total > shown:
         lines.append(_t("delay_certificate_capped_footnote", locale, count=total, shown=shown))
     return lines
+
+
+def format_day_marker(offset: int, locale: str = "ja") -> str:
+    """The marker a delay certificate's actual time carries when it lands *offset* days off its scheduled one."""
+    return _t("delay_certificate_day_marker", locale, offset=offset)
 
 
 def format_delay_certificate_text(rows: list, threshold_sec: int, total: int, locale: str = "ja") -> str:

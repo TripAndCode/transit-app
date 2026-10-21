@@ -144,4 +144,13 @@ describe("RoutePickerPill options", () => {
     const option = screen.getByRole("option", { name: /沖舘・新田線/ });
     expect(option.querySelector(".rp-opt-where")).toBeNull();
   });
+
+  it("finds a route typed with full-width characters", async () => {
+    mockRoutes();
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "Route" }));
+    await user.type(screen.getByPlaceholderText("Select a route"), "Ｊ２０");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+  });
 });

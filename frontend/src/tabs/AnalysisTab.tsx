@@ -10,6 +10,7 @@ import {
   useReports,
   type ReportOptions,
 } from "../api/hooks";
+import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { DwellRunPayload, ReportResponse, TrendPayload } from "../api/types";
@@ -87,6 +88,7 @@ export function AnalysisTab({
   const [searchParams, setSearchParams] = useSearchParams();
   const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
+  const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   function selectReport(type: string) {
@@ -137,7 +139,7 @@ export function AnalysisTab({
 
   const isCertificate = detail.data?.report_type === "delay_certificate";
   function csvHref(type: string): string {
-    return `/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`;
+    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`);
   }
 
   // `route_forecast` is served by its own endpoint, so the reports list never
@@ -270,7 +272,7 @@ export function AnalysisTab({
               <EmptyState
                 title={t("reports.no_data.title")}
                 hint={t("reports.no_data.hint")}
-                reasons={buildFilterCtxReasons(ctx, t)}
+                reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
                 recoveries={buildFilterCtxRecoveries({
                   ctx,
                   onClearRoutes: () => update({ routes: null }),
@@ -454,7 +456,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <EmptyState
         title={t("reports.no_data.title")}
         hint={t("reports.no_data.hint")}
-        reasons={buildFilterCtxReasons(ctx, t)}
+        reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
         recoveries={buildFilterCtxRecoveries({
           ctx,
           onClearRoutes: () => update({ routes: null }),

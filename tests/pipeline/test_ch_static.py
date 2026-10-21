@@ -126,3 +126,43 @@ def test_stop_daily_joins_on_trip_and_sequence_only(ch_client):
         ("S1", date(2026, 9, 14), "", "morning", 90, 1),
     ]
     assert [row[:2] for row in _stop_daily(ch_client, "agg_route_stop_daily")] == [("R1", "BIG"), ("R1", "S1")]
+
+
+def _stop_routes(ch_client) -> dict[str, str]:
+    rows = ch_client.query(
+        "SELECT stop_id, route_codes FROM agg_stop_routes WHERE agency_id = {a:Int32}", parameters={"a": AGENCY}
+    ).result_rows
+    return dict(rows)
+
+
+def _build_stop_routes(ch_client) -> None:
+    """S1 seen on a route with no delay, on one with a delay, and on no route at all."""
+    day = datetime(2026, 9, 14, 8, 0)
+    ch_aggregates.replace_static_stop_times(
+        ch_client, AGENCY, [(AGENCY, "t1", 1, "S1", None, None), (AGENCY, "t2", 1, "S1", None, None)], "fp"
+    )
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            update_row(day, "t1", None, route_code="QUIET"),
+            update_row(day, "t2", 30, route_code="BUSY"),
+            update_row(day, "t2", 30, route_code=None),
+        ],
+    )
+    ch_aggregates.build(ch_client, AGENCY, {ch_aggregates.ROUTE_STOP_DAYS: ch_aggregates.Rebuild([SEPT], None)})
+    ch_aggregates.swap(ch_client, ch_aggregates.ROUTE_STOP_DAYS, AGENCY, [SEPT])
+    ch_aggregates.build_whole_history(ch_client, AGENCY, ["agg_stop_routes"], {})
+    ch_aggregates.swap_whole_history(ch_client, "agg_stop_routes", AGENCY)
+
+
+def test_stop_routes_keep_a_route_whose_every_observation_lacks_a_delay(ch_client):
+    _build_stop_routes(ch_client)
+    assert _stop_routes(ch_client) == {"S1": "BUSY,QUIET"}
+
+
+def test_the_read_only_path_computes_the_stop_routes_in_query(ch_client):
+    _build_stop_routes(ch_client)
+    sql = ch_aggregates.whole_history_sql("agg_stop_routes")
+    rows = ch_client.query(sql, parameters={"agency_id": AGENCY}).result_rows
+    assert {stop_id: codes for _, stop_id, codes in rows} == _stop_routes(ch_client)

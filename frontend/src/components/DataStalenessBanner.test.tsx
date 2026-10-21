@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { DataStalenessBanner } from "./DataStalenessBanner";
 import * as hooks from "../api/hooks";
@@ -28,10 +28,6 @@ function renderBanner() {
   );
 }
 
-beforeEach(() => {
-  sessionStorage.clear();
-});
-
 function hoursAgoIso(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
@@ -57,7 +53,8 @@ describe("DataStalenessBanner", () => {
       data: summary({ latest_captured_at: hoursAgoIso(48) }),
     } as never);
     renderBanner();
-    expect(screen.getByRole("status")).toBeTruthy();
+    // scripts/capture_user_manual_screenshots.py hides the shell banners by this attribute.
+    expect(screen.getByRole("status")).toHaveAttribute("data-shell-banner");
   });
 
   it("renders nothing when the latest observation is recent", () => {
@@ -87,5 +84,60 @@ describe("DataStalenessBanner", () => {
     const messageButton = buttons.find((b) => b.getAttribute("aria-expanded") === "false");
     expect(messageButton).toBeDefined();
     vi.restoreAllMocks();
+  });
+});
+
+describe("DataStalenessBanner dismissal", () => {
+  function renderSwitchable() {
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/9"]}>
+        <Routes>
+          <Route
+            path="/:agencyId"
+            element={<><DataStalenessBanner /><Link to="/10">other agency</Link><Link to="/9">first agency</Link></>}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("keeps a dismissal to the agency it was dismissed for", async () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ latest_captured_at: hoursAgoIso(48) }) } as never);
+    renderSwitchable();
+    await userEvent.click(screen.getByRole("button"));
+    expect(screen.queryByRole("status")).toBeNull();
+    await userEvent.click(screen.getByRole("link", { name: "other agency" }));
+    expect(screen.getByRole("status")).toBeTruthy();
+    await userEvent.click(screen.getByRole("link", { name: "first agency" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("shows again once the page is loaded afresh", async () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary({ latest_captured_at: hoursAgoIso(48) }) } as never);
+    renderBanner();
+    await userEvent.click(screen.getByRole("button"));
+    expect(screen.queryByRole("status")).toBeNull();
+    cleanup();
+    renderBanner();
+    expect(screen.getByRole("status")).toBeTruthy();
+  });
+});
+
+describe("DataStalenessBanner on a page left open", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("warns once the feed's age crosses the threshold, without a reload", () => {
+    vi.useFakeTimers();
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ latest_captured_at: hoursAgoIso(23.5) }),
+    } as never);
+    renderBanner();
+    expect(screen.queryByRole("status")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(60 * 60 * 1000);
+    });
+    expect(screen.getByRole("status")).toBeTruthy();
   });
 });

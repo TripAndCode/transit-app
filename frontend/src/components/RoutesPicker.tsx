@@ -8,8 +8,9 @@ import { routeWhereText, useRouteNames } from "../api/useRouteNames";
 import type { Route } from "../api/types";
 import { FILTER_SEPARATOR } from "../utils/format";
 import { RoutePartsLabel } from "./RouteLabel";
+import { searchKey } from "../utils/searchText";
 
-type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
+type RouteVariant = { code: string; long_name: string | null; headsigns: string[]; searchText: string };
 type RouteGroup = {
   name: string;
   variants: RouteVariant[];
@@ -51,10 +52,13 @@ function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
     const name = routeDisplayName(r) || r.route_code;
     const arr = m.get(name) || [];
     if (!arr.some((v) => v.code === r.route_code)) {
+      const headsigns = r.trip_headsigns ?? [];
       arr.push({
         code: r.route_code,
         long_name: r.route_long_name,
-        headsigns: r.trip_headsigns ?? [],
+        headsigns,
+        // Folded here, once per load, not on every keystroke of the filter.
+        searchText: searchKey(`${name} ${r.route_long_name || ""} ${headsigns.join(" ")} ${r.route_code}`),
       });
     }
     m.set(name, arr);
@@ -107,25 +111,14 @@ export function RoutesPicker({
 
   const groups: RouteGroup[] = buildRouteGroups(data);
 
-  const filterQuery = filter.trim().toLowerCase();
+  const filterQuery = searchKey(filter);
   const filteredGroups = filterQuery
     ? groups
         .map((g) => {
-          const variants = g.variants.filter((v) => {
-            const blob = (
-              g.name +
-              " " +
-              (v.long_name || "") +
-              " " +
-              v.headsigns.join(" ") +
-              " " +
-              v.code
-            ).toLowerCase();
-            return blob.includes(filterQuery);
-          });
+          const variants = g.variants.filter((v) => v.searchText.includes(filterQuery));
           return { ...g, variants };
         })
-        .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(filterQuery))
+        .filter((g) => g.variants.length > 0 || searchKey(g.name).includes(filterQuery))
     : groups;
 
   function toggleCode(code: string) {
