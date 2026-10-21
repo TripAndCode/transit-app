@@ -89,7 +89,10 @@ def _without_grounded_dates(answer: str, grounding: dict) -> str:
     def strip_grounded(match: re.Match[str]) -> str:
         year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
         if any(m == month and d == day and (year is None or (y is not None and int(year) == y)) for y, m, d in dates):
-            return " "
+            # The date's own last character, not a space: what follows it then
+            # reads as it did unstripped (a "-7" stays a range, not a sign, and
+            # a percent sign past it attaches to no number before it).
+            return "日"
         return match.group()
 
     return _JA_DATE_RE.sub(strip_grounded, answer) if dates else answer

@@ -169,3 +169,12 @@ def test_a_japanese_date_is_not_read_out_of_a_decimal():
 def test_a_short_year_does_not_leave_its_digits_as_a_separate_claim():
     grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 25.0}', "question": "どうでしたか"}
     assert verify_numeric_claims("25年9月5日が最も遅れ", grounding) is False
+
+
+def test_stripping_a_grounded_date_leaves_its_neighbours_read_as_before():
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9月5日から7日まで"}
+    # A day range keeps its 7 positive, as it reads without the date stripped.
+    assert verify_numeric_claims("9月5日-7日の平均は3.2分", grounding) is True
+    # A percent sign beyond a stripped date is not attached to the number before it.
+    rated = {"series": [{"date": "2026-09-05", "avg_min": 3.2}], "time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("35 9月5日 %", rated) is False
