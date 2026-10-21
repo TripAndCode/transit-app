@@ -1,5 +1,5 @@
 """Every down migration that drops or deletes data outside the rebuildable
-`agg_*` tables must carry the `-- DESTRUCTIVE` line `db.migrate` gates on,
+aggregate tables must carry the `-- DESTRUCTIVE` line `db.migrate` gates on,
 or `migrate down` runs it without being asked twice."""
 
 from __future__ import annotations
@@ -10,6 +10,14 @@ from pathlib import Path
 import pytest
 
 from db.migrate import _MIGRATIONS_DIR, is_destructive_down
+from pipeline.analyze import _AGG_TABLES_ORDERED
+
+# Aggregates a later analyze run rebuilds in full from source data: its rebuild
+# set and its agg_meta bookkeeping, plus agg_route_dow and agg_stop_seq, which
+# analyze built until they were retired. Any other `agg_*` table, such as one
+# analyze only upserts or one an ingest fills, holds rows no rebuild restores,
+# so its down file needs the marker.
+_REBUILDABLE_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED) | {"agg_meta", "agg_route_dow", "agg_stop_seq"}
 
 _COMMENT = re.compile(r"--[^\n]*")
 _NAME = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
@@ -32,8 +40,8 @@ def _table_names(group: str) -> list[str]:
 
 
 def data_losing_tables(sql: str) -> list[str]:
-    """Non-`agg_*` tables a top-level down-migration statement drops rows or
-    columns from.
+    """Tables outside `_REBUILDABLE_AGG_TABLES` a top-level down-migration
+    statement drops rows or columns from.
 
     Scope: plain DROP TABLE, DELETE FROM, TRUNCATE and ALTER TABLE ... DROP
     COLUMN statements. Statements inside a `DO` block, DROP SCHEMA/EXTENSION/TYPE ...
@@ -46,12 +54,13 @@ def data_losing_tables(sql: str) -> list[str]:
         if not m:
             continue
         group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
-        tables.extend(name for name in _table_names(group) if not name.lower().startswith("agg_"))
+        tables.extend(name for name in _table_names(group) if name.lower() not in _REBUILDABLE_AGG_TABLES)
     return tables
 
 
-def test_classifier_counts_tables_columns_and_rows_but_not_indexes_or_aggs():
+def test_classifier_counts_tables_columns_and_rows_but_not_indexes_or_rebuildable_aggs():
     assert data_losing_tables("DROP TABLE IF EXISTS users;\n") == ["users"]
+    assert data_losing_tables("DROP TABLE IF EXISTS agg_static_version_summary;") == ["agg_static_version_summary"]
     assert data_losing_tables("ALTER TABLE static_trips\n    DROP COLUMN IF EXISTS service_id;\n") == ["static_trips"]
     assert data_losing_tables(
         "DELETE FROM login_events WHERE kind = 'x';\nALTER TABLE login_events DROP CONSTRAINT c;"
@@ -76,7 +85,7 @@ def test_classifier_reads_only_comma_lists_and_quoted_or_qualified_names():
     assert data_losing_tables("TRUNCATE sessions, agg_meta, api_keys;") == ["sessions", "api_keys"]
     assert data_losing_tables('DROP TABLE IF EXISTS "Users";') == ["Users"]
     assert data_losing_tables("DELETE FROM ONLY public.login_events WHERE true;") == ["login_events"]
-    assert data_losing_tables('ALTER TABLE public."agg_x" DROP COLUMN y;') == []
+    assert data_losing_tables('ALTER TABLE public."agg_route_daily" DROP COLUMN y;') == []
 
 
 DOWN_FILES = sorted(_MIGRATIONS_DIR.glob("*.down.sql"))
