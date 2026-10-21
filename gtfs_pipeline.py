@@ -260,16 +260,18 @@ def cmd_add_agency(args):
 def cmd_seed_agencies(args):
     """Idempotently upsert every row of a CSV into the agencies table.
 
-    Columns: agency_id (optional), agency_name, feed_url, static_url, trip_id_pattern
-    Empty strings become NULL for static_url and trip_id_pattern.
-    Uniqueness is by feed_url; existing rows are updated, not duplicated.
+    Columns: agency_id (optional), agency_name, feed_url, static_url,
+    trip_id_pattern, ingest_strategy, static_strategy. Empty strings become
+    NULL for every optional column.
 
-    When ``agency_id`` is set in the CSV the INSERT uses it explicitly,
-    so re-seeding after a TRUNCATE always produces the same id (avoids
-    the sequence-drift bug where dev DBs accumulated agency_id=97 after
-    repeated test truncations and broke fetch_and_ingest.sh's default
-    ``AGENCY_ID=1``). The sequence is bumped to ``MAX(agency_id) + 1``
-    afterwards so future inserts without an explicit id don't collide.
+    A row with an ``agency_id`` is keyed on it: the same CSV always yields
+    the same ids, and an edited feed_url updates that agency in place. The
+    primary key is never rewritten, because child tables reference it
+    without ON UPDATE CASCADE. A row whose feed_url (UNIQUE) already belongs
+    to a different agency_id is refused, and the whole seed is rolled back.
+    A row without an ``agency_id`` is keyed on feed_url and takes the next
+    sequence value, so the sequence is realigned to ``MAX(agency_id)``
+    afterwards to keep those inserts clear of the explicit ids.
     """
     import csv
 
@@ -292,14 +294,28 @@ def cmd_seed_agencies(args):
                 explicit_id = int(aid_raw) if aid_raw.isdigit() else None
                 if explicit_id is not None:
                     cur.execute(
+                        "SELECT agency_id FROM agencies WHERE feed_url = %s AND agency_id <> %s",
+                        (feed, explicit_id),
+                    )
+                    holder = cur.fetchone()
+                    if holder is not None:
+                        logger.error(
+                            f"seed_agencies: {path} gives agency_id {explicit_id} the feed_url {feed}, "
+                            f"which agency_id {holder[0]} already holds; nothing was written. "
+                            "Point one of them at a different feed_url, or keep the existing agency_id."
+                        )
+                        conn.rollback()
+                        conn.close()
+                        sys.exit(1)
+                    cur.execute(
                         """
                         INSERT INTO agencies (
                             agency_id, agency_name, feed_url, static_url,
                             trip_id_pattern, ingest_strategy, static_strategy
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (feed_url) DO UPDATE SET
-                            agency_id = EXCLUDED.agency_id,
+                        ON CONFLICT (agency_id) DO UPDATE SET
+                            feed_url = EXCLUDED.feed_url,
                             agency_name = EXCLUDED.agency_name,
                             static_url = EXCLUDED.static_url,
                             trip_id_pattern = EXCLUDED.trip_id_pattern,
