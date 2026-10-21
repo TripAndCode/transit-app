@@ -323,6 +323,11 @@ BLOCKED = [
                 "timeout 60 make all",
                 "timeout 60 make $TARGET",
                 "for t in bootstrap; do sudo make $t; done",
+                "sudo -u transit nice -n 5 make",
+                "if make; then :; fi",
+                "while make; do :; done",
+                "until make; do :; done",
+                "eval make",
             )
         )
     ],
@@ -738,6 +743,13 @@ ALLOWED = [
     # it counts.
     pytest.param("which make", id="which-make"),
     pytest.param("command -v make", id="command-v-make"),
+    # A run-through prefix runs the program after it, which here is not make.
+    pytest.param("sudo apt install make", id="sudo-runs-apt-not-make"),
+    pytest.param("time git log --grep make", id="time-runs-git-not-make"),
+    pytest.param("env LC_ALL=C grep -n make", id="env-runs-grep-not-make"),
+    # Only a shell's -c takes a script; grep's counts.
+    pytest.param("grep -c make Makefile", id="grep-count-flag-is-no-script"),
+    pytest.param("git grep -c make", id="git-grep-count-flag-is-no-script"),
     pytest.param("brew install make", id="brew-install-make"),
     pytest.param("git log --grep make", id="git-log-grep-make"),
     pytest.param('git commit -m "ci: run make"', id="commit-message-naming-make"),

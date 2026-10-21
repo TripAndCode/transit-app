@@ -45,6 +45,9 @@ Known gaps, still allowed:
   since the substitution check is not scoped to the client's own simple command.
 - A literal `|`, `&` or `;` argument on its own (`psql -F '|'`) reads as a shell
   operator, so it can block a read or split a command the hook then misjudges.
+- A bare `make` run through a wrapper outside the recognised prefixes
+  (`poetry run make`) or after a leading redirect (`</dev/null make`) is not
+  read as running its default goal; a named destructive target still blocks.
 """
 
 from __future__ import annotations
@@ -499,7 +502,7 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline:
 
     A token holding whitespace is a quoted script (`bash -c "..."`, `ssh host
     "..."`) and is read as a command line of its own, as is the word after a
-    `-c` (`bash -c make`). Quoted prose naming a destructive target is read the
+    shell's `-c` (`bash -c make`). Quoted prose naming a destructive target is read the
     same way and blocked, the cheap direction.
     """
     make_controlled = make_controlled or bool(_MAKE_CONTROL.search(cmd))
@@ -512,7 +515,9 @@ def runs_destructive_command(cmd: str, make_controlled: bool = False, multiline:
         if _segment_writes_dev(segment, make_controlled, multiline):
             return True
         quoted = (
-            tok for j, tok in enumerate(segment) if any(c.isspace() for c in tok) or (j and segment[j - 1] == "-c")
+            tok
+            for j, tok in enumerate(segment)
+            if any(c.isspace() for c in tok) or (j > 1 and segment[j - 1] == "-c" and _runs_shell(segment[: j - 1]))
         )
         if any(runs_destructive_command(tok, make_controlled, multiline) for tok in quoted):
             return True
@@ -599,19 +604,22 @@ def _segment_writes_dev(segment: list[str], make_controlled: bool, multiline: bo
     return False
 
 
-# Shell words and programs that run what follows them as a command. Whatever
-# comes between one and `make` -- its flags and their values, a duration, a
-# user -- still leaves make the program run.
+# Shell words and programs that run the command after them.
 _COMMAND_PREFIXES = frozenset(
     {
         "env",
         "do",
         "then",
         "else",
+        "elif",
+        "if",
+        "while",
+        "until",
         "!",
         "{",
         "time",
         "exec",
+        "eval",
         "nohup",
         "nice",
         "xargs",
@@ -622,22 +630,47 @@ _COMMAND_PREFIXES = frozenset(
         "command",
     }
 )
+# A prefix's flags whose value is the next word (`sudo -u user`, `nice -n 5`,
+# `xargs -n 1`, `caffeinate -t 60` ...).
+_PREFIX_VALUE_FLAGS = frozenset({"-u", "-g", "-n", "-L", "-P", "-I", "-d", "-t", "-s", "-k", "-C", "-p"})
+# timeout's duration, the one bare value a prefix takes before its command.
+_DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+# Shells whose -c takes the script to run.
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 # Flags with which make only prints information and runs no target.
 _MAKE_INFO_FLAGS = frozenset({"-v", "--version", "-h", "--help"})
 
 
 def _in_command_position(segment: list[str], i: int) -> bool:
-    """Whether segment[i] is the program the simple command runs: it is the
-    first word after the assignments, or that word is a run-through prefix
-    (`env`, `sudo`, `timeout 60`, a loop's `do` ...). `command -v make`,
-    `which make` and prose naming make do not run it."""
-    words = [tok for tok in segment[:i] if not _ASSIGNMENT.match(tok)]
-    if not words:
-        return True
-    first = words[0].rsplit("/", 1)[-1].lower()
-    if first == "command" and {"-v", "-V"} & set(words[1:]):
-        return False
-    return first in _COMMAND_PREFIXES
+    """Whether segment[i] is the program the simple command runs: every word
+    before it is an assignment, a run-through prefix (`env`, `sudo`, a loop's
+    `do` ...), or such a prefix's own flag, flag value or duration. Any other
+    word is the program run instead (`sudo apt install make`), and `command -v
+    make`, `which make` and prose naming make do not run it."""
+    after_prefix = False
+    expect_value = False
+    for tok in segment[:i]:
+        name = tok.rsplit("/", 1)[-1].lower()
+        if expect_value:
+            expect_value = False
+        elif _ASSIGNMENT.match(tok):
+            pass
+        elif name in _COMMAND_PREFIXES:
+            after_prefix = True
+        elif after_prefix and tok in ("-v", "-V"):
+            return False
+        elif after_prefix and tok.startswith("-"):
+            expect_value = tok in _PREFIX_VALUE_FLAGS
+        elif after_prefix and _DURATION.fullmatch(tok):
+            pass
+        else:
+            return False
+    return True
+
+
+def _runs_shell(words: list[str]) -> bool:
+    """Whether the words before a `-c` end in a shell (`bash`, `sudo sh` ...)."""
+    return bool(words) and words[-1].rsplit("/", 1)[-1].lower() in _SHELLS
 
 
 def _points_at_dev(writes: set[str], words: list[str]) -> bool:
