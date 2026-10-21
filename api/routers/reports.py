@@ -59,6 +59,8 @@ from pipeline.reports import (
     resolve_definition_meta,
     simulation_disclaimer,
 )
+from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
+from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
 from pipeline.reports.forecast import (
     hourly_cells_to_dow_band,
     summarize_agency_overview,
@@ -170,7 +172,7 @@ _REPORT_HONOURS: dict[str, tuple[str, ...]] = {
     "dow_weekend": ("from", "to", "time_band", "routes"),
     "dow_weekday": ("from", "to", "time_band", "routes"),
     "dwell_run": ("from", "to", "dow", "service", "routes"),
-    "council_summary": ALL_SIX,
+    "council_summary": COUNCIL_ON_TIME_HONOURS,
     "delay_certificate": ALL_SIX,
 }
 
@@ -192,9 +194,7 @@ _STANDARDS_SCOPE = scope_applied("from", "to")
 _WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
 _FORECAST_HEATMAP_SCOPE = scope_applied("routes")
 _FORECAST_OVERVIEW_SCOPE = scope_applied()
-# council_summary's planned/executed/service-delivered figures and its
-# data-quality caveat come from per-agency aggregates keyed by date only.
-_COUNCIL_DELIVERED_SCOPE = scope_applied("from", "to")
+_COUNCIL_DELIVERED_SCOPE = scope_applied(*COUNCIL_DELIVERED_HONOURS)
 
 
 class ReportMeta(BaseModel):

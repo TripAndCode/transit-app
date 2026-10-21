@@ -60,3 +60,16 @@ def test_shift_time_str_names_the_day_marker_in_english():
 def test_on_time_filter_narrows_past_the_agency_wide_figures(overrides, expected):
     ctx = RangeCtx(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30), **overrides)
     assert on_time_filter_narrows(ctx) is expected
+
+
+def test_on_time_filter_narrows_reacts_to_exactly_the_fields_only_on_time_honours():
+    from api.routers.reports import _COUNCIL_DELIVERED_SCOPE, _REPORT_HONOURS
+
+    only_on_time = set(_REPORT_HONOURS["council_summary"]) - {f for f, on in _COUNCIL_DELIVERED_SCOPE.items() if on}
+    overrides = {"dow": "weekday", "time_band": "morning", "service": "平日", "routes": ("R1",)}
+    reacting = {
+        field
+        for field, value in overrides.items()
+        if on_time_filter_narrows(RangeCtx(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30), **{field: value}))
+    }
+    assert reacting == only_on_time
