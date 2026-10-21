@@ -158,3 +158,21 @@ def test_write_creates_header_when_target_file_does_not_exist_and_stays_idempote
     out = capsys.readouterr().out
     assert "Nothing to add." in out
     assert csv_path.read_text(encoding="utf-8").splitlines() == lines
+
+
+def test_write_hint_records_the_coverage_probe_verdict(tmp_path, monkeypatch, capsys):
+    """The read-side gate trusts only a recorded probe verdict, so a hint
+    that omits --agency-id/--record leaves every new operator ungated."""
+    csv_path = tmp_path / "agencies.csv"
+    monkeypatch.setattr("sys.argv", ["prog", "--agencies-csv", str(csv_path), "--write"])
+    main()
+
+    out = capsys.readouterr().out
+    assert "probe_rt_field_coverage.py --url <realtime_url> --agency-id <id> --record" in out
+
+
+def test_module_docstring_names_the_recording_probe_invocation():
+    import scripts.bus_kyo_association_feeds as module
+
+    doc = " ".join((module.__doc__ or "").split())
+    assert "--url <realtime_url> --agency-id <id> --record" in doc
