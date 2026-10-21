@@ -1220,7 +1220,8 @@
       "on_time": "定時率",
       "avg_delay": "平均遅延",
       "departures": "観測した発車",
-      "planned_trips": "計画便数"
+      "planned_trips": "計画便数",
+      "planned_trips_agency_wide": "計画便数（事業者全体）"
     },
     "print": "印刷 / PDFで保存",
     "certificate": {
@@ -1375,7 +1376,8 @@
       "llm_approved_label": "AI利用を事前承認",
       "submit": "招待を送信",
       "success": "{{email}} 宛の招待を作成しました。",
-      "error": "エラー: {{msg}}"
+      "error": "エラー: {{msg}}",
+      "error_account_exists": "{{email}} はすでにアカウントがあるため、招待は適用されません。ユーザー一覧でロールとAI利用を変更してください。"
     },
     "nav": {
       "label": "管理ナビゲーション",

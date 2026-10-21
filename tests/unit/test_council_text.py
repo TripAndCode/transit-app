@@ -2,7 +2,7 @@
 
 import pytest
 
-from pipeline.query.formatter import format_council_summary_text
+from pipeline.query.formatter import format_council_summary_footnotes, format_council_summary_text
 from pipeline.reports.definition import resolve_definition_meta
 
 _DEFINITION = resolve_definition_meta("council_summary", None, None)
@@ -51,3 +51,29 @@ def test_headline_leaves_out_a_rate_the_feed_cannot_measure(locale, expected):
     assert "—%" not in text
     unavailable = "not available for this agency's feed" if locale == "en" else "この事業者のフィードでは計測できません"
     assert unavailable in text
+
+
+@pytest.mark.parametrize(
+    ("locale", "expected"),
+    [
+        ("en", "On-time rate 23.6%, mean delay 2.5 min (608,834 samples), service-delivered rate 75.0% (whole agency)"),
+        ("ja", "定時率 23.6%、平均遅延 2.5分（観測608,834件）、運行実績率 75.0%（事業者全体）"),
+    ],
+)
+def test_headline_labels_the_delivered_rate_agency_wide_under_a_narrower_filter(locale, expected):
+    assert _headline(_payload(filtered=True), locale) == expected
+
+
+@pytest.mark.parametrize(
+    ("locale", "note"),
+    [
+        ("en", "cover the whole agency for the period"),
+        ("ja", "事業者全体の値です"),
+    ],
+)
+@pytest.mark.parametrize("delivered", [75.0, None])
+def test_footnotes_say_the_delivered_figures_are_agency_wide_under_a_narrower_filter(locale, note, delivered):
+    payload = _payload(filtered=True, service_delivered_pct=delivered)
+    assert any(note in line for line in format_council_summary_footnotes(_DEFINITION, payload, locale))
+    unfiltered = _payload(service_delivered_pct=delivered)
+    assert not any(note in line for line in format_council_summary_footnotes(_DEFINITION, unfiltered, locale))

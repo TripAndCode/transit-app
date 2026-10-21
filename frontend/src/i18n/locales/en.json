@@ -1220,7 +1220,8 @@
       "on_time": "On time",
       "avg_delay": "Average delay",
       "departures": "Departures observed",
-      "planned_trips": "Planned trips"
+      "planned_trips": "Planned trips",
+      "planned_trips_agency_wide": "Planned trips (whole agency)"
     },
     "print": "Print / Save as PDF",
     "certificate": {
@@ -1375,7 +1376,8 @@
       "llm_approved_label": "Pre-approve AI access",
       "submit": "Send invite",
       "success": "Invite created for {{email}}.",
-      "error": "Error: {{msg}}"
+      "error": "Error: {{msg}}",
+      "error_account_exists": "{{email}} already has an account, so an invite would never apply. Change their role or AI access in the user list instead."
     },
     "nav": {
       "label": "Admin navigation",
