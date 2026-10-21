@@ -199,6 +199,7 @@
     "stat_calmest": "Calmest",
     "stat_mean": "Route avg",
     "stat_samples": "Measurements",
+    "stat_samples_history": "Past observations",
     "route_picker_label": "Route",
     "route_picker_all": "All routes",
     "avg_late": "avg {{min}} min late",
