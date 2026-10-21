@@ -57,6 +57,7 @@ function twoUsers() {
           avatar_url: null,
           role: "admin",
           suspended_at: null,
+          deleted_at: null,
           llm_approved: false,
           created_at: "2026-06-01T00:00:00Z",
         },
@@ -67,6 +68,7 @@ function twoUsers() {
           avatar_url: null,
           role: "user",
           suspended_at: "2026-06-10T00:00:00Z",
+          deleted_at: null,
           llm_approved: false,
           created_at: "2026-05-01T00:00:00Z",
         },
@@ -160,6 +162,55 @@ describe("AdminUsersPage", () => {
     expect(table.queryByText("—")).toBeNull();
     expect(table.getAllByText("Active")).toHaveLength(1);
     expect(table.getAllByText("Suspended")).toHaveLength(1);
+  });
+
+  describe("a deleted user", () => {
+    function withDeletedUser() {
+      const users = twoUsers();
+      const deleted = {
+        ...users.data.users[1],
+        user_id: 3,
+        email: "deleted-3@local",
+        deleted_at: "2026-06-12T00:00:00Z",
+      };
+      useAdminUsersMock.mockReturnValue({ ...users, data: { users: [...users.data.users, deleted], total: 3 } });
+    }
+
+    it("is labelled Deleted, with no Resume and every other control locked", () => {
+      withDeletedUser();
+      wrap();
+      const row = within(dataRows()[2]);
+      expect(row.getByText("Deleted")).toBeTruthy();
+      expect(row.queryByText("Suspended")).toBeNull();
+      expect(row.queryByRole("button", { name: "Resume" })).toBeNull();
+      expect(row.queryByRole("button", { name: "Suspend" })).toBeNull();
+      expect(row.getByRole("combobox")).toHaveProperty("disabled", true);
+      expect(row.getByRole("button", { name: "Approve AI access" })).toHaveProperty("disabled", true);
+      expect(row.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
+    });
+
+    it("cannot be selected, so a bulk action never sends it", async () => {
+      withDeletedUser();
+      const user = userEvent.setup();
+      wrap();
+      expect(screen.getByRole("checkbox", { name: "Select deleted-3@local" })).toHaveProperty("disabled", true);
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      const bulkBar = within(screen.getByTestId("admin-users-bulk-bar"));
+      await user.click(bulkBar.getByRole("button", { name: "Approve AI access" }));
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [1, 2], patch: { llm_approved: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+    });
+
+    it("is not approved by the a shortcut", () => {
+      withDeletedUser();
+      wrap();
+      const row = dataRows()[2];
+      row.focus();
+      fireEvent.keyDown(row, { key: "a" });
+      expect(bulkMutate).not.toHaveBeenCalled();
+    });
   });
 
   it("links each email to its user detail page", () => {

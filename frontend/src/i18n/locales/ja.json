@@ -1283,7 +1283,8 @@
       },
       "status": {
         "suspended": "停止中",
-        "active": "アクティブ"
+        "active": "アクティブ",
+        "deleted": "削除済"
       },
       "llm_approved": {
         "yes": "承認済み",

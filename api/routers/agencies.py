@@ -161,6 +161,7 @@ async def create_agency(
                 "ingest_strategy": body.ingest_strategy,
                 "trip_id_pattern": body.trip_id_pattern,
             },
+            ip=request.client.host if request.client else None,
         )
     invalidate_network_summary()
     return dict(row)
@@ -224,6 +225,7 @@ async def patch_agency(
             target_id=agency_id,
             before={col: row[col] for col in updates},
             after=updates,
+            ip=request.client.host if request.client else None,
         )
     invalidate_network_summary()
     return dict(out)
@@ -262,6 +264,7 @@ async def delete_agency(
                 target_id=str(agency_id),
                 before={"deleted": False},
                 after={"deleted": True},
+                ip=request.client.host if request.client else None,
             )
     # After the commit: invalidating inside the transaction would let a
     # concurrent request re-cache the still-active row before it lands.
@@ -308,6 +311,7 @@ async def restore_agency(
                 target_id=agency_id,
                 before={"deleted": True},
                 after={"deleted": False},
+                ip=request.client.host if request.client else None,
             )
         else:
             # Already active, or gone. Either way this call restored nothing.

@@ -31,6 +31,7 @@ class _FakeConn:
                 "avatar_url": None,
                 "role": "user",
                 "suspended_at": None,
+                "deleted_at": None,
                 "llm_approved": False,
                 "created_at": datetime.now(timezone.utc),
             }

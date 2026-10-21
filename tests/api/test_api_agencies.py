@@ -711,3 +711,27 @@ async def test_patch_other_fields_keeps_the_verdict(agencies_client):
     )
     assert resp.status_code == 200
     assert await _probe_count(aid) == 4
+
+
+@pytest.mark.asyncio
+async def test_every_agency_mutation_records_the_actors_ip(agencies_client):
+    from api.main import app
+
+    client, sid = agencies_client
+    kw = {"headers": {"Origin": TEST_ORIGIN}, "cookies": {"sid": sid}}
+    payload = {"agency_name": "Audited", "feed_url": "http://a.example.com"}
+    created = await client.post("/api/agencies", json=payload, **kw)
+    aid = created.json()["agency_id"]
+    assert (await client.patch(f"/api/agencies/{aid}", json={"agency_name": "Audited 2"}, **kw)).status_code == 200
+    assert (await client.delete(f"/api/agencies/{aid}", **kw)).status_code == 204
+    assert (await client.post(f"/api/agencies/{aid}/restore", **kw)).status_code == 200
+
+    async with app.state.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT action, host(ip) AS ip FROM admin_audit WHERE target_type = 'agency' AND target_id = $1",
+            str(aid),
+        )
+    # ASGITransport reports the client as 127.0.0.1.
+    assert {r["action"]: r["ip"] for r in rows} == {
+        action: "127.0.0.1" for action in ("agency.created", "agency.updated", "agency.deleted", "agency.restored")
+    }

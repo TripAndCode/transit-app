@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncpg
 
+from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 
 #: What deleting a user does to each FK column that references it. The
@@ -95,13 +96,7 @@ async def erase_user(conn: asyncpg.Connection, user_id: int) -> None:
     email, name = target["email"], target["name"]
     await conn.execute("DELETE FROM login_events WHERE user_id = $1", user_id)
     await conn.execute("UPDATE login_events SET ip = NULL, user_agent = NULL WHERE actor_id = $1", user_id)
-    await conn.execute(
-        # An address is one identity whatever its case, and a key whose owner
-        # row is gone kept the casing it was issued under.
-        "DELETE FROM api_keys WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND lower(owner_email) = lower($2))",
-        user_id,
-        email,
-    )
+    await conn.execute(f"DELETE FROM api_keys WHERE {OWNED_BY_USER}", user_id, email)
     await conn.execute(
         "DELETE FROM user_invites WHERE consumed_user_id = $1 OR lower(email) = lower($2)", user_id, email
     )
