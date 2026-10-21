@@ -9,7 +9,7 @@ type Props = { open: boolean; onClose: () => void };
 /** "＋ 招待" dialog: pre-approve a role (and optionally AI access) for an
  * email that hasn't signed in yet. Honored by the OAuth callback on that
  * email's first login; an email that already has an account is refused, and
- * the dialog points the admin at that user's row instead. */
+ * the dialog sends the admin to the user list instead. */
 export function InviteDialog({ open, onClose }: Props) {
   // Mounted only while open, so the form starts empty every time rather
   // than showing the last invite's values.
