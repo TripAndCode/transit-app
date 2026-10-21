@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./Modal";
+import { saveApiKey, storedApiKey } from "../api/client";
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -14,11 +15,10 @@ export function SettingsDrawer({ open, onClose }: Props) {
 
 function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("api_key") ?? "");
+  const [apiKey, setApiKey] = useState(() => storedApiKey() ?? "");
 
   function save() {
-    if (apiKey) localStorage.setItem("api_key", apiKey);
-    else localStorage.removeItem("api_key");
+    saveApiKey(apiKey);
     onClose();
   }
 
