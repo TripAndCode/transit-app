@@ -130,7 +130,9 @@ Endpoints:
   active sessions, identified by a display-safe hash prefix.
 - `GET /api/admin/api-keys`, `POST /api/admin/api-keys`,
   `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
-- `POST /api/admin/invites` — invite a new user.
+- `POST /api/admin/invites` — invite a new user. The invite applies when
+  sign-in creates the account, so an email that already has one is refused
+  with 409 `account_exists`.
 
 Tables read/written: `users`, `sessions` (revoked on suspend/delete/role
 edits that drop access), `oauth_identities`, `user_llm_keys` (read-only,
@@ -231,7 +233,8 @@ Endpoints:
 - `GET /api/admin/ask/funnel` — stage/success counts.
 - `POST /api/admin/ask/promote` — promote one Stage-3 ("rag") query's
   cached intent into the RAG index ahead of the scheduled batch job's own
-  hit-count/quiet-days gate.
+  hit-count/quiet-days gate. The suggestion it publishes is that query's own
+  question text, the one the admin reviewed.
 - `GET /api/admin/ask/eval` — latest local eval artifact, or `null` when
   nothing has produced one yet.
 

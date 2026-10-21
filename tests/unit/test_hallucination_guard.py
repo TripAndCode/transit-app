@@ -96,3 +96,95 @@ def test_a_marker_shape_that_numbers_no_list_is_still_a_claim():
 def test_a_number_starting_a_line_without_a_list_marker_is_still_a_claim():
     assert verify_numeric_claims("22.9 minutes late on route 12.", GROUNDING) is False
     assert verify_numeric_claims("1.5 minutes late on route 12.", GROUNDING) is False
+
+
+def test_japanese_date_of_a_grounded_day_passes():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2}]}
+    assert verify_numeric_claims("9月5日が最も遅れ（平均3.2分）", grounding) is True
+    assert verify_numeric_claims("2026年9月5日が最も遅れ", grounding) is True
+
+
+def test_japanese_date_of_an_ungrounded_day_still_fails():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.2}]}
+    assert verify_numeric_claims("9月6日が最も遅れ", grounding) is False
+    assert verify_numeric_claims("2025年9月5日が最も遅れ", grounding) is False
+
+
+def test_percentage_of_a_grounded_rate_passes():
+    grounding = {"time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("時刻調整の割合は35%です", grounding) is True
+    assert verify_numeric_claims("時刻調整の割合は35％です", grounding) is True
+
+
+def test_percentage_of_an_ungrounded_rate_still_fails():
+    grounding = {"time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("時刻調整の割合は40%です", grounding) is False
+    # A rate's scaled form is only a percentage's, not a bare number's.
+    assert verify_numeric_claims("時刻調整は35回です", grounding) is False
+
+
+def test_percentage_matches_only_a_grounded_fraction():
+    # A grounded count of 3 or 1 is not a rate, so 300% or 100% traces to nothing.
+    assert verify_numeric_claims("定時率は300%です", {"trips": 3}) is False
+    assert verify_numeric_claims("定時率は100%です", {"context": "- 1 | 2 | 7 | 0.35"}) is False
+
+
+def test_percentage_sign_may_follow_a_space():
+    assert verify_numeric_claims("The adjustment rate is 35 %.", {"time_adjustment_rate": 0.35}) is True
+
+
+def test_japanese_date_of_an_ungrounded_day_is_checked_as_its_numbers():
+    # The question names the day as 9/6, which grounds its 9 and 6 as numbers.
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9/6はどうでしたか"}
+    assert verify_numeric_claims("9月6日のデータは表にありません", grounding) is True
+    assert verify_numeric_claims("9月7日のデータは表にありません", grounding) is False
+
+
+def test_japanese_date_named_only_in_the_echoed_question_is_grounded():
+    # The follow-up's grounding is its context block plus the user's question.
+    grounding = {
+        "context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}',
+        "question": "9月6日はどうでしたか",
+    }
+    assert verify_numeric_claims("9月6日のデータは表にありません", grounding) is True
+    assert verify_numeric_claims("9月7日のデータは表にありません", grounding) is False
+
+
+def test_a_year_less_grounded_date_does_not_ground_a_wrong_year():
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9月5日はどうでしたか"}
+    assert verify_numeric_claims("2026年9月5日が最も遅れ", grounding) is True
+    assert verify_numeric_claims("2025年9月5日が最も遅れ", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_a_longer_number():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 1.0}]}
+    assert verify_numeric_claims("12026年9月5日のデータです", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_a_decimal():
+    grounding = {"series": [{"date": "2026-09-05", "avg_min": 3.0}]}
+    assert verify_numeric_claims("3.9月5日のデータです。", grounding) is False
+
+
+def test_a_short_year_does_not_leave_its_digits_as_a_separate_claim():
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 25.0}', "question": "どうでしたか"}
+    assert verify_numeric_claims("25年9月5日が最も遅れ", grounding) is False
+
+
+def test_stripping_a_grounded_date_leaves_its_neighbours_read_as_before():
+    grounding = {"context": 'Series:\n- {"date": "2026-09-05", "avg_min": 3.2}', "question": "9月5日から7日まで"}
+    # A day range keeps its 7 positive, as it reads without the date stripped.
+    assert verify_numeric_claims("9月5日-7日の平均は3.2分", grounding) is True
+    # A percent sign beyond a stripped date is not attached to the number before it.
+    rated = {"series": [{"date": "2026-09-05", "avg_min": 3.2}], "time_adjustment_rate": 0.35}
+    assert verify_numeric_claims("35 9月5日 %", rated) is False
+
+
+def test_an_iso_date_between_a_number_and_a_percent_sign_attaches_nothing():
+    grounding = {"context": "Pairs:\n- rate: 0.35", "question": ""}
+    assert verify_numeric_claims("35 2099-01-01 %", grounding) is False
+
+
+def test_a_japanese_date_is_not_read_out_of_an_iso_date():
+    grounding = {"context": 'Series:\n- {"date": "2026-05-06", "avg_min": 6.0}', "question": ""}
+    assert verify_numeric_claims("2026-09-05月6日", grounding) is True
