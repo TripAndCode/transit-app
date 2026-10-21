@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import threading
 import time
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, TypeVar
@@ -50,6 +51,10 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
         _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
         # Per-key futures for in-flight computes (stampede coalescing).
         inflight: dict[Any, asyncio.Future[T]] = {}
+        # cache_clear() also runs on worker threads (a sync background task's
+        # static reload), so a leader's ownership check and its store are
+        # made atomic with a clear by this lock, not merely by the event loop.
+        lock = threading.Lock()
         label = fn.__name__
 
         @functools.wraps(fn)
@@ -102,9 +107,11 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             # are zero additional waiters and the compute raises.
             fut.add_done_callback(lambda f: f.exception() if f.done() and not f.cancelled() else None)
             inflight[key] = fut
+            succeeded = False
             try:
                 value = await fn(*args, **kwargs)
                 fut.set_result(value)
+                succeeded = True
             except asyncio.CancelledError:
                 # Leader was cancelled (e.g. CancelGETOnDisconnectMiddleware).
                 # Cancel the future so waiters' shield() unblocks and they can
@@ -120,22 +127,21 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 # A cache_clear() since this compute started empties the slot
                 # (a newer leader may hold it since). Then its inputs predate
                 # the clear, so it neither caches nor evicts that leader.
-                owned = inflight.get(key) is fut
-                if owned:
-                    del inflight[key]
-
-            # Cache only on success (exceptions must not be cached so that
-            # the next caller retries the underlying function).
-            if owned:
-                _cache[key] = (time.monotonic(), value)
-                _cache.move_to_end(key)
-                while len(_cache) > maxsize:
-                    _cache.popitem(last=False)
+                # Only a success is cached, so the next caller retries a failure.
+                with lock:
+                    if inflight.get(key) is fut:
+                        del inflight[key]
+                        if succeeded:
+                            _cache[key] = (time.monotonic(), value)
+                            _cache.move_to_end(key)
+                            while len(_cache) > maxsize:
+                                _cache.popitem(last=False)
             return value
 
         def _cache_clear() -> None:
-            _cache.clear()
-            inflight.clear()
+            with lock:
+                _cache.clear()
+                inflight.clear()
 
         wrapper.cache_clear = _cache_clear  # type: ignore[attr-defined]
         _REGISTERED_CLEARS.append(_cache_clear)

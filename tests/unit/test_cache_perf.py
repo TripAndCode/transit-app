@@ -170,6 +170,31 @@ def test_compute_in_flight_across_clear_is_not_cached():
     assert calls["n"] == 2
 
 
+def test_compute_in_flight_across_a_clear_from_a_worker_thread_is_not_cached():
+    source = {"value": "before"}
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+        async def fn(x):
+            seen = source["value"]
+            started.set()
+            await release.wait()
+            return seen
+
+        leader = asyncio.create_task(fn(1))
+        await asyncio.wait_for(started.wait(), 1)
+        source["value"] = "after"
+        await asyncio.to_thread(fn.cache_clear)
+        release.set()
+        assert await asyncio.wait_for(leader, 1) == "before"
+        assert await asyncio.wait_for(fn(1), 1) == "after"
+
+    asyncio.run(run())
+
+
 def test_leader_from_before_clear_leaves_newer_leader_inflight():
     """A leader that finishes after cache_clear() must not remove the in-flight
     entry of a leader started after the clear, so later callers still join it."""
