@@ -14,7 +14,7 @@ import pytest
 from scripts import ops_status_page
 from scripts.collect_oracle_status import OracleStatusReplayed, OracleStatusUnavailable
 from scripts.collect_r2_status import R2StatusReplayed, R2StatusUnavailable
-from scripts.ops_status import build_status, to_json_dict
+from scripts.ops_status import build_status, to_json_dict, validate_document
 
 T0 = datetime(2026, 9, 12, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -155,6 +155,106 @@ def test_collect_all_r2_unavailable_degrades_to_unknown(monkeypatch):
     documents = ops_status_page.collect_all(now=T0)
     by_component = {d["component"]: d for d in documents}
     assert by_component["r2"]["state"] == "unknown"
+
+
+_REPLAY_CHANNELS = [
+    pytest.param("oracle_crawler", "collect_oracle_status", OracleStatusReplayed, id="oracle_crawler"),
+    pytest.param("r2", "collect_r2_status", R2StatusReplayed, id="r2"),
+]
+
+
+def _replayed_heartbeat(component: str, *, published_at: datetime):
+    return build_status(
+        component=component,
+        observed_at=published_at,
+        last_success_at=published_at - timedelta(minutes=1),
+        healthy_max_age_seconds=3600,
+        stale_max_age_seconds=7200,
+        details={},
+        now=published_at,
+    )
+
+
+def _collect_with_replay(monkeypatch, collector_attr: str, replayed_exc: type, status) -> dict:
+    def replayed(**kw):
+        raise replayed_exc("not newer than watermark", status)
+
+    for attr, component in (
+        ("collect_github_status", "github"),
+        ("collect_oracle_status", "oracle_crawler"),
+        ("collect_r2_status", "r2"),
+    ):
+        monkeypatch.setattr(
+            ops_status_page, attr, lambda component=component, **kw: build_status(**_status_kwargs(component))
+        )
+    monkeypatch.setattr(ops_status_page, collector_attr, replayed)
+    return {d["component"]: d for d in ops_status_page.collect_all(now=T0)}
+
+
+@pytest.mark.parametrize("component,collector_attr,replayed_exc", _REPLAY_CHANNELS)
+def test_collect_all_replayed_heartbeat_past_stale_threshold_is_stale(
+    monkeypatch, component, collector_attr, replayed_exc
+):
+    published_at = T0 - timedelta(hours=4)
+    status = _replayed_heartbeat(component, published_at=published_at)
+    assert status.state == "healthy"
+
+    doc = _collect_with_replay(monkeypatch, collector_attr, replayed_exc, status)[component]
+
+    assert doc["state"] == "stale"
+    assert doc["observed_at"] == "2026-09-12T08:00:00Z"
+    assert doc["age_seconds"] == 60
+    validate_document(doc)
+    reason = ops_status_page.reason_for(doc)
+    assert reason is not None
+    assert "no new heartbeat since 2026-09-12T08:00:00Z" in reason
+
+
+@pytest.mark.parametrize("component,collector_attr,replayed_exc", _REPLAY_CHANNELS)
+def test_collect_all_replayed_heartbeat_within_stale_threshold_keeps_its_state(
+    monkeypatch, component, collector_attr, replayed_exc
+):
+    status = _replayed_heartbeat(component, published_at=T0 - timedelta(hours=2))
+
+    doc = _collect_with_replay(monkeypatch, collector_attr, replayed_exc, status)[component]
+
+    assert doc == to_json_dict(status)
+
+
+def test_collect_all_old_failed_heartbeat_stays_failed(monkeypatch):
+    published_at = T0 - timedelta(hours=4)
+    status = build_status(
+        component="oracle_crawler",
+        observed_at=published_at,
+        last_success_at=None,
+        healthy_max_age_seconds=3600,
+        stale_max_age_seconds=7200,
+        reported_failure=True,
+        details={},
+        now=published_at,
+    )
+
+    doc = _collect_with_replay(monkeypatch, "collect_oracle_status", OracleStatusReplayed, status)["oracle_crawler"]
+
+    assert doc["state"] == "failed"
+
+
+def test_collect_all_old_never_succeeded_heartbeat_stays_unknown(monkeypatch):
+    published_at = T0 - timedelta(hours=4)
+    status = build_status(
+        component="r2",
+        observed_at=published_at,
+        last_success_at=None,
+        healthy_max_age_seconds=3600,
+        stale_max_age_seconds=7200,
+        details={},
+        now=published_at,
+    )
+
+    doc = _collect_with_replay(monkeypatch, "collect_r2_status", R2StatusReplayed, status)["r2"]
+
+    assert doc["state"] == "unknown"
+    assert "heartbeat_age_seconds" not in doc["details"]
 
 
 def test_unknown_status_reason_is_bounded_and_single_line():
