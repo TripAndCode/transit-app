@@ -1,6 +1,8 @@
 """async_lru_cache emits hit/miss to pipeline.perf and supports clear_all()."""
 
 import asyncio
+import sys
+import threading
 
 import pytest
 
@@ -171,6 +173,8 @@ def test_compute_in_flight_across_clear_is_not_cached():
 
 
 def test_compute_in_flight_across_a_clear_from_a_worker_thread_is_not_cached():
+    """The clear's thread does not matter to the ownership check; the lock that
+    makes it atomic across threads is not exercised here."""
     source = {"value": "before"}
 
     async def run():
@@ -191,6 +195,34 @@ def test_compute_in_flight_across_a_clear_from_a_worker_thread_is_not_cached():
         release.set()
         assert await asyncio.wait_for(leader, 1) == "before"
         assert await asyncio.wait_for(fn(1), 1) == "after"
+
+    asyncio.run(run())
+
+
+def test_hits_survive_clears_racing_from_another_thread():
+    async def run():
+        @cache.async_lru_cache(maxsize=4, ttl_seconds=0)
+        async def fn(x):
+            return x
+
+        stop = threading.Event()
+
+        def clear_forever():
+            while not stop.is_set():
+                fn.cache_clear()
+
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        clearer = threading.Thread(target=clear_forever)
+        clearer.start()
+        try:
+            # A zero TTL sends every second call down the expired-entry path.
+            for _ in range(20000):
+                assert await fn(1) == 1
+        finally:
+            stop.set()
+            clearer.join()
+            sys.setswitchinterval(previous)
 
     asyncio.run(run())
 

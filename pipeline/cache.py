@@ -52,8 +52,9 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
         # Per-key futures for in-flight computes (stampede coalescing).
         inflight: dict[Any, asyncio.Future[T]] = {}
         # cache_clear() also runs on worker threads (a sync background task's
-        # static reload), so a leader's ownership check and its store are
-        # made atomic with a clear by this lock, not merely by the event loop.
+        # static reload), so every read-modify-write of _cache and inflight's
+        # ownership check is made atomic with a clear by this lock, not merely
+        # by the event loop.
         lock = threading.Lock()
         label = fn.__name__
 
@@ -64,14 +65,16 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 tuple(sorted((k, _keyable(v)) for k, v in kwargs.items())),
             )
             now = time.monotonic()
-            entry = _cache.get(key)
-            if entry is not None:
-                ts, value = entry
-                if now - ts <= ttl_seconds:
+            with lock:
+                entry = _cache.get(key)
+                fresh = entry is not None and now - entry[0] <= ttl_seconds
+                if fresh:
                     _cache.move_to_end(key)
-                    perf.record_cache(label, hit=True)
-                    return value
-                del _cache[key]
+                elif entry is not None:
+                    del _cache[key]
+            if entry is not None and fresh:
+                perf.record_cache(label, hit=True)
+                return entry[1]
 
             # Stampede coalescing: if a compute is already in flight for
             # this key, join it rather than launching another.
