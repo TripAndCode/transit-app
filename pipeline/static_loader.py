@@ -149,10 +149,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
     Files missing from the zip are skipped with a logged ``not in zip``
     line; this lets agencies without ``shapes.txt`` (or any other optional
     file) load successfully. Each loaded table is cleared for this
-    agency before insert, so the function is safe to re-run. The one
-    exception to "skipped" is ``static_calendar``: a missing
-    ``calendar.txt`` clears it, so an earlier feed's timetables cannot
-    classify this feed's dates.
+    agency before insert, so the function is safe to re-run. The
+    exceptions to "skipped" are ``static_calendar`` and
+    ``static_calendar_dates``: a missing ``calendar.txt`` or
+    ``calendar_dates.txt`` clears its table, so an earlier feed's
+    timetables and service exceptions cannot classify this feed's dates.
     """
     p = resolve_static_zip(path)
 
@@ -168,9 +169,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
-                if table == "static_calendar":
-                    # An earlier feed's calendar would file this feed's dates under its timetables.
-                    cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
+                if table in ("static_calendar", "static_calendar_dates"):
+                    # An earlier feed's calendar or exceptions would file this feed's dates under its timetables.
+                    cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
                 continue
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
