@@ -69,9 +69,8 @@ class BusKyoFeed:
 _MCAPPS_BASE = "https://ajt-mobusta-gtfs.mcapps.jp"
 
 ALL_FEEDS: tuple[BusKyoFeed, ...] = (
-    # Every operator, including those already in agencies.csv, is listed
-    # with its agency_id so `pending_feeds` can skip the configured ones by
-    # feed_url.
+    # Operators already in agencies.csv are listed too, so `pending_feeds`
+    # skips them by feed_url.
     BusKyoFeed(
         8,
         "広島電鉄",
