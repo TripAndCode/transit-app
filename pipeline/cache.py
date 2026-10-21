@@ -50,10 +50,6 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
         _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
         # Per-key futures for in-flight computes (stampede coalescing).
         inflight: dict[Any, asyncio.Future[T]] = {}
-        # Bumped by cache_clear(). A compute that started under an older
-        # generation read its inputs before the clear, so its result must not
-        # be stored.
-        generation = [0]
         label = fn.__name__
 
         @functools.wraps(fn)
@@ -106,7 +102,6 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             # are zero additional waiters and the compute raises.
             fut.add_done_callback(lambda f: f.exception() if f.done() and not f.cancelled() else None)
             inflight[key] = fut
-            started_generation = generation[0]
             try:
                 value = await fn(*args, **kwargs)
                 fut.set_result(value)
@@ -122,14 +117,16 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 fut.set_exception(exc)
                 raise
             finally:
-                # After a cache_clear() the slot may hold a newer leader's
-                # future; removing it would stop later callers joining that one.
-                if inflight.get(key) is fut:
+                # A cache_clear() since this compute started empties the slot
+                # (a newer leader may hold it since). Then its inputs predate
+                # the clear, so it neither caches nor evicts that leader.
+                owned = inflight.get(key) is fut
+                if owned:
                     del inflight[key]
 
             # Cache only on success (exceptions must not be cached so that
             # the next caller retries the underlying function).
-            if generation[0] == started_generation:
+            if owned:
                 _cache[key] = (time.monotonic(), value)
                 _cache.move_to_end(key)
                 while len(_cache) > maxsize:
@@ -137,7 +134,6 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             return value
 
         def _cache_clear() -> None:
-            generation[0] += 1
             _cache.clear()
             inflight.clear()
 
