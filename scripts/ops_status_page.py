@@ -20,7 +20,9 @@ combines them -- that is this module's whole job:
   already on record", not a failure: their own collector modules document this as
   the *expected* outcome between Oracle's periodic heartbeats (e.g. most calls to
   this page between two 30-minute Oracle publishes), so degrading it to `unknown`
-  here would make the page flicker to unknown on every ordinary poll.
+  here would make the page flicker to unknown on every ordinary poll. A heartbeat
+  that no newer one has replaced within the stale threshold turns `stale`
+  (`_age_heartbeat`).
 - `build_document` wraps the three resulting documents with a combined
   `overall_state` (the worst of the three, by the same severity order
   `oracle_cloud/v3/bin/status-snapshot.sh` already uses:
@@ -35,6 +37,7 @@ combines them -- that is this module's whole job:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import html
 import json
 import sys
@@ -44,7 +47,12 @@ from typing import Callable, Mapping, Sequence
 
 from scripts import ops_status
 from scripts.collect_github_status import DEFAULT_CACHE_BASENAME as GITHUB_DEFAULT_CACHE_BASENAME
-from scripts.collect_github_status import collect_github_status, redact_secrets
+from scripts.collect_github_status import (
+    DEFAULT_HEALTHY_MULTIPLIER,
+    DEFAULT_STALE_MULTIPLIER,
+    collect_github_status,
+    redact_secrets,
+)
 from scripts.collect_oracle_status import DEFAULT_CACHE_PATH as ORACLE_DEFAULT_CACHE_PATH
 from scripts.collect_oracle_status import DEFAULT_REPO as ORACLE_DEFAULT_GITHUB_REPO_SLUG
 from scripts.collect_oracle_status import OracleStatusReplayed, collect_oracle_status
@@ -67,6 +75,10 @@ _STATE_SEVERITY: Mapping[str, int] = {"healthy": 0, "unknown": 1, "degraded": 2,
 # their value (see `ops_status.classify_state`); kept symbolic rather than
 # arbitrary magic numbers only for readability.
 _SYNTHETIC_UNKNOWN_THRESHOLD_SECONDS = 3600.0
+
+# Oracle publishes both the oracle_crawler and r2 heartbeats every 30 minutes
+# (`oracle_cloud/v3/crontab.snippet`).
+HEARTBEAT_PUBLISH_INTERVAL_SECONDS = 1800.0
 
 
 def _isoformat(value: datetime) -> str:
@@ -110,20 +122,53 @@ def _collect_github(*, local_repo: Path, cache_path: Path, now: datetime) -> dic
     return ops_status.to_json_dict(status)
 
 
-def _collect_oracle_crawler(*, github_repo_slug: str, cache_path: Path) -> dict:
+def _age_heartbeat(status: ops_status.ComponentStatus, *, now: datetime) -> ops_status.ComponentStatus:
+    """Mark a relayed heartbeat `stale` once no newer one has arrived within the stale
+    threshold: the same publish-interval multiples the GitHub collector applies to its own
+    polls, measured from the heartbeat's `observed_at` to `now`. Otherwise a replayed
+    document would keep its publish-time state for as long as GitHub retains that run's log.
+
+    The timestamps and `age_seconds` stay as published, since re-stamping `observed_at`
+    would make an old document look freshly observed; the heartbeat's own age goes into
+    `details` instead. A document already at `stale` or worse, or one that cannot carry
+    `stale` under the contract (no `age_seconds`), is returned unchanged."""
+
+    heartbeat_state, heartbeat_age_seconds = ops_status.classify_state(
+        observed_at=now,
+        last_success_at=status.observed_at,
+        healthy_max_age_seconds=HEARTBEAT_PUBLISH_INTERVAL_SECONDS * DEFAULT_HEALTHY_MULTIPLIER,
+        stale_max_age_seconds=HEARTBEAT_PUBLISH_INTERVAL_SECONDS * DEFAULT_STALE_MULTIPLIER,
+        now=now,
+    )
+    if (
+        heartbeat_state != "stale"
+        or status.age_seconds is None
+        or _STATE_SEVERITY[status.state] >= _STATE_SEVERITY["stale"]
+    ):
+        return status
+    aged = dataclasses.replace(
+        status,
+        state="stale",
+        details={**status.details, "heartbeat_age_seconds": heartbeat_age_seconds},
+    )
+    ops_status.validate_component_status(aged)
+    return aged
+
+
+def _collect_oracle_crawler(*, github_repo_slug: str, cache_path: Path, now: datetime) -> dict:
     try:
         status = collect_oracle_status(repo=github_repo_slug, cache_path=cache_path)
     except OracleStatusReplayed as exc:
         status = exc.status
-    return ops_status.to_json_dict(status)
+    return ops_status.to_json_dict(_age_heartbeat(status, now=now))
 
 
-def _collect_r2(*, github_repo_slug: str, cache_path: Path) -> dict:
+def _collect_r2(*, github_repo_slug: str, cache_path: Path, now: datetime) -> dict:
     try:
         status = collect_r2_status(repo=github_repo_slug, cache_path=cache_path)
     except R2StatusReplayed as exc:
         status = exc.status
-    return ops_status.to_json_dict(status)
+    return ops_status.to_json_dict(_age_heartbeat(status, now=now))
 
 
 def collect_all(
@@ -152,9 +197,9 @@ def collect_all(
         ("github", lambda: _collect_github(local_repo=local_repo, cache_path=github_cache_path, now=now)),
         (
             "oracle_crawler",
-            lambda: _collect_oracle_crawler(github_repo_slug=github_repo_slug, cache_path=oracle_cache_path),
+            lambda: _collect_oracle_crawler(github_repo_slug=github_repo_slug, cache_path=oracle_cache_path, now=now),
         ),
-        ("r2", lambda: _collect_r2(github_repo_slug=github_repo_slug, cache_path=r2_cache_path)),
+        ("r2", lambda: _collect_r2(github_repo_slug=github_repo_slug, cache_path=r2_cache_path, now=now)),
     ]
 
     documents: list[dict] = []
@@ -273,6 +318,10 @@ def reason_for(document: dict) -> str | None:
     collector_error = details.get("collector_error")
     if collector_error:
         return _truncate(f"collector could not run: {collector_error}")
+
+    heartbeat_age_seconds = details.get("heartbeat_age_seconds")
+    if heartbeat_age_seconds is not None:
+        return _truncate(f"no new heartbeat since {document.get('observed_at')} ({heartbeat_age_seconds}s ago)")
 
     builder = _SPECIFIC_REASON_BUILDERS.get(document.get("component", ""))
     specific = builder(details) if builder is not None else None
