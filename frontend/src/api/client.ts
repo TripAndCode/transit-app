@@ -223,23 +223,135 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
-// credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
-// cookie. Same-origin requests (single-origin prod / make serve) are
-// unaffected — browsers always send same-origin cookies.
-//
-// Accept-Language is stamped from the current i18n instance so the
-// backend (Ask LLM prelude / formatter / tool summaries) renders in
-// the same language the user picked in the UI. Falls back to "ja" so
-// the header is always present, matching the LocaleMiddleware default.
+/** Sends the request with the stored API key, if any. A key the server
+ *  rejects is dropped and the request sent once more without it. */
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  const apiKey = localStorage.getItem("api_key");
+  // One timeout for the request, retry included.
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
+  const apiKey = sendableStoredApiKey();
+  const response = await sendOnce(path, init, apiKey, signal);
+  if (apiKey && (await isRejectedApiKey(response))) {
+    // The middleware answers every request carrying a bad key with this 401,
+    // /api/config included, so keeping the key would lock the user out of the
+    // app shell -- including the Settings drawer that could clear it.
+    if (clearStoredApiKey(apiKey)) reportApiKeyRejected();
+    // A key saved since this request was sent is the user's current choice.
+    const replacement = sendableStoredApiKey();
+    return sendOnce(path, init, replacement === apiKey ? null : replacement, signal);
+  }
+  return response;
+}
+
+// credentials:'include' sends the sid cookie cross-origin too (Vite dev :5173 →
+// :8000). Accept-Language follows the UI language so server-rendered text
+// matches it, falling back to "ja" like the LocaleMiddleware default.
+function sendOnce(path: string, init: RequestInit, apiKey: string | null, signal: AbortSignal): Promise<Response> {
   const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept-Language": lang,
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   return fetch(apiUrl(path), { ...init, headers, credentials: "include", signal });
+}
+
+const API_KEY_STORAGE_KEY = "api_key";
+/** Mirrors api/middleware/auth.py's 401 for every unusable key -- unknown,
+ *  revoked, expired, or owned by a suspended account; it does not say which. */
+const INVALID_API_KEY_DETAIL = "Invalid API key";
+
+/** The stored API key, or null. Storage access throws where site data is
+ *  blocked; no key is then read or sent. */
+export function storedApiKey(): string | null {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Stores *key* without surrounding whitespace, or clears it when empty. */
+export function saveApiKey(key: string): void {
+  const trimmed = key.trim();
+  try {
+    if (trimmed) localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
+    else localStorage.removeItem(API_KEY_STORAGE_KEY);
+  } catch {
+    // Blocked storage keeps nothing, so no key is sent either.
+  }
+}
+
+/** The stored key, trimmed, if it can be sent at all. A stored key may carry
+ *  surrounding whitespace, some of which (a full-width space) a header cannot
+ *  hold, so the trimmed form is sent and written back. A key fetch would still
+ *  refuse as a header (a full-width character inside it, from an IME) fails
+ *  every request before it leaves -- the same lockout as a rejected key -- so
+ *  it is dropped the same way. */
+function sendableStoredApiKey(): string | null {
+  const stored = storedApiKey();
+  if (stored === null) return null;
+  const key = stored.trim();
+  if (key !== stored) saveApiKey(key);
+  if (!key) return null;
+  if (isSendableHeaderValue(key)) return key;
+  if (clearStoredApiKey(key)) reportApiKeyRejected();
+  return null;
+}
+
+function isSendableHeaderValue(value: string): boolean {
+  try {
+    new Headers([["X-API-Key", value]]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Removes the stored key only while it is still *rejected*, so requests that
+ *  failed together report once, and a late 401 cannot remove a key saved since.
+ *  Returns whether it removed the key. A failed remove leaves the key in place. */
+function clearStoredApiKey(rejected: string): boolean {
+  try {
+    if (localStorage.getItem(API_KEY_STORAGE_KEY) !== rejected) return false;
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isRejectedApiKey(response: Response): Promise<boolean> {
+  if (response.status !== 401) return false;
+  try {
+    const body: unknown = await response.clone().json();
+    return (body as { detail?: unknown } | null)?.detail === INVALID_API_KEY_DETAIL;
+  } catch {
+    return false;
+  }
+}
+
+const apiKeyRejectedListeners = new Set<() => void>();
+let apiKeyRejectionUnseen = false;
+
+function reportApiKeyRejected(): void {
+  if (apiKeyRejectedListeners.size === 0) {
+    apiKeyRejectionUnseen = true;
+    return;
+  }
+  for (const listener of apiKeyRejectedListeners) listener();
+}
+
+/** Calls *listener* when a stored API key is rejected and dropped -- also once
+ *  on subscribe, if that happened before anyone was listening (the first
+ *  requests can run before the notice mounts). Returns the unsubscribe. */
+export function onApiKeyRejected(listener: () => void): () => void {
+  apiKeyRejectedListeners.add(listener);
+  if (apiKeyRejectionUnseen) {
+    apiKeyRejectionUnseen = false;
+    listener();
+  }
+  return () => {
+    apiKeyRejectedListeners.delete(listener);
+  };
 }
