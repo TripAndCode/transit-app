@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../../components/Modal";
 import { useCreateInvite } from "../../api/admin";
-import { formatApiError } from "../../api/client";
+import { apiErrorDetail, formatApiError } from "../../api/client";
 
 type Props = { open: boolean; onClose: () => void };
 
 /** "＋ 招待" dialog: pre-approve a role (and optionally AI access) for an
  * email that hasn't signed in yet. Honored by the OAuth callback on that
- * email's first login. */
+ * email's first login; an email that already has an account is refused, and
+ * the dialog sends the admin to the user list instead. */
 export function InviteDialog({ open, onClose }: Props) {
   // Mounted only while open, so the form starts empty every time rather
   // than showing the last invite's values.
@@ -82,7 +83,9 @@ function InviteDialogBody({ onClose }: { onClose: () => void }) {
           )}
           {create.error && (
             <div role="alert" style={{ marginBottom: 12, fontSize: 13, color: "var(--text-tertiary)" }}>
-              {t("admin.invite.error", { msg: formatApiError(create.error) })}
+              {apiErrorDetail(create.error) === "account_exists"
+                ? t("admin.invite.error_account_exists", { email: create.variables?.email })
+                : t("admin.invite.error", { msg: formatApiError(create.error) })}
             </div>
           )}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
