@@ -47,3 +47,11 @@ def test_single_route_endpoints_agree_on_routes():
     # Both draw the scope's one selected route.
     assert _ROUTE_TRIPS_SCOPE["routes"] is True
     assert _FORECAST_HEATMAP_SCOPE["routes"] is True
+
+
+def test_council_delivered_figures_honour_only_the_dates():
+    from api.routers.reports import _COUNCIL_DELIVERED_SCOPE
+
+    assert {f for f, on in _COUNCIL_DELIVERED_SCOPE.items() if on} == {"from", "to"}
+    # The on-time figures beside them still honour the whole filter.
+    assert report_scope_applied("council_summary")["routes"]

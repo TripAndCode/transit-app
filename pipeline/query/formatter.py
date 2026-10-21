@@ -90,6 +90,16 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} samples)",
     ("council_headline_delivered", "ja"): "、運行実績率 {delivered}%",
     ("council_headline_delivered", "en"): ", service-delivered rate {delivered}%",
+    ("council_headline_delivered_agency_wide", "ja"): "、運行実績率 {delivered}%（事業者全体）",
+    ("council_headline_delivered_agency_wide", "en"): ", service-delivered rate {delivered}% (whole agency)",
+    ("council_agency_wide_caveat", "ja"): (
+        "計画本数・運行本数・運行実績率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
+        "この期間の事業者全体の値です。"
+    ),
+    ("council_agency_wide_caveat", "en"): (
+        "Planned and executed trips, the service-delivered rate and data quality cover the whole agency "
+        "for the period; the route, day, service and time-band filters apply to the on-time figures only."
+    ),
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
     ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
     ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
@@ -367,14 +377,16 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
     """Footnote lines for the monthly/annual council report template:
     the definition metadata
     (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
-    freshness/quality caveats a council audience needs before trusting the
-    numbers next to them. Every line is derived from *definition*/*payload*'s
+    the scope, freshness and quality caveats a council audience needs before
+    trusting the numbers next to them. Every line is derived from *definition*/*payload*'s
     own fields, never a fixed string, so a non-default tolerance/definition,
     a genuinely stale aggregate, or a low-quality feed each change the
     rendered footnotes to match -- the same guarantee
     ``format_definition_csv_line`` already gives the CSV export.
     """
     lines = list(format_definition_footnotes(definition, locale))
+    if payload.get("filtered"):
+        lines.append(_t("council_agency_wide_caveat", locale))
     if payload.get("is_stale"):
         lines.append(_t("council_stale_caveat", locale))
     clamp_pct = payload.get("clamp_pct")
@@ -397,7 +409,8 @@ def format_council_summary_text(
 ) -> str:
     """Locale-aware prose body for the monthly/annual council report
     template: a headline (on-time rate, average delay, and the
-    service-delivered rate where the feed measures it) over
+    service-delivered rate where the feed measures it, labelled whole-agency
+    when ``payload["filtered"]``) over
     ``[from_date, to_date]``, footnoted with the definition
     metadata and this agency's freshness/quality caveats
     (:func:`format_council_summary_footnotes`). ``payload`` is
@@ -418,7 +431,8 @@ def format_council_summary_text(
         # footnotes say why, which a bare "—%" would not.
         delivered = payload.get("service_delivered_pct")
         if delivered is not None:
-            body += _t("council_headline_delivered", locale, delivered=_r(delivered))
+            key = "council_headline_delivered_agency_wide" if payload.get("filtered") else "council_headline_delivered"
+            body += _t(key, locale, delivered=_r(delivered))
     footnote_mark = "※" if locale != "en" else "* "
     footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
     return f"{header}\n{body}\n{footnotes}"
