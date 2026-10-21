@@ -9,8 +9,8 @@ present in ``agencies.csv`` (matched by ``feed_url``), so a future
 association update only needs a data-table edit here rather than hand-typing
 CSV rows again.
 
-Most of these operators share the same ``mcapps.jp`` platform as 8/9/10
-(same URL shape, same protobuf producer) and can reuse the existing
+Most of these operators share one ``mcapps.jp`` platform (same URL shape,
+same protobuf producer) and can reuse the existing
 ``static_join``/``direct_url`` strategies unchanged. A few use a different
 platform (``busit.jp``, ``bus-vision.jp``) whose fetch/wire shape hasn't been
 confirmed against ``pipeline/strategies/`` -- those are recorded for
@@ -20,11 +20,14 @@ shape.
 
 Even for an ``mcapps.jp`` operator, sharing a platform is not the same as
 sharing confirmed optional-field coverage (see
-``pipeline/strategies/static_join.py: field_coverage`` and
-``scripts/probe_rt_field_coverage.py``) -- run the probe against each new
-feed's live realtime_url before treating its ``service_delivered``/
-``dwell_run`` numbers as trustworthy, the same way that check was applied to
-8/9/10 before their optional-field-dependent report columns were trusted.
+``pipeline/strategies/static_join.py: field_coverage``). The numbers that
+depend on those fields (``service_delivered``'s executed share, ``dwell_run``
+and the other gated readers) stay unavailable for an agency until a probe
+verdict is recorded for it. After ``seed_agencies`` has loaded the new
+rows, run ``scripts/probe_rt_field_coverage.py --url <realtime_url>
+--agency-id <id> --record`` against each new operator's live feed during
+service hours.
+Without ``--agency-id``/``--record`` the probe only prints a report.
 
 Usage:
     poetry run python scripts/bus_kyo_association_feeds.py --check
@@ -66,10 +69,8 @@ class BusKyoFeed:
 _MCAPPS_BASE = "https://ajt-mobusta-gtfs.mcapps.jp"
 
 ALL_FEEDS: tuple[BusKyoFeed, ...] = (
-    # 8/9/10 are already configured in agencies.csv -- listed here too so
-    # `pending_feeds` can skip them by feed_url, the same dedup key
-    # gtfs_pipeline.py's seed_agencies uses via its ON CONFLICT(feed_url)
-    # semantics.
+    # Operators already in agencies.csv are listed too, so `pending_feeds`
+    # skips them by feed_url.
     BusKyoFeed(
         8,
         "広島電鉄",
@@ -245,10 +246,9 @@ ALL_FEEDS: tuple[BusKyoFeed, ...] = (
 def pending_feeds(existing_feed_urls: set[str]) -> list[BusKyoFeed]:
     """Feeds ready to seed that aren't already in agencies.csv.
 
-    Excludes both already-configured feeds (matched by realtime_url, the
-    same dedup key gtfs_pipeline.py's seed_agencies uses via feed_url's
-    UNIQUE constraint) and unsupported-platform feeds (see
-    BusKyoFeed.supported).
+    Excludes both already-configured feeds (matched by realtime_url against
+    feed_url, which the agencies table holds UNIQUE) and unsupported-platform
+    feeds (see BusKyoFeed.supported).
     """
     return [f for f in ALL_FEEDS if f.supported and f.realtime_url not in existing_feed_urls]
 
@@ -330,8 +330,11 @@ def main() -> None:
                 writer.writerow(_to_csv_row(feed))
         print(f"Appended {len(pending)} row(s) to {csv_path}.")
         print(
-            "Next: run scripts/probe_rt_field_coverage.py --url <realtime_url> against each "
-            "newly-added operator's feed before trusting its service_delivered/dwell_run numbers."
+            "Next: after seed_agencies, run "
+            "scripts/probe_rt_field_coverage.py --url <realtime_url> --agency-id <id> --record "
+            "against each newly-added operator's feed during service hours; its "
+            "coverage-gated numbers (service_delivered, dwell_run) stay unavailable until a "
+            "verdict is recorded."
         )
 
 
