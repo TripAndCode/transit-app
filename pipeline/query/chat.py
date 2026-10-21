@@ -45,12 +45,12 @@ from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
 from pipeline.query.llm_client import (
-    _PROVIDER_DEFAULTS,
     REQUEST_TIMEOUT,
     _build_create_kwargs,
     describe_provider_failure,
     get_client,
     log_usage,
+    provider_endpoint,
 )
 from pipeline.query.pooled_conn import UnsupportedConnectionMethod
 from pipeline.query.tools import (
@@ -240,19 +240,10 @@ def _completion_with_key(
     classifies it into the same ``error_kind`` vocabulary the shared-client
     ladder uses. Never logs ``api_key`` — callers must only ever log whether
     a per-user key was used, not its value.
-
-    ``base_url``/``model`` honor the same per-provider env overrides
-    (``{PROVIDER}_BASE_URL``/``{PROVIDER}_MODEL``) as the shared ladder's
-    :func:`~pipeline.query.llm_client._load_provider` — an operator's
-    ``GEMINI_MODEL`` override, say, must apply on the BYOK path too, not
-    just the shared client.
     """
     import openai
 
-    defaults = _PROVIDER_DEFAULTS[provider]
-    upper = provider.upper()
-    base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
-    model = os.environ.get(f"{upper}_MODEL", defaults["model"])
+    base_url, model = provider_endpoint(provider)
     one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=REQUEST_TIMEOUT)
     create_kwargs = _build_create_kwargs(
         model=model,

@@ -70,6 +70,17 @@ def test_byok_client_is_built_with_the_request_timeout():
     assert kwargs["timeout"] is llm_client.REQUEST_TIMEOUT
 
 
+def test_byok_call_uses_the_operator_endpoint_and_model(monkeypatch):
+    monkeypatch.setenv("GEMINI_BASE_URL", "https://proxy.example/v1")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-operator-pick")
+    with patch("openai.OpenAI") as mock_openai:
+        create = mock_openai.return_value.chat.completions.create
+        create.return_value = _response(_usage())
+        chat._completion_with_key("gemini", SECRET, messages=[{"role": "user", "content": PROMPT_TEXT}])
+    assert mock_openai.call_args.kwargs["base_url"] == "https://proxy.example/v1"
+    assert create.call_args.kwargs["model"] == "gemini-operator-pick"
+
+
 def _usage_lines(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.getMessage().startswith("llm usage")]
 
