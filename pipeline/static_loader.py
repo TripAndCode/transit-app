@@ -170,7 +170,6 @@ def load_static(path: str, agency_id: int, conn) -> None:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
                 if table in ("static_calendar", "static_calendar_dates"):
-                    # An earlier feed's calendar or exceptions would file this feed's dates under its timetables.
                     cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
                 continue
 
