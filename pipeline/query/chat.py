@@ -779,15 +779,17 @@ async def chat_with_tools(
     if use_cache:
         # Stage 1: pre-LLM exact question-text lookup.
         #
-        # Keyed on literal question text + agency only — it has no notion of
-        # ``history``, so a generic continuation phrase ("次の50件") would
-        # return whichever (tool, args) was last cached for that exact text
-        # by *any* user in the agency, ignoring this conversation's actual
-        # prior turn. When force_tool_call is set (a recognized continuation
-        # that must be resolved against this history), skip the pre-hit and
-        # fall through to Stage 2 below so the LLM call actually sees
-        # history_block instead of returning a stale, history-blind answer.
-        pre_row = None if force_tool_call else await _cache_lookup_by_question(conn, question, agency_id)
+        # Keyed on literal question text + agency only, so a row answers what
+        # its text means on its own, for any user in the agency. A question
+        # asked with history may lean on the prior turn ("その路線は？",
+        # "次の50件") whether or not it reads as a continuation, so it never
+        # reads or writes the cache by its text: it skips the pre-hit, and
+        # Stage 2 below does not upsert, since an upsert would set
+        # last_question to this text beside args resolved from this
+        # conversation. The signature-hash read stays, because a hit's args
+        # equal the canonical args the LLM just resolved.
+        text_keyed = not history and not force_tool_call
+        pre_row = await _cache_lookup_by_question(conn, question, agency_id) if text_keyed else None
         # The same text can mean different dates on different days ("昨日",
         # "先週"): a time_window token in the LLM's signature is resolved to
         # absolute dates by canonicalize() against that request's RangeCtx, and
@@ -914,14 +916,15 @@ async def chat_with_tools(
 
         # Upsert regardless of hit/miss (bumps hit_count on hit).
         # Skip writes for build-mode synthetic questions so machine-generated
-        # strings never appear as last_question in the cache.
+        # strings never appear as last_question in the cache, and for a
+        # question asked with history (see Stage 1 above).
         # Also skip when the LLM hallucinated a tool name we don't dispatch —
         # otherwise that name gets cached and every future similar question
         # collapses to the same garbage hash, locking out the LLM permanently.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
-        if not _skip_cache_write and _known_tool:
+        if text_keyed and not _skip_cache_write and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
         # Compute final confidence blending NN distance + LLM self-report.

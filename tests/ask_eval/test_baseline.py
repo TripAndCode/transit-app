@@ -20,9 +20,9 @@ import pytest
 
 # The `/ask` endpoint rate-limits anonymous callers to 60/minute
 # (api/middleware/ratelimit.py FREE_LIMIT) — a real production abuse
-# guard, not something to weaken for this eval. All 148 golden-set
-# requests come from the same test-runner IP, so pace them well under
-# that limit instead.
+# guard, not something to weaken for this eval. Every golden-set request
+# comes from the same test-runner IP, so pace them well under that limit
+# instead.
 _REQUEST_INTERVAL_SECONDS = 1.1
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
