@@ -31,6 +31,7 @@ import { RequireAuth } from "./components/RequireAuth";
 import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
+import { ApiKeyRejectedNotice } from "./components/ApiKeyRejectedNotice";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
 import { BannerDismissalsProvider } from "./components/BannerDismissals";
@@ -191,6 +192,7 @@ void i18nReady.then((stringsLoaded) => {
       {stringsLoaded ? (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
+            <ApiKeyRejectedNotice />
             <BannerDismissalsProvider>
               <RouterProvider router={router} />
             </BannerDismissalsProvider>
