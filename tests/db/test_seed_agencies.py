@@ -133,3 +133,51 @@ def test_seed_agencies_keeps_the_sequence_past_explicit_ids(pg_conn, tmp_path, m
     with pg_conn.cursor() as cur:
         cur.execute("SELECT agency_id FROM agencies WHERE feed_url = 'http://implicit.example.com/feed.pb'")
         assert cur.fetchone() == (43,)
+
+
+def test_seed_agencies_keeps_a_no_id_row_clear_of_a_later_explicit_id(pg_conn, tmp_path, monkeypatch):
+    """A no-id row ahead of an explicit id equal to the sequence's next value
+    must not be overwritten by it within the same seed."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
+    _seed(tmp_path, "a.csv", [["42", "既存", "http://existing.example.com/feed.pb", "", "", ""]])
+    _seed(
+        tmp_path,
+        "b.csv",
+        [
+            ["", "自動採番", "http://implicit.example.com/feed.pb", "", "", ""],
+            ["43", "明示", "http://explicit.example.com/feed.pb", "", "", ""],
+        ],
+    )
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT agency_id, agency_name, feed_url FROM agencies ORDER BY agency_id")
+        assert cur.fetchall() == [
+            (42, "既存", "http://existing.example.com/feed.pb"),
+            (43, "明示", "http://explicit.example.com/feed.pb"),
+            (44, "自動採番", "http://implicit.example.com/feed.pb"),
+        ]
+
+
+def test_seed_agencies_refuses_an_agency_id_repeated_in_one_csv(pg_conn, tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
+
+    caplog.set_level(logging.ERROR, logger="gtfs_pipeline")
+    with pytest.raises(SystemExit) as excinfo:
+        _seed(
+            tmp_path,
+            "dup.csv",
+            [
+                ["42", "一行目", "http://first.example.com/feed.pb", "", "", ""],
+                ["42", "二行目", "http://second.example.com/feed.pb", "", "", ""],
+            ],
+        )
+
+    assert excinfo.value.code == 1
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert "agency_id 42" in errors[0]
+    assert "http://first.example.com/feed.pb" in errors[0]
+    assert "http://second.example.com/feed.pb" in errors[0]
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agencies")
+        assert cur.fetchone() == (0,)
