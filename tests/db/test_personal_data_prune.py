@@ -41,3 +41,32 @@ async def test_rows_past_retention_go_and_recent_rows_stay(aconn):
     assert [r["sid_hash"] for r in await aconn.fetch("SELECT sid_hash FROM sessions WHERE user_id = $1", uid)] == [
         token_hash("live")
     ]
+
+
+@pytest.mark.asyncio
+async def test_intent_cache_questions_past_retention_go_unless_promoted(aconn, aagency_id):
+    now = datetime.now(timezone.utc)
+    rows = {
+        "a" * 16: (now - timedelta(days=120), None),
+        "b" * 16: (now - timedelta(days=30), None),
+        "c" * 16: (now - timedelta(days=120), now - timedelta(days=200)),
+    }
+    for sig, (last_used_at, promoted_at) in rows.items():
+        await aconn.execute(
+            "INSERT INTO ask_intent_cache (signature_hash, tool, args, confidence, hit_count, last_question,"
+            " agency_id, created_at, last_used_at, promoted_at)"
+            " VALUES ($1, 'route_delays', '{}'::jsonb, 0.9, 1, 'a question', $2, $3, $3, $4)",
+            sig,
+            aagency_id,
+            last_used_at,
+            promoted_at,
+        )
+
+    pool = await _test_pool()
+    try:
+        await retention.prune_once(pool)
+    finally:
+        await pool.close()
+
+    kept = await aconn.fetch("SELECT signature_hash FROM ask_intent_cache ORDER BY signature_hash")
+    assert [r["signature_hash"] for r in kept] == ["b" * 16, "c" * 16]
