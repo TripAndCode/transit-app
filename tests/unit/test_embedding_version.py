@@ -122,7 +122,7 @@ async def test_promote_one_stamps_version(monkeypatch):
 
     marked: list[tuple] = []
 
-    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None):
+    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None, question=None):
         marked.append((signature_hash, agency_id, embedding_version))
 
     monkeypatch.setattr(intent_promotion.intent_cache, "mark_promoted", fake_mark_promoted)
@@ -141,7 +141,7 @@ async def test_promote_one_stamps_version(monkeypatch):
 async def test_promote_one_reembeds_on_version_drift(monkeypatch):
     monkeypatch.setattr(embeddings, "embedding_version", lambda model_id=None: "m@2")
 
-    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None):
+    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None, question=None):
         return None
 
     monkeypatch.setattr(intent_promotion.intent_cache, "mark_promoted", fake_mark_promoted)

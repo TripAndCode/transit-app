@@ -174,8 +174,8 @@ async def test_mark_promoted_sets_timestamp(conn_with_agency):
 
 @pytest.mark.asyncio
 async def test_upsert_keeps_a_promoted_rows_question(conn_with_agency):
-    """A promoted row's question is the reviewed suggestion text: a later
-    asker's wording must not replace it, though the hit still counts."""
+    """A promoted row's question is the text its suggestion published: a
+    later asker's wording must not replace it, though the hit still counts."""
     pool, agency_id = conn_with_agency
     sig_hash = "8888888888888888"
     async with pool.acquire() as c:
