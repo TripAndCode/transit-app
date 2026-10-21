@@ -130,7 +130,9 @@ Endpoints:
   active sessions, identified by a display-safe hash prefix.
 - `GET /api/admin/api-keys`, `POST /api/admin/api-keys`,
   `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
-- `POST /api/admin/invites` — invite a new user.
+- `POST /api/admin/invites` — invite a new user. The invite applies when
+  sign-in creates the account, so an email that already has one is refused
+  with 409 `account_exists`.
 
 Tables read/written: `users`, `sessions` (revoked on suspend/delete/role
 edits that drop access), `oauth_identities`, `user_llm_keys` (read-only,

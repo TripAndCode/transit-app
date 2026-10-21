@@ -1373,7 +1373,8 @@
       "llm_approved_label": "AI利用を事前承認",
       "submit": "招待を送信",
       "success": "{{email}} 宛の招待を作成しました。",
-      "error": "エラー: {{msg}}"
+      "error": "エラー: {{msg}}",
+      "error_account_exists": "{{email}} はすでにアカウントがあるため、招待は適用されません。ユーザー一覧でロールとAI利用を変更してください。"
     },
     "nav": {
       "label": "管理ナビゲーション",
