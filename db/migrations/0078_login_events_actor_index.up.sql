@@ -6,7 +6,9 @@
 --     (pipeline/account_export.py), `actor_id = $1` ordered by created_at;
 --   - account erasure's `UPDATE login_events ... WHERE actor_id = $1`
 --     (pipeline/account_erasure.py), and the ON DELETE SET NULL on actor_id
---     that deleting the users row then fires.
+--     that deleting the users row then fires;
+--   - the admin audit timeline's `actor=` filter on login_events
+--     (api/routers/admin.py), ordered by created_at DESC.
 --
 -- No other index on the table covers actor_id, so each of those reads the
 -- whole table. The columns mirror 0060's idx_admin_audit_actor_at.
