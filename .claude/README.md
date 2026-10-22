@@ -84,8 +84,9 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   tests point at throwaway `transit_test`@5544 and ClickHouse @8124.
   `hooks/guard-dev-db.sh` (a thin wrapper around `hooks/guard_dev_db.py`) is a
   partial net, not a guarantee. The module docstring of `hooks/guard_dev_db.py`
-  is the canonical description of what it blocks and of its known gaps; its block
-  message names the forms that point a destructive command at the throwaway pair.
+  and the comments beside its rules are the canonical description of what it
+  blocks and of its known gaps; its block message names the forms that point a
+  destructive command at the throwaway pair.
   Treat the rule in `AGENTS.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL

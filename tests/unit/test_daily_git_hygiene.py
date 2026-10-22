@@ -101,7 +101,7 @@ def test_run_local_cleanup_fetches_remote_before_validating_base(
     assert git(repository, "rev-parse", "refs/remotes/origin/main") == new_tip
 
 
-def advance_origin(tmp_path: Path, contents: str = "advanced\n") -> str:
+def advance_origin(tmp_path: Path, contents: str = "advanced\n", path: str = "tracked.txt") -> str:
     """Commit to the bare `origin`'s main from a second clone, as a merged PR does; return the new tip."""
 
     other = tmp_path / "advancing-clone"
@@ -109,8 +109,9 @@ def advance_origin(tmp_path: Path, contents: str = "advanced\n") -> str:
         git(tmp_path, "clone", "--branch", "main", str(tmp_path / "remote.git"), str(other))
         git(other, "config", "user.name", "Other Clone")
         git(other, "config", "user.email", "other@example.com")
-    (other / "tracked.txt").write_text(contents, encoding="utf-8")
-    git(other, "commit", "-am", "advance origin main")
+    (other / path).write_text(contents, encoding="utf-8")
+    git(other, "add", path)
+    git(other, "commit", "-m", "advance origin main")
     git(other, "push", "origin", "main")
     return git(other, "rev-parse", "HEAD")
 
@@ -201,6 +202,55 @@ def test_run_local_cleanup_fast_forwards_despite_untracked_files(
 
     assert git(repository, "rev-parse", "main") == new_tip
     assert (repository / "scratch.txt").read_text(encoding="utf-8") == "local notes\n"
+
+
+@pytest.mark.parametrize("ignored", [False, True], ids=["untracked", "ignored"])
+def test_run_local_cleanup_keeps_a_local_file_the_incoming_history_adds(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, ignored: bool
+):
+    """`merge` replaces an ignored file at an incoming path by default, which would silently drop a
+    local `.env`-style file; the fast-forward refuses instead, as it already does for an untracked one."""
+
+    original = git(repository, "rev-parse", "main")
+    if ignored:
+        (repository / ".git" / "info" / "exclude").write_text("local.env\n", encoding="utf-8")
+    (repository / "local.env").write_text("SECRET=local\n", encoding="utf-8")
+    advance_origin(tmp_path, "SECRET=upstream\n", path="local.env")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
+    assert (repository / "local.env").read_text(encoding="utf-8") == "SECRET=local\n"
+
+
+@pytest.mark.parametrize("operation", ["rebase", "bisect"])
+def test_run_local_cleanup_keeps_main_while_a_worktree_rebases_or_bisects_it(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+):
+    """A paused rebase or bisect detaches HEAD but still owns the branch; moving the ref under it
+    would make the rebase finish onto, or the bisect reset to, a commit it never started from."""
+
+    original = git(repository, "rev-parse", "main")
+    if operation == "rebase":
+        result = subprocess.run(
+            ("git", "-C", str(repository), "rebase", "--exec", "false", "--root"), capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        advance_origin(tmp_path)
+    else:
+        advance_origin(tmp_path, "first\n")
+        advance_origin(tmp_path, "second\n")
+        git(repository, "fetch", "origin")
+        git(repository, "bisect", "start", "origin/main", "main")
+    assert git(repository, "worktree", "list", "--porcelain").count("detached") == 1
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError, match=f"{operation} of main"):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
 
 
 def test_run_local_cleanup_keeps_main_checked_out_in_several_worktrees(
