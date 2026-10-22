@@ -29,35 +29,26 @@
 set -uo pipefail
 input="$(cat)"
 
-# Cheap pre-filter on the raw JSON before paying for a python3 spawn: a payload
-# with no "push" anywhere in it cannot carry one. It only skips the spawn; the
-# parser below makes the actual decision.
+# Cheap pre-filter on the raw JSON before paying for a python3 spawn. The JSON
+# carries the command text verbatim, so this holds for every push whose
+# subcommand is written with its letters together, quoted or not. Known gap,
+# shared by any substring check: a spelling that splits the word with quotes
+# or an escape (pu''sh, pu\sh) still pushes and is never gated.
 printf '%s' "$input" | grep -q 'push' || exit 0
 
-# The parser is the one place that decides whether the command pushes, and it
-# reports the push's own `-C`, its refs and any preceding `cd` for the
-# directory resolution below. A regex over the raw text cannot tell where a
-# quoted value ends or which `git` invocation a flag belongs to, so the command
-# is tokenised with shlex, which applies the shell's own quoting rules: a quoted
-# or escaped path arrives intact, and `ls -C /tmp && git push` or a commit
-# message quoting `-C /tmp` is not read as a directive. Operator characters
-# split even when glued to a word, so `x;git push` and `(git push)` each yield
-# a statement of their own. Every token naming `git` is checked wherever it
-# sits, so `time`, `env`, `sudo` or `if` in front of it still counts, and an
-# argument holding whitespace (`bash -c "..."`) is parsed again as a command.
-# Over-matching costs an unneeded gate run while under-matching skips every
+# The parser decides whether the command pushes and reports the push's own
+# `-C`, refs and any preceding `cd` for the directory resolution below. It
+# tokenises with shlex, which applies the shell's quoting rules, because a
+# regex over the raw text cannot tell where a quoted value ends or which `git`
+# invocation a flag belongs to. Over-matching costs an unneeded gate run, or a
+# block for a command it cannot tokenise, while under-matching skips every
 # check, so wherever the two trade off the parser over-matches.
-#
-# `is_push` is True or False only when the command could be read. A command
-# that names push as a word but that shlex cannot tokenise (an unbalanced
-# quote, typically an apostrophe in a heredoc body) gets no verdict, and no
-# verdict blocks: its directory and refs are unknown, so nothing could be
-# checked.
 PARSED="$(
   printf '%s' "$input" | python3 -c '
 import json, shlex, sys
 
-# Runs of these become tokens of their own, even glued to a word.
+# Runs of these become tokens of their own, even glued to a word, so x;git push
+# and (git push) each yield a statement of their own.
 OPERATOR_CHARS = "();<>|&`"
 # A token made only of these ends a statement: ;  &&  ||  |  &, a subshell or
 # substitution bracket, a backtick, or a run of them such as ");".
@@ -137,7 +128,8 @@ def statements(tokens):
 
 def git_push(statement):
     """(directory from -C, arguments after push) for a git push in the
-    statement, else None."""
+    statement, else None. Every token naming git counts wherever it sits, so
+    a wrapper in front of it (time, env, sudo, if) does not hide the push."""
     for start, token in enumerate(statement):
         if token.rsplit("/", 1)[-1] != "git":
             continue
@@ -173,13 +165,14 @@ def find_push(tokens, cd_dir):
     return nested
 
 
-def names_push(text):
-    """Whether push appears as a word of its own, with quotes, escapes and
-    operator characters taken as word breaks. Decides an unlexable command,
-    so a path or prose that only contains the letters (push-gate, pushed)
-    does not block."""
+def could_push(text):
+    """Whether a command shlex cannot tokenise could still be a git push: push
+    and git each appear as a word of their own, with quotes, escapes and
+    operator characters taken as word breaks. Prose with an apostrophe (I will
+    push later) or a path holding the letters (push-gate) then does not block."""
     breaks = str.maketrans({c: " " for c in OPERATOR_CHARS + chr(34) + chr(39) + "\\"})
-    return "push" in text.translate(breaks).split()
+    words = text.translate(breaks).split()
+    return "push" in words and any(w.rsplit("/", 1)[-1] == "git" for w in words)
 
 
 out = {"is_push": None, "dir": "", "cd_dir": "", "refs": [], "is_delete": False}
@@ -190,7 +183,7 @@ try:
         try:
             tokens = shell_tokens(raw_cmd)
         except ValueError:
-            if names_push(raw_cmd):
+            if could_push(raw_cmd):
                 raise
     found = find_push(tokens, "")
     out["is_push"] = found is not None
@@ -207,17 +200,20 @@ except Exception:
 print(json.dumps(out))
 ' 2>/dev/null
 )"
-[ -n "$PARSED" ] || PARSED='{}'
-
 read_parsed() {
   printf '%s' "$PARSED" | python3 -c "import json,sys; v=json.load(sys.stdin).get('$1'); print('' if v is None else (' '.join(v) if isinstance(v, list) else v))" 2>/dev/null
 }
 
-# Only a literal False lets the command through: an empty or unreadable parse
-# is as unknown as a command shlex could not tokenise.
-case "$(read_parsed is_push)" in
-  False) exit 0 ;;
-  True) ;;
+# Only a literal false lets the command through. A command that could be a git
+# push but that shlex cannot tokenise (an unbalanced quote, typically an
+# apostrophe in a heredoc body) gets a null verdict, as does an empty or
+# unreadable parse: its directory and refs are unknown, so nothing could be
+# checked, and it blocks. The verdict is read from the JSON prefix (is_push is
+# the first key json.dumps emits), sparing a python3 spawn on the common
+# not-a-push path.
+case "$PARSED" in
+  '{"is_push": false, '*) exit 0 ;;
+  '{"is_push": true, '*) ;;
   *)
     echo "BLOCKED: git push — could not parse the push command, so this gate cannot tell which branch" >&2
     echo "  it pushes and would check nothing. An unbalanced quote is the usual cause, such as an" >&2

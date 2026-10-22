@@ -169,6 +169,8 @@ NOT_PUSHES = [
     "git -C /tmp/push-wt status",
     # Unlexable (the apostrophe), but "push" is no word of its own anywhere.
     "cat > /tmp/push-wt/notes <<EOF\nit's pushed\nEOF",
+    # Unlexable, and "push" is a word, but no git is named anywhere.
+    "cat > /tmp/notes <<EOF\nI'll push later\nEOF",
 ]
 
 
@@ -200,11 +202,26 @@ def test_a_push_quoted_inside_an_argument_yields_to_the_real_one():
     assert parsed["refs"] == ["real"]
 
 
-def test_an_unlexable_command_holding_push_gets_no_verdict():
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /wt commit -F - <<EOF\nit's done\nEOF\ngit -C /wt push origin feature",
+        "echo it's; /usr/bin/git push origin x",
+    ],
+)
+def test_an_unlexable_command_naming_git_and_push_gets_no_verdict(command):
     """An apostrophe in a heredoc body leaves shlex an unbalanced quote. The
     hook blocks on a missing verdict, so the parser must not answer False."""
-    command = "git -C /wt commit -F - <<EOF\nit's done\nEOF\ngit -C /wt push origin feature"
     assert _parse(command)["is_push"] is None
+
+
+@pytest.mark.parametrize("command", ["git push origin x", "echo push", "echo it's; git push origin x"])
+def test_the_verdict_is_the_first_key_the_parser_prints(command):
+    """The hook reads the verdict from the raw JSON prefix, sparing a python3
+    spawn, so is_push must stay the first key in the output."""
+    payload = json.dumps({"tool_input": {"command": command}})
+    result = subprocess.run(["python3", "-c", PARSER_SOURCE], input=payload, capture_output=True, text=True, timeout=10)
+    assert re.match(r'\{"is_push": (true|false|null), ', result.stdout), result.stdout
 
 
 def test_an_unlexable_command_without_push_is_not_a_push():
