@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: October 21, 2026
+Last updated: October 22, 2026
 
 Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This page explains what information about you the Service handles and how. The Japanese version of this policy is the authoritative one.
 
@@ -52,7 +52,7 @@ You can read about the United States' personal-information protection system in 
 
 ## What you can do
 
-- **Download your data:** from your account page, download the data the Service holds about you as JSON. The admin action log isn't included; request its disclosure through the contact above.
+- **Download your data:** from your account page, download the data the Service holds about you as JSON. It includes invitations addressed to you or that you redeemed, and the time and kind of each admin action you have taken and, where recorded, its IP address and browser type. The rest of the admin action log, including actions on your account, isn't included; request its disclosure through the contact above.
 - **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only Ask questions not linked to your account remain, until their 90 days pass. A question the operator adopts as a suggested question, including one adopted automatically because it is asked often, remains while it is used as one.
 - **Other requests:** requests for disclosure, correction, suspension of use and the like go to the contact above.
 

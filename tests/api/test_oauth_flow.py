@@ -642,3 +642,70 @@ async def test_provider_failure_keeps_next_for_the_retry(auth_client):
     location = resp.headers["location"]
     assert location.startswith("http://test/login?error=provider_down&next=")
     assert location.endswith(quote(destination, safe=""))
+
+
+async def _google_callback(auth_client, monkeypatch, info, next_url="/"):
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return info
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": next_url, "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        return await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_suspended_account_is_refused_before_any_session_exists(auth_client, aconn, monkeypatch):
+    """A suspended account gets no session, no cookie and no `login` event:
+    the callback sends it back to /login with its own error instead, and the
+    attempt is audited as a failed sign-in against that account."""
+    uid = await aconn.fetchval(
+        "INSERT INTO users (email, name, suspended_at) VALUES ('held@x', 'Held', now()) RETURNING user_id"
+    )
+    await aconn.execute(
+        "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link)"
+        " VALUES ('google', 'held-sub', $1, 'held@x')",
+        uid,
+    )
+    info = {"sub": "held-sub", "email": "held@x", "email_verified": True, "name": "Held", "avatar_url": None}
+
+    resp = await _google_callback(auth_client, monkeypatch, info, next_url="/agencies/1")
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "http://test/login?error=suspended&next=%2Fagencies%2F1"
+    assert "sid=" not in resp.headers.get("set-cookie", "")
+    assert await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id=$1", uid) == 0
+    events = await aconn.fetch(
+        "SELECT kind, actor_id, provider, meta->>'reason' AS reason FROM login_events WHERE user_id=$1", uid
+    )
+    assert [dict(e) for e in events] == [
+        {"kind": "login_failed", "actor_id": uid, "provider": "google", "reason": "suspended"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_sign_in_leaves_the_suspended_account_unchanged(auth_client, aconn, monkeypatch):
+    """A suspended account reached through a new provider's verified email is
+    neither linked to that identity nor promoted by ADMIN_EMAILS: the whole
+    sign-in rolls back, leaving only the failure record."""
+    from api.routers import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "ADMIN_EMAILS", {"held@x"})
+    uid = await aconn.fetchval("INSERT INTO users (email, suspended_at) VALUES ('held@x', now()) RETURNING user_id")
+    info = {"sub": "new-sub", "email": "Held@X", "email_verified": True, "name": "Held", "avatar_url": None}
+
+    resp = await _google_callback(auth_client, monkeypatch, info)
+
+    assert resp.headers["location"] == "http://test/login?error=suspended&next=%2F"
+    assert await aconn.fetchval("SELECT count(*) FROM oauth_identities WHERE user_id=$1", uid) == 0
+    assert await aconn.fetchval("SELECT role FROM users WHERE user_id=$1", uid) == "user"
+    kinds = [r["kind"] for r in await aconn.fetch("SELECT kind FROM login_events WHERE user_id=$1", uid)]
+    assert kinds == ["login_failed"]
