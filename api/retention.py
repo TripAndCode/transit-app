@@ -3,7 +3,7 @@
 The statements come from ``pipeline/retention.py``. Each runs on its own, so
 one that fails is logged and the others still run; the next day's pass
 catches up whatever a failure left behind. Several API processes each
-running the pass is harmless: the deletes are idempotent.
+running the pass is harmless: the statements are idempotent.
 """
 
 from __future__ import annotations
