@@ -5,7 +5,7 @@ import os
 import psycopg2
 import pytest
 
-from tests.conftest import _redirect_to_test_db
+from tests.conftest import _DEV_PORTS, _redirect_to_test_db
 
 
 @pytest.fixture
@@ -108,3 +108,39 @@ def test_an_exported_dev_pgport_does_not_block_a_url_that_names_its_port(monkeyp
     _redirect_to_test_db()
 
     assert os.environ["DATABASE_URL"] == "postgresql://transit:transit@localhost:5544/transit_test"
+
+
+@pytest.mark.parametrize("port", sorted(_DEV_PORTS))
+def test_unset_database_url_with_a_dev_pgport_is_refused(monkeypatch, connect_calls, port):
+    """Code under test falls back to a port-less default URL, which takes its
+    port from PGPORT, so an unset DATABASE_URL is no opt-out."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("PGPORT", str(port))
+
+    with pytest.raises(pytest.UsageError, match=r"DATABASE_URL is unset.*dev Postgres port"):
+        _redirect_to_test_db()
+
+    assert connect_calls == []
+    assert "DATABASE_URL" not in os.environ
+
+
+def test_unset_database_url_with_an_unreadable_pgport_is_refused(monkeypatch, connect_calls):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("PGPORT", "abc")
+
+    with pytest.raises(pytest.UsageError, match=r"DATABASE_URL is unset.*cannot read"):
+        _redirect_to_test_db()
+
+    assert connect_calls == []
+
+
+@pytest.mark.parametrize("pgport", [None, "5544"])
+def test_unset_database_url_off_the_dev_ports_is_left_unset(monkeypatch, connect_calls, pgport):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    if pgport is not None:
+        monkeypatch.setenv("PGPORT", pgport)
+
+    _redirect_to_test_db()
+
+    assert connect_calls == []
+    assert "DATABASE_URL" not in os.environ

@@ -12,6 +12,11 @@ import psycopg2
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import service_date_ch
 
+# The database the API and the pipeline CLI connect to when DATABASE_URL is
+# unset. The test session vets this same value against the dev ports, so a
+# production fallback that bypasses it escapes that guard.
+DEFAULT_DATABASE_URL = "postgresql://localhost/transit"
+
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
 _DOW_JP_TO_ISO = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 7}

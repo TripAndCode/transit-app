@@ -11,6 +11,7 @@ from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
 from pipeline import ch_aggregates
+from pipeline.db import DEFAULT_DATABASE_URL
 from tests.postgres_ports import candidate_ports
 from tests.sharding import assign_shards, shard_from_env
 
@@ -65,7 +66,8 @@ def _redirect_to_test_db() -> None:
 
     Opt-out: set ``DATABASE_URL`` to a name already ending in ``_test``,
     or set ``TEST_DATABASE_URL`` explicitly. ``_refuse_dev_postgres_port``
-    vets either variable first.
+    vets either variable first. With ``DATABASE_URL`` unset nothing is
+    redirected, but the default the code falls back to is vetted the same way.
 
     Robustness notes:
     - Parsing via ``urllib.parse.urlsplit`` instead of a hand-rolled regex
@@ -88,7 +90,10 @@ def _redirect_to_test_db() -> None:
 
     current = os.environ.get("DATABASE_URL")
     if not current:
-        return  # downstream code raises a clearer error
+        # Code under test falls back to DEFAULT_DATABASE_URL, whose port comes
+        # from PGPORT, so that fallback is vetted in place of the unset value.
+        _refuse_dev_postgres_port(DEFAULT_DATABASE_URL, f"DATABASE_URL is unset, so its default {DEFAULT_DATABASE_URL}")
+        return
 
     parts = urlsplit(current)
     _refuse_dev_postgres_port(current, "DATABASE_URL")

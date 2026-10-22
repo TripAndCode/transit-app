@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import psycopg2
 
 from pipeline import runs as pipeline_runs
+from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.retention import (
     ADMIN_AUDIT_RETENTION_DAYS,
@@ -25,7 +26,7 @@ from pipeline.retention import (
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 # sysexits.h EX_TEMPFAIL -- distinct from a genuine failure's exit(1), so a
 # per-agency shell loop (scripts/fetch_and_ingest.sh, docs/deploy-railway.md's
