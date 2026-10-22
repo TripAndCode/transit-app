@@ -190,6 +190,32 @@ def test_a_glued_separator_does_not_leak_into_the_refs():
     assert parsed["refs"] == ["x"]
 
 
+@pytest.mark.parametrize(
+    ("command", "cd_dir"),
+    [
+        # A cd inside ( ), $( ) or backticks, or in a pipeline segment or a
+        # backgrounded command, runs in a subshell: the push never sees it.
+        ("(cd /tmp/x && true) && git push origin HEAD", ""),
+        ("echo $(cd /tmp/x; pwd) && git push origin y", ""),
+        ("echo `cd /tmp/x` && git push origin y", ""),
+        ("cd /tmp/x | cat; git push origin y", ""),
+        ("true | cd /tmp/x; git push origin y", ""),
+        ("cd /tmp/x & git push origin y", ""),
+        ("cd /tmp/a && (cd /tmp/x && true) && git push origin y", "/tmp/a"),
+        # A cd in the same shell as the push still applies.
+        ("cd /tmp/a && git push origin y", "/tmp/a"),
+        ("(cd /tmp/a && git push origin y)", "/tmp/a"),
+        ("cd /tmp/a; (cd /tmp/b; git push origin y)", "/tmp/b"),
+        ("(cd /tmp/a; true | git push origin y)", "/tmp/a"),
+        ("cd /tmp/a\ngit push origin y", "/tmp/a"),
+    ],
+)
+def test_a_cd_applies_only_within_its_own_shell(command, cd_dir):
+    parsed = _parse(command)
+    assert parsed["is_push"] is True
+    assert parsed["cd_dir"] == cd_dir
+
+
 def test_a_push_inside_a_nested_shell_reports_its_own_directory_and_refs():
     parsed = _parse('cd /tmp/a && bash -c "cd /tmp/b && git push origin x"')
     assert parsed["cd_dir"] == "/tmp/b"

@@ -112,18 +112,14 @@ def argument_tokens(text):
         return text.split()
 
 
-def statements(tokens):
-    result, current = [], []
-    for token in tokens:
-        if token and set(token) <= SEPARATOR_CHARS:
-            if current:
-                result.append(current)
-            current = []
-        else:
-            current.append(token)
-    if current:
-        result.append(current)
-    return result
+def operators(run):
+    """The shell operators in a run of separator characters, in order."""
+    ops, i = [], 0
+    while i < len(run):
+        step = 2 if run[i : i + 2] in ("&&", "||", "|&", ";;") else 1
+        ops.append(run[i : i + step])
+        i += step
+    return ops
 
 
 def git_push(statement):
@@ -150,18 +146,35 @@ def find_push(tokens, cd_dir):
     """(cd_dir, directory, arguments) of the first push, else None. A push in
     a statement of its own outranks one inside an argument. Recursion ends
     because an argument holding whitespace is always shorter than the text it
-    was lexed from: its quotes or escapes are gone."""
+    was lexed from: its quotes or escapes are gone.
+
+    A cd moves only the shell it runs in. ( ), $( ) and backticks open a
+    subshell whose cd is dropped when it closes, and each command of a
+    multi-command pipeline, like a backgrounded one, runs in a subshell of
+    its own, so none of those cds reaches a later statement."""
     nested = None
-    for statement in statements(tokens):
-        found = git_push(statement)
-        if found:
-            return (cd_dir, *found)
-        for token in statement:
-            if nested is None and any(c.isspace() for c in token):
-                nested = find_push(argument_tokens(token), cd_dir)
-        # A later cd overrides an earlier one, as it would in the shell.
-        if statement[:1] == ["cd"] and len(statement) > 1:
-            cd_dir = statement[1]
+    groups, statement, piped = [], [], False
+    for token in [*tokens, ";"]:
+        if not (token and set(token) <= SEPARATOR_CHARS):
+            statement.append(token)
+            continue
+        for op in operators(token):
+            if statement:
+                found = git_push(statement)
+                if found:
+                    return (cd_dir, *found)
+                for word in statement:
+                    if nested is None and any(c.isspace() for c in word):
+                        nested = find_push(argument_tokens(word), cd_dir)
+                in_subshell = piped or op in ("|", "|&", "&")
+                if statement[0] == "cd" and len(statement) > 1 and not in_subshell:
+                    cd_dir = statement[1]
+                statement = []
+            piped = op in ("|", "|&")
+            if op == "(" or (op == "`" and not (groups and groups[-1][0] == "`")):
+                groups.append((op, cd_dir))
+            elif op in (")", "`") and groups:
+                cd_dir = groups.pop()[1]
     return nested
 
 
