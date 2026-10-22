@@ -192,6 +192,44 @@ async def test_login_with_wrong_password_is_rejected_and_audited(local_client, a
 
 
 @pytest.mark.asyncio
+async def test_a_suspended_account_is_refused_with_its_own_error_and_no_session(local_client, aconn):
+    """The right password on a suspended account mints no session and logs no
+    `login`; the caller is told the account is suspended, and the attempt is
+    audited as a failed sign-in against that account."""
+    await _seed(local_client)
+    uid = await aconn.fetchval("UPDATE users SET suspended_at = now() WHERE email='root@local' RETURNING user_id")
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "root@local", "password": "correct-horse-battery-staple"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 403
+    assert resp.json() == {"error": "suspended"}
+    assert "set-cookie" not in resp.headers
+    assert await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id=$1", uid) == 0
+    events = await aconn.fetch(
+        "SELECT kind, actor_id, provider, meta->>'reason' AS reason FROM login_events WHERE user_id=$1", uid
+    )
+    assert [dict(e) for e in events] == [
+        {"kind": "login_failed", "actor_id": uid, "provider": "local", "reason": "suspended"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_password_on_a_suspended_account_gets_the_generic_error(local_client, aconn):
+    """Suspension is disclosed only to a caller who proved the password."""
+    await _seed(local_client)
+    await aconn.execute("UPDATE users SET suspended_at = now() WHERE email='root@local'")
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "root@local", "password": "not-the-password"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 401
+    assert resp.json() == {"error": "invalid_credentials"}
+
+
+@pytest.mark.asyncio
 async def test_login_with_unknown_username_gets_the_same_generic_error(local_client):
     """No user-enumeration: a nonexistent username gets the identical 401
     shape as a wrong password for a real one."""

@@ -86,12 +86,16 @@ async def test_deletion_requires_a_same_origin_request(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_the_export_downloads_the_users_data(me_client, aconn):
-    sid, _ = await _signed_in(aconn, "exp@x")
+    sid, uid = await _signed_in(aconn, "exp@x", role="admin")
+    await aconn.execute(
+        "INSERT INTO admin_audit (actor_id, action, target_type, ip) VALUES ($1, 'flag.set', 'flag', '10.0.0.9')", uid
+    )
     r = await me_client.get("/api/me/export", cookies={"sid": sid})
     assert r.status_code == 200
     assert r.headers["content-disposition"].startswith('attachment; filename="transit-app-export-')
     body = r.json()
     assert body["profile"]["email"] == "exp@x"
+    assert [(a["action"], a["ip"]) for a in body["admin_actions"]] == [("flag.set", "10.0.0.9")]
     assert "sid_hash" not in r.text
 
 
