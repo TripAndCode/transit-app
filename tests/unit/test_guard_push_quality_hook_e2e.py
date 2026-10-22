@@ -327,8 +327,18 @@ def test_a_dash_c_path_holding_a_space_is_resolved(fake_repo, spell):
         "echo `cd {other}` && git push origin HEAD",
         "cd {other} | cat; git push origin HEAD",
         "cd {other} && true & git push origin HEAD",
+        "(cd {other} && true)>/dev/null && git push origin HEAD",
+        "(cd {other} && true)2>&1 && git push origin HEAD",
     ],
-    ids=["subshell", "command-substitution", "backticks", "pipeline", "backgrounded-list"],
+    ids=[
+        "subshell",
+        "command-substitution",
+        "backticks",
+        "pipeline",
+        "backgrounded-list",
+        "glued-redirect",
+        "glued-fd-redirect",
+    ],
 )
 def test_a_cd_that_cannot_reach_the_push_does_not_redirect_the_gate(fake_repo, shape):
     """The cd runs in a subshell, so the push runs from the session cwd. Read
@@ -338,6 +348,23 @@ def test_a_cd_that_cannot_reach_the_push_does_not_redirect_the_gate(fake_repo, s
     other = fake_repo.parent / "not-a-repo"
     other.mkdir()
     result = _run_hook(shape.format(other=other), claude_project_dir=fake_repo, cwd=str(worktree))
+    assert result.returncode == 0, result.stderr
+    banner = result.stderr.splitlines()[0] if result.stderr else ""
+    assert banner.startswith("== push gate: files from"), result.stderr
+    assert worktree.name in banner, result.stderr
+
+
+@pytest.mark.parametrize("make_repo", [False, True], ids=["plain-directory", "other-repository"])
+def test_a_cd_outside_this_repository_never_lets_the_gate_skip(fake_repo, make_repo):
+    """Only an explicit -C may send the gate away. A cd the parser reads, rightly
+    or not, as the push's own directory is no proof the push leaves this
+    repository, so resolution goes on to the session cwd and the checks run."""
+    worktree = _worktree_with_change(fake_repo, "cwd-worktree", "NOTES.md")
+    other = fake_repo.parent / "elsewhere"
+    other.mkdir()
+    if make_repo:
+        _git("init", "-q", "-b", "main", cwd=other)
+    result = _run_hook(f"cd {other} && git push origin HEAD", claude_project_dir=fake_repo, cwd=str(worktree))
     assert result.returncode == 0, result.stderr
     banner = result.stderr.splitlines()[0] if result.stderr else ""
     assert banner.startswith("== push gate: files from"), result.stderr

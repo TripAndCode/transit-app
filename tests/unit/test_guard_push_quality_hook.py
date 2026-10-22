@@ -207,6 +207,16 @@ def test_a_glued_separator_does_not_leak_into_the_refs():
         ("cd /tmp/x && true & git push origin y", ""),
         ("cd /tmp/x || true & git push origin y", ""),
         ("cd /tmp/a && (cd /tmp/x && true) && git push origin y", "/tmp/a"),
+        # A redirect glued to the closing ) still closes the group.
+        ("(cd /tmp/x && true)>/dev/null && git push origin y", ""),
+        ("(cd /tmp/x)>/dev/null; git push origin y", ""),
+        ("(cd /tmp/x && true)2>&1 && git push origin y", ""),
+        # A process substitution closes its own ), not the enclosing group.
+        ("(cd /tmp/a; diff <(true) f; git push origin y)", "/tmp/a"),
+        ("(cd /tmp/a; diff <(true) >(cat) ; git push origin y)", "/tmp/a"),
+        # A redirect holding & is no background operator.
+        ("cd /tmp/a; true 2>&1; git push origin y", "/tmp/a"),
+        ("cd /tmp/a && true &>/dev/null; git push origin y", "/tmp/a"),
         # | binds tighter than &&, so the cd is a pipeline of its own here.
         ("cd /tmp/a && true | cat; git push origin y", "/tmp/a"),
         # A push in the same backgrounded list runs after the cd, in its shell.

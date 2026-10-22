@@ -51,9 +51,17 @@ import re
 # Runs of these become tokens of their own, even glued to a word, so x;git push
 # and (git push) each yield a statement of their own.
 OPERATOR_CHARS = "();<>|&`"
-# A token made only of these ends a statement: ;  &&  ||  |  &, a subshell or
-# substitution bracket, a backtick, or a run of them such as ");".
-SEPARATOR_CHARS = frozenset("();|&`")
+# shlex keeps a run of operator characters together, so a run is split again
+# into shell operators by longest match: )> must still close a group and <( open
+# one, while the >& of 2>&1 stays a redirect rather than a background &.
+OPERATORS = sorted(
+    ["&>>", "<<<", "<<-", ";;&", "&&", "||", ";;", ";&", "|&", ">&", "<&", "&>", ">>", "<<", ">|", "<>",
+     "(", ")", ";", "&", "|", "<", ">", "`"],
+    key=len,
+    reverse=True,
+)
+# The operators that end a statement; a redirect operator stays in its statement.
+SEPARATORS = {";", ";;", ";&", ";;&", "&", "&&", "||", "|", "|&", "(", ")", "`"}
 # Global options git reads a separate value for, ahead of the subcommand.
 GIT_VALUE_OPTIONS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source",
@@ -99,7 +107,18 @@ def shell_tokens(text):
     lexer = shlex.shlex(newlines_as_separators(text), posix=True, punctuation_chars=OPERATOR_CHARS)
     lexer.whitespace_split = True
     lexer.commenters = ""
-    return list(lexer)
+    return [part for token in lexer for part in split_operators(token)]
+
+
+def split_operators(token):
+    if not token or not set(token) <= set(OPERATOR_CHARS):
+        return [token]
+    parts, i = [], 0
+    while i < len(token):
+        op = next(o for o in OPERATORS if token.startswith(o, i))
+        parts.append(op)
+        i += len(op)
+    return parts
 
 
 def argument_tokens(text):
@@ -111,16 +130,6 @@ def argument_tokens(text):
         return shell_tokens(text)
     except ValueError:
         return text.split()
-
-
-def operators(run):
-    """The shell operators in a run of separator characters, in order."""
-    ops, i = [], 0
-    while i < len(run):
-        step = 2 if run[i : i + 2] in ("&&", "||", "|&", ";;") else 1
-        ops.append(run[i : i + step])
-        i += step
-    return ops
 
 
 def git_push(statement):
@@ -157,32 +166,31 @@ def find_push(tokens, cd_dir):
     rest of its own list already sees."""
     nested = None
     groups, statement, piped, pending = [], [], False, None
-    for token in [*tokens, ";"]:
-        if not (token and set(token) <= SEPARATOR_CHARS):
-            statement.append(token)
+    for op in [*tokens, ";"]:
+        if op not in SEPARATORS:
+            statement.append(op)
             continue
-        for op in operators(token):
-            here = cd_dir if pending is None else pending
-            if statement:
-                found = git_push(statement)
-                if found:
-                    return (here, *found)
-                for word in statement:
-                    if nested is None and any(c.isspace() for c in word):
-                        nested = find_push(argument_tokens(word), here)
-                if statement[0] == "cd" and len(statement) > 1 and not (piped or op in ("|", "|&")):
-                    pending = statement[1]
-                statement = []
-            piped = op in ("|", "|&")
-            if op == "(" or (op == "`" and not (groups and groups[-1][0] == "`")):
-                groups.append((op, cd_dir, pending))
-                cd_dir, pending = here, None
-            elif op in (")", "`") and groups:
-                _, cd_dir, pending = groups.pop()
-            elif op == "&":
-                pending = None
-            elif op in (";", ";;") and pending is not None:
-                cd_dir, pending = pending, None
+        here = cd_dir if pending is None else pending
+        if statement:
+            found = git_push(statement)
+            if found:
+                return (here, *found)
+            for word in statement:
+                if nested is None and any(c.isspace() for c in word):
+                    nested = find_push(argument_tokens(word), here)
+            if statement[0] == "cd" and len(statement) > 1 and not (piped or op in ("|", "|&")):
+                pending = statement[1]
+            statement = []
+        piped = op in ("|", "|&")
+        if op == "(" or (op == "`" and not (groups and groups[-1][0] == "`")):
+            groups.append((op, cd_dir, pending))
+            cd_dir, pending = here, None
+        elif op in (")", "`") and groups:
+            _, cd_dir, pending = groups.pop()
+        elif op == "&":
+            pending = None
+        elif op in (";", ";;", ";&", ";;&") and pending is not None:
+            cd_dir, pending = pending, None
     return nested
 
 
@@ -333,8 +341,8 @@ fi
 
 # Then a preceding `cd`, for a push that names no ref at all. (The explicit
 # `-C` case above already either set $GATE_DIR or exited, so reaching here
-# means there was no `-C` on the push statement at all -- $CD_DIR is the
-# only remaining directory candidate.)
+# means there was no `-C` on the push statement at all.) Unlike `-C`, a `cd`
+# never ends the resolution on its own.
 CD_DIR=""
 if [ -z "$GATE_DIR" ]; then
   CD_DIR="$(read_parsed cd_dir)"
@@ -348,12 +356,13 @@ fi
 # parsing this gate got wrong — a spelling it does not cover (a variable, a
 # relative path) reduced to something meaningless — and silently continuing
 # from there would check the wrong tree, so it is reported instead. A path
-# that does exist is simply not this repository's push, and gating someone
-# else's repository is not this hook's business.
-if [ -z "$GATE_DIR" ] && [ -n "$CD_DIR" ]; then
-  if [ -e "$CD_DIR" ]; then
-    exit 0
-  fi
+# that does exist outside this repository proves nothing either: the parser
+# may have credited the push with a `cd` that never reached its shell. So
+# resolution carries on to the session cwd and then $CLAUDE_PROJECT_DIR, and
+# this repository's checks run. For a push really made in another
+# repository that costs an unneeded gate run, never a skipped one; only an
+# explicit `-C` lets the gate stand aside.
+if [ -z "$GATE_DIR" ] && [ -n "$CD_DIR" ] && [ ! -e "$CD_DIR" ]; then
   echo "BLOCKED: git push — the command names directory '$CD_DIR', which does not exist, so" >&2
   echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
   echo "  written in a form it failed to read; pass it as a literal absolute path." >&2
@@ -361,9 +370,9 @@ if [ -z "$GATE_DIR" ] && [ -n "$CD_DIR" ]; then
 fi
 
 if [ -z "$GATE_DIR" ]; then
-  # Last resort for a push whose own argv names no directory and no branch
-  # (a bare `git push` with no leading `cd`/`-C` in this same command) --
-  # the payload's cwd, which reflects wherever the session's shell state
+  # Last resort for a push whose own argv names no directory or branch of
+  # this repository (a bare `git push`, or one after a `cd` that led outside
+  # it) -- the payload's cwd, which reflects wherever the session's shell state
   # currently sits, including a `cd` done in an earlier, separate tool
   # call. If that ever stops being accurate for some payload shape, there
   # is nothing left in the command text for this hook to fall back to: a
