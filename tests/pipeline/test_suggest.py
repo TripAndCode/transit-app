@@ -8,10 +8,11 @@ import pytest
 
 from api.range import jst_today
 from pipeline.analyze import analyze
+from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.reports.suggest import compute_suggestion
 from tests.conftest import _test_pool, mirror_updates_to_ch
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 
 @pytest.fixture

@@ -60,13 +60,14 @@ from api.routers.static import router as static_router
 from api.security import cookie_secure
 from api.sso import SSO_ENV as _AUTH_ENV
 from api.sso import sso_status as auth_status
+from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
 from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 # The placeholder signing key used when SESSION_SIGNING_KEY is unset. Safe for
