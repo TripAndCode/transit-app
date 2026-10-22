@@ -488,7 +488,6 @@ async def describe_data(
                 ("p50_min", "median delay (min)"),
                 ("p90_min", "90th percentile delay (min)"),
                 ("on_time_pct", "on-time rate (%) — default threshold 60 s"),
-                ("late5_pct", "share of >5-minute delays (%)"),
                 ("samples", "observation sample count"),
             ]
         else:
@@ -497,7 +496,6 @@ async def describe_data(
                 ("p50_min", "中央値遅延 (分)"),
                 ("p90_min", "90 パーセンタイル遅延 (分)"),
                 ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
-                ("late5_pct", "5分超過率 (%)"),
                 ("samples", "観測サンプル数"),
             ]
         return ToolResult(
@@ -511,7 +509,7 @@ async def describe_data(
 
 
 _CAPABILITY_EXAMPLES_JP = {
-    "single_route": "路線22171の遅延 / 路線16071のp90 / A1の運行情報",
+    "single_route": "路線22171の遅延 / A1の運行情報",
     "ranking": "遅延ワースト10 / 定時率TOP5 / 5分超過の多い路線",
     "comparison": "平日と土日祝の比較 / 22171の種別比較 / 路線間の差",
     "trend": "直近2週間の傾向 / 日次トレンド / 推移を見せて",
@@ -522,7 +520,7 @@ _CAPABILITY_EXAMPLES_JP = {
 }
 
 _CAPABILITY_EXAMPLES_EN = {
-    "single_route": "route 22171 delay / route 16071 p90 / route info for A1",
+    "single_route": "route 22171 delay / route info for A1",
     "ranking": "worst-10 delays / on-time top-5 / most >5min delays",
     "comparison": "weekday vs weekend / service-type split for 22171 / route deltas",
     "trend": "last-14d trend / daily series / show the trend",

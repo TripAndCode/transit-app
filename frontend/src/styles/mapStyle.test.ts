@@ -11,6 +11,7 @@ import {
   readMapDimPref,
   writeMapDimPref,
 } from "./mapStyle";
+import { blockStorage } from "../test/blockStorage";
 
 type Src = Record<string, { tiles?: string[]; attribution?: string }>;
 const basemap = (id: Parameters<typeof buildStyle>[0], lang = "ja") =>
@@ -70,6 +71,12 @@ describe("map style pref (localStorage)", () => {
 
   it("ignores an unknown stored id and returns the default", () => {
     localStorage.setItem("transit.mapStyle", "satellite-pro");
+    expect(readMapStylePref()).toBe("pale");
+  });
+
+  it("reads the default and drops the write where site data is blocked", () => {
+    blockStorage("localStorage");
+    expect(() => writeMapStylePref("photo")).not.toThrow();
     expect(readMapStylePref()).toBe("pale");
   });
 });
@@ -137,5 +144,12 @@ describe("map basemap dim pref (localStorage)", () => {
     localStorage.setItem("transit.mapDim", "lots");
     expect(readMapDimPref()).toBeGreaterThan(0);
     expect(readMapDimPref()).toBeLessThanOrEqual(MAX_DIM_AMOUNT);
+  });
+
+  it("reads the default and drops the write where site data is blocked", () => {
+    const fallback = readMapDimPref();
+    blockStorage("localStorage");
+    expect(() => writeMapDimPref(0.1)).not.toThrow();
+    expect(readMapDimPref()).toBe(fallback);
   });
 });

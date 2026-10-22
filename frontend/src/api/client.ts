@@ -1,4 +1,5 @@
 import i18n from "../i18n";
+import { readStorage, removeStorage, writeStorage } from "../utils/safeStorage";
 
 /** `path` on the API's origin, which VITE_API_BASE_URL names when the API and the SPA are
  *  served from different origins. Every URL the browser fetches or navigates to on the API
@@ -28,12 +29,7 @@ const AGGREGATE_NOT_READY_CODE = "aggregate_not_ready";
  * NOT offer a futile retry. */
 export function isAggregateNotReady(err: unknown): boolean {
   if (!(err instanceof ApiError) || err.status !== 503) return false;
-  try {
-    const parsed = JSON.parse(err.body);
-    return parsed?.code === AGGREGATE_NOT_READY_CODE;
-  } catch {
-    return false;
-  }
+  return apiErrorField(err, "code") === AGGREGATE_NOT_READY_CODE;
 }
 
 /** Detail string the API returns (403) on /followup when
@@ -114,19 +110,26 @@ export async function apiDelete<T = void>(
   });
 }
 
+/** The string `field` of an `ApiError`'s JSON body object. `null` if `err`
+ * isn't an `ApiError`, its body isn't a JSON object, or that field isn't a
+ * string. */
+export function apiErrorField(err: unknown, field: string): string | null {
+  if (!(err instanceof ApiError)) return null;
+  try {
+    const parsed: unknown = JSON.parse(err.body);
+    if (!parsed || typeof parsed !== "object") return null;
+    const value = (parsed as Record<string, unknown>)[field];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's
  * `HTTPException(detail=...)`. `null` if `err` isn't an `ApiError` or its
  * body isn't `{"detail": string}`. */
 export function apiErrorDetail(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  try {
-    const parsed = JSON.parse(err.body);
-    return parsed && typeof parsed === "object" && typeof parsed.detail === "string"
-      ? parsed.detail
-      : null;
-  } catch {
-    return null;
-  }
+  return apiErrorField(err, "detail");
 }
 
 /** The `msg` fields of a FastAPI validation error (`detail` is a list of
@@ -261,25 +264,18 @@ const API_KEY_STORAGE_KEY = "api_key";
  *  revoked, expired, or owned by a suspended account; it does not say which. */
 const INVALID_API_KEY_DETAIL = "Invalid API key";
 
-/** The stored API key, or null. Storage access throws where site data is
- *  blocked; no key is then read or sent. */
+/** The stored API key, or null. Where site data is blocked no key is read,
+ *  so none is sent. */
 export function storedApiKey(): string | null {
-  try {
-    return localStorage.getItem(API_KEY_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+  return readStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
-/** Stores *key* without surrounding whitespace, or clears it when empty. */
+/** Stores *key* without surrounding whitespace, or clears it when empty.
+ *  Blocked storage keeps nothing, so no key is sent either. */
 export function saveApiKey(key: string): void {
   const trimmed = key.trim();
-  try {
-    if (trimmed) localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
-    else localStorage.removeItem(API_KEY_STORAGE_KEY);
-  } catch {
-    // Blocked storage keeps nothing, so no key is sent either.
-  }
+  if (trimmed) writeStorage("localStorage", API_KEY_STORAGE_KEY, trimmed);
+  else removeStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
 /** The stored key, trimmed, if it can be sent at all. A stored key may carry
@@ -312,13 +308,8 @@ function isSendableHeaderValue(value: string): boolean {
  *  failed together report once, and a late 401 cannot remove a key saved since.
  *  Returns whether it removed the key. A failed remove leaves the key in place. */
 function clearStoredApiKey(rejected: string): boolean {
-  try {
-    if (localStorage.getItem(API_KEY_STORAGE_KEY) !== rejected) return false;
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
+  if (storedApiKey() !== rejected) return false;
+  return removeStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
 async function isRejectedApiKey(response: Response): Promise<boolean> {

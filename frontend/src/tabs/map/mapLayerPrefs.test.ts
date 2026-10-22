@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { readBoolPref, useBoolPref, writeBoolPref } from "./mapLayerPrefs";
+import { blockStorage } from "../../test/blockStorage";
 
 beforeEach(() => localStorage.clear());
 
@@ -16,5 +17,12 @@ describe("mapLayerPrefs", () => {
     act(() => result.current[1](true));
     expect(result.current[0]).toBe(true);
     expect(localStorage.getItem("transit.test")).toBe("1");
+  });
+  it("reads the fallback where site data is blocked, and the setter still applies for the visit", () => {
+    blockStorage("localStorage");
+    expect(readBoolPref("transit.test", true)).toBe(true);
+    const { result } = renderHook(() => useBoolPref("transit.test", false));
+    act(() => result.current[1](true));
+    expect(result.current[0]).toBe(true);
   });
 });

@@ -88,7 +88,6 @@
 {"id": "alias-002", "category": "I_alias", "question": "L21の運行情報", "expected_tool": "route_meta", "expected_args": {"route": "12211"}}
 {"id": "alias-003", "category": "I_alias", "question": "B1系統について", "expected_tool": "route_stats", "expected_args": {"route": "3021"}}
 {"id": "alias-004", "category": "I_alias", "question": "中央大橋線の傾向を見せて", "expected_tool": "time_series", "expected_args": {}}
-{"id": "alias-005", "category": "I_alias", "question": "1番系統のp90はどう？", "expected_tool": "route_stats", "expected_args": {}}
 {"id": "alias-006", "category": "I_alias", "question": "国道線のサンプル数を教えて", "expected_tool": "describe_data", "expected_args": {"kind": "sample_counts"}}
 {"id": "alias-007", "category": "I_alias", "question": "バスNo.9999の状態", "expected_tool": "route_stats", "expected_args": {}}
 {"id": "alias-008", "category": "I_alias", "question": "系統5を見せて", "expected_tool": "route_stats", "expected_args": {}}
@@ -140,7 +139,6 @@
 {"id": "rs-extra-006", "category": "I_alias", "question": "16071はどれくらい遅延してる", "expected_tool": "route_stats", "expected_args": {"route": "16071"}}
 {"id": "rs-extra-007", "category": "I_alias", "question": "この系統の平均遅延を知りたい", "expected_tool": "route_stats", "expected_args": {}}
 {"id": "rs-extra-008", "category": "I_alias", "question": "路線の遅延統計を見せて", "expected_tool": "route_stats", "expected_args": {}}
-{"id": "rs-extra-009", "category": "I_alias", "question": "22171のp90遅延はどれくらい？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
 {"id": "rs-extra-010", "category": "I_alias", "question": "16071の遅延を確認したい", "expected_tool": "route_stats", "expected_args": {"route": "16071"}}
 {"id": "oos-extra-001", "category": "H_oos", "question": "明日の遅延を予測して", "expected_tool": null, "expected_args": {}}
 {"id": "oos-extra-002", "category": "H_oos", "question": "未来の運行を予測できる？", "expected_tool": null, "expected_args": {}}

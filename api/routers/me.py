@@ -361,7 +361,8 @@ async def delete_me(
 
 
 class AccountExport(BaseModel):
-    """The download's JSON shape: everything the app holds about the caller."""
+    """The download's JSON shape: the caller's personal data, as
+    ``pipeline.account_export.collect_user_data`` defines it."""
 
     exported_at: Any
     profile: dict[str, Any] | None
@@ -373,6 +374,9 @@ class AccountExport(BaseModel):
     llm_key: dict[str, Any] | None
     api_keys: list[dict[str, Any]]
     usage_daily: list[dict[str, Any]]
+    invites: list[dict[str, Any]]
+    admin_actions: list[dict[str, Any]]
+    admin_account_events: list[dict[str, Any]]
 
 
 @router.get("/me/export", response_model=AccountExport)
@@ -382,7 +386,7 @@ async def export_me(
     user: User = Depends(require_user),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> JSONResponse:
-    """Everything the app holds about the caller, as a JSON download."""
+    """The caller's personal data, as a JSON download."""
     data = await collect_user_data(conn, user.user_id)
     filename = f"transit-app-export-{jst_today().isoformat()}.json"
     return JSONResponse(jsonable_encoder(data), headers={"Content-Disposition": f'attachment; filename="{filename}"'})

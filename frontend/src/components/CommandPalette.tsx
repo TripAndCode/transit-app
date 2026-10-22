@@ -21,6 +21,7 @@ import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { isTypingTarget } from "../utils/isTypingTarget";
 import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
+import { withStorage, writeStorage } from "../utils/safeStorage";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
 import { agencySwitchHref, reportDestination, reportHref, routeHref } from "../routes/destinations";
@@ -42,22 +43,21 @@ type PaletteItem = Searchable & {
 };
 
 function readRecentIds(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENTS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+  return withStorage(
+    "localStorage",
+    (storage) => {
+      const raw = storage.getItem(RECENTS_KEY);
+      if (!raw) return [];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+    },
+    [],
+  );
 }
 
+/** Where storage refuses the write, recents just don't persist. */
 function writeRecentIds(ids: string[]): void {
-  try {
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(ids.slice(0, MAX_RECENTS)));
-  } catch {
-    /* localStorage unavailable (private browsing, quota) — recents just don't persist */
-  }
+  writeStorage("localStorage", RECENTS_KEY, JSON.stringify(ids.slice(0, MAX_RECENTS)));
 }
 
 function pushRecentId(id: string): string[] {

@@ -1,7 +1,17 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
 import i18n from "../i18n";
-import { ApiError, REQUEST_TIMEOUT_MS, apiGet, apiPatch, apiUrl, formatApiError, isAggregateNotReady } from "./client";
+import {
+  ApiError,
+  REQUEST_TIMEOUT_MS,
+  apiErrorDetail,
+  apiErrorField,
+  apiGet,
+  apiPatch,
+  apiUrl,
+  formatApiError,
+  isAggregateNotReady,
+} from "./client";
 import { classifyError } from "./errorClass";
 
 describe("isAggregateNotReady", () => {
@@ -22,6 +32,26 @@ describe("isAggregateNotReady", () => {
 
   it("is false when the body is not JSON", () => {
     expect(isAggregateNotReady(new ApiError(503, "Service Unavailable"))).toBe(false);
+  });
+});
+
+describe("apiErrorField", () => {
+  it("reads the named string field of the JSON body", () => {
+    const err = new ApiError(403, JSON.stringify({ error: "suspended", detail: "x" }));
+    expect(apiErrorField(err, "error")).toBe("suspended");
+    expect(apiErrorDetail(err)).toBe("x");
+  });
+
+  it("is null when the field is missing or not a string", () => {
+    expect(apiErrorField(new ApiError(403, JSON.stringify({ detail: "x" })), "error")).toBeNull();
+    expect(apiErrorField(new ApiError(422, JSON.stringify({ detail: [{ msg: "bad" }] })), "detail")).toBeNull();
+  });
+
+  it("is null for a body that is not a JSON object, and for non-ApiError values", () => {
+    expect(apiErrorField(new ApiError(503, "Service Unavailable"), "detail")).toBeNull();
+    expect(apiErrorField(new ApiError(500, "null"), "detail")).toBeNull();
+    expect(apiErrorField(new ApiError(500, '"detail"'), "length")).toBeNull();
+    expect(apiErrorField(new Error("boom"), "detail")).toBeNull();
   });
 });
 

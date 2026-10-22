@@ -219,6 +219,68 @@ async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monke
     assert result["tool_call"]["arguments"].get("offset") == 50
 
 
+_PRIOR_TURN = [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}]
+
+
+@pytest.mark.asyncio
+async def test_a_question_asked_with_history_skips_the_text_pre_hit(pool_with_agency, monkeypatch):
+    """Anaphora such as "その路線は？" carries no recognized continuation, so
+    force_tool_call stays off, yet what it means depends on this
+    conversation's prior turn. Another conversation's answer cached under the
+    same text must not be replayed for it."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    await _seed_cache_row(pool, agency_id, "それの内訳は？", "capabilities", {})
+    fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "metrics"}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools(
+            "それの内訳は？", _ctx(), conn, agency_id, locale="ja", history=_PRIOR_TURN, force_tool_call=False
+        )
+
+    assert fake.calls == 1
+    assert result["tool_call"]["name"] == "describe_data"
+
+
+@pytest.mark.asyncio
+async def test_a_question_asked_with_history_writes_no_cache_row(pool_with_agency, monkeypatch):
+    """The args the LLM resolved against this conversation's history are not
+    what the literal text means in another conversation."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "metrics"}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("それの内訳は？", _ctx(), conn, agency_id, locale="ja", history=_PRIOR_TURN)
+        cached = await conn.fetchval("SELECT COUNT(*) FROM ask_intent_cache")
+
+    assert result["cache_outcome"] == "miss"
+    assert cached == 0
+
+
+@pytest.mark.asyncio
+async def test_a_question_asked_with_history_leaves_a_matching_row_untouched(pool_with_agency, monkeypatch):
+    """A history-resolved signature that matches an existing row still reads
+    it, but must not relabel it with this question's text: the text pre-hit,
+    /ask/suggest and promotion all treat last_question as what the row's args
+    answer."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    await _seed_cache_row(pool, agency_id, "どんな指標がある？", "describe_data", {"kind": "metrics"})
+    fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "metrics"}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("それの内訳は？", _ctx(), conn, agency_id, locale="ja", history=_PRIOR_TURN)
+        row = await conn.fetchrow("SELECT last_question, hit_count FROM ask_intent_cache")
+
+    assert result["cache_outcome"] == "hit"
+    assert row["last_question"] == "どんな指標がある？"
+    assert row["hit_count"] == 1
+
+
 @pytest.mark.asyncio
 async def test_flag_off_no_cache_reads_or_writes(pool_with_agency, monkeypatch):
     """ASK_INTENT_CACHE_ENABLED=false → no cache table activity, behavior matches Phase ①."""

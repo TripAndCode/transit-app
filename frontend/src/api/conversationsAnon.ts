@@ -3,19 +3,20 @@
 
 import type { AnonThread, ConvMessage, FilterCtx } from "./types";
 import { uuid } from "../utils/uuid";
+import { removeStorage, withStorage, writeStorage } from "../utils/safeStorage";
 
 const KEY = "ask:conversations:v1";
 const MAX_THREADS = 20;
 const MAX_MESSAGES_PER_THREAD = 20;
 
 function read(): AnonThread[] {
-  try {
-    const raw = localStorage.getItem(KEY);
+  return withStorage("localStorage", (storage) => {
+    const raw = storage.getItem(KEY);
     return raw ? (JSON.parse(raw) as AnonThread[]) : [];
-  } catch { return []; }
+  }, []);
 }
 function write(threads: AnonThread[]): void {
-  try { localStorage.setItem(KEY, JSON.stringify(threads)); } catch { /* quota */ }
+  writeStorage("localStorage", KEY, JSON.stringify(threads));
 }
 
 export const conversationsAnon = {
@@ -77,6 +78,6 @@ export const conversationsAnon = {
   exportAll(): AnonThread[] { return read(); },
 
   clearAll(): void {
-    try { localStorage.removeItem(KEY); } catch { /* blocked storage holds no threads */ }
+    removeStorage("localStorage", KEY);
   },
 };

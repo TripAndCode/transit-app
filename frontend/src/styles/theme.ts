@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { readStorage, writeStorage } from "../utils/safeStorage";
 
 /** What the user chose. `"system"` defers to the OS appearance. */
 export type Theme = "light" | "dark" | "system";
@@ -31,12 +32,8 @@ function darkSchemeQuery(): MediaQueryList | null {
 /** Read the persisted preference. Defaults to `"system"` when unset or
  *  invalid, and never throws if localStorage is unavailable. */
 export function readThemePref(): Theme {
-  try {
-    const v = localStorage.getItem(PREF_KEY);
-    if (v === "light" || v === "dark" || v === "system") return v;
-  } catch {
-    /* localStorage unavailable — fall through */
-  }
+  const v = readStorage("localStorage", PREF_KEY);
+  if (v === "light" || v === "dark" || v === "system") return v;
   return DEFAULT_THEME;
 }
 
@@ -44,12 +41,7 @@ export function readThemePref(): Theme {
  *  localStorage is unavailable, in which case the choice lasts only as long as
  *  the caller keeps it. */
 export function writeThemePref(theme: Theme): boolean {
-  try {
-    localStorage.setItem(PREF_KEY, theme);
-    return true;
-  } catch {
-    return false;
-  }
+  return writeStorage("localStorage", PREF_KEY, theme);
 }
 
 /** Collapse a preference to the theme to paint: an explicit choice passes

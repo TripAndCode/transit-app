@@ -504,7 +504,7 @@
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "data": {
       "title": "Your data",
-      "description": "Download everything this app holds about you.",
+      "description": "Download the data this app holds about you.",
       "export": "Download my data",
       "delete": "Delete account",
       "delete_title": "Delete your account?",
@@ -523,6 +523,7 @@
         "no_email": "Could not retrieve a verified email from GitHub. Make your primary email public or sign in with another method.",
         "provider_down": "Provider is having temporary issues. Please retry shortly.",
         "local_account_conflict": "This email already has a password sign-in. Please sign in with your username and password instead.",
+        "suspended": "This account is suspended. If you think this is a mistake, please contact the operator.",
         "invalid_credentials": "Incorrect username or password.",
         "too_many_attempts": "Too many attempts. Please try again shortly.",
         "generic": "Sign-in failed."

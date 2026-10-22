@@ -27,6 +27,7 @@ import { RailTooltip } from "./RailTooltip";
 import { SidebarLineMap } from "./SidebarLineMap";
 import { SidebarPinnedRoutes } from "./SidebarPinnedRoutes";
 import { SidebarTicket } from "./SidebarTicket";
+import { readStorage, writeStorage } from "../utils/safeStorage";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
@@ -52,19 +53,11 @@ const MOBILE_TABBAR_HEIGHT_PX = 56;
 /** Read the persisted collapse preference. No-ops to `false` (expanded) if
  *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */
 function readCollapsedPref(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSED_PREF_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStorage("localStorage", COLLAPSED_PREF_KEY) === "1";
 }
 
 function writeCollapsedPref(collapsed: boolean): void {
-  try {
-    localStorage.setItem(COLLAPSED_PREF_KEY, collapsed ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
+  writeStorage("localStorage", COLLAPSED_PREF_KEY, collapsed ? "1" : "0");
 }
 
 /** The More sheet's vertical padding; its sticky header offsets by the

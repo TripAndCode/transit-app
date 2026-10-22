@@ -1,3 +1,5 @@
+import { readStorage, writeStorage } from "../../utils/safeStorage";
+
 export const MIN_QUEUE_WIDTH = 240;
 export const MAX_QUEUE_WIDTH = 720;
 /* Wide enough for this panel's real content to hold one line: a route name
@@ -13,19 +15,11 @@ export const clampQueueWidth = (px: number) => Math.min(MAX_QUEUE_WIDTH, Math.ma
    and a width preference is never worth failing the Live tab's render for: a
    read falls back to the default and a write is dropped. */
 export function readQueueWidth(): number {
-  try {
-    const stored = Number(localStorage.getItem(STORAGE_KEY));
-    if (Number.isFinite(stored) && stored > 0) return clampQueueWidth(stored);
-  } catch {
-    /* storage unavailable: use the default */
-  }
+  const stored = Number(readStorage("localStorage", STORAGE_KEY));
+  if (Number.isFinite(stored) && stored > 0) return clampQueueWidth(stored);
   return DEFAULT_QUEUE_WIDTH;
 }
 
 export function storeQueueWidth(px: number) {
-  try {
-    localStorage.setItem(STORAGE_KEY, String(px));
-  } catch {
-    /* storage unavailable: the width lasts for this session only */
-  }
+  writeStorage("localStorage", STORAGE_KEY, String(px));
 }

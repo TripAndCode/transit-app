@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { rememberScreenScope, screenOf, useScreenQuery } from "./screenScope";
+import { blockStorage } from "../test/blockStorage";
 
 function QueryProbe({ agencyId, screens }: { agencyId: string; screens: string[] }) {
   const screenQuery = useScreenQuery();
@@ -108,5 +109,18 @@ describe("screen scopes", () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId("routes").textContent).toBe("routes=K31");
+  });
+
+  it("keeps the page's scopes once the browser blocks session storage", () => {
+    rememberScreenScope("7", "routes", "routes=K40");
+    blockStorage("sessionStorage");
+    rememberScreenScope("7", "time", "time_band=am_peak");
+    render(
+      <MemoryRouter initialEntries={["/agencies/7/live"]}>
+        <QueryProbe agencyId="7" screens={["routes", "time"]} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("routes").textContent).toBe("routes=K40");
+    expect(screen.getByTestId("time").textContent).toBe("time_band=am_peak");
   });
 });
