@@ -41,7 +41,8 @@ SELECT
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0052') AS pending_0052,
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0054') AS pending_0054,
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0060') AS pending_0060,
-    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0062') AS pending_0062
+    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0062') AS pending_0062,
+    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0078') AS pending_0078
 \gset
 
 -- 0054 drops idx_ask_conversations_user_agency_updated in the same `migrate up`
@@ -85,4 +86,10 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_sid
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_api_keys_key
     ON api_keys (key) WHERE key IS NOT NULL;
+\endif
+
+\if :pending_0078
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_login_events_actor_created
+    ON login_events (actor_id, created_at DESC)
+    WHERE actor_id IS NOT NULL;
 \endif
