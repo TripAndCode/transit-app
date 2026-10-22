@@ -326,8 +326,9 @@ def test_a_dash_c_path_holding_a_space_is_resolved(fake_repo, spell):
         "echo $(cd {other}; pwd) && git push origin HEAD",
         "echo `cd {other}` && git push origin HEAD",
         "cd {other} | cat; git push origin HEAD",
+        "cd {other} && true & git push origin HEAD",
     ],
-    ids=["subshell", "command-substitution", "backticks", "pipeline"],
+    ids=["subshell", "command-substitution", "backticks", "pipeline", "backgrounded-list"],
 )
 def test_a_cd_that_cannot_reach_the_push_does_not_redirect_the_gate(fake_repo, shape):
     """The cd runs in a subshell, so the push runs from the session cwd. Read
@@ -337,6 +338,19 @@ def test_a_cd_that_cannot_reach_the_push_does_not_redirect_the_gate(fake_repo, s
     other = fake_repo.parent / "not-a-repo"
     other.mkdir()
     result = _run_hook(shape.format(other=other), claude_project_dir=fake_repo, cwd=str(worktree))
+    assert result.returncode == 0, result.stderr
+    banner = result.stderr.splitlines()[0] if result.stderr else ""
+    assert banner.startswith("== push gate: files from"), result.stderr
+    assert worktree.name in banner, result.stderr
+
+
+def test_a_cd_followed_by_a_pipeline_in_its_list_still_redirects_the_gate(fake_repo):
+    """| binds tighter than &&, so `cd X && a | b` runs the cd in the push's
+    own shell, and the gate has to look at X rather than the session cwd."""
+    worktree = _worktree_with_change(fake_repo, "cd-worktree", "NOTES.md")
+    result = _run_hook(
+        f"cd {worktree} && true | cat; git push origin HEAD", claude_project_dir=fake_repo, cwd=str(fake_repo)
+    )
     assert result.returncode == 0, result.stderr
     banner = result.stderr.splitlines()[0] if result.stderr else ""
     assert banner.startswith("== push gate: files from"), result.stderr

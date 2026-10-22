@@ -46,6 +46,7 @@ printf '%s' "$input" | grep -q 'push' || exit 0
 PARSED="$(
   printf '%s' "$input" | python3 -c '
 import json, shlex, sys
+import re
 
 # Runs of these become tokens of their own, even glued to a word, so x;git push
 # and (git push) each yield a statement of their own.
@@ -149,43 +150,51 @@ def find_push(tokens, cd_dir):
     was lexed from: its quotes or escapes are gone.
 
     A cd moves only the shell it runs in. ( ), $( ) and backticks open a
-    subshell whose cd is dropped when it closes, and each command of a
-    multi-command pipeline, like a backgrounded one, runs in a subshell of
-    its own, so none of those cds reaches a later statement."""
+    subshell whose cd is dropped when it closes. A cd in a multi-command
+    pipeline runs in a subshell of its own. & backgrounds a whole and-or list
+    (commands joined by && or ||), so a cd counts for later statements only
+    once its list ends in ; or a newline; until then it is pending, which the
+    rest of its own list already sees."""
     nested = None
-    groups, statement, piped = [], [], False
+    groups, statement, piped, pending = [], [], False, None
     for token in [*tokens, ";"]:
         if not (token and set(token) <= SEPARATOR_CHARS):
             statement.append(token)
             continue
         for op in operators(token):
+            here = cd_dir if pending is None else pending
             if statement:
                 found = git_push(statement)
                 if found:
-                    return (cd_dir, *found)
+                    return (here, *found)
                 for word in statement:
                     if nested is None and any(c.isspace() for c in word):
-                        nested = find_push(argument_tokens(word), cd_dir)
-                in_subshell = piped or op in ("|", "|&", "&")
-                if statement[0] == "cd" and len(statement) > 1 and not in_subshell:
-                    cd_dir = statement[1]
+                        nested = find_push(argument_tokens(word), here)
+                if statement[0] == "cd" and len(statement) > 1 and not (piped or op in ("|", "|&")):
+                    pending = statement[1]
                 statement = []
             piped = op in ("|", "|&")
             if op == "(" or (op == "`" and not (groups and groups[-1][0] == "`")):
-                groups.append((op, cd_dir))
+                groups.append((op, cd_dir, pending))
+                cd_dir, pending = here, None
             elif op in (")", "`") and groups:
-                cd_dir = groups.pop()[1]
+                _, cd_dir, pending = groups.pop()
+            elif op == "&":
+                pending = None
+            elif op in (";", ";;") and pending is not None:
+                cd_dir, pending = pending, None
     return nested
 
 
+# With no tokens to walk, whether an unlexable command could be a push is read
+# from its raw lines: git, then flag tokens, then push as the next word. A
+# quoted flag value holding a space defeats it, so such a command passes
+# unchecked, while push merely sharing a command with git does not block.
+RAW_PUSH = re.compile(r"\bgit\b(\s+-[A-Za-z](\s+\S+)?|\s+--[A-Za-z][A-Za-z-]*(=\S+)?)*\s+push\b")
+
+
 def could_push(text):
-    """Whether a command shlex cannot tokenise could still be a git push: push
-    and git each appear as a word of their own, with quotes, escapes and
-    operator characters taken as word breaks. Prose with an apostrophe (I will
-    push later) or a path holding the letters (push-gate) then does not block."""
-    breaks = str.maketrans({c: " " for c in OPERATOR_CHARS + chr(34) + chr(39) + "\\"})
-    words = text.translate(breaks).split()
-    return "push" in words and any(w.rsplit("/", 1)[-1] == "git" for w in words)
+    return any(RAW_PUSH.search(line) for line in text.splitlines())
 
 
 out = {"is_push": None, "dir": "", "cd_dir": "", "refs": [], "is_delete": False}

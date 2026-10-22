@@ -171,6 +171,8 @@ NOT_PUSHES = [
     "cat > /tmp/push-wt/notes <<EOF\nit's pushed\nEOF",
     # Unlexable, and "push" is a word, but no git is named anywhere.
     "cat > /tmp/notes <<EOF\nI'll push later\nEOF",
+    # Unlexable, and git and push both appear, but push is no git subcommand.
+    "git commit -F - <<EOF\nWe'll push after review\nEOF",
 ]
 
 
@@ -201,7 +203,14 @@ def test_a_glued_separator_does_not_leak_into_the_refs():
         ("cd /tmp/x | cat; git push origin y", ""),
         ("true | cd /tmp/x; git push origin y", ""),
         ("cd /tmp/x & git push origin y", ""),
+        # & backgrounds the whole and-or list, not just its last command.
+        ("cd /tmp/x && true & git push origin y", ""),
+        ("cd /tmp/x || true & git push origin y", ""),
         ("cd /tmp/a && (cd /tmp/x && true) && git push origin y", "/tmp/a"),
+        # | binds tighter than &&, so the cd is a pipeline of its own here.
+        ("cd /tmp/a && true | cat; git push origin y", "/tmp/a"),
+        # A push in the same backgrounded list runs after the cd, in its shell.
+        ("cd /tmp/a && git push origin y &", "/tmp/a"),
         # A cd in the same shell as the push still applies.
         ("cd /tmp/a && git push origin y", "/tmp/a"),
         ("(cd /tmp/a && git push origin y)", "/tmp/a"),
@@ -233,6 +242,7 @@ def test_a_push_quoted_inside_an_argument_yields_to_the_real_one():
     [
         "git -C /wt commit -F - <<EOF\nit's done\nEOF\ngit -C /wt push origin feature",
         "echo it's; /usr/bin/git push origin x",
+        "echo it's; git -C x push origin y",
     ],
 )
 def test_an_unlexable_command_naming_git_and_push_gets_no_verdict(command):
