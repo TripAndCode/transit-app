@@ -4,8 +4,9 @@ It is what ``erase_user`` treats as the user's, found by the same predicates:
 the rows it deletes, and the user's own part of the rows it only clears, which
 is the address and browser recorded on the admin actions they took. The
 targets and snapshots of those actions and the sender of an invite describe
-other people, so they stay out. The email and name that erasure masks in other
-admins' audit entries are already in ``profile``.
+other people, so they stay out, as do the address and browser on an event an
+admin recorded against this account, which are the admin's. The email and name
+that erasure masks in other admins' audit entries are already in ``profile``.
 
 JSONB and INET columns are read as text and parsed here, so the result does
 not depend on which codecs the connection has registered. Secret material
@@ -40,9 +41,13 @@ async def collect_user_data(conn: asyncpg.Connection, user_id: int) -> dict[str,
         " WHERE user_id = $1 ORDER BY created_at",
         user_id,
     )
+    # A row with no actor never holds someone else's address: system events
+    # record none, and erase_user clears an actor's before their row goes.
     events = await conn.fetch(
-        "SELECT kind, provider, host(ip) AS ip, user_agent, created_at FROM login_events"
-        " WHERE user_id = $1 ORDER BY created_at",
+        "SELECT kind, provider,"
+        " CASE WHEN actor_id IS NULL OR actor_id = user_id THEN host(ip) END AS ip,"
+        " CASE WHEN actor_id IS NULL OR actor_id = user_id THEN user_agent END AS user_agent,"
+        " created_at FROM login_events WHERE user_id = $1 ORDER BY created_at",
         user_id,
     )
     presets = await conn.fetch(

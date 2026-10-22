@@ -128,3 +128,27 @@ async def test_the_export_lists_every_invite_that_deletion_would_remove(aconn):
     )
     data = await collect_user_data(aconn, uid)
     assert sorted(i["email"] for i in data["invites"]) == ["Casey@X", "before-rename@x"]
+
+
+@pytest.mark.asyncio
+async def test_an_action_someone_else_took_on_the_account_exports_without_their_address_or_browser(aconn):
+    """An admin's change to this account is part of its history, but the
+    address and browser on that row are the admin's. The account's own events,
+    including ones recorded with no actor, keep theirs."""
+    admin_id = await _user(aconn, "boss@x", role="admin")
+    uid = await _user(aconn, "dana@x")
+    await aconn.execute(
+        "INSERT INTO login_events (user_id, actor_id, kind, ip, user_agent) VALUES"
+        " ($1, $1, 'login', '10.0.0.1', 'mine'),"
+        " ($1, NULL, 'logout', '10.0.0.4', 'unattributed'),"
+        " ($1, $2, 'suspended', '10.0.0.9', 'theirs')",
+        uid,
+        admin_id,
+    )
+    data = await collect_user_data(aconn, uid)
+    assert sorted((e["kind"], e["ip"], e["user_agent"]) for e in data["login_events"]) == [
+        ("login", "10.0.0.1", "mine"),
+        ("logout", "10.0.0.4", "unattributed"),
+        ("suspended", None, None),
+    ]
+    assert "10.0.0.9" not in json.dumps(data, default=str)
