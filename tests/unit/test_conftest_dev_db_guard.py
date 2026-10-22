@@ -144,3 +144,14 @@ def test_unset_database_url_off_the_dev_ports_is_left_unset(monkeypatch, connect
 
     assert connect_calls == []
     assert "DATABASE_URL" not in os.environ
+
+
+@pytest.mark.parametrize("port", sorted(_DEV_PORTS))
+def test_empty_database_url_with_a_dev_pgport_is_refused(monkeypatch, connect_calls, port):
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("PGPORT", str(port))
+
+    with pytest.raises(pytest.UsageError, match=r"DATABASE_URL is unset or empty.*dev Postgres port"):
+        _redirect_to_test_db()
+
+    assert connect_calls == []

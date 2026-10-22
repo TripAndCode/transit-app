@@ -25,8 +25,9 @@ import os
 import pytest
 
 import gtfs_pipeline
+from pipeline.db import DEFAULT_DATABASE_URL
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 # libpq passes `options` through to the backend, so the connection starts with
 # a search_path in which no application table resolves.

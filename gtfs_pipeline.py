@@ -26,7 +26,7 @@ from pipeline.retention import (
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 # sysexits.h EX_TEMPFAIL -- distinct from a genuine failure's exit(1), so a
 # per-agency shell loop (scripts/fetch_and_ingest.sh, docs/deploy-railway.md's

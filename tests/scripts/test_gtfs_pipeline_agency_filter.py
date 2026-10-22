@@ -15,8 +15,9 @@ import psycopg2
 import pytest
 
 from gtfs_pipeline import ACTIVE_AGENCY_IDS_SQL
+from pipeline.db import DEFAULT_DATABASE_URL
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 
 @pytest.fixture

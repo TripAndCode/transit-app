@@ -9,6 +9,7 @@ import time
 
 import psycopg2
 
+from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.locks import (
     INGEST_ANALYZE_LOCK_KEY,
     agency_ingest_lock,
@@ -16,7 +17,7 @@ from pipeline.locks import (
     try_lock_ingest_analyze,
 )
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 
 def test_try_lock_ingest_analyze_acquires_when_free(pg_conn):

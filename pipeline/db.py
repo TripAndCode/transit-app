@@ -13,7 +13,7 @@ from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import service_date_ch
 
 # The database the API and the pipeline CLI connect to when DATABASE_URL is
-# unset. The test session vets this same value against the dev ports, so a
+# unset or empty. The test session vets this same value against the dev ports, so a
 # production fallback that bypasses it escapes that guard.
 DEFAULT_DATABASE_URL = "postgresql://localhost/transit"
 

@@ -8,9 +8,10 @@ import psycopg2
 import pytest
 from httpx import ASGITransport
 
+from pipeline.db import DEFAULT_DATABASE_URL
 from tests.conftest import _test_pool
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 
 @pytest.fixture
