@@ -120,6 +120,8 @@ async def create_agency(
 ) -> dict[str, Any]:
     """Create an agency. Admin-only (feed_url is a server-side fetch sink). Validates feed_url."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     _check_strategies(body)
     try:
         validate_feed_url(body.feed_url)
@@ -146,6 +148,8 @@ async def create_agency(
             actor_id=admin.user_id,
             kind="agency_created",
             meta={"agency_id": aid},
+            ip=ip,
+            user_agent=ua,
         )
         await record_admin_action(
             conn,
@@ -161,7 +165,7 @@ async def create_agency(
                 "ingest_strategy": body.ingest_strategy,
                 "trip_id_pattern": body.trip_id_pattern,
             },
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     invalidate_network_summary()
     return dict(row)
@@ -177,6 +181,8 @@ async def patch_agency(
 ) -> dict[str, Any]:
     """Partial update. Only provided fields change. Validates feed_url if present."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     if "agency_name" in body.model_fields_set and body.agency_name is None:
         raise HTTPException(status_code=422, detail="agency_name cannot be null")
     if "feed_url" in body.model_fields_set and body.feed_url is None:
@@ -216,6 +222,8 @@ async def patch_agency(
             actor_id=admin.user_id,
             kind="agency_updated",
             meta={"agency_id": agency_id, "fields": list(updates.keys())},
+            ip=ip,
+            user_agent=ua,
         )
         await record_admin_action(
             conn,
@@ -225,7 +233,7 @@ async def patch_agency(
             target_id=agency_id,
             before={col: row[col] for col in updates},
             after=updates,
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     invalidate_network_summary()
     return dict(out)
@@ -240,6 +248,8 @@ async def delete_agency(
 ) -> Response:
     """Soft-delete: sets deleted_at. Idempotent — re-deleting a deleted agency is 204."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
@@ -255,6 +265,8 @@ async def delete_agency(
                 actor_id=admin.user_id,
                 kind="agency_deleted",
                 meta={"agency_id": agency_id},
+                ip=ip,
+                user_agent=ua,
             )
             await record_admin_action(
                 conn,
@@ -264,7 +276,7 @@ async def delete_agency(
                 target_id=str(agency_id),
                 before={"deleted": False},
                 after={"deleted": True},
-                ip=request.client.host if request.client else None,
+                ip=ip,
             )
     # After the commit: invalidating inside the transaction would let a
     # concurrent request re-cache the still-active row before it lands.
@@ -284,6 +296,8 @@ async def restore_agency(
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
         # The `deleted_at IS NOT NULL` guard stays part of the write rather
         # than a preceding read: exactly one concurrent caller can match a
@@ -302,6 +316,8 @@ async def restore_agency(
                 actor_id=admin.user_id,
                 kind="agency_restored",
                 meta={"agency_id": agency_id},
+                ip=ip,
+                user_agent=ua,
             )
             await record_admin_action(
                 conn,
@@ -311,7 +327,7 @@ async def restore_agency(
                 target_id=agency_id,
                 before={"deleted": True},
                 after={"deleted": False},
-                ip=request.client.host if request.client else None,
+                ip=ip,
             )
         else:
             # Already active, or gone. Either way this call restored nothing.
