@@ -9,6 +9,7 @@ import { delayColor } from "../styles/tokens";
 import { routeHref } from "../routes/destinations";
 import { isoDaysBefore } from "../api/scope";
 import { Skeleton } from "./Skeleton";
+import { readStorage, withStorage, writeStorage } from "../utils/safeStorage";
 
 /** Days of history a suggestion's route page opens on. */
 const ROUTE_WINDOW_DAYS = 14;
@@ -31,29 +32,22 @@ const SEEN_KEY = "transit.insightPanelSeen";
  *  to off if localStorage is unavailable — same shape as
  *  Sidebar.tsx's readCollapsedPref. */
 function readEnabled(): boolean {
-  try {
-    const stored = localStorage.getItem(ENABLED_KEY);
-    if (stored != null) return stored === "1";
-    return import.meta.env.DEV;
-  } catch {
-    return false;
-  }
+  return withStorage(
+    "localStorage",
+    (storage) => {
+      const stored = storage.getItem(ENABLED_KEY);
+      return stored != null ? stored === "1" : import.meta.env.DEV;
+    },
+    false,
+  );
 }
 
 function readCollapsed(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStorage("localStorage", COLLAPSED_KEY) === "1";
 }
 
 function writeCollapsed(collapsed: boolean): void {
-  try {
-    localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
+  writeStorage("localStorage", COLLAPSED_KEY, collapsed ? "1" : "0");
 }
 
 /** Session-only "already shown" pathway keys, so a route/reason the user
@@ -68,27 +62,23 @@ function seenStorageKey(agencyId: number): string {
 }
 
 function readSeen(agencyId: number): string[] {
-  try {
-    const raw = sessionStorage.getItem(seenStorageKey(agencyId));
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    // Guard the parse result's shape, not just catch JSON syntax errors --
-    // valid-but-wrong-shaped JSON (e.g. "{}") parses without throwing, and
-    // a non-array here would crash `exclude.join(",")` in useSuggestion.
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return withStorage(
+    "sessionStorage",
+    (storage) => {
+      const raw = storage.getItem(seenStorageKey(agencyId));
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      // Guard the parse result's shape, not just catch JSON syntax errors --
+      // valid-but-wrong-shaped JSON (e.g. "{}") parses without throwing, and
+      // a non-array here would crash `exclude.join(",")` in useSuggestion.
+      return Array.isArray(parsed) ? parsed : [];
+    },
+    [],
+  );
 }
 
 function addSeen(agencyId: number, key: string): void {
-  try {
-    const seen = readSeen(agencyId);
-    if (!seen.includes(key)) {
-      sessionStorage.setItem(seenStorageKey(agencyId), JSON.stringify([...seen, key]));
-    }
-  } catch {
-    /* ignore */
-  }
+  const seen = readSeen(agencyId);
+  if (!seen.includes(key)) writeStorage("sessionStorage", seenStorageKey(agencyId), JSON.stringify([...seen, key]));
 }
 
 export function InsightPanel({ className }: { className?: string } = {}) {

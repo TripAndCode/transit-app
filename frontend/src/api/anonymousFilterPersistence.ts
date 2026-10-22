@@ -3,6 +3,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "./auth";
 import type { DowFilter, ServiceFilter, TimeBand } from "./scope";
 import { screenOf } from "./screenScope";
+import { withStorage, writeStorage } from "../utils/safeStorage";
 
 type StoredFilter = {
   from?: string;
@@ -26,22 +27,14 @@ function storageKey(agencyId: number, screen: string): string {
 }
 
 function readStored(key: string): StoredFilter | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw) as StoredFilter;
-  } catch {
-    return null;
-  }
+  return withStorage("localStorage", (storage) => {
+    const raw = storage.getItem(key);
+    return raw ? (JSON.parse(raw) as StoredFilter) : null;
+  }, null);
 }
 
 function writeStored(key: string, value: StoredFilter): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* localStorage unavailable (private browsing, quota) — fail open, same
-     * as Sidebar.tsx's readCollapsedPref/writeCollapsedPref. */
-  }
+  writeStorage("localStorage", key, JSON.stringify(value));
 }
 
 /**

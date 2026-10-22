@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { readStorage, writeStorage } from "../../utils/safeStorage";
 
 export const RELIEF_PREF_KEY = "transit.mapRelief";
 export const PEARL_PREF_KEY = "transit.mapPearl";
@@ -8,22 +9,14 @@ export const LIGHT_PREF_KEY = "transit.mapLight";
  *  storage reads as the fallback and swallows the write, like the style
  *  and dim preferences in styles/mapStyle.ts. */
 export function readBoolPref(key: string, fallback: boolean): boolean {
-  try {
-    const v = localStorage.getItem(key);
-    if (v === "1") return true;
-    if (v === "0") return false;
-  } catch {
-    /* localStorage unavailable -- fall through */
-  }
+  const v = readStorage("localStorage", key);
+  if (v === "1") return true;
+  if (v === "0") return false;
   return fallback;
 }
 
 export function writeBoolPref(key: string, value: boolean): void {
-  try {
-    localStorage.setItem(key, value ? "1" : "0");
-  } catch {
-    /* localStorage unavailable -- the preference lasts this visit only */
-  }
+  writeStorage("localStorage", key, value ? "1" : "0");
 }
 
 /** Current value + a setter that also persists, mirroring useMapStylePref. */

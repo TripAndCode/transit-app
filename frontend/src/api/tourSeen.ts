@@ -1,3 +1,5 @@
+import { readStorage, withStorage, writeStorage } from "../utils/safeStorage";
+
 const KEY = "transit.tourSeen";
 
 /** "unavailable" is distinct from "unseen" so a caller can decline to act on
@@ -19,12 +21,14 @@ let writeConfirmedBroken = false;
  *  first-run dashboard tour. `FirstRunTour` shows a fresh visitor's coach
  *  marks exactly once and never again once this is set. */
 export function readTourSeen(): TourSeenState {
-  try {
-    if (localStorage.getItem(KEY) === "1") return "seen";
-    return writeConfirmedBroken ? "unavailable" : "unseen";
-  } catch {
-    return "unavailable";
-  }
+  return withStorage<TourSeenState>(
+    "localStorage",
+    (storage) => {
+      if (storage.getItem(KEY) === "1") return "seen";
+      return writeConfirmedBroken ? "unavailable" : "unseen";
+    },
+    "unavailable",
+  );
 }
 
 /** Persist that this browser has finished or dismissed the tour, verifying
@@ -32,12 +36,7 @@ export function readTourSeen(): TourSeenState {
  *  `setItem` not throwing. No-ops (beyond recording the failure, see
  *  `writeConfirmedBroken` above) if localStorage is unavailable. */
 export function writeTourSeen(): void {
-  try {
-    localStorage.setItem(KEY, "1");
-    if (localStorage.getItem(KEY) !== "1") writeConfirmedBroken = true;
-  } catch {
-    writeConfirmedBroken = true;
-  }
+  if (!writeStorage("localStorage", KEY, "1") || readStorage("localStorage", KEY) !== "1") writeConfirmedBroken = true;
 }
 
 /** Test-only: clears the in-memory write-failure memory above so cases in

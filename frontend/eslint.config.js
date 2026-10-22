@@ -39,6 +39,33 @@ const shadowBindingSelector = [
   .map((position) => `${position}[name=/^(window|document)$/]`)
   .join(', ')
 
+// The manual-memoization bans of no-restricted-properties; the main block
+// explains them. Kept apart so an override that lifts the storage bans can
+// re-declare the rule with these alone.
+const memoProperties = [
+  {
+    property: 'useMemo',
+    message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
+  },
+  {
+    property: 'useCallback',
+    message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
+  },
+  {
+    property: 'memo',
+    message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
+  },
+]
+
+// Web storage throws on every access where site data is blocked, and on a
+// write once the store is full. src/utils/safeStorage.ts catches both, so a
+// blocked store reads as empty instead of failing a render or a request.
+const storageMessage =
+  'Do not touch web storage directly — use readStorage/writeStorage/removeStorage/withStorage from src/utils/safeStorage.ts, which survive a browser that blocks site data.'
+const storageProperties = ['window', 'globalThis'].flatMap((object) =>
+  ['localStorage', 'sessionStorage'].map((property) => ({ object, property, message: storageMessage })),
+)
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -213,21 +240,21 @@ export default tseslint.config(
       // No such usage exists today; if one is legitimately needed later,
       // scope this rule to a receiver check or add a targeted
       // eslint-disable with a one-line reason at that call site.
-      'no-restricted-properties': [
+      'no-restricted-properties': ['error', ...memoProperties, ...storageProperties],
+      'no-restricted-globals': [
         'error',
-        {
-          property: 'useMemo',
-          message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
-        },
-        {
-          property: 'useCallback',
-          message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
-        },
-        {
-          property: 'memo',
-          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
-        },
+        ...['localStorage', 'sessionStorage'].map((name) => ({ name, message: storageMessage })),
       ],
+    },
+  },
+  {
+    // The helper is the one place that touches web storage; tests seed and
+    // inspect it directly. A rule's options replace rather than merge, so
+    // no-restricted-properties is re-declared with the memoization bans alone.
+    files: ['src/utils/safeStorage.ts', 'src/**/*.test.{ts,tsx}', 'src/test/**'],
+    rules: {
+      'no-restricted-globals': 'off',
+      'no-restricted-properties': ['error', ...memoProperties],
     },
   },
   {

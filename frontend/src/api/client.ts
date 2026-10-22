@@ -1,4 +1,5 @@
 import i18n from "../i18n";
+import { readStorage, removeStorage, writeStorage } from "../utils/safeStorage";
 
 /** `path` on the API's origin, which VITE_API_BASE_URL names when the API and the SPA are
  *  served from different origins. Every URL the browser fetches or navigates to on the API
@@ -263,25 +264,18 @@ const API_KEY_STORAGE_KEY = "api_key";
  *  revoked, expired, or owned by a suspended account; it does not say which. */
 const INVALID_API_KEY_DETAIL = "Invalid API key";
 
-/** The stored API key, or null. Storage access throws where site data is
- *  blocked; no key is then read or sent. */
+/** The stored API key, or null. Where site data is blocked no key is read,
+ *  so none is sent. */
 export function storedApiKey(): string | null {
-  try {
-    return localStorage.getItem(API_KEY_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+  return readStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
-/** Stores *key* without surrounding whitespace, or clears it when empty. */
+/** Stores *key* without surrounding whitespace, or clears it when empty.
+ *  Blocked storage keeps nothing, so no key is sent either. */
 export function saveApiKey(key: string): void {
   const trimmed = key.trim();
-  try {
-    if (trimmed) localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
-    else localStorage.removeItem(API_KEY_STORAGE_KEY);
-  } catch {
-    // Blocked storage keeps nothing, so no key is sent either.
-  }
+  if (trimmed) writeStorage("localStorage", API_KEY_STORAGE_KEY, trimmed);
+  else removeStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
 /** The stored key, trimmed, if it can be sent at all. A stored key may carry
@@ -314,13 +308,8 @@ function isSendableHeaderValue(value: string): boolean {
  *  failed together report once, and a late 401 cannot remove a key saved since.
  *  Returns whether it removed the key. A failed remove leaves the key in place. */
 function clearStoredApiKey(rejected: string): boolean {
-  try {
-    if (localStorage.getItem(API_KEY_STORAGE_KEY) !== rejected) return false;
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
+  if (storedApiKey() !== rejected) return false;
+  return removeStorage("localStorage", API_KEY_STORAGE_KEY);
 }
 
 async function isRejectedApiKey(response: Response): Promise<boolean> {
