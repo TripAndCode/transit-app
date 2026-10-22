@@ -1,12 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { MAX_PINNED_ROUTES, togglePinnedRoute, usePinnedRoutes } from "./pinnedRoutes";
+import { blockStorage } from "../test/blockStorage";
 
 const KEY = "transit.pinnedRoutes";
 
 describe("pinned routes", () => {
   beforeEach(() => localStorage.clear());
-  afterEach(() => localStorage.clear());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
 
   it("pins a route for its agency alone, and unpins it on a second toggle", () => {
     const nine = renderHook(() => usePinnedRoutes(9));
@@ -38,6 +42,15 @@ describe("pinned routes", () => {
     expect(renderHook(() => usePinnedRoutes(9)).result.current).toEqual([]);
     localStorage.setItem(KEY, JSON.stringify({ "9": ["50", 7, null] }));
     expect(renderHook(() => usePinnedRoutes(9)).result.current).toEqual(["50"]);
+  });
+
+  it("keeps the page's pins, and pins more, once storage is blocked", () => {
+    act(() => togglePinnedRoute(9, "50"));
+    blockStorage("localStorage");
+    const nine = renderHook(() => usePinnedRoutes(9));
+    expect(nine.result.current).toEqual(["50"]);
+    act(() => togglePinnedRoute(9, "24"));
+    expect(nine.result.current).toEqual(["50", "24"]);
   });
 
   it("has no pins outside any agency", () => {

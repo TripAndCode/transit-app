@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Z_INDEX } from "../styles/zIndex";
+import { withStorage, writeStorage } from "../utils/safeStorage";
 
 const FIRST_VISIT_KEY = "help_hint_first_visit_at";
 const DISMISSED_KEY = "help_hint_dismissed";
@@ -13,19 +14,11 @@ const HIDE_AFTER_MS = 5 * 60 * 1000;
 const blockedStorageFlags = new Map<string, string>();
 
 function readFlag(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return blockedStorageFlags.get(key) ?? null;
-  }
+  return withStorage("localStorage", (storage) => storage.getItem(key), blockedStorageFlags.get(key) ?? null);
 }
 
 function writeFlag(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    blockedStorageFlags.set(key, value);
-  }
+  if (!writeStorage("localStorage", key, value)) blockedStorageFlags.set(key, value);
 }
 
 /**

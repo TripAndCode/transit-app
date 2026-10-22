@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { DESTINATIONS } from "../routes/destinations";
 import { explicitScopeQuery } from "./scope";
+import { withStorage, writeStorage } from "../utils/safeStorage";
 
 /** Each screen keeps its own filters. The rail, the phone tab bar and the
  *  palette open a screen with the scope that screen last showed for the
@@ -32,12 +33,8 @@ function parse(raw: string | null): Scopes {
 }
 
 function snapshot(): Scopes {
-  let raw: string | null;
-  try {
-    raw = sessionStorage.getItem(STORAGE_KEY);
-  } catch {
-    return scopes;
-  }
+  // A refused read keeps the page's own scopes rather than reading them as none.
+  const raw = withStorage("sessionStorage", (storage) => storage.getItem(STORAGE_KEY), scopesRaw);
   if (raw !== scopesRaw) {
     scopesRaw = raw;
     scopes = parse(raw);
@@ -59,13 +56,8 @@ export function rememberScreenScope(agencyId: string, screen: string, query: str
   const key = keyOf(agencyId, screen);
   if (current[key] === query) return;
   scopes = { ...current, [key]: query };
-  try {
-    const raw = JSON.stringify(scopes);
-    sessionStorage.setItem(STORAGE_KEY, raw);
-    scopesRaw = raw;
-  } catch {
-    /* sessionStorage unavailable: keep the scope for this page only. */
-  }
+  const raw = JSON.stringify(scopes);
+  if (writeStorage("sessionStorage", STORAGE_KEY, raw)) scopesRaw = raw;
   for (const listener of listeners) listener();
 }
 

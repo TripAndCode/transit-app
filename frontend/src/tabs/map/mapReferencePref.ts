@@ -1,3 +1,5 @@
+import { readStorage, writeStorage } from "../../utils/safeStorage";
+
 const STORAGE_KEY = "transit.opsMapReference";
 
 /** Whether the operations map's reference panel starts expanded.
@@ -9,18 +11,9 @@ const STORAGE_KEY = "transit.opsMapReference";
  * every mount would make the dismiss look like it did nothing.
  */
 export function readMapReferencePref(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "hidden";
-  } catch {
-    /* localStorage unavailable — fall through to the default */
-  }
-  return true;
+  return readStorage("localStorage", STORAGE_KEY) !== "hidden";
 }
 
 export function writeMapReferencePref(open: boolean): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, open ? "shown" : "hidden");
-  } catch {
-    /* ignore */
-  }
+  writeStorage("localStorage", STORAGE_KEY, open ? "shown" : "hidden");
 }
