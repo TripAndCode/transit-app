@@ -4,7 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
-import { ApiError, apiPost } from "../api/client";
+import { ApiError, apiErrorField, apiPost } from "../api/client";
 import { LanguageToggle } from "../components/LanguageToggle";
 import { Card } from "../components/ui/Card";
 import { useDocumentLocale } from "../i18n/useDocumentLocale";
@@ -44,6 +44,7 @@ const ERROR_KEYS: Record<string, string> = {
   no_email: "account.login.error.no_email",
   provider_down: "account.login.error.provider_down",
   local_account_conflict: "account.login.error.local_account_conflict",
+  suspended: "account.login.error.suspended",
 };
 
 export function LoginPage() {
@@ -79,6 +80,10 @@ export function LoginPage() {
         setLocalError(t("account.login.error.too_many_attempts"));
       } else if (err instanceof ApiError && err.status === 401) {
         setLocalError(t("account.login.error.invalid_credentials"));
+      } else if (err instanceof ApiError && err.status === 403 && apiErrorField(err, "error") === "suspended") {
+        // The username form names its refusals in `error`; the CSRF guard's
+        // 403 carries `detail` instead and keeps the generic message.
+        setLocalError(t("account.login.error.suspended"));
       } else {
         setLocalError(t("account.login.error.generic"));
       }

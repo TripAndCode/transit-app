@@ -4,7 +4,8 @@ The login handler kicks off the Authlib redirect to the provider; the
 callback verifies a signed ``oauth_tx`` cookie (state + PKCE verifier +
 post-login next URL + provider) we set on the way out, exchanges the
 authorization code, normalizes user info, upserts the user + identity,
-mints a session row, and sets the long-lived ``sid`` cookie. Logout
+mints a session row, and sets the long-lived ``sid`` cookie. A suspended
+account is refused before any session exists, on every sign-in path. Logout
 deletes the session row and clears the cookie.
 
 State for the OAuth handshake lives in a short-lived signed cookie
@@ -416,15 +417,33 @@ async def _upsert_user(
     return uid, role
 
 
+class AccountSuspended(Exception):
+    """Raised instead of minting a session for a suspended account. Raise it
+    inside the sign-in transaction, so nothing that sign-in wrote commits."""
+
+    def __init__(self, user_id: int) -> None:
+        super().__init__(user_id)
+        self.user_id = user_id
+
+
 async def _create_session(conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None) -> str:
     """Insert a sessions row for ``uid`` and return the new ``sid``. Shared by
     the OAuth callback and the local-admin login — both mint a session the
     same way once they've settled on a user_id.
 
+    Raises :class:`AccountSuspended` for a suspended account, so no sign-in
+    path can hand one a session. ``FOR SHARE`` makes a suspension that is
+    being written wait for this transaction or be seen by it: either the
+    read sees ``suspended_at``, or the suspension's own session purge runs
+    after this row commits and removes it.
+
     Only the digest is persisted; the raw ``sid`` is returned to be set as the
     cookie and is then unrecoverable from the database. The legacy ``sid``
     column is deliberately left NULL — a row that stored the raw value would
     reintroduce exactly the exposure the hash exists to remove."""
+    suspended_at = await conn.fetchval("SELECT suspended_at FROM users WHERE user_id = $1 FOR SHARE", uid)
+    if suspended_at is not None:
+        raise AccountSuspended(uid)
     sid = secrets.token_urlsafe(32)
     await conn.execute(
         "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
@@ -462,15 +481,22 @@ def _set_session_cookie(resp: Response, sid: str) -> None:
 
 
 async def _fail_login(
-    conn: asyncpg.Connection, request: Request, provider: str, reason: str, next_url: str | None = None
+    conn: asyncpg.Connection,
+    request: Request,
+    provider: str,
+    reason: str,
+    next_url: str | None = None,
+    *,
+    user_id: int | None = None,
 ) -> RedirectResponse:
     """Audit + redirect helper for OAuth callback failure paths. ``next_url``,
     when the transaction cookie was readable, rides along so the retry from
-    /login still returns to the page the visitor was headed for."""
+    /login still returns to the page the visitor was headed for. ``user_id``
+    names the account when the provider identified one that may not sign in."""
     await record_event(
         conn,
-        user_id=None,
-        actor_id=None,
+        user_id=user_id,
+        actor_id=user_id,
         kind="login_failed",
         provider=provider,
         ip=request.client.host if request.client else None,
@@ -539,6 +565,8 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
             sid = await _mint_session_and_log_login(conn, uid, ua, ip, provider)
     except LocalAccountConflict:
         return await _fail_login(conn, request, provider, "local_account_conflict", tx.get("next"))
+    except AccountSuspended as exc:
+        return await _fail_login(conn, request, provider, "suspended", tx.get("next"), user_id=exc.user_id)
 
     next_url = sanitize_next(tx.get("next"))
     resp = RedirectResponse(url=_frontend_url(next_url), status_code=302)
@@ -614,8 +642,23 @@ async def local_login(
         return JSONResponse(status_code=401, content={"error": "invalid_credentials"})
 
     uid = row["user_id"]
-    async with conn.transaction():
-        sid = await _mint_session_and_log_login(conn, uid, ua, ip, "local")
+    try:
+        async with conn.transaction():
+            sid = await _mint_session_and_log_login(conn, uid, ua, ip, "local")
+    except AccountSuspended:
+        # Reached only with the right password, so naming the state discloses
+        # nothing to a caller who does not already hold the account.
+        await record_event(
+            conn,
+            user_id=uid,
+            actor_id=uid,
+            kind="login_failed",
+            provider="local",
+            ip=ip,
+            user_agent=ua,
+            meta={"reason": "suspended"},
+        )
+        return JSONResponse(status_code=403, content={"error": "suspended"})
 
     resp = JSONResponse(status_code=200, content={"ok": True})
     _set_session_cookie(resp, sid)
