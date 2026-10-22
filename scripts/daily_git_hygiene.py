@@ -26,7 +26,9 @@ Every deletion is appended to a dedicated hygiene log (`--log-file`). Both
 files default to `~/.cache/transit-app/`.
 
 Like `cleanup_git_state.py`, planning is the default; pass `--apply` to
-actually delete anything.
+actually delete anything. Stage 1 fetches and fast-forwards the base branch
+in both modes, since a plan needs it current and moving it forward loses
+nothing.
 """
 
 from __future__ import annotations
@@ -203,13 +205,88 @@ def mark_succeeded_today(state_file: Path, log_file: Path, *, today: str | None 
 # ---------------------------------------------------------------------------
 
 
+def fast_forward_base(repo: Path, *, base: str, remote: str) -> None:
+    """Move local `base` up to the fetched `{remote}/{base}` when it is strictly behind.
+
+    The same sync `/cleanup-merged` does by hand before planning. A branch no
+    worktree holds moves by a compare-and-swap `update-ref`; one checked out
+    in exactly one worktree is fast-forwarded there with `merge --ff-only`,
+    and only while that checkout has no staged or unstaged change to a
+    tracked file. Untracked and ignored files do not block it, but the merge
+    refuses to overwrite either (`--no-overwrite-ignore`), so a local `.env`
+    at a path the incoming history adds survives. Merging the resolved OID,
+    not the ref name, keeps a concurrent fetch from changing what lands.
+
+    A worktree paused mid-rebase or mid-bisect of `base` shows as detached
+    but still owns the branch, as `git worktree add` itself treats it, so
+    `base` is left alone while one exists.
+
+    Raises `CleanupError`, leaving `base` where it is, when `base` holds
+    commits the remote does not (ahead or diverged, which need a person) or
+    when its checkout cannot be fast-forwarded safely.
+    """
+
+    local = cleanup_git_state.run_git(repo, "rev-parse", "--verify", f"refs/heads/{base}").stdout.strip()
+    upstream = cleanup_git_state.run_git(repo, "rev-parse", "--verify", f"refs/remotes/{remote}/{base}").stdout.strip()
+    if local == upstream:
+        return
+    if not cleanup_git_state.is_ancestor_commit(repo, local, upstream):
+        ahead = cleanup_git_state.is_ancestor_commit(repo, upstream, local)
+        relation = "is ahead of" if ahead else "has diverged from"
+        raise CleanupError(
+            f"{base} ({local[:12]}) {relation} {remote}/{base} ({upstream[:12]}); "
+            "its unpushed commits need inspection before cleanup"
+        )
+
+    listing = cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
+    worktrees = cleanup_git_state.parse_worktrees(listing)
+    for worktree in worktrees:
+        if worktree.branch is None and not worktree.prunable:
+            operation = paused_operation_on(worktree.path, base)
+            if operation is not None:
+                raise CleanupError(f"{worktree.path} is paused in a {operation} of {base}; not moving {base} under it")
+    holders = [worktree for worktree in worktrees if worktree.branch == base]
+    if not holders:
+        cleanup_git_state.run_git(repo, "update-ref", f"refs/heads/{base}", upstream, local)
+    elif len(holders) > 1:
+        raise CleanupError(f"{base} is checked out in {len(holders)} worktrees; fast-forward it by hand")
+    else:
+        checkout = holders[0].path
+        changes = cleanup_git_state.run_git(checkout, "status", "--porcelain", "--untracked-files=no").stdout
+        if changes.strip():
+            raise CleanupError(f"{base}'s checkout {checkout} has uncommitted changes; not fast-forwarding it")
+        cleanup_git_state.run_git(checkout, "merge", "--ff-only", "--no-overwrite-ignore", upstream)
+    print(f"Fast-forwarded {base} {local[:12]} -> {upstream[:12]}")
+
+
+def paused_operation_on(worktree: Path, branch: str) -> str | None:
+    """`rebase` or `bisect` when the detached `worktree` is paused in one started from `branch`."""
+
+    git_dir = Path(cleanup_git_state.run_git(worktree, "rev-parse", "--absolute-git-dir").stdout.strip())
+    # A rebase records the full ref it will update; bisect records the short
+    # name of the branch it will return to (an OID when started detached).
+    markers = (
+        ("rebase", git_dir / "rebase-merge" / "head-name"),
+        ("rebase", git_dir / "rebase-apply" / "head-name"),
+        ("bisect", git_dir / "BISECT_START"),
+    )
+    for operation, marker in markers:
+        try:
+            recorded = marker.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            continue
+        if recorded in {branch, f"refs/heads/{branch}"}:
+            return operation
+    return None
+
+
 def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> bool:
     """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes.
 
-    Fetches `remote` first: `build_plan`'s `validate_base` requires local
-    `refs/heads/{base}` to exactly match `refs/remotes/{remote}/{base}`, and
-    this job is specifically meant to run during idle stretches where nothing
-    else has refreshed that remote-tracking ref recently.
+    Fetches `remote` and fast-forwards `base` first, in a dry run too:
+    `build_plan`'s `validate_base` requires local `refs/heads/{base}` to
+    exactly match `refs/remotes/{remote}/{base}`, and an unattended run
+    normally finds a merge that landed since `base` was last pulled.
 
     Unlike the venv stage, `cleanup_git_state.apply_plan` has no per-item
     swallow-and-continue -- any problem raises `CleanupError` immediately,
@@ -220,6 +297,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
     cleanup_git_state.run_git(repo, "fetch", "--prune", remote)
+    fast_forward_base(repo, base=base, remote=remote)
     decisions = cleanup_git_state.build_plan(repo, base=base, remote=remote, protected=protected)
     cleanup_git_state.print_plan(decisions, applying=apply)
     if not apply:
