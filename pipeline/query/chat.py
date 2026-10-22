@@ -914,13 +914,13 @@ async def chat_with_tools(
             args = can_args
             cache_outcome = "miss"
 
-        # Upsert regardless of hit/miss (bumps hit_count on hit).
-        # Skip writes for build-mode synthetic questions so machine-generated
-        # strings never appear as last_question in the cache, and for a
-        # question asked with history (see Stage 1 above).
-        # Also skip when the LLM hallucinated a tool name we don't dispatch —
-        # otherwise that name gets cached and every future similar question
-        # collapses to the same garbage hash, locking out the LLM permanently.
+        # Upsert on a hit or a miss (a hit bumps hit_count), only when all hold:
+        # - text_keyed: the args were resolved without history, so they are
+        #   what this text means for any asker;
+        # - not a build-mode sentinel, so machine-generated strings never
+        #   become last_question;
+        # - a tool we dispatch, or a hallucinated name would be cached and
+        #   every similar question would collapse onto that one hash.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
