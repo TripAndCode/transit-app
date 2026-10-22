@@ -101,6 +101,194 @@ def test_run_local_cleanup_fetches_remote_before_validating_base(
     assert git(repository, "rev-parse", "refs/remotes/origin/main") == new_tip
 
 
+def advance_origin(tmp_path: Path, contents: str = "advanced\n", path: str = "tracked.txt") -> str:
+    """Commit to the bare `origin`'s main from a second clone, as a merged PR does; return the new tip."""
+
+    other = tmp_path / "advancing-clone"
+    if not other.exists():
+        git(tmp_path, "clone", "--branch", "main", str(tmp_path / "remote.git"), str(other))
+        git(other, "config", "user.name", "Other Clone")
+        git(other, "config", "user.email", "other@example.com")
+    (other / path).write_text(contents, encoding="utf-8")
+    git(other, "add", path)
+    git(other, "commit", "-m", "advance origin main")
+    git(other, "push", "origin", "main")
+    return git(other, "rev-parse", "HEAD")
+
+
+def plan_local_cleanup(repo: Path, tmp_path: Path) -> None:
+    hygiene.run_local_cleanup(
+        repo, base="main", remote="origin", protected={"main", "production"}, apply=False, log_file=tmp_path / "log"
+    )
+
+
+def test_run_local_cleanup_fast_forwards_checked_out_main_behind_origin(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A merge since the last pull leaves local main strictly behind origin/main after the fetch;
+    the job fast-forwards the clean checkout holding it instead of refusing every hourly run."""
+
+    original = git(repository, "rev-parse", "main")
+    new_tip = advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == new_tip != original
+    assert (repository / "tracked.txt").read_text(encoding="utf-8") == "advanced\n"
+    assert git(repository, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_run_local_cleanup_fast_forwards_main_in_the_linked_worktree_holding_it(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The merge runs in whichever worktree has main checked out, not in the one the job was pointed at."""
+
+    git(repository, "switch", "-c", "work")
+    linked = tmp_path / "main-checkout"
+    git(repository, "worktree", "add", str(linked), "main")
+    new_tip = advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == new_tip
+    assert (linked / "tracked.txt").read_text(encoding="utf-8") == "advanced\n"
+    assert git(linked, "status", "--porcelain", "--untracked-files=no") == ""
+    assert git(repository, "symbolic-ref", "--short", "HEAD") == "work"
+    assert (repository / "tracked.txt").read_text(encoding="utf-8") == "main\n"
+
+
+def test_run_local_cleanup_advances_main_ref_when_no_worktree_holds_it(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original = git(repository, "rev-parse", "main")
+    git(repository, "switch", "-c", "work")
+    new_tip = advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == new_tip
+    assert git(repository, "symbolic-ref", "--short", "HEAD") == "work"
+    assert git(repository, "rev-parse", "HEAD") == original
+
+
+def test_run_local_cleanup_keeps_main_when_its_checkout_has_tracked_changes(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original = git(repository, "rev-parse", "main")
+    (repository / "tracked.txt").write_text("uncommitted edit\n", encoding="utf-8")
+    advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError, match="uncommitted changes"):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
+    assert (repository / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
+
+
+def test_run_local_cleanup_fast_forwards_despite_untracked_files(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Untracked files do not block the fast-forward: `merge --ff-only` itself refuses to overwrite one."""
+
+    (repository / "scratch.txt").write_text("local notes\n", encoding="utf-8")
+    new_tip = advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == new_tip
+    assert (repository / "scratch.txt").read_text(encoding="utf-8") == "local notes\n"
+
+
+@pytest.mark.parametrize("ignored", [False, True], ids=["untracked", "ignored"])
+def test_run_local_cleanup_keeps_a_local_file_the_incoming_history_adds(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, ignored: bool
+):
+    """`merge` replaces an ignored file at an incoming path by default, which would silently drop a
+    local `.env`-style file; the fast-forward refuses instead, as it already does for an untracked one."""
+
+    original = git(repository, "rev-parse", "main")
+    if ignored:
+        (repository / ".git" / "info" / "exclude").write_text("local.env\n", encoding="utf-8")
+    (repository / "local.env").write_text("SECRET=local\n", encoding="utf-8")
+    advance_origin(tmp_path, "SECRET=upstream\n", path="local.env")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
+    assert (repository / "local.env").read_text(encoding="utf-8") == "SECRET=local\n"
+
+
+@pytest.mark.parametrize("operation", ["rebase", "bisect"])
+def test_run_local_cleanup_keeps_main_while_a_worktree_rebases_or_bisects_it(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+):
+    """A paused rebase or bisect detaches HEAD but still owns the branch; moving the ref under it
+    would make the rebase finish onto, or the bisect reset to, a commit it never started from."""
+
+    original = git(repository, "rev-parse", "main")
+    if operation == "rebase":
+        result = subprocess.run(
+            ("git", "-C", str(repository), "rebase", "--exec", "false", "--root"), capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        advance_origin(tmp_path)
+    else:
+        advance_origin(tmp_path, "first\n")
+        advance_origin(tmp_path, "second\n")
+        git(repository, "fetch", "origin")
+        git(repository, "bisect", "start", "origin/main", "main")
+    assert git(repository, "worktree", "list", "--porcelain").count("detached") == 1
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError, match=f"{operation} of main"):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
+
+
+def test_run_local_cleanup_keeps_main_checked_out_in_several_worktrees(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Fast-forwarding one copy would leave every other copy's files behind its moved branch."""
+
+    original = git(repository, "rev-parse", "main")
+    git(repository, "worktree", "add", "--force", str(tmp_path / "second-main"), "main")
+    advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError, match="checked out in 2 worktrees"):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == original
+
+
+@pytest.mark.parametrize("origin_advances", [False, True], ids=["ahead", "diverged"])
+def test_run_local_cleanup_refuses_main_with_unpushed_commits(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch, origin_advances: bool
+):
+    """Commits only local main holds need a person's inspection, so the job neither moves nor merges it."""
+
+    (repository / "local.txt").write_text("local only\n", encoding="utf-8")
+    git(repository, "add", "local.txt")
+    git(repository, "commit", "-m", "unpushed")
+    local_tip = git(repository, "rev-parse", "main")
+    if origin_advances:
+        advance_origin(tmp_path)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    with pytest.raises(hygiene.CleanupError, match="diverged" if origin_advances else "ahead"):
+        plan_local_cleanup(repository, tmp_path)
+
+    assert git(repository, "rev-parse", "main") == local_tip
+
+
 def test_run_local_cleanup_logs_deleted_local_branches_after_apply(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
