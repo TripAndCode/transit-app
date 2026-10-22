@@ -276,6 +276,8 @@ async def bulk_patch_users(
     One audit action is recorded for the whole batch, carrying the id list.
     """
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     patch = body.patch
     if patch.role is not None and patch.role not in ("user", "admin"):
         raise HTTPException(400, "invalid role")
@@ -353,6 +355,8 @@ async def bulk_patch_users(
                     user_id=uid,
                     actor_id=admin.user_id,
                     kind="suspended" if patch.suspended else "unsuspended",
+                    ip=ip,
+                    user_agent=ua,
                 )
             if patch.role is not None and patch.role != before_row["role"]:
                 await record_event(
@@ -361,6 +365,8 @@ async def bulk_patch_users(
                     actor_id=admin.user_id,
                     kind="role_changed",
                     meta={"old": before_row["role"], "new": patch.role},
+                    ip=ip,
+                    user_agent=ua,
                 )
             if patch.llm_approved is not None and patch.llm_approved != before_row["llm_approved"]:
                 await record_event(
@@ -369,6 +375,8 @@ async def bulk_patch_users(
                     actor_id=admin.user_id,
                     kind="llm_approved_changed",
                     meta={"old": before_row["llm_approved"], "new": patch.llm_approved},
+                    ip=ip,
+                    user_agent=ua,
                 )
 
         out_rows = await conn.fetch(
@@ -405,7 +413,7 @@ async def bulk_patch_users(
                 }
                 for r in out_rows
             ],
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return [UserRow(**dict(r)) for r in out_rows]
 
@@ -459,6 +467,8 @@ async def patch_user(
     of the sole remaining active admin.
     """
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     if uid == admin.user_id:
         raise HTTPException(400, "cannot modify self")
     if body.role is not None and body.role not in ("user", "admin"):
@@ -496,12 +506,18 @@ async def patch_user(
         )
         if new_suspended and not old_suspended:
             await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
-            await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="suspended")
+            await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="suspended", ip=ip, user_agent=ua)
         elif old_suspended and not new_suspended:
-            await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="unsuspended")
+            await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="unsuspended", ip=ip, user_agent=ua)
         if new_role != old_role:
             await record_event(
-                conn, user_id=uid, actor_id=admin.user_id, kind="role_changed", meta={"old": old_role, "new": new_role}
+                conn,
+                user_id=uid,
+                actor_id=admin.user_id,
+                kind="role_changed",
+                meta={"old": old_role, "new": new_role},
+                ip=ip,
+                user_agent=ua,
             )
         if new_llm_approved != old_llm_approved:
             await record_event(
@@ -510,6 +526,8 @@ async def patch_user(
                 actor_id=admin.user_id,
                 kind="llm_approved_changed",
                 meta={"old": old_llm_approved, "new": new_llm_approved},
+                ip=ip,
+                user_agent=ua,
             )
 
         before_fields = {"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved}
@@ -524,7 +542,7 @@ async def patch_user(
                 target_id=str(uid),
                 before={k: before_fields[k] for k in changed},
                 after={k: after_fields[k] for k in changed},
-                ip=request.client.host if request.client else None,
+                ip=ip,
             )
 
         out = await conn.fetchrow(
@@ -551,6 +569,8 @@ async def delete_user(
     suspended admin doesn't remove an active admin from the pool.
     """
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     if uid == admin.user_id:
         raise HTTPException(400, "cannot modify self")
     async with conn.transaction():
@@ -583,7 +603,7 @@ async def delete_user(
         )
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
-        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted")
+        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
@@ -601,7 +621,7 @@ async def delete_user(
                 "deleted_at": deleted_at,
                 "api_keys_revoked": sorted(r["id"] for r in revoked),
             },
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return Response(status_code=204)
 
@@ -698,20 +718,22 @@ async def revoke_user_session(
     assumed) 404s instead of deleting the wrong -- or multiple -- sessions.
     """
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
         rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
         sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
         if sid_hash is None:
             raise HTTPException(404, "session not found")
         await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
-        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked")
+        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
             action="user.session_revoked",
             target_type="user",
             target_id=str(uid),
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return Response(status_code=204)
 
@@ -808,6 +830,8 @@ async def issue_api_key(
     same digest the auth stack uses for sessions -- so this key validates
     through the same ``key_hash`` lookup as any other row in the table."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
         # FOR UPDATE: a concurrent delete_user either finishes first and is
         # seen here, or waits and then revokes this key along with the rest.
@@ -831,7 +855,13 @@ async def issue_api_key(
             body.expires_at,
         )
         await record_event(
-            conn, user_id=body.owner_user_id, actor_id=admin.user_id, kind="api_key_issued", meta={"label": body.label}
+            conn,
+            user_id=body.owner_user_id,
+            actor_id=admin.user_id,
+            kind="api_key_issued",
+            meta={"label": body.label},
+            ip=ip,
+            user_agent=ua,
         )
         await record_admin_action(
             conn,
@@ -840,7 +870,7 @@ async def issue_api_key(
             target_type="user",
             target_id=str(body.owner_user_id),
             after={"label": body.label, "tier": body.tier},
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return ApiKeyIssued(**dict(row), key=raw_key)
 
@@ -853,6 +883,8 @@ async def revoke_api_key(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
         row = await conn.fetchrow(
             "UPDATE api_keys SET revoked_at = now() "
@@ -862,14 +894,16 @@ async def revoke_api_key(
         )
         if not row:
             raise HTTPException(404, "api key not found")
-        await record_event(conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked")
+        await record_event(
+            conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked", ip=ip, user_agent=ua
+        )
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
             action="api_key.revoked",
             target_type="api_key",
             target_id=str(key_id),
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return Response(status_code=204)
 
@@ -913,6 +947,8 @@ async def create_invite(
     that already has an account is refused with 409 ``account_exists``: its
     role and AI access are changed on its user row instead."""
     csrf_guard(request)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
         if body.role not in ("user", "admin"):
             raise HTTPException(400, "invalid role")
@@ -935,6 +971,8 @@ async def create_invite(
             actor_id=admin.user_id,
             kind="invite_created",
             meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+            ip=ip,
+            user_agent=ua,
         )
         await record_admin_action(
             conn,
@@ -943,7 +981,7 @@ async def create_invite(
             target_type="invite",
             target_id=str(row["invite_id"]),
             after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-            ip=request.client.host if request.client else None,
+            ip=ip,
         )
     return InviteOut(**dict(row))
 

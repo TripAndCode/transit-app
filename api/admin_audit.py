@@ -24,12 +24,13 @@ Two invariants every caller depends on:
   record commit or roll back together.
 """
 
-import ipaddress
 import json
 import logging
 from typing import Any, Mapping, Sequence
 
 import asyncpg
+
+from pipeline.audit import to_inet
 
 _log = logging.getLogger(__name__)
 
@@ -47,22 +48,6 @@ def _to_jsonb(payload: AuditPayload) -> str | None:
     if payload is None:
         return None
     return json.dumps(payload, default=str)
-
-
-def _to_inet(ip: str | None) -> str | None:
-    """Return `ip` as-is if it parses as an IP address, else `None`.
-
-    A value that fails `::inet` at insert time would raise before the audit
-    row -- and the mutation it describes -- can commit, so anything
-    unparsable (a proxy that forwarded garbage) is dropped here instead.
-    """
-    if ip is None:
-        return None
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        return None
-    return ip
 
 
 async def record_admin_action(
@@ -130,7 +115,7 @@ async def record_admin_action(
                 _to_jsonb(before),
                 _to_jsonb(after),
                 reason,
-                _to_inet(ip),
+                to_inet(ip),
             )
     except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError):
         _log.warning(

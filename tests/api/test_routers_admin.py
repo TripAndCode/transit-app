@@ -677,3 +677,76 @@ async def test_no_key_can_be_issued_to_a_deleted_user(admin_client, aconn):
     assert r.status_code == 409
     assert r.json()["detail"] == "user is deleted"
     assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE owner_user_id=$1", uid) == 0
+
+
+_ACTOR_UA = "admin-console/1"
+_ACTOR_HEADERS = {**_HEADERS, "User-Agent": _ACTOR_UA}
+
+
+async def _actor_trail(conn, actor_id):
+    """Every account event ``actor_id`` wrote, oldest first, with the address
+    and browser it came from. ASGITransport reports the client as 127.0.0.1."""
+    rows = await conn.fetch(
+        "SELECT user_id, kind, host(ip) AS ip, user_agent FROM login_events WHERE actor_id = $1 ORDER BY event_id",
+        actor_id,
+    )
+    return [(r["user_id"], r["kind"], r["ip"], r["user_agent"]) for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_a_single_patch_records_the_admins_address_and_browser_on_every_event(admin_client, aconn):
+    """An admin's change to another account is recorded with where it came
+    from, as a sign-in is."""
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn)
+    url = f"/api/admin/users/{uid}"
+    changed = {"role": "admin", "suspended": True, "llm_approved": True}
+    r = await admin_client.patch(url, json=changed, cookies={"sid": sid_admin}, headers=_ACTOR_HEADERS)
+    assert r.status_code == 200
+    r = await admin_client.patch(url, json={"suspended": False}, cookies={"sid": sid_admin}, headers=_ACTOR_HEADERS)
+    assert r.status_code == 200
+    assert await _actor_trail(aconn, uid_admin) == [
+        (uid, kind, "127.0.0.1", _ACTOR_UA)
+        for kind in ("suspended", "role_changed", "llm_approved_changed", "unsuspended")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_bulk_patch_records_the_admins_address_and_browser_on_every_event(admin_client, aconn):
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn)
+    _, uid_b, _ = await _seed(aconn)
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"role": "admin", "suspended": True, "llm_approved": True}},
+        cookies={"sid": sid_admin},
+        headers=_ACTOR_HEADERS,
+    )
+    assert r.status_code == 200
+    assert await _actor_trail(aconn, uid_admin) == [
+        (uid, kind, "127.0.0.1", _ACTOR_UA)
+        for uid in (uid_a, uid_b)
+        for kind in ("suspended", "role_changed", "llm_approved_changed")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_session_key_invite_and_delete_actions_record_the_admins_address_and_browser(admin_client, aconn):
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    sid, uid, _ = await _seed(aconn)
+    kw = {"cookies": {"sid": sid_admin}, "headers": _ACTOR_HEADERS}
+    r = await admin_client.delete(f"/api/admin/users/{uid}/sessions/{token_hash(sid)[:16]}", **kw)
+    assert r.status_code == 204
+    r = await admin_client.post("/api/admin/api-keys", json={"owner_user_id": uid}, **kw)
+    assert r.status_code == 201
+    assert (await admin_client.delete(f"/api/admin/api-keys/{r.json()['id']}", **kw)).status_code == 204
+    r = await admin_client.post("/api/admin/invites", json={"email": "invitee@example.com"}, **kw)
+    assert r.status_code == 201
+    assert (await admin_client.delete(f"/api/admin/users/{uid}", **kw)).status_code == 204
+    assert await _actor_trail(aconn, uid_admin) == [
+        (uid, "session_revoked", "127.0.0.1", _ACTOR_UA),
+        (uid, "api_key_issued", "127.0.0.1", _ACTOR_UA),
+        (uid, "api_key_revoked", "127.0.0.1", _ACTOR_UA),
+        (None, "invite_created", "127.0.0.1", _ACTOR_UA),
+        (uid, "deleted", "127.0.0.1", _ACTOR_UA),
+    ]

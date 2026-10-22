@@ -714,11 +714,11 @@ async def test_patch_other_fields_keeps_the_verdict(agencies_client):
 
 
 @pytest.mark.asyncio
-async def test_every_agency_mutation_records_the_actors_ip(agencies_client):
+async def test_every_agency_mutation_records_the_actors_ip_and_browser(agencies_client):
     from api.main import app
 
     client, sid = agencies_client
-    kw = {"headers": {"Origin": TEST_ORIGIN}, "cookies": {"sid": sid}}
+    kw = {"headers": {"Origin": TEST_ORIGIN, "User-Agent": "admin-console/1"}, "cookies": {"sid": sid}}
     payload = {"agency_name": "Audited", "feed_url": "http://a.example.com"}
     created = await client.post("/api/agencies", json=payload, **kw)
     aid = created.json()["agency_id"]
@@ -731,7 +731,15 @@ async def test_every_agency_mutation_records_the_actors_ip(agencies_client):
             "SELECT action, host(ip) AS ip FROM admin_audit WHERE target_type = 'agency' AND target_id = $1",
             str(aid),
         )
+        events = await conn.fetch(
+            "SELECT kind, host(ip) AS ip, user_agent FROM login_events WHERE meta->>'agency_id' = $1 ORDER BY event_id",
+            str(aid),
+        )
     # ASGITransport reports the client as 127.0.0.1.
     assert {r["action"]: r["ip"] for r in rows} == {
         action: "127.0.0.1" for action in ("agency.created", "agency.updated", "agency.deleted", "agency.restored")
     }
+    assert [(e["kind"], e["ip"], e["user_agent"]) for e in events] == [
+        (kind, "127.0.0.1", "admin-console/1")
+        for kind in ("agency_created", "agency_updated", "agency_deleted", "agency_restored")
+    ]
