@@ -29,12 +29,7 @@ const AGGREGATE_NOT_READY_CODE = "aggregate_not_ready";
  * NOT offer a futile retry. */
 export function isAggregateNotReady(err: unknown): boolean {
   if (!(err instanceof ApiError) || err.status !== 503) return false;
-  try {
-    const parsed = JSON.parse(err.body);
-    return parsed?.code === AGGREGATE_NOT_READY_CODE;
-  } catch {
-    return false;
-  }
+  return apiErrorField(err, "code") === AGGREGATE_NOT_READY_CODE;
 }
 
 /** Detail string the API returns (403) on /followup when
@@ -115,19 +110,26 @@ export async function apiDelete<T = void>(
   });
 }
 
+/** The string `field` of an `ApiError`'s JSON body object. `null` if `err`
+ * isn't an `ApiError`, its body isn't a JSON object, or that field isn't a
+ * string. */
+export function apiErrorField(err: unknown, field: string): string | null {
+  if (!(err instanceof ApiError)) return null;
+  try {
+    const parsed: unknown = JSON.parse(err.body);
+    if (!parsed || typeof parsed !== "object") return null;
+    const value = (parsed as Record<string, unknown>)[field];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's
  * `HTTPException(detail=...)`. `null` if `err` isn't an `ApiError` or its
  * body isn't `{"detail": string}`. */
 export function apiErrorDetail(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  try {
-    const parsed = JSON.parse(err.body);
-    return parsed && typeof parsed === "object" && typeof parsed.detail === "string"
-      ? parsed.detail
-      : null;
-  } catch {
-    return null;
-  }
+  return apiErrorField(err, "detail");
 }
 
 /** The `msg` fields of a FastAPI validation error (`detail` is a list of

@@ -275,6 +275,42 @@ describe("LoginPage", () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
+  it("says the account is suspended when sign-in comes back refused for that reason", () => {
+    renderLogin("/login?error=suspended");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This account is suspended. If you think this is a mistake, please contact the operator.",
+    );
+  });
+
+  it("says the account is suspended when the username form is refused for that reason", async () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockRejectedValue(new ApiError(403, JSON.stringify({ error: "suspended" })));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "right");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByText("This account is suspended. If you think this is a mistake, please contact the operator."),
+    ).toBeTruthy();
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic error for a 403 that is not a suspension", async () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockRejectedValue(new ApiError(403, JSON.stringify({ detail: "cross-origin request denied" })));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "right");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByText("Sign-in failed.")).toBeTruthy();
+  });
+
   it("shows a rate-limit-specific error on 429", async () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: true };
     mockApiPost.mockRejectedValue(new ApiError(429, ""));
