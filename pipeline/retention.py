@@ -1,9 +1,10 @@
-"""Retention windows and the DELETE text that enforces them.
+"""Retention windows and the SQL text that enforces them.
 
 Every period the privacy policy states -- per-user usage counts and login
 history (``PERSONAL_DATA_RETENTION_MONTHS``), sessions past their expiry, the
 unlinked Ask questions (the question log and the intent cache's question
-text) and the admin audit log -- is pruned daily by the API process
+text) and the admin action log, including the address and browser an admin's
+action leaves on login history -- is pruned daily by the API process
 (``api/retention.py`` via ``policy_prune_sql``), so the stated periods hold
 without an external scheduler. Most windows can also be pruned by hand with
 their `gtfs_pipeline.py` command.
@@ -36,6 +37,19 @@ def prune_admin_audit_sql(days: int) -> str:
     return f"DELETE FROM admin_audit WHERE at < now() - INTERVAL '{int(days)} days'"
 
 
+def clear_admin_event_client_sql(days: int) -> str:
+    """UPDATE text that clears the address and browser on `login_events` rows
+    another account recorded. Those are the acting admin's, so they keep the
+    admin action log's period while the row itself keeps login history's.
+    Rows already cleared are left alone so the daily pass rewrites nothing."""
+    return (
+        "UPDATE login_events SET ip = NULL, user_agent = NULL"
+        " WHERE actor_id IS NOT NULL AND actor_id IS DISTINCT FROM user_id"
+        f" AND created_at < now() - INTERVAL '{int(days)} days'"
+        " AND (ip IS NOT NULL OR user_agent IS NOT NULL)"
+    )
+
+
 def prune_query_log_sql(days: int) -> str:
     """DELETE text for the `ask_query_log` retention prune."""
     return f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{int(days)} days'"
@@ -63,11 +77,12 @@ def personal_data_prune_sql(months: int) -> list[str]:
 
 
 def policy_prune_sql() -> list[str]:
-    """Every DELETE the privacy policy's stated periods depend on, in the order
-    the daily pass runs them."""
+    """Every statement the privacy policy's stated periods depend on, in the
+    order the daily pass runs them."""
     return [
         *personal_data_prune_sql(PERSONAL_DATA_RETENTION_MONTHS),
         prune_query_log_sql(QUERY_LOG_RETENTION_DAYS),
         prune_intent_cache_sql(QUERY_LOG_RETENTION_DAYS),
         prune_admin_audit_sql(ADMIN_AUDIT_RETENTION_DAYS),
+        clear_admin_event_client_sql(ADMIN_AUDIT_RETENTION_DAYS),
     ]

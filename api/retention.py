@@ -1,4 +1,4 @@
-"""Daily deletes that keep stored data within the privacy policy's periods.
+"""Daily statements that keep stored data within the privacy policy's periods.
 
 The statements come from ``pipeline/retention.py``. Each runs on its own, so
 one that fails is logged and the others still run; the next day's pass
@@ -22,13 +22,15 @@ PRUNE_INTERVAL_SECONDS = 24 * 60 * 60
 
 async def prune_once(pool: Any) -> None:
     for sql in policy_prune_sql():
-        table = sql.split()[2]
+        # The statement up to its WHERE names both the table and what is
+        # done to it, which tells apart two statements on one table.
+        target = sql.split(" WHERE ", 1)[0]
         try:
             result = await pool.execute(sql)
         except Exception:
-            _log.warning("Retention prune of %s failed; the next daily pass retries it", table, exc_info=True)
+            _log.warning("Retention prune (%s) failed; the next daily pass retries it", target, exc_info=True)
             continue
-        _log.info("Retention prune of %s: %s", table, result)
+        _log.info("Retention prune (%s): %s", target, result)
 
 
 async def _prune_daily(app: Any) -> None:

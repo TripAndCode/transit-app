@@ -70,3 +70,51 @@ async def test_intent_cache_questions_past_retention_go_unless_promoted(aconn, a
 
     kept = await aconn.fetch("SELECT signature_hash FROM ask_intent_cache ORDER BY signature_hash")
     assert [r["signature_hash"] for r in kept] == ["b" * 16, "c" * 16]
+
+
+@pytest.mark.asyncio
+async def test_an_admin_actions_address_and_browser_go_after_the_admin_audit_period(aconn):
+    """The login-history row an admin's action leaves outlives the admin action
+    log, so what it records about the admin is cleared at that log's period.
+    The account's own rows, and ones with no actor, keep theirs."""
+    admin_id = await aconn.fetchval("INSERT INTO users (email, role) VALUES ('boss@x', 'admin') RETURNING user_id")
+    uid = await aconn.fetchval("INSERT INTO users (email) VALUES ('target@x') RETURNING user_id")
+    now = datetime.now(timezone.utc)
+    old, recent = now - timedelta(days=500), now - timedelta(days=30)
+    rows = {
+        "old_admin": (uid, admin_id, "suspended", old),
+        "old_admin_no_target": (None, admin_id, "agency_created", old),
+        "recent_admin": (uid, admin_id, "role_changed", recent),
+        "old_self": (uid, uid, "login", old),
+        "old_no_actor": (uid, None, "role_changed", old),
+    }
+    for label, (user_id, actor_id, kind, at) in rows.items():
+        await aconn.execute(
+            "INSERT INTO login_events (user_id, actor_id, kind, ip, user_agent, created_at, meta)"
+            " VALUES ($1, $2, $3, '10.0.0.9', 'ua', $4, jsonb_build_object('label', $5::text))",
+            user_id,
+            actor_id,
+            kind,
+            at,
+            label,
+        )
+
+    pool = await _test_pool()
+    try:
+        await retention.prune_once(pool)
+    finally:
+        await pool.close()
+
+    kept = {
+        r["label"]: (r["ip"], r["user_agent"])
+        for r in await aconn.fetch(
+            "SELECT meta->>'label' AS label, host(ip) AS ip, user_agent FROM login_events WHERE meta ? 'label'"
+        )
+    }
+    assert kept == {
+        "old_admin": (None, None),
+        "old_admin_no_target": (None, None),
+        "recent_admin": ("10.0.0.9", "ua"),
+        "old_self": ("10.0.0.9", "ua"),
+        "old_no_actor": ("10.0.0.9", "ua"),
+    }

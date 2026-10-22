@@ -60,6 +60,7 @@ def test_the_prune_builders_coerce_the_interval_they_interpolate():
         gtfs_pipeline.prune_pipeline_runs_sql,
         gtfs_pipeline.prune_admin_audit_sql,
         retention.prune_intent_cache_sql,
+        retention.clear_admin_event_client_sql,
     ):
         assert "INTERVAL '7 days'" in builder("7"), "a numeric string is still a day count"
         with pytest.raises(ValueError):
@@ -117,3 +118,16 @@ def test_intent_cache_questions_share_the_question_log_window():
     from pipeline import retention
 
     assert retention.prune_intent_cache_sql(retention.QUERY_LOG_RETENTION_DAYS) in retention.policy_prune_sql()
+
+
+def test_admin_event_client_details_are_cleared_after_the_admin_audit_period():
+    """The address and browser an admin's action leaves on another account's
+    login history are the admin's, and the policy keeps the admin action log
+    for the admin audit period, not the login-history one."""
+    from pipeline import retention
+
+    sql = retention.clear_admin_event_client_sql(400)
+    assert sql.startswith("UPDATE login_events SET ip = NULL, user_agent = NULL WHERE ")
+    assert "actor_id IS NOT NULL AND actor_id IS DISTINCT FROM user_id" in sql
+    assert "created_at < now() - INTERVAL '400 days'" in sql
+    assert retention.clear_admin_event_client_sql(retention.ADMIN_AUDIT_RETENTION_DAYS) in retention.policy_prune_sql()
