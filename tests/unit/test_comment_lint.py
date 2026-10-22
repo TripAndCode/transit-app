@@ -370,6 +370,15 @@ def test_cli_rejects_two_modes_at_once(repository):
     assert "not allowed with argument" in result.stderr
 
 
+def test_cli_stale_candidates_refuses_the_auto_base(repository):
+    """`auto` names a branch tip, and a tip diffed as given against the working
+    tree reports the base's own later changes as the branch's."""
+
+    result = run_cli("--root", str(repository), "--stale-candidates", "auto")
+    assert result.returncode == 2
+    assert "explicit BASE" in result.stderr
+
+
 def test_cli_skips_a_missing_base_instead_of_failing(repository):
     """A run that could not look is an anomaly, so it reports on stderr."""
 

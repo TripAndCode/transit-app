@@ -357,6 +357,22 @@ def test_ordinary_file_change_is_not_flagged_as_enforcement(repository: Path, tm
     assert manifest["enforcement"] is False
 
 
+@pytest.mark.parametrize("path", ["tests/unit/test_something_unrelated.py", "tests/unit/test_url_guard.py"])
+def test_ordinary_unit_test_is_not_flagged_as_enforcement(repository: Path, tmp_path: Path, path: str):
+    """Negative control for the per-file test patterns: a widened
+    `test_guard_push_quality_hook*.py` glob, or one loosened to any `*guard*`
+    test, would make every unit-test change route as enforcement."""
+
+    target = repository / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# placeholder\n", encoding="utf-8")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [path]
+    assert manifest["enforcement"] is False
+
+
 def test_exact_base_keeps_a_merged_main_out_of_a_delta_scan(repository: Path, tmp_path: Path):
     """After the branch merges main, its previous head is still an ancestor, so
     the merge base with HEAD is that head and the delta would carry every

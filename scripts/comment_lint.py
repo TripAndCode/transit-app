@@ -331,6 +331,8 @@ def main(argv=None):
     parser.add_argument("--radius", type=int, default=3)
     parser.add_argument("--warn", action="store_true", help="report but never fail the gate")
     args = parser.parse_args(argv)
+    if args.stale == "auto":
+        parser.error("--stale-candidates needs an explicit BASE, the merge base to diff the working tree against")
 
     root = args.root
     if args.baseline:
