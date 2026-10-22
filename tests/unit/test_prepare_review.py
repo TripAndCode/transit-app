@@ -45,7 +45,7 @@ def repository(tmp_path: Path) -> Path:
     return repo
 
 
-def run_script(repo: Path, output_dir: Path, *extra_args: str) -> dict[str, object]:
+def run_script(repo: Path, output_dir: Path, *extra_args: str, base: str = "main") -> dict[str, object]:
     """Execute the script as users do and decode its manifest."""
 
     result = subprocess.run(
@@ -55,7 +55,7 @@ def run_script(repo: Path, output_dir: Path, *extra_args: str) -> dict[str, obje
             "--repo",
             str(repo),
             "--base",
-            "main",
+            base,
             "--output-dir",
             str(output_dir),
             *extra_args,
@@ -307,6 +307,13 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
         "frontend/knip.json",
         "tests/conftest.py",
         "tests/sharding.py",
+        "tests/unit/test_guard_dev_db.py",
+        "tests/unit/test_guard_push_quality_hook.py",
+        "tests/unit/test_guard_push_quality_hook_e2e.py",
+        "tests/unit/test_codex_hooks.py",
+        "tests/unit/test_conftest_dev_db_guard.py",
+        "tests/postgres_ports.py",
+        "tests/unit/test_postgres_ports.py",
     ],
 )
 def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path: Path, path: str):
@@ -316,8 +323,9 @@ def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path
     entry) would otherwise silently drop one with nothing failing. Covers
     the review-tooling self-reference (scripts/prepare_review.py and its own
     test) and the enforcement-relevant scripts' own test files (deletion
-    safety, git-hygiene, hook setup), none of which the `check-*`/`check_*`
-    basename glob happens to catch."""
+    safety, git-hygiene, hook setup, the dev-DB and push-gate hooks, the
+    conftest dev-DB guard and its port resolver), none of which the
+    `check-*`/`check_*` basename glob happens to catch."""
 
     target = repository / path
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -347,6 +355,71 @@ def test_ordinary_file_change_is_not_flagged_as_enforcement(repository: Path, tm
 
     assert manifest["changed_files"] == ["app.py", "notes.md"]
     assert manifest["enforcement"] is False
+
+
+@pytest.mark.parametrize("path", ["tests/unit/test_something_unrelated.py", "tests/unit/test_url_guard.py"])
+def test_ordinary_unit_test_is_not_flagged_as_enforcement(repository: Path, tmp_path: Path, path: str):
+    """Negative control for the per-file test patterns: a widened
+    `test_guard_push_quality_hook*.py` glob, or one loosened to any `*guard*`
+    test, would make every unit-test change route as enforcement."""
+
+    target = repository / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# placeholder\n", encoding="utf-8")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [path]
+    assert manifest["enforcement"] is False
+
+
+def test_exact_base_keeps_a_merged_main_out_of_a_delta_scan(repository: Path, tmp_path: Path):
+    """After the branch merges main, its previous head is still an ancestor, so
+    the merge base with HEAD is that head and the delta would carry every
+    commit main gained. Replaying the previous head onto the new fork point
+    and diffing from that tree as given leaves only the branch's own change."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "feature.py").write_text("step = 1\n", encoding="utf-8")
+    git(repository, "add", "feature.py")
+    git(repository, "commit", "-m", "first feature step")
+    old_head = git(repository, "rev-parse", "HEAD").strip()
+    git(repository, "switch", "main")
+    (repository / "upstream.py").write_text("other = 1\n", encoding="utf-8")
+    git(repository, "add", "upstream.py")
+    git(repository, "commit", "-m", "someone else's work")
+    git(repository, "switch", "feature")
+    git(repository, "merge", "--no-edit", "main")
+    (repository / "feature.py").write_text("step = 1\nstep = 2\n", encoding="utf-8")
+    git(repository, "commit", "-am", "second feature step")
+    old_fork = git(repository, "merge-base", old_head, "main").strip()
+    new_fork = git(repository, "merge-base", "HEAD", "main").strip()
+    replayed = git(repository, "merge-tree", "--write-tree", f"--merge-base={old_fork}", new_fork, old_head).strip()
+
+    manifest = run_script(repository, tmp_path / "artifacts", "--exact-base", base=replayed)
+
+    assert manifest["merge_base"] == replayed
+    assert manifest["changed_files"] == ["feature.py"]
+    assert manifest["changed_lines"] == 1
+    diff = Path(str(manifest["diff_path"])).read_text(encoding="utf-8")
+    assert "+step = 2" in diff
+    assert "other = 1" not in diff
+
+
+def test_exact_base_matches_the_merge_base_for_an_ancestor(repository: Path, tmp_path: Path):
+    """A previous head that is an ancestor of HEAD is its own merge base, so the
+    unmerged delta scan can pass it with --exact-base too."""
+
+    git(repository, "switch", "-c", "feature")
+    old_head = git(repository, "rev-parse", "HEAD").strip()
+    (repository / "app.py").write_text("value = 2\n", encoding="utf-8")
+    git(repository, "commit", "-am", "change app")
+
+    exact = run_script(repository, tmp_path / "exact", "--exact-base", base=old_head)
+    merged = run_script(repository, tmp_path / "merged", base=old_head)
+
+    assert exact["merge_base"] == merged["merge_base"] == old_head
+    assert exact["changed_files"] == merged["changed_files"] == ["app.py"]
 
 
 def test_output_directory_inside_repository_is_rejected(repository: Path):

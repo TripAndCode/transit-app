@@ -245,6 +245,12 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     "tests/unit/test_cleanup_git_state.py",
     "tests/unit/test_daily_git_hygiene.py",
     "tests/unit/test_setup_git_hooks.py",
+    "tests/unit/test_guard_dev_db.py",
+    "tests/unit/test_guard_push_quality_hook*.py",
+    "tests/unit/test_codex_hooks.py",
+    "tests/unit/test_conftest_dev_db_guard.py",
+    "tests/postgres_ports.py",
+    "tests/unit/test_postgres_ports.py",
     ".gitleaks.toml",
     "tests/unit/test_gitleaks_allowlist_scope.py",
     "tests/unit/test_gitleaks_version_pin.py",
@@ -281,6 +287,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--base", default="main")
+    parser.add_argument(
+        "--exact-base",
+        action="store_true",
+        help="Diff from BASE as given, which may be a tree, instead of from its merge base with HEAD",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--exclude",
@@ -296,8 +307,11 @@ def main() -> int:
     if output_dir == repo or repo in output_dir.parents:
         parser.error("--output-dir must be outside the reviewed repository")
     patterns = EXCLUDED_PATTERNS + tuple(args.exclude)
-    run_git(repo, "rev-parse", "--verify", args.base)
-    merge_base = run_git(repo, "merge-base", args.base, "HEAD").stdout.strip()
+    resolved_base = run_git(repo, "rev-parse", "--verify", args.base).stdout.strip()
+    if args.exact_base:
+        merge_base = resolved_base
+    else:
+        merge_base = run_git(repo, "merge-base", args.base, "HEAD").stdout.strip()
     included, excluded = changed_paths(repo, merge_base, patterns)
     combined = aggregate_changes(diff_numstat(repo, merge_base, patterns) + untracked_changes(repo, patterns))
     diff_path = build_diff(repo, merge_base, output_dir, included, patterns)

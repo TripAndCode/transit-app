@@ -39,7 +39,7 @@ API token. If a call fails, check `gh auth status`.
 
 ## Phase 0 — Materialize the head and capture the baseline
 
-1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,author`, and
+1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,baseRefName,author`, and
    resolve your own login once with `gh api user --jq .login`. Open the report with the
    PR's `url` and `number`, as `/review-pr` does. If `author.login` equals your own
    login, stop and point at `/address-my-pr-comments`, which owns threads on your own PR.
@@ -49,11 +49,12 @@ API token. If a call fails, check `gh auth status`.
 3. State the PR's objective in one short paragraph, from the `title` and `body` just
    fetched. Phase 1's dispatch needs it.
 4. Fetch and move the worktree to the PR's current head:
-   `git fetch origin <headRefName>`, then
+   `git fetch origin <headRefName> <baseRefName>`, then
    `git -C .worktrees/review-<headRefName> checkout origin/<headRefName>`, creating the
    worktree with `git worktree add .worktrees/review-<headRefName>
    origin/<headRefName>` if it is absent. Record the result as `new_head` and confirm
-   it equals `headRefOid`.
+   it equals `headRefOid`. The base is fetched too because Phase 1 locates the PR's
+   fork point on `origin/<baseRefName>`, and a stale ref there hides a merge of it.
 
 ## Phase 1 — Scan the delta for regressions, staleness, and refactor opportunities
 
@@ -63,16 +64,40 @@ the last look").
 
 Also confirm `git -C <review-worktree> merge-base --is-ancestor <old_head> <new_head>`
 succeeds. When it fails the branch was rebased or force-pushed, so `old_head` is no
-longer a baseline: `prepare_review.py` would fall back to an older common ancestor and
-re-scan commits the previous run already covered. Say the branch was rewritten and skip
-the scan, pointing at `/review-pr` for a full re-review instead.
+longer a baseline: a diff from it would fold the rewrite itself into the delta. Say the
+branch was rewritten and skip the scan, pointing at `/review-pr` for a full re-review
+instead.
 
-Otherwise prepare the delta the same deterministic way the rest of the repo does, from
-a private scratch directory:
+Then pick the baseline. An author whose base moved on merges it in, and `old_head`
+stays an ancestor through that merge, so diffing from it would put every commit the base
+gained in the delta and brief the reviewer on other people's merged work. Compare the
+PR's fork point before and after:
+
+```bash
+git -C <review-worktree> merge-base <old_head> origin/<baseRefName>   # old_fork
+git -C <review-worktree> merge-base <new_head> origin/<baseRefName>   # new_fork
+```
+
+- Equal fork points: the baseline is `<old_head>`.
+- Different fork points: the new commits merged the base. Replay the previous head onto
+  the new fork point:
+  `git -C <review-worktree> merge-tree --write-tree --merge-base=<old_fork> <new_fork> <old_head>`.
+  On exit status 0 its first output line is a tree id, the PR as it stood at `old_head`
+  moved onto the new base, and that tree is the baseline; say in the report that the
+  merge was replayed. The delta then holds only the PR's own new changes, including any
+  edit the author's merge made by hand. Exit status 1 means the previous head conflicts
+  with the new base, and any other non-zero status means `merge-tree` could not run.
+  Either way there is no clean baseline: say which, and skip the scan, pointing at
+  `/review-pr` for a full re-review instead. `merge-tree` only adds unreferenced
+  objects; it moves no ref and touches neither the index nor the worktree.
+
+Prepare the delta the same deterministic way the rest of the repo does, from a private
+scratch directory. `--exact-base` diffs from the baseline as given; `old_head` is its
+own merge base with `new_head`, and a tree has none:
 
 ```bash
 python3 scripts/prepare_review.py \
-  --repo <review-worktree-absolute-path> --base <old_head> \
+  --repo <review-worktree-absolute-path> --base <baseline> --exact-base \
   --output-dir <scratch-directory> > <scratch-directory>/delta-manifest.json
 ```
 
