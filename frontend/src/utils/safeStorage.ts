@@ -4,7 +4,7 @@
  * a full store throws on write. The store is looked up on each call, inside
  * the guard, so a refusal at any point reads as "nothing stored" and a
  * refused write reports false. eslint.config.js bans touching storage
- * anywhere else.
+ * directly anywhere else in the application source under src/.
  */
 
 type StorageArea = "localStorage" | "sessionStorage";

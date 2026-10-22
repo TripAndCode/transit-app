@@ -45,9 +45,20 @@ describe("direct web-storage access is banned outside the safe-storage helper", 
   });
 
   test.each([["src/utils/safeStorage.ts"], ["src/api/x.test.ts"], ["src/components/X.test.tsx"], ["src/test/blockStorage.ts"]])(
-    "%s may touch storage directly",
+    "%s may touch storage directly, by any spelling",
     (filename) => {
-      expect(storageBans('export const v = localStorage.getItem("k");\n', filename)).toEqual([]);
+      const code =
+        'export const v = localStorage.getItem("k");\n' +
+        'export const w = window.localStorage.getItem("k");\n' +
+        'export const g = globalThis.sessionStorage.getItem("k");\n';
+      expect(storageBans(code, filename)).toEqual([]);
     },
   );
+
+  test("a test file exempt from the storage bans still has the memoization bans", () => {
+    const code = 'import React from "react";\nexport const v = React.useMemo(() => 1, []);\n';
+    const messages = linter.verify(code, config, { filename: "src/components/X.test.tsx" });
+    expect(messages.filter((m) => m.fatal)).toEqual([]);
+    expect(messages.some((m) => m.ruleId === "no-restricted-properties" && m.message.includes("useMemo"))).toBe(true);
+  });
 });
