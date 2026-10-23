@@ -305,11 +305,13 @@ _ANAPHORA_RE = re.compile(
     r"|\b(?:that|this)\s*[.!?]?\s*$"
 )
 
-# A route the question names itself: a code ("22171", "系統5") or an alias
-# ("A1", "L21"), in the shapes schema_linker resolves. A count or rank
+# A route the question names itself: a 4-5 digit code ("22171"), a numbered
+# 系統/路線 ("系統5") or a one-letter alias ("A1", "L21"). A count or rank
 # ("ワースト5", "TOP10", "p90", "1000件"), a year, date or duration ("2025年",
 # "2026-10-20", "1200秒") and a stop number ("停留所1234") are not one, since
-# they leave a referenced route unresolved.
+# they leave a referenced route unresolved. A 3-digit code or "1番" is left
+# unmatched because it reads the same as a count; missing one only sends the
+# question to the LLM with its history.
 _OWN_ROUTE_RE = re.compile(
     r"(?<![\d/.-])(?<!停留所)(?<!バス停)\d{4,5}(?![\d/.:-]|\s*[年月日時分秒件本便回人位%])"
     r"|(?:系統|路線|route)\s*\d+|\d+\s*系統"
