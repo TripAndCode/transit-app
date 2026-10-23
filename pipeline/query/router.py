@@ -281,23 +281,19 @@ def needs_previous_turn(question: str) -> bool:
 
 
 # Words that point at something the conversation already named ("その路線",
-# "それの内訳", "the same route"). Words that only contain a demonstrative are
-# not references: その他 "other", そのもの "itself", それぞれ "each", それとも
-# "or", それほど "that much", おそれ "risk", これまで/これから "so far"/"from now
-# on", そこそこ "fairly", あれば "if there is", the filler あのー, この before a
-# time span or in a time idiom ("この1週間", "この週末", "この頃"), and
-# この/こちらで naming the app itself ("このシステム", "こちらでは何ができる").
-# English "that"/"this" count only where they cannot be a relative pronoun or a
-# "this week" window: before a transit noun, or as a pronoun after a
-# preposition or at the end; "these days" means "nowadays".
-_REFERENCE_BACK_RE = re.compile(
+# "それの内訳", "the same route"). The lookarounds drop words that only contain
+# a demonstrative (その他, それぞれ, それでも, この1週間, このシステム); the
+# needs_history tests list them. English "that"/"this" count only where they
+# cannot be a relative pronoun or a "this week" window: before a transit noun,
+# or as a pronoun after a preposition or at the end of the question.
+_ANAPHORA_RE = re.compile(
     r"その(?!他|ほか|もの)"
-    r"|(?<!お)それ(?!ぞれ|とも|ほど)"
-    r"|これ(?!まで|から)"
+    r"|(?<!お)それ(?!ぞれ|とも|ほど|でも|にしても)"
+    r"|これ(?!まで|から|ほど)"
     r"|この(?![\d一二三四五六七八九十数半週月年春夏秋冬]|先|頃|ごろ|ところ|まま|間|あいだ"
     r"|システム|アプリ|サービス|サイト|ページ|画面|ツール)"
     r"|あの(?![ーう、,\s])"
-    r"|あれ(?![ばるた])"
+    r"|あれ(?![ばるた]|ほど)"
     r"|(?<!そこ)そこ(?!そこ)|そちら|こちら(?!で)|あちら"
     r"|同じ(?:路線|系統|停留所|バス停|駅|日|時間|期間|曜日|区間|便|事業者|条件|の|こと|もの|やつ)"
     r"|当該|上記|前述"
@@ -310,10 +306,11 @@ _REFERENCE_BACK_RE = re.compile(
 )
 
 # A route the question names itself: a code ("22171", "系統5") or an alias
-# ("A1", "L21"). A count or rank ("ワースト5", "TOP10", "p90") is not one, and
-# neither is a date or a stop, since those leave a referenced route unresolved.
+# ("A1", "L21"). A count or rank ("ワースト5", "TOP10", "p90"), a year or date
+# ("2025年", "2026-10-20") and a stop number ("停留所1234") are not one, since
+# they leave a referenced route unresolved.
 _OWN_ROUTE_RE = re.compile(
-    r"\d{4,}"
+    r"(?<![\d/.-])(?<!停留所)(?<!バス停)\d{4,}(?![\d/.:-]|\s*[年月日])"
     r"|(?:系統|路線|route)\s*\d+|\d+\s*系統"
     r"|(?<![a-z0-9])(?!p\d)[a-z]{1,2}\d+(?![a-z0-9])"
 )
@@ -330,7 +327,7 @@ def needs_history(question: str) -> bool:
     ("22171の遅延とその推移").
     """
     text = _fold(question or "").strip()
-    return bool(_REFERENCE_BACK_RE.search(text)) and not _OWN_ROUTE_RE.search(text)
+    return bool(_ANAPHORA_RE.search(text)) and not _OWN_ROUTE_RE.search(text)
 
 
 def _match_rules(question: str) -> RouterDecision | None:

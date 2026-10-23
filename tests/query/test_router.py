@@ -704,6 +704,12 @@ def test_needs_previous_turn_false(q):
         # the referenced result, not the agency-wide one a rule would answer.
         "それの遅延ワースト5",
         "その路線の定時率TOP10",
+        # A year, a date or a stop number is not a route of the question's own.
+        "2024年のその路線の定時率TOP10",
+        "2025年のその系統の遅延ワースト5",
+        "2026-10-20のその路線は？",
+        "2026/10/20のそれの内訳は？",
+        "停留所1234のその系統は？",
         "What about THAT route?",
         "show me the same for weekends",
         "break it down by hour",
@@ -735,6 +741,10 @@ def test_needs_history_true(q):
         "その他の指標はある？",
         "路線そのものの遅延",
         "それほど遅れない路線は？",
+        "これほど遅延が多い路線ワースト5",
+        "あれほど遅れる路線は？",
+        "それでも遅延が多い路線TOP10",
+        "それにしても遅延が多い路線は？",
         "こちらでは何ができますか？",
         "今このシステムに何社入ってるの？",
         "路線ごとにそれぞれの定時率を見せて",
