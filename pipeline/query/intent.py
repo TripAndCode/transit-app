@@ -2,8 +2,8 @@
 
 Two paraphrased questions that express the same analytical intent must produce
 the same dispatch. This module is the deterministic boundary: structure-only
-normalization (sort keys, lowercase string enums, drop tool defaults, resolve
-relative time tokens), then a stable SHA-256 hash truncated to 16 hex chars.
+normalization (sort keys, lowercase string enums, drop tool defaults), then a
+stable SHA-256 hash truncated to 16 hex chars.
 
 No I/O, no DB, no LLM — pure functions.
 """
@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 # Per-tool defaults — args whose explicit value equals the default are dropped
@@ -47,14 +46,7 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 # String enums whose case we normalize; identifiers stay case-preserved.
-_LOWERCASE_KEYS = frozenset({"metric", "service_type", "time_window", "granularity", "order"})
-
-# Relative time tokens we resolve to absolute date pairs from the RangeCtx.
-_REL_TIME: dict[str, Callable[[dict[str, Any]], tuple[date, date]]] = {
-    "last_7_days": lambda ctx: ((ctx["to_date"] - timedelta(days=7)), ctx["to_date"]),
-    "last_2_weeks": lambda ctx: ((ctx["to_date"] - timedelta(days=14)), ctx["to_date"]),
-    "last_30_days": lambda ctx: ((ctx["to_date"] - timedelta(days=30)), ctx["to_date"]),
-}
+_LOWERCASE_KEYS = frozenset({"metric", "service_type", "granularity", "order"})
 
 
 @dataclass(frozen=True)
@@ -75,40 +67,23 @@ class IntentSignature:
 def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     """Produce a stable canonical args dict for hashing.
 
-    ``ctx`` provides the request's ``from_date`` / ``to_date`` (RangeCtx) so
-    relative time tokens like ``last_2_weeks`` can resolve to absolute dates
-    before hashing. ``ctx`` is consulted only for that purpose.
+    ``ctx`` (the request's window) is not read: no canonical arg depends on it.
     """
     if tool not in _TOOL_DEFAULTS:
         raise ValueError(f"unknown tool: {tool!r}")
 
     out: dict[str, Any] = {}
 
-    # 1. Resolve relative time tokens to absolute dates first. Only a string
-    # names a token; any other value is an unrecognised one.
-    window = args.get("time_window")
-    resolve = _REL_TIME.get(window) if isinstance(window, str) else None
-    resolved_time_window = resolve is not None
-    if resolve is not None:
-        frm, to = resolve(ctx)
-        out["from_date"] = frm.isoformat() if isinstance(frm, date) else str(frm)
-        out["to_date"] = to.isoformat() if isinstance(to, date) else str(to)
-    else:
-        if (v := args.get("from_date")) is not None:
-            out["from_date"] = v.isoformat() if isinstance(v, date) else str(v)
-        if (v := args.get("to_date")) is not None:
-            out["to_date"] = v.isoformat() if isinstance(v, date) else str(v)
+    # 1. Absolute dates hash as ISO strings, whether given as date or string.
+    if (v := args.get("from_date")) is not None:
+        out["from_date"] = v.isoformat() if isinstance(v, date) else str(v)
+    if (v := args.get("to_date")) is not None:
+        out["to_date"] = v.isoformat() if isinstance(v, date) else str(v)
 
     # 2. Copy remaining args, lowercasing string enums and sorting list values.
     # ``from_date`` / ``to_date`` were already handled in step 1.
-    # ``time_window`` is skipped only when it was a recognised relative-time
-    # token (already resolved above); an *unrecognised* value is preserved so
-    # that e.g. a typo like ``"last_60_days"`` doesn't silently collapse to
-    # the same hash as a query with no time_window at all.
     for k, v in args.items():
         if k in ("from_date", "to_date"):
-            continue
-        if k == "time_window" and resolved_time_window:
             continue
         if v is None:
             continue  # treat None and missing as equivalent

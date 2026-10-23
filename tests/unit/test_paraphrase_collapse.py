@@ -29,7 +29,7 @@ def _hash(tool, args, ctx=None):
     return signature_hash(tool, canonicalize(tool, args, ctx or _ctx()))
 
 
-# -- 10 paraphrase pairs that MUST collapse -------------------------------------
+# -- 8 paraphrase pairs that MUST collapse --------------------------------------
 # Each tuple: (description, (tool_a, args_a), (tool_b, args_b))
 
 PARAPHRASE_PAIRS = [
@@ -42,11 +42,6 @@ PARAPHRASE_PAIRS = [
         "top_n: default n omitted vs explicit",
         ("top_n", {"metric": "avg_delay"}),
         ("top_n", {"metric": "avg_delay", "n": 10}),
-    ),
-    (
-        "top_n: relative time vs explicit absolute dates (same window)",
-        ("top_n", {"metric": "avg_delay", "time_window": "last_2_weeks"}),
-        ("top_n", {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"}),
     ),
     (
         "top_n: best_first=False default vs omitted",
@@ -77,11 +72,6 @@ PARAPHRASE_PAIRS = [
         "time_series: default granularity=day omitted vs explicit",
         ("time_series", {"metric": "avg_delay"}),
         ("time_series", {"metric": "avg_delay", "granularity": "day"}),
-    ),
-    (
-        "top_n: relative last_7_days resolves to absolute (today's ctx)",
-        ("top_n", {"metric": "avg_delay", "time_window": "last_7_days"}),
-        ("top_n", {"metric": "avg_delay", "from_date": "2026-05-20", "to_date": "2026-05-27"}),
     ),
 ]
 

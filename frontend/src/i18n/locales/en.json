@@ -848,7 +848,6 @@
       "n": "Count",
       "best_first": "Best first",
       "service_type": "Service type",
-      "time_window": "Time window",
       "granularity": "Granularity",
       "dimension": "Compare by",
       "from_date": "Start date",

@@ -367,8 +367,8 @@ async def _dispatch_and_respond(
 
 
 #: The arg names that pin an answer to absolute dates: the tools' own
-#: ``from``/``to``, and the ``from_date``/``to_date`` canonicalize resolves
-#: relative windows into.
+#: ``from``/``to``, and the ``from_date``/``to_date`` spelling
+#: ``_apply_date_overrides`` also accepts.
 _DATED_ARG_KEYS = frozenset({"from", "to", "from_date", "to_date"})
 
 
@@ -791,11 +791,9 @@ async def chat_with_tools(
         text_keyed = not history and not force_tool_call
         pre_row = await _cache_lookup_by_question(conn, question, agency_id) if text_keyed else None
         # The same text can mean different dates on different days ("昨日",
-        # "先週"): a time_window token in the LLM's signature is resolved to
-        # absolute dates by canonicalize() against that request's RangeCtx, and
-        # the cached args hold the absolute dates from the first time it ran.
-        # Such a row answers its own signature, not its text, so the LLM
-        # resolves the text again.
+        # "先週"): when the LLM's signature pins absolute dates, the cached
+        # args hold the dates from the first time it ran. Such a row answers
+        # its own signature, not its text, so the LLM resolves the text again.
         if pre_row is not None and _carries_dates(pre_row["args"]):
             pre_row = None
         if pre_row is not None:

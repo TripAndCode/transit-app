@@ -28,14 +28,6 @@ def test_default_n_collapses_with_explicit_default():
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
-def test_relative_dates_resolve_before_hashing():
-    """'last_2_weeks' resolves to absolute dates from the RangeCtx (to_date − 14 days)."""
-    ctx = _ctx("2026-05-13", "2026-05-27")
-    a = canonicalize("top_n", {"metric": "avg_delay", "time_window": "last_2_weeks"}, ctx)
-    b = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"}, ctx)
-    assert signature_hash("top_n", a) == signature_hash("top_n", b)
-
-
 def test_route_ids_list_order_collapses():
     """A list of route IDs is order-agnostic for canonicalization."""
     a = canonicalize("compare_segments", {"route_ids": ["16071", "22171"]}, _ctx())
@@ -258,9 +250,8 @@ async def test_explicit_all_services_survives_canonicalization_and_dispatches_th
     assert seen == ["all", "all", "平日"]
 
 
-@pytest.mark.parametrize("window", [["last_7_days"], {"days": 7}])
-def test_a_time_window_that_is_not_a_string_is_kept_as_unrecognised(window):
-    """Only a string names a relative-time token; any other value hashes as given."""
+@pytest.mark.parametrize("window", ["last_7_days", "Last_7_Days", ["last_7_days"], {"days": 7}])
+def test_a_time_window_arg_is_not_resolved_to_dates(window):
+    """No tool takes time_window, so it hashes as given, like any other unknown arg."""
     out = canonicalize("top_n", {"metric": "avg_delay", "time_window": window}, _ctx())
-    assert out["time_window"] == window
-    assert "from_date" not in out
+    assert out == {"metric": "avg_delay", "time_window": window}
