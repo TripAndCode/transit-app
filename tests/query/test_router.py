@@ -7,6 +7,7 @@ import pytest_asyncio
 from pipeline.query.router import (
     _match_rules,
     is_follow_up,
+    needs_history,
     needs_previous_turn,
     retrieve_examples,
     route_question,
@@ -676,3 +677,111 @@ def test_needs_previous_turn_false(q):
     """Follow-up wording around a question a Stage-1 rule answers on its own
     does not need a prior turn."""
     assert needs_previous_turn(q) is False
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "その路線は？",
+        "それの内訳は？",
+        "この停留所の遅延は？",
+        "そこの平日は？",
+        "あの日の定時率は？",
+        "あの系統はどう？",
+        "その系統の休日は？",
+        "それ以外の路線は？",
+        "これの内訳を見せて",
+        "あれの推移は？",
+        "あそこの停留所は？",
+        "そちらの系統は？",
+        "こちらの停留所の遅延",
+        "同じ路線の土日は？",
+        "当該路線の推移",
+        "上記の系統の定時率",
+        "前述の停留所は？",
+        "この系統の平均遅延を知りたい",
+        # A count or rank is not a subject: this asks for the ranking within
+        # the referenced result, not the agency-wide one a rule would answer.
+        "それの遅延ワースト5",
+        "その路線の定時率TOP10",
+        # A year, a date or a stop number is not a route of the question's own.
+        "2024年のその路線の定時率TOP10",
+        "2025年のその系統の遅延ワースト5",
+        "2026-10-20のその路線は？",
+        "2026/10/20のそれの内訳は？",
+        "停留所1234のその系統は？",
+        # Nor is a duration, a count, or a token shaped unlike a route alias.
+        "その系統で1200秒以上遅れた便",
+        "上位1000件のその内訳",
+        "PM5時以降のその系統",
+        "No1のその路線",
+        "What about THAT route?",
+        "show me the same for weekends",
+        "break it down by hour",
+        "how did those stops do?",
+        "compare this line on weekends",
+        "and what about that?",
+        "compare it with that",
+        "how did these routes do?",
+    ],
+)
+def test_needs_history_true(q):
+    assert needs_history(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "",
+        "   ",
+        "定時率TOP10",
+        "22171の遅延",
+        # A route of its own gives the reference something in the question to
+        # point at.
+        "22171の遅延とその推移",
+        "系統5とその定時率",
+        "A1の遅延とその内訳",
+        "２２１７１の遅延とその内訳",
+        # Words that only contain a demonstrative.
+        "その他の指標はある？",
+        "路線そのものの遅延",
+        "それほど遅れない路線は？",
+        "これほど遅延が多い路線ワースト5",
+        "あれほど遅れる路線は？",
+        "それでも遅延が多い路線TOP10",
+        "それにしても遅延が多い路線は？",
+        "こちらでは何ができますか？",
+        "今このシステムに何社入ってるの？",
+        "路線ごとにそれぞれの定時率を見せて",
+        "平日と休日、それとも土曜が遅い？",
+        "遅延のおそれがある路線は？",
+        "これまでの遅延の推移",
+        "これからの運行は？",
+        "この先も遅延は増える？",
+        "この1週間の推移",
+        "この数日の遅延",
+        "この週末の遅延",
+        "この冬の定時率",
+        "この頃の遅延傾向は？",
+        "このところ遅延は増えてる？",
+        "このままだと遅延は増える？",
+        "この間の遅延",
+        "あのー、遅延ワースト10は？",
+        "あのさ、遅延ワースト10は？",
+        "あのね、遅延ワースト10は？",
+        "データがあれば見せて",
+        "そこそこ遅れる路線は？",
+        "平日と土日は同じくらい？",
+        "ここ1週間の推移",
+        "routes that are late most often",
+        "how was this week?",
+        "same-day comparison",
+        "next stop information",
+        "p90 delay this month",
+        "on-time rate for this week",
+        "how about this month?",
+        "how bad are delays these days?",
+    ],
+)
+def test_needs_history_false(q):
+    assert needs_history(q) is False
