@@ -280,6 +280,59 @@ def needs_previous_turn(question: str) -> bool:
     return is_follow_up(text) and _match_rules(text) is None
 
 
+# Words that point at something the conversation already named ("その路線",
+# "それの内訳", "the same route"). Words that only contain a demonstrative are
+# not references: その他 "other", そのもの "itself", それぞれ "each", それとも
+# "or", それほど "that much", おそれ "risk", これまで/これから "so far"/"from now
+# on", そこそこ "fairly", あれば "if there is", the filler あのー, この before a
+# time span or in a time idiom ("この1週間", "この週末", "この頃"), and
+# この/こちらで naming the app itself ("このシステム", "こちらでは何ができる").
+# English "that"/"this" count only where they cannot be a relative pronoun or a
+# "this week" window: before a transit noun, or as a pronoun after a
+# preposition or at the end; "these days" means "nowadays".
+_REFERENCE_BACK_RE = re.compile(
+    r"その(?!他|ほか|もの)"
+    r"|(?<!お)それ(?!ぞれ|とも|ほど)"
+    r"|これ(?!まで|から)"
+    r"|この(?![\d一二三四五六七八九十数半週月年春夏秋冬]|先|頃|ごろ|ところ|まま|間|あいだ"
+    r"|システム|アプリ|サービス|サイト|ページ|画面|ツール)"
+    r"|あの(?![ーう、,\s])"
+    r"|あれ(?![ばるた])"
+    r"|(?<!そこ)そこ(?!そこ)|そちら|こちら(?!で)|あちら"
+    r"|同じ(?:路線|系統|停留所|バス停|駅|日|時間|期間|曜日|区間|便|事業者|条件|の|こと|もの|やつ)"
+    r"|当該|上記|前述"
+    r"|\b(?:it|them|those)\b|\bthese\b(?!\s+days\b)"
+    r"|\bsame\b(?!-)"
+    r"|\b(?:that|this)\s+(?:routes?|lines?|stops?|stations?|bus(?:es)?|trips?|days?|dates?|periods?|hours?"
+    r"|agency|agencies|operators?|ones?)\b"
+    r"|\b(?:of|about|for|on|in|with|like|than|from)\s+(?:that|this)\b(?!\s+[a-z])"
+    r"|\b(?:that|this)\s*[.!?]?\s*$"
+)
+
+# A route the question names itself: a code ("22171", "系統5") or an alias
+# ("A1", "L21"). A count or rank ("ワースト5", "TOP10", "p90") is not one, and
+# neither is a date or a stop, since those leave a referenced route unresolved.
+_OWN_ROUTE_RE = re.compile(
+    r"\d{4,}"
+    r"|(?:系統|路線|route)\s*\d+|\d+\s*系統"
+    r"|(?<![a-z0-9])(?!p\d)[a-z]{1,2}\d+(?![a-z0-9])"
+)
+
+
+def needs_history(question: str) -> bool:
+    """True when a question points back at the conversation and names no route of its own.
+
+    With history present the API sends such a question to the LLM stage with
+    that history instead of Stages 1-2: a rule or embedding match would replay
+    args stored for some other question, so "その路線は？" would be answered
+    about whichever route those args name. A question that names its own
+    route gives the reference something in the question to point at
+    ("22171の遅延とその推移").
+    """
+    text = _fold(question or "").strip()
+    return bool(_REFERENCE_BACK_RE.search(text)) and not _OWN_ROUTE_RE.search(text)
+
+
 def _match_rules(question: str) -> RouterDecision | None:
     """Return the first matching rule's decision, or ``None``.
 

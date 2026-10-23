@@ -712,6 +712,89 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
     assert data["tool_call"] == {"name": "describe_data", "arguments": {"kind": "stops"}}
 
 
+_ROUTE_TURN = {"question": "22171の遅延", "tool": "route_stats", "args": {"route_code": "22171"}}
+
+
+def _recording_chat(captured: dict):
+    async def fake_chat(question, ctx, conn, agency_id, **kwargs):
+        captured["history"] = kwargs.get("history")
+        captured["force_tool_call"] = kwargs.get("force_tool_call")
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    return fake_chat
+
+
+@pytest.mark.asyncio
+async def test_a_reference_back_with_history_skips_the_router(ask_client, monkeypatch):
+    """A question like "その路線は？" names no route of its own, so a stateless
+    rule or embedding match would answer about whichever route its stored args
+    name; with history attached it goes to the LLM, which sees the route it
+    refers to."""
+    client, agency_id = ask_client
+    captured: dict = {}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for a reference back to the conversation")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "その路線は？", "history": [_ROUTE_TURN]},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["router_stage"] == "llm"
+    assert captured["history"] and captured["history"][0]["question"] == "22171の遅延"
+    # Not continuation wording, so the model keeps tool_choice="auto".
+    assert captured["force_tool_call"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_reference_back_without_history_still_reaches_the_router(ask_client, monkeypatch):
+    client, agency_id = ask_client
+    routed: list[str] = []
+
+    async def no_decision(q, *a, **k):
+        routed.append(q)
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat({}))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "その路線は？"},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert routed == ["その路線は？"]
+    assert resp.json()["router_stage"] == "llm"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", ["この1週間の推移", "定時率TOP10", "22171の遅延とその推移"])
+async def test_a_self_contained_question_with_history_still_reaches_the_router(ask_client, monkeypatch, question):
+    client, agency_id = ask_client
+    routed: list[str] = []
+
+    async def no_decision(q, *a, **k):
+        routed.append(q)
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat({}))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": question, "history": [_ROUTE_TURN]},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert routed == [question]
+
+
 @pytest.mark.asyncio
 async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client

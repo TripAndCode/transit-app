@@ -101,7 +101,10 @@ sentinel:
 1. `api/routers/ask.py: ask()` resolves `RangeCtx`, checks `is_follow_up()`
    (pagination-style phrases route straight to the LLM with history; with no
    history they get the `no_history` prompt instead, unless the router is on
-   and a Stage-1 rule answers them, per `needs_previous_turn()`), then
+   and a Stage-1 rule answers them, per `needs_previous_turn()`) and
+   `needs_history()` (with history, a question that points back at the
+   conversation, "その路線は？", and names no route of its own also goes
+   straight to the LLM; with no history it is routed as usual), then
    calls `pipeline/query/router.py: route_or_examples(question, conn, agency_id, k=3)`.
 2. **Stage 1 — rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
    `top_n`). A match dispatches immediately via `pipeline.query.tools.dispatch`.
@@ -238,7 +241,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 | File | Role |
 |---|---|
-| `router.py` | Stage 1 (regex `_RULES`) + Stage 2 (embedding NN) dispatch decision, or few-shot examples for Stage 3; `is_follow_up()`, `needs_previous_turn()` |
+| `router.py` | Stage 1 (regex `_RULES`) + Stage 2 (embedding NN) dispatch decision, or few-shot examples for Stage 3; `is_follow_up()`, `needs_previous_turn()`, `needs_history()` |
 | `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
 | `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
 | `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
