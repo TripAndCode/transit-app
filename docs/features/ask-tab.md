@@ -99,9 +99,15 @@ either way.
 sentinel:
 
 1. `api/routers/ask.py: ask()` resolves `RangeCtx`, checks `is_follow_up()`
-   (pagination-style phrases route straight to the LLM with history; with no
-   history they get the `no_history` prompt instead, unless the router is on
-   and a Stage-1 rule answers them, per `needs_previous_turn()`) and
+   (follow-up phrases route straight to the LLM with history) and, with no
+   history, `needs_previous_turn()`, which gives the `no_history` prompt to
+   the follow-ups a first turn cannot answer: a reference back ("さっき",
+   "同じ条件") always; continuation ("もっと", "次の50件") unless the router
+   is on and a Stage-1 rule answers it; and refinement ("降順", "絞り込",
+   "さらに", "別の") unless it names its own subject (a transit noun or
+   metric such as 路線, 停留所, 遅延 or 定時率, or a route code; "その路線"
+   does not count) or such a rule answers it. The rest are routed as usual, and with the router off
+   go to the LLM. Then it checks
    `needs_history()` (with history, a question that points back at the
    conversation, "その路線は？", and names no route of its own also goes
    straight to the LLM; with no history it is routed as usual), then
