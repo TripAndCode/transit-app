@@ -599,6 +599,10 @@ async def test_an_unresolvable_chunk_neither_dispatches_nor_blocks_a_golden_matc
         "next",
         "again",
         "reverse",
+        "遅延の多い路線を降順で",
+        "さらに定時率の低い路線",
+        "別の路線と比較したい",
+        "list routes by delay in reverse",
     ],
 )
 def test_is_follow_up_true(q):
@@ -641,10 +645,69 @@ def test_is_follow_up_false(q):
         "降順",
         "さらに",
         "絞り込んで",
+        "もっと",
+        "次の10件",
+        "逆に",
+        "別の日",
+        "平日に絞り込んで",
+        "2025年に絞り込んで",
+        "reverse",
+        "in reverse",
+        "別の便利な使い方",
+        # Continuation wording needs the previous turn's list even beside a
+        # subject.
+        "もっと遅延の多い路線を見せて",
+        "次の10件の路線",
+        # The noun belongs to a reference back, not to the question.
+        "その路線を降順で",
+        "同じ路線を絞り込んで",
+        "あの系統を並べ替えて",
+        "その停留所をさらに",
     ],
 )
 def test_needs_previous_turn_true(q):
     assert needs_previous_turn(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "遅延の多い路線を降順で",
+        "さらに定時率の低い路線",
+        "別の路線と比較したい",
+        "22171の遅延を降順で",
+        "A1を別の系統と比較",
+        "停留所を遅延の多い順に並べ替えて",
+        "バス停を遅れの大きい順に絞り込んで",
+        "別の事業者の便と比較",
+        "それぞれの路線を降順で",
+        "定時率を昇順に並べ替え",
+        "list routes by delay in reverse",
+    ],
+)
+def test_refinement_wording_with_a_subject_of_its_own_does_not_need_a_previous_turn(q):
+    """No rule answers these, but each names what to rank, filter or compare,
+    so a first turn can still answer it."""
+    assert _match_rules(q) is None
+    assert needs_previous_turn(q) is False
+    assert needs_previous_turn(q, router_runs=False) is False
+
+
+@pytest.mark.parametrize(
+    "q, routed, unrouted",
+    [
+        # A rule answers the continuation only when the router runs.
+        ("遅延ワースト10の続き", False, True),
+        # Refinement wording with a subject never needs the previous turn.
+        ("平日に絞り込んで遅延ワースト10", False, False),
+        # A back-reference always does.
+        ("同じ条件で遅延ワースト10", True, True),
+        ("降順", True, True),
+    ],
+)
+def test_needs_previous_turn_without_the_router(q, routed, unrouted):
+    assert needs_previous_turn(q) is routed
+    assert needs_previous_turn(q, router_runs=False) is unrouted
 
 
 @pytest.mark.parametrize(

@@ -79,7 +79,8 @@ _DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 # range, stops). A delay word or a route code (4+ digits) marks an analytic
 # question about the data itself, which the meta answers would replace with an
 # answer to a different question, so such a question is left to the later stages.
-_ANALYTIC_WORDS = r"遅延|遅れ|遅く|\d{4,}"
+_DELAY_WORDS = r"遅延|遅れ|遅く"
+_ANALYTIC_WORDS = rf"{_DELAY_WORDS}|\d{{4,}}"
 # The ranking rules rank routes; a question about stops has no rule here.
 _STOP_WORDS = r"停留所|バス停"
 
@@ -232,29 +233,43 @@ _validate_rules()
 # matching the rest of the question would answer something else.
 _BACK_REFERENCE_WORDS = r"他には|さっき|前の(?:やつ|結果|に戻)|同じ(?:条件|系統|の|こと)|それを|そのまま"
 
-# Phrasings that only make sense against the previous turn (pagination,
-# re-sort, "show me more"). Four alternatives are narrowed because a
-# self-contained question can contain a look-alike word:
+# Phrasings that only make sense against the previous turn: continuing its
+# list (pagination, "show me more") or refining it (re-sort, filter, "another
+# one"). Four alternatives are narrowed because a self-contained question can
+# contain a look-alike word:
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
 #   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ).
-#   * bare English words must be whole words (\b), so they don't fire inside
-#     content words like "same-day" or "next stop".
-_FOLLOW_UP_RE = re.compile(
+#   * English words count only whole and at the end of the question, so
+#     "next"/"more" do but "same-day comparison" or "next stop information"
+#     do not (favors false negatives, which are safe).
+_ENGLISH_FOLLOW_UP_END = r"\b\s*[.!?]?\s*$"
+_CONTINUATION_WORDS = (
     r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
-    r"|もう少し|続き|つづき|さらに|残り"
+    r"|もう少し|続き|つづき|残り"
     r"|次の(?:\d+件|\d*ページ|やつ|分(?!.*停留所)|ぶん)|次のページ|\d+ページ目"  # 次の<page-ish>, not 次の停留所
     r"|前の\d+件"  # 前の<page>, not 前の停留所
-    rf"|{_BACK_REFERENCE_WORDS}"
-    r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
-    r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
-    # English follow-ups only when trailing (whole-word, end of query) — so
-    # "next"/"more" count but content words like "same-day comparison" or
-    # "next stop information" do not (favors false-negatives, which are safe).
-    r"|\b(?:more|next|again|continue|previous|same|reverse)\b\s*[.!?]?\s*$"
+    rf"|\b(?:more|next|again|continue|previous|same){_ENGLISH_FOLLOW_UP_END}"
 )
+_REFINEMENT_WORDS = (
+    r"逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込|さらに"
+    r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
+    rf"|\breverse{_ENGLISH_FOLLOW_UP_END}"
+)
+_FOLLOW_UP_RE = re.compile(rf"{_CONTINUATION_WORDS}|{_BACK_REFERENCE_WORDS}|{_REFINEMENT_WORDS}")
 _BACK_REFERENCE_RE = re.compile(_BACK_REFERENCE_WORDS)
+_CONTINUATION_RE = re.compile(_CONTINUATION_WORDS)
+_REFINEMENT_RE = re.compile(_REFINEMENT_WORDS)
+
+# What a refinement can apply to without a previous turn: a transit entity or
+# metric the question names (matched on folded text). A filter value alone
+# (平日, 2025年) or a rank marker (ワースト10) names nothing to rank, so it
+# does not count. 便 skips 便利/不便/郵便.
+_SUBJECT_RE = re.compile(
+    rf"路線|系統|{_STOP_WORDS}|{_DELAY_WORDS}|定時率|事業者|(?<![不郵])便(?!利)"
+    r"|(?<![a-z])(?:routes?|stops?|delay(?:s|ed)?|on[- ]?time)(?![a-z])"
+)
 
 
 def is_follow_up(question: str) -> bool:
@@ -267,17 +282,24 @@ def is_follow_up(question: str) -> bool:
     return bool(_FOLLOW_UP_RE.search((question or "").strip()))
 
 
-def needs_previous_turn(question: str) -> bool:
+def needs_previous_turn(question: str, *, router_runs: bool = True) -> bool:
     """True when a follow-up question cannot be answered on its own.
 
-    A back-reference always needs a previous turn. Other follow-up wording
-    (pagination, re-sort, filter) needs one unless a Stage-1 rule answers
-    the question. Meaningful only when the router will run.
+    A back-reference always needs a previous turn. Continuation wording
+    (pagination, "more") needs one unless a Stage-1 rule answers the
+    question. Refinement wording (re-sort, filter, "another") needs one only
+    when the question names no subject of its own to refine, and then
+    likewise unless a rule answers it; a noun that belongs to a reference
+    back ("その路線") is not such a subject. With *router_runs* false no rule
+    will see the question, so none answers it.
     """
     text = (question or "").strip()
     if _BACK_REFERENCE_RE.search(text):
         return True
-    return is_follow_up(text) and _match_rules(text) is None
+    needs_prior_result = bool(_CONTINUATION_RE.search(text)) or (
+        bool(_REFINEMENT_RE.search(text)) and not _has_own_subject(text)
+    )
+    return needs_prior_result and not (router_runs and _match_rules(text) is not None)
 
 
 # Words that point at something the conversation already named ("その路線",
@@ -331,6 +353,12 @@ def needs_history(question: str) -> bool:
     """
     text = _fold(question or "").strip()
     return bool(_ANAPHORA_RE.search(text)) and not _OWN_ROUTE_RE.search(text)
+
+
+def _has_own_subject(question: str) -> bool:
+    text = _fold(question)
+    named = bool(_SUBJECT_RE.search(text) or _OWN_ROUTE_RE.search(text))
+    return named and not needs_history(question)
 
 
 def _match_rules(question: str) -> RouterDecision | None:

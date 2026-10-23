@@ -207,13 +207,13 @@ async def ask(
     _prior_tool = history[-1].get("tool") if follow_up else None
     force_tool_call = bool(_prior_tool) and "offset" in _PAGINATABLE_TOOL_DEFAULTS.get(_prior_tool or "", {})
 
-    # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
-    # continue: short-circuit to a gentle prompt. Otherwise the question
-    # falls to the open LLM with no examples, which hallucinates a page the
-    # user never asked for (e.g. describe_data(routes, offset=100)). Only a
-    # running router can answer one on its own; see needs_previous_turn().
-    previous_turn_needed = needs_previous_turn(body.question) if router_enabled else is_follow_up(body.question)
-    if history_enabled and not history and previous_turn_needed:
+    # Follow-up phrasing ("もっと", "次の50件", a bare "降順") with NO prior
+    # result to continue: short-circuit to a gentle prompt. Otherwise the
+    # question falls to the open LLM with no examples, which hallucinates a
+    # page the user never asked for (e.g. describe_data(routes, offset=100)).
+    # needs_previous_turn() lets through the ones a first turn can answer: a
+    # refinement that names its own subject, or one a Stage-1 rule answers.
+    if history_enabled and not history and needs_previous_turn(body.question, router_runs=router_enabled):
         msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
         if log_enabled:
