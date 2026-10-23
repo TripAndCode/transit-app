@@ -32,11 +32,14 @@ async def log_query(
     intent-cache feature flag is enabled (Phase ②+); they are NULL when
     the flag is off (Phase ①-compatible).
 
-    ``numeric_guard_triggered`` carries the post-generation numeric-guard
-    verdict for the free-text Stage-3 path. NULL means no verdict exists for
-    this row (the guard never ran), which is distinct from FALSE ("ran, answer
-    was clean") — the two must stay separable to tell a dormant guard from a
-    guard that simply never fires.
+    ``numeric_guard_triggered`` is the column for a post-generation
+    numeric-guard verdict, and no /ask path produces one: a dispatched
+    tool's answer is rendered from grounded data, and the Stage-3 plain-text
+    reply has nothing to trace a number back to (see
+    ``pipeline.query.chat._text_reply``). The one path that runs the guard,
+    the conversation follow-up, does not write this log. So every row
+    records NULL ("no verdict"), which must stay distinct from FALSE ("ran,
+    answer was clean").
     """
     try:
         await conn.execute(

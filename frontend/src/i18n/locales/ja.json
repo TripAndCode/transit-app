@@ -1819,8 +1819,7 @@
         "score_label": "スコア",
         "generated_at_label": "時点"
       },
-      "table_label": "Ask クエリログ",
-      "numeric_guard": "数値ガード"
+      "table_label": "Ask クエリログ"
     }
   },
   "copilot": {

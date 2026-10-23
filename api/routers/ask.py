@@ -229,8 +229,8 @@ async def ask(
     # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
     sig_hash: str | None = None
     cache_outcome: str | None = None
-    # Numeric-hallucination-guard verdict. Stays None on the deterministic
-    # router paths, where no free-text answer is generated for it to check.
+    # Numeric-hallucination-guard verdict, as chat_with_tools reports it. No
+    # /ask path runs the guard, so it stays None (see log_query).
     numeric_guard_triggered: bool | None = None
 
     if decision is not None:
