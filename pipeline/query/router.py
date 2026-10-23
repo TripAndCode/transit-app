@@ -1,18 +1,18 @@
 """Pre-LLM router.
 
-Three-stage pipeline orchestrated from :func:`route_question`:
+Three-stage pipeline orchestrated from :func:`route_or_examples`:
 
 1. **Rules** — :data:`_RULES` regex match → direct dispatch.
 2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance is below
    :data:`_EMBED_DISPATCH_THRESHOLD`
    → direct dispatch using that Q's stored tool/args.
-3. **(caller)** — When ``route_question`` returns ``None``,
-   :func:`retrieve_examples` provides top-3 nearest as few-shot context
-   for the LLM call (Stage 3, in :mod:`pipeline.query.chat`).
+3. **(caller)** — When :func:`route_or_examples` returns no decision, the
+   top-3 nearest it returns alongside serve as few-shot context for the LLM
+   call (Stage 3, in :mod:`pipeline.query.chat`).
 
 The router is additive: any failure (no rule match, embedder unavailable,
-empty index) returns ``None`` so the caller falls through to the LLM with
-empty examples.
+empty index) returns ``(None, [])`` so the caller falls through to the LLM
+with empty examples.
 """
 
 from __future__ import annotations
@@ -554,26 +554,3 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
 
     # Fall-through: serve top-k enriched examples for the LLM few-shot.
     return None, _enrich(matches[:k], resolved)
-
-
-async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:
-    """Stage 1 + Stage 2 dispatch. Returns ``None`` if no direct dispatch.
-
-    Thin wrapper over :func:`route_or_examples` for backward-compat.
-    """
-    decision, _ = await route_or_examples(question, conn, agency_id)
-    return decision
-
-
-async def retrieve_examples(question: str, conn, agency_id: int, k: int = _RAG_TOP_K):
-    """Top-``k`` golden-set matches joined to their tool/args.
-
-    Used by the API layer to inject few-shot context into the LLM prompt
-    when ``route_question`` returns ``None``. Tolerates an unavailable
-    embedder or empty index by returning ``[]`` — caller must handle.
-
-    Thin wrapper over :func:`route_or_examples`; returns ``[]`` whenever a
-    direct dispatch was possible (rule hit or embedding hit).
-    """
-    _, examples = await route_or_examples(question, conn, agency_id, k=k)
-    return examples
