@@ -329,6 +329,27 @@ def test_fetch_branch_protection_uses_query_param_not_f_flag():
     assert "per_page=100" in joined
 
 
+# A rollup entry can also be a commit status from an external integration rather than
+# a check run. Its node is a StatusContext, shaped after GitHub's GraphQL schema: a
+# `context` and a `state` (StatusState), with no `name`, `status` or `conclusion`.
+def _status_context_pr(number: int, state: str) -> dict:
+    return {
+        "number": number,
+        "isDraft": False,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": "backend-tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {
+                "__typename": "StatusContext",
+                "context": "deploy/preview",
+                "state": state,
+                "targetUrl": "https://example.invalid/status",
+            },
+        ],
+    }
+
+
 # --- summarize_prs -----------------------------------------------------------------
 
 
@@ -344,6 +365,15 @@ def test_summarize_prs_counts_draft_conflicting_and_failing_checks():
     assert summary["failing_checks_pr_count"] == 2
     assert summary["failing_checks_pr_numbers"] == [403, 404]
     assert "failing_required_checks_pr_count" not in summary
+
+
+def test_summarize_prs_counts_a_failing_commit_status_as_a_failing_check():
+    states = {500: "FAILURE", 501: "ERROR", 502: "SUCCESS", 503: "PENDING", 504: "EXPECTED"}
+    prs = [_status_context_pr(number, state) for number, state in states.items()]
+    summary = collector.summarize_prs(prs, limit=50)
+
+    assert summary["failing_checks_pr_count"] == 2
+    assert summary["failing_checks_pr_numbers"] == [500, 501]
 
 
 def test_summarize_prs_marks_truncated_when_at_limit():
