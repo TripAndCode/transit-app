@@ -36,7 +36,7 @@ const HOUR_SEC = 3600;
  *  one late bus is an anecdote, not a period of the day. */
 const MIN_PEAK_OBSERVATIONS = 3;
 
-/** Mirrors `_TIME_BAND_RANGES` in api/range.py, which is the canonical
+/** Mirrors `TIME_BAND_RANGES` in api/range.py, which is the canonical
  *  definition; the server filters the rows, this only positions them. */
 const BAND_WINDOWS: Record<Exclude<TimeBand, "all">, TimeWindow> = {
   morning: { startSec: 5 * HOUR_SEC, endSec: 9 * HOUR_SEC },

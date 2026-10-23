@@ -43,7 +43,7 @@ describe("destinations", () => {
 
   it("puts the route in the dossier's path, not its query", () => {
     expect(routeHref(9, "50", "?routes=50&from=2026-09-01")).toBe("/agencies/9/routes/50?from=2026-09-01");
-    expect(routeHref(9, "a/b", "", "stops")).toBe("/agencies/9/routes/a%2Fb?tab=stops");
+    expect(routeHref(9, "a/b")).toBe("/agencies/9/routes/a%2Fb");
     // Which report or document the list was showing says nothing about a route.
     expect(routeHref(9, "50", "?report=worst_5min&sort=ranking&doc=council&by=periods&sparse=1&period=weekend&dow=weekday")).toBe(
       "/agencies/9/routes/50?dow=weekday",
@@ -51,9 +51,9 @@ describe("destinations", () => {
   });
 
   it("opens one selected route's dossier, and the list for any other selection", () => {
-    expect(routesHref(9, "?routes=50&from=2026-09-01", "stops")).toBe("/agencies/9/routes/50?from=2026-09-01&tab=stops");
+    expect(routesHref(9, "?routes=50&from=2026-09-01")).toBe("/agencies/9/routes/50?from=2026-09-01");
     expect(routesHref(9, "?routes=50,51")).toBe("/agencies/9/routes?routes=50%2C51");
-    expect(routesHref(9, "", "stops")).toBe("/agencies/9/routes");
+    expect(routesHref(9, "")).toBe("/agencies/9/routes");
   });
 
   it("names the screen each report type opens on", () => {
@@ -82,7 +82,7 @@ describe("destinations", () => {
 
   it("switches agency onto the same destination, but a dossier onto the Routes list", () => {
     expect(agencySwitchHref(4, "time", "?by=x&routes=5")).toBe("/agencies/4/time?by=x");
-    expect(agencySwitchHref(4, "routes/50", "?tab=stops", "from=2026-09-01")).toBe(
+    expect(agencySwitchHref(4, "routes/50", "?sub_tab=marey", "from=2026-09-01")).toBe(
       "/agencies/4/routes?from=2026-09-01",
     );
     expect(agencySwitchHref(4, "compare", "?by=agencies")).toBe("/agencies/4/compare?by=agencies");

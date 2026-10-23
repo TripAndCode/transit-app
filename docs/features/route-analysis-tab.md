@@ -18,18 +18,17 @@ saved-analysis bookmarks — scoped to exactly one selected route.
   hand the selection to the Routes list (`/agencies/:agencyId/routes`).
 - `/agencies/:agencyId/route-analysis` and `/agencies/:agencyId/analysis/where`
   redirect here when their `routes` names exactly one route, to
-  `routes/<route_code>?tab=stops` with `routes` dropped and the rest of the
-  query (`sub_tab`, `compare`, the filter) kept; any other selection goes to
-  the Routes list. `tab` names a dossier tab (`RouteTab` in
-  `destinations.ts`) for links; the dossier has one view, so nothing reads
-  it, and `sub_tab` alone picks the panel.
+  `routes/<route_code>` with `routes` dropped and the rest of the query
+  (`sub_tab`, `compare`, the filter) kept; any other selection goes to the
+  Routes list. The dossier has one view, and `sub_tab` alone picks its
+  panel.
 - Reached from the rail's Routes entry (`nav.routes`) and then a route name
   in one of the list's ranking rows (`RouteCell` in
   `frontend/src/components/ReportTable.tsx`, with the active scope), or
   from other links that open a route directly, all built by
   `routeHref`/`routesHref` in `frontend/src/routes/destinations.ts`: the
   command palette's route items (with the active scope), the Live trip panel
-  (`routes/<route_code>?tab=stops`), and Reports' routes-to-check rows and
+  (`routes/<route_code>`), and Reports' routes-to-check rows and
   saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
   compare-with-previous-week toggle (`?compare=1` search param), the
