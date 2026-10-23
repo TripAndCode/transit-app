@@ -1,12 +1,23 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { createElement } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, type UseQueryResult } from "@tanstack/react-query";
 import i18n from "../i18n";
-import { useReport, useConversations, useConversation, useAppendMessage, useRouteShape } from "./hooks";
+import {
+  useAppendMessage,
+  useConversation,
+  useConversations,
+  useForecastHeatmap,
+  useForecastOverview,
+  usePerformanceStandards,
+  useReport,
+  useRouteShape,
+  useSuggestion,
+  useWeatherDelay,
+} from "./hooks";
 import type { Scope } from "./scope";
 import { SCOPE_EXTRAS_NONE } from "./scope";
-import type { AnonThread, Conversation, DefinitionMeta, ReportResponse, RouteShapeResponse } from "./types";
+import type { AnonThread, Conversation, DefinitionMeta, ReportResponse } from "./types";
 
 void i18n.changeLanguage("en");
 
@@ -166,13 +177,23 @@ describe("useReport's ranking options", () => {
   });
 });
 
-describe("useRouteShape's cache identity", () => {
-  it("fetches the route again after a language switch, since the server names a nameless stop in the request's language", async () => {
-    const shape: RouteShapeResponse = { route: "R1", geometry: null, stops: [], unobserved_stops: [] };
-    mockApiGet.mockResolvedValue(shape);
+// Each of these endpoints writes text in the request's Accept-Language
+// (api/routers' `Depends(get_locale)` GET routes; tests/unit/test_localized_routes.py
+// pins that list), so a response cached in one language must not be served
+// after a switch to the other.
+describe("hooks for endpoints that write text in the request's language", () => {
+  it.each<[string, () => UseQueryResult<unknown>, unknown]>([
+    ["useForecastHeatmap", () => useForecastHeatmap(1, "R1"), {}],
+    ["useForecastOverview", () => useForecastOverview(1), {}],
+    ["useReport", () => useReport(1, "trend", baseCtx()), report()],
+    ["usePerformanceStandards", () => usePerformanceStandards(1, baseCtx(), true), {}],
+    ["useWeatherDelay", () => useWeatherDelay(1, baseCtx(), true), {}],
+    ["useSuggestion", () => useSuggestion(1, []), { suggestion: null }],
+    ["useRouteShape", () => useRouteShape(1, "R1", baseCtx()), { route: "R1", geometry: null, stops: [], unobserved_stops: [] }],
+  ])("%s fetches again after a language switch", async (_name, useHook, response) => {
+    mockApiGet.mockResolvedValue(response);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const ctx = baseCtx();
-    const { result } = renderHook(() => useRouteShape(1, "R1", ctx), withProviders(queryClient));
+    const { result } = renderHook(useHook, withProviders(queryClient));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockApiGet).toHaveBeenCalledTimes(1);
     try {

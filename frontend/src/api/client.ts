@@ -1,5 +1,6 @@
 import i18n from "../i18n";
 import { readStorage, removeStorage, writeStorage } from "../utils/safeStorage";
+import { requestLanguage } from "./requestLanguage";
 
 /** `path` on the API's origin, which VITE_API_BASE_URL names when the API and the SPA are
  *  served from different origins. Every URL the browser fetches or navigates to on the API
@@ -248,12 +249,11 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
 
 // credentials:'include' sends the sid cookie cross-origin too (Vite dev :5173 →
 // :8000). Accept-Language follows the UI language so server-rendered text
-// matches it, falling back to "ja" like the LocaleMiddleware default.
+// matches it.
 function sendOnce(path: string, init: RequestInit, apiKey: string | null, signal: AbortSignal): Promise<Response> {
-  const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "Accept-Language": lang,
+    "Accept-Language": requestLanguage(i18n),
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
   return fetch(apiUrl(path), { ...init, headers, credentials: "include", signal });
