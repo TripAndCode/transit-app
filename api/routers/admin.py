@@ -41,6 +41,7 @@ import os
 import re
 import secrets
 import time
+import unicodedata
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -121,7 +122,9 @@ async def list_users(
 ) -> UserList:
     """List users with optional filters.
 
-    - ``q``: substring match on email OR name (ILIKE).
+    - ``q``: case-insensitive substring match on email OR name. Both sides
+      are NFKC-folded, as the client-side search boxes fold them, so
+      full-width IME input and half-width katakana match their plain forms.
     - ``role``: exact match, restricted to ``user`` / ``admin`` (silently
       ignored otherwise so a malformed query param doesn't 500).
     - ``suspended``: ``True`` filters to suspended only, ``False`` to active.
@@ -136,8 +139,11 @@ async def list_users(
     where = []
     args: list[Any] = []
     if q:
-        args.append(f"%{escape_like(q)}%")
-        where.append(f"(email ILIKE ${len(args)} ESCAPE '\\' OR name ILIKE ${len(args)} ESCAPE '\\')")
+        # Fold before escaping: NFKC turns a full-width ％, ＿ or ＼ into the
+        # ASCII metacharacter, which escaping first would leave live.
+        args.append(f"%{escape_like(unicodedata.normalize('NFKC', q))}%")
+        n = len(args)
+        where.append(f"(normalize(email, NFKC) ILIKE ${n} ESCAPE '\\' OR normalize(name, NFKC) ILIKE ${n} ESCAPE '\\')")
     if role in ("user", "admin"):
         args.append(role)
         where.append(f"role = ${len(args)}")
