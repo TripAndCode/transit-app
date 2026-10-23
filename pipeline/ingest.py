@@ -504,19 +504,13 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in seen]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
-                        # One member per savepoint (see _savepoint), so a member
-                        # whose lookup fails leaves the next member's lookups
-                        # usable. extractfile() can raise on a corrupt member
-                        # header/index, not just parse_feed, so it sits inside
-                        # the same per-member try. The outer try/except covers
-                        # tar-wide failures (a corrupt archive tarfile.open
-                        # can't even read).
-                        #
-                        # The ClickHouse insert is outside the savepoint, which
-                        # guards Postgres state only. The parsed rows are
-                        # buffered into pending_rows/pending_files and only
-                        # inserted (and marked `done`) by _flush(), in batches;
-                        # see the crash-safety note above pending_rows.
+                        # One member per savepoint, so a member whose lookup
+                        # fails leaves the next member's lookups usable.
+                        # extractfile() can raise on a corrupt member, so it
+                        # sits inside the same try; the outer try covers
+                        # tar-wide failures. The savepoint guards Postgres
+                        # only: parsed rows are buffered, and _flush() inserts
+                        # them into ClickHouse and marks them done in batches.
                         try:
                             with _savepoint(cur, "tar_member"):
                                 fobj = tf.extractfile(member)
@@ -533,19 +527,12 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                             continue
                         _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
-                            # This commit persists nothing: the lookups only
-                            # read, and rows go to ClickHouse. Nor does it change
-                            # what the lookups see, since under READ COMMITTED
-                            # each one takes a fresh snapshot. What it ends is
-                            # the transaction, and with it the ACCESS SHARE lock
-                            # each lookup holds on agencies and the static_*
-                            # tables until commit. While one is held, anything
-                            # needing ACCESS EXCLUSIVE on that table (a
-                            # migration's ALTER TABLE, TRUNCATE, DROP) waits, and
-                            # every later query on the table queues behind it.
-                            # Committing here and after each tarball caps that
-                            # wait at a few hundred files rather than the whole
-                            # run.
+                            # Persists nothing (the lookups only read). Ending
+                            # the transaction releases the ACCESS SHARE lock
+                            # each lookup holds on agencies and static_*, so a
+                            # queued ACCESS EXCLUSIVE (a migration's ALTER,
+                            # TRUNCATE or DROP), and every query behind it,
+                            # waits a few hundred files at most, not the run.
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
             except Exception as e:
@@ -554,13 +541,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                 conn.rollback()
             conn.commit()
 
-        # Flush whatever the tarball loop above buffered (even under
-        # _BATCH_ROWS) so `done` is accurate before the loose-.pb loop below
-        # computes its own dedup skip-list. `new_pb`'s check against `seen`
-        # (not `done`) already prevents double-processing on its own even
-        # without this flush, but leaving files unflushed here would let
-        # `done` silently drift out of sync with what this run has actually
-        # persisted — this flush keeps the two in step at the loop boundary.
+        # Flush the tarball members' buffer, even under _BATCH_ROWS, so `done`
+        # matches what this run has persisted at the loop boundary.
         _flush()
 
         new_pb = [p for p in pb_loose if f"{_date_dir(p.parent.name)}/{p.name}" not in seen]
@@ -568,10 +550,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
             logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
-                # One file per savepoint, with its rows buffered for _flush(),
-                # as in the tarball loop above; the batches are shared with
-                # that loop, so `done` only advances once a batch is actually
-                # persisted.
+                # One file per savepoint, its rows buffered for _flush(); the
+                # batches are shared with the tarball members, so `done` only
+                # advances once a batch is persisted.
                 try:
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
@@ -585,7 +566,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                     continue
                 _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
-                    # Releases the lookups' locks; see the tarball loop above.
+                    # Releases the lookups' ACCESS SHARE locks.
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
         conn.commit()

@@ -151,15 +151,9 @@ than issuing their own requests.
 ## i18n
 
 - Frontend strings come from the `design` i18n namespace
-  (`frontend/src/i18n/design.ts`, loaded via `useTranslation("design")`), not
-  the default `translation` namespace's `frontend/src/i18n/locales/{ja,en}.json`
-  files. `design.ts` holds its own `ja`/`en` objects directly in the TS
-  module. `npm run lint:i18n`'s key-parity check reads only the two
-  `locales/*.json` files; the `ja`/`en` key parity of `design.ts` is asserted
-  instead by `frontend/src/i18n/design.test.ts`, which `npm run test` and
-  CI's `npm run test:coverage` run. `npm run lint:i18n`'s glossary check
-  does scan `design.ts` for variant wording, and `npm run lint:i18n-strings`
-  skips `src/i18n/design.ts` by name.
+  (`frontend/src/i18n/design.ts`, loaded via `useTranslation("design")`).
+  `docs/features/route-analysis-tab.md`'s i18n section describes how its
+  `ja`/`en` key parity and wording are checked.
 - Every report response carries the same `definition` block described in
   `docs/features/analysis-tab.md`'s i18n section; this tab renders it through
   the shared `DefinitionMetaBlock` component rather than duplicating that
