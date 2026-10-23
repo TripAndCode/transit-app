@@ -28,6 +28,7 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -1412,6 +1413,19 @@ _HANDLERS = {
 _HANDLERS.update(META_HANDLERS)
 
 
+# Free-text arguments matched against stored route and stop names. dispatch
+# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
+_FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
+
+
+def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: unicodedata.normalize("NFKC", v) if k in _FREE_TEXT_ARGS and isinstance(v, str) else v
+        for k, v in arguments.items()
+    }
+
+
 async def dispatch(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1464,6 +1478,7 @@ async def dispatch(
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}
             arguments = {"route": raw_rc, **arguments}
+        arguments = _fold_free_text_args(arguments)
 
         from pipeline.query.schema_linker import resolve_route
 

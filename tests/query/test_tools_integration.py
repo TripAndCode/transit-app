@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from api.range import RangeCtx
+from pipeline.query import tools
+from pipeline.query.results import ToolResult
 from pipeline.query.tools import _is_route_registered, dispatch
 from tests.conftest import _test_pool
 from tests.fixtures.clock import jst_midday
@@ -128,6 +130,73 @@ async def test_dispatch_did_you_mean_locale_en(conn_routes_with_alias):
     assert "Did you mean" in result.summary
     # JP phrasing must not leak through.
     assert "もしかして" not in result.summary
+
+
+@pytest.fixture
+async def conn_routes_with_full_width_names(apply_schema):
+    """Routes whose stored names mix ASCII with full-width forms, as real
+    Japanese GTFS feeds do."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+        await conn.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
+            "VALUES ($1, $2, $3, $4)",
+            [
+                (agency_id, "国道線(1021)", "A1 国道・古川線", None),
+                (agency_id, "市内線(2011)", "1 市内線", None),
+                (agency_id, "阿品線(3051)", "Ｊ１　阿品線", "ＪＲ阿品駅経由"),
+            ],
+        )
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.fixture
+def routes_seen_by_handler(monkeypatch) -> list:
+    """The ``route`` argument each dispatch hands to the route_meta handler,
+    after dispatch has resolved it."""
+    seen: list = []
+
+    async def spy(args, ctx, conn, agency_id, locale, ch=None):
+        seen.append(args.get("route"))
+        return ToolResult(kind="empty", summary="")
+
+    monkeypatch.setitem(tools._HANDLERS, "route_meta", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "code"),
+    [
+        ({"route": "１０２１"}, "1021"),
+        ({"route_code": "１０２１"}, "1021"),
+        ({"route": "Ａ１"}, "1021"),
+        ({"route": "ａ１"}, "1021"),
+        ({"route": "１番"}, "2011"),
+        # The stored short name 'Ｊ１　阿品線' folds to 'J1 阿品線'.
+        ({"route": "J1"}, "3051"),
+        # Trigram stage: the stored long name is full-width, so the column is
+        # folded as the argument is, whichever spelling the user typed.
+        ({"route": "JR阿品駅経由"}, "3051"),
+        ({"route": "ＪＲ阿品駅経由"}, "3051"),
+        # Unresolved: the handler still gets the ASCII code to look up.
+        ({"route": "９９９９９"}, "99999"),
+    ],
+)
+async def test_dispatch_resolves_a_full_width_route_like_its_ascii_spelling(
+    conn_routes_with_full_width_names, routes_seen_by_handler, args, code
+):
+    pool, agency_id = conn_routes_with_full_width_names
+    async with pool.acquire() as conn:
+        await dispatch("route_meta", args, _ctx(), conn, agency_id, locale="ja")
+    assert routes_seen_by_handler == [code]
 
 
 @pytest.mark.asyncio
