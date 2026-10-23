@@ -80,7 +80,9 @@ DEFAULT_CACHE_BASENAME = Path(".cache") / "ops-status-github.json"
 
 # GitHub's own conclusion values that mean "this check did not pass" -- SUCCESS,
 # NEUTRAL, SKIPPED, and STALE are all "did not block the PR", not a failure.
-FAILING_CHECK_CONCLUSIONS = frozenset({"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"})
+FAILING_CHECK_CONCLUSIONS = frozenset(
+    {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+)
 # A rollup entry that is a commit status (a StatusContext node, from an external CI or
 # deploy integration) has no `conclusion`; its `state` carries the verdict instead.
 FAILING_STATUS_STATES = frozenset({"FAILURE", "ERROR"})

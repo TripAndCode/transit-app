@@ -367,6 +367,23 @@ def test_summarize_prs_counts_draft_conflicting_and_failing_checks():
     assert "failing_required_checks_pr_count" not in summary
 
 
+def test_summarize_prs_counts_a_check_run_that_failed_to_start_as_failing():
+    # A workflow GitHub could not start, such as one with an invalid workflow
+    # file, concludes STARTUP_FAILURE rather than FAILURE.
+    pr = {
+        "number": 510,
+        "isDraft": False,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "STARTUP_FAILURE"}
+        ],
+    }
+    summary = collector.summarize_prs([pr], limit=50)
+
+    assert summary["failing_checks_pr_numbers"] == [510]
+
+
 def test_summarize_prs_counts_a_failing_commit_status_as_a_failing_check():
     states = {500: "FAILURE", 501: "ERROR", 502: "SUCCESS", 503: "PENDING", 504: "EXPECTED"}
     prs = [_status_context_pr(number, state) for number, state in states.items()]
