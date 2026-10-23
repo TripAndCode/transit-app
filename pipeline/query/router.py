@@ -240,11 +240,18 @@ _BACK_REFERENCE_WORDS = r"他には|さっき|前の(?:やつ|結果|に戻)|同
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
-#   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ).
+#   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ),
+#     nor 別 as the suffix of a kanji or katakana word: 月別の/路線別の/ルート別の
+#     are "by X" breakdowns and 特別の is "special". After hiragana or at the
+#     start (それとは別の, 別の日) it still reads as "another".
 #   * English words count only whole and at the end of the question, so
 #     "next"/"more" do but "same-day comparison" or "next stop information"
 #     do not (favors false negatives, which are safe).
 _ENGLISH_FOLLOW_UP_END = r"\b\s*[.!?]?\s*$"
+# CJK ideographs (with extension A and compatibility forms), 々, and full- and
+# half-width katakana including ー: the characters a word that takes 別 as a
+# suffix ends in.
+_KANJI_OR_KATAKANA = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々\u30a0-\u30ff\uff66-\uff9f"
 _CONTINUATION_WORDS = (
     r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
     r"|もう少し|続き|つづき|残り"
@@ -254,7 +261,7 @@ _CONTINUATION_WORDS = (
 )
 _REFINEMENT_WORDS = (
     r"逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込|さらに"
-    r"|別の(?!府)"  # 別の but NOT 別の府 (another prefecture)
+    rf"|(?<![{_KANJI_OR_KATAKANA}])別の(?!府)"
     rf"|\breverse{_ENGLISH_FOLLOW_UP_END}"
 )
 _FOLLOW_UP_RE = re.compile(rf"{_CONTINUATION_WORDS}|{_BACK_REFERENCE_WORDS}|{_REFINEMENT_WORDS}")

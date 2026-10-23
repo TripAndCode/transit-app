@@ -856,7 +856,9 @@ async def test_a_reference_back_without_history_still_reaches_the_router(ask_cli
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("question", ["この1週間の推移", "定時率TOP10", "22171の遅延とその推移"])
+@pytest.mark.parametrize(
+    "question", ["この1週間の推移", "定時率TOP10", "22171の遅延とその推移", "月別の推移を教えて", "路線別の遅延"]
+)
 async def test_a_self_contained_question_with_history_still_reaches_the_router(ask_client, monkeypatch, question):
     client, agency_id = ask_client
     routed: list[str] = []

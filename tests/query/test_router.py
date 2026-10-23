@@ -603,6 +603,12 @@ async def test_an_unresolvable_chunk_neither_dispatches_nor_blocks_a_golden_matc
         "さらに定時率の低い路線",
         "別の路線と比較したい",
         "list routes by delay in reverse",
+        # 別の after hiragana or at the start still reads as "another".
+        "別の日",
+        "それとは別の路線",
+        "じゃあ別の系統",
+        "また別の停留所",
+        "全く別の時間帯",
     ],
 )
 def test_is_follow_up_true(q):
@@ -622,6 +628,17 @@ def test_is_follow_up_true(q):
         "別府の路線",
         "same-day comparison",
         "next stop information",
+        # 別 after a kanji or katakana word is a "by X" suffix, not "another".
+        "月別の推移を教えて",
+        "曜日別の遅延",
+        "時間帯別の定時率",
+        "路線別の遅延",
+        "系統別の平均遅延",
+        "停留所別の遅れ",
+        "日々別の集計",
+        "ルート別の比較",
+        "ﾙｰﾄ別の比較",
+        "特別の理由",
         "",
     ],
 )
@@ -663,6 +680,7 @@ def test_is_follow_up_false(q):
         "同じ路線を絞り込んで",
         "あの系統を並べ替えて",
         "その停留所をさらに",
+        "それとは別の路線",
     ],
 )
 def test_needs_previous_turn_true(q):
@@ -689,6 +707,12 @@ def test_refinement_wording_with_a_subject_of_its_own_does_not_need_a_previous_t
     """No rule answers these, but each names what to rank, filter or compare,
     so a first turn can still answer it."""
     assert _match_rules(q) is None
+    assert needs_previous_turn(q) is False
+    assert needs_previous_turn(q, router_runs=False) is False
+
+
+@pytest.mark.parametrize("q", ["月別の推移を教えて", "曜日別の遅延", "時間帯別の定時率", "ルート別の比較"])
+def test_a_by_x_breakdown_does_not_need_a_previous_turn(q):
     assert needs_previous_turn(q) is False
     assert needs_previous_turn(q, router_runs=False) is False
 
