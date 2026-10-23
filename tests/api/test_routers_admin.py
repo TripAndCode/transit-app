@@ -15,12 +15,13 @@ from api.security import token_hash
 from tests.conftest import _test_pool
 
 
-async def _seed(conn, *, role="user", email=None, suspended=False):
+async def _seed(conn, *, role="user", email=None, name=None, suspended=False):
     email = email or f"u{datetime.now().timestamp()}@x"
     uid = (
         await conn.fetchrow(
-            "INSERT INTO users (email, role, suspended_at) VALUES ($1, $2, $3) RETURNING user_id",
+            "INSERT INTO users (email, name, role, suspended_at) VALUES ($1, $2, $3, $4) RETURNING user_id",
             email,
+            name,
             role,
             datetime.now(timezone.utc) if suspended else None,
         )
@@ -77,6 +78,48 @@ async def test_admin_search(admin_client, aconn):
     r = await admin_client.get("/api/admin/users?q=findme", cookies={"sid": sid})
     assert r.status_code == 200
     assert r.json()["total"] == 1
+
+
+async def _search(admin_client, sid, q):
+    r = await admin_client.get("/api/admin/users", params={"q": q}, cookies={"sid": sid})
+    assert r.status_code == 200
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_a_full_width_query_to_find_a_name(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="t@x", name="Tanaka Taro")
+    body = await _search(admin_client, sid, "ＴＡＮＡＫＡ")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_a_full_width_query_to_find_an_email(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="kanri42@x")
+    body = await _search(admin_client, sid, "ｋａｎｒｉ４２")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_the_stored_name_too(admin_client, aconn):
+    """A name stored in half-width katakana is found by its plain form."""
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="k@x", name="ﾀﾅｶ ﾀﾛｳ")
+    body = await _search(admin_client, sid, "タナカ")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_matches_a_full_width_percent_literally(admin_client, aconn):
+    """A full-width ％ folds to ``%`` and is then escaped, so it matches only a
+    literal percent sign rather than acting as a wildcard."""
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, literal, _ = await _seed(aconn, email="p1@x", name="50%off")
+    await _seed(aconn, email="p2@x", name="50xoff")
+    body = await _search(admin_client, sid, "５０％ｏｆｆ")
+    assert [u["user_id"] for u in body["users"]] == [literal]
 
 
 @pytest.mark.asyncio
