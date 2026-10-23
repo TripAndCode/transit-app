@@ -292,7 +292,7 @@ _ANAPHORA_RE = re.compile(
     r"|これ(?!まで|から|ほど)"
     r"|この(?![\d一二三四五六七八九十数半週月年春夏秋冬]|先|頃|ごろ|ところ|まま|間|あいだ"
     r"|システム|アプリ|サービス|サイト|ページ|画面|ツール)"
-    r"|あの(?![ーう、,\s])"
+    r"|あの(?![ーうさね、,\s])"
     r"|あれ(?![ばるた]|ほど)"
     r"|(?<!そこ)そこ(?!そこ)|そちら|こちら(?!で)|あちら"
     r"|同じ(?:路線|系統|停留所|バス停|駅|日|時間|期間|曜日|区間|便|事業者|条件|の|こと|もの|やつ)"
@@ -306,13 +306,14 @@ _ANAPHORA_RE = re.compile(
 )
 
 # A route the question names itself: a code ("22171", "系統5") or an alias
-# ("A1", "L21"). A count or rank ("ワースト5", "TOP10", "p90"), a year or date
-# ("2025年", "2026-10-20") and a stop number ("停留所1234") are not one, since
+# ("A1", "L21"), in the shapes schema_linker resolves. A count or rank
+# ("ワースト5", "TOP10", "p90", "1000件"), a year, date or duration ("2025年",
+# "2026-10-20", "1200秒") and a stop number ("停留所1234") are not one, since
 # they leave a referenced route unresolved.
 _OWN_ROUTE_RE = re.compile(
-    r"(?<![\d/.-])(?<!停留所)(?<!バス停)\d{4,}(?![\d/.:-]|\s*[年月日])"
+    r"(?<![\d/.-])(?<!停留所)(?<!バス停)\d{4,5}(?![\d/.:-]|\s*[年月日時分秒件本便回人位%])"
     r"|(?:系統|路線|route)\s*\d+|\d+\s*系統"
-    r"|(?<![a-z0-9])(?!p\d)[a-z]{1,2}\d+(?![a-z0-9])"
+    r"|(?<![a-z0-9])(?!p\d)[a-z]\d{1,2}(?![a-z0-9])"
 )
 
 
