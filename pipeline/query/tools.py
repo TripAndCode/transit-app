@@ -28,6 +28,7 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -1398,6 +1399,23 @@ _HANDLERS = {
 _HANDLERS.update(META_HANDLERS)
 
 
+# Arguments a caller writes as free text and that are matched against stored
+# route and stop names. dispatch NFKC-folds them, as router._match_rules folds
+# the question, so a full-width "１０２１" or "Ａ１" and half-width kana arrive
+# in the plain spelling the resolvers and the SQL compare. Every other argument
+# stays exact: an enum's values are ASCII, which NFKC leaves as they are, so
+# folding one could only turn an invalid full-width spelling into a valid one,
+# and dates go to date.fromisoformat as sent.
+_FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
+
+
+def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: unicodedata.normalize("NFKC", v) if k in _FREE_TEXT_ARGS and isinstance(v, str) else v
+        for k, v in arguments.items()
+    }
+
+
 async def dispatch(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1450,6 +1468,7 @@ async def dispatch(
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}
             arguments = {"route": raw_rc, **arguments}
+        arguments = _fold_free_text_args(arguments)
 
         from pipeline.query.schema_linker import resolve_route
 
