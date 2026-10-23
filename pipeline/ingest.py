@@ -104,31 +104,24 @@ def _archive_since(tarballs: list[pathlib.Path], pb_loose: list[pathlib.Path]) -
 
 @contextmanager
 def _savepoint(cur, name: str) -> Iterator[None]:
-    """Run a block as a Postgres SAVEPOINT, isolating its failure from the
-    surrounding (uncommitted) transaction: on success the savepoint is
-    released; on an exception its writes are rolled back, then it's
-    released too, and the exception re-raised for the caller's own
-    try/except to log and count.
+    """Run one file's Postgres work as a SAVEPOINT, so its failure leaves the
+    transaction usable for the files after it.
 
-    Used to isolate one bad tarball member / loose ``.pb`` file from every
-    other member/file already inserted since the last periodic
-    ``conn.commit()`` — a bare ``conn.rollback()`` on one bad item would
-    discard ALL of them, not just the failing one.
+    That work is only reads: the strategy's lookups (static_join's timetable
+    probes, aomori_regex's trip_id pattern). Parsed rows go to ClickHouse
+    through ``_flush``, outside any savepoint, so no rollback here can
+    discard an ingested row. But a lookup that fails aborts the whole
+    transaction, and every later statement on ``conn`` would then fail with
+    "current transaction is aborted" until it ended. ``ROLLBACK TO
+    SAVEPOINT`` clears that state for just this file, and the exception is
+    re-raised for the caller's own try/except to log and count. A failure
+    that never reached Postgres (a corrupt tar member, a decode error) rolls
+    back a savepoint with nothing to undo.
 
-    RELEASE is issued on both paths because ``ROLLBACK TO SAVEPOINT``
-    undoes the writes but does not destroy the savepoint itself; without
-    it, the next iteration's same-named ``SAVEPOINT`` would stack on top
-    of the still-live one instead of replacing it. That stacking is what
-    RELEASE actually prevents — it does *not*, by itself, keep Postgres's
-    64-entry per-backend subtransaction cache from filling up on a long
-    run of *successful* items in one commit window (each successful
-    SAVEPOINT still holds a slot until the next top-level commit). This
-    pipeline's read endpoints serve from precomputed ``agg_*`` tables, not
-    live scans of ``updates`` (see AGENTS.md), so the resulting
-    pg_subtrans-lookup overhead on concurrent readers is low-impact here;
-    lowering the commit cadence below 64 items would close that specific
-    gap but cost more frequent fsyncs, so it's accepted as-is rather than
-    tuned for a cost with no observed impact.
+    RELEASE is issued on both paths because ``ROLLBACK TO SAVEPOINT`` does
+    not destroy the savepoint itself; without it, the next file's same-named
+    ``SAVEPOINT`` would nest inside the still-live one instead of replacing
+    it.
     """
     cur.execute(f"SAVEPOINT {name}")
     try:
@@ -511,22 +504,19 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in seen]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
-                        # _savepoint isolates one bad member's Postgres-side work
-                        # (parse_feed's static_join JOIN, if any) from every good
-                        # member already inserted since the last commit boundary
-                        # in this tarball — extractfile() itself can raise on a
-                        # corrupt member header/index, not just parse_feed, so it
-                        # must be inside the savepoint too. The outer try/except
-                        # still covers genuinely tar-wide failures (a corrupt
-                        # archive tarfile.open can't even read).
+                        # One member per savepoint (see _savepoint), so a member
+                        # whose lookup fails leaves the next member's lookups
+                        # usable. extractfile() can raise on a corrupt member
+                        # header/index, not just parse_feed, so it sits inside
+                        # the same per-member try. The outer try/except covers
+                        # tar-wide failures (a corrupt archive tarfile.open
+                        # can't even read).
                         #
-                        # The ClickHouse insert is deliberately OUTSIDE the
-                        # savepoint: it no longer touches Postgres, so a Postgres
-                        # SAVEPOINT protects nothing for that step. The parsed
-                        # rows are buffered into pending_rows/pending_files and
-                        # only actually inserted (and marked `done`) by _flush(),
-                        # in batches — see _flush()'s docstring
-                        # above for the crash-safety invariant this preserves.
+                        # The ClickHouse insert is outside the savepoint, which
+                        # guards Postgres state only. The parsed rows are
+                        # buffered into pending_rows/pending_files and only
+                        # inserted (and marked `done`) by _flush(), in batches;
+                        # see the crash-safety note above pending_rows.
                         try:
                             with _savepoint(cur, "tar_member"):
                                 fobj = tf.extractfile(member)
@@ -543,6 +533,19 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                             continue
                         _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
+                            # This commit persists nothing: the lookups only
+                            # read, and rows go to ClickHouse. Nor does it change
+                            # what the lookups see, since under READ COMMITTED
+                            # each one takes a fresh snapshot. What it ends is
+                            # the transaction, and with it the ACCESS SHARE lock
+                            # each lookup holds on agencies and the static_*
+                            # tables until commit. While one is held, anything
+                            # needing ACCESS EXCLUSIVE on that table (a
+                            # migration's ALTER TABLE, TRUNCATE, DROP) waits, and
+                            # every later query on the table queues behind it.
+                            # Committing here and after each tarball caps that
+                            # wait at a few hundred files rather than the whole
+                            # run.
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
             except Exception as e:
@@ -565,15 +568,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
             logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
-                # _savepoint isolates one bad file's Postgres-side work from
-                # every good file already inserted since the last commit
-                # boundary in this batch (see _savepoint's docstring for why
-                # RELEASE matters). The ClickHouse insert is outside the
-                # savepoint (see the tarball loop above for why); rows are
-                # buffered into pending_rows/pending_files and only actually
-                # inserted (and marked `done`) by _flush(), in batches shared
-                # with the tarball loop above, so `done` only advances once a
-                # batch is actually persisted.
+                # One file per savepoint, with its rows buffered for _flush(),
+                # as in the tarball loop above; the batches are shared with
+                # that loop, so `done` only advances once a batch is actually
+                # persisted.
                 try:
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
@@ -587,6 +585,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                     continue
                 _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
+                    # Releases the lookups' locks; see the tarball loop above.
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
         conn.commit()

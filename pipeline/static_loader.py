@@ -140,7 +140,13 @@ def load_static(path: str, agency_id: int, conn) -> None:
             When a directory is given, the most recently named
             ``*static*.zip`` inside it is picked.
         agency_id: The agency id rows are scoped to.
-        conn: A psycopg2 connection. The caller commits.
+        conn: A psycopg2 connection. load_static commits the load as one
+            transaction, then runs ANALYZE and commits again, before
+            returning; any uncommitted work the caller already had open on
+            ``conn`` is committed with the load, so it cannot be rolled
+            back alongside it. It never rolls back: if it raises, the
+            caller rolls back before reusing ``conn``, and a failure before
+            the first commit leaves none of the load in place.
 
     Raises:
         FileNotFoundError: If ``path`` does not resolve to a zip file
