@@ -22,15 +22,10 @@ from pipeline.reports.rankings import _round1, _weighted_avg_min
 _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "ja"): "データがありません。期間や路線フィルタを見直してください。",
     ("no_data", "en"): "No data available. Try widening the range or clearing route filters.",
-    ("no_static", "ja"): (
-        "この質問にはGTFS Staticデータが必要です。\n"
-        "`python gtfs_pipeline.py load_static ./raw_archives_static` を先に実行してください。"
-    ),
-    ("no_static", "en"): (
-        "This report needs GTFS static data.\nRun `python gtfs_pipeline.py load_static ./raw_archives_static` first."
-    ),
-    ("ranking_header", "ja"): "【{label}遅延ランキング上位{limit}路線】",
-    ("ranking_header", "en"): "[{label}Delay ranking — top {limit} routes]",
+    ("ranking_header", "ja"): "【{label}遅延ランキング上位{count}路線】",
+    ("ranking_header", "en"): "[{label}Delay ranking — top {count} routes]",
+    ("ranking_header_best", "ja"): "【{label}平均遅延の少ない順 上位{count}路線】",
+    ("ranking_header_best", "en"): "[{label}Lowest average delay — top {count} routes]",
     ("ranking_row", "ja"): "{rank}位: 路線{route} 平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
     ("ranking_row", "en"): "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)",
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
@@ -45,8 +40,6 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
-    ("dow_header_other", "ja"): "【{label}{dow}曜日遅延ランキング】",
-    ("dow_header_other", "en"): "[{label}{dow} delay ranking]",
     ("dow_row", "ja"): "{rank}位: 路線{route} {dow_label}：平均{avg}分（{samples}件）",
     ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} samples)",
     ("compare_header", "ja"): "【平日・土日 遅延差ランキング】",
@@ -62,7 +55,16 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dir_equal", "ja"): "同程度",
     ("dir_equal", "en"): "similar",
     ("service_suffix", "ja"): "{service}の",
-    ("service_suffix", "en"): "{service} ",
+    ("service_suffix", "en"): "{service}: ",
+    # The service filter's values (api.range.ServiceType), named in each locale.
+    ("service_平日", "ja"): "平日",
+    ("service_平日", "en"): "Weekday",
+    ("service_土曜", "ja"): "土曜",
+    ("service_土曜", "en"): "Saturday",
+    ("service_日祝", "ja"): "日祝",
+    ("service_日祝", "en"): "Sunday/Holiday",
+    ("service_土日祝", "ja"): "土日祝",
+    ("service_土日祝", "en"): "Weekend/Holiday",
     ("trend_header", "ja"): "【日次トレンド({from_date} 〜 {to_date})】\n平均: {avg:.2f}分 / 観測日数: {days}日",
     ("trend_header", "en"): "[Daily trend ({from_date} to {to_date})]\nmean: {avg:.2f} min / observed days: {days}",
     ("trend_empty", "ja"): "選択した期間にデータがありません。",
@@ -162,11 +164,12 @@ def _r(x) -> str:
 
 
 def _service_prefix(intent: dict, locale: str) -> str:
-    """Optional '{service}の' / '{service} ' prefix when intent narrows by service."""
+    """Optional '{service}の' / '{service}: ' prefix when intent narrows by service."""
     service = intent.get("service")
     if not service:
         return ""
-    return _t("service_suffix", locale, service=service)
+    name = _LOCALES.get((f"service_{service}", locale), service)
+    return _t("service_suffix", locale, service=name)
 
 
 def _no_data(locale: str = "ja") -> str:
@@ -175,7 +178,8 @@ def _no_data(locale: str = "ja") -> str:
 
 
 def _fmt_ranking(rows: list, intent: dict, locale: str) -> str:
-    """Render a ranking report (worst-delay routes) into locale text.
+    """Render a delay ranking into locale text, worst first, or best first
+    when ``intent["sort_order"]`` is ``"asc"``.
 
     Row shape from ``compute_ranking`` is
     ``(route_code, service, avg_min, p50_min, p90_min, samples)``; ``service``
@@ -195,8 +199,8 @@ def _fmt_ranking(rows: list, intent: dict, locale: str) -> str:
         )
         for i, r in enumerate(rows, 1)
     ]
-    header = _t("ranking_header", locale, label=label, limit=intent.get("limit", 15))
-    return header + "\n" + "\n".join(lines)
+    key = "ranking_header_best" if intent.get("sort_order") == "asc" else "ranking_header"
+    return _t(key, locale, label=label, count=len(rows)) + "\n" + "\n".join(lines)
 
 
 def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
@@ -240,10 +244,10 @@ def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
 
     Each row is ``(route_code, service, dow, avg_min, samples)``. ``dow``
     is an ISODOW int (1..7) or a rollup label string; ``dow_label`` handles
-    both shapes and honours the requested locale.
+    both shapes and honours the requested locale. ``intent["dow_group"]`` is
+    ``"weekday"`` or ``"weekend"``, the two groups compute_dow_ranking takes.
     """
-    dow = intent.get("dow", "")
-    dow_group = intent.get("dow_group")
+    header_key = "dow_header_weekend" if intent["dow_group"] == "weekend" else "dow_header_weekday"
     label = _service_prefix(intent, locale)
     lines = [
         _t(
@@ -257,13 +261,7 @@ def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
         )
         for i, r in enumerate(rows, 1)
     ]
-    if dow_group == "weekend":
-        header = _t("dow_header_weekend", locale, label=label)
-    elif dow_group == "weekday":
-        header = _t("dow_header_weekday", locale, label=label)
-    else:
-        header = _t("dow_header_other", locale, label=label, dow=dow)
-    return header + "\n" + "\n".join(lines)
+    return _t(header_key, locale, label=label) + "\n" + "\n".join(lines)
 
 
 def _fmt_compare_ranking(rows: list, intent: dict, locale: str) -> str:
@@ -305,13 +303,10 @@ FORMATTERS = {
 def format_result(query_type: str, rows, intent: dict, locale: str = "ja") -> str:
     """Public entry point: dispatch a result tuple list to its renderer.
 
-    ``rows is None`` signals the caller had no static GTFS data loaded.
     Unknown ``query_type`` and empty ``rows`` both fall back to :func:`_no_data`.
     ``locale`` ∈ {``"ja"``, ``"en"``} switches the rendered language; defaults
     to ``"ja"`` to preserve pre-i18n callers (tests, ad-hoc shells).
     """
-    if rows is None:
-        return _t("no_static", locale)
     fmt = FORMATTERS.get(query_type)
     if not fmt:
         return _no_data(locale)
