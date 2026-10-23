@@ -367,8 +367,8 @@ async def _dispatch_and_respond(
 
 
 #: The arg names that pin an answer to absolute dates: the tools' own
-#: ``from``/``to``, and the ``from_date``/``to_date`` spelling
-#: ``_apply_date_overrides`` also accepts.
+#: ``from``/``to``, and the ``from_date``/``to_date`` spelling an LLM signature
+#: or a cached one may carry, which ``_apply_date_overrides`` also accepts.
 _DATED_ARG_KEYS = frozenset({"from", "to", "from_date", "to_date"})
 
 

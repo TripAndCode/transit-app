@@ -825,8 +825,8 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     present the original ctx is returned unchanged.
     """
     days_back = args.get("days_back")
-    # Accept both key forms: canonicalize writes "from_date"/"to_date";
-    # legacy/LLM-direct callers may pass "from"/"to" (no underscores).
+    # Accept both key forms: the TOOLS schema names "from"/"to", and an LLM
+    # signature or a cached one may spell them "from_date"/"to_date".
     raw_from = args.get("from_date") or args.get("from")
     raw_to = args.get("to_date") or args.get("to")
     if days_back is None and not raw_from and not raw_to:
