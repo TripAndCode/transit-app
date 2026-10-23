@@ -1,9 +1,10 @@
-"""Applies db/clickhouse/schema.sql, which creates every ClickHouse table:
-the observation tables (`updates`, `updates_live`), the aggregate and
-internal tables pipeline.ch_aggregates computes (its ALL_TABLES), and
-`static_stop_times`, the schedule mirror those aggregates join. analyze
-refuses to run while any table in ALL_TABLES is missing, so this is also how
-a store gets them.
+"""Applies db/clickhouse/schema.sql, which creates the app's persistent
+ClickHouse tables: the observation tables (`updates`, `updates_live`), the
+aggregate and internal tables pipeline.ch_aggregates computes (its
+ALL_TABLES), and `static_stop_times`, the schedule mirror those aggregates
+join. The work tables ch_aggregates builds and drops during a run are not
+here. analyze refuses to run while any table in ALL_TABLES is missing, so
+this is also how a store gets them.
 
 Every statement is CREATE TABLE IF NOT EXISTS, so re-applying is idempotent
 and there is no migration chain. It creates a missing table and leaves an
