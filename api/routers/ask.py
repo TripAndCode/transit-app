@@ -1,11 +1,11 @@
-"""Ask tab — natural-language Japanese questions answered via tool-use.
+"""Ask tab — natural-language questions answered by the tools in
+:data:`pipeline.query.tools.TOOLS`.
 
-v1 used a single intent classifier that fell off a cliff for anything
-outside ~15 known templates. v2 uses tool-use mode against the six
-tools defined in :mod:`pipeline.query.tools`. Out-of-scope questions
-get a friendly text refusal with 2–3 supported suggestions.
+A question the deterministic router can match runs its tool directly; the
+rest go to the LLM in tool-use mode over the same tools. Out-of-scope
+questions get a friendly text refusal with 2–3 supported suggestions.
 
-The request body now carries the global :class:`~api.range.RangeCtx`
+The request body carries the global :class:`~api.range.RangeCtx`
 (time range / DOW / time-band) so the LLM and tools can scope to the
 user's chosen window without having to mention it in the prompt.
 """
@@ -79,9 +79,10 @@ class Turn(BaseModel):
         return v
 
 
-# Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
-# — an enum, not a free-form string, so an arbitrary/oversized value can never
-# reach the system prompt that chat_with_tools builds from this hint.
+# The tab hints the Copilot panel may send (frontend/src/components/CopilotPanel.tsx),
+# not the SPA's route names: the closed set the system prompt accepts. An enum,
+# not a free-form string, so an arbitrary/oversized value can never reach the
+# system prompt that chat_with_tools builds from this hint.
 PanelTab = Literal["overview", "map", "ask", "live", "analysis", "network"]
 
 
@@ -193,7 +194,7 @@ async def ask(
     skip_router = follow_up or (history_enabled and bool(history) and needs_history(body.question))
     # A forced tool call only makes sense when there is an actual prior tool
     # invocation to continue (e.g. re-paginating the same describe_data
-    # call). is_follow_up()'s regex also matches ordinary continuation
+    # call). is_follow_up()'s regex also matches ordinary follow-up
     # phrasing ("さらに", "それを", "他には") that can legitimately follow a
     # free-text answer (e.g. an out-of-scope refusal, history[-1]["tool"] is
     # None) — forcing a tool call there would remove the model's only
@@ -207,13 +208,13 @@ async def ask(
     _prior_tool = history[-1].get("tool") if follow_up else None
     force_tool_call = bool(_prior_tool) and "offset" in _PAGINATABLE_TOOL_DEFAULTS.get(_prior_tool or "", {})
 
-    # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
-    # continue: short-circuit to a gentle prompt. Otherwise the question
-    # falls to the open LLM with no examples, which hallucinates a page the
-    # user never asked for (e.g. describe_data(routes, offset=100)). Only a
-    # running router can answer one on its own; see needs_previous_turn().
-    previous_turn_needed = needs_previous_turn(body.question) if router_enabled else is_follow_up(body.question)
-    if history_enabled and not history and previous_turn_needed:
+    # Follow-up phrasing ("もっと", "次の50件", a bare "降順") with NO prior
+    # result to continue: short-circuit to a gentle prompt. Otherwise the
+    # question falls to the open LLM with no examples, which hallucinates a
+    # page the user never asked for (e.g. describe_data(routes, offset=100)).
+    # needs_previous_turn() lets through the ones a first turn can answer: a
+    # refinement that names its own subject, or one a Stage-1 rule answers.
+    if history_enabled and not history and needs_previous_turn(body.question, router_runs=router_enabled):
         msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
         if log_enabled:

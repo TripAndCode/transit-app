@@ -570,7 +570,7 @@ export function MapTab() {
               <span>{trip.route_code ? <RouteLabel code={trip.route_code} names={routeNames} compact /> : routeNames.format(null)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
-            {trip.route_code && <Link to={routeHref(String(id), trip.route_code, "", "stops")}>{td("openAnalysis")}</Link>}
+            {trip.route_code && <Link to={routeHref(String(id), trip.route_code)}>{td("openAnalysis")}</Link>}
           </div>)}
           {cappedDelayedRows.remaining > 0 && (
             <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>

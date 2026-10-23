@@ -394,6 +394,33 @@ def test_build_and_apply_plan_remove_only_clean_recoverable_state(
     assert git(repository, "branch", "--list", "unique-work")
 
 
+def test_untracked_work_is_seen_whatever_the_clone_configures_for_untracked_files(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`status.showUntrackedFiles=no` is a common large-repo setting, and Git
+    refuses it alongside `--ignored`. The dirty check names its own untracked
+    mode, so the plan still runs and an untracked file still keeps its
+    worktree."""
+
+    git(repository, "config", "status.showUntrackedFiles", "no")
+    untracked, clean = tmp_path / "untracked-tree", tmp_path / "clean-tree"
+    git(repository, "worktree", "add", "-q", "-b", "untracked-work", str(untracked), "main")
+    git(repository, "worktree", "add", "-q", "-b", "clean-work", str(clean), "main")
+    age_worktrees(untracked, clean)
+    (untracked / "notes.txt").write_text("do not discard\n", encoding="utf-8")
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    decisions = {decision.branch: decision for decision in plan}
+
+    assert decisions["untracked-work"].action == "keep"
+    assert "uncommitted or untracked" in decisions["untracked-work"].reason
+    assert decisions["clean-work"].action == "delete"
+    cleanup.apply_plan(repository, plan)
+    assert (untracked / "notes.txt").exists()
+    assert not clean.exists()
+
+
 def test_a_worktree_holding_ignored_work_is_kept_but_regenerable_files_are_not(
     repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

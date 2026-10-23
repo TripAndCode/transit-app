@@ -80,7 +80,12 @@ DEFAULT_CACHE_BASENAME = Path(".cache") / "ops-status-github.json"
 
 # GitHub's own conclusion values that mean "this check did not pass" -- SUCCESS,
 # NEUTRAL, SKIPPED, and STALE are all "did not block the PR", not a failure.
-FAILING_CHECK_CONCLUSIONS = frozenset({"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"})
+FAILING_CHECK_CONCLUSIONS = frozenset(
+    {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+)
+# A rollup entry that is a commit status (a StatusContext node, from an external CI or
+# deploy integration) has no `conclusion`; its `state` carries the verdict instead.
+FAILING_STATUS_STATES = frozenset({"FAILURE", "ERROR"})
 
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 
@@ -328,7 +333,11 @@ def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
             conflicting_numbers.append(number)
         checks = pr.get("statusCheckRollup")
         if isinstance(checks, list) and isinstance(number, int):
-            failing = any(isinstance(c, dict) and c.get("conclusion") in FAILING_CHECK_CONCLUSIONS for c in checks)
+            failing = any(
+                isinstance(c, dict)
+                and (c.get("conclusion") in FAILING_CHECK_CONCLUSIONS or c.get("state") in FAILING_STATUS_STATES)
+                for c in checks
+            )
             if failing:
                 failing_numbers.append(number)
 

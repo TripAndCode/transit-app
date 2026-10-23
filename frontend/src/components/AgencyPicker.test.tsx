@@ -46,7 +46,7 @@ describe("AgencyPicker", () => {
     ["/agencies/1/time?routes=50", "/agencies/9/time"],
     ["/agencies/1/reports?doc=council&from=2026-08-01", "/agencies/9/reports?doc=council"],
     ["/agencies/1/compare?by=agencies&from=2026-08-01", "/agencies/9/compare?by=agencies"],
-    ["/agencies/1/routes/50?tab=stops&routes=50", "/agencies/9/routes"],
+    ["/agencies/1/routes/50?sub_tab=marey&routes=50", "/agencies/9/routes"],
   ])("switches agency from %s onto %s, dropping the filters", async (from, to) => {
     const user = userEvent.setup();
     renderPicker(from);

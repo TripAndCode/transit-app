@@ -70,7 +70,7 @@ but are not plotted.
   fallback, writing to `updates_live` as well, then the client reads the
   newly persisted data.
 - A delayed trip's row in the attention panel links to
-  `/agencies/:agencyId/routes/<route_code>?tab=stops`, that route's dossier
+  `/agencies/:agencyId/routes/<route_code>`, that route's dossier
   (built by `routeHref` in `frontend/src/routes/destinations.ts`), the one
   deep link from this tab into a historical view.
 

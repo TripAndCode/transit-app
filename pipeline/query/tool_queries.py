@@ -184,7 +184,9 @@ async def segment_hotspots(
     """Worst stop_sequences by average delay for one route over ctx.
 
     Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
-    avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
+    avg_min DESC, limited to `limit`. stop_name is None when stops.txt gives
+    the stop no name; the caller names it in the request's language with
+    `pipeline.query.tools.unnamed_stop_name`. Only stop_sequences with > 5 samples
     are returned — this tool's own noise gate on its live ClickHouse scan,
     not an inherited one: no aggregate table applies an insert-time sample
     gate. Backs tools._tool_segment_hotspots.
@@ -217,7 +219,7 @@ async def segment_hotspots(
     trip_ids = [r[1] for r in ch_rows]
     stop_sequences = [r[0] for r in ch_rows]
     name_rows = await conn.fetch(
-        "SELECT u.stop_sequence, COALESCE(MAX(ss.stop_name), u.stop_sequence::text || '番停留所') AS stop_name "
+        "SELECT u.stop_sequence, MAX(ss.stop_name) AS stop_name "
         "FROM UNNEST($2::text[], $3::int[]) AS u(trip_id, stop_sequence) "
         "LEFT JOIN static_stop_times sst "
         "  ON sst.trip_id = u.trip_id AND sst.stop_sequence = u.stop_sequence AND sst.agency_id = $1 "
@@ -229,7 +231,7 @@ async def segment_hotspots(
     )
     name_by_seq = {r["stop_sequence"]: r["stop_name"] for r in name_rows}
     return [
-        (stop_sequence, name_by_seq.get(stop_sequence, f"{stop_sequence}番停留所"), _round2(avg_min), samples)
+        (stop_sequence, name_by_seq.get(stop_sequence), _round2(avg_min), samples)
         for stop_sequence, _trip_id, avg_min, samples in ch_rows
     ]
 

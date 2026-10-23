@@ -14,7 +14,10 @@ def test_boot_warns_when_sign_in_is_required_but_sso_is_unset(monkeypatch, caplo
 
 
 def test_boot_is_quiet_when_sso_is_configured(monkeypatch, caplog):
+    # The gate is pinned on so that configured SSO is the only thing that can
+    # silence the warning; an inherited LOGIN_REQUIRED=false would pass alone.
     monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    monkeypatch.setenv("LOGIN_REQUIRED", "true")
     flags.reset_cache()
     with caplog.at_level(logging.WARNING, logger="api.main"):
         api.main._warn_if_login_gate_inactive(sso_enabled=True)

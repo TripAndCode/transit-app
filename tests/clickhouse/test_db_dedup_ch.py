@@ -291,6 +291,83 @@ def test_include_arr_delay_implausible_value_nulls_arr_delay_without_dropping_ro
     client.close()
 
 
+def _extended_hour_poll(file_name, captured_at, *, dep_delay, scheduled_sec):
+    """One static_join poll of trip T1's stop 1 with an extended-hour (24:00 or
+    later) departure: scheduled_time is NULL for every such poll, so only
+    scheduled_sec tells two schedules apart."""
+    # Shaped for insert_updates: scheduled_time, stop_id, arr_delay, the two
+    # schedule relationships, feed_timestamp, scheduled_sec, static_version_id.
+    return (
+        file_name,
+        captured_at,
+        "T1",
+        "weekday",
+        None,
+        "R1",
+        1,
+        dep_delay,
+        "S1",
+        None,
+        None,
+        None,
+        None,
+        scheduled_sec,
+        None,
+    )
+
+
+def _dedup_scheduled_sec(polls):
+    """The (scheduled_sec, dep_delay) of each dedup row over *polls*, inserted in order."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import insert_updates
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(client, 1, polls)
+    try:
+        result = client.query(build_dedup_ch_sql(include_scheduled_sec=True), parameters={"agency_id": 1})
+        rows = [dict(zip(result.column_names, row, strict=True)) for row in result.result_rows]
+    finally:
+        client.close()
+    return [(r["scheduled_sec"], r["dep_delay"]) for r in rows]
+
+
+# 00:25 and 00:28 JST on 2 April: both inside the 1 April service day, the day
+# a 24:30 departure belongs to.
+_FIRST_POLL = datetime(2026, 4, 1, 15, 25, 0, tzinfo=timezone.utc)
+_LATEST_POLL = datetime(2026, 4, 1, 15, 28, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_dedup_ch_takes_an_extended_hour_events_schedule_from_its_latest_poll():
+    """A static reload moves the departure from 24:30:00 to 24:35:00 between two
+    polls. Both share one group, so the schedule must come from the same latest
+    poll as the delay, never the older one."""
+    rows = _dedup_scheduled_sec(
+        [
+            _extended_hour_poll("a/1.pb", _FIRST_POLL, dep_delay=60, scheduled_sec=88200),
+            _extended_hour_poll("a/2.pb", _LATEST_POLL, dep_delay=120, scheduled_sec=88500),
+        ]
+    )
+    assert rows == [(88500, 120)]
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_dedup_ch_keeps_a_latest_poll_with_no_schedule_unscheduled():
+    """A reload that leaves the stop with no departure time (a non-timepoint
+    stop) stores the latest poll with scheduled_sec NULL, in the same group as
+    the older extended-hour poll. The event then has no schedule; the older
+    poll's 24:30:00 must not stand in for it."""
+    rows = _dedup_scheduled_sec(
+        [
+            _extended_hour_poll("a/1.pb", _FIRST_POLL, dep_delay=60, scheduled_sec=88200),
+            _extended_hour_poll("a/2.pb", _LATEST_POLL, dep_delay=120, scheduled_sec=None),
+        ]
+    )
+    assert rows == [(None, 120)]
+
+
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_dedup_cte_ch_picks_latest_observation():
     """`pipeline.reports.filters._dedup_cte_ch` composes

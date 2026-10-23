@@ -30,9 +30,9 @@ function easeOutCubic(t: number): number {
  * `prefers-reduced-motion: reduce`, and whenever `duration` is 0.
  *
  * Formatting -- decimal places, locale grouping, a unit suffix -- is the
- * caller's job; this hook only ever returns a plain number. Prefer
- * `n.toLocaleString(i18n.language)` over a bare `toLocaleString()` at the
- * call site so digit grouping follows the active UI language.
+ * caller's job; this hook only ever returns a plain number. Format it with
+ * `formatNumber()` or `formatMinutes()` from utils/format.ts, which follow
+ * the active UI language; the lint config rejects a direct `toLocale*()`.
  */
 export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseCountUpOptions = {}): number {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
