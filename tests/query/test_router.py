@@ -609,6 +609,7 @@ async def test_an_unresolvable_chunk_neither_dispatches_nor_blocks_a_golden_matc
         "じゃあ別の系統",
         "また別の停留所",
         "全く別の時間帯",
+        "全然別の路線",
     ],
 )
 def test_is_follow_up_true(q):

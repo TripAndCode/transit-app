@@ -126,7 +126,7 @@ _RULES: list[Rule] = [
         # A delay or on-time word marks a metric question and a named route a
         # single-route one; neither asks about the dataset. A bare digit run
         # may be a date, so it does not count.
-        unless=re.compile(r"遅延|遅れ|遅く|定時率|(?:路線|系統)\s*\d+"),
+        unless=re.compile(rf"{_DELAY_WORDS}|定時率|(?:路線|系統)\s*\d+"),
     ),
     Rule(
         name="meta-metrics",
@@ -233,17 +233,19 @@ _validate_rules()
 # matching the rest of the question would answer something else.
 _BACK_REFERENCE_WORDS = r"他には|さっき|前の(?:やつ|結果|に戻)|同じ(?:条件|系統|の|こと)|それを|そのまま"
 
-# Phrasings that only make sense against the previous turn: continuing its
-# list (pagination, "show me more") or refining it (re-sort, filter, "another
-# one"). Four alternatives are narrowed because a self-contained question can
+# Phrasings that read as continuing the previous turn's list (pagination,
+# "show me more") or refining it (re-sort, filter, "another one");
+# needs_previous_turn() decides which of them cannot be answered without that
+# turn. Four alternatives are narrowed because a self-contained question can
 # contain a look-alike word:
 #   * もっと must not swallow もっとも ("most" — a superlative, not "more").
 #   * 次の/前の must not catch literal "next/previous stop" data questions.
 #     They only count as follow-ups before continuation/pagination words.
 #   * 別の must not catch 別の府 ("another prefecture", as in 別の府県のデータ),
 #     nor 別 as the suffix of a kanji or katakana word: 月別の/路線別の/ルート別の
-#     are "by X" breakdowns and 特別の is "special". After hiragana or at the
-#     start (それとは別の, 別の日) it still reads as "another".
+#     are "by X" breakdowns and 特別の is "special". After hiragana, after
+#     全然 ("completely"), or at the start (それとは別の, 全然別の, 別の日) it
+#     still reads as "another".
 #   * English words count only whole and at the end of the question, so
 #     "next"/"more" do but "same-day comparison" or "next stop information"
 #     do not (favors false negatives, which are safe).
@@ -261,7 +263,7 @@ _CONTINUATION_WORDS = (
 )
 _REFINEMENT_WORDS = (
     r"逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込|さらに"
-    rf"|(?<![{_KANJI_OR_KATAKANA}])別の(?!府)"
+    rf"|(?:(?<=全然)|(?<![{_KANJI_OR_KATAKANA}]))別の(?!府)"
     rf"|\breverse{_ENGLISH_FOLLOW_UP_END}"
 )
 _FOLLOW_UP_RE = re.compile(rf"{_CONTINUATION_WORDS}|{_BACK_REFERENCE_WORDS}|{_REFINEMENT_WORDS}")

@@ -193,7 +193,7 @@ async def ask(
     skip_router = follow_up or (history_enabled and bool(history) and needs_history(body.question))
     # A forced tool call only makes sense when there is an actual prior tool
     # invocation to continue (e.g. re-paginating the same describe_data
-    # call). is_follow_up()'s regex also matches ordinary continuation
+    # call). is_follow_up()'s regex also matches ordinary follow-up
     # phrasing ("さらに", "それを", "他には") that can legitimately follow a
     # free-text answer (e.g. an out-of-scope refusal, history[-1]["tool"] is
     # None) — forcing a tool call there would remove the model's only
