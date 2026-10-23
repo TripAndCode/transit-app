@@ -375,13 +375,13 @@ async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_c
     # Real static-schedule data for the stop_sequence=2 hotspot, so the
     # assertion below exercises the actual Postgres stop-name-resolution
     # join (the whole reason this is a two-step query, not a single
-    # ClickHouse aggregate) rather than only its SQL-side fallback
-    # ('{stop_sequence}番停留所'). ClickHouse's any(trip_id) picks an
-    # arbitrary one of the 6 seeded "hot" trips as the representative row
-    # for the group, so a static_stop_times row is inserted for ALL 6 (not
-    # just trip_hot_0) -- otherwise whichever trip any() happens to pick
-    # could miss the join and the test would flake between the real name
-    # and the fallback depending on ClickHouse's internal row order.
+    # ClickHouse aggregate) rather than only its no-name result (None).
+    # ClickHouse's any(trip_id) picks an arbitrary one of the 6 seeded
+    # "hot" trips as the representative row for the group, so a
+    # static_stop_times row is inserted for ALL 6 (not just trip_hot_0) --
+    # otherwise whichever trip any() happens to pick could miss the join and
+    # the test would flake between the real name and None depending on
+    # ClickHouse's internal row order.
     await aconn.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_hot', 'テスト停留所')",
         aagency_id,
@@ -399,6 +399,33 @@ async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_c
     assert result[0][1] == "テスト停留所"
     assert result[0][2] == 5.0
     assert result[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_segment_hotspots_leaves_a_stop_with_no_stop_name_unnamed(aconn, aagency_id, ch_client, ch_async_client):
+    """No stops.txt name for the hotspot's stop (here, no static_stop_times row
+    at all) comes back as None: naming it is the caller's job, in the caller's
+    language."""
+    from pipeline.query.tool_queries import segment_hotspots
+
+    now = jst_midday()
+    for i in range(6):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 4, 240)",
+            aagency_id,
+            f"pb_nameless_{i}",
+            now + timedelta(minutes=i),
+            f"trip_nameless_{i}",
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=jst_today() - timedelta(days=1), to_date=jst_today() + timedelta(days=1))
+    result = await segment_hotspots(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert [(r[0], r[1]) for r in result] == [(4, None)]
 
 
 @pytest.mark.asyncio

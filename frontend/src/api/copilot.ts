@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import { useTranslation } from "react-i18next";
+import { requestLanguage } from "./requestLanguage";
 
 type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
@@ -46,7 +47,7 @@ export function useCopilotInsight(
   viewPayload: unknown,
 ): { insight: CopilotInsight | null; loading: boolean; error: unknown } {
   const { i18n } = useTranslation();
-  const key = buildKey(agencyId, tab, viewPayload, i18n.resolvedLanguage ?? i18n.language);
+  const key = buildKey(agencyId, tab, viewPayload, requestLanguage(i18n));
 
   // Only the request *key* is debounced here; useQuery (queryKey
   // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,
