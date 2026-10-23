@@ -27,12 +27,10 @@ LOCALIZED_GET_ROUTES = {
     ("GET", "/api/{agency_id}/weather_delay"),
 }
 
-# Take the locale but write no text in it: the overview payload's strings are
-# all rendered client-side, and the build schema returns both languages'
-# labels at once. Their frontend keys carry no language.
+# Take the locale but write no text in it: the build schema returns both
+# languages' labels at once. Its frontend key carries no language.
 LOCALE_UNUSED_GET_ROUTES = {
     ("GET", "/api/{agency_id}/ask/build-schema"),
-    ("GET", "/api/{agency_id}/overview/summary"),
 }
 
 # Not cached as GET responses: Ask answers and follow-ups are mutations, and

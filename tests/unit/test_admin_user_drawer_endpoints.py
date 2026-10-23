@@ -161,35 +161,55 @@ def test_list_sessions_never_returns_the_full_sid():
     assert all("abcdefghijklmnop" != v for v in body[0].values())
 
 
+_PREFIX = "abcdef012345"
+_HASH = _PREFIX + "a" * 52
+
+
 def test_revoke_session_by_unique_prefix_succeeds():
-    conn = _FakeConn(sessions=[{"sid_hash": "abc123xxxxxx", "user_id": 7}])
-    r = _client(conn).delete("/api/admin/users/7/sessions/abc123", headers=_ORIGIN)
+    conn = _FakeConn(sessions=[{"sid_hash": _HASH, "user_id": 7}])
+    r = _client(conn).delete(f"/api/admin/users/7/sessions/{_PREFIX}", headers=_ORIGIN)
     assert r.status_code == 204
     assert conn.sessions == []
+    assert len(conn.audit) == 1
 
 
 def test_revoke_session_unknown_prefix_404s():
-    conn = _FakeConn(sessions=[{"sid_hash": "abc123xxxxxx", "user_id": 7}])
-    r = _client(conn).delete("/api/admin/users/7/sessions/zzz", headers=_ORIGIN)
+    conn = _FakeConn(sessions=[{"sid_hash": _HASH, "user_id": 7}])
+    r = _client(conn).delete("/api/admin/users/7/sessions/fedcba987654", headers=_ORIGIN)
     assert r.status_code == 404
+    assert r.json()["detail"] == "session not found"
     assert conn.sessions  # untouched
+    assert conn.audit == []
 
 
-def test_revoke_session_ambiguous_prefix_404s_and_deletes_nothing():
+def test_revoke_session_ambiguous_prefix_409s_and_deletes_nothing():
     conn = _FakeConn(
         sessions=[
-            {"sid_hash": "abc111", "user_id": 7},
-            {"sid_hash": "abc222", "user_id": 7},
+            {"sid_hash": _PREFIX + "1" * 52, "user_id": 7},
+            {"sid_hash": _PREFIX + "2" * 52, "user_id": 7},
         ]
     )
-    r = _client(conn).delete("/api/admin/users/7/sessions/abc", headers=_ORIGIN)
-    assert r.status_code == 404
+    r = _client(conn).delete(f"/api/admin/users/7/sessions/{_PREFIX}", headers=_ORIGIN)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "prefix matches multiple sessions"
     assert len(conn.sessions) == 2
+    assert conn.audit == []
+
+
+def test_revoke_session_refuses_a_short_prefix_before_looking_anything_up():
+    """Refused as on the self-service route, so a one-character guess cannot
+    revoke whichever session it happens to be the only match for."""
+    conn = _FakeConn(sessions=[{"sid_hash": _HASH, "user_id": 7}])
+    r = _client(conn).delete("/api/admin/users/7/sessions/a", headers=_ORIGIN)
+    assert r.status_code == 400
+    assert r.json()["detail"] == "prefix too short"
+    assert conn.sessions  # untouched
+    assert conn.audit == []
 
 
 def test_revoke_session_requires_csrf_origin():
-    conn = _FakeConn(sessions=[{"sid_hash": "abc123", "user_id": 7}])
-    r = _client(conn).delete("/api/admin/users/7/sessions/abc123")
+    conn = _FakeConn(sessions=[{"sid_hash": _HASH, "user_id": 7}])
+    r = _client(conn).delete(f"/api/admin/users/7/sessions/{_PREFIX}")
     assert r.status_code == 403
     assert conn.sessions  # untouched
 

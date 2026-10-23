@@ -161,3 +161,100 @@ async def test_sessions_listed_then_revoked(me_client, aconn):
         headers={"Origin": "http://test"},
     )
     assert r2.status_code == 204
+
+
+# A shared display-length prefix with letters in it, so uppercasing it changes it.
+_PREFIX = "abcdef012345"
+
+
+async def _seed_hash(conn, uid, sid_hash):
+    await conn.execute(
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        sid_hash,
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=30),
+    )
+
+
+async def _hashes(conn, uid):
+    return set(await conn.fetchval("SELECT array_agg(sid_hash) FROM sessions WHERE user_id=$1", uid) or [])
+
+
+async def _revoke(me_client, sid, prefix):
+    return await me_client.delete(f"/api/me/sessions/{prefix}", cookies={"sid": sid}, headers={"Origin": "http://test"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prefix", "detail"),
+    [
+        (_PREFIX[:11], "prefix too short"),
+        (_PREFIX[:11] + "g", "invalid prefix"),
+        (_PREFIX[:11] + "_", "invalid prefix"),
+        (_PREFIX.upper(), "invalid prefix"),
+    ],
+)
+async def test_revoking_a_session_refuses_a_prefix_no_stored_hash_can_have(me_client, aconn, prefix, detail):
+    """Uppercase is rejected, not folded: a stored hash is lowercase hex."""
+    sid, uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, uid, _PREFIX + "a" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(me_client, sid, prefix)
+    assert (r.status_code, r.json()["detail"]) == (400, detail)
+    assert await _hashes(aconn, uid) == before
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_404s_when_no_session_matches(me_client, aconn):
+    sid, uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, uid, _PREFIX + "a" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(me_client, sid, "fedcba987654")
+    assert (r.status_code, r.json()["detail"]) == (404, "session not found")
+    assert await _hashes(aconn, uid) == before
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_by_a_unique_prefix_removes_only_that_session(me_client, aconn):
+    sid, uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, uid, _PREFIX + "a" * 52)
+    r = await _revoke(me_client, sid, _PREFIX)
+    assert r.status_code == 204
+    assert await _hashes(aconn, uid) == {token_hash(sid)}
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_409s_on_an_ambiguous_prefix(me_client, aconn):
+    sid, uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, uid, _PREFIX + "a" * 52)
+    await _seed_hash(aconn, uid, _PREFIX + "c" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(me_client, sid, _PREFIX)
+    assert (r.status_code, r.json()["detail"]) == (409, "prefix matches multiple sessions")
+    assert await _hashes(aconn, uid) == before
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_never_reaches_another_users_session(me_client, aconn):
+    sid, _uid = await _seed_user_and_session(aconn)
+    _other_sid, other_uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, other_uid, _PREFIX + "b" * 52)
+    before = await _hashes(aconn, other_uid)
+    r = await _revoke(me_client, sid, _PREFIX)
+    assert (r.status_code, r.json()["detail"]) == (404, "session not found")
+    assert await _hashes(aconn, other_uid) == before
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_counts_matches_among_the_callers_sessions_only(me_client, aconn):
+    """Another user holding a session with the same prefix makes it neither
+    ambiguous nor theirs to lose."""
+    sid, uid = await _seed_user_and_session(aconn)
+    _other_sid, other_uid = await _seed_user_and_session(aconn)
+    await _seed_hash(aconn, uid, _PREFIX + "a" * 52)
+    await _seed_hash(aconn, other_uid, _PREFIX + "b" * 52)
+    other_before = await _hashes(aconn, other_uid)
+    r = await _revoke(me_client, sid, _PREFIX)
+    assert r.status_code == 204
+    assert await _hashes(aconn, uid) == {token_hash(sid)}
+    assert await _hashes(aconn, other_uid) == other_before

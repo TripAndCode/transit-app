@@ -401,7 +401,9 @@ export type AgencyClampDay = { date: string; clamp_pct: number | null };
 
 type AgencyStaticVersion = {
   version: string;
-  loaded_at: string | null;
+  /** When analyze last summarized this version, restamped by every run while
+   *  it is current; not when the timetable was loaded. */
+  analyzed_at: string | null;
   trips: number | null;
   vehicle_km: number | null;
   /** Null for a superseded version: the raw static rows a route count needs
@@ -487,7 +489,7 @@ export type AgencyHealthRow = {
     last_probed_at: string | null;
   };
   clamp_history: AgencyClampDay[];
-  static_version: { version: string; loaded_at: string | null } | null;
+  static_version: { version: string; analyzed_at: string | null } | null;
   /** JST day (`YYYY-MM-DD`) the current timetable was loaded, when known. */
   static_loaded_on: string | null;
   /** A job is working on this agency; a new run would be refused. */

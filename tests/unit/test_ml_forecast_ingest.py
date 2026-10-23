@@ -1,4 +1,11 @@
-from pipeline.ml_forecast_ingest import fetch_latest_manifest, prune_forecast_ml_sql
+import io
+import logging
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
+
+from pipeline.ml_forecast_ingest import fetch_latest_manifest, ingest_forecast, prune_forecast_ml_sql
 
 
 def test_prune_sql_deletes_rows_for_a_service_date_in_the_past():
@@ -86,3 +93,61 @@ def test_fetch_latest_manifest_follows_pagination_across_multiple_pages():
     )
     result = fetch_latest_manifest(s3, "transit-ml")
     assert result == {"rows": 1, "origin_date": "2026-10-12", "prefix": "forecasts/2026-10-12"}
+
+
+_GOOD_ROW = {
+    "agency_id": 8,
+    "route_code": "R1",
+    "service_date": "2026-10-12",
+    "hour": 8,
+    "mean_min": 3.0,
+    "q10": 1.0,
+    "q50": 3.0,
+    "q90": 5.0,
+    "model_version": "2026-10-10",
+    "origin_date": "2026-10-11",
+    "generated_at": "2026-10-11T02:00:00",
+}
+
+
+def _published(row: dict) -> _FakeS3:
+    buf = io.BytesIO()
+    pq.write_table(pa.Table.from_pylist([row]), buf)
+    return _FakeS3(
+        {
+            "forecasts/2026-10-11/manifest.json": b'{"rows": 1, "origin_date": "2026-10-11"}',
+            "forecasts/2026-10-11/forecast.parquet": buf.getvalue(),
+        }
+    )
+
+
+class _UntouchedConn:
+    """A connection the ingest must never reach for a publish it cannot read."""
+
+    touched = False
+
+    def cursor(self):
+        self.touched = True
+        raise AssertionError("cursor() on a corrupt publish")
+
+    def commit(self):
+        self.touched = True
+
+    def rollback(self):
+        self.touched = True
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param({k: v for k, v in _GOOD_ROW.items() if k != "q90"}, id="missing-column"),
+        pytest.param({**_GOOD_ROW, "origin_date": "11/10/2026"}, id="non-iso-origin-date"),
+        pytest.param({**_GOOD_ROW, "generated_at": "yesterday"}, id="non-iso-generated-at"),
+    ],
+)
+def test_ingest_forecast_answers_a_corrupt_publish_with_zero_and_logs_it(row, caplog):
+    conn = _UntouchedConn()
+    with caplog.at_level(logging.ERROR, logger="pipeline.ml_forecast_ingest"):
+        assert ingest_forecast(conn, _published(row), "transit-ml") == 0
+    assert "could not read the latest forecast" in caplog.text
+    assert conn.touched is False

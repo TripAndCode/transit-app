@@ -298,7 +298,7 @@ describe("RunChain", () => {
 describe("stage cells", () => {
   const health = {
     static_loaded_on: "2026-09-18",
-    static_version: { version: "gtfs_static_20260918", loaded_at: null },
+    static_version: { version: "gtfs_static_20260918", analyzed_at: null },
     latest_data_date: "2026-09-16",
     freshness: "stale",
   } as AgencyHealthRow;
