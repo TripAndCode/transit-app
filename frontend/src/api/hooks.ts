@@ -6,6 +6,7 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
@@ -285,8 +286,13 @@ export function useRouteShape(
   route: string | null,
   ctx: Scope,
 ): UseQueryResult<RouteShapeResponse> {
+  // The server names a stop that stops.txt leaves unnamed in the request's
+  // Accept-Language, which client.ts derives the same way, so a cached shape
+  // is only good for the language it was fetched in.
+  const { i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   return useQuery({
-    queryKey: ["route_shape", agencyId, route, ...scopeKey(ctx)],
+    queryKey: ["route_shape", agencyId, route, lang, ...scopeKey(ctx)],
     queryFn: ({ signal }) => {
       const qs = new URLSearchParams(scopeToQueryString(ctx));
       qs.set("route", route!);

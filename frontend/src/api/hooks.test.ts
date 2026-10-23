@@ -3,10 +3,10 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n";
-import { useReport, useConversations, useConversation, useAppendMessage } from "./hooks";
+import { useReport, useConversations, useConversation, useAppendMessage, useRouteShape } from "./hooks";
 import type { Scope } from "./scope";
 import { SCOPE_EXTRAS_NONE } from "./scope";
-import type { AnonThread, Conversation, DefinitionMeta, ReportResponse } from "./types";
+import type { AnonThread, Conversation, DefinitionMeta, ReportResponse, RouteShapeResponse } from "./types";
 
 void i18n.changeLanguage("en");
 
@@ -163,6 +163,28 @@ describe("useReport's ranking options", () => {
     expect(mockApiGet).toHaveBeenCalledTimes(2);
     expect(String(mockApiGet.mock.calls[0][0])).not.toContain("threshold_sec");
     expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]threshold_sec=0(&|$)/);
+  });
+});
+
+describe("useRouteShape's cache identity", () => {
+  it("fetches the route again after a language switch, since the server names a nameless stop in the request's language", async () => {
+    const shape: RouteShapeResponse = { route: "R1", geometry: null, stops: [], unobserved_stops: [] };
+    mockApiGet.mockResolvedValue(shape);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ctx = baseCtx();
+    const { result } = renderHook(() => useRouteShape(1, "R1", ctx), withProviders(queryClient));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    try {
+      await act(async () => {
+        await i18n.changeLanguage("ja");
+      });
+      await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2));
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage("en");
+      });
+    }
   });
 });
 

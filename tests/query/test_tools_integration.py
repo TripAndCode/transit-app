@@ -461,6 +461,49 @@ async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("locale", "names"), [("ja", ["2番停留所", "3番停留所"]), ("en", ["Stop #2", "Stop #3"])])
+async def test_dispatch_segment_hotspots_names_a_stop_with_no_stop_name_in_the_request_language(
+    aconn, aagency_id, ch_client, ch_async_client, locale, names
+):
+    """A hotspot whose stop has no stops.txt name is named by its sequence in the
+    request's language: stop_sequence 2 has no static_stop_times row at all, and
+    stop_sequence 3's static_stops row carries a NULL name."""
+    now = datetime.now(timezone.utc)
+    for stop_sequence, delay in ((2, 300), (3, 120)):
+        for i in range(6):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', $5, $6)",
+                aagency_id,
+                f"pb_unnamed_{stop_sequence}_{i}",
+                now + timedelta(minutes=i),
+                f"trip_unnamed_{i}",
+                stop_sequence,
+                delay,
+            )
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_nameless', NULL)",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+        "VALUES ($1, $2, 3, 'stop_nameless')",
+        [(aagency_id, f"trip_unnamed_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "segment_hotspots", {"route": "R1"}, ctx, aconn, aagency_id, locale=locale, ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert [(row[0], row[1]) for row in result.rows] == [(2, names[0]), (3, names[1])]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_client, ch_async_client):
     """dispatch('schedule_realism', ...) with live ClickHouse data for a
     registered-by-observation route must return a table flagging the
