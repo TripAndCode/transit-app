@@ -4,9 +4,13 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryKey,
+  type UseQueryOptions,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
+import { requestLanguage } from "./requestLanguage";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
 import { scopeSummaryQuery } from "./scopeSummaryQuery";
@@ -43,11 +47,25 @@ import type {
 } from "./types";
 import { useSession } from "./auth";
 
+/** `useQuery` for an endpoint whose response holds text the server writes in
+ *  the request's Accept-Language (an `api/routers` GET route that takes
+ *  `Depends(get_locale)`; tests/unit/test_localized_routes.py lists them). The
+ *  language joins the end of the cache key, so a language switch fetches
+ *  again rather than serving text cached in the other language, and a key
+ *  prefix still matches every language's entry. */
+function useLocalizedQuery<TQueryFnData, TData = TQueryFnData>(
+  options: UseQueryOptions<TQueryFnData, Error, TData>,
+): UseQueryResult<TData> {
+  const { i18n } = useTranslation();
+  const queryKey: QueryKey = [...options.queryKey, requestLanguage(i18n)];
+  return useQuery({ ...options, queryKey });
+}
+
 export function useForecastHeatmap(
   agencyId: number | null,
   route: string,
 ): UseQueryResult<ForecastHeatmap> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["forecast-heatmap", agencyId, route],
     queryFn: ({ signal }) =>
       apiGet<ForecastHeatmap>(`/api/${agencyId}/forecast/heatmap?route=${encodeURIComponent(route)}`, {
@@ -60,7 +78,7 @@ export function useForecastHeatmap(
 export function useForecastOverview(
   agencyId: number | null,
 ): UseQueryResult<ForecastOverview> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["forecast-overview", agencyId],
     queryFn: ({ signal }) =>
       apiGet<ForecastOverview>(`/api/${agencyId}/forecast/overview`, { signal }),
@@ -149,7 +167,7 @@ export function useReport(
   ctx: Scope,
   options: ReportOptions = {},
 ): UseQueryResult<ReportResponse> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx), !!options.includeSparse, options.limit ?? null, options.thresholdSec ?? null],
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${reportQueryString(ctx, options)}`, { signal }),
@@ -188,7 +206,7 @@ export function usePerformanceStandards(
   ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<PerformanceStandardsResponse> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["performance-standards", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}`, {
@@ -207,7 +225,7 @@ export function useWeatherDelay(
   ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<WeatherDelayResponse> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["weather-delay", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${scopeToQueryString(ctx)}`, { signal }),
@@ -220,7 +238,7 @@ export function useSuggestion(
   exclude: string[],
 ): UseQueryResult<Suggestion | null> {
   const excludeKey = exclude.join(",");
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["reports-suggest", agencyId, excludeKey],
     queryFn: ({ signal }) => {
       const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
@@ -285,7 +303,7 @@ export function useRouteShape(
   route: string | null,
   ctx: Scope,
 ): UseQueryResult<RouteShapeResponse> {
-  return useQuery({
+  return useLocalizedQuery({
     queryKey: ["route_shape", agencyId, route, ...scopeKey(ctx)],
     queryFn: ({ signal }) => {
       const qs = new URLSearchParams(scopeToQueryString(ctx));

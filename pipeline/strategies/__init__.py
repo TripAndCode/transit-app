@@ -1,7 +1,10 @@
 """Ingest and static strategies.
 
 Each ingest strategy module exposes:
-    parse_feed(pb_bytes: bytes, agency_id: int, conn) -> list[tuple]
+    parse_feed(pb_bytes: bytes, captured_at: str, file_name: str, agency_id: int, conn) -> list[tuple]
+        ``captured_at`` (an ISO-8601 timestamp) and ``file_name`` (the
+        file's source identity, which ingest dedups on) are
+        copied onto every row it returns.
         Returns rows ready for pipeline.clickhouse.insert_updates (15-tuple,
         see pipeline.clickhouse.UPDATE_COLUMNS — agency_id is prepended by
         insert_updates, not part of this tuple). A strategy whose source

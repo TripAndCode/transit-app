@@ -701,9 +701,15 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
 
 
 @pytest.mark.asyncio
-async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_app_ch, ch_client):
-    """A stop whose stops.txt row carries no name still gets the sequence-based
-    name an observed stop falls back to, so the stop chart always has a label."""
+@pytest.mark.parametrize(
+    ("accept_language", "unobserved_name", "observed_name"),
+    [("ja", "2番停留所", "3番停留所"), ("en", "Stop #2", "Stop #3")],
+)
+async def test_route_shape_names_a_stop_with_no_stop_name_in_the_request_language(
+    map_app_ch, ch_client, accept_language, unobserved_name, observed_name
+):
+    """A stop whose stops.txt row carries no name gets a sequence-based name in
+    the request's language, observed or not, so the stop chart always has a label."""
     app, agency_id = map_app_ch
     day = jst_today()
     async with app.state.pool.acquire() as conn:
@@ -715,19 +721,22 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
         await conn.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
             "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
-            "       ($1, 'ST2', NULL, 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326))",
+            "       ($1, 'ST2', NULL, 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326)), "
+            "       ($1, 'ST3', NULL, 40.84, 140.76, ST_SetSRID(ST_MakePoint(140.76, 40.84), 4326))",
             agency_id,
         )
         await conn.execute(
             "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
             "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
-            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00'), "
+            "       ($1, 'T1', 3, 'ST3', '09:10:00', '09:10:00')",
             agency_id,
         )
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T1', 'R1', 1, 60, $2, 'test.pb', 'weekday', '09:00:00')",
+            "VALUES ($1, 'T1', 'R1', 1, 60, $2, 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 3, 90, $2, 'test.pb', 'weekday', '09:10:00')",
             agency_id,
             jst_midday(day),
         )
@@ -742,11 +751,15 @@ async def test_route_shape_names_an_unobserved_stop_that_has_no_stop_name(map_ap
     mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
+        resp = await client.get(
+            f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}",
+            headers={"Accept-Language": accept_language},
+        )
 
     assert resp.status_code == 200
-    unobserved = resp.json()["unobserved_stops"]
-    assert [(s["stop_sequence"], s["stop_name"]) for s in unobserved] == [(2, "2番停留所")]
+    body = resp.json()
+    assert [(s["stop_sequence"], s["stop_name"]) for s in body["stops"]] == [(1, "駅前"), (3, observed_name)]
+    assert [(s["stop_sequence"], s["stop_name"]) for s in body["unobserved_stops"]] == [(2, unobserved_name)]
 
 
 @pytest.mark.asyncio

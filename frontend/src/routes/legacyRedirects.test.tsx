@@ -50,7 +50,7 @@ describe("legacy redirects", () => {
     expect(loc.params.toString()).toBe("from=2026-09-01");
   });
 
-  it("sends the where lens with one route to that route's stops, dropping routes", () => {
+  it("sends the where lens with one route to that route's dossier, dropping routes", () => {
     const loc = go(
       LENS,
       <RedirectAnalysisLens />,
@@ -58,7 +58,7 @@ describe("legacy redirects", () => {
       "agencies/:agencyId/routes/:routeCode",
     );
     expect(loc.pathname).toBe("/agencies/9/routes/50");
-    expect(loc.params.get("tab")).toBe("stops");
+    expect(loc.params.has("tab")).toBe(false);
     expect(loc.params.get("sub_tab")).toBe("marey");
     expect(loc.params.get("from")).toBe("2026-09-01");
     expect(loc.params.has("routes")).toBe(false);
@@ -70,7 +70,7 @@ describe("legacy redirects", () => {
     expect(loc.params.get("routes")).toBe("50,51");
   });
 
-  it("sends route-analysis with one route to that route's stops", () => {
+  it("sends route-analysis with one route to that route's dossier", () => {
     const loc = go(
       "agencies/:agencyId/route-analysis",
       <RedirectWhere />,
@@ -78,7 +78,7 @@ describe("legacy redirects", () => {
       "agencies/:agencyId/routes/:routeCode",
     );
     expect(loc.pathname).toBe("/agencies/9/routes/50");
-    expect(loc.params.toString()).toBe("tab=stops");
+    expect(loc.params.toString()).toBe("");
   });
 
   it("sends route-analysis without a route to the Routes list", () => {

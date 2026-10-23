@@ -31,8 +31,8 @@ import "../styles/focusedAnalysis.css";
 import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
-// chunk, which the sidebar warms on hover, downloading a map nobody has asked
-// to see yet.
+// chunk and download with every route's page. Loaded this way, it arrives
+// only once the Map sub-tab is first opened.
 const AnalysisMap = lazy(() =>
   import("../components/analysis/AnalysisMap").then((m) => ({ default: m.AnalysisMap })),
 );

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 from clickhouse_connect.driver.exceptions import DataError, OperationalError
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline.clickhouse import insert_updates
 from pipeline.ingest import IngestIncomplete, StaticTimetableMissing, ingest, parse_trip_id
@@ -237,10 +238,8 @@ def test_ingest_stamps_archived_feeds_with_their_header_instant(layout, pg_conn,
 def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(
     pg_conn, ch_client, agency_id, tmp_path
 ):
-    """One malformed member inside a tarball must only roll back ITS OWN
-    insert, not every good member already inserted earlier in the same
-    tarball since the last 300-member commit boundary - the identical bug
-    class fixed for the loose-.pb loop, reproduced at tarball-member grain."""
+    """One malformed member inside a tarball costs only itself: the good
+    member ahead of it still lands."""
     ok_data, bad_data = b"\x00", b"\x01"
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
@@ -284,11 +283,8 @@ def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, ch_client, a
 
 
 def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_conn, ch_client, agency_id, tmp_path):
-    """A file that fails must only roll back ITS OWN work, not every good
-    file already inserted earlier in the same (not-yet-committed) batch.
-    a_ok.pb sorts before z_bad.pb, so the good insert happens first and,
-    with a bare conn.rollback() on the later failure, would be wiped too -
-    isolation must use a per-file SAVEPOINT, not the whole transaction."""
+    """A file that fails costs only itself: a_ok.pb sorts before z_bad.pb, and
+    its buffered row still lands after z_bad.pb's failure."""
     day_dir = tmp_path / "20260401"
     day_dir.mkdir()
     (day_dir / "a_ok.pb").write_bytes(b"\x00")
@@ -309,9 +305,9 @@ def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_member
     pg_conn, ch_client, agency_id, tmp_path
 ):
     """tarfile.extractfile() can raise on a corrupt member (bad header/index)
-    even when tarfile.open() and getmembers() succeeded. That must isolate
-    like any other per-member failure, not escape the savepoint and roll
-    back every good member already inserted earlier in this tarball."""
+    even when tarfile.open() and getmembers() succeeded. Like any other
+    per-member failure it costs only that member: an earlier good member's
+    row still lands."""
     ok_data, bad_data = b"\x00", b"\x01"
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
@@ -336,6 +332,40 @@ def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_member
         ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
     assert _ch_route_codes(ch_client, agency_id) == ["44372"]  # a_ok.pb's row survives z_bad.pb's extractfile failure
+
+
+@pytest.mark.parametrize("layout", ["tarball", "loose"])
+def test_ingest_lookup_failure_leaves_later_files_lookups_usable(layout, pg_conn, ch_client, agency_id, tmp_path):
+    """A strategy lookup that fails aborts the Postgres transaction. The
+    per-file savepoint clears that, so a later file's lookup still runs and
+    its row lands; without it, every later lookup on the connection fails
+    with "current transaction is aborted". The run ends with no transaction
+    left open."""
+    names = ("20260401/a_bad.pb", "20260401/z_ok.pb")
+    if layout == "tarball":
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            for name in names:
+                info = tarfile.TarInfo(name=name)
+                info.size = 1
+                tf.addfile(info, io.BytesIO(b"\x00"))
+        (tmp_path / "20260401.tar.gz").write_bytes(buf.getvalue())
+    else:
+        (tmp_path / "20260401").mkdir()
+        for name in names:
+            (tmp_path / name).write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 / 0" if file_name.endswith("a_bad.pb") else "SELECT 1")
+        return [_FAKE_ROW]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert count == 1
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]
+    assert pg_conn.info.transaction_status == TRANSACTION_STATUS_IDLE
 
 
 def test_strict_ingest_raises_after_landing_every_good_file(pg_conn, ch_client, agency_id, tmp_path):

@@ -28,6 +28,7 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -148,6 +149,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("segment_hotspots_summary", "en"): "Delay hotspots — route {route}",
     ("segment_hotspots_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
     ("segment_hotspots_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("unnamed_stop", "ja"): "{stop_sequence}番停留所",
+    ("unnamed_stop", "en"): "Stop #{stop_sequence}",
     ("time_pattern_summary", "ja"): "路線{route} 時間帯・曜日パターン",
     ("time_pattern_summary", "en"): "Time-of-day/day-of-week pattern — route {route}",
     ("time_pattern_no_data", "ja"): "路線{route} の時間帯別データがありません。",
@@ -367,6 +370,15 @@ def _summary(template: str, lang: str = "ja", **vars: Any) -> str:
         return tpl.format(**vars) if vars else tpl
     except KeyError:
         return tpl
+
+
+def unnamed_stop_name(stop_sequence: int, locale: str) -> str:
+    """The name a stop goes by when stops.txt gives it none: no name field, or no matching row.
+
+    Every response that names stops calls this rather than spelling the label
+    itself, in SQL or Python, so the label follows the request's language.
+    """
+    return _summary("unnamed_stop", lang=locale, stop_sequence=stop_sequence)
 
 
 # ---------------------------------------------------------------------------
@@ -1291,7 +1303,10 @@ async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int
     return ToolResult(
         kind="table",
         summary=_summary("segment_hotspots_summary", lang=locale, route=route),
-        rows=[list(r) for r in rows],
+        rows=[
+            [stop_sequence, stop_name if stop_name is not None else unnamed_stop_name(stop_sequence, locale), *rest]
+            for stop_sequence, stop_name, *rest in rows
+        ],
         columns=["stop_sequence", "stop_name", "avg_min", "samples"],
     )
 
@@ -1407,6 +1422,19 @@ _HANDLERS = {
 _HANDLERS.update(META_HANDLERS)
 
 
+# Free-text arguments matched against stored route and stop names. dispatch
+# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
+_FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
+
+
+def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: unicodedata.normalize("NFKC", v) if k in _FREE_TEXT_ARGS and isinstance(v, str) else v
+        for k, v in arguments.items()
+    }
+
+
 async def dispatch(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1459,6 +1487,7 @@ async def dispatch(
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}
             arguments = {"route": raw_rc, **arguments}
+        arguments = _fold_free_text_args(arguments)
 
         from pipeline.query.schema_linker import resolve_route
 
