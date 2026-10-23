@@ -1413,13 +1413,9 @@ _HANDLERS = {
 _HANDLERS.update(META_HANDLERS)
 
 
-# Arguments a caller writes as free text and that are matched against stored
-# route and stop names. dispatch NFKC-folds them, as router._match_rules folds
-# the question, so a full-width "１０２１" or "Ａ１" and half-width kana arrive
-# in the plain spelling the resolvers and the SQL compare. Every other argument
-# stays exact: an enum's values are ASCII, which NFKC leaves as they are, so
-# folding one could only turn an invalid full-width spelling into a valid one,
-# and dates go to date.fromisoformat as sent.
+# Free-text arguments matched against stored route and stop names. dispatch
+# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
 _FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
 
 

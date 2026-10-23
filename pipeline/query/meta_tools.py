@@ -129,8 +129,8 @@ async def describe_data(
                 pattern,
             )
             # A non-empty filter that matches nothing must NOT fall through to
-            # a full dump (the original bug) nor claim "0件表示" beside a high
-            # unfiltered total. Return an unambiguous empty result instead.
+            # a full dump nor claim "0件表示" beside a high unfiltered total.
+            # Return an unambiguous empty result instead.
             if total == 0:
                 return ToolResult(
                     kind="empty",
