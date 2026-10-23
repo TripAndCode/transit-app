@@ -109,6 +109,16 @@ class UserList(BaseModel):
     total: int
 
 
+def _user_search_predicate(n: int) -> str:
+    """The admin user search's WHERE clause for the LIKE pattern in ``$n``.
+
+    ``idx_users_email_nfkc_trgm`` and ``idx_users_name_nfkc_trgm`` index these
+    exact expressions; the planner uses an expression index only for a
+    predicate on the same expression, so the two must change together.
+    """
+    return f"(normalize(email, NFKC) ILIKE ${n} ESCAPE '\\' OR normalize(name, NFKC) ILIKE ${n} ESCAPE '\\')"
+
+
 @router.get("/users", response_model=UserList)
 async def list_users(
     q: str | None = None,
@@ -142,8 +152,7 @@ async def list_users(
         # Fold before escaping: NFKC turns a full-width ％, ＿ or ＼ into the
         # ASCII metacharacter, which escaping first would leave live.
         args.append(f"%{escape_like(unicodedata.normalize('NFKC', q))}%")
-        n = len(args)
-        where.append(f"(normalize(email, NFKC) ILIKE ${n} ESCAPE '\\' OR normalize(name, NFKC) ILIKE ${n} ESCAPE '\\')")
+        where.append(_user_search_predicate(len(args)))
     if role in ("user", "admin"):
         args.append(role)
         where.append(f"role = ${len(args)}")
