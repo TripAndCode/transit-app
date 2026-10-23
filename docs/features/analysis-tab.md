@@ -68,8 +68,8 @@ What the user sees/does:
   `frontend/src/components/emptyStateRecoveries.ts`, each shown only when it
   applies: clear the route filter, reset the service type to all, and jump
   to the latest data. Admins also get a collapsed raw-rows `<details>` under
-  any non-`trend` report that has rows; it shows the response's text
-  summary. `trend` instead renders `TrendBlock` (defined inline in
+  any report other than `trend` or `route_forecast` that has rows; it shows
+  the response's text summary. `trend` instead renders `TrendBlock` (defined inline in
   `AnalysisTab.tsx`): a day-of-week x hour heat surface with "By hour" and
   "By band" profiles
   (`frontend/src/components/charts/HeatSurface.tsx`), a daily line chart
