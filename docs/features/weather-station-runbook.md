@@ -119,7 +119,12 @@ WEATHER_INGEST_ENABLED=true
 ```
 
 This requires restarting the app process (or redeploying) so the new value is
-read. Once enabled:
+read. The switch is also a registered feature flag (`weather_ingest_enabled`),
+so an admin can turn it on from the flags page (`/admin/flags`) instead, with
+no restart. An override set there wins over the env var: if one already says
+off, setting the env var and restarting changes nothing until the override is
+changed or cleared. The flags page's source column shows which of the two is
+in force. Once enabled:
 
 - The cron path (`api/routers/internal.py`'s `_run_weather_ingest`) picks up
   every configured station automatically on its normal schedule, bounded by
@@ -158,9 +163,10 @@ reading whatever rows are already stored (it does not delete history).
    );
    ```
 
-4. **Enable ingest**: set `WEATHER_INGEST_ENABLED=true` and restart, or run
-   `make ingest-weather` for an immediate backfill of the last
-   `PUBLICATION_WINDOW_DAYS` days.
+4. **Enable ingest**: set `WEATHER_INGEST_ENABLED=true` and restart, or turn
+   `weather_ingest_enabled` on from `/admin/flags` with no restart (Step 4
+   above says which one wins). Then run `make ingest-weather` for an
+   immediate backfill of the last `PUBLICATION_WINDOW_DAYS` days.
 
 ## Confirming it worked
 

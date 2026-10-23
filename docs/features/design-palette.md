@@ -58,10 +58,11 @@ and MapLibre style-expression consumers resolve the same source of truth.
   `--ease-out` decelerates for things entering; `--ease-in-out` is
   symmetric, for things that move and settle. All four durations collapse
   to `0ms` under `prefers-reduced-motion`.
-- `--el-1`..`--el-3`: three elevation tiers, each themed separately. Both
-  themes pair a hairline ring with a drop shadow; dark additionally adds a
-  top inset highlight to every tier, since a shadow alone barely reads on a
-  near-black surface.
+- `--el-1`..`--el-3`: three elevation tiers, each themed separately. Light
+  pairs a hairline ring with a drop shadow on every tier. Dark gives every
+  tier a hairline ring plus a top inset highlight, since a shadow alone
+  barely reads on a near-black surface, and adds a drop only on the
+  floating tiers, `--el-2` and `--el-3`.
 - `--text-xs`..`--text-3xl` (12px/13px/15px/17px/20px/26px/34px/46px):
   the type scale. `--text-xs` (12px) is the floor for any DOM text — below
   it, CJK glyphs stop being legible, so nothing in the product renders

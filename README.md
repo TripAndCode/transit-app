@@ -318,6 +318,7 @@ value when neither an override nor the env var is set.
 | `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
 | `login_required` | `LOGIN_REQUIRED` | on |
+| `ml_forecast` | `ML_FORECAST_ENABLED` | off |
 
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
@@ -326,6 +327,11 @@ value when neither an override nor the env var is set.
 signed-out caller with `401 {"detail": "auth required"}`, except the sign-in
 flow (`/api/auth/*`) and `/api/config`. It is enforced only while SSO is
 configured.
+
+`ml_forecast` lets `GET /api/{agency_id}/forecast/heatmap` and
+`/forecast/overview` fill a cell from the ML model's fresh forecasts in
+`agg_route_forecast_ml`, marked `source: "ml"`; with it off, every cell is the
+historical baseline.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
 can sign in, so the login gate stays open and every page works signed out. Do not

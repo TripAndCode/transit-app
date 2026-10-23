@@ -558,7 +558,19 @@ def is_regenerable(path: str) -> bool:
 def worktree_is_dirty(repo: Path, worktree: Worktree) -> bool:
     """Treat staged, unstaged, untracked and non-regenerable ignored files as non-discardable state."""
 
-    status = run_git(repo, "-C", str(worktree.path), "status", "--porcelain=v1", "-z", "--ignored=matching").stdout
+    # The untracked mode is named rather than inherited: a clone configured with
+    # `status.showUntrackedFiles=no` would hide untracked work, and Git rejects
+    # that setting alongside `--ignored` outright.
+    status = run_git(
+        repo,
+        "-C",
+        str(worktree.path),
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--ignored=matching",
+        "--untracked-files=normal",
+    ).stdout
     # A rename's second NUL-separated field is its source path, not an entry;
     # the rename entry before it already makes the worktree dirty.
     for entry in filter(None, status.split("\0")):

@@ -161,7 +161,9 @@ What the user sees/does:
   (`frontend/src/i18n/design.ts`, loaded via `useTranslation("design")`), not
   the default `translation` namespace's `frontend/src/i18n/locales/{ja,en}.json`
   files. `design.ts` holds its own `ja`/`en` objects directly in the TS
-  module, and neither i18n gate reaches it: `npm run lint:i18n`'s key-parity
-  check reads only the two `locales/*.json` files, and
-  `npm run lint:i18n-strings` skips `src/i18n/design.ts` by name. A new
-  `design.ts` key needs its `ja`/`en` pair kept in sync by hand.
+  module. `npm run lint:i18n`'s key-parity check reads only the two
+  `locales/*.json` files; the `ja`/`en` key parity of `design.ts` is asserted
+  instead by `frontend/src/i18n/design.test.ts`, which `npm run test` and
+  CI's `npm run test:coverage` run. `npm run lint:i18n`'s glossary check
+  does scan `design.ts` for variant wording, and `npm run lint:i18n-strings`
+  skips `src/i18n/design.ts` by name.
