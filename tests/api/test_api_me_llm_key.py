@@ -1,7 +1,6 @@
 """Tests for ``GET``/``PUT``/``DELETE /api/me/llm-key`` (BYOK LLM credentials)."""
 
 import os
-from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
@@ -10,27 +9,12 @@ import openai
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import _test_pool
+from tests.fixtures.users import seed_session
 
 
 async def _seed_user_and_session(conn, *, role="user"):
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING user_id",
-            f"u{datetime.now().timestamp()}@x",
-            "Yo",
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-{uid:0>30}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-        "test-ua",
-    )
+    sid, uid, _ = await seed_session(conn, role=role, name="Yo", user_agent="test-ua")
     return sid, uid
 
 

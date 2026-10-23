@@ -14,15 +14,13 @@ an anonymous caller, so a prober cannot tell the route apart from one that
 does not exist.
 """
 
-from datetime import datetime, timedelta, timezone
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from pipeline import perf
 from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture(autouse=True)
@@ -31,21 +29,6 @@ def reset_perf():
     perf.reset()
     yield
     perf.reset()
-
-
-async def _seed_session(aconn, *, role="admin"):
-    email = f"{role}-{datetime.now().timestamp()}@x"
-    uid = (await aconn.fetchrow("INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id", email, role))[
-        "user_id"
-    ]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-    )
-    return sid
 
 
 @pytest.fixture
@@ -95,7 +78,7 @@ async def test_perf_reset(debug_client, aconn):
     """POST /api/debug/perf/reset (admin, same-origin) clears the registry;
     subsequent GET shows ops == {}."""
     perf.record("pre.reset", 10.0)
-    sid = await _seed_session(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
 
     reset_resp = await debug_client.post(
         "/api/debug/perf/reset",
@@ -121,7 +104,7 @@ async def test_perf_reset_requires_authentication(debug_client):
 @pytest.mark.asyncio
 async def test_perf_reset_requires_admin_role(debug_client, aconn):
     """A signed-in non-admin is forbidden."""
-    sid = await _seed_session(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     resp = await debug_client.post(
         "/api/debug/perf/reset",
         cookies={"sid": sid},
@@ -133,7 +116,7 @@ async def test_perf_reset_requires_admin_role(debug_client, aconn):
 @pytest.mark.asyncio
 async def test_perf_reset_rejects_cross_origin(debug_client, aconn):
     """An authenticated admin still fails csrf_guard on a cross-origin POST."""
-    sid = await _seed_session(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
     resp = await debug_client.post(
         "/api/debug/perf/reset",
         cookies={"sid": sid},
@@ -160,7 +143,7 @@ async def test_perf_disabled(monkeypatch, debug_client):
 async def test_perf_disabled_404s_an_authenticated_admin_too(monkeypatch, debug_client, aconn):
     """Past the auth/CSRF gates, a disabled surface still 404s for an admin."""
     monkeypatch.setenv("PERF_DEBUG_ENABLED", "false")
-    sid = await _seed_session(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
 
     resp = await debug_client.post(
         "/api/debug/perf/reset",

@@ -7,6 +7,7 @@ import pytest
 from api import retention
 from api.security import token_hash
 from tests.conftest import _test_pool
+from tests.fixtures.users import add_session
 
 
 @pytest.mark.asyncio
@@ -23,10 +24,8 @@ async def test_rows_past_retention_go_and_recent_rows_stay(aconn):
     now = datetime.now(timezone.utc)
     for at in (now - timedelta(days=800), now - timedelta(days=30)):
         await aconn.execute("INSERT INTO login_events (user_id, kind, created_at) VALUES ($1, 'login', $2)", uid, at)
-    for name, expires in (("expired", now - timedelta(days=1)), ("live", now + timedelta(days=1))):
-        await aconn.execute(
-            "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)", token_hash(name), uid, expires
-        )
+    await add_session(aconn, uid, expires_in=timedelta(days=-1))
+    live = await add_session(aconn, uid, expires_in=timedelta(days=1))
 
     pool = await _test_pool()
     try:
@@ -39,7 +38,7 @@ async def test_rows_past_retention_go_and_recent_rows_stay(aconn):
     ]
     assert await aconn.fetchval("SELECT count(*) FROM login_events WHERE user_id = $1", uid) == 1
     assert [r["sid_hash"] for r in await aconn.fetch("SELECT sid_hash FROM sessions WHERE user_id = $1", uid)] == [
-        token_hash("live")
+        token_hash(live)
     ]
 
 

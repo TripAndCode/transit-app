@@ -1,12 +1,12 @@
 """Hard deletion of a user (`pipeline/account_erasure.py`)."""
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from api.security import token_hash
 from pipeline.account_erasure import USER_FKS, ErasureRefused, erase_user
+from tests.fixtures.users import add_session
 
 _DELETE_RULES = {"c": "CASCADE", "n": "SET NULL", "a": "NO ACTION", "r": "RESTRICT", "d": "SET DEFAULT"}
 
@@ -38,13 +38,7 @@ async def _user(conn, email, *, name=None, role="user", password_hash=None):
 
 
 async def _seed_everything(conn, agency_id, uid, admin_id, email):
-    now = datetime.now(timezone.utc)
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, ip, user_agent) VALUES ($1, $2, $3, '10.0.0.1', 'ua')",
-        token_hash(f"s-{uid}"),
-        uid,
-        now + timedelta(days=1),
-    )
+    await add_session(conn, uid, ip="10.0.0.1", user_agent="ua")
     await conn.execute(
         "INSERT INTO oauth_identities (provider, provider_sub, user_id) VALUES ('google', $1, $2)", f"g{uid}", uid
     )

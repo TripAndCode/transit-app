@@ -7,7 +7,6 @@ so the callback's state check accepts it, then asserts redirect target +
 database side effects (users, oauth_identities, sessions, login_events).
 """
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote
 
@@ -17,6 +16,7 @@ from httpx import ASGITransport
 
 from api.security import token_hash
 from tests.conftest import _test_pool
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture(autouse=True)
@@ -524,17 +524,7 @@ async def test_logout_when_anonymous_still_204(auth_client):
 
 @pytest.mark.asyncio
 async def test_logout_deletes_session(auth_client, aconn):
-    from datetime import timedelta
-    from datetime import timezone as tz
-
-    uid = (await aconn.fetchrow("INSERT INTO users (email) VALUES ('x@x') RETURNING user_id"))["user_id"]
-    sid = "test-sid"
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(tz.utc) + timedelta(days=30),
-    )
+    sid = (await seed_session(aconn, email="x@x")).sid
     resp = await auth_client.post(
         "/api/auth/logout",
         cookies={"sid": sid},

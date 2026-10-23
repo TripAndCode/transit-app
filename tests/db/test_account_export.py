@@ -1,13 +1,13 @@
 """The data export (`pipeline/account_export.py`)."""
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from api.security import token_hash
 from pipeline.account_export import collect_user_data
 from tests.db.test_account_erasure import _seed_everything, _user
+from tests.fixtures.users import add_session
 
 _SECRET_COLUMNS = ("password_hash", "sid_hash", "key_hash", "encrypted_key")
 
@@ -36,12 +36,7 @@ async def test_a_new_account_exports_empty_collections(aconn):
 @pytest.mark.asyncio
 async def test_the_export_holds_the_users_data_and_no_secrets(aconn, aagency_id):
     uid = await aconn.fetchval("INSERT INTO users (email, name) VALUES ('full@x', 'Full') RETURNING user_id")
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, ip) VALUES ($1, $2, $3, '10.0.0.1')",
-        token_hash("s"),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
+    await add_session(aconn, uid, ip="10.0.0.1")
     await aconn.execute(
         "INSERT INTO filter_presets (user_id, agency_id, name, range_ctx) VALUES ($1, $2, 'p', '{\"dow\": \"all\"}')",
         uid,
