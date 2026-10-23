@@ -1,11 +1,11 @@
-"""Ask tab — natural-language Japanese questions answered via tool-use.
+"""Ask tab — natural-language questions answered by the tools in
+:data:`pipeline.query.tools.TOOLS`.
 
-v1 used a single intent classifier that fell off a cliff for anything
-outside ~15 known templates. v2 uses tool-use mode against the six
-tools defined in :mod:`pipeline.query.tools`. Out-of-scope questions
-get a friendly text refusal with 2–3 supported suggestions.
+A question the deterministic router can match runs its tool directly; the
+rest go to the LLM in tool-use mode over the same tools. Out-of-scope
+questions get a friendly text refusal with 2–3 supported suggestions.
 
-The request body now carries the global :class:`~api.range.RangeCtx`
+The request body carries the global :class:`~api.range.RangeCtx`
 (time range / DOW / time-band) so the LLM and tools can scope to the
 user's chosen window without having to mention it in the prompt.
 """
@@ -79,9 +79,10 @@ class Turn(BaseModel):
         return v
 
 
-# Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
-# — an enum, not a free-form string, so an arbitrary/oversized value can never
-# reach the system prompt that chat_with_tools builds from this hint.
+# The tab hints the Copilot panel may send (frontend/src/components/CopilotPanel.tsx),
+# not the SPA's route names: the closed set the system prompt accepts. An enum,
+# not a free-form string, so an arbitrary/oversized value can never reach the
+# system prompt that chat_with_tools builds from this hint.
 PanelTab = Literal["overview", "map", "ask", "live", "analysis", "network"]
 
 

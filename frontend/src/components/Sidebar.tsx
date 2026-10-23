@@ -138,7 +138,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Below 640px (the shared MOBILE_BREAKPOINT_QUERY) the desktop rail's
-  // fixed 230/64px width would eat most of a ~390px phone screen, leaving
+  // fixed 248/76px width would eat most of a ~390px phone screen, leaving
   // almost no room for tab content. isMobile renders only the active
   // variant rather than mounting both and hiding one with CSS `display`,
   // which would double the nav's DOM nodes and listeners at every width.
@@ -337,10 +337,10 @@ export function Sidebar() {
     return (
       <>
         {/* Bottom tab bar: thumb-reachable and gives tab content back the
-            width the 36px rail used to take. Fixed, not a flex sibling of
-            <main> — App.tsx's content column already reserves space for it
-            via .app-shell's bottom padding at this breakpoint, so it can
-            float over everything the way a native app's tab bar does. */}
+            width the 248/76px rail would take. Fixed, not a flex sibling of
+            <main> — global.css reserves its height as `.app-main`'s bottom
+            padding at this breakpoint, so it can float over everything the
+            way a native app's tab bar does. */}
         <nav
           className="app-tabbar"
           aria-label={t("nav.mobile_tabbar_label")}

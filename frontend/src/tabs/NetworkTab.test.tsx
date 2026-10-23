@@ -486,4 +486,51 @@ describe("NetworkTab", () => {
     // The cap is 200 rows, so proving it renders a few hundred rows several
     // times; on a loaded machine that alone outlasts the default timeout.
   }, 45_000);
+
+  it.each([
+    [-1.2, 0.8, "+0.8"],
+    [0.8, -1.2, "-1.2"],
+  ])("signs every frame of the delay figure's tween from %s to %s by the value it shows", (from, to, settled) => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: false, media: query, onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    try {
+      const summary = (avg: number) => ({
+        data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ avg_delay_min: avg })] },
+        isPending: false, error: null, refetch: vi.fn(),
+      });
+      let current = summary(from);
+      vi.spyOn(hooks, "useNetworkSummary").mockImplementation(() => current as never);
+      const ui = () => (
+        <MemoryRouter initialEntries={["/agencies/1/network"]}>
+          <Routes>
+            <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+          </Routes>
+        </MemoryRouter>
+      );
+      const { rerender } = renderWithProviders(ui());
+      current = summary(to);
+      rerender(ui());
+
+      const figure = () => document.querySelector(".network-row__value")!.textContent!.replace(/min$/, "");
+      const shown: string[] = [];
+      for (let now = 0; now <= 600; now += 25) {
+        act(() => frames.splice(0).forEach((cb) => cb(now)));
+        shown.push(figure());
+      }
+      for (const s of shown) expect(s).toMatch(/^[+-]\d+\.\d$/);
+      // The tween crossed zero, so both signs were on screen at some frame.
+      expect(shown.some((s) => s.startsWith("-"))).toBe(true);
+      expect(shown.some((s) => s.startsWith("+") && s !== "+0.0")).toBe(true);
+      expect(shown.at(-1)).toBe(settled);
+    } finally {
+      raf.mockRestore();
+      caf.mockRestore();
+    }
+  });
 });

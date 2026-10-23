@@ -14,13 +14,13 @@ export function RedirectTo({ dest, extra = {} }: { dest: Destination; extra?: Re
 export function RedirectWhere() {
   const { agencyId = "" } = useParams();
   const { search } = useLocation();
-  return <Navigate to={routesHref(agencyId, search, "stops")} replace />;
+  return <Navigate to={routesHref(agencyId, search)} replace />;
 }
 
 const LENS_DEST: Record<string, Destination> = { overview: "pulse", when: "time", why: "why", predict: "pulse" };
 
 function lensTarget(agencyId: string, lens: string, search: string): string {
-  if (lens === "where") return routesHref(agencyId, search, "stops");
+  if (lens === "where") return routesHref(agencyId, search);
   if (lens === "rider") return destHref(agencyId, "routes", search, { sort: "on_time" });
   if (lens === "compare") {
     const params = new URLSearchParams(search);

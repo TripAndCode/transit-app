@@ -167,9 +167,12 @@ jobs:
   # absent by falling through to the LLM-only path). The python-extended job
   # above installs it for the RUN_SLOW `test_embeddings` gate, among the whole
   # suite; this job is the narrow check: a fresh `--with embeddings` install,
-  # then import and embed, with no database or API server. A silent
-  # break here would otherwise surface only as Stage 2 of the Ask router
-  # quietly falling through to the LLM every time, in production. Scheduled
+  # then import and embed, with no database or API server. It guards the
+  # environments that install that group: local dev (`make bootstrap`,
+  # `make install`) and the weekly Ask eval workflow. A silent break there
+  # would otherwise surface only as Stage 2 of the Ask router quietly falling
+  # through to the LLM every time. Production is not one of them: the deploy
+  # image installs `--only main`, so its Stage 2 always falls through. Scheduled
   # here rather than on every push because the install and model download are
   # minutes of extra runner time not worth paying on every change.
   embeddings-smoke:

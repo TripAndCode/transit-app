@@ -428,21 +428,18 @@ input[type="date"] { color-scheme: light; }
 .definition-meta > p { margin: 6px 0 0; max-width: 60ch; }
 html, body, #root { height: 100%; margin: 0; }
 
-/* In flow at the top of <main>, not floating over it. Everything around this
-   stack already assumed it occupies layout: App.tsx sizes the content area
-   with `flex: 1` precisely because "the banners/strip above take variable
-   height", and ActivityStrip documents itself as "an always-present 24 px row
-   in the App shell" and sets `flex-shrink: 0`. The `position: fixed` overlay
-   contradicted both, and on every route where the banners render it landed on
-   the filter bar -- covering the filter chips' remove button and "Clear all"
-   outright and, being `pointer-events: auto`, swallowing the clicks aimed at
-   them.
+/* In flow at the top of <main>, not floating over it. The layout around this
+   stack assumes it occupies space: App.tsx sizes the content area with
+   `flex: 1` because the banners and strip above take variable height, and
+   ActivityStrip takes a `flex-shrink: 0` row of its own while it shows. A
+   `position: fixed` overlay would land on the filter bar wherever the banners
+   render, covering the filter chips' remove buttons and "Clear all" and
+   swallowing the clicks aimed at them.
 
    These banners are also the wrong shape for an overlay: they persist until
    dismissed rather than timing out, so they belong in the layout the way a
-   page header does. A toast that never leaves is just a blocked region. The
-   drop shadow goes with the fixed positioning -- in flow, the border alone
-   carries the edge. */
+   page header does. A toast that never leaves is just a blocked region. In
+   flow, the border alone carries the edge, so there is no drop shadow. */
 .app-notice-stack {
   display: flex;
   flex-direction: column;

@@ -164,12 +164,12 @@ def test_multi_agency_only_stale_returned(pg_conn, ch_client, agency_id):
 
 
 def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agency_id):
-    """Direct regression coverage for the JST/UTC boundary in
-    check_agg_freshness's live-side cutoff (same bug class as
-    tests/clickhouse/test_db_dedup_ch.py::test_dedup_ch_buckets_by_jst_day_not_utc_day
-    proved for the dedup query - and the same class of bug project memory
-    "analyze conn must pin JST" hit for real: a UTC-pinned connection
-    mis-bucketed ~20% of rows relative to the JST-pinned API).
+    """check_agg_freshness must judge the live side on the JST service day,
+    because that is the day analyze buckets every row under: the cutoff is
+    JST midnight, and the newest capture before it is filed by its service
+    date. A UTC calendar would compare a different day against the
+    aggregates. tests/clickhouse/test_db_dedup_ch.py::test_dedup_ch_buckets_by_jst_day_not_utc_day
+    pins the same invariant for the dedup query.
 
     2026-01-01T20:30:00Z is 2026-01-02 05:30 JST - a different calendar day
     in each timezone, and past the service-day cutover so it is service day
