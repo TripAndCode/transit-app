@@ -136,10 +136,14 @@ def build_dedup_ch_sql(
     "HH:MM[:SS]" string can hold it). A caller deriving an hour-of-day bucket
     that must not silently drop every extended-hour trip should read
     `scheduled_sec` instead of parsing `scheduled_time`'s first two
-    characters. `scheduled_sec` never legitimately differs between re-polls
-    of the same stop event (it is derived once from the static schedule at
-    ingest time, not refined like `dep_delay`/`arr_delay`), so a plain
-    `any()` resolves it correctly and more cheaply than `argMax`.
+    characters. It is the same latest poll's value as `dep_delay`, not any
+    poll's: a static reload can move an event's departure between two of its
+    polls, and for an extended-hour departure nothing in the `GROUP BY` keeps
+    those polls apart, because `scheduled_time` is NULL in every one of them.
+    The value is wrapped in a `tuple` so `argMax` keeps a latest poll whose
+    `scheduled_sec` is NULL (a reload that leaves the stop with no departure
+    time) instead of skipping it for an older poll's schedule, the skip that
+    the `arr_delay` sentinel below guards against.
 
     `include_arr_delay` additionally clamps `arr_delay` to the same
     plausibility window as `dep_delay` (`MAX_PLAUSIBLE_DELAY_SEC`) whenever
@@ -186,7 +190,11 @@ def build_dedup_ch_sql(
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
-    scheduled_sec = ", any(u.scheduled_sec) AS scheduled_sec" if include_scheduled_sec else ""
+    scheduled_sec = (
+        ", tupleElement(argMax(tuple(u.scheduled_sec), (u.captured_at, u.file_name)), 1) AS scheduled_sec"
+        if include_scheduled_sec
+        else ""
+    )
     arr = (
         ", NULLIF(argMax(coalesce(CASE WHEN u.arr_delay BETWEEN "
         f"-{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC} THEN u.arr_delay END, "
