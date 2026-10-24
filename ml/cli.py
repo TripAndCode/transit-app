@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -10,8 +11,10 @@ import sys
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+import asyncpg
 from clickhouse_connect.driver.client import Client
 
 from ml import sync
@@ -23,6 +26,9 @@ from ml.model_result import result_from_json, result_to_json
 from ml.r2 import upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
+
+if TYPE_CHECKING:
+    from pipeline.day_types import DayTypes
 
 
 def _today_jst() -> date:
@@ -165,6 +171,32 @@ def _train(args: argparse.Namespace) -> int:
 _CELL = ["agency_id", "route_code", "service_date", "hour"]
 
 
+async def _read_day_types(conn, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
+    """Each agency's day types over [first, last] from the replica's feed
+    calendars. A replica whose migrations predate the calendar table gives
+    none, so every agency falls back to the weekday rule; so does an agency
+    whose calendar is empty, because its timetable loaded before the table
+    existed and sync does not reload a timetable it already holds."""
+    # Imported here so sync, which keeps the replica current, does not depend
+    # on what only predict needs.
+    from pipeline.day_types import load_day_types
+
+    if await conn.fetchval("SELECT to_regclass('static_calendar')") is None:
+        return {}
+    return {agency_id: await load_day_types(conn, agency_id, first, last) for agency_id in agency_ids}
+
+
+def _calendar_day_types(database_url: str, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
+    async def read() -> dict[int, DayTypes]:
+        conn = await asyncpg.connect(database_url)
+        try:
+            return await _read_day_types(conn, agency_ids, first, last)
+        finally:
+            await conn.close()
+
+    return asyncio.run(read())
+
+
 def _predict(args: argparse.Namespace) -> int:
     model_dir = args.model
     if not (model_dir / "meta.json").exists():
@@ -174,6 +206,9 @@ def _predict(args: argparse.Namespace) -> int:
     # Read and swap credentials before the heavy predict work, so a
     # misconfigured env fails fast instead of after it.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise SystemExit("DATABASE_URL must be set, not empty: predict reads the feed calendars from the replica")
     _use_store_credentials()
 
     # Imported here: they need the optional `ml` group, which sync and
@@ -181,7 +216,7 @@ def _predict(args: argparse.Namespace) -> int:
     import pandas as pd
 
     from ml.dataset import load_runs
-    from ml.features import build_frame, template_future_runs, with_route_ids
+    from ml.features import build_frame, template_future_runs, template_span, with_route_ids
     from ml.model_backtest import MIN_MODEL_DAYS
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import predict
@@ -195,9 +230,13 @@ def _predict(args: argparse.Namespace) -> int:
     origin = _today_jst()
     # `runs` is ClickHouse's observed-trip history -- origin+1..+horizon_days
     # haven't happened, so build_frame's target slate is templated from the
-    # most recent history sharing each future day's weekday (see
-    # template_future_runs), not read from `runs` itself.
-    template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS)
+    # most recent complete day of each future day's day type (see
+    # template_future_runs), not read from `runs` itself. An agency whose feed
+    # stopped gets no template, so nothing is published for it.
+    first, last = template_span(origin, HORIZON_DAYS)
+    agency_ids = sorted(int(agency) for agency in runs["agency_id"].unique())
+    day_types = _calendar_day_types(database_url, agency_ids, first, last)
+    template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS, day_types=day_types)
     frame = build_frame(
         pd.concat([runs, template], ignore_index=True),
         origin,

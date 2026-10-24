@@ -5,10 +5,13 @@ forecast: its route, trip, service, scheduled hour and date. Needs the optional
 
 from __future__ import annotations
 
-from datetime import date
+from collections.abc import Mapping
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
+
+from pipeline.day_types import DayTypes, public_holidays_between, resolve_day_types
 
 CATEGORICAL = ["agency_id", "route_id"]
 FEATURES = [
@@ -76,38 +79,127 @@ def with_route_ids(runs: pd.DataFrame, ids: pd.DataFrame) -> pd.DataFrame:
     return runs.merge(ids, on=ROUTE, how="left", validate="many_to_one")
 
 
+# A template is copied from the agency's last two weeks. Each candidate is
+# judged against the _PREVIOUS_DAYS days of its type before it, so the
+# reference window reaches that many weeks behind the oldest candidate: a
+# Saturday or a Sunday-holiday comes round once a week.
+_PREVIOUS_DAYS = 3
 _TEMPLATE_LOOKBACK_DAYS = 14
+_REFERENCE_DAYS = _TEMPLATE_LOOKBACK_DAYS + 7 * _PREVIOUS_DAYS
+# At the daily predict, the sync before it has ingested every closed JST day,
+# so a current feed's newest day is origin-1 (short only of its after-midnight
+# captures). A second day absorbs one sync or upload that has not landed yet;
+# a newest observed day older than that means the feed or the replica stopped.
+# Any observed run counts, so no timetable change can silence an agency.
+_STALE_AFTER_DAYS = 2
+# A template must look like the previous days of its type: a day with fewer
+# than half their median slots, or whose first run starts or last run ends this
+# many hours past their median first or last hour, is partial. A full day's ends
+# wander by an hour or two. Judging against only the last few days lets a
+# permanent timetable change become the norm once two days of it have run.
+_PARTIAL_SHARE = 0.5
+_CUT_OFF_HOURS = 4
 
 
-def template_future_runs(runs: pd.DataFrame, origin: date, horizon_days: int = 7) -> pd.DataFrame:
+def template_span(origin: date, horizon_days: int = 7) -> tuple[date, date]:
+    """The dates template_future_runs reads a day type for: its reference window
+    through the last target day. A caller's `day_types` must cover them."""
+    return origin - timedelta(days=_REFERENCE_DAYS), origin + timedelta(days=horizon_days)
+
+
+def template_future_runs(
+    runs: pd.DataFrame,
+    origin: date,
+    horizon_days: int = 7,
+    *,
+    day_types: Mapping[int, DayTypes] | None = None,
+) -> pd.DataFrame:
     """Live prediction has no observed runs after `origin` -- `runs` holds only
     completed trips, and `origin` itself can already hold a same-day partial
     row (GTFS-RT ingestion is continuous, so the morning's trips may already
     be in ClickHouse by the time the daily predict job runs). Each agency
-    templates its own origin+1..origin+horizon_days from the most recent day
-    STRICTLY BEFORE origin, in its own trailing _TEMPLATE_LOOKBACK_DAYS of
-    history, sharing that target day's weekday -- never another agency's day
-    (multi-agency `runs` can have agencies at different freshness), never
-    origin's own still-incomplete day, and never arbitrarily old history. An
-    agency with no matching day in that window is skipped for that target
-    day; only the realized delay is actually unknown for a row that is
-    templated, so it is NaN."""
+    templates its own origin+1..origin+horizon_days from the most recent
+    complete day STRICTLY BEFORE origin, in its own trailing
+    _TEMPLATE_LOOKBACK_DAYS of history, of the target day's day type (weekday,
+    Saturday, Sunday-or-holiday) -- never another agency's day (multi-agency
+    `runs` can have agencies at different freshness), never origin's own
+    still-incomplete day, and never arbitrarily old history. A target day with
+    no such day is skipped, never matched by weekday instead. Only the realized
+    delay is actually unknown for a row that is templated, so it is NaN.
+
+    `day_types` holds each agency's types over template_span (its calendar,
+    from pipeline.day_types.load_day_types); an agency absent from it is typed
+    by the weekday rule alone. A day is partial, and never a template, when
+    against the median of the previous _PREVIOUS_DAYS days of its type it ran
+    fewer than half the route x hour slots, or its span is cut off at either
+    end; a day with no earlier day of its type is not partial. An agency whose
+    newest day with any observed run is older than origin-_STALE_AFTER_DAYS
+    gets no template at all, so a feed that stopped stops being forecast.
+
+    A day the weekday rule alone typed (no calendar, or one that does not cover
+    it: the replica keeps only each feed's current calendar) is never a
+    template when it is a public holiday or in the 12/29-1/3 year-end break.
+    Feeds run some holidays on their weekday timetable and the year-end break
+    on a holiday one, so the rule's type for such a day is a guess, while the
+    target it would be copied to may be typed by the feed's calendar."""
     t = pd.Timestamp(origin)
-    window_start = t - pd.Timedelta(days=_TEMPLATE_LOOKBACK_DAYS)
+    first, last = template_span(origin, horizon_days)
+    weekday_rule = resolve_day_types(first, last, [], [], {})
+    holidays = frozenset(public_holidays_between(first, last))
     frames = []
-    for _agency_id, agency_runs in runs.groupby("agency_id"):
-        recent = agency_runs[(agency_runs["service_date"] >= window_start) & (agency_runs["service_date"] < t)]
+    for agency_id, agency_runs in runs.groupby("agency_id"):
+        types = (day_types or {}).get(int(agency_id), weekday_rule)
+        observed = agency_runs.loc[agency_runs["service_date"] < t, "service_date"]
+        if observed.empty or observed.max() < t - pd.Timedelta(days=_STALE_AFTER_DAYS):
+            continue
+        eligible = _template_days(agency_runs, t, types)
+        recent = eligible[eligible.index >= t - pd.Timedelta(days=_TEMPLATE_LOOKBACK_DAYS)]
+        candidates = recent[[not _guessed(day.date(), types, holidays) for day in recent.index]]
         for d in range(1, horizon_days + 1):
             target_day = t + pd.Timedelta(days=d)
-            same_weekday = recent[recent["service_date"].dt.dayofweek == target_day.dayofweek]
-            if same_weekday.empty:
+            same_type = candidates[candidates == types.of(target_day.date())]
+            if same_type.empty:
                 continue
-            template_day = same_weekday["service_date"].max()
+            template_day = same_type.index.max()
             rows = agency_runs[agency_runs["service_date"] == template_day].copy()
             rows["service_date"] = target_day
             rows["delay_min"] = np.nan
             frames.append(rows)
     return pd.concat(frames, ignore_index=True) if frames else runs.iloc[0:0].copy()
+
+
+def _guessed(day: date, types: DayTypes, holidays: frozenset[date]) -> bool:
+    year_end = (day.month == 12 and day.day >= 29) or (day.month == 1 and day.day <= 3)
+    return day not in types.from_calendar and (day in holidays or year_end)
+
+
+def _template_days(agency_runs: pd.DataFrame, origin: pd.Timestamp, types: DayTypes) -> pd.Series:
+    """The agency's days in the reference window before origin that are not
+    partial, indexed by date, each with its day type."""
+    window = agency_runs[
+        (agency_runs["service_date"] >= origin - pd.Timedelta(days=_REFERENCE_DAYS))
+        & (agency_runs["service_date"] < origin)
+    ]
+    days = (
+        window[["service_date", "route_code", "hour"]]
+        .drop_duplicates()
+        .groupby("service_date")["hour"]
+        .agg(slots="size", first="min", last="max")
+    )
+    kinds = pd.Series([types.of(day.date()) for day in days.index], index=days.index, dtype="object")
+    keep = []
+    for day, own in days.iterrows():
+        previous = days[(kinds == kinds[day]) & (days.index < day)].tail(_PREVIOUS_DAYS)
+        if previous.empty:
+            keep.append(True)
+            continue
+        thin = own["slots"] < _PARTIAL_SHARE * previous["slots"].median()
+        cut_off = (
+            own["first"] >= previous["first"].median() + _CUT_OFF_HOURS
+            or own["last"] <= previous["last"].median() - _CUT_OFF_HOURS
+        )
+        keep.append(not (thin or cut_off))
+    return kinds[keep]
 
 
 def weekend_days(runs: pd.DataFrame) -> pd.DataFrame:
