@@ -80,8 +80,14 @@ R2_RT_MAX_STALE_DAYS="${R2_RT_MAX_STALE_DAYS-2}"
 # broken", not a real expectation of daily volume.
 MIN_RT_OBJECT_BYTES="${MIN_RT_OBJECT_BYTES-1}"
 MIN_STATIC_OBJECT_BYTES="${MIN_STATIC_OBJECT_BYTES-1024}"
+# sync-r2.sh's own lock (same default path), held for its whole run.
+SYNC_LOCK="${SYNC_R2_LOCK:-$BASE_DIR/sync-r2.lock}"
+# Long enough to outlast a normal daily sync, short enough that a hung one
+# still alerts the same morning.
+VERIFY_R2_SYNC_WAIT_SECONDS="${VERIFY_R2_SYNC_WAIT_SECONDS-3600}"
 
-for var in R2_RT_MAX_STALE_DAYS MIN_RT_OBJECT_BYTES MIN_STATIC_OBJECT_BYTES; do
+for var in R2_RT_MAX_STALE_DAYS MIN_RT_OBJECT_BYTES MIN_STATIC_OBJECT_BYTES \
+    VERIFY_R2_SYNC_WAIT_SECONDS; do
     value="${!var}"
     case "$value" in
         ''|*[!0-9]*)
@@ -123,7 +129,6 @@ r2_list() {
     done | sort -n
 }
 
-NOW=$(date -u +%s)
 failed=0
 agencies=0
 total_objects=0
@@ -175,6 +180,26 @@ record_result() {
     rm -f "$tmp"
     return 0
 }
+
+# Cron starts this script while sync-r2.sh can still be uploading, and a
+# listing taken mid-sync reports objects that land minutes later as missing.
+# So wait for sync-r2.sh's lock to come free first, but only for
+# VERIFY_R2_SYNC_WAIT_SECONDS: a sync still running past that is a problem in
+# itself, and R2 is not checked against a half-finished upload. The lock is
+# only probed, never held through the checks, because sync-r2.sh skips its
+# run outright when the lock is taken. Without flock (macOS dev/test boxes)
+# this degrades to not waiting, matching sync-r2.sh's own overlap guard.
+if command -v flock >/dev/null 2>&1; then
+    if ! flock -w "$VERIFY_R2_SYNC_WAIT_SECONDS" "$SYNC_LOCK" true; then
+        problem "sync-r2.sh still running, or its lock $SYNC_LOCK is unusable: not acquired within ${VERIFY_R2_SYNC_WAIT_SECONDS}s — R2 not checked"
+        record_result fail
+        exit 1
+    fi
+else
+    echo "verify-r2.sh: WARNING flock not found — not waiting for an in-flight sync-r2.sh run" >&2
+fi
+
+NOW=$(date -u +%s)
 
 # `|| [ -n "$row" ]` processes a final row lacking a trailing newline, matching
 # the other agencies.tsv readers.
