@@ -6,25 +6,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import _test_pool
-
-
-async def _seed_admin_session(conn) -> str:
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, 'admin') RETURNING user_id",
-            f"opsadmin{datetime.now().timestamp()}@x",
-        )
-    )["user_id"]
-    sid = f"sid-ops-{uid}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return sid
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -41,7 +24,7 @@ async def ops_client(apply_schema, ch_async_client):
     app.state.ch_client = ch_async_client
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE")
-        admin_sid = await _seed_admin_session(conn)
+        admin_sid = (await seed_session(conn, role="admin")).sid
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, admin_sid, pool
     await pool.close()

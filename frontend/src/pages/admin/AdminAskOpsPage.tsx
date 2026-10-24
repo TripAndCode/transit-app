@@ -119,14 +119,9 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
       key: "status",
       header: t("admin.ask_ops.col.status"),
       render: (row) => (
-        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-          <StatusChip tone={row.status === "ok" ? "good" : "warn"}>
-            {t(`admin.ask_ops.status.${row.status}`)}
-          </StatusChip>
-          {row.numeric_guard_triggered && (
-            <StatusChip tone="neutral">{t("admin.ask_ops.numeric_guard")}</StatusChip>
-          )}
-        </span>
+        <StatusChip tone={row.status === "ok" ? "good" : "warn"}>
+          {t(`admin.ask_ops.status.${row.status}`)}
+        </StatusChip>
       ),
     },
     { key: "tool", header: t("admin.ask_ops.col.tool"), render: (row) => row.tool ?? "—" },

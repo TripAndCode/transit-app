@@ -68,6 +68,16 @@ def test_list_users_escapes_percent_in_q_and_adds_escape_clause():
     assert "ESCAPE '\\'" in sql
 
 
+def test_list_users_folds_q_before_escaping_it():
+    """Escaping first would leave a full-width ``％``/``＿`` untouched, and the
+    NFKC fold would then turn it into a live wildcard."""
+    conn = _RecordingConn()
+    response = _client(conn).get("/api/admin/users", params={"q": "５０％＿ｏｆｆ＼"})
+    assert response.status_code == 200
+    _, args = conn.calls[0]
+    assert args[0] == r"%50\%\_off\\%"
+
+
 def test_list_users_filters_on_llm_approved_so_total_counts_the_waiting():
     """The nav badge asks for a count, not a page: it reads ``total`` from a
     one-row request, which is only exact if the filter reaches the SQL."""

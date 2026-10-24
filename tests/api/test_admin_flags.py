@@ -4,34 +4,13 @@ the admin guard, the mandatory-reason PATCH contract, the returned provenance
 lag) for both the API's own next GET and `pipeline.flags.flag()`.
 """
 
-from datetime import datetime, timedelta, timezone
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from pipeline.flags import REGISTRY, flag
 from tests.conftest import _test_pool
-
-
-async def _seed_admin(conn, *, role="admin"):
-    email = f"u{datetime.now().timestamp()}@x"
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id",
-            email,
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-    )
-    return sid, uid
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -47,14 +26,14 @@ async def admin_client(apply_schema):
 
 @pytest.mark.asyncio
 async def test_non_admin_forbidden(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     r = await admin_client.get("/api/admin/flags", cookies={"sid": sid})
     assert r.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_returns_every_registered_flag(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await admin_client.get("/api/admin/flags", cookies={"sid": sid})
     assert r.status_code == 200
     body = r.json()
@@ -65,7 +44,7 @@ async def test_list_returns_every_registered_flag(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_patch_requires_reason(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     key = REGISTRY[0].key
     r = await admin_client.patch(
         f"/api/admin/flags/{key}",
@@ -78,7 +57,7 @@ async def test_patch_requires_reason(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_patch_rejects_blank_reason(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     key = REGISTRY[0].key
     r = await admin_client.patch(
         f"/api/admin/flags/{key}",
@@ -91,7 +70,7 @@ async def test_patch_rejects_blank_reason(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_patch_unknown_key_404(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await admin_client.patch(
         "/api/admin/flags/not_a_real_flag",
         json={"value": True, "reason": "testing"},
@@ -103,7 +82,7 @@ async def test_patch_unknown_key_404(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_patch_sets_override_visible_immediately(admin_client, aconn, monkeypatch):
-    sid, uid = await _seed_admin(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     definition = REGISTRY[0]
     monkeypatch.delenv(definition.env_var, raising=False)
     override_value = not definition.env_default
@@ -137,7 +116,7 @@ async def test_patch_records_admin_action(admin_client, aconn, monkeypatch):
         calls.append(kwargs)
 
     monkeypatch.setattr("api.routers.admin_flags.record_admin_action", _fake_record_admin_action)
-    sid, uid = await _seed_admin(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     definition = REGISTRY[0]
 
     r = await admin_client.patch(
@@ -158,7 +137,7 @@ async def test_patch_records_admin_action(admin_client, aconn, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_unknown_key_404(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await admin_client.delete(
         "/api/admin/flags/not_a_real_flag",
         cookies={"sid": sid},
@@ -169,7 +148,7 @@ async def test_delete_unknown_key_404(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_delete_clears_the_override_and_restores_the_env_value(admin_client, aconn, monkeypatch):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     definition = REGISTRY[0]
     monkeypatch.delenv(definition.env_var, raising=False)
 
@@ -205,7 +184,7 @@ async def test_delete_records_admin_action(admin_client, aconn, monkeypatch):
     async def _fake_record_admin_action(conn, **kwargs):
         calls.append(kwargs)
 
-    sid, uid = await _seed_admin(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     definition = REGISTRY[0]
     monkeypatch.delenv(definition.env_var, raising=False)
     r = await admin_client.patch(
@@ -233,7 +212,7 @@ async def test_delete_records_admin_action(admin_client, aconn, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_without_an_override_is_a_no_op(admin_client, aconn, monkeypatch):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     definition = REGISTRY[0]
     monkeypatch.delenv(definition.env_var, raising=False)
     await aconn.execute("DELETE FROM feature_flags WHERE key = $1", definition.key)
@@ -249,7 +228,7 @@ async def test_delete_without_an_override_is_a_no_op(admin_client, aconn, monkey
 
 @pytest.mark.asyncio
 async def test_delete_rejects_a_cross_origin_request(admin_client, aconn):
-    sid, _ = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await admin_client.delete(
         f"/api/admin/flags/{REGISTRY[0].key}",
         cookies={"sid": sid},

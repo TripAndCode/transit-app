@@ -97,7 +97,9 @@ gate. `prune.sh` now also refuses to run (exit 65) unless sync-r2.sh's
 `.sync-r2.last-ok` marker is fresh, so the parity gate is enforced in code,
 not just documented here.
 
-`bin/verify-r2.sh` runs right after `sync-r2.sh` and independently lists
+`bin/verify-r2.sh` runs right after `sync-r2.sh`, waits for a sync still in
+progress to release its lock (a problem in itself past
+`VERIFY_R2_SYNC_WAIT_SECONDS`, default one hour), and then independently lists
 each configured agency's actual R2 objects, checking freshness and
 byte-size integrity against local disk instead of trusting `sync-r2.sh`'s
 own exit status. `bin/prune-r2.sh` runs weekly (like `prune.sh`, gated on

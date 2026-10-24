@@ -12,8 +12,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import _test_pool
+from tests.fixtures.users import seed_session
 
 _EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
 
@@ -33,23 +33,6 @@ class _UnavailableEmbedder:
         raise RuntimeError("unavailable")
 
 
-async def _seed_admin_session(conn) -> tuple[int, str]:
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, 'admin') RETURNING user_id",
-            f"askopsadmin{datetime.now().timestamp()}@x",
-        )
-    )["user_id"]
-    sid = f"sid-askops-{uid}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return uid, sid
-
-
 @pytest.fixture
 async def ask_ops_client(apply_schema, monkeypatch):
     from api.main import app
@@ -63,7 +46,7 @@ async def ask_ops_client(apply_schema, monkeypatch):
         await conn.execute(
             "TRUNCATE agencies, sessions, users, ask_query_log, ask_intent_cache, rag_chunks, admin_audit CASCADE"
         )
-        admin_uid, admin_sid = await _seed_admin_session(conn)
+        admin_sid, admin_uid, _ = await seed_session(conn, role="admin")
         agency_id = (
             await conn.fetchrow(
                 "INSERT INTO agencies (agency_name, feed_url) VALUES ('AskOpsAgency', 'http://x') RETURNING agency_id"

@@ -7,59 +7,46 @@ import pytest
 
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 
-
-def _ctx(from_d="2026-05-13", to_d="2026-05-27"):
-    return {"from_date": date.fromisoformat(from_d), "to_date": date.fromisoformat(to_d)}
-
-
 # --- Same-intent pairs that MUST collapse to the same hash ---
 
 
 def test_paraphrase_top_n_collapses():
-    a = canonicalize("top_n", {"metric": "AVG_DELAY", "n": 10}, _ctx())
-    b = canonicalize("top_n", {"n": 10, "metric": "avg_delay"}, _ctx())  # key order + case
+    a = canonicalize("top_n", {"metric": "AVG_DELAY", "n": 10})
+    b = canonicalize("top_n", {"n": 10, "metric": "avg_delay"})  # key order + case
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
 def test_default_n_collapses_with_explicit_default():
     """When n=10 is the tool's default, omitting it must hash the same as explicit n=10."""
-    a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay", "n": 10}, _ctx())
-    assert signature_hash("top_n", a) == signature_hash("top_n", b)
-
-
-def test_relative_dates_resolve_before_hashing():
-    """'last_2_weeks' resolves to absolute dates from the RangeCtx (to_date − 14 days)."""
-    ctx = _ctx("2026-05-13", "2026-05-27")
-    a = canonicalize("top_n", {"metric": "avg_delay", "time_window": "last_2_weeks"}, ctx)
-    b = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"}, ctx)
+    a = canonicalize("top_n", {"metric": "avg_delay"})
+    b = canonicalize("top_n", {"metric": "avg_delay", "n": 10})
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
 def test_route_ids_list_order_collapses():
     """A list of route IDs is order-agnostic for canonicalization."""
-    a = canonicalize("compare_segments", {"route_ids": ["16071", "22171"]}, _ctx())
-    b = canonicalize("compare_segments", {"route_ids": ["22171", "16071"]}, _ctx())
+    a = canonicalize("compare_segments", {"route_ids": ["16071", "22171"]})
+    b = canonicalize("compare_segments", {"route_ids": ["22171", "16071"]})
     assert signature_hash("compare_segments", a) == signature_hash("compare_segments", b)
 
 
 def test_best_first_default_false_collapses():
     """best_first=False (default) and omitted hash the same."""
-    a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay", "best_first": False}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay"})
+    b = canonicalize("top_n", {"metric": "avg_delay", "best_first": False})
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
 def test_on_time_rate_best_first_default_true_collapses():
     """on_time_rate lists the best routes first when best_first is omitted."""
-    a = canonicalize("top_n", {"metric": "on_time_rate"}, _ctx())
-    b = canonicalize("top_n", {"metric": "on_time_rate", "best_first": True}, _ctx())
+    a = canonicalize("top_n", {"metric": "on_time_rate"})
+    b = canonicalize("top_n", {"metric": "on_time_rate", "best_first": True})
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
 def test_describe_data_default_order_desc_collapses():
-    a = canonicalize("describe_data", {"kind": "sample_counts"}, _ctx())
-    b = canonicalize("describe_data", {"kind": "sample_counts", "order": "desc"}, _ctx())
+    a = canonicalize("describe_data", {"kind": "sample_counts"})
+    b = canonicalize("describe_data", {"kind": "sample_counts", "order": "desc"})
     assert signature_hash("describe_data", a) == signature_hash("describe_data", b)
 
 
@@ -67,37 +54,32 @@ def test_describe_data_default_order_desc_collapses():
 
 
 def test_different_n_does_not_collapse():
-    a = canonicalize("top_n", {"metric": "avg_delay", "n": 10}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay", "n": 20}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay", "n": 10})
+    b = canonicalize("top_n", {"metric": "avg_delay", "n": 20})
     assert signature_hash("top_n", a) != signature_hash("top_n", b)
 
 
 def test_different_service_type_does_not_collapse():
-    a = canonicalize("top_n", {"metric": "avg_delay", "service_type": "weekday"}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay", "service_type": "weekend"}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay", "service_type": "weekday"})
+    b = canonicalize("top_n", {"metric": "avg_delay", "service_type": "weekend"})
     assert signature_hash("top_n", a) != signature_hash("top_n", b)
 
 
 def test_different_tool_does_not_collapse():
-    a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
-    b = canonicalize("time_series", {"metric": "avg_delay"}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay"})
+    b = canonicalize("time_series", {"metric": "avg_delay"})
     assert signature_hash("top_n", a) != signature_hash("time_series", b)
 
 
 def test_different_date_range_does_not_collapse():
-    _a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx("2026-05-13", "2026-05-27"))
-    _b = canonicalize("top_n", {"metric": "avg_delay"}, _ctx("2026-04-13", "2026-04-27"))
-    # No explicit dates in args; ctx-resolved range injected only when args reference dates.
-    # Both may hash the same — that's valid. The test of record: different EXPLICIT
-    # date ranges in args do not collapse.
-    a2 = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"}, _ctx())
-    b2 = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-04-13", "to_date": "2026-04-27"}, _ctx())
+    a2 = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"})
+    b2 = canonicalize("top_n", {"metric": "avg_delay", "from_date": "2026-04-13", "to_date": "2026-04-27"})
     assert signature_hash("top_n", a2) != signature_hash("top_n", b2)
 
 
 def test_best_first_true_does_not_collapse_with_default():
-    a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay", "best_first": True}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay"})
+    b = canonicalize("top_n", {"metric": "avg_delay", "best_first": True})
     assert signature_hash("top_n", a) != signature_hash("top_n", b)
 
 
@@ -106,12 +88,12 @@ def test_best_first_true_does_not_collapse_with_default():
 
 
 def test_on_time_rate_worst_first_is_kept():
-    out = canonicalize("top_n", {"metric": "on_time_rate", "best_first": False}, _ctx())
+    out = canonicalize("top_n", {"metric": "on_time_rate", "best_first": False})
     assert out["best_first"] is False
 
 
 def test_describe_data_ascending_order_is_kept():
-    out = canonicalize("describe_data", {"kind": "sample_counts", "order": "asc"}, _ctx())
+    out = canonicalize("describe_data", {"kind": "sample_counts", "order": "asc"})
     assert out["order"] == "asc"
 
 
@@ -120,19 +102,19 @@ def test_describe_data_ascending_order_is_kept():
 
 def test_route_id_case_preserved():
     """Identifiers must NOT be lowercased — different-case route IDs must NOT collapse."""
-    a = canonicalize("route_stats", {"route_id": "ROUTE_ABC"}, _ctx())
-    b = canonicalize("route_stats", {"route_id": "route_abc"}, _ctx())
+    a = canonicalize("route_stats", {"route_id": "ROUTE_ABC"})
+    b = canonicalize("route_stats", {"route_id": "route_abc"})
     assert signature_hash("route_stats", a) != signature_hash("route_stats", b)
 
 
 def test_hash_is_16_hex_chars():
-    h = signature_hash("top_n", canonicalize("top_n", {"metric": "avg_delay"}, _ctx()))
+    h = signature_hash("top_n", canonicalize("top_n", {"metric": "avg_delay"}))
     assert len(h) == 16 and all(c in "0123456789abcdef" for c in h)
 
 
 def test_unknown_tool_raises():
     with pytest.raises(ValueError):
-        canonicalize("not_a_tool", {}, _ctx())
+        canonicalize("not_a_tool", {})
 
 
 def test_signature_dataclass_frozen():
@@ -144,8 +126,8 @@ def test_signature_dataclass_frozen():
 
 def test_null_and_missing_are_equivalent():
     """A None-valued arg and an absent arg must produce the same canonical form."""
-    a = canonicalize("top_n", {"metric": "avg_delay", "service_type": None}, _ctx())
-    b = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
+    a = canonicalize("top_n", {"metric": "avg_delay", "service_type": None})
+    b = canonicalize("top_n", {"metric": "avg_delay"})
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
@@ -154,12 +136,10 @@ def test_date_object_args_serialize_to_iso():
     a = canonicalize(
         "top_n",
         {"metric": "avg_delay", "from_date": date(2026, 5, 13), "to_date": date(2026, 5, 27)},
-        _ctx(),
     )
     b = canonicalize(
         "top_n",
         {"metric": "avg_delay", "from_date": "2026-05-13", "to_date": "2026-05-27"},
-        _ctx(),
     )
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
@@ -222,9 +202,9 @@ def test_build_schema_defaults_match_canonical_defaults():
 def test_on_time_tools_collapse_their_best_first_default(tool):
     """The on-time tools list best-first unless told otherwise, so an explicit
     true is the same intent as none, and false stays a different one."""
-    omitted = canonicalize(tool, {"k": 5}, _ctx())
-    assert canonicalize(tool, {"k": 5, "best_first": True}, _ctx()) == omitted
-    assert canonicalize(tool, {"k": 5, "best_first": False}, _ctx()) != omitted
+    omitted = canonicalize(tool, {"k": 5})
+    assert canonicalize(tool, {"k": 5, "best_first": True}) == omitted
+    assert canonicalize(tool, {"k": 5, "best_first": False}) != omitted
 
 
 async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch):
@@ -243,14 +223,11 @@ async def test_explicit_all_services_survives_canonicalization_and_dispatches_th
 
     monkeypatch.setattr(tools, "compute_ranking", fake_ranking)
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 30), service="平日")
-    ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
     raw = {"metric": "avg_delay", "service_type": "all"}
 
-    canonical = canonicalize("top_n", raw, ctx_dict)
+    canonical = canonicalize("top_n", raw)
     assert canonical.get("service_type") == "all"
-    assert signature_hash("top_n", canonical) != signature_hash(
-        "top_n", canonicalize("top_n", {"metric": "avg_delay"}, ctx_dict)
-    )
+    assert signature_hash("top_n", canonical) != signature_hash("top_n", canonicalize("top_n", {"metric": "avg_delay"}))
 
     await tools._tool_top_n(raw, ctx, None, 1, "en")
     await tools._tool_top_n(canonical, ctx, None, 1, "en")
@@ -258,9 +235,8 @@ async def test_explicit_all_services_survives_canonicalization_and_dispatches_th
     assert seen == ["all", "all", "平日"]
 
 
-@pytest.mark.parametrize("window", [["last_7_days"], {"days": 7}])
-def test_a_time_window_that_is_not_a_string_is_kept_as_unrecognised(window):
-    """Only a string names a relative-time token; any other value hashes as given."""
-    out = canonicalize("top_n", {"metric": "avg_delay", "time_window": window}, _ctx())
-    assert out["time_window"] == window
-    assert "from_date" not in out
+@pytest.mark.parametrize("window", ["last_7_days", "Last_7_Days", ["last_7_days"], {"days": 7}])
+def test_a_time_window_arg_is_not_resolved_to_dates(window):
+    """No tool takes time_window, so it hashes as given, like any other unknown arg."""
+    out = canonicalize("top_n", {"metric": "avg_delay", "time_window": window})
+    assert out == {"metric": "avg_delay", "time_window": window}

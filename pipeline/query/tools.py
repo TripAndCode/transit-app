@@ -28,6 +28,7 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -130,6 +131,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_no_data", "en"): "No observations in the selected window.",
     ("trend_summary", "ja"): "日次トレンド ({from_date}〜{to_date}): 平均{avg:.2f}分",
     ("trend_summary", "en"): "Daily trend ({from_date} to {to_date}): mean {avg:.2f} min",
+    ("trend_summary_week", "ja"): "週次トレンド ({from_date}〜{to_date}): 平均{avg:.2f}分",
+    ("trend_summary_week", "en"): "Weekly trend ({from_date} to {to_date}): mean {avg:.2f} min",
+    ("trend_summary_month", "ja"): "月次トレンド ({from_date}〜{to_date}): 平均{avg:.2f}分",
+    ("trend_summary_month", "en"): "Monthly trend ({from_date} to {to_date}): mean {avg:.2f} min",
     ("on_time_no_data", "ja"): "定時率を計算できるデータがありません。",
     ("on_time_no_data", "en"): "Not enough data to compute on-time rate.",
     ("on_time_summary", "ja"): "定時率 (遅延 {threshold_min} 分以内) 上位{count}路線",
@@ -144,6 +149,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("segment_hotspots_summary", "en"): "Delay hotspots — route {route}",
     ("segment_hotspots_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
     ("segment_hotspots_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("unnamed_stop", "ja"): "{stop_sequence}番停留所",
+    ("unnamed_stop", "en"): "Stop #{stop_sequence}",
     ("time_pattern_summary", "ja"): "路線{route} 時間帯・曜日パターン",
     ("time_pattern_summary", "en"): "Time-of-day/day-of-week pattern — route {route}",
     ("time_pattern_no_data", "ja"): "路線{route} の時間帯別データがありません。",
@@ -363,6 +370,15 @@ def _summary(template: str, lang: str = "ja", **vars: Any) -> str:
         return tpl.format(**vars) if vars else tpl
     except KeyError:
         return tpl
+
+
+def unnamed_stop_name(stop_sequence: int, locale: str) -> str:
+    """The name a stop goes by when stops.txt gives it none: no name field, or no matching row.
+
+    Every response that names stops calls this rather than spelling the label
+    itself, in SQL or Python, so the label follows the request's language.
+    """
+    return _summary("unnamed_stop", lang=locale, stop_sequence=stop_sequence)
 
 
 # ---------------------------------------------------------------------------
@@ -821,8 +837,8 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     present the original ctx is returned unchanged.
     """
     days_back = args.get("days_back")
-    # Accept both key forms: canonicalize writes "from_date"/"to_date";
-    # legacy/LLM-direct callers may pass "from"/"to" (no underscores).
+    # Accept both key forms: the TOOLS schema names "from"/"to", and an LLM
+    # signature or a cached one may spell them "from_date"/"to_date".
     raw_from = args.get("from_date") or args.get("from")
     raw_to = args.get("to_date") or args.get("to")
     if days_back is None and not raw_from and not raw_to:
@@ -1160,6 +1176,11 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
     return ToolResult(kind="empty", summary=_summary("unknown_dimension", lang=locale, dimension=dimension))
 
 
+# The header for each bucket width compute_trend_series knows; it buckets any
+# other value by day, so any other value is titled daily too.
+_TREND_SUMMARY_KEYS = {"week": "trend_summary_week", "month": "trend_summary_month"}
+
+
 async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     # When the LLM scopes to a single route, push it into ctx so the
     # compute function narrows the trend to that route only. Without this
@@ -1179,7 +1200,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     return ToolResult(
         kind="series",
         summary=_summary(
-            "trend_summary",
+            _TREND_SUMMARY_KEYS.get(granularity, "trend_summary"),
             lang=locale,
             from_date=ctx.from_date,
             to_date=ctx.to_date,
@@ -1282,7 +1303,10 @@ async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int
     return ToolResult(
         kind="table",
         summary=_summary("segment_hotspots_summary", lang=locale, route=route),
-        rows=[list(r) for r in rows],
+        rows=[
+            [stop_sequence, stop_name if stop_name is not None else unnamed_stop_name(stop_sequence, locale), *rest]
+            for stop_sequence, stop_name, *rest in rows
+        ],
         columns=["stop_sequence", "stop_name", "avg_min", "samples"],
     )
 
@@ -1398,6 +1422,19 @@ _HANDLERS = {
 _HANDLERS.update(META_HANDLERS)
 
 
+# Free-text arguments matched against stored route and stop names. dispatch
+# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
+_FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
+
+
+def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: unicodedata.normalize("NFKC", v) if k in _FREE_TEXT_ARGS and isinstance(v, str) else v
+        for k, v in arguments.items()
+    }
+
+
 async def dispatch(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1450,6 +1487,7 @@ async def dispatch(
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}
             arguments = {"route": raw_rc, **arguments}
+        arguments = _fold_free_text_args(arguments)
 
         from pipeline.query.schema_linker import resolve_route
 

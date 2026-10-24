@@ -2,7 +2,7 @@
 
 Public surface
 --------------
-compute_overview_summary(agency_id, ctx, conn, locale, *, pool=None) -> dict
+compute_overview_summary(agency_id, ctx, conn, *, pool=None, ch=None) -> dict
     Build the full Overview tab payload.  Pass ``pool`` to run the ten
     stage queries concurrently (each task acquires its own connection);
     omit it (or pass ``None``) for the sequential single-connection path
@@ -1273,7 +1273,6 @@ async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,
     conn,
-    locale: str = "ja",
     *,
     pool=None,
     ch=None,

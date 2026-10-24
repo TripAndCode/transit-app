@@ -58,8 +58,9 @@ jobs:
       - name: i18n key parity
         run: npm run lint:i18n
 
-      # Exact-string gate for server-rendered strings the frontend can't see
-      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`.
+      # Catches hardcoded, untranslated UI text in the frontend's TS/TSX
+      # source: the npm script shells out to `python3` to run
+      # frontend/scripts/lint-i18n-strings.py.
       # The only native dependency in this job, and the reason it is worth
       # naming — it is what decides whether this job can stay hosted.
       - name: i18n exact-string check

@@ -88,9 +88,9 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
     then prune rows whose service_date has aged out, all in one transaction
     (a failure partway through rolls back the whole batch rather than
     leaving a half-upserted forecast with the prune skipped). Never raises:
-    a missing/corrupt manifest or a DB failure is logged and answered with
-    `0`, so a bad publish from the VPS side never aborts the caller's wider
-    ingest sweep."""
+    a missing/corrupt manifest, a forecast whose rows lack a column or carry
+    a non-ISO date, or a DB failure is logged and answered with `0`, so a bad
+    publish from the VPS side never aborts the caller's wider ingest sweep."""
     import pyarrow.parquet as pq
 
     try:
@@ -100,27 +100,26 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
         parquet_key = f"{manifest['prefix']}/forecast.parquet"
         body = s3_client.get_object(Bucket=bucket, Key=parquet_key)["Body"].read()
         table = pq.read_table(io.BytesIO(body))
-        rows = table.to_pylist()
+        pg_rows = [
+            (
+                row["agency_id"],
+                row["route_code"],
+                _as_date(row["service_date"]),
+                row["hour"],
+                row["mean_min"],
+                row["q10"],
+                row["q50"],
+                row["q90"],
+                row["model_version"],
+                _as_date(row["origin_date"]),
+                _as_datetime(row["generated_at"]),
+            )
+            for row in table.to_pylist()
+        ]
     except Exception:
         _log.exception("ml_forecast_ingest: could not read the latest forecast from R2")
         return 0
 
-    pg_rows = [
-        (
-            row["agency_id"],
-            row["route_code"],
-            _as_date(row["service_date"]),
-            row["hour"],
-            row["mean_min"],
-            row["q10"],
-            row["q50"],
-            row["q90"],
-            row["model_version"],
-            _as_date(row["origin_date"]),
-            _as_datetime(row["generated_at"]),
-        )
-        for row in rows
-    ]
     try:
         from psycopg2.extras import execute_values
 
@@ -138,7 +137,12 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
             cur.execute(prune_forecast_ml_sql(FORECAST_ML_RETENTION_DAYS))
         conn.commit()
     except Exception:
-        conn.rollback()
         _log.exception("ml_forecast_ingest: could not upsert the latest forecast")
+        # A connection the server dropped refuses the rollback as well; the
+        # failure that matters is already logged.
+        try:
+            conn.rollback()
+        except Exception:
+            _log.debug("ml_forecast_ingest: rollback failed", exc_info=True)
         return 0
-    return len(rows)
+    return len(pg_rows)

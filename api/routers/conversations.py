@@ -339,7 +339,6 @@ async def append_message_endpoint(
     user_summary = body.user_summary or f"🛠 {resolved_tool}"
 
     ctx_obj = _ctx_from_stored_filters(conv["filter_ctx"])
-    ctx_dict = {"from_date": ctx_obj.from_date, "to_date": ctx_obj.to_date}
 
     # Wrap user-msg + cache upsert + dispatch + assistant-msg in one transaction.
     # Without it, a concurrent DELETE of this conversation would FK-cascade-delete
@@ -358,7 +357,7 @@ async def append_message_endpoint(
 
         # Canonicalize + cache upsert (always bumps hit_count for chip/builder paths)
         try:
-            can_args = canonicalize(resolved_tool, resolved_args, ctx_dict)
+            can_args = canonicalize(resolved_tool, resolved_args)
         except ValueError:
             can_args = dict(resolved_args)
         sig_hash = signature_hash(resolved_tool, can_args)

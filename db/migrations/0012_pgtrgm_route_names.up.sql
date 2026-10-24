@@ -1,6 +1,7 @@
 -- 0012_pgtrgm_route_names.up.sql
--- Trigram fuzzy match for Japanese route-name aliases. Used by
--- pipeline/query/schema_linker.resolve_route.
+-- Trigram fuzzy match for Japanese route-name aliases. 0080 drops both
+-- indexes: resolve_route matches the NFKC-folded columns, which they do not
+-- cover. pg_trgm itself stays in use.
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 

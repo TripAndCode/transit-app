@@ -99,3 +99,18 @@ async def test_calendar_until_of_a_calendar_dates_only_feed_is_its_last_addition
     await _exception(aconn, a, "WD", "20260930", 1)
 
     assert await _calendar_until(aconn, a) == ("20260930", "2026-09-30")
+
+
+async def test_both_static_version_reads_date_a_version_by_its_last_analysis(aconn):
+    """The summary row's ``computed_at`` is restamped by every analyze, so it
+    is published as ``analyzed_at``; when the timetable was loaded is the
+    health list's ``static_loaded_on``."""
+    a = await _current_version(aconn)
+    computed_at = await aconn.fetchval("SELECT computed_at FROM agg_static_version_summary WHERE agency_id = $1", a)
+
+    (version,) = ad.build_static_versions([dict(r) for r in await aconn.fetch(ad.STATIC_VERSIONS_SQL, a)])
+    assert version["analyzed_at"] == computed_at.isoformat()
+    assert "loaded_at" not in version
+
+    (current,) = [dict(r) for r in await aconn.fetch(ad.CURRENT_STATIC_VERSION_SQL) if r["agency_id"] == a]
+    assert current["analyzed_at"] == computed_at

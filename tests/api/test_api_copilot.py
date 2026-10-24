@@ -1,33 +1,10 @@
-from datetime import datetime, timedelta, timezone
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from pipeline.flags import invalidate as invalidate_flags
 from tests.conftest import TEST_ORIGIN, _test_pool
-
-
-async def _seed_user_and_session(conn, *, role="user", llm_approved=False):
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, name, role, llm_approved) VALUES ($1, $2, $3, $4) RETURNING user_id",
-            f"u{datetime.now().timestamp()}@x",
-            "Yo",
-            role,
-            llm_approved,
-        )
-    )["user_id"]
-    sid = f"sid-{uid:0>30}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-        "test-ua",
-    )
-    return sid, uid
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -173,7 +150,7 @@ async def test_copilot_insight_serves_an_anonymous_caller(copilot_client, monkey
 async def test_copilot_insight_serves_an_unapproved_signed_in_caller(copilot_client, aconn, monkeypatch):
     """``users.llm_approved`` gates LLM calls only; this route makes none."""
     client, agency_id = copilot_client
-    sid, _uid = await _seed_user_and_session(aconn, llm_approved=False)
+    sid = (await seed_session(aconn, name="Yo", user_agent="test-ua")).sid
 
     async def fake_insight(tab, view_payload, *, locale="ja"):
         return {"text": "ok", "cite": "c", "low_confidence": False}

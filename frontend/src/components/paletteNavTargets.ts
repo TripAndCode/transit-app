@@ -37,8 +37,8 @@ const SUBLABEL_KEYS: Record<NavTo, string> = {
 
 /**
  * The palette's "Go to" group and `g`-chord destinations: every sidebar nav
- * item plus Ask (reached from the top bar rather than the rail, but still a
- * keyboard-reachable destination). Derived from
+ * item plus Ask, which the rail draws as a transfer station off the line
+ * rather than as one of `SIDEBAR_NAV_ITEMS`. Derived from
  * `SIDEBAR_NAV_ITEMS` so a new sidebar destination automatically gets a
  * palette entry instead of silently missing one.
  */

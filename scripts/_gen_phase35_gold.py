@@ -7,15 +7,12 @@ Run from repo root:
 from __future__ import annotations
 
 import json
-from datetime import date
 
 from pipeline.query.intent import canonicalize
 
-CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
-
 
 def entry(eid: str, tool: str, args: dict) -> dict:
-    can = canonicalize(tool, args, CTX)
+    can = canonicalize(tool, args)
     return {
         "id": eid,
         "via": "builder",

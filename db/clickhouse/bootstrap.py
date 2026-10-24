@@ -1,7 +1,17 @@
-"""Applies the ClickHouse schema for `updates` and `updates_live`. No migration
-chain needed yet — CREATE TABLE IF NOT EXISTS is naturally idempotent.
-If this schema needs to evolve later, add versioned migrations then;
-building that machinery now for these two tables is premature.
+"""Applies db/clickhouse/schema.sql, which creates the app's persistent
+ClickHouse tables: the observation tables (`updates`, `updates_live`), the
+aggregate and internal tables pipeline.ch_aggregates computes (its
+ALL_TABLES), and `static_stop_times`, the schedule mirror those aggregates
+join. The work tables ch_aggregates builds and drops during a run are not
+here. analyze refuses to run while any table in ALL_TABLES is missing, so
+this is also how a store gets them.
+
+Every statement is CREATE TABLE IF NOT EXISTS, so re-applying is idempotent
+and there is no migration chain. It creates a missing table and leaves an
+existing one as it is. The one change it makes to existing tables is the
+nullable-column self-heal below, and that reaches only the observation
+tables; any other change to an existing table's shape is a deliberate manual
+step, like the type migration described next.
 
 NOTE: the live dev ClickHouse instance (a large, real-data `updates` table)
 predates the trip_id/scheduled_time LowCardinality change in schema.sql and

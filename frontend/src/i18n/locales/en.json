@@ -848,7 +848,6 @@
       "n": "Count",
       "best_first": "Best first",
       "service_type": "Service type",
-      "time_window": "Time window",
       "granularity": "Granularity",
       "dimension": "Compare by",
       "from_date": "Start date",
@@ -1819,8 +1818,7 @@
         "score_label": "Score",
         "generated_at_label": "As of"
       },
-      "table_label": "Ask query log",
-      "numeric_guard": "Numeric guard"
+      "table_label": "Ask query log"
     }
   },
   "copilot": {

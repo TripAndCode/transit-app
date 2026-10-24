@@ -117,7 +117,7 @@ def test_timeline_sql_reads_the_shared_dedup_cte_and_buckets_by_scheduled_sec():
     # Built on the shared dedup CTE, not a hand-rolled scan of `updates`.
     assert sql.startswith("WITH deduped AS (")
     assert "argMax(u.dep_delay, (u.captured_at, u.file_name))" in sql
-    assert "any(u.scheduled_sec) AS scheduled_sec" in sql
+    assert "argMax(tuple(u.scheduled_sec), (u.captured_at, u.file_name)), 1) AS scheduled_sec" in sql
     assert "FROM deduped" in sql
 
     # The bucket is derived from scheduled_sec, not captured_at: the rail is a

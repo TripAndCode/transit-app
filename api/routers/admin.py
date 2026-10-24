@@ -41,6 +41,7 @@ import os
 import re
 import secrets
 import time
+import unicodedata
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -68,7 +69,7 @@ from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
-from pipeline.admin_users import session_id_prefix, unique_prefix_match
+from pipeline.admin_users import SessionPrefixError, resolve_session_prefix, session_id_prefix
 from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
@@ -108,6 +109,16 @@ class UserList(BaseModel):
     total: int
 
 
+def _user_search_predicate(n: int) -> str:
+    """The admin user search's WHERE clause for the LIKE pattern in ``$n``.
+
+    ``idx_users_email_nfkc_trgm`` and ``idx_users_name_nfkc_trgm`` index these
+    exact expressions; the planner uses an expression index only for a
+    predicate on the same expression, so the two must change together.
+    """
+    return f"(normalize(email, NFKC) ILIKE ${n} ESCAPE '\\' OR normalize(name, NFKC) ILIKE ${n} ESCAPE '\\')"
+
+
 @router.get("/users", response_model=UserList)
 async def list_users(
     q: str | None = None,
@@ -121,7 +132,9 @@ async def list_users(
 ) -> UserList:
     """List users with optional filters.
 
-    - ``q``: substring match on email OR name (ILIKE).
+    - ``q``: case-insensitive substring match on email OR name. Both sides
+      are NFKC-folded, as the client-side search boxes fold them, so
+      full-width IME input and half-width katakana match their plain forms.
     - ``role``: exact match, restricted to ``user`` / ``admin`` (silently
       ignored otherwise so a malformed query param doesn't 500).
     - ``suspended``: ``True`` filters to suspended only, ``False`` to active.
@@ -136,8 +149,10 @@ async def list_users(
     where = []
     args: list[Any] = []
     if q:
-        args.append(f"%{escape_like(q)}%")
-        where.append(f"(email ILIKE ${len(args)} ESCAPE '\\' OR name ILIKE ${len(args)} ESCAPE '\\')")
+        # Fold before escaping: NFKC turns a full-width ％, ＿ or ＼ into the
+        # ASCII metacharacter, which escaping first would leave live.
+        args.append(f"%{escape_like(unicodedata.normalize('NFKC', q))}%")
+        where.append(_user_search_predicate(len(args)))
     if role in ("user", "admin"):
         args.append(role)
         where.append(f"role = ${len(args)}")
@@ -706,26 +721,28 @@ async def revoke_user_session(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Revoke one session identified by an admin-visible prefix of its
-    ``sid_hash``.
+    """Revoke one of user ``uid``'s sessions, identified by an admin-visible
+    prefix of its ``sid_hash``.
 
-    Looks up every session hash for the user and picks the prefix match in
-    Python (:func:`pipeline.admin_users.unique_prefix_match`) rather than a
-    SQL ``LIKE $1 || '%'`` -- an exact ``left(sid_hash, length($1)) = $1``
-    comparison, driven by that lookup, never treats a caller-supplied
-    prefix as a wildcard pattern. A prefix that matches zero or more than
-    one session (astronomically unlikely for random tokens, but never
-    assumed) 404s instead of deleting the wrong -- or multiple -- sessions.
+    Delegates to :func:`pipeline.admin_users.resolve_session_prefix` over
+    ``uid``'s sessions only, answering with its
+    :class:`~pipeline.admin_users.SessionPrefixError`, and deleting and
+    recording nothing, when the prefix names no single session. The prefix
+    never reaches SQL: the match is picked in Python.
     """
     csrf_guard(request)
     ua = request.headers.get("user-agent")
     ip = request.client.host if request.client else None
     async with conn.transaction():
-        rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
-        sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
-        if sid_hash is None:
-            raise HTTPException(404, "session not found")
-        await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
+
+        async def scoped_hashes() -> list[str]:
+            return [r["sid_hash"] for r in await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)]
+
+        try:
+            sid_hash = await resolve_session_prefix(sid_prefix, scoped_hashes)
+        except SessionPrefixError as exc:
+            raise HTTPException(exc.status, exc.detail) from None
+        await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND sid_hash=$2", uid, sid_hash)
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,

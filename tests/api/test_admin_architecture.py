@@ -8,33 +8,12 @@ fixture, same pattern as `tests/api/test_routers_admin.py`, even though the
 handlers themselves never touch `conn`.
 """
 
-from datetime import datetime, timedelta, timezone
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import _test_pool
-
-
-async def _seed(conn, *, role="user"):
-    email = f"arch{datetime.now().timestamp()}@x"
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id",
-            email,
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-arch-{uid}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return sid
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -50,7 +29,7 @@ async def arch_client(apply_schema):
 
 @pytest.mark.asyncio
 async def test_docs_list_requires_admin(arch_client, aconn):
-    sid = await _seed(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     r = await arch_client.get("/api/admin/architecture/docs", cookies={"sid": sid})
     assert r.status_code == 403
 
@@ -65,7 +44,7 @@ async def test_docs_list_anonymous_unauthorized(arch_client):
 async def test_docs_list_returns_known_feature_docs(arch_client, aconn):
     """Enumeration is dynamic (glob), not a hardcoded list -- assert against
     real repo files that must exist (ask-tab.md predates this item)."""
-    sid = await _seed(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await arch_client.get("/api/admin/architecture/docs", cookies={"sid": sid})
     assert r.status_code == 200
     body = r.json()
@@ -81,14 +60,14 @@ async def test_docs_list_returns_known_feature_docs(arch_client, aconn):
 
 @pytest.mark.asyncio
 async def test_doc_detail_requires_admin(arch_client, aconn):
-    sid = await _seed(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     r = await arch_client.get("/api/admin/architecture/docs/ask-tab", cookies={"sid": sid})
     assert r.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_doc_detail_returns_content(arch_client, aconn):
-    sid = await _seed(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await arch_client.get("/api/admin/architecture/docs/ask-tab", cookies={"sid": sid})
     assert r.status_code == 200
     body = r.json()
@@ -99,7 +78,7 @@ async def test_doc_detail_returns_content(arch_client, aconn):
 
 @pytest.mark.asyncio
 async def test_doc_detail_unknown_slug_404s(arch_client, aconn):
-    sid = await _seed(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await arch_client.get("/api/admin/architecture/docs/does-not-exist", cookies={"sid": sid})
     assert r.status_code == 404
 
@@ -111,7 +90,7 @@ async def test_doc_detail_rejects_path_traversal(arch_client, aconn):
     that directory, like `CLAUDE`) must 404, not serve an arbitrary repo
     file -- proves the lookup is matched against the live enumeration of
     `docs/features/*.md` stems, never path-joined from the raw param."""
-    sid = await _seed(aconn, role="admin")
+    sid = (await seed_session(aconn, role="admin")).sid
     for slug in ("..", "CLAUDE", "etc-passwd"):
         r = await arch_client.get(f"/api/admin/architecture/docs/{slug}", cookies={"sid": sid})
         assert r.status_code == 404, slug

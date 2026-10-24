@@ -367,8 +367,8 @@ async def _dispatch_and_respond(
 
 
 #: The arg names that pin an answer to absolute dates: the tools' own
-#: ``from``/``to``, and the ``from_date``/``to_date`` canonicalize resolves
-#: relative windows into.
+#: ``from``/``to``, and the ``from_date``/``to_date`` spelling an LLM signature
+#: or a cached one may carry, which ``_apply_date_overrides`` also accepts.
 _DATED_ARG_KEYS = frozenset({"from", "to", "from_date", "to_date"})
 
 
@@ -564,9 +564,8 @@ async def chat_with_tools(
         parsed = _parse_build_sentinel(question)
         if parsed is not None:
             build_tool, build_args = parsed
-            ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
             try:
-                can_args = canonicalize(build_tool, build_args, ctx_dict)
+                can_args = canonicalize(build_tool, build_args)
             except ValueError:
                 # Unknown tool — fall back to dispatching with raw args so the
                 # tool handler can return its own "unknown" error string.
@@ -791,11 +790,9 @@ async def chat_with_tools(
         text_keyed = not history and not force_tool_call
         pre_row = await _cache_lookup_by_question(conn, question, agency_id) if text_keyed else None
         # The same text can mean different dates on different days ("昨日",
-        # "先週"): a time_window token in the LLM's signature is resolved to
-        # absolute dates by canonicalize() against that request's RangeCtx, and
-        # the cached args hold the absolute dates from the first time it ran.
-        # Such a row answers its own signature, not its text, so the LLM
-        # resolves the text again.
+        # "先週"): when the LLM's signature pins absolute dates, the cached
+        # args hold the dates from the first time it ran. Such a row answers
+        # its own signature, not its text, so the LLM resolves the text again.
         if pre_row is not None and _carries_dates(pre_row["args"]):
             pre_row = None
         if pre_row is not None:
@@ -895,9 +892,8 @@ async def chat_with_tools(
             }
 
         # We have a valid IntentSignature — canonicalize and compute hash.
-        ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
         try:
-            can_args = canonicalize(sig.tool, sig.args, ctx_dict)
+            can_args = canonicalize(sig.tool, sig.args)
         except ValueError:
             # Unknown tool from LLM — degrade gracefully.
             can_args = dict(sig.args)
