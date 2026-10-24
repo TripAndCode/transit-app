@@ -21,7 +21,9 @@ days_ago_ts() {
 # LS_FIXTURE holds the canned `aws s3 ls --recursive` output to return, keyed
 # by the prefix argument, one "prefix=lines..." block set via env before each
 # call. Simpler: the shim reads $LS_RT_<id> / $LS_STATIC_<id> env vars named
-# after the sanitized prefix it was asked to list.
+# after the sanitized prefix it was asked to list. A file of that name under
+# LS_FIXTURE_DIR takes precedence, so a background process can change what
+# R2 "holds" while verify-r2.sh is running.
 export AWS_LOG="$TEST_BASE/aws.log"
 cat > "$SHIM_DIR/aws" <<'SHIM'
 #!/usr/bin/env bash
@@ -31,7 +33,11 @@ if [ "$1" = s3 ] && [ "$2" = ls ]; then
     url="$3"
     prefix="${url#s3://*/}"
     var="LS_$(printf '%s' "$prefix" | tr -c 'A-Za-z0-9' '_')"
-    printf '%s' "${!var:-}"
+    if [ -n "${LS_FIXTURE_DIR:-}" ] && [ -f "$LS_FIXTURE_DIR/$var" ]; then
+        cat "$LS_FIXTURE_DIR/$var"
+    else
+        printf '%s' "${!var:-}"
+    fi
     exit 0
 fi
 if [ "$1" = s3 ] && [ "$2" = rm ]; then
@@ -209,6 +215,13 @@ set -e
 [ "$rc" -eq 64 ] || fail "a non-numeric R2_RT_MAX_STALE_DAYS should exit 64, got $rc"
 pass "a non-numeric threshold is rejected with exit 64"
 
+set +e
+VERIFY_R2_SYNC_WAIT_SECONDS=soon ../bin/verify-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "a non-numeric VERIFY_R2_SYNC_WAIT_SECONDS should exit 64, got $rc"
+pass "a non-numeric sync wait is rejected with exit 64"
+
 # A non-degenerate leading-zero threshold ("010") must be read as decimal 10,
 # not octal 8 -- a 9-day-old RT object must still be considered fresh at a
 # 10-day limit, but would wrongly fail if the limit were silently misread as
@@ -240,3 +253,75 @@ grep -q "value too great for base" "$TEST_BASE/out.log" \
 grep -q "1 agencies checked" "$TEST_BASE/out.log" \
     || fail "R2_RT_MAX_STALE_DAYS=008 aborted the per-agency loop early instead of checking the agency"
 pass "a leading-zero threshold whose octal reading is invalid (008) doesn't abort the per-agency scan"
+
+# hold_sync_lock <lock-file> <seconds> [<fixture-var> <fixture-line>]
+# Stands in for an in-flight sync-r2.sh: holds <lock-file> for <seconds>,
+# then, when given, finishes its upload by publishing <fixture-line> as the
+# R2 listing for <fixture-var> before releasing the lock.
+hold_sync_lock() {
+    local lock="$1" seconds="$2" var="${3:-}" line="${4:-}"
+    rm -f "$TEST_BASE/lock-held"
+    (
+        exec 9>"$lock"
+        flock 9
+        touch "$TEST_BASE/lock-held"
+        sleep "$seconds"
+        [ -z "$var" ] || printf '%s\n' "$line" > "$LS_FIXTURE_DIR/$var"
+    ) &
+    holder_pid=$!
+    for _ in $(seq 1 100); do
+        [ -f "$TEST_BASE/lock-held" ] && return 0
+        sleep 0.05
+    done
+    fail "background lock holder never acquired $lock (test setup issue)"
+}
+
+# verify-r2.sh runs while sync-r2.sh may still be uploading, so it must wait
+# for sync-r2.sh's lock before listing R2, and must not pass when that wait
+# runs out. Where `flock` is absent (e.g. macOS) every other test here
+# already covers the run-without-waiting path; this block skips cleanly.
+if command -v flock >/dev/null 2>&1; then
+    export LS_FIXTURE_DIR="$TEST_BASE/ls-fixtures"
+    mkdir -p "$LS_FIXTURE_DIR"
+    printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' \
+        > "$COLLECTOR_BASE/etc/agencies.tsv"
+    printf '1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
+        >> "$COLLECTOR_BASE/etc/agencies.tsv"
+    printf '8\thiroden\t60\thttp://feed.test/tu8.pb\thttp://feed.test/s8.zip\thttp://ping.test/8\n' \
+        >> "$COLLECTOR_BASE/etc/agencies.tsv"
+    head -c 2048 /dev/zero > "$COLLECTOR_BASE/data/8/static/gtfs_static_20260909.zip"
+
+    # Mid-sync, R2 still lacks agency 8's current static zip; the sync
+    # uploads it and then releases the lock.
+    seed_healthy
+    export LS_static_8_="$fresh $static8_size static/8/gtfs_static_20260801.zip"$'\n'
+    hold_sync_lock "$COLLECTOR_BASE/sync-r2.lock" 1 \
+        LS_static_8_ "$fresh $static8_size static/8/gtfs_static_20260909.zip"
+    export VERIFY_R2_SYNC_WAIT_SECONDS=30
+    run_verify
+    wait "$holder_pid"
+    rm -f "$LS_FIXTURE_DIR/LS_static_8_"
+    [ "$rc" -eq 0 ] \
+        || fail "verify-r2.sh should wait for the in-flight sync, then pass, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+    pass "verify-r2.sh waits for an in-flight sync-r2.sh before listing R2"
+
+    # A sync still running when the wait runs out is a problem, not a pass,
+    # and R2 is not listed at all. Holding a non-default SYNC_R2_LOCK also
+    # proves verify-r2.sh waits on the same lock file sync-r2.sh uses.
+    seed_healthy
+    export SYNC_R2_LOCK="$TEST_BASE/custom-sync.lock"
+    hold_sync_lock "$SYNC_R2_LOCK" 4
+    export VERIFY_R2_SYNC_WAIT_SECONDS=1
+    run_verify
+    wait "$holder_pid"
+    unset SYNC_R2_LOCK VERIFY_R2_SYNC_WAIT_SECONDS
+    [ "$rc" -eq 1 ] || fail "a sync still running past the wait should exit 1, got $rc: $(cat "$TEST_BASE/out.log")"
+    grep -q "PROBLEM sync-r2.sh still running" "$TEST_BASE/out.log" \
+        || fail "timeout reason absent: $(cat "$TEST_BASE/out.log")"
+    [ -s "$AWS_LOG" ] && fail "R2 was listed while sync-r2.sh was still running"
+    read -r _ marker_result _ < "$COLLECTOR_BASE/.verify-r2.last-result"
+    [ "$marker_result" = "fail" ] || fail "a timed-out wait should record result=fail, got '$marker_result'"
+    pass "a sync-r2.sh still running past the wait fails verify-r2.sh without listing R2"
+else
+    echo "SKIP: flock not installed on this platform, sync-r2 wait behavior not exercised"
+fi

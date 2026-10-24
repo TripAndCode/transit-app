@@ -60,6 +60,45 @@ else
     echo "sync-r2: WARNING flock not found — running without an overlap guard" >&2
 fi
 
+# The directories mirrored here are written to while this runs: rt-poller.sh
+# renames TripUpdate_*.pb.part files in the open UTC day directory under rt/,
+# rotate-day.sh writes <day>.tar.gz.part beside the tarballs, and
+# static-fetch.sh creates and removes .dl.* downloads in static/. The AWS CLI
+# stats every file under its source before applying --exclude, and a file
+# that vanishes in between makes it exit nonzero even though every archive
+# uploaded. So each sync reads a per-run staging directory holding only
+# symlinks to the archives it mirrors. Each link is named after its target,
+# and --follow-symlinks makes the CLI read the target's size, mtime and
+# bytes, so the comparison and upload match a direct sync of those files.
+# Archives are only ever created by an atomic rename and never rewritten.
+STAGE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/sync-r2.XXXXXX") || {
+    echo "sync-r2: FAILED to create a staging directory" >&2
+    exit 1
+}
+trap 'rm -rf "$STAGE_ROOT"' EXIT
+
+# sync_archives <src-dir> <name-glob> <s3-dest> <stage-name>
+# Links every regular file directly in <src-dir> whose name matches
+# <name-glob> into a fresh staging directory and syncs that to <s3-dest>.
+# Nonzero when staging or the sync itself fails. An empty staging directory
+# is still synced, so an unreachable R2 fails the agency either way.
+sync_archives() {
+    local src pattern="$2" dest="$3" stage="$STAGE_ROOT/$4" f
+    # Absolute, so the links resolve from the staging directory.
+    src=$(cd "$1" && pwd) || return 1
+    mkdir "$stage" || return 1
+    for f in "$src"/*; do
+        # $pattern is matched as a glob on purpose.
+        # shellcheck disable=SC2254
+        case "${f##*/}" in $pattern) ;; *) continue ;; esac
+        [ -f "$f" ] || continue
+        ln -s "$f" "$stage/${f##*/}" || return 1
+    done
+    "$AWS" s3 sync "$stage" "$dest" \
+        --endpoint-url "$OBJECT_STORE_ENDPOINT" --follow-symlinks \
+        --exclude '*' --include "$pattern" --only-show-errors
+}
+
 failed=0
 processed=0
 
@@ -67,9 +106,7 @@ for rt in "$BASE_DIR"/data/*/rt; do
     [ -d "$rt" ] || continue
     processed=$((processed + 1))
     id=$(basename "$(dirname "$rt")")
-    if "$AWS" s3 sync "$rt" "s3://$OBJECT_STORE_BUCKET/rt/$id" \
-        --endpoint-url "$OBJECT_STORE_ENDPOINT" \
-        --exclude '*' --include '*.tar.gz' --only-show-errors; then
+    if sync_archives "$rt" '*.tar.gz' "s3://$OBJECT_STORE_BUCKET/rt/$id" "rt-$id"; then
         echo "[a$id] rt synced"
     else
         echo "[a$id] rt sync FAILED" >&2
@@ -81,9 +118,7 @@ for sdir in "$BASE_DIR"/data/*/static; do
     [ -d "$sdir" ] || continue
     processed=$((processed + 1))
     id=$(basename "$(dirname "$sdir")")
-    if "$AWS" s3 sync "$sdir" "s3://$OBJECT_STORE_BUCKET/static/$id" \
-        --endpoint-url "$OBJECT_STORE_ENDPOINT" \
-        --exclude '*' --include 'gtfs_static_*.zip' --only-show-errors; then
+    if sync_archives "$sdir" 'gtfs_static_*.zip' "s3://$OBJECT_STORE_BUCKET/static/$id" "static-$id"; then
         echo "[a$id] static synced"
     else
         echo "[a$id] static sync FAILED" >&2
