@@ -26,7 +26,6 @@ async def test_expired_cookie_cleared(client, aconn):
     sid = (await seed_session(aconn, expires_in=timedelta(seconds=-1))).sid
     resp = await client.get("/api/me", cookies={"sid": sid})
     assert resp.status_code == 401
-    # cookie cleared on response
     set_cookie = resp.headers.get("set-cookie", "")
     assert "sid=" in set_cookie and "Max-Age=0" in set_cookie
 
