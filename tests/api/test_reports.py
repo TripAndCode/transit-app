@@ -1064,6 +1064,38 @@ async def test_ranking_csv_service_column_holds_the_active_filter(reports_client
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("report", "locale", "header"),
+    [
+        ("ranking", "ja", "【平日の遅延ランキング上位2路線】"),
+        ("ranking", "en", "[Weekday: Delay ranking — top 2 routes]"),
+        ("ranking_best", "ja", "【平日の平均遅延の少ない順 上位2路線】"),
+        ("ranking_best", "en", "[Weekday: Lowest average delay — top 2 routes]"),
+        ("on_time", "ja", "【平日の定時率ランキング】"),
+        ("worst_5min", "ja", "【平日の5分超遅延ランキング】"),
+        # compute_dow_ranking drops the service filter, so its header names none.
+        ("dow_weekday", "ja", "【平日遅延ランキング】"),
+    ],
+)
+async def test_ranking_text_header_names_the_service_filter_and_row_count(
+    reports_client, ch_client, report, locale, header
+):
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_split_and_whole(pool, agency_id, day)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/{_ranking_query(report, day, '', '&service=平日')}",
+        headers={"Accept-Language": locale},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["rows"]) == 2
+    assert data["text"].split("\n")[0] == header
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["agg", "live"])
 async def test_trend_names_a_split_route_once_on_all_its_observations(reports_client, ch_client, ch_async_client, path):
     """Each slice alone is too thin to name a worst route; pooled, the route

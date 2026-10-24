@@ -9,8 +9,7 @@ from pipeline.query.router import (
     is_follow_up,
     needs_history,
     needs_previous_turn,
-    retrieve_examples,
-    route_question,
+    route_or_examples,
     set_golden_set_path,
 )
 from tests.conftest import _test_pool
@@ -88,11 +87,12 @@ async def conn_with_embedded_chunks(apply_schema):
 
 
 @pytest.mark.asyncio
-async def test_route_question_rule_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_rule_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     """Rule path beats Stage 2 even when chunks exist."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        decision = await route_question("どんな路線がある？", conn, agency_id)
+        decision, examples = await route_or_examples("どんな路線がある？", conn, agency_id)
+    assert examples == []
     assert decision is not None
     assert decision.stage == "rules"
     assert decision.tool == "describe_data"
@@ -100,11 +100,12 @@ async def test_route_question_rule_hit(conn_with_embedded_chunks, fake_embedder,
 
 
 @pytest.mark.asyncio
-async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_embedding_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     """No rule matches → embedding finds g-1 with distance ~0 → dispatch."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        decision = await route_question("中央大橋線の遅延", conn, agency_id)
+        decision, examples = await route_or_examples("中央大橋線の遅延", conn, agency_id)
+    assert examples == []
     assert decision is not None
     assert decision.stage == "embedding"
     assert decision.tool == "route_stats"
@@ -112,21 +113,21 @@ async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embe
 
 
 @pytest.mark.asyncio
-async def test_route_question_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    """Distant query (no rule hit) → distance > threshold → returns None."""
+async def test_route_or_examples_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """Distant query (no rule hit) → distance > threshold → no decision."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # Avoid OOS-guard keywords (e.g. 天気) so this exercises Stage 2 only.
-        decision = await route_question("なんとなく気になる", conn, agency_id)
+        decision, _ = await route_or_examples("なんとなく気になる", conn, agency_id)
     assert decision is None
 
 
 @pytest.mark.asyncio
-async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_rejects_above_threshold(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     # _FakeEmbedder returns [0.5,0.5,0,...] for unknown text → distance ~0.29 from both axis chunks → no dispatch
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        d = await route_question("全然関係ない質問", conn, agency_id)
+        d, _ = await route_or_examples("全然関係ない質問", conn, agency_id)
     assert d is None
 
 
@@ -351,12 +352,13 @@ def test_all_rules_map_to_known_tools():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    """Even when route_question returns None, retrieve_examples should give top-3."""
+async def test_route_or_examples_returns_top_k_with_tool_args(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """With no direct dispatch, route_or_examples gives the top-k matches as examples."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # Non-OOS, non-rule phrase so we exercise the Stage 2 fall-through.
-        matches = await retrieve_examples("なんとなく気になる", conn, agency_id, k=3)
+        decision, matches = await route_or_examples("なんとなく気になる", conn, agency_id, k=3)
+    assert decision is None
     # Two chunks in fixture, so we get 2 (capped by available data).
     assert len(matches) == 2
     # Tool/args populated from the golden_set dict.
@@ -367,8 +369,6 @@ async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded
 
 @pytest.mark.asyncio
 async def test_route_or_examples_single_path(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    from pipeline.query.router import route_or_examples
-
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # rule hit: decision, no examples
@@ -383,7 +383,7 @@ async def test_route_or_examples_single_path(conn_with_embedded_chunks, fake_emb
 
 
 @pytest.mark.asyncio
-async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
+async def test_route_or_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
     pool, agency_id = conn_with_embedded_chunks
 
     class _Down:
@@ -396,8 +396,7 @@ async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embed
 
     monkeypatch.setattr(router, "_get_embedder", lambda: _Down())
     async with pool.acquire() as conn:
-        matches = await retrieve_examples("anything", conn, agency_id, k=3)
-    assert matches == []
+        assert await route_or_examples("anything", conn, agency_id, k=3) == (None, [])
 
 
 @pytest.mark.asyncio

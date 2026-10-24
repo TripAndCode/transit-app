@@ -20,17 +20,15 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date
 from pathlib import Path
 
 from pipeline.query.intent import canonicalize, signature_hash
 
-EVAL_CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
 _MIN_BUILDER_ENTRIES = 20
 
 
 def _hash(tool: str, args: dict) -> str:
-    return signature_hash(tool, canonicalize(tool, args, EVAL_CTX))
+    return signature_hash(tool, canonicalize(tool, args))
 
 
 def main() -> int:

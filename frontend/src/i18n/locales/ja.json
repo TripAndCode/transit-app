@@ -848,7 +848,6 @@
       "n": "件数",
       "best_first": "良い順に並べる",
       "service_type": "便種別",
-      "time_window": "期間",
       "granularity": "粒度",
       "dimension": "比較軸",
       "from_date": "開始日",
@@ -1819,8 +1818,7 @@
         "score_label": "スコア",
         "generated_at_label": "時点"
       },
-      "table_label": "Ask クエリログ",
-      "numeric_guard": "数値ガード"
+      "table_label": "Ask クエリログ"
     }
   },
   "copilot": {

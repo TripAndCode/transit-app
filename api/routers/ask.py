@@ -230,8 +230,8 @@ async def ask(
     # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
     sig_hash: str | None = None
     cache_outcome: str | None = None
-    # Numeric-hallucination-guard verdict. Stays None on the deterministic
-    # router paths, where no free-text answer is generated for it to check.
+    # Numeric-hallucination-guard verdict, as chat_with_tools reports it. No
+    # /ask path runs the guard, so it stays None (see log_query).
     numeric_guard_triggered: bool | None = None
 
     if decision is not None:
@@ -367,8 +367,8 @@ _BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", 
 # Per-tool labels (ja / en) and field override metadata for the builder UI.
 # This dict supplies the human-readable labels and the enum option lists for
 # each builder tool.
-# NOTE: ``service_type`` and ``time_window`` are intentionally absent from every
-# tool's builder fields. Those overlap with the per-thread FilterContextBar
+# NOTE: ``service_type`` is intentionally absent from every tool's builder
+# fields, as are dates. Those overlap with the per-thread FilterContextBar
 # (期間 ・ 曜日 ・ 時間帯), which is the single source of truth for time + DOW
 # scope. Chips MAY pre-set these as args (overriding filter context for that
 # specific dispatch); the builder UI does not duplicate them.
