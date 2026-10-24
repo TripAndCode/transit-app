@@ -1,9 +1,12 @@
-# interval tuned per-agency from real dep_delay-change rates (2026-08-20):
-# aomori's upstream feed changes ~58% of the time within 30s (30s justified);
-# the mcapps.jp feeds (8/9/10) change only ~20% within 30s, so 60s loses
-# almost no real signal while roughly halving RT archive volume.
+# interval follows how often each feed's dep_delay actually changes: aomori's
+# feed (and ODPT's mirror of it, which republishes about every 30s) changes
+# within 30s more often than not, so it polls at 30s; the mcapps.jp feeds
+# rarely change within 30s, so 60s loses almost no real signal while roughly
+# halving RT archive volume.
+# aomori polls ODPT's public, key-less mirror of the operator's own feed (same
+# producer, same trip_ids): aomoricitybus.com drops this collector's address.
 # id	name	interval	feed_url	static_url	ping_url
-1	aomori	30	https://aomoricitybus.com/TripUpdate.pb		https://hc-ping.com/FILL-ME-1
+1	aomori	30	https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_AomoriCity_AllLines_trip_update		https://hc-ping.com/FILL-ME-1
 8	hiroden	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/8/current_data.zip	https://hc-ping.com/FILL-ME-8
 9	hirobus	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/9/current_data.zip	https://hc-ping.com/FILL-ME-9
 10	hiroko	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/10/current_data.zip	https://hc-ping.com/FILL-ME-10

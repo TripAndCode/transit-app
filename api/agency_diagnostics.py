@@ -120,7 +120,7 @@ STATIC_VERSIONS_SQL = """
         ) AS calendar_until
     )
     SELECT s.static_version_id AS version,
-           s.computed_at       AS loaded_at,
+           s.computed_at       AS analyzed_at,
            s.trip_count        AS trips,
            s.vehicle_km        AS vehicle_km,
            rc.routes           AS routes,
@@ -165,7 +165,7 @@ ALL_CLAMP_HISTORY_SQL = """
 
 CURRENT_STATIC_VERSION_SQL = """
     SELECT DISTINCT ON (agency_id)
-           agency_id, static_version_id AS version, computed_at AS loaded_at
+           agency_id, static_version_id AS version, computed_at AS analyzed_at
     FROM agg_static_version_summary
     ORDER BY agency_id, computed_at DESC
 """
@@ -357,7 +357,7 @@ def build_static_versions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, A
     return [
         {
             "version": r["version"],
-            "loaded_at": _iso(r.get("loaded_at")),
+            "analyzed_at": _iso(r.get("analyzed_at")),
             "trips": r.get("trips"),
             "vehicle_km": r.get("vehicle_km"),
             "routes": r.get("routes"),
@@ -473,7 +473,7 @@ def build_agency_health(
     that loaded a zip (``static_loads``: ``ok`` static runs; a check that
     found nothing newer closes ``unchanged`` and does not count), falling
     back to the fetch day in the loaded zip's name for a timetable loaded
-    before loads were recorded. ``static_version.loaded_at`` cannot stand in
+    before loads were recorded. ``static_version.analyzed_at`` cannot stand in
     for it: analyze restamps that on every run.
     """
     probes_by_agency = _group_by_agency(probes)
@@ -511,7 +511,7 @@ def build_agency_health(
                 "static_version": (
                     None
                     if version is None
-                    else {"version": version["version"], "loaded_at": _iso(version.get("loaded_at"))}
+                    else {"version": version["version"], "analyzed_at": _iso(version.get("analyzed_at"))}
                 ),
                 "static_loaded_on": (
                     jst_date(loads_by_agency.get(aid)) or _version_date(version["version"] if version else None)

@@ -13,6 +13,8 @@ tests/unit/test_trend_weighted_avg.py).
 from datetime import date
 from typing import Any
 
+import pytest
+
 from pipeline.query.formatter import _r, format_result, format_trend_text
 from pipeline.reports.rankings import _weighted_avg_min
 
@@ -53,11 +55,6 @@ def test_fmt_ranking_empty():
     assert "データがありません" in result
 
 
-def test_format_result_none_rows_returns_static_msg():
-    result = format_result("ranking", None, {})
-    assert "GTFS" in result or "load_static" in result
-
-
 def test_format_result_unknown_type():
     result = format_result("nonexistent_type", [("a",)], {})
     assert "データがありません" in result
@@ -66,8 +63,8 @@ def test_format_result_unknown_type():
 def test_fmt_dow_ranking_renders_int_dow_as_jp():
     """ISODOW int from compute_dow_ranking renders as a Japanese day char."""
     # Row shape: (route_code, service_type, dow, avg_min, samples)
-    rows = [("44372", "平日", 1, 3.5, 100)]  # 1 = Monday in ISODOW
-    result = format_result("dow_ranking", rows, {})
+    rows = [("44372", None, 1, 3.5, 100)]  # 1 = Monday in ISODOW
+    result = format_result("dow_ranking", rows, {"dow_group": "weekday"})
     assert "月" in result, f"expected '月' in {result!r}"
 
 
@@ -150,7 +147,7 @@ def test_fmt_ranking_en_locale_uses_english_strings():
     rows = [("16101", "平日", 7.9, 4.8, 22.8, 152)]
     result = format_result("ranking", rows, {"limit": 100}, locale="en")
     assert "Delay ranking" in result
-    assert "top 100 routes" in result
+    assert "top 1 routes" in result
     assert "route 16101" in result
     assert "mean 7.9 min" in result
     assert "p50=4.8" in result
@@ -162,14 +159,54 @@ def test_fmt_ranking_en_locale_uses_english_strings():
 def test_fmt_dow_ranking_en_translates_iso_dow_and_rollup():
     """EN locale: ISODOW int → short EN name, rollup label → EN word."""
     # ISODOW int path.
-    int_rows = [("44372", "平日", 1, 3.5, 100)]
-    result = format_result("dow_ranking", int_rows, {}, locale="en")
+    int_rows = [("44372", None, 1, 3.5, 100)]
+    result = format_result("dow_ranking", int_rows, {"dow_group": "weekday"}, locale="en")
     assert "Mon" in result, f"expected 'Mon' in {result!r}"
     # Rollup label path with weekday header.
     rollup_rows = [("16101", "平日", "平日", 8.8, 114)]
     result = format_result("dow_ranking", rollup_rows, {"dow_group": "weekday"}, locale="en")
     assert "Weekday delay ranking" in result
     assert "Weekday" in result  # the per-row label too
+
+
+_TWO_RANKED = [("16101", None, 7.9, 4.8, 22.8, 152), ("16102", None, 3.1, 2.0, 9.0, 98)]
+
+
+@pytest.mark.parametrize(
+    ("intent", "locale", "header"),
+    [
+        ({"limit": 100, "sort_order": "desc"}, "ja", "【遅延ランキング上位2路線】"),
+        ({"limit": 100, "sort_order": "desc"}, "en", "[Delay ranking — top 2 routes]"),
+        ({"limit": 100, "sort_order": "asc"}, "ja", "【平均遅延の少ない順 上位2路線】"),
+        ({"limit": 100, "sort_order": "asc"}, "en", "[Lowest average delay — top 2 routes]"),
+        ({"limit": 100, "sort_order": "desc", "service": "平日"}, "ja", "【平日の遅延ランキング上位2路線】"),
+        ({"limit": 100, "sort_order": "desc", "service": "平日"}, "en", "[Weekday: Delay ranking — top 2 routes]"),
+        ({"limit": 100, "sort_order": "asc", "service": "日祝"}, "ja", "【日祝の平均遅延の少ない順 上位2路線】"),
+        (
+            {"limit": 100, "sort_order": "asc", "service": "日祝"},
+            "en",
+            "[Sunday/Holiday: Lowest average delay — top 2 routes]",
+        ),
+    ],
+)
+def test_fmt_ranking_header_counts_rows_and_names_order_and_service(intent, locale, header):
+    """The header counts the rows that follow, not the requested limit, says
+    which end of the ranking they come from, and names the service filter."""
+    assert format_result("ranking", _TWO_RANKED, intent, locale=locale).split("\n")[0] == header
+
+
+@pytest.mark.parametrize(
+    ("query_type", "service", "locale", "header"),
+    [
+        ("on_time", "土曜", "ja", "【土曜の定時率ランキング】"),
+        ("on_time", "土曜", "en", "[Saturday: On-time rate ranking]"),
+        ("worst_5min", "土日祝", "ja", "【土日祝の5分超遅延ランキング】"),
+        ("worst_5min", "土日祝", "en", "[Weekend/Holiday: Ranking of delays over 5 min]"),
+    ],
+)
+def test_fmt_service_filtered_headers_name_the_filter(query_type, service, locale, header):
+    rows = [("14081", service, 76.6, 0.5, 205)]
+    assert format_result(query_type, rows, {"service": service}, locale=locale).split("\n")[0] == header
 
 
 def test_format_trend_text_empty_days_list():

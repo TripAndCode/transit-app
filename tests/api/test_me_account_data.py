@@ -1,14 +1,12 @@
 """Self-serve account deletion and data export on /api/me."""
 
-from datetime import datetime, timedelta, timezone
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
-from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture(autouse=True)
@@ -27,21 +25,9 @@ async def me_client(apply_schema):
     await pool.close()
 
 
-async def _signed_in(conn, email, *, role="user"):
-    uid = await conn.fetchval("INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id", email, role)
-    sid = f"sid-data-{uid}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return sid, uid
-
-
 @pytest.mark.asyncio
 async def test_deleting_the_account_removes_it_and_clears_the_cookie(me_client, aconn):
-    sid, uid = await _signed_in(aconn, "del@x")
+    sid, uid, _ = await seed_session(aconn, email="del@x")
     r = await me_client.request(
         "DELETE", "/api/me", json={"confirm_email": " DEL@x "}, cookies={"sid": sid}, headers={"Origin": TEST_ORIGIN}
     )
@@ -52,7 +38,7 @@ async def test_deleting_the_account_removes_it_and_clears_the_cookie(me_client, 
 
 @pytest.mark.asyncio
 async def test_a_mismatched_confirmation_deletes_nothing(me_client, aconn):
-    sid, uid = await _signed_in(aconn, "keep@x")
+    sid, uid, _ = await seed_session(aconn, email="keep@x")
     r = await me_client.request(
         "DELETE", "/api/me", json={"confirm_email": "other@x"}, cookies={"sid": sid}, headers={"Origin": TEST_ORIGIN}
     )
@@ -63,7 +49,7 @@ async def test_a_mismatched_confirmation_deletes_nothing(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_the_last_admin_is_refused(me_client, aconn):
-    sid, _ = await _signed_in(aconn, "admin@x", role="admin")
+    sid = (await seed_session(aconn, email="admin@x", role="admin")).sid
     r = await me_client.request(
         "DELETE", "/api/me", json={"confirm_email": "admin@x"}, cookies={"sid": sid}, headers={"Origin": TEST_ORIGIN}
     )
@@ -73,7 +59,7 @@ async def test_the_last_admin_is_refused(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_deletion_requires_a_same_origin_request(me_client, aconn):
-    sid, _ = await _signed_in(aconn, "csrf@x")
+    sid = (await seed_session(aconn, email="csrf@x")).sid
     r = await me_client.request(
         "DELETE",
         "/api/me",
@@ -86,7 +72,7 @@ async def test_deletion_requires_a_same_origin_request(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_the_export_downloads_the_users_data(me_client, aconn):
-    sid, uid = await _signed_in(aconn, "exp@x", role="admin")
+    sid, uid, _ = await seed_session(aconn, email="exp@x", role="admin")
     await aconn.execute(
         "INSERT INTO admin_audit (actor_id, action, target_type, ip) VALUES ($1, 'flag.set', 'flag', '10.0.0.9')", uid
     )

@@ -401,7 +401,9 @@ export type AgencyClampDay = { date: string; clamp_pct: number | null };
 
 type AgencyStaticVersion = {
   version: string;
-  loaded_at: string | null;
+  /** When analyze last summarized this version, restamped by every run while
+   *  it is current; not when the timetable was loaded. */
+  analyzed_at: string | null;
   trips: number | null;
   vehicle_km: number | null;
   /** Null for a superseded version: the raw static rows a route count needs
@@ -487,7 +489,7 @@ export type AgencyHealthRow = {
     last_probed_at: string | null;
   };
   clamp_history: AgencyClampDay[];
-  static_version: { version: string; loaded_at: string | null } | null;
+  static_version: { version: string; analyzed_at: string | null } | null;
   /** JST day (`YYYY-MM-DD`) the current timetable was loaded, when known. */
   static_loaded_on: string | null;
   /** A job is working on this agency; a new run would be refused. */
@@ -933,14 +935,13 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
 type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
 
 /** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
- * Invalidates the query list so the row's promoted state refreshes. */
+ * Nothing is invalidated: the query-log rows carry no promoted state
+ * (`promotable` depends only on the row having a cached intent), so a
+ * promote leaves the list unchanged, and a repeat click is answered with
+ * `reason: "already_promoted"`. */
 export function usePromoteAskQuery() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["adminAskQueries"] });
-    },
   });
 }
 

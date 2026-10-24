@@ -644,12 +644,12 @@ async def test_network_summary_endpoint_surfaces_ridership_weighting(net_client)
 async def test_the_board_shows_an_agency_edit_on_its_next_load(net_client, aconn):
     """A deleted agency leaves the board, and new ridership weights show, at
     once rather than after the board's cache expires."""
-    from tests.api.test_admin_flags import _seed_admin
     from tests.conftest import TEST_ORIGIN
+    from tests.fixtures.users import seed_session
 
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)])
-    sid, _uid = await _seed_admin(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     params = {"from": "2026-04-01", "to": "2026-04-07"}
     admin = {"cookies": {"sid": sid}, "headers": {"Origin": TEST_ORIGIN}}
 

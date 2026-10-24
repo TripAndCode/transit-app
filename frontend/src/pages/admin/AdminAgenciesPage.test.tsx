@@ -34,7 +34,7 @@ const HEALTH = [
     last_capture_at: "2026-09-20T02:30:00+00:00",
     rt_coverage: { complete: true, present_count: 4, field_count: 4, probed: true, last_probed_at: null },
     clamp_history: [{ date: "2026-09-19", clamp_pct: 0.4 }],
-    static_version: { version: "v2026-09-01", loaded_at: null },
+    static_version: { version: "v2026-09-01", analyzed_at: null },
     static_loaded_on: "2026-09-18",
     in_flight: false,
     latest_run: null as AgencyRun | null,

@@ -13,26 +13,8 @@ from httpx import ASGITransport
 
 from api.security import token_hash
 from tests.conftest import _test_pool
-
-
-async def _seed(conn, *, role="user", email=None, suspended=False):
-    email = email or f"u{datetime.now().timestamp()}@x"
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role, suspended_at) VALUES ($1, $2, $3) RETURNING user_id",
-            email,
-            role,
-            datetime.now(timezone.utc) if suspended else None,
-        )
-    )["user_id"]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-    )
-    return sid, uid, email
+from tests.fixtures.users import add_session, add_session_digest
+from tests.fixtures.users import seed_session as _seed
 
 
 @pytest.fixture
@@ -77,6 +59,48 @@ async def test_admin_search(admin_client, aconn):
     r = await admin_client.get("/api/admin/users?q=findme", cookies={"sid": sid})
     assert r.status_code == 200
     assert r.json()["total"] == 1
+
+
+async def _search(admin_client, sid, q):
+    r = await admin_client.get("/api/admin/users", params={"q": q}, cookies={"sid": sid})
+    assert r.status_code == 200
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_a_full_width_query_to_find_a_name(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="t@x", name="Tanaka Taro")
+    body = await _search(admin_client, sid, "ＴＡＮＡＫＡ")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_a_full_width_query_to_find_an_email(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="kanri42@x")
+    body = await _search(admin_client, sid, "ｋａｎｒｉ４２")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_folds_the_stored_name_too(admin_client, aconn):
+    """A name stored in half-width katakana is found by its plain form."""
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="k@x", name="ﾀﾅｶ ﾀﾛｳ")
+    body = await _search(admin_client, sid, "タナカ")
+    assert [u["user_id"] for u in body["users"]] == [uid]
+
+
+@pytest.mark.asyncio
+async def test_admin_search_matches_a_full_width_percent_literally(admin_client, aconn):
+    """A full-width ％ folds to ``%`` and is then escaped, so it matches only a
+    literal percent sign rather than acting as a wildcard."""
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, literal, _ = await _seed(aconn, email="p1@x", name="50%off")
+    await _seed(aconn, email="p2@x", name="50xoff")
+    body = await _search(admin_client, sid, "５０％ｏｆｆ")
+    assert [u["user_id"] for u in body["users"]] == [literal]
 
 
 @pytest.mark.asyncio
@@ -161,15 +185,118 @@ async def test_last_admin_guard_survives_concurrent_demotes(admin_client, aconn)
 async def test_admin_user_sessions_omit_expired_sessions(admin_client, aconn):
     admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
     _sid, uid, _ = await _seed(aconn)
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(f"expired-{uid}"),
-        uid,
-        datetime.now(timezone.utc) - timedelta(minutes=1),
-    )
+    await add_session(aconn, uid, expires_in=timedelta(minutes=-1))
     r = await admin_client.get(f"/api/admin/users/{uid}/sessions", cookies={"sid": admin_sid})
     assert r.status_code == 200
     assert len(r.json()) == 1
+
+
+# A shared display-length prefix with letters in it, so uppercasing it changes it.
+_PREFIX = "abcdef012345"
+
+
+async def _hashes(conn, uid):
+    return set(await conn.fetchval("SELECT array_agg(sid_hash) FROM sessions WHERE user_id=$1", uid) or [])
+
+
+async def _revoke(admin_client, admin_sid, uid, prefix):
+    return await admin_client.delete(
+        f"/api/admin/users/{uid}/sessions/{prefix}", cookies={"sid": admin_sid}, headers={"Origin": "http://test"}
+    )
+
+
+async def _revocations(conn, uid):
+    return await conn.fetchval(
+        "SELECT count(*) FROM admin_audit WHERE action = 'user.session_revoked' AND target_id = $1", str(uid)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prefix", "detail"),
+    [
+        (_PREFIX[:11], "prefix too short"),
+        ("a", "prefix too short"),
+        (_PREFIX[:11] + "g", "invalid prefix"),
+        (_PREFIX[:11] + "_", "invalid prefix"),
+        (_PREFIX.upper(), "invalid prefix"),
+    ],
+)
+async def test_admin_session_revoke_refuses_a_prefix_no_stored_hash_can_have(admin_client, aconn, prefix, detail):
+    """The same checks as the self-service route: uppercase is rejected, not folded."""
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    _sid, uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, uid, _PREFIX + "a" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(admin_client, admin_sid, uid, prefix)
+    assert (r.status_code, r.json()["detail"]) == (400, detail)
+    assert await _hashes(aconn, uid) == before
+    assert await _revocations(aconn, uid) == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_session_revoke_404s_when_no_session_matches(admin_client, aconn):
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    _sid, uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, uid, _PREFIX + "a" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(admin_client, admin_sid, uid, "fedcba987654")
+    assert (r.status_code, r.json()["detail"]) == (404, "session not found")
+    assert await _hashes(aconn, uid) == before
+
+
+@pytest.mark.asyncio
+async def test_admin_session_revoke_by_a_unique_prefix_removes_only_that_session(admin_client, aconn):
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    sid, uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, uid, _PREFIX + "a" * 52)
+    r = await _revoke(admin_client, admin_sid, uid, _PREFIX)
+    assert r.status_code == 204
+    assert await _hashes(aconn, uid) == {token_hash(sid)}
+    assert await _revocations(aconn, uid) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_session_revoke_409s_on_an_ambiguous_prefix(admin_client, aconn):
+    """Several matches are a conflict to resolve with a longer prefix, not a
+    session that is already gone."""
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    _sid, uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, uid, _PREFIX + "a" * 52)
+    await add_session_digest(aconn, uid, _PREFIX + "c" * 52)
+    before = await _hashes(aconn, uid)
+    r = await _revoke(admin_client, admin_sid, uid, _PREFIX)
+    assert (r.status_code, r.json()["detail"]) == (409, "prefix matches multiple sessions")
+    assert await _hashes(aconn, uid) == before
+    assert await _revocations(aconn, uid) == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_session_revoke_never_reaches_another_users_session(admin_client, aconn):
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    _sid, uid, _ = await _seed(aconn)
+    _other_sid, other_uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, other_uid, _PREFIX + "b" * 52)
+    before = await _hashes(aconn, other_uid)
+    r = await _revoke(admin_client, admin_sid, uid, _PREFIX)
+    assert (r.status_code, r.json()["detail"]) == (404, "session not found")
+    assert await _hashes(aconn, other_uid) == before
+
+
+@pytest.mark.asyncio
+async def test_admin_session_revoke_counts_matches_among_the_target_users_sessions_only(admin_client, aconn):
+    """Another user holding a session with the same prefix makes it neither
+    ambiguous nor theirs to lose."""
+    admin_sid, _admin_uid, _ = await _seed(aconn, role="admin")
+    sid, uid, _ = await _seed(aconn)
+    _other_sid, other_uid, _ = await _seed(aconn)
+    await add_session_digest(aconn, uid, _PREFIX + "a" * 52)
+    await add_session_digest(aconn, other_uid, _PREFIX + "b" * 52)
+    other_before = await _hashes(aconn, other_uid)
+    r = await _revoke(admin_client, admin_sid, uid, _PREFIX)
+    assert r.status_code == 204
+    assert await _hashes(aconn, uid) == {token_hash(sid)}
+    assert await _hashes(aconn, other_uid) == other_before
 
 
 @pytest.mark.asyncio

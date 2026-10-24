@@ -78,7 +78,9 @@ class RtCoverage(BaseModel):
 
 class StaticVersion(BaseModel):
     version: str
-    loaded_at: str | None
+    #: When analyze last summarized this version, restamped by every run
+    #: while it is current; not when the timetable was loaded.
+    analyzed_at: str | None
     trips: int | None
     vehicle_km: float | None
     routes: int | None
@@ -125,7 +127,9 @@ class AgencyRtSummary(BaseModel):
 
 class AgencyStaticVersion(BaseModel):
     version: str
-    loaded_at: str | None
+    #: When analyze last summarized this version; the load day is the
+    #: health row's ``static_loaded_on``.
+    analyzed_at: str | None
 
 
 class AgencyRunStep(BaseModel):

@@ -299,7 +299,7 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     h = out["headline"]
     assert h["samples"] == 3
     assert h["avg_min"] == pytest.approx(3.0, abs=0.01)
@@ -442,7 +442,7 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     h = out["headline"]
     assert h["avg_min"] == pytest.approx(4.0, abs=0.01)
     assert h["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
@@ -470,7 +470,7 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     h = out["headline"]
     assert h["avg_min"] is not None
     assert h["baseline_avg_min"] is None
@@ -535,7 +535,7 @@ async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     worse_codes = [m["route_code"] for m in out["movers"]["worse"]]
     better_codes = [m["route_code"] for m in out["movers"]["better"]]
     # All four worsened routes are surfaced (limit is now 10), sorted by
@@ -567,7 +567,7 @@ async def test_movers_delta_min_rounds_half_up_not_half_to_even(aconn, aagency_i
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
     assert worse_by_code["R_BOUND"]["delta_min"] == 2.16
 
@@ -623,7 +623,7 @@ async def test_movers_suppresses_delta_pct_below_prv_avg_floor(aconn, aagency_id
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
 
     tiny = worse_by_code["R_TINY"]
@@ -685,7 +685,7 @@ async def test_movers_includes_route_with_zero_baseline_avg(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
 
     assert "R_ZERO" in worse_by_code
@@ -733,7 +733,7 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     rstr = next((m for m in out["movers"]["worse"] if m["route_code"] == "R_STR"), None)
     assert rstr is not None, f"R_STR missing; movers={out['movers']}"
     assert rstr["streak_weeks"] == 3
@@ -782,7 +782,7 @@ async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     conc = out["concentration"]
     codes = [r["route_code"] for r in conc["top_routes"]]
     # All 6 routes are within the top-20 limit.
@@ -807,7 +807,7 @@ async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     codes = [r["route_code"] for r in out["concentration"]["top_routes"] if r["route_code"].startswith("R_TIE")]
     assert codes == ["R_TIE_A", "R_TIE_B"]
 
@@ -835,7 +835,7 @@ async def test_concentration_fast_path_counts_clamped_observations_not_clamped_a
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     top = out["concentration"]["top_routes"]
     assert [r["route_code"] for r in top] == ["R_MIX", "R_OTHER"]
     # grand_total = 50 + 20 = 70 late-minutes.
@@ -877,9 +877,9 @@ async def test_concentration_fast_and_slow_paths_agree_on_mixed_early_late_day(
     from pipeline.reports import compute_overview_summary
 
     fast_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    fast_out = await compute_overview_summary(aagency_id, fast_ctx, aconn, "ja")
+    fast_out = await compute_overview_summary(aagency_id, fast_ctx, aconn)
     slow_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    slow_out = await compute_overview_summary(aagency_id, slow_ctx, aconn, "ja", ch=ch_async_client)
+    slow_out = await compute_overview_summary(aagency_id, slow_ctx, aconn, ch=ch_async_client)
 
     for out in (fast_out, slow_out):
         top = out["concentration"]["top_routes"]
@@ -902,7 +902,7 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     routes = out["top_delayed"]["routes"]
     assert routes[0]["route_code"] == "R_HIGH"
     assert routes[0]["avg_min"] == pytest.approx(8.0, abs=0.05)
@@ -922,7 +922,7 @@ async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aa
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     codes = [r["route_code"] for r in out["top_delayed"]["routes"] if r["route_code"].startswith("R_TDTIE")]
     assert codes == ["R_TDTIE_A", "R_TDTIE_B"]
 
@@ -938,7 +938,7 @@ async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, 
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["top_delayed"]["delayed_count"] == 2
 
 
@@ -957,7 +957,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
         await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", avg, 10)
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     top = out["top_delayed"]
     assert [r["route_code"] for r in top["routes"]] == ["R_0", "R_1", "R_2", "R_3", "R_4"]
     assert top["band_counts"] == {
@@ -969,7 +969,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
 
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
-    empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn, "ja")
+    empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn)
     assert empty_out["top_delayed"] == {
         "routes": [],
         "delayed_count": 0,
@@ -1007,7 +1007,7 @@ async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aage
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     routes = out["top_delayed"]["routes"]
     assert len(routes) == 1
     assert routes[0]["route_code"] == "R_TD"
@@ -1030,7 +1030,7 @@ async def test_top_delayed_routes_uses_cur_ctx_not_full_ctx(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 5), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     codes = [r["route_code"] for r in out["top_delayed"]["routes"]]
     assert codes == ["R_NEW"]
     # delayed_count must also exclude R_OLD (would otherwise be 2, not 1,
@@ -1074,7 +1074,7 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     pk = out["peak_hour"]
     assert pk is not None
     assert pk["peak_hour"] == 8
@@ -1110,7 +1110,7 @@ async def test_service_split_ignores_the_service_id_and_sparkline_7_points(aconn
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     # 05-18..05-22 are Mon..Fri at 1..5 min, 05-23 is Saturday, 05-24 Sunday.
     assert out["service_split"] == _split(weekday=(3.0, 5, 5), saturday=(6.0, 1, 1), sunday_holiday=(7.0, 1, 1))
     assert len(out["sparkline_points"]) == 7
@@ -1197,7 +1197,7 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id, ch_
         to_date=date(2026, 5, 6),
         time_band="morning",
     )
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     # Morning-only avg = (10 + 5) / 2 = 7.5 min over 2 samples.
     assert out["headline"]["samples"] == 2
     assert out["headline"]["avg_min"] == pytest.approx(7.5, abs=0.1)
@@ -1218,7 +1218,7 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     pk_wd = out["peak_hour_weekday"]
     pk_we = out["peak_hour_weekend"]
     assert pk_wd is not None
@@ -1249,7 +1249,7 @@ async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aco
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     pk_wd = out["peak_hour_weekday"]
     assert pk_wd is not None
     # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
@@ -1268,7 +1268,7 @@ async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     pk_wd = out["peak_hour_weekday"]
     assert pk_wd is not None
     assert pk_wd["peak_hour"] == 8
@@ -1310,7 +1310,7 @@ async def test_peak_hour_falls_back_to_live_under_routes_filter(aconn, aagency_i
 
     # A routes filter forces the live path (agg_hour_daily has no route column).
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), routes=("R_PW",))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     pk_wd = out["peak_hour_weekday"]
     pk_we = out["peak_hour_weekend"]
     assert pk_wd is not None and pk_we is not None
@@ -1335,13 +1335,13 @@ async def test_peak_hours_under_a_service_filter_read_its_dates_from_the_aggrega
     from pipeline.reports import compute_overview_summary
 
     window = {"from_date": date(2026, 9, 14), "to_date": date(2026, 9, 27)}
-    weekday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="平日"), aconn, "ja")
+    weekday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="平日"), aconn)
     assert weekday["peak_hour"]["peak_hour"] == 8
     assert weekday["peak_hour"]["by_hour"][12] is None
     assert weekday["peak_hour_weekday"]["peak_hour"] == 8
     assert weekday["peak_hour_weekend"] is None
 
-    holiday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="日祝"), aconn, "ja")
+    holiday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="日祝"), aconn)
     assert holiday["peak_hour"]["peak_hour"] == 12
     assert holiday["peak_hour"]["by_hour"][8] is None
     assert holiday["peak_hour_weekday"]["peak_hour"] == 12
@@ -1364,7 +1364,7 @@ async def test_service_split_daily_returns_one_row_per_date_with_its_day_type(ac
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["service_split_daily"] == [
         {"date": "2026-05-18", "day_type": "weekday", "avg_min": 1.0},
         {"date": "2026-05-19", "day_type": "weekday", "avg_min": 4.0},
@@ -1395,7 +1395,7 @@ async def test_service_split_files_a_weekday_holiday_under_sundays_and_holidays(
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     # weekday: (1200 + 2400 + 1200) s / 40 = 2.0 min; holiday: (1080 + 720) s / 12 = 2.5 min.
     assert out["service_split"] == _split(weekday=(2.0, 2, 40), saturday=(5.0, 1, 4), sunday_holiday=(2.5, 2, 12))
     assert [row["day_type"] for row in out["service_split_daily"]] == [
@@ -1437,7 +1437,7 @@ async def test_service_split_follows_a_two_class_calendar(aconn, aagency_id):
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 9, 14), to_date=date(2026, 9, 21))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     # 土日祝: (2 * 500 * 120 + 500 * 60) s / 1500 = 100 s.
     assert out["service_split"] == _split(weekday=(3.0, 5, 2000), weekend_holiday=(1.67, 3, 1500))
     assert [row["day_type"] for row in out["service_split_daily"]] == [*["weekday"] * 5, *["weekend_holiday"] * 3]
@@ -1461,7 +1461,7 @@ async def test_service_split_follows_the_calendar_over_the_weekday(aconn, aagenc
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 8, 10), to_date=date(2026, 8, 16))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["service_split"] == _split(weekday=(2.0, 5, 500), sunday_holiday=(3.0, 2, 200))
     assert [row["day_type"] for row in out["service_split_daily"]] == [
         *["weekday"] * 5,
@@ -1513,7 +1513,7 @@ async def test_service_split_daily_rounds_same_precision_as_service_split(aconn,
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     by_date = {row["date"]: row for row in out["service_split_daily"]}
     daily_avg = by_date[d.isoformat()]["avg_min"]
     assert daily_avg == pytest.approx(0.56, abs=1e-9)
@@ -1572,12 +1572,12 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
 
     # Sequential path (pool=None, the existing default).
-    seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    seq_out = await compute_overview_summary(aagency_id, ctx, aconn)
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
     pool = await _test_pool()
     try:
-        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
+        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, pool=pool)
     finally:
         await pool.close()
 
@@ -1853,7 +1853,7 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
 
     counting = _CountingCh(ch_async_client)
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
     # ...and it is the grain query: one dedup CTE grouped to the shared grain.
@@ -1890,7 +1890,7 @@ async def test_slow_path_service_split_classifies_by_date(aconn, aagency_id, ch_
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 9, 15), to_date=date(2026, 9, 21), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     assert out["service_split"] == _split(weekday=(5.0, 1, 1), saturday=(1.0, 1, 1), sunday_holiday=(3.0, 1, 2))
     assert out["service_split_daily"] == [
         {"date": "2026-09-18", "day_type": "weekday", "avg_min": 5.0},
@@ -1918,7 +1918,7 @@ async def test_slow_path_movers_add_exactly_one_more_query(aconn, aagency_id, ch
 
     counting = _CountingCh(ch_async_client)
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
 
     assert len(counting.queries) == 2, f"expected 2 ClickHouse queries, got {len(counting.queries)}"
     worse = out["movers"]["worse"]
@@ -1952,7 +1952,7 @@ async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aag
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     assert out["headline"]["avg_min"] == pytest.approx(10.0, abs=0.01)
     assert out["headline"]["baseline_avg_min"] == pytest.approx(5.0, abs=0.01)
     assert out["headline"]["delta_min"] == pytest.approx(5.0, abs=0.01)
@@ -1998,7 +1998,7 @@ async def test_narrow_ctx_baseline_matches_current_window_width(aconn, aagency_i
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 16), to_date=date(2026, 5, 18), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     h = out["headline"]
     # cur_ctx == ctx (already <= 7 days wide, so no clamping): 3 days at 5.0 min.
     assert h["window_from"] == "2026-05-16"
@@ -2045,7 +2045,7 @@ async def test_slow_path_dow_applies_per_consumer(aconn, aagency_id, ch_client, 
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning", dow="weekday")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
 
     # ctx.dow='weekday' keeps only the Thursday row for the headline/sparkline.
     assert out["headline"]["samples"] == 1
@@ -2074,7 +2074,7 @@ async def test_slow_path_concentration_ignores_early_running(aconn, aagency_id, 
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     top = out["concentration"]["top_routes"]
     assert [t["route_code"] for t in top] == ["R_LATE", "R_EARLY"]
     assert top[0]["share_pct"] == pytest.approx(100.0, abs=0.05)
@@ -2118,7 +2118,7 @@ async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     worse = out["movers"]["worse"]
     better = out["movers"]["better"]
     assert [m["delta_min"] for m in worse] == [pytest.approx(9.0, abs=0.01)] * 3
@@ -2148,7 +2148,7 @@ async def test_slow_path_movers_excludes_null_route_code(aconn, aagency_id, ch_c
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     assert out["movers"]["worse"] == []
     assert out["movers"]["better"] == []
 
@@ -2186,7 +2186,7 @@ async def test_slow_path_movers_rank_on_raw_not_rounded_delta(aconn, aagency_id,
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     better = out["movers"]["better"]
     assert len(better) == 2
     # Both display the SAME rounded delta_min...
@@ -2244,11 +2244,11 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
-    seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    seq_out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
 
     pool = await _test_pool()
     try:
-        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool, ch=ch_async_client)
+        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, pool=pool, ch=ch_async_client)
     finally:
         await pool.close()
 
@@ -2276,7 +2276,7 @@ async def test_compute_overview_summary_slow_path_without_ch_raises(aconn, aagen
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
     with pytest.raises(RuntimeError, match="ClickHouse client"):
-        await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=None)
+        await compute_overview_summary(aagency_id, ctx, aconn, ch=None)
 
 
 @pytest.mark.asyncio
@@ -2364,7 +2364,7 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
 
     ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
     failing = _FailingCh()
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=failing)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
 
     # The two ClickHouse-derived fields degrade to null...
     assert out["peak_hour_weekday"] is None
@@ -2538,7 +2538,7 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
 
     counting = _CountingCh(ch_async_client)
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
     assert "GROUP BY date, route_code, service_type" in counting.queries[0]
@@ -2589,6 +2589,6 @@ async def test_one_day_type_resolution_serves_the_filter_and_the_split(aconn, aa
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 10, 5), to_date=date(2026, 10, 18), service="土曜")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["service_split"] == _split(saturday=(5.0, 1, 20))
     assert out["service_split_daily"] == [{"date": "2026-10-10", "day_type": "saturday", "avg_min": 5.0}]

@@ -42,12 +42,15 @@ SELECT
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0054') AS pending_0054,
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0060') AS pending_0060,
     NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0062') AS pending_0062,
-    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0078') AS pending_0078
+    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0078') AS pending_0078,
+    NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0079') AS pending_0079
 \gset
 
--- 0054 drops idx_ask_conversations_user_agency_updated in the same `migrate up`
--- that runs 0052. It is built here anyway: otherwise 0052 builds it inside its
--- transaction, blocking writes for the whole build, while 0054's drop is quick.
+-- 0054 drops idx_ask_conversations_user_agency_updated, and 0079 drops
+-- idx_users_email_trgm and idx_users_name_trgm, in the same `migrate up` that
+-- runs 0052. They are built here anyway: otherwise 0052 builds them inside its
+-- transaction, blocking writes for the whole build, while the later drops are
+-- quick.
 \if :pending_0052
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -92,4 +95,12 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_api_keys_key
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_login_events_actor_created
     ON login_events (actor_id, created_at DESC)
     WHERE actor_id IS NOT NULL;
+\endif
+
+\if :pending_0079
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_nfkc_trgm
+    ON users USING gin (normalize(email, NFKC) gin_trgm_ops);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_name_nfkc_trgm
+    ON users USING gin (normalize(name, NFKC) gin_trgm_ops);
 \endif

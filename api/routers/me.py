@@ -17,6 +17,7 @@ from api.range import jst_today
 from api.security import User, csrf_guard, require_user, token_hash
 from pipeline.account_erasure import ErasureRefused, erase_user
 from pipeline.account_export import collect_user_data
+from pipeline.admin_users import SessionPrefixError, resolve_session_prefix
 from pipeline.query.llm_key_validation import validate_provider_key
 from pipeline.query.user_llm_keys import (
     ALLOWED_PROVIDERS,
@@ -109,17 +110,11 @@ async def list_sessions(
     ]
 
 
-def _is_valid_sid_prefix(sid_prefix: str) -> bool:
-    """True iff the prefix is lowercase hex, the only alphabet a stored
-    ``sid_hash`` can contain. Tighter than the session id's own alphabet was,
-    and it keeps `%` and `_` -- both LIKE wildcards -- out of the value."""
-    return all(c in "0123456789abcdef" for c in sid_prefix)
-
-
-# Exact-prefix comparison, not LIKE: a LIKE pattern treats an unescaped `_`
-# in sid_prefix as a single-character wildcard, letting a valid-looking
-# prefix match a session it isn't actually a prefix of. Belt and braces with
-# the hex check above, so neither alone is load-bearing.
+# Only narrows the fetch to the caller's sessions that start with the prefix.
+# The boundary is resolve_session_prefix: it refuses anything but lowercase
+# hex before this runs and re-checks every returned hash itself. The
+# comparison is exact (left(), not LIKE, which reads `_` as a wildcard) so
+# the two agree on what matches.
 _SID_PREFIX_QUERY = "SELECT sid_hash FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2"
 
 
@@ -132,28 +127,23 @@ async def revoke_session(
 ) -> Response:
     """Revoke the caller's session matching the given ``sid_hash`` prefix.
 
-    Rejects ambiguous prefixes with 409 — the UI passes the 12-char
-    display prefix, which is astronomically unlikely to collide across one
-    user's sessions but the server refuses to guess if it does. Matching a
-    prefix of the digest is safe in a way matching a prefix of the session id
-    would not be: the digest is not a credential, so it can be echoed through
-    a URL path.
+    Delegates to :func:`pipeline.admin_users.resolve_session_prefix` over the
+    caller's own sessions only, answering with its
+    :class:`~pipeline.admin_users.SessionPrefixError` when the prefix names
+    no single session. Matching a prefix of the digest is safe in a way
+    matching a prefix of the session id would not be: the digest is not a
+    credential, so it can be echoed through a URL path.
     """
     csrf_guard(request)
-    if len(sid_prefix) < 12:
-        raise HTTPException(400, "prefix too short")
-    if not _is_valid_sid_prefix(sid_prefix):
-        raise HTTPException(400, "invalid prefix")
-    rows = await conn.fetch(_SID_PREFIX_QUERY, user.user_id, sid_prefix)
-    if len(rows) == 0:
-        raise HTTPException(404, "session not found")
-    if len(rows) > 1:
-        raise HTTPException(409, "prefix matches multiple sessions")
-    await conn.execute(
-        "DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2",
-        rows[0]["sid_hash"],
-        user.user_id,
-    )
+
+    async def scoped_hashes() -> list[str]:
+        return [r["sid_hash"] for r in await conn.fetch(_SID_PREFIX_QUERY, user.user_id, sid_prefix)]
+
+    try:
+        sid_hash = await resolve_session_prefix(sid_prefix, scoped_hashes)
+    except SessionPrefixError as exc:
+        raise HTTPException(exc.status, exc.detail) from None
+    await conn.execute("DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2", sid_hash, user.user_id)
     return Response(status_code=204)
 
 

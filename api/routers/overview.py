@@ -1,6 +1,7 @@
 """概況 (Overview) tab endpoint.
 
-Returns the full magazine payload in a single locale-aware round-trip.
+Returns the full magazine payload in a single round-trip. Nothing in it is
+worded on the server, so it is the same in every language.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_ch, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
@@ -264,17 +265,12 @@ async def overview_summary(
     agency_id: int = Depends(get_agency),
     ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
-    locale: str = Depends(get_locale),
 ) -> OverviewSummary:
     """Return the 概況 magazine payload for one agency over ``ctx``.
-
-    Locale picks the language of any string fields the backend emits
-    (today: none — strings are frontend-side. Reserved for future
-    qualitative labels). See spec section "Architecture".
 
     Takes no request connection: every stage acquires its own from the pool,
     and one held here across that fan-out is what lets enough concurrent
     requests wait on each other forever.
     """
-    payload = await compute_overview_summary(agency_id, ctx, None, locale, pool=request.app.state.pool, ch=ch)
+    payload = await compute_overview_summary(agency_id, ctx, None, pool=request.app.state.pool, ch=ch)
     return OverviewSummary(**payload, scope_applied=_SUMMARY_SCOPE)

@@ -4,11 +4,6 @@ import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-/** The route dossier's tab names, which links write to its `tab` param.
- *  RouteDossier does not read it: the dossier has one view, the stop
- *  analysis, whose own `sub_tab` picks the panel. */
-export type RouteTab = "summary" | "stops" | "time" | "trips" | "reliability" | "why";
-
 type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
 export const ROUTES_REPORT_TYPES = ["ranking", "ranking_best", "on_time", "worst_5min"] as const satisfies readonly ReportTypeId[];
 export const TIME_REPORT_TYPES = ["trend", "dow_weekday", "dow_weekend", "route_forecast"] as const satisfies readonly ReportTypeId[];
@@ -113,17 +108,17 @@ export function destHref(
  *  contradict it. The params that picked another screen's report, document
  *  or ranking coverage (`report`, `sort`, `doc`, `by`, `sparse`), and the
  *  compare bars' shown `period`, mean nothing on a route's page either. */
-export function routeHref(agencyId: number | string, code: string, search = "", tab?: RouteTab): string {
+export function routeHref(agencyId: number | string, code: string, search = ""): string {
   const params = new URLSearchParams(search);
   for (const key of ["routes", "report", "sort", "doc", "by", "sparse", "period"]) params.delete(key);
-  return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), tab ? { tab } : {})}`;
+  return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), {})}`;
 }
 
 /** The Routes screen for a `routes` selection: one route opens its dossier,
  *  any other selection the list. */
-export function routesHref(agencyId: number | string, search = "", tab?: RouteTab): string {
+export function routesHref(agencyId: number | string, search = ""): string {
   const routes = (new URLSearchParams(search).get("routes") ?? "").split(",").filter(Boolean);
-  return routes.length === 1 ? routeHref(agencyId, routes[0], search, tab) : destHref(agencyId, "routes", search);
+  return routes.length === 1 ? routeHref(agencyId, routes[0], search) : destHref(agencyId, "routes", search);
 }
 
 /** The screen a report type opens on, or null for an unknown type. */

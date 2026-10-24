@@ -18,6 +18,9 @@ CRON_TZ=Asia/Tokyo
 # verify-r2.sh independently lists each configured agency's actual R2
 # objects and checks freshness + byte-size integrity, rather than trusting
 # sync-r2.sh's own exit status -- runs right after it, same env sourcing.
+# A sync still uploading at :15 is waited out on sync-r2.sh's lock (bounded
+# by VERIFY_R2_SYNC_WAIT_SECONDS, a problem when exceeded), so the offset
+# needs no slack for a slow sync.
 15 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/verify-r2.sh  >> /home/opc/collector/cron.log 2>&1
 # spool-cleanup.sh reclaims local disk immediately, file by file, the moment
 # R2 actually confirms (its own listing + byte-size match, not just trusting

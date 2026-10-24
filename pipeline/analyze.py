@@ -59,8 +59,9 @@ divide SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than
 re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
 samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
 values, which is not the same as the true pooled mean over the underlying
-raw observations. agg_route_daily_dist already followed this pattern from
-the start (see its own `sum_delay_sec`); these seven tables now match it.
+raw observations. The same rule covers these six tables and
+agg_route_daily_dist, which carries `sum_delay_sec` with no rounded mean
+beside it.
 
 agg_daily_trend additionally carries `sum_late_sec`, the exact
 SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so

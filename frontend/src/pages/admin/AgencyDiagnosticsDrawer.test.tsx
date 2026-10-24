@@ -64,7 +64,7 @@ const DIAGNOSTICS = {
   static_versions: [
     {
       version: "v2026-09-01",
-      loaded_at: "2026-09-01T02:00:00+00:00",
+      analyzed_at: "2026-09-01T02:00:00+00:00",
       trips: 1204,
       vehicle_km: 18321.5,
       routes: 12,
@@ -73,7 +73,7 @@ const DIAGNOSTICS = {
     },
     {
       version: "v2026-04-01",
-      loaded_at: "2026-04-01T02:00:00+00:00",
+      analyzed_at: "2026-04-01T02:00:00+00:00",
       trips: 1188,
       vehicle_km: null,
       routes: null,

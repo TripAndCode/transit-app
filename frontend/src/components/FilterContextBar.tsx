@@ -25,10 +25,10 @@ type Props = {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-/** Reuses ThreadSidebar's rangeLabel for the date-range segment; the
- *  day-of-week key namespace and empty-range fallback are intentionally
- *  different between the two callers, so only the range block (the part
- *  that had the same separator bug fixed twice) is shared. */
+/** The date-range segment comes from `utils/rangeLabel`, shared with
+ *  ThreadSidebar; the day-of-week key namespace and empty-range fallback
+ *  are intentionally different between the two callers, so only the range
+ *  block is shared. */
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
