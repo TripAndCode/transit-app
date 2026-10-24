@@ -20,13 +20,24 @@ _META_FILE = "meta.json"
 _ROUTES_FILE = "routes.parquet"
 
 
-def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: pd.DataFrame, window_days: int) -> None:
+def save_model_set(
+    models: ModelSet,
+    directory: Path,
+    *,
+    version: str,
+    routes: pd.DataFrame,
+    window_days: int,
+    point: str = "mean",
+    clip_quantile: float | None = None,
+) -> None:
     """`version`, `window_days` (the training window the published model was
-    actually fit with) and `routes` (the vocabulary `ml.features.route_ids`
-    built for this fit) are published together with the boosters -- `predict`
-    needs the same vocabulary and window `train` used, never values rebuilt or
-    re-guessed from its own, differently-dated `runs` snapshot or its own CLI
-    default (see `route_ids`'s own docstring on the vocabulary hazard).
+    actually fit with), `clip_quantile` (the history clip its features were
+    built with), `point` (the forecast it was adopted to show) and `routes` (the
+    vocabulary `ml.features.route_ids` built for this fit) are published
+    together with the boosters -- `predict` needs the same vocabulary, window
+    and features `train` used, never values rebuilt or re-guessed from its own,
+    differently-dated `runs` snapshot or its own CLI default (see `route_ids`'s
+    own docstring on the vocabulary hazard).
 
     Writes to a sibling temp directory and renames it into place at the end,
     so a failure partway through never leaves `directory` holding a mix of a
@@ -44,7 +55,13 @@ def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: p
     for alpha, booster in models.quantiles.items():
         cast(lgb.Booster, booster).save_model(str(tmp / _QUANTILE_FILES[alpha]))
     routes.to_parquet(tmp / _ROUTES_FILE)
-    meta = {"interval_shift": models.interval_shift, "version": version, "window_days": window_days}
+    meta = {
+        "interval_shift": models.interval_shift,
+        "version": version,
+        "window_days": window_days,
+        "point": point,
+        "clip_quantile": clip_quantile,
+    }
     (tmp / _META_FILE).write_text(json.dumps(meta))
     if directory.exists():
         shutil.rmtree(directory)

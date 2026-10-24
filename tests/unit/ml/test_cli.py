@@ -347,3 +347,141 @@ def test_use_store_credentials_rejects_an_unset_but_present_variable(monkeypatch
         cli._use_store_credentials()
 
     assert os.environ["AWS_ACCESS_KEY_ID"] == "archive-readonly-key"
+
+
+def test_snapshot_runs_saves_the_replicas_runs_for_a_later_variant_eval(tmp_path, monkeypatch):
+    from ml.dataset import read_runs
+
+    monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
+    monkeypatch.setattr("ml.cli.get_client", lambda: object())
+    out = tmp_path / "runs.parquet"
+    assert main(["snapshot-runs", "--out", str(out), "--agency", "8"]) == 0
+    # Parquet has no seconds resolution, so the dates come back in milliseconds.
+    pd.testing.assert_frame_equal(read_runs(out).astype({"service_date": "datetime64[s]"}), _runs())
+
+
+def _snapshot(tmp_path):
+    from ml.dataset import write_runs
+
+    path = tmp_path / "runs.parquet"
+    write_runs(_runs(), path)
+    return path
+
+
+def test_variant_eval_scores_each_point_of_one_fit_on_the_same_origins(tmp_path):
+    from ml.model_result import result_from_json
+
+    out = tmp_path / "variants"
+    args = ["variant-eval", "--runs", str(_snapshot(tmp_path)), "--fit", "clip", "--out-dir", str(out)]
+    assert main([*args, "--point", "mean", "--point", "q50", "--origins", "7"]) == 0
+    mean = result_from_json((out / "clip.json").read_text())
+    median = result_from_json((out / "clip-q50.json").read_text())
+    assert mean.origins == median.origins and len(mean.origins) == 7
+    assert mean.params["clip_quantile"] == median.params["clip_quantile"] is not None
+    assert (mean.params["point"], median.params["point"]) == ("mean", "q50")
+
+
+def test_variant_eval_refuses_a_fit_it_does_not_know(tmp_path):
+    with pytest.raises(SystemExit):
+        main(["variant-eval", "--runs", "x.parquet", "--fit", "lasso", "--out-dir", str(tmp_path)])
+
+
+def test_compare_summarizes_every_variant_in_the_directory(tmp_path, capsys):
+    import json
+
+    out = tmp_path / "variants"
+    snapshot = str(_snapshot(tmp_path))
+    for fit in ("live", "huber"):
+        assert main(["variant-eval", "--runs", snapshot, "--fit", fit, "--out-dir", str(out), "--origins", "7"]) == 0
+    assert main(["compare", "--dir", str(out)]) == 0
+    comparison = json.loads((out / "comparison.json").read_text())
+    assert set(comparison["variants"]) == {"live", "huber"}
+    assert (out / "comparison.md").read_text() == capsys.readouterr().out
+    # A second compare reads the variants again, not its own output.
+    assert main(["compare", "--dir", str(out)]) == 0
+
+
+def test_train_records_the_point_and_clip_its_model_was_fit_with(tmp_path, monkeypatch):
+    import json
+
+    from ml.model_store import read_meta
+
+    backtest = tmp_path / "models.json"
+    backtest.write_text("{}")
+    monkeypatch.setattr("ml.cli.result_from_json", lambda text: None)
+    monkeypatch.setattr("ml.cli.judge", lambda result: __import__("ml.adoption").adoption.Verdict(True, ()))
+    monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
+    monkeypatch.setattr("ml.cli.get_client", lambda: object())
+    monkeypatch.setattr("ml.cli._today_jst", lambda: START + timedelta(days=DAYS + 1))
+    monkeypatch.setattr("ml.cli._run", lambda cmd: None)
+    for name, value in (
+        ("ML_STORE_BUCKET", "transit-ml"),
+        ("ML_STORE_ENDPOINT", "https://example.r2"),
+        ("ML_STORE_ACCESS_KEY_ID", "store-key"),
+        ("ML_STORE_SECRET_ACCESS_KEY", "store-secret"),
+        ("AWS_ACCESS_KEY_ID", "unused"),
+        ("AWS_SECRET_ACCESS_KEY", "unused"),
+    ):
+        monkeypatch.setenv(name, value)
+    out = tmp_path / "model"
+    assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
+    from ml.models import ModelParams
+
+    meta = read_meta(out)
+    assert (meta["point"], meta["clip_quantile"]) == (ModelParams().point, ModelParams().clip_quantile)
+    assert json.loads(json.dumps(meta)) == meta
+
+
+def _rewrite_meta(model_dir, **changes):
+    import json
+
+    path = model_dir / "meta.json"
+    meta = {**json.loads(path.read_text()), **changes}
+    path.write_text(json.dumps({key: value for key, value in meta.items() if value is not ...}))
+
+
+def test_predict_publishes_the_point_forecast_the_model_was_adopted_with(tmp_path, monkeypatch):
+    raw = _runs()
+    model_dir = tmp_path / "model"
+    _publish_model(raw, model_dir)
+    _rewrite_meta(model_dir, point="q50")
+    _stub_predict(monkeypatch, raw, START + timedelta(days=DAYS))
+    out = tmp_path / "forecast.parquet"
+    assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8"]) == 0
+    forecast = pd.read_parquet(out)
+    np.testing.assert_allclose(forecast["mean_min"], forecast["q50"])
+
+
+def test_predict_builds_features_with_the_clip_the_model_was_fit_with(tmp_path, monkeypatch):
+    import ml.features
+
+    raw = _runs()
+    model_dir = tmp_path / "model"
+    _publish_model(raw, model_dir)
+    _rewrite_meta(model_dir, clip_quantile=0.99)
+    _stub_predict(monkeypatch, raw, START + timedelta(days=DAYS))
+    seen = []
+    real = ml.features.build_frame
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("clip_quantile"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ml.features, "build_frame", spy)
+    assert main(["predict", "--model", str(model_dir), "--out", str(tmp_path / "f.parquet"), "--agency", "8"]) == 0
+    assert seen == [0.99]
+
+
+def test_a_model_published_without_point_or_clip_predicts_its_mean_unclipped(tmp_path, monkeypatch):
+    raw = _runs()
+    model_dir = tmp_path / "model"
+    _publish_model(raw, model_dir)
+    _stub_predict(monkeypatch, raw, START + timedelta(days=DAYS))
+    current = tmp_path / "current.parquet"
+    assert main(["predict", "--model", str(model_dir), "--out", str(current), "--agency", "8"]) == 0
+    _rewrite_meta(model_dir, point=..., clip_quantile=...)
+    legacy = tmp_path / "legacy.parquet"
+    assert main(["predict", "--model", str(model_dir), "--out", str(legacy), "--agency", "8"]) == 0
+    columns = ["agency_id", "route_code", "service_date", "hour", "mean_min", "q10", "q50", "q90"]
+    pd.testing.assert_frame_equal(pd.read_parquet(legacy)[columns], pd.read_parquet(current)[columns])
+    assert not np.allclose(pd.read_parquet(legacy)["mean_min"], pd.read_parquet(legacy)["q50"])

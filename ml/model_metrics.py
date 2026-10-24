@@ -28,6 +28,15 @@ def add_intervals(model: IntervalStats, baseline: IntervalStats, frame: pd.DataF
     _add(baseline, y[has_b0], p10, p90, {"0.1": p10, "0.9": p90})
 
 
+def add_slot_intervals(stats: IntervalStats, frame: pd.DataFrame, preds: Predictions) -> None:
+    """Scores the interval a cell publishes, its runs' mean q10 and mean q90,
+    against each of its runs."""
+    bounds = frame[CELL].assign(q10=preds.q10, q90=preds.q90).groupby(CELL, observed=True)
+    lo = bounds["q10"].transform("mean").to_numpy(dtype=float)
+    hi = bounds["q90"].transform("mean").to_numpy(dtype=float)
+    _add(stats, frame["delay_min"].to_numpy(dtype=float), lo, hi, {})
+
+
 def _add(stats: IntervalStats, y: np.ndarray, lo: np.ndarray, hi: np.ndarray, quantiles: dict[str, np.ndarray]) -> None:
     stats.runs += len(y)
     stats.covered += int(((y >= lo) & (y <= hi)).sum())
@@ -37,14 +46,15 @@ def _add(stats: IntervalStats, y: np.ndarray, lo: np.ndarray, hi: np.ndarray, qu
         stats.pinball[alpha] = stats.pinball.get(alpha, 0.0) + float(np.maximum(a * diff, (a - 1) * diff).sum())
 
 
-def cell_frame(frame: pd.DataFrame, preds: Predictions) -> pd.DataFrame:
-    """Every run in a cell shares its slot, so the cell's B0 is any run's slot mean."""
-    scored = frame[[*CELL, "delay_min", "slot_mean"]].assign(model=preds.mean)
+def cell_frame(frame: pd.DataFrame, point: np.ndarray) -> pd.DataFrame:
+    """`point` is each run's point forecast. Every run in a cell shares its slot,
+    so the cell's B0 is any run's raw slot mean."""
+    scored = frame[[*CELL, "delay_min", "b0"]].assign(model=point)
     cells = scored.groupby(CELL, observed=True).agg(
         runs=("delay_min", "size"),
         actual=("delay_min", "mean"),
         model=("model", "mean"),
-        b0=("slot_mean", "first"),
+        b0=("b0", "first"),
     )
     return cells.reset_index()
 

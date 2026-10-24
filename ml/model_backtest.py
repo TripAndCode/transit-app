@@ -5,8 +5,10 @@ Needs the optional `ml` dependency group."""
 
 from __future__ import annotations
 
+import copy
 from collections import defaultdict
-from dataclasses import asdict
+from collections.abc import Sequence
+from dataclasses import asdict, replace
 from datetime import date, timedelta
 
 import pandas as pd
@@ -14,9 +16,9 @@ import pandas as pd
 from ml.backtest import AgencyResult, SliceRow, choose_origins
 from ml.features import build_frame, route_ids, weekend_days, with_route_ids
 from ml.metrics import ErrorStats
-from ml.model_metrics import MODEL, add_cells, add_intervals, cell_frame, take
-from ml.model_result import IntervalStats, ModelBacktestResult
-from ml.models import ModelParams, fit_calibrated, predict
+from ml.model_metrics import MODEL, add_cells, add_intervals, add_slot_intervals, cell_frame, take
+from ml.model_result import SLOT_INTERVAL, IntervalStats, ModelBacktestResult
+from ml.models import ModelParams, fit_calibrated, point_forecast, predict
 from ml.training import HORIZON_DAYS, training_frame
 
 RETRAIN_EVERY = 7
@@ -30,15 +32,27 @@ def run_backtest(
     runs: pd.DataFrame, *, params: ModelParams | None = None, origin_count: int = 28
 ) -> ModelBacktestResult:
     params = params or ModelParams()
+    return run_backtests(runs, params=params, origin_count=origin_count, points=(params.point,))[params.point]
+
+
+def run_backtests(
+    runs: pd.DataFrame, *, params: ModelParams, origin_count: int = 28, points: Sequence[str]
+) -> dict[str, ModelBacktestResult]:
+    """One backtest of `params`' fits, scored once per point forecast in `points`
+    ("mean", "q50"): each point's result is the one run_backtest gives for
+    `params` with that point, without fitting the same models again."""
     runs = with_route_ids(runs, route_ids(runs))
     days = sorted({timestamp.date() for timestamp in runs["service_date"]})
     origins = choose_origins(days, origin_count, horizon=HORIZON_DAYS)
-    rows: dict[int, dict[tuple[str, int, bool, bool], SliceRow]] = defaultdict(dict)
+    rows: dict[str, dict[int, dict[tuple[str, int, bool, bool], SliceRow]]] = {
+        point: defaultdict(dict) for point in points
+    }
     intervals: dict[str, dict[str, IntervalStats]] = {
         MODEL: defaultdict(IntervalStats),
+        SLOT_INTERVAL: defaultdict(IntervalStats),
         "B0": defaultdict(IntervalStats),
     }
-    origin_skill: list[tuple[date, float | None]] = []
+    origin_skill: dict[str, list[tuple[date, float | None]]] = {point: [] for point in points}
     starts = list(range(0, len(origins), RETRAIN_EVERY))
     cutoffs = [origins[start] - timedelta(days=1) for start in starts]
     fallback: set[int] = set()
@@ -51,7 +65,12 @@ def run_backtest(
     # per-origin cost again. See test_a_sliced_week_matches_training_frame_at_its_own_cutoff.
     full_frame = (
         training_frame(
-            runs, cutoffs[-1], window_days=params.window_days, half_life_days=params.half_life_days, seed=params.seed
+            runs,
+            cutoffs[-1],
+            window_days=params.window_days,
+            half_life_days=params.half_life_days,
+            seed=params.seed,
+            clip_quantile=params.clip_quantile,
         )
         if cutoffs
         else pd.DataFrame()
@@ -62,7 +81,8 @@ def run_backtest(
         train = full_frame if full_frame.empty else full_frame[full_frame["service_date"] <= pd.Timestamp(cutoff)]
         if train.empty:
             fallback |= all_agencies
-            origin_skill.extend((origin, None) for origin in week)
+            for skills in origin_skill.values():
+                skills.extend((origin, None) for origin in week)
             continue
         age_days = (pd.Timestamp(cutoff) - train["service_date"]).dt.days
         train = train.assign(weight=(0.5 ** (age_days / params.half_life_days)).astype("float32"))
@@ -77,12 +97,14 @@ def run_backtest(
                 window_days=params.window_days,
                 horizon_days=HORIZON_DAYS,
                 precomputed_weekend_days=days_table,
+                clip_quantile=params.clip_quantile,
             )
             if frame.empty:
-                origin_skill.append((origin, None))
+                for skills in origin_skill.values():
+                    skills.append((origin, None))
                 continue
             preds = predict(models, frame)
-            model_shared, b0_shared = ErrorStats(), ErrorStats()
+            shared = {point: (ErrorStats(), ErrorStats()) for point in points}
             for agency_id, index in frame.groupby("agency_id").indices.items():
                 sub, sub_preds = frame.iloc[index], take(preds, index)
                 # Unlike add_cells below, not gated by on_model: this tracks the model's own
@@ -91,22 +113,32 @@ def run_backtest(
                 # model's own calibration, not the current display routing (its skill checks
                 # are deliberately routing-aware, through add_cells' own use_model gating).
                 add_intervals(intervals[MODEL][str(agency_id)], intervals["B0"][str(agency_id)], sub, sub_preds)
-                m, b = add_cells(rows[int(agency_id)], cell_frame(sub, sub_preds), use_model=int(agency_id) in on_model)
-                model_shared.merge(m)
-                b0_shared.merge(b)
-            skill = None
-            if model_shared.mae is not None and b0_shared.mae:
-                skill = 1 - model_shared.mae / b0_shared.mae
-            origin_skill.append((origin, skill))
-    return ModelBacktestResult(
-        params=asdict(params),
-        origins=origins,
-        cutoffs=cutoffs,
-        agencies=[_agency_result(runs, agency_id, rows[agency_id], origins, params) for agency_id in sorted(rows)],
-        intervals={method: dict(by_agency) for method, by_agency in intervals.items()},
-        origin_skill=origin_skill,
-        fallback_agencies=sorted(fallback & set(rows)),
-    )
+                add_slot_intervals(intervals[SLOT_INTERVAL][str(agency_id)], sub, sub_preds)
+                for point in points:
+                    cells = cell_frame(sub, point_forecast(sub_preds, point))
+                    m, b = add_cells(rows[point][int(agency_id)], cells, use_model=int(agency_id) in on_model)
+                    shared[point][0].merge(m)
+                    shared[point][1].merge(b)
+            for point, (model_shared, b0_shared) in shared.items():
+                skill = None
+                if model_shared.mae is not None and b0_shared.mae:
+                    skill = 1 - model_shared.mae / b0_shared.mae
+                origin_skill[point].append((origin, skill))
+    return {
+        point: ModelBacktestResult(
+            params=asdict(replace(params, point=point)),
+            origins=origins,
+            cutoffs=cutoffs,
+            agencies=[
+                _agency_result(runs, agency_id, rows[point][agency_id], origins, params)
+                for agency_id in sorted(rows[point])
+            ],
+            intervals={method: copy.deepcopy(dict(by_agency)) for method, by_agency in intervals.items()},
+            origin_skill=origin_skill[point],
+            fallback_agencies=sorted(fallback & set(rows[point])),
+        )
+        for point in points
+    }
 
 
 def _agency_result(

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -10,7 +11,16 @@ require("lightgbm")
 
 from ml.conformal import conformity_shift  # noqa: E402
 from ml.features import FEATURES, build_frame, route_ids, with_route_ids  # noqa: E402
-from ml.models import ModelParams, ModelSet, fit, fit_calibrated, predict, split_calibration  # noqa: E402
+from ml.models import (  # noqa: E402
+    ModelParams,
+    ModelSet,
+    Predictions,
+    fit,
+    fit_calibrated,
+    point_forecast,
+    predict,
+    split_calibration,
+)
 from ml.training import training_frame  # noqa: E402
 
 START = date(2026, 6, 1)
@@ -160,3 +170,70 @@ def test_fit_calibrated_falls_back_at_production_scale_even_above_twice_min_data
     preds = predict(models, frame)
     by_route = frame.assign(pred=preds.mean).groupby("route_code")["pred"].mean()
     assert abs(by_route["LATE"] - by_route["EARLY"]) > 1.0  # not collapsed to one constant
+
+
+ROBUST = ModelParams(rounds=200, learning_rate=0.2, num_leaves=7, min_data_in_leaf=20, bagging_freq=0)
+
+
+def _outlier_frame(n=400, seed=0):
+    """Two slots, 1 and 5 minutes late, with one row in ten 100 minutes late
+    and no feature that tells those rows apart. Each row's cap is its slot's
+    level plus a minute."""
+    rng = np.random.default_rng(seed)
+    frame = pd.DataFrame({name: np.zeros(n, dtype="float32") for name in FEATURES})
+    frame["agency_id"] = np.int16(8)
+    frame["route_id"] = np.int32(0)
+    level = np.where(np.arange(n) % 2 == 0, 1.0, 5.0)
+    frame["slot_mean"] = level.astype("float32")
+    y = level + rng.normal(0, 0.2, n)
+    y[np.arange(n) % 20 < 2] = 100.0
+    return frame.assign(delay_min=y.astype("float32"), weight=np.float32(1.0), clip_lo=0.0, clip_hi=level + 1.0)
+
+
+def _mean_levels(params):
+    frame = _outlier_frame()
+    return frame.assign(pred=predict(fit(frame, params), frame).mean).groupby("slot_mean")["pred"].mean()
+
+
+def test_huber_keeps_a_few_extreme_targets_from_pulling_the_mean_model():
+    squared = _mean_levels(ROBUST)
+    assert squared[1.0] > 8.0 and squared[5.0] > 12.0
+    # LightGBM starts Huber from the mean, 12.7 here, so a delta below ~12
+    # saturates every gradient, no split gains anything, and the fit stops there.
+    huber = _mean_levels(replace(ROBUST, mean_objective="huber", huber_delta=15.0))
+    assert huber[1.0] < 3.5 and huber[5.0] < 7.5
+    loose = _mean_levels(replace(ROBUST, mean_objective="huber", huber_delta=1e6))
+    np.testing.assert_allclose(loose, squared, atol=0.5)
+
+
+def test_clipping_bounds_the_mean_models_target_but_not_the_quantile_models():
+    frame = _outlier_frame()
+    raw, clipped = predict(fit(frame, ROBUST), frame), predict(fit(frame, replace(ROBUST, clip_quantile=0.99)), frame)
+    assert (clipped.mean <= frame["clip_hi"].to_numpy() + 1e-6).all() and raw.mean.mean() > 8.0
+    for name in ("q10", "q50", "q90"):
+        np.testing.assert_allclose(getattr(clipped, name), getattr(raw, name))
+
+
+def test_a_run_whose_agency_had_no_cap_keeps_its_target_unclipped():
+    frame = _outlier_frame().assign(clip_lo=np.nan, clip_hi=np.nan)
+    raw, clipped = predict(fit(frame, ROBUST), frame), predict(fit(frame, replace(ROBUST, clip_quantile=0.99)), frame)
+    np.testing.assert_allclose(clipped.mean, raw.mean)
+
+
+def test_clipping_needs_a_frame_built_with_its_caps():
+    with pytest.raises(ValueError, match="clip_lo"):
+        fit(_outlier_frame().drop(columns=["clip_lo", "clip_hi"]), replace(ROBUST, clip_quantile=0.99))
+
+
+def test_the_point_forecast_is_the_mean_or_the_median():
+    preds = Predictions(mean=np.array([3.0]), q10=np.array([0.0]), q50=np.array([1.0]), q90=np.array([2.0]))
+    assert point_forecast(preds, "mean")[0] == 3.0
+    assert point_forecast(preds, "q50")[0] == 1.0
+
+
+@pytest.mark.parametrize(
+    "overrides", [{"point": "q90"}, {"mean_objective": "l1"}, {"clip_quantile": 0.3}, {"huber_delta": 0.0}]
+)
+def test_model_params_refuse_an_option_they_cannot_honour(overrides):
+    with pytest.raises(ValueError):
+        ModelParams(**overrides)

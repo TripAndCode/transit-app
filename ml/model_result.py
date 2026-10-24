@@ -12,6 +12,9 @@ from typing import Any
 from ml.backtest import AgencyResult, results_from_json, results_to_json
 
 MODEL = "LGBM"
+# The interval `ml predict` publishes: one per route×date×hour cell, the mean of
+# its runs' bounds, scored against each run in the cell.
+SLOT_INTERVAL = f"{MODEL} slot"
 
 
 @dataclass

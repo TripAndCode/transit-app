@@ -14,15 +14,29 @@ import numpy as np
 import pandas as pd
 
 from ml.conformal import conformity_shift
-from ml.features import CATEGORICAL, FEATURES, TARGET
+from ml.features import CATEGORICAL, FEATURES, TARGET, check_clip_quantile
 
 QUANTILES = (0.1, 0.5, 0.9)
 CALIBRATION_DAYS = 7
 INTERVAL_COVERAGE = 0.8
+POINTS = ("mean", "q50")
+MEAN_OBJECTIVES = ("regression", "huber")
 
 
 @dataclass(frozen=True)
 class ModelParams:
+    """`clip_quantile` winsorizes the history the delay features are built from
+    and the mean model's training target, per agency (see build_frame); the
+    quantile models keep the raw target. `point` is the forecast a cell shows:
+    the mean model's, or the median model's.
+
+    `mean_objective` "huber" trains the mean model with a Huber loss whose
+    `huber_delta` (minutes) is where a residual's loss turns from squared to
+    linear. Its default is the classic 1.345σ for the robust spread of runs
+    around their B0. LightGBM starts Huber from the target's mean, so the delta
+    must exceed most residuals' distance from it: once nearly every gradient is
+    saturated, no split gains anything under lambda_l2 and the fit stops there."""
+
     window_days: int = 28
     half_life_days: float = 28.0
     num_leaves: int = 63
@@ -34,6 +48,26 @@ class ModelParams:
     bagging_freq: int = 1
     lambda_l2: float = 1.0
     seed: int = 7
+    clip_quantile: float | None = None
+    point: str = "mean"
+    mean_objective: str = "regression"
+    huber_delta: float = 2.0
+
+    def __post_init__(self) -> None:
+        if self.point not in POINTS:
+            raise ValueError(f"point must be one of {POINTS}, not {self.point!r}")
+        if self.mean_objective not in MEAN_OBJECTIVES:
+            raise ValueError(f"mean_objective must be one of {MEAN_OBJECTIVES}, not {self.mean_objective!r}")
+        check_clip_quantile(self.clip_quantile)
+        if not self.huber_delta > 0:
+            raise ValueError(f"huber_delta must be positive, not {self.huber_delta}")
+
+    def mean_objective_params(self) -> dict[str, Any]:
+        # LightGBM reads the Huber threshold from `alpha`; any other key is
+        # ignored without a warning under verbose=-1.
+        if self.mean_objective == "huber":
+            return {"objective": "huber", "alpha": self.huber_delta}
+        return {"objective": "regression"}
 
     def booster_params(self) -> dict[str, Any]:
         return {
@@ -73,18 +107,37 @@ def fit(frame: pd.DataFrame, params: ModelParams) -> ModelSet:
         raise ValueError("no training rows in this frame")
     data = lgb.Dataset(
         frame[FEATURES],
-        label=frame[TARGET],
+        label=_mean_target(frame, params),
         weight=frame["weight"],
         categorical_feature=CATEGORICAL,
         free_raw_data=False,
     )
     base = params.booster_params()
-    mean = lgb.train({**base, "objective": "regression"}, data, num_boost_round=params.rounds)
+    mean = lgb.train({**base, **params.mean_objective_params()}, data, num_boost_round=params.rounds)
+    if params.clip_quantile is not None:
+        data.set_label(frame[TARGET])
     quantiles: dict[float, Predictor] = {
         alpha: lgb.train({**base, "objective": "quantile", "alpha": alpha}, data, num_boost_round=params.rounds)
         for alpha in QUANTILES
     }
     return ModelSet(mean=mean, quantiles=quantiles)
+
+
+def _mean_target(frame: pd.DataFrame, params: ModelParams) -> pd.Series:
+    """The raw target, or with clip_quantile, each row's target clipped to its
+    agency's bounds from that row's own origin window. A row whose agency had no
+    history there has no bounds and keeps its target."""
+    if params.clip_quantile is None:
+        return frame[TARGET]
+    if not {"clip_lo", "clip_hi"} <= set(frame.columns):
+        raise ValueError("clip_quantile needs a frame built with it: clip_lo/clip_hi are missing")
+    return frame[TARGET].clip(lower=frame["clip_lo"], upper=frame["clip_hi"])
+
+
+def point_forecast(preds: Predictions, point: str) -> np.ndarray:
+    if point not in POINTS:
+        raise ValueError(f"point must be one of {POINTS}, not {point!r}")
+    return preds.mean if point == "mean" else preds.q50
 
 
 def predict(models: ModelSet, frame: pd.DataFrame) -> Predictions:

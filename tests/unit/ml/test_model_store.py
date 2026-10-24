@@ -71,7 +71,16 @@ def test_a_saved_model_set_predicts_the_same_as_before_saving(tmp_path):
     np.testing.assert_allclose(before.q50, after.q50)
     np.testing.assert_allclose(before.q90, after.q90)
     assert loaded.interval_shift == models.interval_shift
-    assert read_meta(directory) == {"interval_shift": models.interval_shift, "version": "2026-06-30", "window_days": 28}
+    assert read_meta(directory) == {
+        "interval_shift": models.interval_shift,
+        "version": "2026-06-30",
+        "window_days": 28,
+        "point": "mean",
+        "clip_quantile": None,
+    }
+
+    save_model_set(models, directory, version="v", routes=routes, window_days=28, point="q50", clip_quantile=0.99)
+    assert (read_meta(directory)["point"], read_meta(directory)["clip_quantile"]) == ("q50", 0.99)
 
 
 def test_the_route_vocabulary_round_trips(tmp_path):

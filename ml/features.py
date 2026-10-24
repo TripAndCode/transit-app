@@ -63,6 +63,7 @@ _HISTORY = [
     "agency_days",
 ]
 _COUNTS = ["slot_runs", "slot_days", "trip_runs", "agency_days"]
+_CLIP_BOUNDS = ["clip_lo", "clip_hi"]
 
 
 def route_ids(runs: pd.DataFrame) -> pd.DataFrame:
@@ -219,12 +220,23 @@ def build_frame(
     window_days: int = 28,
     horizon_days: int = 7,
     precomputed_weekend_days: pd.DataFrame | None = None,
+    clip_quantile: float | None = None,
 ) -> pd.DataFrame:
     """One row per run on origin+1..origin+horizon_days, with its features as of
     origin−1 and its actual delay. The origin day itself is neither history nor
     target. `runs` must carry `route_id` (with_route_ids). `precomputed_weekend_days`,
     when given, must come from `weekend_days()` on this same `runs`; it is filtered
-    to origin−1 here either way, so passing it changes performance, not the result."""
+    to origin−1 here either way, so passing it changes performance, not the result.
+
+    `b0` is the slot's raw mean, the B0 baseline every variant is scored against,
+    and `slot_p10`/`slot_p90` are B0's raw interval. With `clip_quantile` (q), the
+    delay features are built from a winsorized history instead: each agency's
+    window delays are clipped to that window's own (1−q, q) quantiles, carried as
+    `clip_lo`/`clip_hi` so a model's training target can be bounded the same way.
+    The bounds come only from the window, so they never read the origin day or
+    later, and never depend on another agency's runs."""
+    check_clip_quantile(clip_quantile)
+    clipped = clip_quantile is not None
     t = pd.Timestamp(origin)
     last = t - pd.Timedelta(days=1)
     hist = runs[(runs["service_date"] <= last) & (runs["service_date"] >= t - pd.Timedelta(days=window_days))]
@@ -239,14 +251,19 @@ def build_frame(
     frame["hour_cos"] = np.cos(angle)
 
     if hist.empty:
-        for column in _HISTORY:
+        for column in [*_HISTORY, "b0", *(_CLIP_BOUNDS if clipped else [])]:
             frame[column] = np.nan
     else:
         agency_days = hist.groupby("agency_id")["service_date"].nunique().rename("agency_days")
+        features_hist = hist
+        if clip_quantile is not None:
+            bounds = _clip_bounds(hist, clip_quantile)
+            features_hist = _winsorized(hist, bounds)
+            frame = frame.join(bounds, on="agency_id")
         frame = (
-            frame.join(_slot_stats(hist), on=SLOT)
-            .join(_route_stats(hist, last), on=ROUTE)
-            .join(_trip_stats(hist), on=TRIP)
+            frame.join(_slot_stats(features_hist, hist if clipped else None), on=SLOT)
+            .join(_route_stats(features_hist, last), on=ROUTE)
+            .join(_trip_stats(features_hist), on=TRIP)
             .join(agency_days, on="agency_id")
         )
     all_days = precomputed_weekend_days if precomputed_weekend_days is not None else weekend_days(runs)
@@ -257,19 +274,40 @@ def build_frame(
         frame = frame.join(_weekend_share(days), on=["agency_id", "service"])
 
     frame[_COUNTS] = frame[_COUNTS].fillna(0)
-    numeric = [column for column in [*FEATURES, "slot_p10", "slot_p90"] if column not in CATEGORICAL]
+    extra = ["b0", "slot_p10", "slot_p90", *(_CLIP_BOUNDS if clipped else [])]
+    numeric = [column for column in [*FEATURES, *extra] if column not in CATEGORICAL]
     frame[numeric] = frame[numeric].astype("float32")
     return frame.reset_index(drop=True)
 
 
-def _slot_stats(hist: pd.DataFrame) -> pd.DataFrame:
+def check_clip_quantile(quantile: float | None) -> None:
+    if quantile is not None and not 0.5 < quantile < 1:
+        raise ValueError(f"clip_quantile must lie strictly between 0.5 and 1, not {quantile}")
+
+
+def _clip_bounds(hist: pd.DataFrame, quantile: float) -> pd.DataFrame:
+    bounds = hist.groupby("agency_id")["delay_min"].quantile([1 - quantile, quantile]).unstack()
+    bounds.columns = _CLIP_BOUNDS
+    return bounds
+
+
+def _winsorized(hist: pd.DataFrame, bounds: pd.DataFrame) -> pd.DataFrame:
+    lo = hist["agency_id"].map(bounds["clip_lo"])
+    hi = hist["agency_id"].map(bounds["clip_hi"])
+    return hist.assign(delay_min=hist["delay_min"].clip(lower=lo, upper=hi).astype("float32"))
+
+
+def _slot_stats(hist: pd.DataFrame, raw: pd.DataFrame | None = None) -> pd.DataFrame:
     """B0 (the slot's runs-weighted mean), B1 (its latest day) and the slot's
-    spread over the window. p10/p90 are B0's own empirical interval; computed
-    and typed alongside the other features but left out of FEATURES, available
-    to a caller that wants a per-slot interval directly from this frame."""
+    spread over the window, as features. `b0`, `slot_p10` and `slot_p90` are B0
+    and its own empirical interval, always from the raw history (`raw`, when
+    `hist` has been winsorized): computed and typed alongside the features but
+    left out of FEATURES, so a caller can score B0 straight from this frame."""
     grouped = hist.groupby(SLOT)["delay_min"]
     stats = grouped.agg(slot_mean="mean", slot_runs="size", slot_std="std")
-    bounds = grouped.quantile([0.1, 0.9]).unstack()
+    raw_grouped = grouped if raw is None else raw.groupby(SLOT)["delay_min"]
+    stats["b0"] = stats["slot_mean"] if raw is None else raw_grouped.mean()
+    bounds = raw_grouped.quantile([0.1, 0.9]).unstack()
     stats["slot_p10"] = bounds[0.1]
     stats["slot_p90"] = bounds[0.9]
     daily = hist.groupby([*SLOT, "service_date"])["delay_min"].mean().reset_index()
