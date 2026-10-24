@@ -15,7 +15,7 @@ language only needs to add a column rather than rewriting handler code.
 
 from typing import Any
 
-from pipeline.query.labels import dow_label
+from pipeline.query.labels import day_group_label, dow_label
 from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
@@ -56,15 +56,6 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dir_equal", "en"): "similar",
     ("service_suffix", "ja"): "{service}の",
     ("service_suffix", "en"): "{service}: ",
-    # The service filter's values (api.range.ServiceType), named in each locale.
-    ("service_平日", "ja"): "平日",
-    ("service_平日", "en"): "Weekday",
-    ("service_土曜", "ja"): "土曜",
-    ("service_土曜", "en"): "Saturday",
-    ("service_日祝", "ja"): "日祝",
-    ("service_日祝", "en"): "Sunday/Holiday",
-    ("service_土日祝", "ja"): "土日祝",
-    ("service_土日祝", "en"): "Weekend/Holiday",
     ("trend_header", "ja"): "【日次トレンド({from_date} 〜 {to_date})】\n平均: {avg:.2f}分 / 観測日数: {days}日",
     ("trend_header", "en"): "[Daily trend ({from_date} to {to_date})]\nmean: {avg:.2f} min / observed days: {days}",
     ("trend_empty", "ja"): "選択した期間にデータがありません。",
@@ -168,8 +159,7 @@ def _service_prefix(intent: dict, locale: str) -> str:
     service = intent.get("service")
     if not service:
         return ""
-    name = _LOCALES.get((f"service_{service}", locale), service)
-    return _t("service_suffix", locale, service=name)
+    return _t("service_suffix", locale, service=day_group_label(service, locale))
 
 
 def _no_data(locale: str = "ja") -> str:

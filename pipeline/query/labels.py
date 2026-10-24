@@ -21,8 +21,23 @@ from pipeline.db import _DOW_ISO_TO_JP
 # in display tables ('Mon' / 'Tue' / …).
 _DOW_ISO_TO_EN = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
 
-# JP rollup labels (emitted by the weekday/weekend grouping SQL) → EN.
-_ROLLUP_JP_TO_EN = {"平日": "Weekday", "週末": "Weekend", "土日祝": "Weekend/Holiday"}
+# Japanese day-group words → EN: the rollup labels the weekday/weekend
+# grouping SQL emits, and the service filter's values (api.range.ServiceType).
+# The DOW values dow_label renders are ISODOW ints or the 平日/週末 rollups,
+# never 土曜 or 日祝, so the service values change no DOW rendering.
+_DAY_GROUP_JP_TO_EN = {
+    "平日": "Weekday",
+    "週末": "Weekend",
+    "土曜": "Saturday",
+    "日祝": "Sunday/Holiday",
+    "土日祝": "Weekend/Holiday",
+}
+
+
+def day_group_label(value: str, lang: str = "ja") -> str:
+    """Render a Japanese day-group word (a DOW rollup or a service-filter
+    value) in ``lang``; a word with no English entry passes through."""
+    return _DAY_GROUP_JP_TO_EN.get(value, value) if lang == "en" else value
 
 
 def dow_label(value, lang: str = "ja") -> str:
@@ -38,10 +53,7 @@ def dow_label(value, lang: str = "ja") -> str:
         if en:
             return _DOW_ISO_TO_EN.get(value, str(value))
         return _DOW_ISO_TO_JP.get(value, str(value))
-    s = str(value)
-    if en and s in _ROLLUP_JP_TO_EN:
-        return _ROLLUP_JP_TO_EN[s]
-    return s
+    return day_group_label(str(value), lang)
 
 
 def time_label(value) -> str:
