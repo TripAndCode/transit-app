@@ -21,9 +21,9 @@ from ml import sync
 from ml.adoption import judge
 from ml.backtest import DataSpan, evaluate_agency, lookback_days, needs_older_cells, results_from_json, results_to_json
 from ml.cells import Cell
-from ml.compare import FITS, compare, render_markdown, variant_name
+from ml.compare import DEFAULT_BASELINE, FITS, compare, render_markdown, variant_name
 from ml.data import agencies_with_data, count_days, date_span, fetch_cells
-from ml.model_result import result_from_json, result_to_json
+from ml.model_result import DEFAULT_POINT, POINTS, result_from_json, result_to_json
 from ml.r2 import upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
@@ -147,7 +147,7 @@ def _variant_eval(args: argparse.Namespace) -> int:
     from ml.models import ModelParams
 
     params = replace(ModelParams(window_days=args.window), **FITS[args.fit])
-    points = tuple(dict.fromkeys(args.point or ["mean"]))
+    points = tuple(dict.fromkeys(args.point or [DEFAULT_POINT]))
     results = run_backtests(read_runs(args.runs), params=params, origin_count=args.origins, points=points)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for point, result in results.items():
@@ -395,7 +395,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_variant = sub.add_parser("variant-eval", help="Backtest one model variant from a runs snapshot")
     p_variant.add_argument("--runs", type=Path, required=True)
     p_variant.add_argument("--fit", choices=sorted(FITS), required=True)
-    p_variant.add_argument("--point", choices=["mean", "q50"], action="append")
+    p_variant.add_argument("--point", choices=POINTS, action="append")
     p_variant.add_argument("--out-dir", type=Path, required=True)
     p_variant.add_argument("--origins", type=int, default=28)
     p_variant.add_argument("--window", type=int, default=28)
@@ -403,7 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     p_compare = sub.add_parser("compare", help="Compare the variant backtests in a directory")
     p_compare.add_argument("--dir", type=Path, required=True)
-    p_compare.add_argument("--baseline", default="base")
+    p_compare.add_argument("--baseline", default=DEFAULT_BASELINE)
     p_compare.set_defaults(handler=_compare)
 
     p_train_live = sub.add_parser("train", help="Fit and publish this week's live model, if adopted")

@@ -11,7 +11,14 @@ from typing import Any
 
 from ml.adoption import judge
 from ml.backtest import HORIZONS
-from ml.model_result import MODEL, SLOT_INTERVAL, IntervalStats, ModelBacktestResult, merged_intervals
+from ml.model_result import (
+    DEFAULT_POINT,
+    MODEL,
+    SLOT_INTERVAL,
+    IntervalStats,
+    ModelBacktestResult,
+    merged_intervals,
+)
 from ml.summary import summarize
 
 # A slot's window holds a handful of runs per weekday, so one run deep in the
@@ -30,6 +37,10 @@ FITS: dict[str, dict[str, Any]] = {
 
 def variant_name(fit: str, point: str) -> str:
     return fit if point == "mean" else f"{fit}-{point}"
+
+
+# What is published: the default fit scored with the default point.
+DEFAULT_BASELINE = variant_name("base", DEFAULT_POINT)
 
 
 def _on_model_coverage(result: ModelBacktestResult) -> float | None:

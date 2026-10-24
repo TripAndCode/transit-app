@@ -16,11 +16,11 @@ import pandas as pd
 
 from ml.conformal import conformity_shift
 from ml.features import CATEGORICAL, FEATURES, TARGET, check_clip_quantile
+from ml.model_result import DEFAULT_POINT, POINTS
 
 QUANTILES = (0.1, 0.5, 0.9)
 CALIBRATION_DAYS = 7
 INTERVAL_COVERAGE = 0.8
-POINTS = ("mean", "q50")
 MEAN_OBJECTIVES = ("regression", "huber")
 # What a recorded params dict that predates these fields was fit and scored with.
 _UNRECORDED = {"clip_quantile": None, "point": "mean", "mean_objective": "regression"}
@@ -54,7 +54,7 @@ class ModelParams:
     lambda_l2: float = 1.0
     seed: int = 7
     clip_quantile: float | None = None
-    point: str = "q50"
+    point: str = DEFAULT_POINT
     mean_objective: str = "regression"
     huber_delta: float = 2.0
 

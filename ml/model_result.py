@@ -12,6 +12,9 @@ from typing import Any
 from ml.backtest import AgencyResult, results_from_json, results_to_json
 
 MODEL = "LGBM"
+# The point forecasts a model result can score, and the one published.
+POINTS = ("mean", "q50")
+DEFAULT_POINT = "q50"
 # The interval `ml predict` publishes: one per route×date×hour cell, the mean of
 # its runs' bounds, scored against each run in the cell.
 SLOT_INTERVAL = f"{MODEL} slot"

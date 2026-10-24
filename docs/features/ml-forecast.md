@@ -71,18 +71,18 @@ The weekly job also backtests LightGBM forecasters of each trip run's mean delay
 - `huber`, which trains the mean model with a Huber loss;
 - `clip-huber`, both.
 
-Each fit is scored with the mean model's forecast as the point, the median model's (`--point q50`, named `<fit>-q50`), or both from one fit. B0 is always the slot's raw mean, so every variant is scored against the same baseline. Each variant is one full `train-eval` with its memory peak, so run them one process at a time, outside the timers' windows, from one snapshot of the replica so that every variant scores the same origins:
+Each fit is scored with the median model's forecast as the point (`--point q50`, named `<fit>-q50`), the mean model's (`--point mean`, named `<fit>`), or both from one fit. B0 is always the slot's raw mean, so every variant is scored against the same baseline. Each variant is one full `train-eval` with its memory peak, so run them one process at a time, outside the timers' windows, from one snapshot of the replica so that every variant scores the same origins:
 
 ```
 cd /root/transit-app && set -a && . /etc/transit-ml/env && set +a
 nice .venv/bin/python -m ml.cli snapshot-runs --out <dir>/runs.parquet
 nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit base --point mean --point q50 --out-dir <dir>/variants
 nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit clip --point mean --point q50 --out-dir <dir>/variants
-nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit huber --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit huber --point mean --out-dir <dir>/variants
 nice .venv/bin/python -m ml.cli compare --dir <dir>/variants
 ```
 
-`compare` refuses variants scored on different origins. It writes `comparison.json` and `comparison.md` beside the variants: each variant's skill against B0 overall, per agency and by days ahead, RMSE, both intervals' coverage, its adoption verdict, and on how many origins it beats the `--baseline` variant (`base` by default).
+`compare` refuses variants scored on different origins. It writes `comparison.json` and `comparison.md` beside the variants: each variant's skill against B0 overall, per agency and by days ahead, RMSE, both intervals' coverage, its adoption verdict, and on how many origins it beats the `--baseline` variant: by default `base-q50`, what is published. `variant-eval` scores the published point unless `--point` names others.
 
 ## Publishing and serving the forecast
 

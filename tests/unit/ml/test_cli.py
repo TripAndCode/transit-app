@@ -402,13 +402,19 @@ def test_variant_eval_refuses_a_fit_it_does_not_know(tmp_path):
 def test_compare_summarizes_every_variant_in_the_directory(tmp_path, capsys):
     import json
 
+    from ml.compare import variant_name
+    from ml.models import ModelParams
+
     out = tmp_path / "variants"
     snapshot = str(_snapshot(tmp_path))
-    for fit in ("base", "huber"):
-        assert main(["variant-eval", "--runs", snapshot, "--fit", fit, "--out-dir", str(out), "--origins", "7"]) == 0
+    assert main(["variant-eval", "--runs", snapshot, "--fit", "base", "--out-dir", str(out), "--origins", "7"]) == 0
+    huber = ["variant-eval", "--runs", snapshot, "--fit", "huber", "--point", "mean", "--out-dir", str(out)]
+    assert main([*huber, "--origins", "7"]) == 0
     assert main(["compare", "--dir", str(out)]) == 0
     comparison = json.loads((out / "comparison.json").read_text())
-    assert set(comparison["variants"]) == {"base", "huber"}
+    # Unless told otherwise, variants are scored with, and compared against, what is published.
+    live = variant_name("base", ModelParams().point)
+    assert set(comparison["variants"]) == {live, "huber"} and comparison["baseline"] == live
     assert (out / "comparison.md").read_text() == capsys.readouterr().out
     # A second compare reads the variants again, not its own output.
     assert main(["compare", "--dir", str(out)]) == 0
