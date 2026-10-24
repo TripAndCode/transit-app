@@ -480,7 +480,7 @@ def _maybe_mount_static(app: FastAPI) -> None:
         # Trade-off: this blanket-blocks every dot-prefixed path segment, not
         # just .vite/ -- a future legitimate route
         # (e.g. /.well-known/...) would silently get this 200 SPA shell
-        # instead of the real file or a real 404. No such route exists today.
+        # instead of the real file or a real 404.
         if any(part.startswith(".") for part in full_path.split("/")):
             return FileResponse(index_path)
         # realpath collapses any ".." before the containment check, so a path

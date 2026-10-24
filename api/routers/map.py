@@ -208,6 +208,11 @@ async def _latest_route_observation(
     Probes `updates_live` first, so a route running today answers from
     today, then `updates`, so one that is not answers from its latest
     closed day.
+
+    The Postgres precheck comes first because the date bound alone does not
+    make a miss cheap: route_code sits behind captured_at in the ClickHouse
+    sort key, so proving a route has no rows in the window still reads the
+    agency's whole window.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None

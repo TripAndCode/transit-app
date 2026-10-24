@@ -1861,8 +1861,9 @@ async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_clien
 
 
 # council_summary / delay_certificate
+#
 # The report list itself is covered by test_reports_list_returns_static_metadata
-# above (now asserting the full 11-type set), so no separate listing test here.
+# above, which asserts the full 11-type set, so no separate listing test here.
 
 
 @pytest.mark.asyncio
