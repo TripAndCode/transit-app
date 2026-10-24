@@ -64,11 +64,8 @@ class IntentSignature:
     rationale: str | None = None
 
 
-def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    """Produce a stable canonical args dict for hashing.
-
-    ``ctx`` (the request's window) is not read: no canonical arg depends on it.
-    """
+def canonicalize(tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Produce a stable canonical args dict for hashing."""
     if tool not in _TOOL_DEFAULTS:
         raise ValueError(f"unknown tool: {tool!r}")
 

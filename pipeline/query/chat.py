@@ -564,9 +564,8 @@ async def chat_with_tools(
         parsed = _parse_build_sentinel(question)
         if parsed is not None:
             build_tool, build_args = parsed
-            ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
             try:
-                can_args = canonicalize(build_tool, build_args, ctx_dict)
+                can_args = canonicalize(build_tool, build_args)
             except ValueError:
                 # Unknown tool — fall back to dispatching with raw args so the
                 # tool handler can return its own "unknown" error string.
@@ -893,9 +892,8 @@ async def chat_with_tools(
             }
 
         # We have a valid IntentSignature — canonicalize and compute hash.
-        ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
         try:
-            can_args = canonicalize(sig.tool, sig.args, ctx_dict)
+            can_args = canonicalize(sig.tool, sig.args)
         except ValueError:
             # Unknown tool from LLM — degrade gracefully.
             can_args = dict(sig.args)

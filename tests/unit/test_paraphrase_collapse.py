@@ -14,19 +14,13 @@ record of which rule needs tightening or loosening.
 
 from __future__ import annotations
 
-from datetime import date
-
 import pytest
 
 from pipeline.query.intent import canonicalize, signature_hash
 
 
-def _ctx(from_d="2026-05-13", to_d="2026-05-27"):
-    return {"from_date": date.fromisoformat(from_d), "to_date": date.fromisoformat(to_d)}
-
-
-def _hash(tool, args, ctx=None):
-    return signature_hash(tool, canonicalize(tool, args, ctx or _ctx()))
+def _hash(tool, args):
+    return signature_hash(tool, canonicalize(tool, args))
 
 
 # -- 8 paraphrase pairs that MUST collapse --------------------------------------
