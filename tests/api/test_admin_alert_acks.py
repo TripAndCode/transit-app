@@ -9,8 +9,8 @@ import pytest
 from httpx import ASGITransport
 
 from api.admin_board import alert_key
-from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.fixtures.users import seed_session
 
 
 def _key(count: int) -> str:
@@ -19,21 +19,6 @@ def _key(count: int) -> str:
 
 
 ACKED = _key(2)
-
-
-async def _seed_user(conn, *, role="admin"):
-    email = f"u{datetime.now().timestamp()}@x"
-    uid = (await conn.fetchrow("INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id", email, role))[
-        "user_id"
-    ]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-    )
-    return sid, uid
 
 
 @pytest.fixture
@@ -55,7 +40,7 @@ async def _ack(client, sid, key=ACKED):
 
 @pytest.mark.asyncio
 async def test_an_acknowledgement_is_stored_for_a_week_under_the_acting_admin(admin_client, aconn):
-    sid, uid = await _seed_user(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     r = await _ack(admin_client, sid)
     assert r.status_code == 204
     row = await aconn.fetchrow(
@@ -67,7 +52,7 @@ async def test_an_acknowledgement_is_stored_for_a_week_under_the_acting_admin(ad
 
 @pytest.mark.asyncio
 async def test_acknowledging_again_renews_the_one_row(admin_client, aconn):
-    sid, _ = await _seed_user(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     await _ack(admin_client, sid)
     await aconn.execute(
         "UPDATE admin_alert_acks SET acked_at = acked_at - interval '1 day', expires_at = expires_at - interval '1 day'"
@@ -80,7 +65,7 @@ async def test_acknowledging_again_renews_the_one_row(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_an_acknowledgement_is_audited(admin_client, aconn):
-    sid, uid = await _seed_user(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     await _ack(admin_client, sid)
     audit = await aconn.fetchrow(
         "SELECT actor_id, action, target_type, target_id FROM admin_audit ORDER BY at DESC LIMIT 1"
@@ -91,7 +76,7 @@ async def test_an_acknowledgement_is_audited(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_only_an_admin_may_acknowledge(admin_client, aconn):
-    sid, _ = await _seed_user(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     r = await _ack(admin_client, sid)
     assert r.status_code == 403
     assert await aconn.fetchval("SELECT count(*) FROM admin_alert_acks") == 0
@@ -99,7 +84,7 @@ async def test_only_an_admin_may_acknowledge(admin_client, aconn):
 
 @pytest.mark.asyncio
 async def test_a_key_that_is_not_an_alert_key_is_refused(admin_client, aconn):
-    sid, _ = await _seed_user(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     r = await _ack(admin_client, sid, key="not-a-key")
     assert r.status_code == 422
     assert await aconn.fetchval("SELECT count(*) FROM admin_alert_acks") == 0

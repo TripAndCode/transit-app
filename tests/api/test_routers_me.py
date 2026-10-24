@@ -1,6 +1,6 @@
 """Tests for self-service ``/api/me`` endpoints: profile, sessions, presets."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -8,25 +8,11 @@ from httpx import ASGITransport
 
 from api.security import token_hash
 from tests.conftest import _test_pool
+from tests.fixtures.users import add_session, seed_session
 
 
 async def _seed_user_and_session(conn, *, role="user"):
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING user_id",
-            f"u{datetime.now().timestamp()}@x",
-            "Yo",
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-{uid:0>30}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-        "test-ua",
-    )
+    sid, uid, _ = await seed_session(conn, role=role, name="Yo", user_agent="test-ua")
     return sid, uid
 
 
@@ -116,14 +102,7 @@ async def test_other_user_cannot_delete_preset(me_client, aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_sessions_mark_the_one_making_the_request(me_client, aconn):
     sid, uid = await _seed_user_and_session(aconn)
-    other = f"sid-other-{uid:0>24}"
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(other),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-        "other-ua",
-    )
+    other = await add_session(aconn, uid, user_agent="other-ua")
     rows = (await me_client.get("/api/me/sessions", cookies={"sid": sid})).json()
     current = {row["sid_prefix"]: row["current"] for row in rows}
     assert current == {token_hash(sid)[:12]: True, token_hash(other)[:12]: False}
@@ -132,14 +111,7 @@ async def test_sessions_mark_the_one_making_the_request(me_client, aconn):
 @pytest.mark.asyncio
 async def test_sessions_list_omits_expired_sessions(me_client, aconn):
     sid, uid = await _seed_user_and_session(aconn)
-    expired = f"sid-expired-{uid:0>22}"
-    await aconn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(expired),
-        uid,
-        datetime.now(timezone.utc) - timedelta(minutes=1),
-        "dead-ua",
-    )
+    await add_session(aconn, uid, expires_in=timedelta(minutes=-1), user_agent="dead-ua")
     rows = (await me_client.get("/api/me/sessions", cookies={"sid": sid})).json()
     assert [row["sid_prefix"] for row in rows] == [token_hash(sid)[:12]]
 

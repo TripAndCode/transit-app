@@ -1,12 +1,12 @@
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -25,24 +25,6 @@ async def test_health_endpoint(app_client):
     resp = await app_client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
-
-
-async def _seed_admin(conn) -> str:
-    """Insert an admin user + session, return the sid cookie value."""
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, 'admin') RETURNING user_id",
-            f"admin{datetime.now().timestamp()}@x",
-        )
-    )["user_id"]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return sid
 
 
 @pytest.fixture
@@ -68,7 +50,7 @@ async def agencies_client(apply_schema):
     # break test_list_agencies_empty's `[] == response` assertion.
     async with pool.acquire() as conn:
         await conn.execute(truncate_sql)
-        admin_sid = await _seed_admin(conn)
+        admin_sid = (await seed_session(conn, role="admin")).sid
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # creating agencies is admin-only (the feed_url is an SSRF sink), so every
         # test that creates one passes this admin session cookie.
@@ -94,7 +76,7 @@ async def agencies_client_real_validator(apply_schema):
     )
     async with pool.acquire() as conn:
         await conn.execute(truncate_sql)
-        admin_sid = await _seed_admin(conn)
+        admin_sid = (await seed_session(conn, role="admin")).sid
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, admin_sid
         async with pool.acquire() as conn:
