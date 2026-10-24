@@ -29,8 +29,8 @@ async def log_query(
     """Insert one anonymized query-log row. Swallows all errors.
 
     ``signature_hash`` and ``cache_outcome`` are populated only when the
-    intent-cache feature flag is enabled (Phase ②+); they are NULL when
-    the flag is off (Phase ①-compatible).
+    ``ask_intent_cache_enabled`` flag is on and the question reached the
+    LLM stage; they are NULL otherwise.
 
     ``numeric_guard_triggered`` is the column for a post-generation
     numeric-guard verdict, and no /ask path produces one: a dispatched
