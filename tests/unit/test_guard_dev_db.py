@@ -66,6 +66,8 @@ BLOCKED = [
     # Make targets that write through .env's dev defaults, and name nothing.
     pytest.param("make prune-personal-data", id="make-prune-personal-data"),
     pytest.param("make prune-query-log", id="make-prune-query-log"),
+    pytest.param("make ingest-ml", id="make-ingest-ml"),
+    pytest.param("poetry run python gtfs_pipeline.py ingest_ml", id="cli-ingest-ml"),
     pytest.param("make -C . prune-admin-audit", id="make-dir-flag-prune-admin-audit"),
     pytest.param("make ch-bootstrap", id="make-ch-bootstrap"),
     pytest.param("CLICKHOUSE_PORT=8123 make ch-bootstrap", id="make-ch-bootstrap-dev-port"),
@@ -630,6 +632,10 @@ BLOCKED = [
 ]
 
 ALLOWED = [
+    pytest.param(
+        "make ingest-ml DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="make-ingest-ml-against-throwaway",
+    ),
     # An exec into a named service or container that is not a dev one is not the
     # dev store, whatever port the client defaults to inside it.
     pytest.param(

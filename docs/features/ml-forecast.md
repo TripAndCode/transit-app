@@ -84,3 +84,11 @@ pruned once its service date is old enough. The `ml_forecast` flag
 `/forecast/overview` overlay this table's rows (`source: "ml"`) over the seasonal
 baseline (`source: "baseline"`); with the flag off, the ingest still runs and the
 table still fills, but the API never reads it.
+
+Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
+forecast into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`
+from the same file (a read-only token is enough). Unlike the sweep it exits
+non-zero on a missing variable, an unreadable publish or a failed upsert, and
+says "no forecast has been published yet" rather than reporting zero rows. The
+heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
+and marks them as the ML model's.

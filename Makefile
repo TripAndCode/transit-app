@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml seed-agenciesbuild-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -290,6 +290,13 @@ digest:
 # window only.
 ingest-weather:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
+
+# Pulls the ML workbench's latest published forecast (R2 `transit-ml`, read
+# with ML_STORE_* from .env) into agg_route_forecast_ml. Idempotent: upserts
+# on (agency_id, route_code, service_date, hour). Writes $(db_url), so it is an
+# operator step against the dev database.
+ingest-ml:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_ml
 
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:
