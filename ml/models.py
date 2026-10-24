@@ -37,10 +37,10 @@ class ModelParams:
 
     `mean_objective` "huber" trains the mean model with a Huber loss whose
     `huber_delta` (minutes) is where a residual's loss turns from squared to
-    linear. Its default is the classic 1.345σ for the robust spread of runs
-    around their B0. LightGBM starts Huber from the target's mean, so the delta
-    must exceed most residuals' distance from it: once nearly every gradient is
-    saturated, no split gains anything under lambda_l2 and the fit stops there."""
+    linear. LightGBM starts Huber from the target's mean, so the delta must
+    exceed most residuals' distance from that mean: once nearly every gradient
+    is saturated, no split gains anything under lambda_l2 and the fit stops
+    there, silently, with the mean as its only forecast."""
 
     window_days: int = 28
     half_life_days: float = 28.0
