@@ -97,6 +97,16 @@ describe("AdminAskOpsPage", () => {
     expect(screen.getByText(/遅延が大きい路線/)).toBeTruthy();
   });
 
+  it("shows no numeric-guard badge, since no /ask answer carries a guard verdict", () => {
+    queriesReturn = {
+      data: { rows: [{ ...baseRow, numeric_guard_triggered: true }], next_cursor: null },
+      isLoading: false,
+      error: null,
+    };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(/数値ガード|Numeric guard/)).toBeNull();
+  });
+
   it("shows the promote action only for promotable (rag) rows", () => {
     queriesReturn = {
       data: {

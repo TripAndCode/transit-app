@@ -164,7 +164,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
      `PUBLIC_BASE_URL=https://<your-railway-domain>` (a *partial* OAuth set
      is rejected at startup). Add the
      `https://<domain>/api/auth/{google,github}/callback` redirect URIs at
-     the provider. See README ▸ Authentication.
+     the provider. See README ▸ Configuration.
    - `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` are an optional
      break-glass local-admin login, independent of SSO — see README ▸
      Configuration. Never set `DEFAULT_ADMIN_USERNAME` to a real SSO user's
@@ -414,7 +414,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 
 ## 5. Custom domain (optional)
 
-1. Buy a domain (suggestions in README ▸ Deployment).
+1. Buy a domain.
 2. Railway `app` → **Settings → Networking → Custom Domain** → enter it.
 3. Add the CNAME Railway shows you at your registrar. TLS issues
    automatically once DNS resolves.

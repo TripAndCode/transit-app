@@ -12,7 +12,8 @@
  * user-initiated action where explicit feedback is appropriate.
  *
  * Grace period: 80 ms before showing, so cache-hit mutations don't
- * produce a visible blink. 200 ms CSS fade-out for smooth disappearance.
+ * produce a visible blink. Hiding is immediate, with no fade-out: the strip
+ * switches to `display: none` in the same render that drops its opacity.
  *
  * The strip is rendered inside the in-flow app notice stack. It reserves no
  * space while idle, since it's `display: none`, but once mutations start it
@@ -26,9 +27,8 @@ import "./ActivityStrip.css";
 /**
  * Horizontal activity strip that signals in-flight mutations to the user.
  *
- * Renders an always-present 24 px row in the App shell. The row is visually
- * transparent when idle and transitions to a soft --accent-soft band with
- * animated dots when `useIsMutating()` reports one or more active mutations.
+ * Hidden (`display: none`) while idle, and a 24 px --accent-soft band with
+ * animated dots while `useIsMutating()` reports an active mutation.
  * Themed through --accent-soft with --accent-strong text (not a hardcoded
  * colour) so the band follows the active theme and its label stays AA-readable.
  */

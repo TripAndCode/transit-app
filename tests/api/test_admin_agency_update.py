@@ -31,28 +31,10 @@ from httpx import ASGITransport
 
 from api.admin_runs import LAST_STATIC_LOAD_SQL, LATEST_OPERATOR_RUNS_SQL, build_latest_runs
 from api.middleware.ratelimit import limiter
-from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.fixtures.users import seed_session
 
 _ORIGIN = {"Origin": TEST_ORIGIN}
-
-
-async def _seed_session(conn, *, role: str = "admin") -> tuple[str, int]:
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id",
-            f"u{datetime.now().timestamp()}@x",
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-{uid}-{datetime.now().timestamp()}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=1),
-    )
-    return sid, uid
 
 
 async def _seed_agency(conn, *, static: bool = True, deleted: bool = False) -> int:
@@ -96,7 +78,7 @@ _PATHS = ["refresh-static", "update"]
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _PATHS)
 async def test_a_member_who_is_not_an_admin_is_forbidden(app_client, aconn, queued, path):
-    sid, _ = await _seed_session(aconn, role="user")
+    sid = (await seed_session(aconn, role="user")).sid
     aid = await _seed_agency(aconn)
     r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
     assert r.status_code == 403
@@ -106,7 +88,7 @@ async def test_a_member_who_is_not_an_admin_is_forbidden(app_client, aconn, queu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _PATHS)
 async def test_a_press_without_a_same_site_origin_is_refused(app_client, aconn, queued, path):
-    sid, _ = await _seed_session(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     aid = await _seed_agency(aconn)
     r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid})
     assert r.status_code == 403
@@ -117,7 +99,7 @@ async def test_a_press_without_a_same_site_origin_is_refused(app_client, aconn, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("path", "kind"), [("refresh-static", "static"), ("update", "update")])
 async def test_a_press_opens_an_umbrella_run_audits_it_and_answers_202(app_client, aconn, queued, path, kind):
-    sid, uid = await _seed_session(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     aid = await _seed_agency(aconn)
     r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
 
@@ -141,7 +123,7 @@ async def test_a_press_opens_an_umbrella_run_audits_it_and_answers_202(app_clien
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _PATHS)
 async def test_a_second_press_while_the_first_run_is_in_flight_is_409(app_client, aconn, queued, path):
-    sid, _ = await _seed_session(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     aid = await _seed_agency(aconn)
     first = await app_client.post(f"/api/admin/agencies/{aid}/update", cookies={"sid": sid}, headers=_ORIGIN)
     assert first.status_code == 202
@@ -154,7 +136,7 @@ async def test_a_second_press_while_the_first_run_is_in_flight_is_409(app_client
 
 @pytest.mark.asyncio
 async def test_a_run_abandoned_past_the_reap_age_does_not_block_a_new_one(app_client, aconn, queued):
-    sid, uid = await _seed_session(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     aid = await _seed_agency(aconn)
     await aconn.execute(
         "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by) "
@@ -169,7 +151,7 @@ async def test_a_run_abandoned_past_the_reap_age_does_not_block_a_new_one(app_cl
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _PATHS)
 async def test_a_disabled_agency_is_409(app_client, aconn, queued, path):
-    sid, _ = await _seed_session(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     aid = await _seed_agency(aconn, deleted=True)
     r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
     assert r.status_code == 409
@@ -179,7 +161,7 @@ async def test_a_disabled_agency_is_409(app_client, aconn, queued, path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _PATHS)
 async def test_an_agency_with_no_timetable_source_is_409(app_client, aconn, queued, path):
-    sid, _ = await _seed_session(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     aid = await _seed_agency(aconn, static=False)
     r = await app_client.post(f"/api/admin/agencies/{aid}/{path}", cookies={"sid": sid}, headers=_ORIGIN)
     assert r.status_code == 409
@@ -188,7 +170,7 @@ async def test_an_agency_with_no_timetable_source_is_409(app_client, aconn, queu
 
 @pytest.mark.asyncio
 async def test_health_reports_each_agencys_latest_run_step_by_step(app_client, aconn):
-    sid, uid = await _seed_session(aconn)
+    sid, uid, _ = await seed_session(aconn, role="admin")
     aid = await _seed_agency(aconn)
     umbrella = await aconn.fetchval(
         "INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by) "
@@ -235,7 +217,7 @@ async def test_health_reports_each_agencys_latest_run_step_by_step(app_client, a
 
 @pytest.mark.asyncio
 async def test_health_carries_no_run_for_an_agency_no_operator_has_run(app_client, aconn):
-    sid, _ = await _seed_session(aconn)
+    sid = (await seed_session(aconn, role="admin")).sid
     aid = await _seed_agency(aconn, static=False)
     r = await app_client.get("/api/admin/agencies/health", cookies={"sid": sid})
     row = next(h for h in r.json() if h["agency_id"] == aid)

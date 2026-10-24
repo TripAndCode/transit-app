@@ -9,8 +9,7 @@ from pipeline.query.router import (
     is_follow_up,
     needs_history,
     needs_previous_turn,
-    retrieve_examples,
-    route_question,
+    route_or_examples,
     set_golden_set_path,
 )
 from tests.conftest import _test_pool
@@ -88,11 +87,12 @@ async def conn_with_embedded_chunks(apply_schema):
 
 
 @pytest.mark.asyncio
-async def test_route_question_rule_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_rule_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     """Rule path beats Stage 2 even when chunks exist."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        decision = await route_question("どんな路線がある？", conn, agency_id)
+        decision, examples = await route_or_examples("どんな路線がある？", conn, agency_id)
+    assert examples == []
     assert decision is not None
     assert decision.stage == "rules"
     assert decision.tool == "describe_data"
@@ -100,11 +100,12 @@ async def test_route_question_rule_hit(conn_with_embedded_chunks, fake_embedder,
 
 
 @pytest.mark.asyncio
-async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_embedding_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     """No rule matches → embedding finds g-1 with distance ~0 → dispatch."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        decision = await route_question("中央大橋線の遅延", conn, agency_id)
+        decision, examples = await route_or_examples("中央大橋線の遅延", conn, agency_id)
+    assert examples == []
     assert decision is not None
     assert decision.stage == "embedding"
     assert decision.tool == "route_stats"
@@ -112,21 +113,21 @@ async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embe
 
 
 @pytest.mark.asyncio
-async def test_route_question_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    """Distant query (no rule hit) → distance > threshold → returns None."""
+async def test_route_or_examples_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """Distant query (no rule hit) → distance > threshold → no decision."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # Avoid OOS-guard keywords (e.g. 天気) so this exercises Stage 2 only.
-        decision = await route_question("なんとなく気になる", conn, agency_id)
+        decision, _ = await route_or_examples("なんとなく気になる", conn, agency_id)
     assert decision is None
 
 
 @pytest.mark.asyncio
-async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+async def test_route_or_examples_rejects_above_threshold(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
     # _FakeEmbedder returns [0.5,0.5,0,...] for unknown text → distance ~0.29 from both axis chunks → no dispatch
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        d = await route_question("全然関係ない質問", conn, agency_id)
+        d, _ = await route_or_examples("全然関係ない質問", conn, agency_id)
     assert d is None
 
 
@@ -351,12 +352,13 @@ def test_all_rules_map_to_known_tools():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    """Even when route_question returns None, retrieve_examples should give top-3."""
+async def test_route_or_examples_returns_top_k_with_tool_args(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """With no direct dispatch, route_or_examples gives the top-k matches as examples."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # Non-OOS, non-rule phrase so we exercise the Stage 2 fall-through.
-        matches = await retrieve_examples("なんとなく気になる", conn, agency_id, k=3)
+        decision, matches = await route_or_examples("なんとなく気になる", conn, agency_id, k=3)
+    assert decision is None
     # Two chunks in fixture, so we get 2 (capped by available data).
     assert len(matches) == 2
     # Tool/args populated from the golden_set dict.
@@ -367,8 +369,6 @@ async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded
 
 @pytest.mark.asyncio
 async def test_route_or_examples_single_path(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    from pipeline.query.router import route_or_examples
-
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
         # rule hit: decision, no examples
@@ -383,7 +383,7 @@ async def test_route_or_examples_single_path(conn_with_embedded_chunks, fake_emb
 
 
 @pytest.mark.asyncio
-async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
+async def test_route_or_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
     pool, agency_id = conn_with_embedded_chunks
 
     class _Down:
@@ -396,8 +396,7 @@ async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embed
 
     monkeypatch.setattr(router, "_get_embedder", lambda: _Down())
     async with pool.acquire() as conn:
-        matches = await retrieve_examples("anything", conn, agency_id, k=3)
-    assert matches == []
+        assert await route_or_examples("anything", conn, agency_id, k=3) == (None, [])
 
 
 @pytest.mark.asyncio
@@ -599,6 +598,17 @@ async def test_an_unresolvable_chunk_neither_dispatches_nor_blocks_a_golden_matc
         "next",
         "again",
         "reverse",
+        "遅延の多い路線を降順で",
+        "さらに定時率の低い路線",
+        "別の路線と比較したい",
+        "list routes by delay in reverse",
+        # 別の after hiragana or at the start still reads as "another".
+        "別の日",
+        "それとは別の路線",
+        "じゃあ別の系統",
+        "また別の停留所",
+        "全く別の時間帯",
+        "全然別の路線",
     ],
 )
 def test_is_follow_up_true(q):
@@ -618,6 +628,17 @@ def test_is_follow_up_true(q):
         "別府の路線",
         "same-day comparison",
         "next stop information",
+        # 別 after a kanji or katakana word is a "by X" suffix, not "another".
+        "月別の推移を教えて",
+        "曜日別の遅延",
+        "時間帯別の定時率",
+        "路線別の遅延",
+        "系統別の平均遅延",
+        "停留所別の遅れ",
+        "日々別の集計",
+        "ルート別の比較",
+        "ﾙｰﾄ別の比較",
+        "特別の理由",
         "",
     ],
 )
@@ -641,10 +662,76 @@ def test_is_follow_up_false(q):
         "降順",
         "さらに",
         "絞り込んで",
+        "もっと",
+        "次の10件",
+        "逆に",
+        "別の日",
+        "平日に絞り込んで",
+        "2025年に絞り込んで",
+        "reverse",
+        "in reverse",
+        "別の便利な使い方",
+        # Continuation wording needs the previous turn's list even beside a
+        # subject.
+        "もっと遅延の多い路線を見せて",
+        "次の10件の路線",
+        # The noun belongs to a reference back, not to the question.
+        "その路線を降順で",
+        "同じ路線を絞り込んで",
+        "あの系統を並べ替えて",
+        "その停留所をさらに",
+        "それとは別の路線",
     ],
 )
 def test_needs_previous_turn_true(q):
     assert needs_previous_turn(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    [
+        "遅延の多い路線を降順で",
+        "さらに定時率の低い路線",
+        "別の路線と比較したい",
+        "22171の遅延を降順で",
+        "A1を別の系統と比較",
+        "停留所を遅延の多い順に並べ替えて",
+        "バス停を遅れの大きい順に絞り込んで",
+        "別の事業者の便と比較",
+        "それぞれの路線を降順で",
+        "定時率を昇順に並べ替え",
+        "list routes by delay in reverse",
+    ],
+)
+def test_refinement_wording_with_a_subject_of_its_own_does_not_need_a_previous_turn(q):
+    """No rule answers these, but each names what to rank, filter or compare,
+    so a first turn can still answer it."""
+    assert _match_rules(q) is None
+    assert needs_previous_turn(q) is False
+    assert needs_previous_turn(q, router_runs=False) is False
+
+
+@pytest.mark.parametrize("q", ["月別の推移を教えて", "曜日別の遅延", "時間帯別の定時率", "ルート別の比較"])
+def test_a_by_x_breakdown_does_not_need_a_previous_turn(q):
+    assert needs_previous_turn(q) is False
+    assert needs_previous_turn(q, router_runs=False) is False
+
+
+@pytest.mark.parametrize(
+    "q, routed, unrouted",
+    [
+        # A rule answers the continuation only when the router runs.
+        ("遅延ワースト10の続き", False, True),
+        # Refinement wording with a subject never needs the previous turn.
+        ("平日に絞り込んで遅延ワースト10", False, False),
+        # A back-reference always does.
+        ("同じ条件で遅延ワースト10", True, True),
+        ("降順", True, True),
+    ],
+)
+def test_needs_previous_turn_without_the_router(q, routed, unrouted):
+    assert needs_previous_turn(q) is routed
+    assert needs_previous_turn(q, router_runs=False) is unrouted
 
 
 @pytest.mark.parametrize(

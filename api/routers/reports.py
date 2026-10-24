@@ -61,6 +61,7 @@ from pipeline.reports import (
 )
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
+from pipeline.reports.filters import _service_label
 from pipeline.reports.forecast import (
     hourly_cells_to_dow_band,
     summarize_agency_overview,
@@ -926,7 +927,7 @@ async def get_report(
         )
         rows_total = len(ranked)
         rows = ranked[:n]
-        intent = {"query_type": "ranking", "limit": n, "sort_order": sort_order}
+        intent = {"query_type": "ranking", "sort_order": sort_order, "service": _service_label(ctx)}
     elif report_type == "on_time":
         rows = await compute_on_time(
             agency_id,
@@ -942,21 +943,21 @@ async def get_report(
         # change compute_on_time's own 5-tuple contract, so pooling callers
         # (pipeline.reports.suggest) are unaffected. See pipeline/stats.py.
         rows = annotate_on_time_pct_confidence(rows)
-        intent = {"query_type": "on_time", "limit": n}
+        intent = {"query_type": "on_time", "service": _service_label(ctx)}
     elif report_type == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n, late_tolerance_sec=late_tolerance_sec)
-        intent = {"query_type": "worst_5min", "limit": n}
+        intent = {"query_type": "worst_5min", "service": _service_label(ctx)}
     elif report_type == "compare_ranking":
         compared = await compute_compare_ranking(agency_id, ctx, conn, limit=None, ch=ch)
         rows_total = len(compared)
         rows = compared[:n]
-        intent = {"query_type": "compare_ranking", "limit": n}
+        intent = {"query_type": "compare_ranking"}
     elif report_type == "dow_weekend":
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n, ch=ch)
-        intent = {"query_type": "dow_ranking", "dow_group": "weekend", "limit": n}
+        intent = {"query_type": "dow_ranking", "dow_group": "weekend"}
     elif report_type == "dow_weekday":
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n, ch=ch)
-        intent = {"query_type": "dow_ranking", "dow_group": "weekday", "limit": n}
+        intent = {"query_type": "dow_ranking", "dow_group": "weekday"}
     elif report_type == "trend":
         # Daily series + hour-of-day heatmap for the granular Trend tab.
         series = await compute_trend_series(agency_id, ctx, conn, ch=ch)

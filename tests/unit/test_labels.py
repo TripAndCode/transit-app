@@ -2,7 +2,9 @@
 
 from datetime import time
 
-from pipeline.query.labels import dow_label, time_label
+import pytest
+
+from pipeline.query.labels import day_group_label, dow_label, time_label
 
 
 def test_dow_label_int_maps_to_japanese_char():
@@ -17,6 +19,27 @@ def test_dow_label_string_passes_through():
 
 def test_dow_label_unknown_int_falls_back_to_str():
     assert dow_label(99) == "99"
+
+
+@pytest.mark.parametrize(
+    ("value", "en"),
+    [
+        ("平日", "Weekday"),
+        ("週末", "Weekend"),
+        ("土曜", "Saturday"),
+        ("日祝", "Sunday/Holiday"),
+        ("土日祝", "Weekend/Holiday"),
+    ],
+)
+def test_day_group_label_names_rollups_and_service_values(value, en):
+    """One table names both the DOW rollups and the service filter's values."""
+    assert day_group_label(value, lang="en") == en
+    assert day_group_label(value, lang="ja") == value
+    assert dow_label(value, lang="en") == en
+
+
+def test_day_group_label_passes_an_unknown_word_through():
+    assert day_group_label("秋彼岸", lang="en") == "秋彼岸"
 
 
 def test_time_label_time_object_renders_hhmm():

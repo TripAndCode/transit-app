@@ -545,7 +545,8 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
 
 
 @pytest.mark.asyncio
-async def test_followup_without_history_does_not_hallucinate(ask_client, monkeypatch):
+@pytest.mark.parametrize("question", ["もっと見せて", "もっと", "降順", "さらに", "その路線を降順で"])
+async def test_followup_without_history_does_not_hallucinate(ask_client, monkeypatch, question):
     """A follow-up phrasing with no history returns a gentle prompt, not an LLM-invented page."""
     client, agency_id = ask_client
 
@@ -560,7 +561,7 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
-        json={"question": "もっと見せて"},  # no history
+        json={"question": question},  # no history
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
@@ -604,7 +605,7 @@ async def test_first_turn_follow_up_wording_a_rule_answers_reaches_the_router(as
 @pytest.mark.asyncio
 async def test_first_turn_follow_up_gets_the_no_history_prompt_when_the_router_is_off(ask_client, monkeypatch):
     """With the router off no Stage-1 rule will answer the question, so a
-    first-turn follow-up gets the no-history prompt even when a rule matches it."""
+    first-turn continuation gets the no-history prompt even when a rule matches it."""
     client, agency_id = ask_client
 
     async def flags(key):
@@ -619,11 +620,92 @@ async def test_first_turn_follow_up_gets_the_no_history_prompt_when_the_router_i
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
-        json={"question": "平日に絞り込んで遅延ワースト10"},  # no history
+        json={"question": "遅延ワースト10の続き"},  # no history
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
     assert resp.json()["router_stage"] == "no_history"
+
+
+_REFINEMENTS_WITH_A_SUBJECT = ["遅延の多い路線を降順で", "さらに定時率の低い路線", "別の路線と比較したい"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", _REFINEMENTS_WITH_A_SUBJECT)
+async def test_first_turn_refinement_with_a_subject_of_its_own_reaches_the_router(ask_client, monkeypatch, question):
+    """No rule answers these, but each names what to rank or compare, so a
+    first turn is routed and then answered by the LLM, not given the
+    no-history prompt."""
+    client, agency_id = ask_client
+    routed: list[str] = []
+    captured: dict = {}
+
+    async def no_decision(q, *a, **k):
+        routed.append(q)
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": question},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert routed == [question]
+    assert resp.json()["router_stage"] == "llm"
+    assert captured["history"] == []
+    assert captured["force_tool_call"] is False
+
+
+@pytest.mark.asyncio
+async def test_first_turn_refinement_with_a_subject_reaches_the_llm_when_the_router_is_off(ask_client, monkeypatch):
+    client, agency_id = ask_client
+    captured: dict = {}
+
+    async def flags(key):
+        return key != "ask_router_enabled"
+
+    async def boom(*a, **k):
+        raise AssertionError("the router is off")
+
+    monkeypatch.setattr("api.routers.ask.aflag", flags)
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "遅延の多い路線を降順で"},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["router_stage"] == "llm"
+    assert captured["history"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", _REFINEMENTS_WITH_A_SUBJECT)
+async def test_refinement_with_a_subject_and_history_still_skips_the_router(ask_client, monkeypatch, question):
+    """With history the refinement is read against the previous turn, so it
+    goes to the LLM with that turn whether or not it names a subject."""
+    client, agency_id = ask_client
+    captured: dict = {}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for a follow-up with history")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": question, "history": [_ROUTE_TURN]},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["router_stage"] == "llm"
+    assert captured["history"] and captured["history"][0]["question"] == "22171の遅延"
 
 
 @pytest.mark.asyncio
@@ -774,7 +856,9 @@ async def test_a_reference_back_without_history_still_reaches_the_router(ask_cli
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("question", ["この1週間の推移", "定時率TOP10", "22171の遅延とその推移"])
+@pytest.mark.parametrize(
+    "question", ["この1週間の推移", "定時率TOP10", "22171の遅延とその推移", "月別の推移を教えて", "路線別の遅延"]
+)
 async def test_a_self_contained_question_with_history_still_reaches_the_router(ask_client, monkeypatch, question):
     client, agency_id = ask_client
     routed: list[str] = []

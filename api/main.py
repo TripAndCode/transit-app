@@ -211,9 +211,11 @@ async def lifespan(app: FastAPI):
             f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
         )
     _validate_session_signing_key(enabled, os.environ.get("SESSION_SIGNING_KEY"))
-    # max_size=20 (asyncpg default 10): an overview request on the pool-gather
-    # path holds its own get_conn slot plus up to OVERVIEW_FANOUT_LIMIT more,
-    # so the pool fills only once 20 / (OVERVIEW_FANOUT_LIMIT + 1) cold
+    # max_size=20 (asyncpg default 10): a cold overview request holds at most
+    # OVERVIEW_FANOUT_LIMIT connections at once. It takes no request
+    # connection; each fanned-out stage acquires its own under that bound, and
+    # the few acquires before the fan-out run one at a time and are returned
+    # first. The pool therefore fills only once 20 / OVERVIEW_FANOUT_LIMIT cold
     # overview requests overlap.
     app.state.pool = await asyncpg.create_pool(
         DATABASE_URL, server_settings=PG_SESSION_SETTINGS, min_size=10, max_size=20

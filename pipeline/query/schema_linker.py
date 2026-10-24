@@ -14,9 +14,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-ROUTE_CODE_RE = re.compile(r"^\d{3,5}$")
-LETTER_PREFIX_RE = re.compile(r"^[A-Za-z]\d{1,2}$")
-N_BAN_RE = re.compile(r"^(\d{1,3})番$")
+# ASCII digits only. dispatch NFKC-folds full-width digits, but NFKC leaves
+# other scripts' digits (Arabic-Indic, Devanagari, ...) alone, and those are
+# never part of a route code or alias.
+ROUTE_CODE_RE = re.compile(r"^\d{3,5}$", re.ASCII)
+LETTER_PREFIX_RE = re.compile(r"^[A-Za-z]\d{1,2}$", re.ASCII)
+N_BAN_RE = re.compile(r"^(\d{1,3})番$", re.ASCII)
 
 _TRGM_THRESHOLD = 0.30
 _TRGM_CONFIDENT = 0.60
@@ -36,7 +39,12 @@ class RouteResolution:
 
 
 async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
-    """Resolve a user-typed route reference to a canonical ``route_code``."""
+    """Resolve a user-typed route reference to a canonical ``route_code``.
+
+    ``raw`` arrives NFKC-folded from dispatch. Stored route names keep the
+    feed's own full-width forms, so every name comparison below folds the
+    column the same way.
+    """
     raw = (raw or "").strip()
     if not raw:
         return RouteResolution(route_code=None, reason="none")
@@ -68,7 +76,7 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
             "       route_short_name "
             "FROM static_routes "
             "WHERE agency_id = $1 "
-            "  AND route_short_name ILIKE $2 || ' %' "
+            "  AND normalize(route_short_name, NFKC) ILIKE $2 || ' %' "
             "ORDER BY route_id "
             "LIMIT 1",
             agency_id,
@@ -90,7 +98,7 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
             "       route_short_name "
             "FROM static_routes "
             "WHERE agency_id = $1 "
-            "  AND route_short_name ILIKE $2 || ' %' "
+            "  AND normalize(route_short_name, NFKC) ILIKE $2 || ' %' "
             "ORDER BY route_id "
             "LIMIT 1",
             agency_id,
@@ -108,12 +116,12 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
         "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
         "       route_short_name, "
         "       GREATEST( "
-        "         similarity(coalesce(route_short_name, ''), $2), "
-        "         similarity(coalesce(route_long_name, ''), $2) "
+        "         similarity(normalize(coalesce(route_short_name, ''), NFKC), $2), "
+        "         similarity(normalize(coalesce(route_long_name, ''), NFKC), $2) "
         "       ) AS score "
         "FROM static_routes "
         "WHERE agency_id = $1 "
-        "  AND (route_short_name % $2 OR route_long_name % $2) "
+        "  AND (normalize(route_short_name, NFKC) % $2 OR normalize(route_long_name, NFKC) % $2) "
         "ORDER BY score DESC "
         "LIMIT 5",
         agency_id,

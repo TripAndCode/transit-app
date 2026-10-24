@@ -1,7 +1,6 @@
 """Tests for ``GET``/``PUT``/``DELETE /api/me/llm-key`` (BYOK LLM credentials)."""
 
 import os
-from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
@@ -10,28 +9,8 @@ import openai
 import pytest
 from httpx import ASGITransport
 
-from api.security import token_hash
 from tests.conftest import _test_pool
-
-
-async def _seed_user_and_session(conn, *, role="user"):
-    uid = (
-        await conn.fetchrow(
-            "INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING user_id",
-            f"u{datetime.now().timestamp()}@x",
-            "Yo",
-            role,
-        )
-    )["user_id"]
-    sid = f"sid-{uid:0>30}"
-    await conn.execute(
-        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        token_hash(sid),
-        uid,
-        datetime.now(timezone.utc) + timedelta(days=30),
-        "test-ua",
-    )
-    return sid, uid
+from tests.fixtures.users import seed_session
 
 
 @pytest.fixture
@@ -53,7 +32,7 @@ async def test_get_llm_key_anonymous_401(me_client):
 
 @pytest.mark.asyncio
 async def test_get_llm_key_defaults_to_not_configured(me_client, aconn):
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     resp = await me_client.get("/api/me/llm-key", cookies={"sid": sid})
     assert resp.status_code == 200
     assert resp.json() == {"configured": False, "provider": None, "key_suffix": None}
@@ -65,7 +44,7 @@ async def test_put_llm_key_rejects_invalid_key_before_persisting(monkeypatch, me
         return False
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "bad"},
@@ -88,7 +67,7 @@ async def test_put_llm_key_rejects_unsupported_provider(monkeypatch, me_client, 
         return True
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "not_a_real_provider", "api_key": "whatever"},
@@ -106,7 +85,7 @@ async def test_put_then_get_llm_key_never_returns_full_key(monkeypatch, me_clien
         return True
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     put_resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "gsk_realkey1234"},
@@ -132,7 +111,7 @@ async def test_delete_llm_key_clears_configured_status(monkeypatch, me_client, a
         return True
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "gsk_realkey1234"},
@@ -152,7 +131,7 @@ async def test_delete_llm_key_clears_configured_status(monkeypatch, me_client, a
 @pytest.mark.asyncio
 async def test_put_llm_key_requires_same_origin(me_client, aconn):
     """Mutating the BYOK key without a same-origin Origin/Referer is rejected (CSRF guard)."""
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "gsk_realkey1234"},
@@ -174,7 +153,7 @@ async def test_put_llm_key_returns_503_when_validation_unavailable(monkeypatch, 
         raise _FakeAPIConnectionError()
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "gsk_realkey1234"},
@@ -195,7 +174,7 @@ async def test_put_llm_key_masks_short_key_suffix(monkeypatch, me_client, aconn)
         return True
 
     monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
-    sid, _uid = await _seed_user_and_session(aconn)
+    sid = (await seed_session(aconn)).sid
     put_resp = await me_client.put(
         "/api/me/llm-key",
         json={"provider": "gemini", "api_key": "abcd"},
