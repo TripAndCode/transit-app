@@ -171,8 +171,10 @@ function HeatmapGrid({
   function cellText(dow: number, hour: number): string {
     const cell = byKey.get(`${dow}-${hour}`);
     const value = cell?.expected_avg_min;
-    const head = `${dayLabel(dow)} ${hour}:00 · ${value == null ? "—" : formatMinutes(value)}`;
-    return cell?.low_confidence ? `${head} · ${t("forecast.lowSamples", { count: cell.samples })}` : head;
+    const parts = [`${dayLabel(dow)} ${hour}:00`, value == null ? "—" : formatMinutes(value)];
+    if (cell?.source === "ml") parts.push(t("forecast.ml_source"));
+    if (cell?.low_confidence) parts.push(t("forecast.lowSamples", { count: cell.samples }));
+    return parts.join(" · ");
   }
 
   return (
@@ -568,6 +570,19 @@ function RoutePicker({
   );
 }
 
+/** Marks a forecast whose values come from the ML model rather than the
+ *  seasonal baseline; rendered once per view, never per cell. */
+function MlForecastChip() {
+  const { t } = useTranslation();
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <span className="caveat-badge" data-testid="fc-ml-chip">
+        {t("forecast.ml_source")}
+      </span>
+    </div>
+  );
+}
+
 /** Agency-wide landing: worst-window headline + day×band grid + delay-ranked routes. */
 function AgencyLanding({
   aid,
@@ -619,6 +634,7 @@ function AgencyLanding({
 
   return (
     <>
+      {data.grid.some((c) => c.source === "ml") && <MlForecastChip />}
       {data.worst && (
         <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
@@ -725,6 +741,7 @@ function RouteDetail({
 
   return (
     <>
+      {mlBacked && <MlForecastChip />}
       {worstBand && (
         <div
           data-testid="detail-worst"
