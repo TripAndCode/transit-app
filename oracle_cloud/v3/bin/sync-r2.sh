@@ -70,7 +70,8 @@ fi
 # symlinks to the archives it mirrors. Each link is named after its target,
 # and --follow-symlinks makes the CLI read the target's size, mtime and
 # bytes, so the comparison and upload match a direct sync of those files.
-# Archives are only ever created by an atomic rename and never rewritten.
+# Every archive is written by an atomic rename, so a link's target is always
+# either absent or complete.
 STAGE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/sync-r2.XXXXXX") || {
     echo "sync-r2: FAILED to create a staging directory" >&2
     exit 1

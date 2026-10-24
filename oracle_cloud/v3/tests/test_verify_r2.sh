@@ -18,12 +18,10 @@ days_ago_ts() {
     date -u -v-"$1"d +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date -u -d "$1 days ago" +%Y-%m-%d\ %H:%M:%S
 }
 
-# LS_FIXTURE holds the canned `aws s3 ls --recursive` output to return, keyed
-# by the prefix argument, one "prefix=lines..." block set via env before each
-# call. Simpler: the shim reads $LS_RT_<id> / $LS_STATIC_<id> env vars named
-# after the sanitized prefix it was asked to list. A file of that name under
-# LS_FIXTURE_DIR takes precedence, so a background process can change what
-# R2 "holds" while verify-r2.sh is running.
+# The shim answers `aws s3 ls --recursive` from env vars named after the
+# sanitized prefix it was asked to list (e.g. LS_static_8_ for static/8/). A
+# file of that name under LS_FIXTURE_DIR takes precedence, so a background
+# process can change what R2 "holds" while verify-r2.sh is running.
 export AWS_LOG="$TEST_BASE/aws.log"
 cat > "$SHIM_DIR/aws" <<'SHIM'
 #!/usr/bin/env bash
