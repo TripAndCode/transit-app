@@ -163,16 +163,18 @@ def test_predict_is_a_command():
 
 def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
     import json
+    from dataclasses import asdict
 
     from ml.adoption import Verdict
     from ml.backtest import AgencyResult
     from ml.model_result import ModelBacktestResult, result_to_json
+    from ml.models import ModelParams
 
     backtest = tmp_path / "models.json"
     backtest.write_text(
         result_to_json(
             ModelBacktestResult(
-                params={},
+                params=asdict(ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5)),
                 origins=[date(2026, 6, 1)],
                 cutoffs=[date(2026, 5, 31)],
                 agencies=[AgencyResult(8, date(2026, 6, 1), date(2026, 6, 1), 1, [date(2026, 6, 1)], False, [])],
@@ -401,14 +403,19 @@ def test_compare_summarizes_every_variant_in_the_directory(tmp_path, capsys):
     assert main(["compare", "--dir", str(out)]) == 0
 
 
-def test_train_records_the_point_and_clip_its_model_was_fit_with(tmp_path, monkeypatch):
-    import json
-
-    from ml.model_store import read_meta
+def _adopted_backtest(tmp_path, monkeypatch, params):
+    """A backtest result recording `params`, judged adopted, with train's
+    stores stubbed out. Returns the backtest's path."""
+    from ml.model_result import ModelBacktestResult, result_to_json
 
     backtest = tmp_path / "models.json"
-    backtest.write_text("{}")
-    monkeypatch.setattr("ml.cli.result_from_json", lambda text: None)
+    backtest.write_text(
+        result_to_json(
+            ModelBacktestResult(
+                params=params, origins=[START], cutoffs=[START], agencies=[], intervals={}, origin_skill=[]
+            )
+        )
+    )
     monkeypatch.setattr("ml.cli.judge", lambda result: __import__("ml.adoption").adoption.Verdict(True, ()))
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
@@ -423,11 +430,63 @@ def test_train_records_the_point_and_clip_its_model_was_fit_with(tmp_path, monke
         ("AWS_SECRET_ACCESS_KEY", "unused"),
     ):
         monkeypatch.setenv(name, value)
+    return backtest
+
+
+def _spy_fit(monkeypatch):
+    import ml.models
+
+    fitted = []
+    real = ml.models.fit_calibrated
+
+    def spy(frame, params, cutoff, **kwargs):
+        fitted.append(params)
+        return real(frame, params, cutoff, **kwargs)
+
+    monkeypatch.setattr(ml.models, "fit_calibrated", spy)
+    return fitted
+
+
+def test_train_fits_and_publishes_exactly_the_params_the_backtest_judged(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from ml.model_store import read_meta
+    from ml.models import ModelParams
+
+    judged = ModelParams(window_days=21, rounds=40, num_leaves=7, min_data_in_leaf=5, clip_quantile=0.99, point="mean")
+    judged = ModelParams(**{**asdict(judged), "mean_objective": "huber", "huber_delta": 3.0})
+    backtest = _adopted_backtest(tmp_path, monkeypatch, asdict(judged))
+    fitted = _spy_fit(monkeypatch)
     out = tmp_path / "model"
     assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
+    assert fitted == [judged]
     meta = read_meta(out)
-    assert (meta["point"], meta["clip_quantile"]) == ("q50", None)
-    assert json.loads(json.dumps(meta)) == meta
+    assert (meta["point"], meta["clip_quantile"], meta["window_days"]) == ("mean", 0.99, 21)
+
+
+def test_train_reads_a_record_from_before_the_point_existed_as_an_unclipped_mean(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from ml.models import ModelParams
+
+    legacy = asdict(ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5))
+    for name in ("clip_quantile", "point", "mean_objective", "huber_delta"):
+        del legacy[name]
+    backtest = _adopted_backtest(tmp_path, monkeypatch, legacy)
+    fitted = _spy_fit(monkeypatch)
+    assert main(["train", "--backtest", str(backtest), "--out", str(tmp_path / "model"), "--agency", "8"]) == 0
+    assert (fitted[0].point, fitted[0].clip_quantile, fitted[0].mean_objective) == ("mean", None, "regression")
+
+
+def test_train_refuses_a_record_that_does_not_say_what_was_judged(tmp_path, monkeypatch):
+    backtest = _adopted_backtest(tmp_path, monkeypatch, {})
+    with pytest.raises(ValueError, match="window_days"):
+        main(["train", "--backtest", str(backtest), "--out", str(tmp_path / "model"), "--agency", "8"])
+
+
+def test_train_takes_no_window_of_its_own(tmp_path):
+    with pytest.raises(SystemExit):
+        main(["train", "--backtest", str(tmp_path / "models.json"), "--out", str(tmp_path / "m"), "--window", "14"])
 
 
 def _rewrite_meta(model_dir, **changes):

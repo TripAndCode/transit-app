@@ -237,3 +237,35 @@ def test_the_point_forecast_is_the_mean_or_the_median():
 def test_model_params_refuse_an_option_they_cannot_honour(overrides):
     with pytest.raises(ValueError):
         ModelParams(**overrides)
+
+
+def test_params_rebuild_exactly_from_the_record_a_backtest_keeps():
+    from dataclasses import asdict
+
+    params = ModelParams(window_days=21, clip_quantile=0.99, point="mean", mean_objective="huber", huber_delta=3.0)
+    assert ModelParams.from_record(asdict(params)) == params
+
+
+def test_a_record_from_before_the_point_existed_reads_as_an_unclipped_squared_error_mean():
+    from dataclasses import asdict
+
+    legacy = asdict(ModelParams(window_days=21))
+    for name in ("clip_quantile", "point", "mean_objective", "huber_delta"):
+        del legacy[name]
+    params = ModelParams.from_record(legacy)
+    assert (params.window_days, params.point, params.clip_quantile, params.mean_objective) == (
+        21,
+        "mean",
+        None,
+        "regression",
+    )
+
+
+@pytest.mark.parametrize("change", [{"window_days": ...}, {"max_depth": 5}])
+def test_a_record_that_is_missing_or_adds_a_fit_setting_is_refused(change):
+    from dataclasses import asdict
+
+    record = {**asdict(ModelParams()), **change}
+    record = {key: value for key, value in record.items() if value is not ...}
+    with pytest.raises(ValueError):
+        ModelParams.from_record(record)

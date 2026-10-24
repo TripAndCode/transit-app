@@ -173,10 +173,16 @@ def _compare(args: argparse.Namespace) -> int:
 
 
 def _train(args: argparse.Namespace) -> int:
-    verdict = judge(result_from_json(args.backtest.read_text()))
+    judged = result_from_json(args.backtest.read_text())
+    verdict = judge(judged)
     if not verdict.adopted:
         sys.stderr.write(f"not adopted, keeping the previous model: {'; '.join(verdict.reasons)}\n")
         return 0
+    # Imported here: it needs the optional `ml` group, which the adoption gate
+    # above does not. The model is fit with exactly the params that were judged.
+    from ml.models import ModelParams
+
+    params = ModelParams.from_record(judged.params)
 
     # Read and swap credentials before the fit, so a misconfigured env fails
     # fast instead of after a full fit plus a local overwrite.
@@ -188,7 +194,7 @@ def _train(args: argparse.Namespace) -> int:
     from ml.dataset import load_runs
     from ml.features import route_ids, with_route_ids
     from ml.model_store import save_model_set
-    from ml.models import ModelParams, fit_calibrated
+    from ml.models import fit_calibrated
     from ml.training import training_frame
 
     client = get_client()
@@ -196,12 +202,12 @@ def _train(args: argparse.Namespace) -> int:
     routes = route_ids(runs)
     runs = with_route_ids(runs, routes)
     cutoff = _today_jst() - timedelta(days=1)
-    params = ModelParams(window_days=args.window)
     train = training_frame(
         runs,
         cutoff,
         window_days=params.window_days,
         half_life_days=params.half_life_days,
+        seed=params.seed,
         clip_quantile=params.clip_quantile,
     )
     if train.empty:
@@ -403,7 +409,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_train_live = sub.add_parser("train", help="Fit and publish this week's live model, if adopted")
     p_train_live.add_argument("--backtest", type=Path, required=True)
     p_train_live.add_argument("--out", type=Path, required=True)
-    p_train_live.add_argument("--window", type=int, default=28)
     p_train_live.add_argument("--agency", type=int, action="append")
     p_train_live.set_defaults(handler=_train)
 

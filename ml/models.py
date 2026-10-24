@@ -5,7 +5,8 @@ conformalized quantile regression. Needs the optional `ml` dependency group."""
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from datetime import date
 from typing import Any, Protocol
 
@@ -21,6 +22,8 @@ CALIBRATION_DAYS = 7
 INTERVAL_COVERAGE = 0.8
 POINTS = ("mean", "q50")
 MEAN_OBJECTIVES = ("regression", "huber")
+# What a recorded params dict that predates these fields was fit and scored with.
+_UNRECORDED = {"clip_quantile": None, "point": "mean", "mean_objective": "regression"}
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,20 @@ class ModelParams:
         check_clip_quantile(self.clip_quantile)
         if not self.huber_delta > 0:
             raise ValueError(f"huber_delta must be positive, not {self.huber_delta}")
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> ModelParams:
+        """The params a backtest result recorded (its `params`), so a model is
+        fit with exactly what was judged. A record from before clip_quantile,
+        point and mean_objective existed scored an unclipped squared-error
+        mean. A record missing any other field, or naming one ModelParams does
+        not have, does not say what was judged and is refused."""
+        names = {field.name for field in fields(cls)}
+        unknown = sorted(set(record) - names)
+        missing = sorted(names - set(record) - set(_UNRECORDED) - {"huber_delta"})
+        if unknown or missing:
+            raise ValueError(f"a backtest's params must name every fit setting: missing {missing}, unknown {unknown}")
+        return cls(**{**_UNRECORDED, **record})
 
     def mean_objective_params(self) -> dict[str, Any]:
         # LightGBM reads the Huber threshold from `alpha`; any other key is
