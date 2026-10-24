@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from api.triage import LOW_CONFIDENCE_SAMPLES
-from pipeline.flags import aflag, flag
+from pipeline.flags import aflag
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
     render_template,
@@ -26,22 +26,17 @@ class NoInsightAvailable(Exception):
     """Raised when there is no `view_payload` or no template for this tab."""
 
 
-def is_enabled() -> bool:
+async def ais_enabled() -> bool:
     """True iff the proactive-insight feature is turned on.
 
     Off by default: the panel is opted into per deployment.
-    """
-    return flag("copilot_insight_enabled", False)
 
-
-async def ais_enabled() -> bool:
-    """:func:`is_enabled` for a caller on the event loop.
-
-    After `invalidate()` the async read waits for the re-read, so the request
-    right after an operator flips this switch sees the new value; the
-    synchronous form answers it with the old one while the re-read runs
-    behind it. With nothing cached at all, the synchronous form reads
-    Postgres inline, which on the event loop stalls every other request.
+    Read through `aflag()`, not the synchronous `flag()`: after `invalidate()`
+    the async read waits for the re-read, so the request right after an
+    operator flips this switch sees the new value; the synchronous form
+    answers it with the old one while the re-read runs behind it. With
+    nothing cached at all, the synchronous form reads Postgres inline, which
+    on the event loop stalls every other request.
     """
     return await aflag("copilot_insight_enabled")
 

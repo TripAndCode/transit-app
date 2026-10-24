@@ -29,8 +29,6 @@ import asyncpg
 from pipeline.query.embeddings import get_embedder
 from pipeline.query.intent_promotion import promote as _promote_core
 
-_log = logging.getLogger(__name__)
-
 
 async def promote(agency_id: int, hit_threshold: int = 5, quiet_days: int = 7) -> int:
     """Promote eligible cache rows into rag_chunks.  Returns number promoted."""

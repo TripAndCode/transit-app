@@ -17,15 +17,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.service_day import service_date_ch, service_date_of
-
-_JST = ZoneInfo("Asia/Tokyo")
 
 VALID_KINDS = (
     "routes",
