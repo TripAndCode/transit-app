@@ -70,10 +70,33 @@ training cutoff date. The daily `predict` job loads whichever version
 `models/latest.json` names, forecasts each on-model agency's routes for the next
 `HORIZON_DAYS` days, and uploads the result as the latest published forecast.
 `predict` needs the target days' rows to already exist in `runs` to build their
-features, which ClickHouse's observed-only history never has for the future — it
-templates each future day's slot features from the most recent prior day sharing
-that weekday (`ml.features.template_future_runs`), scoped per agency so a staler
-agency's forecast never silently borrows a fresher agency's template.
+features, which ClickHouse's observed-only history never has for the future. It
+copies each future day's runs from a recent day of the same day type (weekday,
+Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
+
+- **Day type** follows the app's rule (`pipeline/day_types.py`): the agency's
+  feed calendar in the replica's Postgres where it covers the date, the weekday
+  rule with Japan's public holidays otherwise. A replica whose migrations predate
+  `static_calendar`, or whose timetables were loaded before it existed (sync
+  never reloads a timetable already in its done-set), has no calendar to read,
+  so its agencies use the weekday rule alone.
+- **The template** is the most recent complete day of that type in the agency's
+  last 14 days before the origin, never the origin's own partial day and never
+  another agency's day. A target day with no such day is not forecast; it never
+  falls back to the same weekday.
+- **A partial day** has fewer than half the route×hour slots of the median of the
+  agency's other days of its type in the last 28 days, and is passed over for
+  the next most recent day of its type.
+- **A stopped feed** is not forecast. An agency publishes only while its newest
+  complete day is at most 2 days before the origin. The 10:30 sync has ingested
+  every closed JST day, so a current feed's newest day is the day before; the
+  second day absorbs one sync or archive upload that has not landed by 11:00.
+
+The backtest and training never template. They score and learn from the runs
+that actually happened on each target day. The backtest therefore measures the
+model on the true timetable, while the live forecast has only a template of it,
+so a day the template gets wrong costs the live forecast skill that the backtest
+never sees.
 
 Outside the VPS, production's `/internal/cron/ingest` sweep polls R2 for a newer
 published forecast and upserts it into Postgres's `agg_route_forecast_ml`
