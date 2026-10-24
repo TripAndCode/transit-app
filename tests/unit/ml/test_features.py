@@ -358,6 +358,24 @@ def test_a_permanent_evening_cut_becomes_the_template_after_two_days():
     _assert_the_cut_becomes_the_template_on_its_third_weekday(runs, 13)
 
 
+def test_a_weekly_candidate_at_the_lookback_edge_is_judged_against_three_earlier_days():
+    # Origin Fri 10/30: its only Saturday candidate is 10/17 (no Saturday ran
+    # on 10/24), 4 of the 10 slots its type runs. Of the three Saturdays
+    # before it, 10/10 is a fragment; judged against 10/3 and 10/10 alone, 10/17
+    # would look whole.
+    runs = pd.concat(
+        [
+            _timetable(
+                date(2026, 9, 26), date(2026, 10, 17), slots=10, short={date(2026, 10, 10): 2, date(2026, 10, 17): 4}
+            ),
+            _timetable(date(2026, 10, 18), date(2026, 10, 29), slots=10, only=("weekday", "sunday_holiday")),
+        ],
+        ignore_index=True,
+    )
+    template = template_future_runs(runs, date(2026, 10, 30), horizon_days=7)
+    assert _sources(template, date(2026, 10, 31)) == set()
+
+
 def test_a_day_that_starts_hours_late_with_few_slots_is_partial():
     # Sat 10/24 has only its last 3 of 8 hours, as when the archive holding a
     # service day's early hours never arrived.

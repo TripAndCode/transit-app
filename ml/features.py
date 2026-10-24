@@ -80,10 +80,12 @@ def with_route_ids(runs: pd.DataFrame, ids: pd.DataFrame) -> pd.DataFrame:
 
 
 # A template is copied from the agency's last two weeks. Each candidate is
-# judged against the days of its type before it, which the four-week reference
-# window holds for even the oldest candidate.
+# judged against the _PREVIOUS_DAYS days of its type before it, so the
+# reference window reaches that many weeks behind the oldest candidate: a
+# Saturday or a Sunday-holiday comes round once a week.
+_PREVIOUS_DAYS = 3
 _TEMPLATE_LOOKBACK_DAYS = 14
-_REFERENCE_DAYS = 28
+_REFERENCE_DAYS = _TEMPLATE_LOOKBACK_DAYS + 7 * _PREVIOUS_DAYS
 # At the daily predict, the sync before it has ingested every closed JST day,
 # so a current feed's newest day is origin-1 (short only of its after-midnight
 # captures). A second day absorbs one sync or upload that has not landed yet;
@@ -97,7 +99,6 @@ _STALE_AFTER_DAYS = 2
 # permanent timetable change become the norm once two days of it have run.
 _PARTIAL_SHARE = 0.5
 _CUT_OFF_HOURS = 4
-_PREVIOUS_DAYS = 3
 
 
 def template_span(origin: date, horizon_days: int = 7) -> tuple[date, date]:

@@ -94,8 +94,10 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
   is used instead. A day is partial when, against the median of the previous 3
   days of its type, it has fewer than half the route×hour slots, or its first run
   starts or its last run ends 4 or more hours past theirs. A stopped feed or a
-  missing archive leaves such a fragment. A day with no earlier day of its type
-  in the last 28 days is not partial. Judging against only the last 3 days lets a
+  missing archive leaves such a fragment. The reference reaches 5 weeks back, so
+  even a Saturday at the far end of the 2-week lookback has 3 earlier Saturdays to
+  be judged against; a day with no earlier day of its type in that window is not
+  partial. Judging against only the last 3 days lets a
   permanent timetable change become the template once two days of it have run:
   its first two days are measured against the old timetable and skipped.
 - **A stopped feed** is not forecast. An agency publishes only while its newest
