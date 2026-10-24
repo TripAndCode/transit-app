@@ -9,12 +9,43 @@ setup_base
 trap teardown_base EXIT
 
 export AWS_LOG="$TEST_BASE/aws.log"
+export AWS_SRC_LOG="$TEST_BASE/aws-src.log"
+export AWS_STAGE_LOG="$TEST_BASE/aws-stage.log"
 # Fake aws: records every invocation; `s3 sync` is a no-op otherwise.
 # AWS_FAIL_MATCH: if set and any arg contains this substring, exit 1
 # instead of 0 (simulates one agency's sync failing).
+# For `s3 sync SRC DEST`, it also records SRC (AWS_SRC_LOG) and one
+# "DEST NAME=CONTENT" line per top-level entry of SRC, read through any
+# symlink the way the real CLI's --follow-symlinks does (AWS_STAGE_LOG).
+# The real CLI stats every file under SRC before applying --exclude, so a
+# live writer's temp file renamed or removed in between makes it warn and
+# exit 2; any such temp file (or dangling link) under SRC reproduces that.
 cat > "$SHIM_DIR/aws" <<'SHIM'
 #!/usr/bin/env bash
 echo "$@" >> "$AWS_LOG"
+if [ "$1" = s3 ] && [ "$2" = sync ]; then
+    src="$3" dest="$4"
+    echo "$src" >> "$AWS_SRC_LOG"
+    for entry in "$src"/* "$src"/.[!.]*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        if [ -f "$entry" ]; then
+            content=$(cat "$entry")
+        elif [ -d "$entry" ]; then
+            content="<dir>"
+        else
+            content="<dangling>"
+        fi
+        echo "$dest ${entry##*/}=$content" >> "$AWS_STAGE_LOG"
+    done
+    vanished=$(find "$src" \( -name '*.part' -o -name '.dl.*' \) -print | head -1)
+    if [ -z "$vanished" ]; then
+        vanished=$(find "$src" -type l ! -exec test -e {} \; -print | head -1)
+    fi
+    if [ -n "$vanished" ]; then
+        echo "warning: Skipping file $vanished. File does not exist." >&2
+        exit 2
+    fi
+fi
 if [ -n "${AWS_FAIL_MATCH:-}" ]; then
     for a in "$@"; do
         case "$a" in *"$AWS_FAIL_MATCH"*) exit 1 ;; esac
@@ -24,8 +55,22 @@ exit 0
 SHIM
 chmod +x "$SHIM_DIR/aws"
 
-mkdir -p "$COLLECTOR_BASE/data/1/rt" "$COLLECTOR_BASE/data/1/static"
+# A collector mid-day: agency 1's rt dir holds a closed-day tarball, the
+# tarball rotate-day.sh is still writing, and the live UTC day directory
+# rt-poller.sh is writing into (a finished sample and an in-flight .part);
+# its static dir holds the current zip, the latest.zip pointer, the fetch
+# marker and an in-flight static-fetch.sh download. Agency 8 has only an
+# empty static dir.
+mkdir -p "$COLLECTOR_BASE/data/1/rt/20261024" "$COLLECTOR_BASE/data/1/static"
 mkdir -p "$COLLECTOR_BASE/data/8/static"
+printf 'TAR-1-1022' > "$COLLECTOR_BASE/data/1/rt/20261022.tar.gz"
+printf 'partial' > "$COLLECTOR_BASE/data/1/rt/20261023.tar.gz.part"
+printf 'sample' > "$COLLECTOR_BASE/data/1/rt/20261024/TripUpdate_001633.pb"
+printf 'partial' > "$COLLECTOR_BASE/data/1/rt/20261024/TripUpdate_001703.pb.part"
+printf 'ZIP-1-1024' > "$COLLECTOR_BASE/data/1/static/gtfs_static_20261024.zip"
+ln -s gtfs_static_20261024.zip "$COLLECTOR_BASE/data/1/static/latest.zip"
+printf '2026-10-24T00:00:00Z' > "$COLLECTOR_BASE/data/1/static/.static-last-ok"
+printf 'partial' > "$COLLECTOR_BASE/data/1/static/.dl.Ab12Cd"
 
 # Missing required env -> fails closed, no aws calls made.
 if OBJECT_STORE_ENDPOINT= OBJECT_STORE_BUCKET= OBJECT_STORE_ACCESS_KEY_ID= OBJECT_STORE_SECRET_ACCESS_KEY= \
@@ -41,14 +86,15 @@ export OBJECT_STORE_ENDPOINT="https://example.r2.cloudflarestorage.com"
 export OBJECT_STORE_BUCKET="test-bucket"
 export OBJECT_STORE_ACCESS_KEY_ID="AKIDTEST"
 export OBJECT_STORE_SECRET_ACCESS_KEY="secrettest"
-../bin/sync-r2.sh >/dev/null
+../bin/sync-r2.sh > "$TEST_BASE/out.log" 2>&1 \
+    || fail "a run whose only oddities are live writers' files should succeed: $(cat "$TEST_BASE/out.log")"
 
-grep -q "s3 sync $COLLECTOR_BASE/data/1/rt s3://test-bucket/rt/1" "$AWS_LOG" \
+grep -q "s3 sync [^ ]* s3://test-bucket/rt/1 " "$AWS_LOG" \
     || fail "agency 1 rt not synced to rt/1"
-grep -q "s3 sync $COLLECTOR_BASE/data/1/static s3://test-bucket/static/1" "$AWS_LOG" \
+grep -q "s3 sync [^ ]* s3://test-bucket/static/1 " "$AWS_LOG" \
     || fail "agency 1 static not synced to static/1"
-grep -q "s3 sync $COLLECTOR_BASE/data/8/static s3://test-bucket/static/8" "$AWS_LOG" \
-    || fail "agency 8 static not synced to static/8"
+grep -q "s3 sync [^ ]* s3://test-bucket/static/8 " "$AWS_LOG" \
+    || fail "agency 8 static not synced to static/8 (an empty dir must still be synced)"
 grep -q -- "--include \*.tar.gz" "$AWS_LOG" || fail "rt sync missing tar.gz include filter"
 grep -q -- "--include gtfs_static_\*.zip" "$AWS_LOG" || fail "static sync missing zip include filter"
 grep -q -- "--endpoint-url https://example.r2.cloudflarestorage.com" "$AWS_LOG" \
@@ -60,6 +106,23 @@ pass "each agency's rt/static synced to its own R2 path with the right filters a
 # flag here would actually be caught.
 grep -q "secrettest" "$AWS_LOG" && fail "secret leaked onto the aws command line"
 pass "secret never appears on the aws command line"
+
+# Each sync reads a source holding only the archives it mirrors, reached
+# through a link to the real file, so nothing a live writer creates or
+# removes is ever under the walked tree.
+expected_stage="s3://test-bucket/rt/1 20261022.tar.gz=TAR-1-1022
+s3://test-bucket/static/1 gtfs_static_20261024.zip=ZIP-1-1024"
+[ "$(sort "$AWS_STAGE_LOG")" = "$expected_stage" ] \
+    || fail "aws saw more than the archives (or not them): $(cat "$AWS_STAGE_LOG")"
+grep -q -- "--follow-symlinks" "$AWS_LOG" || fail "sync calls don't ask aws to follow the staged links"
+pass "aws is handed only the archives, not the live day dir or any temp file"
+
+[ "$(wc -l < "$AWS_SRC_LOG" | tr -d ' ')" = 3 ] || fail "expected 3 sync sources, got: $(cat "$AWS_SRC_LOG")"
+while IFS= read -r src; do
+    case "$src" in "$COLLECTOR_BASE/data/"*) fail "aws walked a live data dir: $src" ;; esac
+    [ -e "$src" ] && fail "staging dir $src was left behind after the run"
+done < "$AWS_SRC_LOG"
+pass "staging dirs are outside data/ and removed when the run ends"
 
 # A fully-successful run writes the marker prune.sh depends on.
 OK_MARKER="$COLLECTOR_BASE/.sync-r2.last-ok"
@@ -73,7 +136,7 @@ marker_before=$(cat "$OK_MARKER")
 if AWS_FAIL_MATCH="rt/1" ../bin/sync-r2.sh >/dev/null 2>&1; then
     fail "sync-r2.sh should exit nonzero when any agency's sync failed"
 fi
-grep -q "s3 sync $COLLECTOR_BASE/data/8/static s3://test-bucket/static/8" "$AWS_LOG" \
+grep -q "s3 sync [^ ]* s3://test-bucket/static/8 " "$AWS_LOG" \
     || fail "agency 8 was skipped after agency 1's rt sync failed"
 pass "one agency's sync failure doesn't skip the rest, but still exits nonzero"
 
