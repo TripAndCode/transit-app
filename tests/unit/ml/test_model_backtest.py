@@ -161,7 +161,12 @@ def _b0_scores(result):
 
 @pytest.mark.parametrize(
     "variant",
-    [{"clip_quantile": 0.95}, {"mean_objective": "huber"}, {"point": "q50"}, {"clip_quantile": 0.95, "point": "q50"}],
+    [
+        {"clip_quantile": 0.95},
+        {"mean_objective": "huber", "point": "mean"},
+        {"point": "mean"},
+        {"clip_quantile": 0.95, "point": "mean"},
+    ],
 )
 def test_every_variant_is_scored_against_the_same_raw_b0(variant):
     runs = _with_outliers()
@@ -175,7 +180,7 @@ def test_every_variant_is_scored_against_the_same_raw_b0(variant):
 def test_one_fit_scores_each_point_forecast_as_its_own_result():
     runs = _with_outliers()
     both = run_backtests(runs, params=FAST, origin_count=7, points=("mean", "q50"))
-    assert both["mean"] == run_backtest(runs, params=FAST, origin_count=7)
+    assert both["mean"] == run_backtest(runs, params=replace(FAST, point="mean"), origin_count=7)
     assert both["q50"] == run_backtest(runs, params=replace(FAST, point="q50"), origin_count=7)
     assert both["mean"].intervals == both["q50"].intervals
     model_errors = {
@@ -188,3 +193,9 @@ def test_the_published_slot_interval_is_scored_beside_the_per_run_one():
     result = run_backtest(_runs(), params=FAST, origin_count=7)
     per_run = sum(s.runs for s in result.intervals[MODEL].values())
     assert per_run > 0 and sum(s.runs for s in result.intervals[SLOT_INTERVAL].values()) == per_run
+
+
+def test_the_point_forecast_is_the_median_unless_asked_for_the_mean():
+    result = run_backtest(_runs(), params=FAST, origin_count=7)
+    assert result.params["point"] == "q50"
+    assert result == run_backtests(_runs(), params=FAST, origin_count=7, points=("q50",))["q50"]

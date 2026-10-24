@@ -15,11 +15,13 @@ from ml.model_result import MODEL, SLOT_INTERVAL, IntervalStats, ModelBacktestRe
 from ml.summary import summarize
 
 # A slot's window holds a handful of runs per weekday, so one run deep in the
-# tail (a trip matched to a schedule an hour off, say) can set its mean. Each
-# agency's 99th percentile bounds that pull and leaves the bulk of runs as is.
+# tail can set its mean. Each agency's 99th percentile bounds that pull and
+# leaves the bulk of runs as they are.
 CLIP_QUANTILE = 0.99
+# What each fit trains; the point it is scored with is chosen per result
+# (variant_name), so "huber" means something only when scored with the mean.
 FITS: dict[str, dict[str, Any]] = {
-    "live": {},
+    "base": {},
     "clip": {"clip_quantile": CLIP_QUANTILE},
     "huber": {"mean_objective": "huber"},
     "clip-huber": {"clip_quantile": CLIP_QUANTILE, "mean_objective": "huber"},

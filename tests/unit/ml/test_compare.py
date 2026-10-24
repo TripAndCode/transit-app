@@ -51,7 +51,7 @@ def _runs(days=80):
 
 def _results(runs, origin_count=7):
     results = {}
-    for fit in ("live", "clip"):
+    for fit in ("base", "clip"):
         params = replace(FAST, **FITS[fit])
         for point, result in run_backtests(
             runs, params=params, origin_count=origin_count, points=("mean", "q50")
@@ -61,22 +61,22 @@ def _results(runs, origin_count=7):
 
 
 def test_a_variant_is_named_by_its_fit_and_point():
-    assert variant_name("live", "mean") == "live"
+    assert variant_name("base", "mean") == "base"
     assert variant_name("clip", "q50") == "clip-q50"
 
 
-def test_the_live_fit_is_the_default_model():
-    assert replace(FAST, **FITS["live"]) == FAST
+def test_the_base_fit_is_the_default_model():
+    assert replace(FAST, **FITS["base"]) == FAST
 
 
 def test_each_variant_is_summarized_against_b0_and_the_baseline_variant():
-    comparison = compare(_results(_runs()), baseline="live")
-    assert set(comparison["variants"]) == {"live", "live-q50", "clip", "clip-q50"}
-    live, clip = comparison["variants"]["live"], comparison["variants"]["clip"]
-    assert live["b0_mae"] == clip["b0_mae"]
-    assert set(live["agency_skill"]) == {"8", "9"}
-    assert set(live["horizon_mae"]) == {str(h) for h in range(1, 8)}
-    assert live["origin_wins"] == {"wins": 0, "ties": 7, "losses": 0}
+    comparison = compare(_results(_runs()), baseline="base")
+    assert set(comparison["variants"]) == {"base", "base-q50", "clip", "clip-q50"}
+    base, clip = comparison["variants"]["base"], comparison["variants"]["clip"]
+    assert base["b0_mae"] == clip["b0_mae"]
+    assert set(base["agency_skill"]) == {"8", "9"}
+    assert set(base["horizon_mae"]) == {str(h) for h in range(1, 8)}
+    assert base["origin_wins"] == {"wins": 0, "ties": 7, "losses": 0}
     assert sum(clip["origin_wins"].values()) == 7
     for summary in comparison["variants"].values():
         assert summary["coverage"] is not None and summary["slot_coverage"] is not None
@@ -89,7 +89,7 @@ def test_variants_scored_on_different_origins_are_refused():
     results = _results(runs)
     results["short"] = run_backtests(runs, params=FAST, origin_count=5, points=("mean",))["mean"]
     with pytest.raises(ValueError, match="origins"):
-        compare(results, baseline="live")
+        compare(results, baseline="base")
 
 
 def test_a_missing_baseline_is_refused():
@@ -98,6 +98,6 @@ def test_a_missing_baseline_is_refused():
 
 
 def test_the_markdown_names_every_variant_and_agency():
-    text = render_markdown(compare(_results(_runs()), baseline="live"))
-    for name in ("live", "live-q50", "clip", "clip-q50", "agency 8", "agency 9"):
+    text = render_markdown(compare(_results(_runs()), baseline="base"))
+    for name in ("base", "base-q50", "clip", "clip-q50", "agency 8", "agency 9"):
         assert name in text

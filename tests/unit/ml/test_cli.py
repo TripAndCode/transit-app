@@ -391,11 +391,11 @@ def test_compare_summarizes_every_variant_in_the_directory(tmp_path, capsys):
 
     out = tmp_path / "variants"
     snapshot = str(_snapshot(tmp_path))
-    for fit in ("live", "huber"):
+    for fit in ("base", "huber"):
         assert main(["variant-eval", "--runs", snapshot, "--fit", fit, "--out-dir", str(out), "--origins", "7"]) == 0
     assert main(["compare", "--dir", str(out)]) == 0
     comparison = json.loads((out / "comparison.json").read_text())
-    assert set(comparison["variants"]) == {"live", "huber"}
+    assert set(comparison["variants"]) == {"base", "huber"}
     assert (out / "comparison.md").read_text() == capsys.readouterr().out
     # A second compare reads the variants again, not its own output.
     assert main(["compare", "--dir", str(out)]) == 0
@@ -425,10 +425,8 @@ def test_train_records_the_point_and_clip_its_model_was_fit_with(tmp_path, monke
         monkeypatch.setenv(name, value)
     out = tmp_path / "model"
     assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
-    from ml.models import ModelParams
-
     meta = read_meta(out)
-    assert (meta["point"], meta["clip_quantile"]) == (ModelParams().point, ModelParams().clip_quantile)
+    assert (meta["point"], meta["clip_quantile"]) == ("q50", None)
     assert json.loads(json.dumps(meta)) == meta
 
 

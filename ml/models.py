@@ -28,7 +28,9 @@ class ModelParams:
     """`clip_quantile` winsorizes the history the delay features are built from
     and the mean model's training target, per agency (see build_frame); the
     quantile models keep the raw target. `point` is the forecast a cell shows:
-    the mean model's, or the median model's.
+    the median model's by default, or the mean model's. A cell is scored by its
+    absolute error, and the median does not follow one extreme run in a slot's
+    history the way a squared-error mean does.
 
     `mean_objective` "huber" trains the mean model with a Huber loss whose
     `huber_delta` (minutes) is where a residual's loss turns from squared to
@@ -49,7 +51,7 @@ class ModelParams:
     lambda_l2: float = 1.0
     seed: int = 7
     clip_quantile: float | None = None
-    point: str = "mean"
+    point: str = "q50"
     mean_objective: str = "regression"
     huber_delta: float = 2.0
 

@@ -397,7 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     p_compare = sub.add_parser("compare", help="Compare the variant backtests in a directory")
     p_compare.add_argument("--dir", type=Path, required=True)
-    p_compare.add_argument("--baseline", default="live")
+    p_compare.add_argument("--baseline", default="base")
     p_compare.set_defaults(handler=_compare)
 
     p_train_live = sub.add_parser("train", help="Fit and publish this week's live model, if adopted")
