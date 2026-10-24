@@ -289,7 +289,8 @@ def test_predict_publishes_nothing_for_an_agency_whose_data_stopped(tmp_path, mo
 
 @pytest.mark.parametrize("database_url", [None, ""])
 def test_predict_without_a_database_url_fails_before_reading_the_replica(tmp_path, monkeypatch, database_url):
-    # An unset variable, or the empty one env.example ships for systemd.
+    # Unset, or present but empty, as systemd's EnvironmentFile= sets a bare
+    # `DATABASE_URL=`. env.example ships a placeholder URL to fill in.
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     (model_dir / "meta.json").write_text("{}")

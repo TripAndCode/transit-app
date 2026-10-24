@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import pytest
+
 from tests.unit.ml.ml_group import require
 
 pd = require("pandas")
@@ -261,7 +263,7 @@ def test_template_future_runs_does_not_template_from_the_origins_own_partial_day
     assert _sources(template, date(2026, 10, 29)) == {"W1021"}
 
 
-def test_an_agency_whose_newest_complete_day_is_more_than_two_days_old_gets_no_template():
+def test_an_agency_whose_newest_observed_day_is_more_than_two_days_old_gets_no_template():
     origin = date(2026, 10, 24)
     current = _timetable(date(2026, 10, 8), date(2026, 10, 22))  # newest day origin-2
     stopped = _timetable(date(2026, 10, 1), date(2026, 10, 21), agency_id=9)  # newest day origin-3
@@ -269,23 +271,91 @@ def test_an_agency_whose_newest_complete_day_is_more_than_two_days_old_gets_no_t
     assert set(template["agency_id"]) == {8}
 
 
-def test_a_partial_day_is_skipped_for_the_next_most_recent_day_of_its_type():
-    # Exactly two Saturdays: Sat 10/24 kept 3 of the usual 8 slots, so the
-    # Saturday target copies Sat 10/17. Half the median of both Saturdays (2.75)
-    # would not catch it; the partial day must not vote on what is typical.
+def test_a_feed_that_stopped_mid_day_stays_current_two_days_then_goes_unpublished():
+    # Agency 1's shape: complete weekdays through Tue 10/13, then a morning-only
+    # Wed 10/14, then nothing. Its fragment keeps it current through origin
+    # 10/16 (origin-2), with weekdays copied from 10/13; from 10/17 it is not
+    # forecast at all.
+    runs = pd.concat(
+        [
+            _timetable(date(2026, 9, 20), date(2026, 10, 13), slots=16),
+            _timetable(date(2026, 10, 14), date(2026, 10, 14), slots=5),
+        ],
+        ignore_index=True,
+    )
+    assert _sources(template_future_runs(runs, date(2026, 10, 16)), date(2026, 10, 19)) == {"W1013"}
+    for origin in (date(2026, 10, 17), date(2026, 10, 18), date(2026, 10, 20)):
+        assert template_future_runs(runs, origin).empty
+
+
+def test_a_fragment_on_the_last_day_keeps_the_agency_current_but_is_not_a_template():
+    # Wed 10/21 (origin-1) is a 2-hour fragment after nothing since Fri 10/16.
+    runs = _timetable(date(2026, 10, 1), date(2026, 10, 16), slots=8)
+    fragment = _timetable(date(2026, 10, 21), date(2026, 10, 21), slots=2)
+    template = template_future_runs(pd.concat([runs, fragment], ignore_index=True), date(2026, 10, 22))
+    assert _sources(template, date(2026, 10, 23)) == {"W1016"}
+    assert _sources(template, date(2026, 10, 24)) == {"S1010"}
+
+
+@pytest.mark.parametrize("stop", [12, 15, 18, 20])
+def test_a_last_day_cut_off_in_the_afternoon_is_not_a_template(stop):
+    # Weekdays run 06:00-23:00; on Wed 10/21 (origin-1) the feed stops at
+    # `stop`, which from 15:00 on leaves at least half the slots.
+    runs = pd.concat(
+        [
+            _timetable(date(2026, 10, 1), date(2026, 10, 20), slots=18),
+            _timetable(date(2026, 10, 21), date(2026, 10, 21), hours=tuple(range(6, stop))),
+        ],
+        ignore_index=True,
+    )
+    template = template_future_runs(runs, date(2026, 10, 22), horizon_days=7)
+    assert _sources(template, date(2026, 10, 23)) == {"W1020"}
+    assert _sources(template, date(2026, 10, 28)) == {"W1020"}
+
+
+def test_a_partial_saturday_is_skipped_for_the_saturday_before_it():
+    # Sat 10/24 kept 3 of the usual 8 slots; the Saturday target copies 10/17.
     runs = _timetable(date(2026, 10, 11), date(2026, 10, 24), slots=8, short={date(2026, 10, 24): 3})
     template = template_future_runs(runs, date(2026, 10, 25), horizon_days=7)
     assert _sources(template, date(2026, 10, 31)) == {"S1017"}
     assert len(template[template["service_date"] == pd.Timestamp(date(2026, 10, 31))]) == 8
 
 
-def test_a_partial_last_day_is_neither_a_template_nor_the_agencys_newest_complete_day():
-    # Wed 10/21 (origin-1) is a fragment and Tue 10/20 (origin-2) is complete:
-    # the agency is still current, and weekdays copy 10/20.
-    runs = _timetable(date(2026, 10, 1), date(2026, 10, 21), slots=8, short={date(2026, 10, 21): 3})
-    template = template_future_runs(runs, date(2026, 10, 22), horizon_days=7)
-    assert _sources(template, date(2026, 10, 23)) == {"W1020"}
-    assert _sources(template, date(2026, 10, 28)) == {"W1020"}
+def _cut_from_tue_10_13(cut_hours, *, before_slots=10):
+    """Weekdays switch to `cut_hours` from Tue 10/13 for good; weekends keep
+    `before_slots` hourly runs from 06:00."""
+    return pd.concat(
+        [
+            _timetable(date(2026, 9, 24), date(2026, 10, 12), slots=before_slots),
+            _timetable(date(2026, 10, 13), date(2026, 10, 21), only={"weekday"}, hours=cut_hours),
+            _timetable(date(2026, 10, 13), date(2026, 10, 21), slots=before_slots, only={"saturday", "sunday_holiday"}),
+        ],
+        ignore_index=True,
+    )
+
+
+def _assert_the_cut_becomes_the_template_on_its_third_weekday(runs, cut_slots):
+    # 10/13 and 10/14, the cut's first two weekdays, are judged against the old
+    # timetable and are not templates, so origin 10/15 still copies Fri 10/9.
+    # 10/15 has two cut weekdays among its previous three, so from origin 10/16
+    # on the cut timetable is what weekdays copy. The agency publishes throughout.
+    assert _sources(template_future_runs(runs, date(2026, 10, 15)), date(2026, 10, 16)) == {"W1009"}
+    assert _sources(template_future_runs(runs, date(2026, 10, 16)), date(2026, 10, 19)) == {"W1015"}
+    template = template_future_runs(runs, date(2026, 10, 22))
+    assert _sources(template, date(2026, 10, 23)) == {"W1021"}
+    assert len(template[template["service_date"] == pd.Timestamp(date(2026, 10, 23))]) == cut_slots
+    assert _sources(template, date(2026, 10, 24)) == {"S1017"}
+
+
+def test_a_permanent_cut_to_fewer_runs_becomes_the_template_after_two_days():
+    # Origin 10/22 is 9 days after the cut: weekdays go from 10 hourly runs to 4.
+    _assert_the_cut_becomes_the_template_on_its_third_weekday(_cut_from_tue_10_13((6, 9, 12, 15)), 4)
+
+
+def test_a_permanent_evening_cut_becomes_the_template_after_two_days():
+    # Weekdays' last run moves from 23:00 to 18:00.
+    runs = _cut_from_tue_10_13(tuple(range(6, 19)), before_slots=18)
+    _assert_the_cut_becomes_the_template_on_its_third_weekday(runs, 13)
 
 
 def test_a_day_that_starts_hours_late_with_few_slots_is_partial():
@@ -300,28 +370,6 @@ def test_a_day_that_starts_hours_late_with_few_slots_is_partial():
     )
     template = template_future_runs(runs, date(2026, 10, 25), horizon_days=7)
     assert _sources(template, date(2026, 10, 31)) == {"S1017"}
-
-
-def test_a_timetable_cut_that_keeps_its_span_is_not_partial():
-    # From Tue 10/13 (origin-9) weekdays run 4 of their 10 hours, from the same
-    # first to the same last run; weekends are unchanged. The agency is still
-    # current, and weekdays copy the reduced timetable.
-    before = _timetable(date(2026, 9, 24), date(2026, 10, 12), slots=10)
-    cut = _timetable(date(2026, 10, 13), date(2026, 10, 21), only={"weekday"}, hours=(6, 9, 12, 15))
-    weekends = _timetable(date(2026, 10, 13), date(2026, 10, 21), slots=10, only={"saturday", "sunday_holiday"})
-    runs = pd.concat([before, cut, weekends], ignore_index=True)
-    template = template_future_runs(runs, date(2026, 10, 22), horizon_days=7)
-    assert _sources(template, date(2026, 10, 23)) == {"W1021"}
-    assert len(template[template["service_date"] == pd.Timestamp(date(2026, 10, 23))]) == 4
-    assert _sources(template, date(2026, 10, 24)) == {"S1017"}
-
-
-def test_a_fragment_as_the_newest_day_does_not_keep_a_stopped_agency_current():
-    # Its feed stopped mid-day on 10/21 (origin-1) after nothing since 10/16.
-    runs = _timetable(date(2026, 10, 1), date(2026, 10, 16), slots=8)
-    fragment = _timetable(date(2026, 10, 21), date(2026, 10, 21), slots=2)
-    template = template_future_runs(pd.concat([runs, fragment], ignore_index=True), date(2026, 10, 22))
-    assert template.empty
 
 
 _WEEKDAYS = (True, True, True, True, True, False, False)

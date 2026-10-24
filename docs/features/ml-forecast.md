@@ -90,17 +90,20 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
   a public holiday or in the 12/29–1/3 year-end break, because feeds run some
   holidays on their weekday timetable and the year-end break on a holiday one.
   It still counts as the feed's latest day for the stopped-feed rule below.
-- **A partial day** is passed over for the next most recent day of its type. It
-  is one that both has fewer than half the route×hour slots of the median of the
-  agency's other days of its type in the last 28 days, and is cut off: its first
-  run starts, or its last run ends, 4 or more hours past those days' median. A
-  stopped feed or a missing archive cuts a day's span. A timetable cut thins the
-  day but keeps its first and last runs, so the reduced days stay complete and
-  become the templates.
+- **A partial day** is never a template; the next most recent day of its type
+  is used instead. A day is partial when, against the median of the previous 3
+  days of its type, it has fewer than half the route×hour slots, or its first run
+  starts or its last run ends 4 or more hours past theirs. A stopped feed or a
+  missing archive leaves such a fragment. A day with no earlier day of its type
+  in the last 28 days is not partial. Judging against only the last 3 days lets a
+  permanent timetable change become the template once two days of it have run:
+  its first two days are measured against the old timetable and skipped.
 - **A stopped feed** is not forecast. An agency publishes only while its newest
-  complete day is at most 2 days before the origin. The 10:30 sync has ingested
-  every closed JST day, so a current feed's newest day is the day before; the
-  second day absorbs one sync or archive upload that has not landed by 11:00.
+  day with any observed run is at most 2 days before the origin; a fragment
+  counts, so no timetable change can silence an agency. The 10:30 sync has
+  ingested every closed JST day, so a current feed's newest day is the day
+  before; the second day absorbs one sync or archive upload that has not landed
+  by 11:00.
 
 The backtest and training never template. They score and learn from the runs
 that actually happened on each target day. The backtest therefore measures the
