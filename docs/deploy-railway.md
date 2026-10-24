@@ -201,9 +201,8 @@ Open the domain in a browser — SPA loads. Tabs are empty until data lands
 > wrapped in try/except; every caller already falls through to the LLM-only
 > path when it's unavailable, so Ask still works (Stages 1 and 3), just
 > without Stage 2's embedding-nearest-neighbor lookup. To restore it for a
-> given deploy, add the group back to the Dockerfile's `poetry install` line
-> and re-add a build-time bake step for the model (see git history for the
-> previous version of this Dockerfile stage).
+> given deploy, add the group to the Dockerfile's `poetry install` line and
+> a build-time step that bakes the model into the image.
 
 ---
 
@@ -212,16 +211,18 @@ Open the domain in a browser — SPA loads. Tabs are empty until data lands
 `migrate up` only creates the schema; the DB is empty until you ingest.
 
 **Production data path — the live path, promoted daily.** The Oracle Cloud
-VM keeps collecting GTFS-RT (~every 30s) and streams polls to `app`, which
-stores them in `updates_live` (step 4, "Continuous freshness"). The cron poke
+VM keeps collecting GTFS-RT (every 30–60 s, set per agency in
+`agencies.tsv`) and streams polls to `app`, which stores them in
+`updates_live` (step 4, "Continuous freshness"). The cron poke
 (step 4) promotes each closed JST day into `updates` and runs `analyze`, so
 history holds the polls the collector pushes, one every
 `COLLECTOR_INGEST_INTERVAL_SEC`. Without streaming it holds only the one
 `ingest_live` sample each poke takes. Oracle also rolls per-day, per-agency
 archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
-them over HTTPS and runs `ingest → analyze_all → prune` into the private `db`,
-but only for days the live path never promoted, because a day in `updates`
+them over HTTPS and runs `ingest → analyze_all → prune` into the private
+`clickhouse` and `db` services, but only for days the live path never
+promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
 exposed and Oracle never accepts inbound connections.
 
@@ -371,7 +372,9 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 
 > **Required: the live-table promotion cron.** `updates_live` (today's and
 > future observations) is never copied into `updates` (history, `agg_*`'s
-> source) except by `POST /internal/cron/ingest`, and ClickHouse's TTL drops
+> source) except by the sweep `POST /internal/cron/ingest` runs (the admin
+> console's ingest runs and per-agency 再集計/まとめて更新 run it on demand),
+> and ClickHouse's TTL drops
 > each day out of `updates_live` 3 days after capture. If nothing pokes this
 > endpoint, a day silently never becomes history. **Before deploying, confirm
 > an external scheduler actually calls it** — this is not configured by the
@@ -496,6 +499,6 @@ Skip entirely if it's only demo data.
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
-| Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've re-added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
+| Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
 | Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
 | Nobody can sign in (Google/GitHub OAuth down) | Sign in at `/login` with the break-glass `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` account, turn `login_required` off on `/admin/flags`, and turn it back on once OAuth recovers. Keep those two variables set in production for exactly this: once any admin has set a `login_required` override, the `LOGIN_REQUIRED` env var alone cannot turn the gate off. |

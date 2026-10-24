@@ -66,8 +66,9 @@ The weekly job also backtests LightGBM forecasters of each trip run's mean delay
 
 An adopted model is written to `/var/lib/transit-ml/model` and uploaded to R2 under
 `models/<version>/` plus a `models/latest.json` pointer, where `<version>` is the
-training cutoff date. The daily `predict` job loads whichever version
-`models/latest.json` names, forecasts each on-model agency's routes for the next
+training cutoff date. The daily `predict` job loads the model `train` last wrote
+to `/var/lib/transit-ml/model` (it does not read `models/latest.json`),
+forecasts each on-model agency's routes for the next
 `HORIZON_DAYS` days, and uploads the result as the latest published forecast.
 `predict` needs the target days' rows to already exist in `runs` to build their
 features, which ClickHouse's observed-only history never has for the future. It
@@ -93,7 +94,8 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
 - **A partial day** is never a template; the next most recent day of its type
   is used instead. A day is partial when, against the median of the previous 3
   days of its type, it has fewer than half the route×hour slots, or its first run
-  starts or its last run ends 4 or more hours past theirs. A stopped feed or a
+  starts 4 or more hours after theirs or its last run ends 4 or more hours before
+  theirs. A stopped feed or a
   missing archive leaves such a fragment. The reference reaches 5 weeks back, so
   even a Saturday at the far end of the 2-week lookback has 3 earlier Saturdays to
   be judged against; a day with no earlier day of its type in that window is not
