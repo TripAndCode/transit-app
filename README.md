@@ -50,8 +50,8 @@ The bootstrap database is empty. Choose one path:
 ```bash
 # Fallback: load each agency's timetable, sample the current agency feeds into
 # updates_live, then build every agency's aggregates. A sample reaches agg_*
-# only once its service day closes and a POST /internal/cron/ingest poke
-# promotes it into updates.
+# only once its service day closes and the promotion sweep (the cron poke, or
+# an admin ingest run) copies it into updates.
 poetry run python gtfs_pipeline.py refresh-static
 poetry run python gtfs_pipeline.py ingest_live
 make analyze-all
