@@ -6,7 +6,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from pipeline.ml_forecast_ingest import fetch_latest_manifest, ingest_forecast, prune_forecast_ml_sql
+from pipeline.ml_forecast_ingest import (
+    ForecastIngest,
+    ForecastReadError,
+    ForecastWriteError,
+    StoreNotConfigured,
+    fetch_latest_manifest,
+    ingest_forecast,
+    load_forecast,
+    prune_forecast_ml_sql,
+    s3_client_from_env,
+)
 
 
 def test_prune_sql_deletes_rows_for_a_service_date_in_the_past():
@@ -173,3 +183,96 @@ def test_ingest_forecast_answers_a_dropped_connection_with_zero_and_logs_it(capl
         assert ingest_forecast(_DroppedConn(), _published(_GOOD_ROW), "transit-ml") == 0
     assert "could not upsert the latest forecast" in caplog.text
     assert "server closed the connection unexpectedly" in caplog.text
+
+
+_STORE_VARS = ("ML_STORE_ENDPOINT", "ML_STORE_BUCKET", "ML_STORE_ACCESS_KEY_ID", "ML_STORE_SECRET_ACCESS_KEY")
+
+
+def test_load_forecast_reports_nothing_published_without_touching_the_db():
+    conn = _UntouchedConn()
+    assert load_forecast(conn, _FakeS3({}), "transit-ml") == ForecastIngest(prefix=None, rows=0)
+    assert conn.touched is False
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param({k: v for k, v in _GOOD_ROW.items() if k != "q90"}, id="missing-column"),
+        pytest.param({**_GOOD_ROW, "origin_date": "11/10/2026"}, id="non-iso-origin-date"),
+    ],
+)
+def test_load_forecast_raises_a_read_error_for_a_corrupt_publish(row):
+    conn = _UntouchedConn()
+    with pytest.raises(ForecastReadError):
+        load_forecast(conn, _published(row), "transit-ml")
+    assert conn.touched is False
+
+
+def test_load_forecast_raises_a_write_error_carrying_the_db_failure():
+    with pytest.raises(ForecastWriteError, match="server closed the connection unexpectedly"):
+        load_forecast(_DroppedConn(), _published(_GOOD_ROW), "transit-ml")
+
+
+class _RecordingConn:
+    """Accepts every statement; records commit."""
+
+    def __init__(self):
+        self.committed = False
+        self.statements: list[str] = []
+
+    def cursor(self):
+        conn = self
+
+        class _Cur:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def execute(self, sql, *args):
+                conn.statements.append(sql)
+
+        return _Cur()
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        pass
+
+
+def test_load_forecast_returns_the_prefix_and_row_count(monkeypatch):
+    # load_forecast imports execute_values at call time, so patching the
+    # module attribute is what it picks up.
+    calls = []
+    monkeypatch.setattr("psycopg2.extras.execute_values", lambda cur, sql, rows: calls.append(len(rows)))
+    conn = _RecordingConn()
+    result = load_forecast(conn, _published(_GOOD_ROW), "transit-ml")
+    assert result == ForecastIngest(prefix="forecasts/2026-10-11", rows=1)
+    assert calls == [1]
+    assert any("DELETE FROM agg_route_forecast_ml" in sql for sql in conn.statements)
+    assert conn.committed is True
+
+
+def test_s3_client_from_env_names_every_missing_variable(monkeypatch):
+    for name in _STORE_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    with pytest.raises(StoreNotConfigured) as excinfo:
+        s3_client_from_env()
+    message = str(excinfo.value)
+    assert "ML_STORE_ENDPOINT" in message
+    assert "ML_STORE_ACCESS_KEY_ID" in message
+    assert "ML_STORE_SECRET_ACCESS_KEY" in message
+    assert "ML_STORE_BUCKET" not in message
+
+
+def test_s3_client_from_env_returns_a_client_and_the_bucket(monkeypatch):
+    for name in _STORE_VARS:
+        monkeypatch.setenv(name, "x")
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    client, bucket = s3_client_from_env()
+    assert bucket == "transit-ml"
+    assert hasattr(client, "list_objects_v2")

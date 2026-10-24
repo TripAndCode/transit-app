@@ -28,7 +28,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
-from pipeline.ml_forecast_ingest import ingest_forecast
+from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
@@ -551,19 +551,10 @@ def _ingest_ml_forecast(conn: Any) -> None:
     this job's primary purpose. `ingest_forecast` itself never raises for a
     missing manifest; this guard is for everything else (missing env vars,
     a broken S3 client, a network error)."""
-    bucket = os.environ.get("ML_STORE_BUCKET")
-    endpoint = os.environ.get("ML_STORE_ENDPOINT")
-    if not bucket or not endpoint:
+    if not os.environ.get("ML_STORE_BUCKET") or not os.environ.get("ML_STORE_ENDPOINT"):
         return
     try:
-        import boto3
-
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=os.environ.get("ML_STORE_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("ML_STORE_SECRET_ACCESS_KEY"),
-        )
+        s3, bucket = s3_client_from_env()
         count = ingest_forecast(conn, s3, bucket)
         _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
     except Exception:
