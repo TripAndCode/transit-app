@@ -98,14 +98,17 @@ class WeeklyService:
 
 @dataclass(frozen=True)
 class DayTypes:
-    """Each date of a window filed under one of ``buckets``."""
+    """Each date of a window filed under one of ``buckets``. ``from_calendar``
+    holds the dates a classed calendar service decided; every other date of
+    ``by_date`` is the weekday rule's."""
 
     buckets: tuple[DayType, ...]
     by_date: Mapping[date, DayType]
+    from_calendar: frozenset[date] = frozenset()
 
     def __hash__(self) -> int:
         # By value, so a request context carrying day types can key a cache.
-        return hash((self.buckets, frozenset(self.by_date.items())))
+        return hash((self.buckets, frozenset(self.by_date.items()), self.from_calendar))
 
     def of(self, d: date) -> DayType:
         return self.by_date[d]
@@ -113,8 +116,9 @@ class DayTypes:
 
 def _majority(
     running: Iterable[str], classes: Mapping[str, DayType | None], trips: Mapping[str, int], fallback: DayType
-) -> DayType:
-    """The class running the most trips, then the most services.
+) -> DayType | None:
+    """The class running the most trips, then the most services, or None when
+    no running service has a class.
 
     A tie goes to the tied class that agrees with ``fallback``, the weekday
     rule's verdict; 土日祝 agrees with both 土曜 and 日祝, so a two-class feed
@@ -129,7 +133,7 @@ def _majority(
             slot[0] += trips.get(service_id, 0)
             slot[1] += 1
     if not votes:
-        return fallback
+        return None
     best = max(votes.values())
     tied = [cls for cls in _ORDER if votes.get(cls) == best]
     return next((cls for cls in tied if agrees(cls, fallback)), tied[0])
@@ -184,12 +188,17 @@ def resolve_day_types(
 
     holidays = frozenset(public_holidays_between(from_date, to_date))
     by_date: dict[date, DayType] = {}
+    from_calendar: set[date] = set()
     d = from_date
     while d <= to_date:
         fallback = fallback_day_type(d, holidays)
         running = {s.service_id for s in in_window if s.start <= d <= s.end and s.days[d.weekday()]}
         running = (running | added.get(d, set())) - removed.get(d, set())
         cls = _majority(running, classes, trips, fallback)
+        if cls is None:
+            cls = fallback
+        else:
+            from_calendar.add(d)
         if two_way:
             by_date[d] = "weekday" if cls == "weekday" else "weekend_holiday"
         elif cls == "weekend_holiday":
@@ -197,7 +206,7 @@ def resolve_day_types(
         else:
             by_date[d] = cls
         d += timedelta(days=1)
-    return DayTypes(buckets=TWO_WAY if two_way else THREE_WAY, by_date=by_date)
+    return DayTypes(buckets=TWO_WAY if two_way else THREE_WAY, by_date=by_date, from_calendar=frozenset(from_calendar))
 
 
 def _gtfs_date(value: str) -> date | None:

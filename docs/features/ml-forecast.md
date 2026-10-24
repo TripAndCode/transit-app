@@ -84,6 +84,12 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
   last 14 days before the origin, never the origin's own partial day and never
   another agency's day. A target day with no such day is not forecast; it never
   falls back to the same weekday.
+- **A guessed day is never a template.** The replica keeps only each feed's
+  current calendar, so a day before it, like every day of an agency with no
+  calendar, is typed by the weekday rule alone. Such a day is skipped when it is
+  a public holiday or in the 12/29–1/3 year-end break, because feeds run some
+  holidays on their weekday timetable and the year-end break on a holiday one.
+  It still counts as the feed's latest day for the stopped-feed rule below.
 - **A partial day** is passed over for the next most recent day of its type. It
   is one that both has fewer than half the route×hour slots of the median of the
   agency's other days of its type in the last 28 days, and is cut off: its first

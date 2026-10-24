@@ -138,18 +138,21 @@ def test_weekend_share_does_not_see_rows_on_or_after_the_origin():
 _TIMETABLE = {"weekday": "W", "saturday": "S", "sunday_holiday": "H"}
 
 
-def _timetable(first: date, last: date, *, agency_id: int = 8, slots: int = 4, short=None, only=None, hours=None):
+def _timetable(
+    first: date, last: date, *, agency_id: int = 8, slots: int = 4, short=None, only=None, hours=None, kinds=None
+):
     """An agency running, on every date of [first, last], the timetable the
-    weekday rule gives that date: `slots` hourly runs from 06:00 whose trip ids
-    name the timetable and the date (``W1016-6`` is 10/16's 06:00 weekday run),
-    or ``short[d]`` runs on a day cut off early. ``hours`` replaces the hourly
-    runs with runs at those hours alone; ``only`` keeps the dates of those
-    timetables alone."""
+    weekday rule gives that date (or ``kinds[d]``): `slots` hourly runs from
+    06:00 whose trip ids name the timetable and the date (``W1016-6`` is 10/16's
+    06:00 weekday run), or ``short[d]`` runs on a day cut off early. ``hours``
+    replaces the hourly runs with runs at those hours alone; ``only`` keeps the
+    dates of those timetables alone."""
     short = short or {}
+    kinds = kinds or {}
     rows = []
     d = first
     while d <= last:
-        kind = fallback_day_type(d)
+        kind = kinds.get(d) or fallback_day_type(d)
         if only is None or kind in only:
             for hour in hours or range(6, 6 + short.get(d, slots)):
                 rows.append(
@@ -189,7 +192,9 @@ def _sources(template, d: date) -> set[str]:
 def test_template_future_runs_copies_the_most_recent_same_type_day_forward_with_its_delay_unknown():
     runs = _timetable(date(2026, 10, 5), date(2026, 10, 16))
     template = template_future_runs(runs, date(2026, 10, 17), horizon_days=1)
-    assert _sources(template, date(2026, 10, 18)) == {"H1012"}  # Sunday from the Sports Day holiday
+    # Sunday from the last Sunday: Sports Day 10/12 is newer, but a holiday no
+    # calendar types is never a template.
+    assert _sources(template, date(2026, 10, 18)) == {"H1011"}
     assert len(template) == 4
     assert (template["service"] == "sunday_holiday").all()
     assert template["delay_min"].isna().all()
@@ -202,7 +207,7 @@ def test_a_weekday_after_a_holiday_is_templated_from_a_weekday_not_from_the_holi
     template = template_future_runs(runs, date(2026, 10, 18), horizon_days=7)
     assert _sources(template, date(2026, 10, 19)) == {"W1016"}
     assert _sources(template, date(2026, 10, 24)) == {"S1017"}
-    assert _sources(template, date(2026, 10, 25)) == {"H1012"}
+    assert _sources(template, date(2026, 10, 25)) == {"H1011"}
 
 
 def test_a_holiday_on_a_weekday_is_templated_from_the_last_sunday_or_holiday():
@@ -322,10 +327,10 @@ def test_a_fragment_as_the_newest_day_does_not_keep_a_stopped_agency_current():
 _WEEKDAYS = (True, True, True, True, True, False, False)
 
 
-def _calendar(origin: date, services, exceptions=()):
+def _calendar(origin: date, services, exceptions=(), *, start=date(2026, 10, 1)):
     """An agency's day types over template_span from its calendar: `services`
-    are (service_id, Monday-first flags) running all of 2026-10..2027-03."""
-    weekly = [WeeklyService(sid, days, date(2026, 10, 1), date(2027, 3, 31)) for sid, days in services]
+    are (service_id, Monday-first flags) running from `start` to 2027-03."""
+    weekly = [WeeklyService(sid, days, start, date(2027, 3, 31)) for sid, days in services]
     first, last = template_span(origin)
     return resolve_day_types(first, last, weekly, exceptions, {sid: 10 for sid, _days in services})
 
@@ -357,3 +362,23 @@ def test_a_feed_with_one_weekend_timetable_copies_a_saturday_from_the_newer_sund
     runs = _timetable(date(2026, 10, 13), date(2026, 10, 26))
     template = template_future_runs(runs, origin, day_types={8: types})
     assert _sources(template, date(2026, 10, 31)) == {"H1025"}
+
+
+def test_a_holiday_before_the_loaded_calendar_is_not_a_template():
+    # The replica holds only the feed's current calendar, from 10/13. Sports Day
+    # 10/12 predates it, so only the holiday rule types it, and this feed ran
+    # its weekday timetable that day.
+    origin = date(2026, 10, 15)
+    types = _calendar(origin, [("wk", _WEEKDAYS), ("su", (False,) * 6 + (True,))], start=date(2026, 10, 13))
+    runs = _timetable(date(2026, 10, 1), date(2026, 10, 14), kinds={date(2026, 10, 12): "weekday"})
+    template = template_future_runs(runs, origin, day_types={8: types})
+    assert _sources(template, date(2026, 10, 18)) == {"H1011"}
+
+
+def test_a_year_end_day_no_calendar_types_is_not_a_template():
+    # Without a calendar, 12/29-1/3 are typed by the weekday rule alone, which
+    # cannot know the year-end timetable they ran.
+    runs = _timetable(date(2026, 12, 19), date(2027, 1, 1))
+    template = template_future_runs(runs, date(2027, 1, 2), horizon_days=7)
+    assert _sources(template, date(2027, 1, 4)) == {"W1228"}
+    assert _sources(template, date(2027, 1, 3)) == {"H1227"}

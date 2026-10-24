@@ -11,7 +11,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from pipeline.day_types import DayTypes, resolve_day_types
+from pipeline.day_types import DayTypes, public_holidays_between, resolve_day_types
 
 CATEGORICAL = ["agency_id", "route_id"]
 FEATURES = [
@@ -130,19 +130,28 @@ def template_future_runs(
     route x hour slots of the median of the agency's other days of its type in
     the reference window, so a fragment never votes on what is typical, and its
     span is cut off at either end against those days' median first and last
-    hour. An
-    agency whose newest complete day is older than origin-_STALE_AFTER_DAYS
-    gets no template at all, so a feed that stopped stops being forecast."""
+    hour. An agency whose newest complete day is older than
+    origin-_STALE_AFTER_DAYS gets no template at all, so a feed that stopped
+    stops being forecast.
+
+    A day the weekday rule alone typed (no calendar, or one that does not cover
+    it: the replica keeps only each feed's current calendar) is never a
+    template when it is a public holiday or in the 12/29-1/3 year-end break.
+    Feeds run some holidays on their weekday timetable and the year-end break
+    on a holiday one, so the rule's type for such a day is a guess, while the
+    target it would be copied to may be typed by the feed's calendar."""
     t = pd.Timestamp(origin)
     first, last = template_span(origin, horizon_days)
     weekday_rule = resolve_day_types(first, last, [], [], {})
+    holidays = frozenset(public_holidays_between(first, last))
     frames = []
     for agency_id, agency_runs in runs.groupby("agency_id"):
         types = (day_types or {}).get(int(agency_id), weekday_rule)
         complete = _complete_days(agency_runs, t, types)
         if complete.empty or complete.index.max() < t - pd.Timedelta(days=_STALE_AFTER_DAYS):
             continue
-        candidates = complete[complete.index >= t - pd.Timedelta(days=_TEMPLATE_LOOKBACK_DAYS)]
+        recent = complete[complete.index >= t - pd.Timedelta(days=_TEMPLATE_LOOKBACK_DAYS)]
+        candidates = recent[[not _guessed(day.date(), types, holidays) for day in recent.index]]
         for d in range(1, horizon_days + 1):
             target_day = t + pd.Timedelta(days=d)
             same_type = candidates[candidates == types.of(target_day.date())]
@@ -154,6 +163,11 @@ def template_future_runs(
             rows["delay_min"] = np.nan
             frames.append(rows)
     return pd.concat(frames, ignore_index=True) if frames else runs.iloc[0:0].copy()
+
+
+def _guessed(day: date, types: DayTypes, holidays: frozenset[date]) -> bool:
+    year_end = (day.month == 12 and day.day >= 29) or (day.month == 1 and day.day <= 3)
+    return day not in types.from_calendar and (day in holidays or year_end)
 
 
 def _complete_days(agency_runs: pd.DataFrame, origin: pd.Timestamp, types: DayTypes) -> pd.Series:

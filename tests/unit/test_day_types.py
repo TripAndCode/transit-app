@@ -192,6 +192,14 @@ def test_dates_the_calendar_does_not_cover_fall_back_to_the_weekday_rule():
     ]
 
 
+def test_day_types_name_the_dates_their_calendar_decided():
+    services = [WeeklyService(s.service_id, s.days, CAL_START, date(2026, 9, 15)) for s in _hiroshima_like()]
+    one_off = [("お盆臨時", date(2026, 9, 14), 1)]
+    types = resolve_day_types(date(2026, 9, 12), date(2026, 9, 21), services, one_off, TRIPS)
+    assert types.from_calendar == {date(2026, 9, 12), date(2026, 9, 13), date(2026, 9, 14), date(2026, 9, 15)}
+    assert resolve_day_types(date(2026, 9, 12), date(2026, 9, 21), [], [], {}).from_calendar == frozenset()
+
+
 def test_a_mixed_date_takes_the_class_running_the_most_trips():
     services = [*_hiroshima_like(), WeeklyService("12_日祝(共通)", SUNDAY, CAL_START, CAL_END)]
     # Saturday 9/19: route group 12 alone runs its holiday timetable.
