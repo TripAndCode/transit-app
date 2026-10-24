@@ -278,6 +278,32 @@ def test_a_forecast_ingest_failure_does_not_raise(monkeypatch):
     internal_module._ingest_ml_forecast(object())  # must not raise
 
 
+def test_a_store_missing_its_keys_is_skipped_quietly_without_connecting(monkeypatch, caplog):
+    """The pre-connect gate checks the same variables the S3 client needs:
+    a deployment with only the bucket and endpoint set is unconfigured, not a
+    sweep-by-sweep failure."""
+    import logging
+
+    import api.routers.internal as internal_module
+
+    calls = []
+    monkeypatch.setattr(internal_module, "ingest_forecast", lambda *args: calls.append(args) or 0)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.delenv("ML_STORE_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("ML_STORE_SECRET_ACCESS_KEY", raising=False)
+    connects = []
+    monkeypatch.setattr(psycopg2, "connect", lambda *args, **kwargs: connects.append(args) or MagicMock())
+
+    with caplog.at_level(logging.ERROR):
+        internal_module._run_ml_forecast_ingest("postgresql://unused")
+        internal_module._ingest_ml_forecast(object())
+
+    assert connects == []
+    assert calls == []
+    assert "ml_forecast ingest failed" not in caplog.text
+
+
 def test_ml_forecast_ingest_runs_only_for_an_unscoped_ingest_sweep(two_agencies, monkeypatch):
     """The published forecast is fleet-wide (one R2 object, not one per
     agency) -- a single-agency admin reanalyze must not trigger a
@@ -311,6 +337,8 @@ def test_ml_forecast_ingest_runs_only_after_the_advisory_lock_is_released(two_ag
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
     monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "test")
 
     from api.routers.internal import _run_ingest_and_analyze
     from pipeline.locks import INGEST_ANALYZE_LOCK_KEY

@@ -52,6 +52,11 @@ class ForecastIngest:
     rows: int
 
 
+def store_configured() -> bool:
+    """Whether every variable `s3_client_from_env` needs is set."""
+    return all(os.environ.get(name) for name in _STORE_VARS)
+
+
 def s3_client_from_env() -> tuple[Any, str]:
     """The `transit-ml` bucket's S3 client and name, from `ML_STORE_*`."""
     missing = [name for name in _STORE_VARS if not os.environ.get(name)]

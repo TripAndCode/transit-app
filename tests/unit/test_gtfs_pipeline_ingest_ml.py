@@ -16,14 +16,12 @@ from pipeline.ml_forecast_ingest import ForecastIngest, ForecastReadError, Forec
 
 
 def _run(*, load_result=None, load_error=None):
-    """Runs the command against a fake connection; returns it and the
-    autocommit setting load_forecast saw."""
+    """Runs the command against a fake connection, and checks it is closed
+    whether the ingest succeeds or not. A real connection's behavior is
+    covered in tests/db/test_ml_forecast_ingest_db.py."""
     conn = MagicMock()
-    conn.autocommit = True  # what _get_conn() hands back
-    seen_autocommit = []
 
     def fake_load(c, s3, bucket):
-        seen_autocommit.append(c.autocommit)
         if load_error:
             raise load_error
         return load_result
@@ -37,15 +35,12 @@ def _run(*, load_result=None, load_error=None):
             gtfs_pipeline.cmd_ingest_ml(Namespace())
         finally:
             conn.close.assert_called_once()
-    return conn, seen_autocommit
 
 
 def test_reports_the_rows_and_the_forecast_it_ingested(caplog):
     with caplog.at_level(logging.INFO):
-        _, seen = _run(load_result=ForecastIngest(prefix="forecasts/2026-10-24", rows=1234))
+        _run(load_result=ForecastIngest(prefix="forecasts/2026-10-24", rows=1234))
     assert "upserted 1234 row(s) from forecasts/2026-10-24" in caplog.text
-    # One transaction, so a failed upsert rolls the prune back with it.
-    assert seen == [False]
 
 
 def test_says_nothing_is_published_rather_than_zero_rows(caplog):

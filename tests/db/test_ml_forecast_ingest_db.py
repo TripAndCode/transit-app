@@ -1,10 +1,13 @@
 import io
-from datetime import datetime
+from argparse import Namespace
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+import gtfs_pipeline
+from pipeline import ml_forecast_ingest
 from pipeline.ml_forecast_ingest import ingest_forecast
 
 
@@ -155,3 +158,40 @@ def test_ingest_forecast_upserts_rather_than_duplicates_the_same_slot(pg_conn):
 def test_ingest_forecast_returns_zero_without_raising_when_the_manifest_is_missing(pg_conn):
     count = ingest_forecast(pg_conn, _FakeS3({}), "transit-ml")
     assert count == 0
+
+
+def test_the_ingest_ml_command_upserts_the_latest_forecast_through_a_real_connection(pg_conn, monkeypatch):
+    """Runs the operator command end to end on the connection `_get_conn()`
+    really returns, which a mocked connection cannot stand in for: that one
+    arrives mid-transaction from its schema probe."""
+    _seed_agency(pg_conn)
+    origin = date.today()
+    rows = [
+        {
+            "agency_id": 8,
+            "route_code": "R1",
+            "service_date": (origin + timedelta(days=1)).isoformat(),
+            "hour": 8,
+            "mean_min": 4.5,
+            "q10": 1.0,
+            "q50": 4.0,
+            "q90": 8.0,
+            "model_version": "test",
+            "origin_date": origin.isoformat(),
+            "generated_at": f"{origin.isoformat()}T11:00:00",
+        }
+    ]
+    prefix = f"forecasts/{origin.isoformat()}"
+    s3 = _FakeS3(
+        {
+            f"{prefix}/manifest.json": b'{"rows": 1}',
+            f"{prefix}/forecast.parquet": _parquet_bytes(rows),
+        }
+    )
+    monkeypatch.setattr(ml_forecast_ingest, "s3_client_from_env", lambda: (s3, "transit-ml"))
+
+    gtfs_pipeline.cmd_ingest_ml(Namespace())
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT mean_min FROM agg_route_forecast_ml WHERE agency_id = 8 AND route_code = 'R1'")
+        assert cur.fetchone()[0] == 4.5

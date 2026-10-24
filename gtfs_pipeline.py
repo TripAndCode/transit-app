@@ -923,9 +923,6 @@ def cmd_ingest_ml(args):
         logger.error(f"ingest_ml: ML store {exc}")
         sys.exit(2)
     conn = _get_conn()
-    # _get_conn() commits each statement on its own; the upsert and prune
-    # must commit or roll back together.
-    conn.autocommit = False
     try:
         result = ml_forecast_ingest.load_forecast(conn, s3, bucket)
     except (ml_forecast_ingest.ForecastReadError, ml_forecast_ingest.ForecastWriteError) as exc:
