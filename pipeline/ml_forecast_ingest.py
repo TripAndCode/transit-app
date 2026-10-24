@@ -93,7 +93,7 @@ def prune_forecast_ml_sql(days: int) -> str:
     own usefulness window. Not part of `pipeline.retention.policy_prune_sql`:
     that aggregator is reserved for privacy-policy-mandated windows; this one
     is a plain freshness cleanup, run from the same ingest step that writes
-    this table (see `ingest_forecast`), not the daily privacy-prune pass."""
+    this table (see `load_forecast`), not the daily privacy-prune pass."""
     return f"DELETE FROM agg_route_forecast_ml WHERE service_date < now()::date - INTERVAL '{int(days)} days'"
 
 

@@ -548,9 +548,10 @@ def _run_agency_update(
 def _ingest_ml_forecast(conn: Any) -> None:
     """Best-effort: a missing/misconfigured ML bucket or a transient R2
     failure must not abort the surrounding ingest+analyze sweep, which is
-    this job's primary purpose. `ingest_forecast` itself never raises for a
-    missing manifest; this guard is for everything else (a broken S3
-    client, a network error). An unconfigured store is skipped, not logged."""
+    this job's primary purpose. `ingest_forecast` already logs and swallows
+    every read or write failure from R2 or the DB; this guard covers building
+    the S3 client and anything else unexpected. An unconfigured store is
+    skipped, not logged."""
     if not store_configured():
         return
     try:
