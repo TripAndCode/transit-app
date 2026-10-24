@@ -135,7 +135,10 @@ describe("scope controls", () => {
     it("shows each weekday's mean delay once the data is in", () => {
       mount(DaysControl, "", SUMMARY);
       const mon = screen.getByRole("button", { name: "Mon 2.3 min" });
-      expect(mon.querySelector(".scope-mini-bar")).toHaveStyle({ background: "var(--d1)" });
+      // jsdom substitutes no var() and the token stylesheet is not loaded, so
+      // the computed background is the initial value; the inline declaration
+      // is what the component sets.
+      expect(mon.querySelector<HTMLElement>(".scope-mini-bar")!.style.background).toBe("var(--d1)");
       expect(screen.getByRole("button", { name: "Sat 5.1 min" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Tue" })).toBeInTheDocument();
     });
