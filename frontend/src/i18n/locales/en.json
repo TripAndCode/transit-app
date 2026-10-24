@@ -200,6 +200,7 @@
     "stat_mean": "Route avg",
     "stat_samples": "Measurements",
     "stat_samples_history": "Past observations",
+    "ml_source": "ML forecast",
     "route_picker_label": "Route",
     "route_picker_all": "All routes",
     "avg_late": "avg {{min}} min late",
