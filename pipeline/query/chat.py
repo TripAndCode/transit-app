@@ -724,13 +724,13 @@ async def chat_with_tools(
     use_cache = _cache_enabled()
     if use_cache:
         # Only the JSON-mode (intent-cache) request should see this format —
-        # see JSON_MODE_ADDENDUM's own docstring for why leaking it into the
+        # see JSON_MODE_ADDENDUM for why leaking it into the
         # native tool_calls request measurably broke tool-calling for some
         # tools.
         system_prompt = system_prompt + "\n" + JSON_MODE_ADDENDUM
         if force_tool_call:
             # response_format=json_object can't be combined with tool_choice
-            # (see the comment below), so under the intent-cache flag
+            # (OpenAI rejects the combination with a 400), so under the intent-cache flag
             # force_tool_call has no API-level lever to pull — this prompt
             # instruction is the JSON-mode equivalent of tool_choice="required".
             system_prompt = system_prompt + "\n" + JSON_MODE_FORCE_TOOL_ADDENDUM
@@ -768,13 +768,11 @@ async def chat_with_tools(
             temperature=0.0,
         )
 
-    # -----------------------------------------------------------------------
     # When cache is enabled, attempt a cache lookup BEFORE calling the LLM.
     # Stage 1: exact question-text pre-lookup — lets us skip the LLM entirely
     # when the same question has been seen before.
     # Stage 2: if question is new, call LLM → compute sig_hash → sig-hash
     # lookup (covers paraphrases that map to the same canonical intent).
-    # -----------------------------------------------------------------------
     if use_cache:
         # Stage 1: pre-LLM exact question-text lookup.
         #

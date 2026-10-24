@@ -1119,8 +1119,10 @@ async def list_admin_audit(
 ) -> AuditPage:
     """Paged, filterable admin-action timeline: `admin_audit` merged with the
     `login`/`login_failed` events from `login_events` (mapped to
-    `login.ok`/`login.fail`) -- every other `login_events` kind is an admin
-    action already recorded directly into `admin_audit`.
+    `login.ok`/`login.fail`). Admin mutations are recorded directly into
+    `admin_audit`; the other `login_events` kinds (a user's own logout,
+    account creation and invite use, and a role granted by seeding or
+    `ADMIN_EMAILS`) are not part of this timeline.
 
     `target` matches either `target_type` or `target_id` (exact). `cursor`
     is opaque, from a previous page's `next_cursor`.

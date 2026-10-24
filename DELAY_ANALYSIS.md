@@ -5,8 +5,9 @@ details see `README.md`; for AI-assist conventions see `AGENTS.md`.
 
 ## The raw data
 
-We poll each agency's real-time feed (GTFS-RT) on a schedule and save every reading to
-the `updates` table. One row means: **"this trip, at this stop, was N seconds late."**
+We poll each agency's real-time feed (GTFS-RT) on a schedule. The readings the app
+receives land in `updates_live`, and each closed day is promoted into the `updates`
+table. One row means: **"this trip, at this stop, was N seconds late."**
 
 That number — `dep_delay` (seconds) = actual departure − scheduled departure — comes
 straight from the feed. **We don't compute the delay; the feed gives it to us. We
@@ -45,7 +46,8 @@ The baseline is **not** prediction with a trained model. It is **looking up an a
 already computed**:
 
 > "Route X, on weekdays, in the 5 p.m. hour → historically +8 min on average"
-> is one row read from `agg_route_hour`.
+> is that route's hour-17 rows for Monday–Friday in `agg_route_hour_dow`,
+> pooled by sample count.
 
 This is a *seasonal-naive baseline* (a.k.a. climatology): the future is assumed to
 resemble the historical pattern for that route at that time. It is honest to call it

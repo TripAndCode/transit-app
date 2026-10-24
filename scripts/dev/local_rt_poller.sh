@@ -13,7 +13,7 @@
 # failure: every other agency ingested, and the one refused for having no
 # timetable loaded waits on an operator, so the poll warns and keeps pace.
 #
-# Wired into `make serve` (see Makefile); not part of the production path,
+# Run by `LOCAL_RT_POLL=1 make serve` (off by default); not part of the production path,
 # which streams from the Oracle collector or the daily Railway ingest job
 # instead (see docs/deploy-railway.md).
 #

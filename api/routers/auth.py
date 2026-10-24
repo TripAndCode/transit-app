@@ -538,11 +538,10 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         # the /login handler) already stashed it in the Starlette session via
         # Authlib's own state machinery, and authorize_access_token's
         # _format_state_params() pulls it back out of that session state
-        # automatically. Supplying it again as a kwarg collided with that
+        # automatically. Supplying it again as a kwarg collides with that
         # (TypeError: got multiple values for keyword argument
-        # 'code_verifier'), breaking every real login attempt in production —
-        # the tx cookie is the actual security boundary (state/TTL/signature
-        # check above), not this now-redundant kwarg.
+        # 'code_verifier') and fails every login. The tx cookie is the actual
+        # security boundary (state/TTL/signature check above), not this kwarg.
         token = await client.authorize_access_token(request)
     except Exception:
         _log.exception("OAuth token exchange failed for provider=%s", provider)

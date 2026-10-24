@@ -134,8 +134,8 @@ Endpoints:
   sign-in creates the account, so an email that already has one is refused
   with 409 `account_exists`.
 
-Tables read/written: `users`, `sessions` (revoked on suspend/delete/role
-edits that drop access), `oauth_identities`, `user_llm_keys` (read-only,
+Tables read/written: `users`, `sessions` (revoked on suspend and delete,
+and one at a time), `oauth_identities`, `user_llm_keys` (read-only,
 for the drawer's provider indicator), `api_keys`, `user_invites`. Every
 mutation records an `admin_audit` entry.
 
@@ -199,8 +199,10 @@ Endpoint: `GET /api/admin/audit` — a single cursor-paged, filterable
 timeline merging `admin_audit` (every admin mutation across this whole
 surface, written through `api.admin_audit.record_admin_action`) with the
 login/login-failure rows of `login_events` (mapped to `login.ok`/
-`login.fail`; every other `login_events` kind is already recorded directly
-into `admin_audit`).
+`login.fail`). Admin mutations are recorded directly into `admin_audit`; the
+other `login_events` kinds (a user's own logout, account creation and invite
+use, and a role granted by seeding or `ADMIN_EMAILS`) are not part of this
+timeline.
 
 ## Feature flags
 

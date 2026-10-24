@@ -42,9 +42,9 @@ with a proactive "Insight Panel" suggesting what to look at next.
   (`frontend/src/routes/legacyRedirects.tsx`, through `reportHref` in
   `destinations.ts`).
 - Reach it from the Routes, Time, Why and Compare rail entries, the command
-  palette's report items, the Insight Panel's suggestion (both through
-  `reportHref`, which opens the screen hosting the type), or the Reports
-  period summary's "Detailed reports →" link (`time?report=trend`).
+  palette's report items (through `reportHref`, which opens the screen
+  hosting the type), or the Reports period summary's "Detailed reports →"
+  link (`time?report=trend`).
 - Top-level component: `frontend/src/tabs/AnalysisTab.tsx`, which takes
   `reportTypes` and an optional `defaultReport`, and reads the selected one
   from the `report` search param: the param when the screen hosts that type,
@@ -93,21 +93,24 @@ What the user sees/does:
   asks for its maximum length rather than the default widest-gap top.
 - **Insight Panel** (right column) —
   `frontend/src/components/InsightPanel.tsx`: a single proactive suggestion
-  ("this route's trend just shifted", "on-time rate dropped", etc.),
-  dismissible per-suggestion (persisted to `sessionStorage`, keyed by
-  agency) and toggleable off entirely; defaults on in dev builds
+  ("this route's trend just shifted", "on-time rate dropped", etc.) whose
+  button opens that route's dossier; a suggestion once opened is not offered
+  again this session (persisted to `sessionStorage`, keyed by agency). The
+  panel collapses to a narrow rail, and is switched off entirely only through
+  localStorage `transit.insightPanelEnabled`; defaults on in dev builds
   (`import.meta.env.DEV`), opt-in in production.
 - Below ~640px (`MOBILE_BREAKPOINT_PX`,
   `frontend/src/hooks/useMediaQuery.ts`) the three columns stack vertically
   instead of side-by-side — this tab otherwise stays desktop-oriented by
-  design (see the inline comment in `AnalysisTab.tsx`).
+  design (see the comment in `frontend/src/tabs/analysisTab.css`).
 
 ## Scope
 
 Every analysis screen reads and writes one shared scope in the URL through
 `frontend/src/api/scope.ts` (`useScope`, `parseScope`, `scopeToQueryString`,
 `applyScopePatch`). The backend validates the same parameters in
-`api/range.py`'s `clamp_range_ctx`.
+`api/range.py`'s `clamp_range_ctx`, except `late`/`early`, which each
+endpoint that takes them declares as its own bounded query params.
 
 | Param | Values |
 |---|---|
@@ -140,7 +143,7 @@ Rules the two sides share:
   agency's own buckets and shows such a value as the bucket it resolves to.
 - **Invalid values.** An invalid value in the page URL falls back to that
   condition's default instead of reaching the API. The API itself answers
-  422 for an invalid value, as it does for the older fields.
+  422 for an invalid value of any scope field.
 - **Unknown params survive.** `scope.ts` writes only its own params, so
   screen-local ones survive a scope change: `report`, `sort`, `by`, `doc`,
   `sub_tab`, and the route dossier's `compare=1` (the week-earlier overlay).
@@ -167,7 +170,8 @@ response honoured that field.
 - **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
   and `council_summary`. Elsewhere they are ignored and reported as `false`,
   including `worst_5min`, whose over-5-min threshold stays its own
-  `late_tolerance_sec`.
+  `late_tolerance_sec`. The scope summary reports `early` as `true`, since
+  it bounds that endpoint's tolerance curve.
 - **Split figures.** `council_summary` also answers `delivered_scope_applied`
   (null on every other report): its planned/executed/service-delivered figures
   and data-quality caveat come from per-agency aggregates and honour only
@@ -182,7 +186,7 @@ response honoured that field.
 Pulse, Routes, Time, Why, Compare by periods and the Reports summary state
 the scope as one sentence above their content
 (`frontend/src/components/scope/ScopeSentence.tsx`), for example
-「青森市バスの全路線を、9/1〜9/28のすべての曜日・終日で、定時は1分以内として見る」.
+「青森市バスの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は1分以内として見る」.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names
@@ -204,8 +208,7 @@ the scope as one sentence above their content
     ignored).
   - Days: all, weekdays or weekend, seven weekday toggles that never
     remove the last day, and the timetable select.
-  - Time: the seven bands and all day. Hour-by-hour filtering is shown as
-    pending until `agg_route_hour_daily` exists.
+  - Time: the seven bands and all day.
   - Routes: the grouped route picker.
   - On-time tolerance: 1/3/5 minutes and a slider that writes when the drag
     ends.
@@ -244,15 +247,18 @@ the scope as one sentence above their content
   set condition whose field is `false` renders struck through, in the
   sentence and in the pinned strip, with 「この画面では使われない条件です」
   as its title and accessible description. A condition at its default
-  filters nothing and is never greyed. A screen that passes nothing greys
+  filters nothing and is never greyed; the period always filters, so it is
+  greyed wherever `from` is `false`. A screen that passes nothing greys
   nothing. AnalysisTab uses the forecast overview's map for
-  `route_forecast`, and a report's map only once that report's response is
+  `route_forecast` (the route heatmap's when exactly one route is
+  selected), and a report's map only once that report's response is
   the one on screen.
-- **Pinned strip.** 「帯を固定」 shows every control inline under the
+- **Pinned strip.** 「すべての条件を表示」 shows every control inline under the
   sentence; the choice is kept in localStorage `transit.scopePinned`.
 - **Presets and reset.** Signed-in users save and load presets beside the
-  sentence (`PresetMenu`). 「条件をリセット」 appears once any non-date
-  condition differs from the default, and resets the dates too.
+  sentence (`PresetMenu`), or on the page heading's row when the page has a
+  `ScopePageHeader`. 「条件をリセット」 appears once any condition, the
+  period included, differs from the default, and resets the dates too.
 
 ## Request path
 
@@ -260,9 +266,9 @@ the scope as one sentence above their content
 |---|---|---|
 | `useScopeSummary(agencyId, scope, enabled)` | `GET /api/{agency_id}/scope/summary` (`api/routers/scope_summary.py: scope_summary`) | `pipeline/reports/scope_summary.py: compute_scope_summary()` — four reads of `agg_route_daily_dist` (span, daily, per-weekday, per-route) plus one merged histogram for the tolerance curve; no ClickHouse. |
 | `useReports(agencyId)` | `GET /api/{agency_id}/reports` (`api/routers/reports.py: list_reports`) | Static metadata only — the fixed `_REPORT_TYPES` tuple, no DB read. |
-| `useReport(agencyId, reportType, ctx, options)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time rate over the scope's filter into one row beside the whole agency's service-delivered rate for the dates, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. Every per-route report is one row per route over all of its observations, never split by the observations' raw `service_type` (a feed's own `service_id`). In the tuple rows of `ranking`/`ranking_best`/`on_time`/`worst_5min`/`dow_weekday`/`dow_weekend`, the second element names the active service filter, null without one; `compare_ranking` and `hourly_heatmap` carry no service slot. `ranking`/`ranking_best` leave out routes observed fewer than `RANKING_MIN_SAMPLES` times unless `include_sparse=1` (the screen's `sparse=1` toggle) and return `rows_total` and `reliable_min_samples`, so the screen can say how many rows qualified and badge the thin ones. `compare_ranking` returns `rows_total` too, so the compare bars can say when the API's longest list still stops short of every compared route. `delay_certificate` returns `rows_total` as well, counted in the same scan, and its summary text and CSV footnotes say when `limit` left only the earliest trips listed. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
+| `useReport(agencyId, reportType, ctx, options)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (`compute_hourly_heatmap` also under a `routes` filter, since `agg_hour_daily` pools every route) (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time rate over the scope's filter into one row beside the whole agency's service-delivered rate for the dates, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. Every per-route report is one row per route over all of its observations, never split by the observations' raw `service_type` (a feed's own `service_id`). In the tuple rows of `ranking`/`ranking_best`/`on_time`/`worst_5min`, the second element names the active service filter, null without one; `dow_weekday`/`dow_weekend` drop the service filter, so theirs is always null; `compare_ranking` and `hourly_heatmap` carry no service slot. `ranking`/`ranking_best` leave out routes observed fewer than `RANKING_MIN_SAMPLES` times unless `include_sparse=1` (the screen's `sparse=1` toggle) and return `rows_total` and `reliable_min_samples`, so the screen can say how many rows qualified and badge the thin ones. `compare_ranking` returns `rows_total` too, so the compare bars can say when the API's longest list still stops short of every compared route. `delay_certificate` returns `rows_total` as well, counted in the same scan, and its summary text and CSV footnotes say when `limit` left only the earliest trips listed. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
 | `useSuggestion(agencyId, exclude)` (drives `InsightPanel`) | `GET /api/{agency_id}/reports/suggest` (`api/routers/reports.py: get_suggestion`) | `pipeline/reports/suggest.py: compute_suggestion()` — a rule-based pick (anomaly over a 1-day window, or trend-shift/on-time over a 7-day window); polled every 5 minutes. |
-| `useForecastOverview(agencyId)` / `useForecastHeatmap(agencyId, route)` (both drive `RouteForecastSection`) | `GET /api/{agency_id}/forecast/overview` / `GET /api/{agency_id}/forecast/heatmap?route=...` (`api/routers/reports.py`) | Both re-pool `agg_route_hour_dow` on read (a seasonal-naive baseline, explicitly **not** a prediction — both responses carry a `disclaimer` string). `forecast/overview`'s route list additionally joins the last 7 analyzed days from `agg_route_daily` for each route's sparkline (best-effort — a failure there degrades to no sparklines rather than a 500). |
+| `useForecastOverview(agencyId)` / `useForecastHeatmap(agencyId, route)` (both drive `RouteForecastSection`) | `GET /api/{agency_id}/forecast/overview` / `GET /api/{agency_id}/forecast/heatmap?route=...` (`api/routers/reports.py`) | Both re-pool `agg_route_hour_dow` on read (a seasonal-naive baseline, explicitly **not** a prediction — both responses carry a `disclaimer` string). With the `ml_forecast` flag on (off by default), fresh `agg_route_forecast_ml` rows replace the matching cells, marked `source: "ml"`, and the disclaimer then says some cells are a forecast model's estimate. `forecast/overview`'s route list additionally joins the last 7 analyzed days from `agg_route_daily` for each route's sparkline (best-effort — a failure there degrades to no sparklines rather than a 500). |
 
 ## Key files
 
@@ -298,7 +304,7 @@ the scope as one sentence above their content
 | `pipeline/histogram.py` | Fixed-width histogram bucketing/percentile math, accepting custom `(lo, hi, width)` bounds so `pipeline/dwell_run.py` can reuse it with its own bucket scale |
 | `pipeline/reports/suggest.py` | `compute_suggestion()` — the Insight Panel's rule engine |
 | `pipeline/reports/forecast.py` | `summarize_agency_overview`, `summarize_expected_delay_heatmap`, `hourly_cells_to_dow_band` — shape the forecast endpoints' payloads |
-| `pipeline/analyze.py` | Builds every `agg_*` table the fast paths and forecast endpoints read, including `agg_route_daily_dwell_run` (`static_join` agencies with a static schedule loaded only) |
+| `pipeline/analyze.py` | Builds every `agg_*` table the fast paths and forecast endpoints read except `agg_route_forecast_ml` (loaded by `pipeline/ml_forecast_ingest.py`), including `agg_route_daily_dwell_run` (`static_join` agencies with a static schedule loaded only) |
 
 ## How to verify manually
 
@@ -341,14 +347,14 @@ the scope as one sentence above their content
    Open `/agencies/:agencyId/routes?sort=on_time` - expect `on_time` to be
    selected.
 4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select
-   exactly one route in the filter bar - expect the view to switch to the
+   exactly one route in the scope sentence - expect the view to switch to the
    per-route detail (band-collapsed grid, worst-window sentence).
-5. Change the filter bar's date range / dow / time_band - expect the
+5. Change the scope sentence's period / days / time - expect the
    selected report to refetch with new numbers.
 6. If the Insight Panel is visible (dev builds default it on; set
    `localStorage.transit.insightPanelEnabled = "1"` otherwise), click its
-   suggestion - expect navigation to the relevant report/route; dismiss it
-   and confirm it doesn't reappear this session.
+   suggestion - expect navigation to that route's dossier; go back and
+   confirm the same suggestion doesn't reappear this session.
 
 ## i18n
 

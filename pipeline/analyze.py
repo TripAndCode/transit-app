@@ -111,8 +111,8 @@ _SERVICE_DATE = service_date_ch()
 
 
 # The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
-# (see analyze()), because the dedup is the expensive full-partition scan+sort
-# and every aggregate built in Postgres below needs it. The dedup itself runs in
+# (see analyze()), because the dedup is the expensive scan and GROUP BY over
+# every date being rebuilt, and every aggregate built in Postgres below needs it. The dedup itself runs in
 # ClickHouse (build_dedup_ch_sql, the `updates` fact table's home) and its result
 # is bulk-loaded into the temp table those builders read; none of them reads
 # `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
@@ -176,8 +176,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
 # (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
 # survives `static_loader.load_static()` overwriting the raw static_* tables
-# on the next reload — see the migration's own docstring and the dedicated
-# section below for why deleting it every run would defeat its purpose.
+# on the next reload (db/migrations/0037_agg_static_version_summary.up.sql).
 
 # Aggregates built from the static schedule alone. Every column they read is
 # in _STATIC_DEPENDENCY_COLUMNS, plus constants the fingerprint covers via
@@ -1023,7 +1022,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     )
 
         # ── Materialise the deduped fact slice ──────────────────────────
-        # See the module-level note above _AGG_TABLES_ORDERED for what it holds.
+        # Every column, NULL-service rows included, for only the dates being rebuilt.
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
@@ -1241,8 +1240,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # merely filtered by an explicit `IS NOT NULL` (removing such a
             # filter alone does not fix this; the column itself must never be
             # NULL going into argMax). `coalesce(..., -1)` maps NULL to a
-            # sentinel outside the real value range (0/1/2 per GTFS-RT's
-            # ScheduleRelationship enum) so argMax always sees a real value
+            # sentinel outside the real value range (GTFS-RT's
+            # ScheduleRelationship enums are non-negative) so argMax always sees a real value
             # for every row and genuinely reflects the latest observation,
             # including a correction back to "not skipped/canceled". Applied
             # to both subqueries for the same reason, even though today's
@@ -1299,8 +1298,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # misread as a service-quality change. Independent of ingest_strategy
         # (unlike agg_service_delivered_daily) -- any agency whose strategy
         # joins static data at all (today: static_join) can populate this;
-        # an agency that never does (aomori_regex) or a day predating item
-        # 88's rollout simply has every row's static_version_id NULL, which
+        # an agency that never does (aomori_regex) or a day ingested before
+        # rows carried a version simply has every row's static_version_id NULL, which
         # the inner GROUP BY collapses to its own NULL-keyed group -- the
         # outer HAVING drops that group's day entirely rather than inserting
         # a NULL-version row, since a NULL isn't a "version" a boundary can
@@ -1343,8 +1342,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # visit's arrival minus the PREVIOUS visit's departure) -- see
         # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
         # arr_delay straight from _analyze_deduped (materialised once above)
-        # rather than running its own second ClickHouse scan -- see that
-        # section's own comment for why a second scan is deliberately avoided.
+        # rather than running its own second ClickHouse scan: the dedup is the
+        # expensive scan, so it runs once and every Postgres builder reads its result.
         # Requires BOTH a static schedule (arrival_time/departure_time come
         # from static_stop_times, which `has_static` alone confirms rows
         # exist for) AND an ingest strategy confirmed to send `arr_delay`
@@ -1484,7 +1483,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # stops × days, not by raw observation count, so it's safe to fetch
             # as one block (ch_client.query(), not the streaming reader
             # `_analyze_deduped` needs) even though the pre-aggregation GROUP BY
-            # underneath it scans the agency's full `updates` history.
+            # underneath it scans every `updates` row of the dates being rebuilt
+            # (the agency's whole history on a full rebuild).
             #
             # The per-event dedup is build_dedup_ch_sql's: implausible and NULL
             # delays are dropped BEFORE the latest-observation-wins argMax, so a
@@ -1601,9 +1601,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         else:
             logger.info("  agg_route_headway_daily: 0 rows (ingest_strategy != static_join)")
         # ── agg_static_version_summary (per-static-version planned trip count / vehicle-km) ──
-        # UPSERTed only for the CURRENTLY loaded static_version_id — see the
-        # migration's docstring and _AGG_TABLES_ORDERED's comment above for
-        # why this table is deliberately exempt from the wipe-and-rewrite
+        # UPSERTed only for the CURRENTLY loaded static_version_id. This table
+        # is deliberately exempt from the wipe-and-rewrite
         # loop every other agg_* table follows: a past version's row must
         # survive `static_loader.load_static()` overwriting the raw
         # static_trips/static_shapes rows on its next reload, or a
@@ -1621,8 +1620,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # a schedule has far more trips than shapes. A trip whose shape_id
         # doesn't resolve in static_shapes is excluded from the SUM
         # (undercounts rather than aborting), and the whole figure is NULL
-        # (not 0) when this agency has no shapes loaded for any trip at all —
-        # see the migration's own docstring.
+        # (not 0) when this agency has no shapes loaded for any trip at all:
+        # NULL reads as "not computable", never as zero planned distance.
         if has_static:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1645,8 +1644,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 )
                 version_row = cur.fetchone()
             static_version_id, trip_count, trips_with_shape, vehicle_km = version_row or (None, 0, 0, None)
-            # No backfill: a trip row inserted before migration 0036 (or by an
-            # ingest strategy that never sets static_version_id at all) has a
+            # No backfill: a trip row inserted before migration 0036 and not
+            # reloaded since (load_static stamps every row it writes) has a
             # NULL static_version_id, and MAX(...) over an all-NULL column is
             # NULL — there is no version key to upsert a row under, so this
             # agency simply gets no row here yet, same "not available until a

@@ -82,8 +82,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     )
 
     # One indexed read per agency (api.clickhouse.max_captured_at_before —
-    # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
-    # sync sibling; see its docstring) instead of `maxOrNull`, which is a
+    # same index-served ORDER BY ... LIMIT 1 form as
+    # pipeline.clickhouse.max_captured_at_before) instead of `maxOrNull`, which is a
     # full per-agency scan, materially slower than the indexed form.
     #
     # This probe backs ONLY the `is_stale` field below — every other field in

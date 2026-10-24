@@ -83,7 +83,7 @@ describe("NetworkTab", () => {
     expect(screen.getByText("10.0%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
     const staleBadge = screen.getByText("Behind");
     expect(staleBadge).toBeInTheDocument();
-    // Native title= was replaced by the shared, keyboard-reachable Tooltip.
+    // The badge explains itself through the shared, keyboard-reachable Tooltip, never a native title=.
     expect(staleBadge).not.toHaveAttribute("title");
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.focusIn(staleBadge);

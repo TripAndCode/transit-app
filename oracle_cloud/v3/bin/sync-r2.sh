@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # Mirror this collector's own data/<id>/{rt,static} straight to Cloudflare R2
-# (S3-compatible API) — replaces the old two-hop "workstation mirror"
-# (rsync down to a workstation via scripts/fetch_archives.sh, then
-# scripts/sync_archives_to_r2.sh) with a direct upload from the VM that
-# actually collects the data. Same bucket layout as that workstation
-# mirror (rt/<id>/, static/<id>/), so it continues the existing R2 archive
-# rather than starting a parallel one. `aws s3 sync` only transfers
+# (S3-compatible API), uploading directly from the VM that actually collects
+# the data. Same bucket layout (rt/<id>/, static/<id>/) as the workstation's
+# manual fallback (`make sync-r2`, scripts/sync_archives_to_r2.sh), so both
+# feed one R2 archive rather than parallel ones. `aws s3 sync` only transfers
 # new/changed objects, so reruns are cheap and idempotent. This script never
-# deletes anything; R2-side retention is bin/prune-r2.sh's job (it runs on
-# its own, much longer, cadence since R2 is the durable long-term archive —
+# deletes anything; R2-side retention is bin/prune-r2.sh's job (it keeps a
+# much longer retention window than prune.sh, since R2 is the durable long-term archive —
 # see that script), and bin/verify-r2.sh independently confirms what actually
 # landed in R2 is fresh and intact rather than trusting this script's own
 # exit status alone.
@@ -19,7 +17,7 @@
 #
 # One agency's sync failure (transient R2/network error) must not silently
 # skip every agency after it in the loop, since prune.sh's local deletion
-# now trusts this script to have mirrored everything first — so each `aws`
+# trusts this script to have mirrored everything first — so each `aws`
 # call is isolated (no bare `set -e` abort mid-loop) and failures are
 # collected, reported, and turned into a nonzero exit at the end instead.
 set -uo pipefail
@@ -39,8 +37,7 @@ LOCK_FILE="${SYNC_R2_LOCK:-$BASE_DIR/sync-r2.lock}"
 # a fully-successful run (see the end of this script), so prune.sh's
 # "R2 already has it" assumption is actually enforced, not just asserted
 # in a comment. A stale/missing marker means prune.sh must not trust that
-# assumption, even though nothing pages a human on that yet (see
-# crontab.snippet).
+# assumption, and health-check.sh pages a human when it goes stale or missing.
 OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 
 # Prevent an overlapping run (e.g. a slow first-time backlog upload still

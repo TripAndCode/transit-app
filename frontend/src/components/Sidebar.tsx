@@ -147,8 +147,8 @@ export function Sidebar() {
   // a single-match query while it is closed.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // Below BP.sm the rail's nav links move into a persistent bottom tab bar
-  // (thumb-reachable, and it gives the tab content back the width the rail
-  // used to take); this sheet holds what doesn't fit in the tab slots --
+  // (thumb-reachable, and it gives the tab content the width the rail
+  // would take); this sheet holds what doesn't fit in the tab slots --
   // the agency picker, the other destinations, the Other group and the
   // settings/account controls -- behind "…".
   const [moreOpen, setMoreOpen] = useState(false);

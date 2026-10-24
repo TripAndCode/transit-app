@@ -55,8 +55,7 @@ type AdminButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant: "primary" | "secondary" | "danger";
 };
 
-/** Shared row/toolbar action button for the admin section (Agencies/Users/
- *  Ops previously each left these as unstyled native <button>s). */
+/** Shared row/toolbar action button for the admin section. */
 export function AdminButton({ variant, className, type = "button", ...rest }: AdminButtonProps) {
   useAdminStyles();
   return <button type={type} className={`admin-btn ${variant} ${className ?? ""}`} {...rest} />;

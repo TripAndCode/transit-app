@@ -6,10 +6,10 @@ import type { Map as MLMap } from "maplibre-gl";
  *
  * `isStyleLoaded()` is false not only while a style loads but while its basemap
  * source tiles are still fetching. So right after a `setStyle()`'s one-shot
- * `style.load` fires, an overlay re-run can observe `isStyleLoaded() === false`
- * and — with the old `once("style.load", fn)` — wait for an event that already
+ * `style.load` fires, an overlay re-run can observe `isStyleLoaded() === false`,
+ * and a `once("style.load", fn)` would then wait for an event that already
  * fired and never comes again, leaving the overlay silently un-attached. Whether
- * it broke depended on tile speed (flaky: cached → fine, cold → blank).
+ * that bites depends on tile speed (flaky: cached → fine, cold → blank).
  *
  * We trigger on two events: `styledata` (fast — fires as the style/sources
  * settle, gated on `isStyleLoaded()`) and `idle` (reliable backstop — fires once

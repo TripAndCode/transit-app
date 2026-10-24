@@ -31,9 +31,8 @@ CRON_TZ=Asia/Tokyo
 # never as a further deletion. Idempotent: safe to run daily.
 20 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/spool-cleanup.sh  >> /home/opc/collector/cron.log 2>&1
 # prune.sh REFUSES to run (exit 65) unless sync-r2.sh's .sync-r2.last-ok
-# marker is fresh (see both scripts) -- replaces the old "workstation
-# mirror" (this repo's make fetch + make sync-r2) as prune's actual,
-# enforced parity gate, not just a documented assumption. That refusal is
+# marker is fresh (see both scripts) -- prune's actual, enforced parity
+# gate, not just a documented assumption. That refusal is
 # itself a nonzero exit, so the wrapper pages on it instead of letting a
 # real R2 outage show up only as prune.sh silently skipping its weekly run.
 30 9 * * 0  /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/prune.sh                  >> /home/opc/collector/cron.log 2>&1

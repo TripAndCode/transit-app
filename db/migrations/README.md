@@ -40,7 +40,8 @@ line itself must start with the marker after stripping leading whitespace.
 migration unless called with `force_destructive=True`; the CLI exposes this as
 `gtfs_pipeline.py migrate down --force-destructive`. The gate exists so an
 accidental or scripted rollback cannot discard data as a side effect — a
-destructive rollback has to be asked for explicitly, migration by migration.
+destructive rollback has to be asked for explicitly. One flag covers every
+marked migration down to `--target`; without it, nothing in the range runs.
 
 `tests/unit/test_migration_destructive_markers.py` holds every down file to this: one that drops a table or column, or deletes rows, outside the aggregate tables analyze rebuilds in full (the test's `_REBUILDABLE_AGG_TABLES`) must carry the line. Its classifier reads only some statement shapes, listed in `data_losing_tables`'s docstring; data loss through any other shape needs the line by hand.
 

@@ -102,9 +102,7 @@ _QUESTIONS: dict[str, str] = {
 # tests (tests/api/test_api_ask.py's
 # test_unrelated_question_with_unrelated_history_gets_fresh_tool_call) — the
 # scenario that actually tempts the model to answer from stale context
-# instead of dispatching a fresh tool call. See the module docstring's "Why
-# each question also carries a misleading prior turn" section for why this
-# is necessary.
+# instead of dispatching a fresh tool call.
 _MISLEADING_HISTORY: list[dict] = [
     {"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}},
 ]

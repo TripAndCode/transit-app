@@ -73,7 +73,7 @@ What the user sees/does:
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). **`peak_hour` is the one exception**: without a service filter it reads `agg_route_hour` (a fixed analyze-period rollup with no date column) regardless of the range, so it need not reflect "no data in this range" — `OverviewTab.tsx` deliberately excludes it from the empty-state check for this reason. A service filter is a set of dates, which that table cannot apply, so under one `peak_hour` reads what `peak_hour_by_dow` reads over the range instead. `peak_hour_by_dow` (used for the modal's weekday/weekend split) reads the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the live scan only under a `routes` or `time_band` filter. |
+| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). **`peak_hour` is the one exception**: without a service filter it reads `agg_route_hour` (a fixed analyze-period rollup with no date column) regardless of the range, so it need not reflect "no data in this range" — `OverviewTab.tsx` deliberately excludes it from the empty-state check for this reason. A service filter is a set of dates, which that table cannot apply, so under one `peak_hour` reads what `_peak_hour_by_dow()` reads over the range instead. `_peak_hour_by_dow()` (used for the modal's weekday/weekend split) reads the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the live scan only under a `routes` or `time_band` filter. |
 | `usePeakHourBreakdown(agencyId, hour, dow)` (fires only once an hour is clicked on the ribbon) | `GET /api/{agency_id}/peak-hour-breakdown` (`api/routers/overview.py: peak_hour_breakdown`) | `agg_route_hour_dow`, one row per route pooled across its raw service ids, and across DOWs when `dow` is omitted; routes with fewer than 3 samples are excluded. Returns up to 20 routes, worst avg delay first. |
 
 ## Key files
@@ -136,7 +136,7 @@ alone for single-origin):
    the larger variant of that module.
 5. Click an individual hour bar on the peak-hour ribbon — expect
    `PeakHourModal` to open with that hour's top routes.
-6. Change the filter bar's date range / dow / time_band / route selection —
+6. Change the scope sentence's period / days / time / routes —
    expect every module to refetch via `useOverviewSummary`.
 
 ## i18n
@@ -145,7 +145,7 @@ alone for single-origin):
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `nav.pulse` for the rail entry, and the shared
   `scope.*` namespace used by the scope sentence.
-- No server-side `_LOCALES` strings for this tab — `overview_summary`'s
-  `locale` parameter is reserved for future qualitative labels
-  (`api/routers/overview.py`'s docstring); today's payload is numeric/string
+- No server-side `_LOCALES` strings for this tab — `overview_summary` takes
+  no locale, since nothing in its payload is worded on the server
+  (`api/routers/overview.py`'s docstring); the payload is numeric/string
   data the frontend renders entirely through its own `t()` calls.

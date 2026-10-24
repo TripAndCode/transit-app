@@ -53,8 +53,8 @@ if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
 
 // jsdom implements neither IntersectionObserver nor ResizeObserver. These
 // defaults are inert (they never call back) so a component that observes an
-// element without checking for the class first mounts without throwing
-// instead of leaving the observed state permanently at its initial value. A
+// element without checking for the class first mounts without throwing,
+// its observed state left at its initial value. A
 // test that needs the observer to actually fire installs its own driveable
 // stub with `vi.stubGlobal` (see RevealSection.test.tsx, useInView.test.ts),
 // which overrides this default for that test and is restored by
@@ -89,11 +89,11 @@ if (typeof window !== "undefined" && typeof ResizeObserver === "undefined") {
 
 // vitest's jsdom environment wraps URL.createObjectURL to copy a jsdom Blob
 // into a Node Blob, reaching the bytes through an own Symbol property of the
-// jsdom wrapper. jsdom now keeps that implementation in a private class field,
+// jsdom wrapper. jsdom keeps that implementation in a private class field,
 // so the wrapper throws for every jsdom Blob: CSV downloads, and maplibre-gl,
 // which registers its worker bundle when the module is imported. No test reads
 // an object URL's contents back, so an opaque unique URL stands in whenever the
-// probe throws. Once the environment can convert jsdom Blobs again, the probe
+// probe throws. When the environment can convert jsdom Blobs, the probe
 // passes and the real implementation stays in place.
 if (typeof window !== "undefined") {
   try {

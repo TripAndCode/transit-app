@@ -11,8 +11,9 @@
 # file) exits nonzero. Unlike status-snapshot.sh, this DOES need R2
 # credentials of its own: nothing else in bin/ already computes a whole-bucket
 # object count/byte total, so this is the one script that lists R2 for that
-# purpose (sync-r2.sh/verify-r2.sh/reconcile-r2.sh only ever look at one
-# agency's or one object's own prefix, never the aggregate).
+# purpose (sync-r2.sh/verify-r2.sh only ever look at one agency's or one
+# object's own prefix; reconcile-r2.sh lists the whole bucket, but to classify
+# orphans, not to report usage).
 #
 # Disk usage is always live (a single `df` call), so its own state's
 # `last_success_at` is always "now" whenever `df` itself succeeds -- there is

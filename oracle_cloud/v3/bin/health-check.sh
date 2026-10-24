@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Collector health check — the one script that actively pages a human.
+# Collector health check — pages on what is actually on disk, and sends the
+# periodic all-clear.
 #
-# Every other script in bin/ reports trouble by writing to stderr, which cron
-# appends to cron.log, where it sits unread until someone goes looking. This
+# cron-wrap.sh pages only when a cron job exits nonzero, so a job that exits 0
+# while collecting nothing, or a stalled RT poller, goes unnoticed there. This
 # script instead re-derives, from what is actually on disk right now, whether
 # each configured agency is still producing data and whether R2 still holds a
 # confirmed-fresh mirror of it, and pings the alert endpoint with the specific

@@ -19,7 +19,7 @@ outputs:
     value: ${{ steps.publish.outputs.port }}
   container-name:
     description: >-
-      The resolved, run-unique container name. A caller that tears the
+      The resolved, per-scope container name. A caller that tears the
       container down must use this, not the prefix it passed in.
     value: ${{ steps.resolve.outputs.container-name }}
 

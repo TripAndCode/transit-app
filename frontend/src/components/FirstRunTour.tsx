@@ -74,7 +74,7 @@ export function FirstRunTour() {
   // dismissal the same way; treating it as "later" instead would bring the
   // tour back on the next mount for keyboard users only. The trap also owns
   // moving focus into the card and handing it back on dismissal, which is
-  // why `place` below no longer captures or moves focus itself.
+  // why `place` below never captures or moves focus itself.
   useFocusTrap(!dismissed, panelRef, finish);
 
   useLayoutEffect(() => {

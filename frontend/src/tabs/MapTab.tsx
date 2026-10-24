@@ -226,8 +226,8 @@ export function MapTab() {
   const liveQuery = useLiveTrips(id);
   // Ticks `now` only at the next moment a row would actually change bucket
   // (leave the live-rows age window, or move the header freshness badge),
-  // instead of polling every 15s and re-pushing the GeoJSON source on every
-  // tick regardless of whether anything crossed a boundary. Re-armed on
+  // instead of polling on a fixed interval and re-pushing the GeoJSON source on
+  // every tick regardless of whether anything crossed a boundary. Re-armed on
   // every fetch (liveQuery.data) since new rows shift where that boundary
   // is; the recursive schedule (rather than depending on `now`) keeps
   // re-arming itself between fetches without re-running this effect.
