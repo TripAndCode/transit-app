@@ -75,12 +75,11 @@ Each fit is scored with the mean model's forecast as the point, the median model
 
 ```
 cd /root/transit-app && set -a && . /etc/transit-ml/env && set +a
-ml="nice .venv/bin/python -m ml.cli"
-$ml snapshot-runs --out <dir>/runs.parquet
-$ml variant-eval --runs <dir>/runs.parquet --fit base --point mean --point q50 --out-dir <dir>/variants
-$ml variant-eval --runs <dir>/runs.parquet --fit clip --point mean --point q50 --out-dir <dir>/variants
-$ml variant-eval --runs <dir>/runs.parquet --fit huber --out-dir <dir>/variants
-$ml compare --dir <dir>/variants
+nice .venv/bin/python -m ml.cli snapshot-runs --out <dir>/runs.parquet
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit base --point mean --point q50 --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit clip --point mean --point q50 --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit huber --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli compare --dir <dir>/variants
 ```
 
 `compare` refuses variants scored on different origins. It writes `comparison.json` and `comparison.md` beside the variants: each variant's skill against B0 overall, per agency and by days ahead, RMSE, both intervals' coverage, its adoption verdict, and on how many origins it beats the `--baseline` variant (`base` by default).
