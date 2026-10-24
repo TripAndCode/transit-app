@@ -34,9 +34,9 @@ export const mermaidMarkdownComponents: Components = {
   code({ className, children, ...rest }) {
     if (isMermaidClassName(className)) {
       const source = codeToText(children);
-      // Keyed by source (see MermaidDiagram's own doc comment): switching to
-      // a different diagram remounts rather than reusing state across an
-      // unrelated `source`.
+      // Keyed by source: switching to a different diagram remounts
+      // MermaidDiagram, which clears its `svg`/`failed` state without a
+      // setState in its effect body (react-hooks/set-state-in-effect).
       return <MermaidDiagram key={source} source={source} />;
     }
     return (

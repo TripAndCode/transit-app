@@ -168,11 +168,9 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
     # wedged forever, which would silently skip every subsequent cron poke.
     # check_agg_freshness patched explicitly (matching
     # test_run_ingest_and_analyze_skips_deleted_agency above) rather than
-    # left to run for real against a bare MagicMock ch_client: it currently
-    # limps through only because MagicMock's auto-generated attributes
-    # happen to satisfy every access in pipeline.clickhouse.max_captured_at_before
-    # and is_stale, a fragile coincidence unrelated to what this test
-    # actually verifies (lock release).
+    # left to run for real against a bare MagicMock ch_client, which holds no
+    # real freshness data; that check is unrelated to what this test actually
+    # verifies (lock release).
     with (
         patch("pipeline.ingest.ingest_live") as fake_ingest,
         patch("pipeline.analyze.analyze") as fake_analyze,

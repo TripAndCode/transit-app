@@ -232,8 +232,10 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(warm_flags)
         _warn_if_login_gate_inactive(enabled)
         # Non-fatal: ClickHouse only backs a subset of routes (live and
-        # per-day reads, and narrowed-filter report fallbacks). Postgres-only routes (auth, admin, PostGIS
-        # heatmap, any time_band="all" report path reading agg_* tables) have
+        # per-day reads, narrowed-filter report fallbacks, and the admin
+        # board/ops freshness probe, which degrades without it). Postgres-only
+        # routes (auth, the rest of admin, PostGIS heatmap, any time_band="all"
+        # report path reading agg_* tables) have
         # nothing to do with ClickHouse and must keep working even if it's down
         # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
         # client that raises a clean 503 lazily, only if something actually
@@ -476,7 +478,7 @@ def _maybe_mount_static(app: FastAPI) -> None:
         # STATIC_DIR) is never served, regardless of what the build step
         # did or didn't clean up.
         # Trade-off: this blanket-blocks every dot-prefixed path segment, not
-        # just the .vite leak it was added for -- a future legitimate route
+        # just .vite/ -- a future legitimate route
         # (e.g. /.well-known/...) would silently get this 200 SPA shell
         # instead of the real file or a real 404. No such route exists today.
         if any(part.startswith(".") for part in full_path.split("/")):

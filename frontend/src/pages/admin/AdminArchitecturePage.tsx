@@ -8,9 +8,9 @@ import { mermaidMarkdownComponents } from "../../components/MarkdownMermaid";
 import { SidebarNavList } from "../../components/SidebarNavList";
 import { PageHeader } from "../../components/ui/PageHeader";
 
-// Rendered as a Mermaid flowchart rather than prose so it matches the
-// approved mockup's data-flow box. This is a MANUAL-SYNC reminder, not an
-// enforced one: AGENTS.md's own "Architecture pointers" section is
+// Rendered as a Mermaid data-flow flowchart rather than prose. This is a
+// MANUAL-SYNC reminder, not an enforced one: AGENTS.md's own
+// "Architecture pointers" section is
 // agent-facing prose, not a frontend asset, so there is no way to derive
 // this diagram from it at build or run time. If that section's data path,
 // DB split, or Ask-routing stages change, update the flowchart below by

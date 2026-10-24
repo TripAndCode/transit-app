@@ -160,7 +160,7 @@ PUBLICATION_WINDOW_DAYS = 5
 # Wall-clock budget for the cron path's weather pass. The cron path in
 # api.routers.internal runs this pass on its own connection, opened only
 # after the ingest+analyze advisory lock's connection has already closed --
-# so an overrun here can no longer hold that lock and starve a later cron
+# so an overrun here cannot hold that lock and starve a later cron
 # poke's live GTFS-RT polls. The budget still matters on its own terms: it
 # bounds how long one BackgroundTask invocation keeps running (and its
 # connection open) when a source is slow, rather than letting it run

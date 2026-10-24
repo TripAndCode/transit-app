@@ -25,7 +25,7 @@ function wrapper() {
     createElement(QueryClientProvider, { client }, children);
 }
 
-// Every query MapTab keeps mounted while a route is selected. They render
+// Every live query MapTab keeps mounted while a route is selected. They render
 // against one another on the same canvas — trip dots, the progress marker and
 // the stop-delay gradient — so one of them holding a value the others have
 // moved past reads as a bug in the map, not as a stale cache. `staleTime`

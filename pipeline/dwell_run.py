@@ -43,8 +43,9 @@ from pipeline.histogram import bucketize, n_buckets_for, percentile_from_hist
 # negative dwell reading is possible (arr_delay/dep_delay are independently
 # refining RT estimates, not a single atomic snapshot, so a later-polled
 # dep_delay can occasionally imply an earlier actual departure than the
-# arrival estimate) and lands in the underflow bucket rather than being
-# clamped or dropped.
+# arrival estimate) and is kept rather than clamped or dropped: it fills the
+# inner bins down to DWELL_LO, and only a reading below that lands in the
+# underflow bucket.
 DWELL_LO = -120
 DWELL_HI = 600
 DWELL_WIDTH = 30
@@ -54,9 +55,9 @@ DWELL_N_BUCKETS = n_buckets_for(lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
 # to several minutes depending on stop spacing, with a half-hour ceiling
 # before falling into overflow (long-haul express hops). A running time at
 # or below zero shouldn't happen in clean data (stops are ordered by
-# stop_sequence) but is possible from data anomalies and lands in the
-# underflow bucket like any other out-of-range reading, rather than being
-# silently dropped.
+# stop_sequence) but is possible from data anomalies; a negative one lands in
+# the underflow bucket like any other out-of-range reading (zero is the first
+# inner bin), rather than being silently dropped.
 RUN_LO = 0
 RUN_HI = 1800
 RUN_WIDTH = 60

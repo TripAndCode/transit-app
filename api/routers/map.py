@@ -232,7 +232,7 @@ async def _latest_route_observation(
 # level (like `_HEATMAP_CLUSTER_PROJECTION_SQL` below) so its shape, including
 # the plausibility clamp, is unit-testable without ClickHouse. Clamped the
 # same way `pipeline.db.build_dedup_ch_sql` clamps every averaged surface
-# (see `MAX_PLAUSIBLE_DELAY_SEC`'s docstring) even though this endpoint reports
+# (`pipeline.db.MAX_PLAUSIBLE_DELAY_SEC`) even though this endpoint reports
 # a single current value, not an average: a frozen feed can report the same
 # implausible reading either way -- map and aggregates must agree on
 # plausibility.
@@ -1037,10 +1037,8 @@ async def route_trips(
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (a date bound alone isn't enough
-    # while every agency's full history still fits inside the bound's
-    # window). See `_latest_route_observation` for the full existence-check
-    # and bound rationale.
+    # just a bounded-but-still-huge scan. See `_latest_route_observation` for
+    # the full existence-check and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     empty = RouteTripsResponse(
         date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE

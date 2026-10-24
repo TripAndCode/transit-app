@@ -132,8 +132,8 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // deliberately excluded: a link without dates asks for the rolling
     // default period, which a remembered fixed range must not replace.
     //
-    // Gated to `isFirstAttemptForScreen`, same as the ambiguity guard just
-    // above: beyond the first attempt, a field absent from `nextStored`
+    // Gated to `isFirstAttemptForScreen`, the case the ambiguity guard just
+    // above excludes: beyond the first attempt, a field absent from `nextStored`
     // reflects a real, later, in-session change (e.g. the user explicitly
     // clearing just `dow` while `from`/`to`/`time_band` stay put) that must
     // be allowed to stick, not be silently undone by resurrecting the old

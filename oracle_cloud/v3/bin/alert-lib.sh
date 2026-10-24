@@ -11,7 +11,7 @@
 # Env:
 #   ALERT_PING_URL  healthchecks.io check URL for collector health. Leaving it
 #                   unset is a supported configuration: alerting degrades to
-#                   the pre-existing log-only behavior and the caller's exit
+#                   log-only behavior and the caller's exit
 #                   status is unchanged, so a VM that has not been given a
 #                   check URL yet still runs normally instead of failing every
 #                   cron job on a missing variable.

@@ -498,8 +498,8 @@ def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float 
 # log. The first failure of each kind is a warning with its traceback — the
 # signal an operator needs — and the repeats that follow are debug until the
 # path succeeds again, which clears the state so a later outage is announced
-# afresh. Losing the failure entirely to `debug`, as this used to, is the other
-# way to get this wrong.
+# afresh. Losing the failure entirely to `debug` is the other way to get this
+# wrong.
 _SUGGEST_FAILING: set[str] = set()
 
 

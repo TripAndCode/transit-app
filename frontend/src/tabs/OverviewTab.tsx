@@ -93,14 +93,13 @@ export function OverviewTab() {
   // already disabled for a null id.
   if (agencyId == null) return null;
 
-  // movers is intentionally excluded here: since the retired MoversList/
-  // HeroSentence removal, movers no longer drives any main-view content
+  // movers is intentionally excluded here: it drives no main-view content
   // (it's only consumed inside ConcentrationBar). Checking it would let an
   // agency with movers but no other signal skip EmptyState and render a
   // hero row of "—" plus an empty routes list and no revealed sections.
-  // peak_hour is excluded for the same reason, but structurally: it reads
-  // agg_route_hour, a fixed analyze-period rollup with no date column (see
-  // pipeline/reports/overview.py's _peak_hour docstring), so it ignores
+  // peak_hour is excluded for the same reason, but structurally: without a
+  // service filter it reads agg_route_hour, a fixed analyze-period rollup with
+  // no date column (pipeline/reports/overview.py's _peak_hour), so it ignores
   // ctx's date range entirely and stays non-null for any range once an
   // agency has ever had data — it can never signal "no data in THIS range".
   const hasAnyData = (summary: NonNullable<typeof data>) =>

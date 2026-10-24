@@ -86,7 +86,7 @@ export default tseslint.config(
       // optimize), on top of the classic rules-of-hooks set. Its actual
       // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
       // at 'warn'; `npm run lint` runs with `--max-warnings 0`, so a
-      // bailout now fails the build instead of passing silently.
+      // bailout fails the build instead of passing silently.
       // `react-hooks/todo` (off by default upstream) reports syntax the
       // compiler has not implemented, such as a `try/finally` in a
       // component. The compiler then skips that whole component, so it is
@@ -189,8 +189,7 @@ export default tseslint.config(
           // (`"use client"`) *must* come first, so flagging the import after
           // it would demand a move with nowhere to move to. A re-export with
           // a source (`export { x } from "./x"`) is part of the same
-          // dependency list an import belongs to, which is how `import/first`
-          // treats it too.
+          // dependency list an import belongs to.
           selector:
             'Program > :not(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration, ExpressionStatement[expression.type="Literal"][expression.value=/^use /]) ~ ImportDeclaration',
           message: 'Move this import above the module\'s other top-level statements — imports are hoisted regardless of where they appear, so keep them together at the top.',
@@ -200,13 +199,10 @@ export default tseslint.config(
       // (e.g. `import { useMemo as m } from "react"`). Only matches *named*
       // imports (`importNames`) — a namespace import (`import * as React
       // from "react"`) isn't targeted by name, so this rule instead flags
-      // the whole `react` module the moment ANY of useMemo/useCallback/memo
-      // exist among its exports, regardless of whether the importing file
-      // actually uses them. No file uses `import * as React` today (grepped
-      // clean), so this causes no false positive now, but a future
-      // namespace import (e.g. for `React.forwardRef`) would fail here with
-      // a misleading "do not import useMemo/useCallback/memo" message even
-      // if it never touches them.
+      // every namespace import of `react`, regardless of whether the importing
+      // file actually uses useMemo/useCallback/memo. A namespace import (e.g.
+      // for `React.forwardRef`) fails here with a misleading "do not import
+      // useMemo/useCallback/memo" message even if it never touches them.
       'no-restricted-imports': [
         'error',
         {
@@ -227,9 +223,7 @@ export default tseslint.config(
       // otherwise slip past no-restricted-imports (a default specifier
       // resolves to the name `"default"`, which isn't in `importNames`).
       // Receiver-agnostic by design, since the property name itself is the
-      // signal; verified no existing `.memo`/`.useMemo`/`.useCallback`
-      // property access exists in frontend/src today, so this introduces no
-      // false positive. Does NOT catch a *dynamically computed* property
+      // signal. Does NOT catch a *dynamically computed* property
       // name (e.g. `x["use" + "Memo"]`) — an inherent ESLint static-analysis
       // limitation, not closeable without a custom scope-aware rule; this
       // requires deliberate obfuscation to hit, not an easy accidental
@@ -237,9 +231,8 @@ export default tseslint.config(
       // React imports — an unrelated future `.memo`/`.useMemo`/
       // `.useCallback` property (e.g. an unrelated memoization-cache object
       // or a GraphQL field literally named `memo`) would also trip this.
-      // No such usage exists today; if one is legitimately needed later,
-      // scope this rule to a receiver check or add a targeted
-      // eslint-disable with a one-line reason at that call site.
+      // If one is legitimately needed, scope this rule to a receiver check or
+      // add a targeted eslint-disable with a one-line reason at that call site.
       'no-restricted-properties': ['error', ...memoProperties, ...storageProperties],
       'no-restricted-globals': [
         'error',

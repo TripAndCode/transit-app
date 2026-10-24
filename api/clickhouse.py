@@ -48,7 +48,7 @@ async def get_ch_client():
             "max_execution_time": 30,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
-            # This process only ever SELECTs from `updates`/`updates_live` — every write/DDL
+            # This client only ever SELECTs from `updates`/`updates_live` — every write/DDL
             # path (ingest, analyze, bootstrap) goes through pipeline/clickhouse.py's
             # sync client instead. `readonly=2` (not 1) so the settings above
             # can still be applied per-query; `readonly=1` would reject those

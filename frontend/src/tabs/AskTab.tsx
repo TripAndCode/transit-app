@@ -140,8 +140,8 @@ export function AskTab() {
   // User-initiated filter edit. When an active thread exists, persist the new
   // filter to the conversation so subsequent 実行 calls dispatch with the
   // visible filter. The save promise is tracked so handleCardSubmit can await
-  // it — without that, an edit followed by an immediate 実行 raced the PATCH
-  // and the backend answered with the previous (stale) filter scope.
+  // it — without that, an edit followed by an immediate 実行 would race the
+  // PATCH and the backend would answer with the previous (stale) filter scope.
   // Resolves to whether the save landed; it never rejects, so a failed save
   // is reported once (as a failure banner) rather than as an unhandled
   // rejection.

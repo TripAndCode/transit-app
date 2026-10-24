@@ -4,11 +4,11 @@
 #
 # Required env vars:
 #   ORACLE_HOST      IP or hostname of the collection server
-#   ORACLE_USER      SSH user (e.g. opc)
 #   ORACLE_SSH_KEY   Base64-encoded private key  — OR —
 #   ORACLE_SSH_KEY_PATH  Path to private key file (used if ORACLE_SSH_KEY is not set)
 #
 # Optional:
+#   ORACLE_USER      SSH user                      (default: opc)
 #   ORACLE_RT_DIR    Remote RT archive directory   (default: /home/opc/app/transportation_analysis/archive)
 #   ORACLE_STATIC_DIR Remote static archive dir    (default: /home/opc/app/transportation_analysis/static_archive)
 #   LOCAL_RT_DIR     Local destination for RT      (default: ./raw_archives)

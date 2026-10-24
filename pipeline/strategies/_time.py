@@ -10,13 +10,13 @@ import re
 from typing import Literal
 
 # ONE parse: the extended-hour (>=24) decision and the zero-pad must never
-# disagree, which is what happened when static_join.py checked sched[:2] for
-# extended-hour and hour_str.isdigit() for padding separately -- a 3+ digit
-# hour token (e.g. "125:30:00") had a 2-char prefix under 24 and passed the
-# isdigit() pad unchanged, storing an unparseable value. [0-9], not \d:
-# str.isdigit()/\d both accept non-ASCII decimal digits (Unicode category Nd,
-# e.g. Arabic-Indic "٣") that int() can raise ValueError on for some code
-# points (e.g. superscript "²", category No, isdigit() True but int() raises).
+# disagree. Checking a 2-char hour prefix for extended-hour and isdigit() for
+# padding separately lets a 3+ digit hour token (e.g. "125:30:00") read as
+# under 24 and pass the pad unchanged, storing an unparseable value. [0-9], not
+# \d: the minute/second groups are stored verbatim, and \d also accepts
+# non-ASCII decimal digits (Unicode category Nd, e.g. Arabic-Indic "٣") that
+# would reach the downstream time cast; str.isdigit() further accepts code
+# points that int() raises ValueError on (e.g. superscript "²", category No).
 _GTFS_TIME_RE = re.compile(r"^([0-9]{1,2}):([0-5][0-9])(?::([0-5][0-9]))?$")
 
 Status = Literal["ok", "empty", "extended", "bad"]
@@ -35,7 +35,7 @@ def parse_departure_time(raw: str | None) -> tuple[str | None, Status, int | Non
     and is ``None`` only for ``"empty"``/``"bad"`` input that didn't parse
     as a time at all.
 
-    This is the ONE regex match (see module docstring): every caller that
+    This is the ONE regex match (see `_GTFS_TIME_RE`): every caller that
     needs the formatted string, the extended-hour decision, and/or the raw
     seconds value must go through this single parse, not repeat it, so the
     three can never disagree with each other.

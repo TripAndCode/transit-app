@@ -1239,8 +1239,8 @@ async def test_reports_unknown_agency_returns_404(reports_client):
 
 
 # ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
-# AttributeError from `ch.query(...)`. All six compute_* functions in
-# pipeline/reports/rankings.py accept ch=None (for fast-path-only callers);
+# AttributeError from `ch.query(...)`. Every compute_* function in
+# pipeline/reports/rankings.py accepts ch=None (for fast-path-only callers);
 # these guard the live branch instead of letting it fail deep inside
 # clickhouse_connect. No agg/ClickHouse seeding needed — the guard fires
 # before any query is issued.

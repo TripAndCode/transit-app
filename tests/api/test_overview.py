@@ -242,10 +242,9 @@ async def test_the_overview_never_holds_a_connection_while_it_waits_for_another(
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
     """An agency with no `updates` rows in range returns a zero-filled
     OverviewSummary, not a 404 or 500."""
-    # overview_summary() now declares ch=Depends(get_ch) alongside conn (Task
-    # 8.5's time_band live-fallback) — resolving it needs something present
-    # at app.state.ch_client. This test's default ctx never leaves the
-    # ctx.time_band == 'all' fast path, so None is a safe default here
+    # overview_summary() takes ch=Depends(get_ch); a None app.state.ch_client
+    # resolves to get_ch's lazy-503 stand-in, which this test's default ctx
+    # (the ctx.time_band == 'all' fast path) never touches
     # (same pattern as tests/api/test_reports.py's reports_app fixture).
     from api.main import app
 
@@ -1120,8 +1119,7 @@ async def test_service_split_ignores_the_service_id_and_sparkline_7_points(aconn
 async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aagency_id):
     """End-to-end: seed data, hit the endpoint, every top-level key present
     and headline shape is well-populated."""
-    # See test_overview_endpoint_returns_empty_payload_when_no_data's comment —
-    # default ctx (time_band == 'all') never needs a real ClickHouse client.
+    # The default ctx (time_band == 'all') never needs a real ClickHouse client.
     from api.main import app
 
     app.state.ch_client = None
@@ -2261,8 +2259,8 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
 
 # ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
 # AttributeError from `ch.query(...)`. These are the 3 spots in
-# pipeline/reports/overview.py that predate the shared _Grain/_require_grain
-# guard pattern. No agg/ClickHouse seeding needed — each guard fires before
+# pipeline/reports/overview.py that check `ch` themselves instead of using the
+# shared _Grain/_require_grain guard. No agg/ClickHouse seeding needed — each guard fires before
 # any query is issued.
 
 

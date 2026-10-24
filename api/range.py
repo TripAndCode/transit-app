@@ -153,14 +153,15 @@ def dow_isodays(dow: str) -> frozenset[int] | None:
     return frozenset(WEEKDAY_NAMES.index(name) + 1 for name in dow.split(","))
 
 
-# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
-# 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
-# sides of the comparison to TIME — these literals are sent over the wire as
-# text and cast server-side. '24:00' is a valid Postgres TIME (end-of-day).
+# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Postgres
+# `scheduled_time` is a TIME column, so `time_band_case_sql` casts these
+# literals to TIME: they are sent over the wire as text and cast
+# server-side. '24:00' is a valid Postgres TIME (end-of-day).
 #
-# Public because it is the single definition of the band grid: the Postgres
-# CASE (`time_band_case_sql`), the ClickHouse filter (`time_band_clause_ch`)
-# and pipeline/reports/filters.py's TIME-column filter all read it, and a
+# Public because it is the single definition of the band grid: analyze's
+# ClickHouse bucketing (pipeline/ch_aggregates.py), the Postgres CASE
+# (`time_band_case_sql`), the ClickHouse filter (`time_band_clause_ch`) and
+# pipeline/reports/filters.py's TIME-column filter all read it, and a
 # second copy would let analyze's bucketing drift from the query filters.
 TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
     "morning": ("05:00", "09:00"),
@@ -680,7 +681,7 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 # all and silently disappears from every time-band-filtered report.
 # `toUInt8OrNull` (not `toUInt8`) keeps a malformed or NULL scheduled_time
 # from aborting the whole query: it yields NULL, which the comparison then
-# excludes, exactly as an unparseable value was excluded before.
+# excludes.
 _CH_SAME_DAY_HHMM = (
     "concat(leftPad(toString(toUInt8OrNull(substring(scheduled_time, 1, 2)) % 24), 2, '0'), "
     "substring(scheduled_time, 3, 3))"
@@ -701,7 +702,7 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     shares exactly this filter instead of re-deriving the clock bounds.
 
     ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
-    (GTFS ``"HH:MM:SS"`` text — see the migration design doc), not a native
+    (GTFS ``"HH:MM:SS"`` text), not a native
     TIME column, so the comparison is a zero-padded lexicographic string
     range rather than a ``::time`` cast.
 
@@ -711,9 +712,8 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     ``"HH:MM:SS"`` (GTFS `departure_time` TEXT), but agency 1 (青森市バス,
     the `aomori_regex` ingest strategy — see
     pipeline/strategies/aomori_regex.py) writes 5-char ``"HH:MM"`` with no
-    seconds. Under the old Postgres `TIME` column this didn't matter
-    (Postgres normalizes both forms to the same internal value);
-    ClickHouse's `String` does not, so a raw compare of ``"09:00"``
+    seconds. A Postgres `TIME` column would normalize both forms to the
+    same internal value; ClickHouse's `String` does not, so a raw compare of ``"09:00"``
     against an 8-char bound like ``"09:00:00"`` is wrong — the 5-char
     form sorts as lexicographically LESS than its own 8-char equivalent,
     so every trip scheduled exactly on a band boundary (05:00, 09:00,
@@ -780,8 +780,9 @@ def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
 def time_band_case_sql(column: str) -> str:
     """SQL CASE mapping a TIME column to its `TIME_BAND_RANGES` band key.
 
-    Generated from `TIME_BAND_RANGES` so analyze's bucketing can never drift
-    from `time_band_clause_ch`'s filter. NULL / out-of-range -> 'none'.
+    Generated from `TIME_BAND_RANGES`, the grid analyze's ClickHouse bucketing
+    (pipeline/ch_aggregates.py) and `time_band_clause_ch`'s filter also read,
+    so none of them can drift. NULL / out-of-range -> 'none'.
     """
     arms = "\n".join(
         f"            WHEN {column} >= '{start}'::time AND {column} < '{end}'::time THEN '{band}'"

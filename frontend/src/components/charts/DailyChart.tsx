@@ -142,11 +142,10 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
   const linePts = days.map((d, i) => [padL + i * stepX, toY(d.avg_min ?? 0)] as [number, number]);
   // Trailing 7-day average sits ALONGSIDE the raw line (not a replacement) —
   // a low-traffic day's noisy raw figure is easier to read against a smooth
-  // reference. Absent entirely for week/month-bucketed series and for
-  // cached responses from before this field existed, so only draw it when
-  // at least one day actually has a value; missing individual days (rare —
-  // see compute_trend_series's docstring) are simply skipped rather than
-  // breaking the line at 0.
+  // reference. Absent entirely for week/month-bucketed series, so only draw
+  // it when at least one day actually has a value; missing individual days
+  // (rare — only when a day's whole trailing window has no samples) are
+  // simply skipped rather than breaking the line at 0.
   const smoothedPts = days
     .map((d, i) =>
       d.avg_min_smoothed != null ? ([padL + i * stepX, toY(d.avg_min_smoothed)] as [number, number]) : null,

@@ -159,7 +159,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
             # Inclusive day count from the earliest unaggregated day through
             # the newest completed one — e.g. a single day of unaggregated
             # data (earliest_day == live_day) is 1 day behind, not 0. Falls
-            # back to the old flat placeholder only if the earliest-day probe
+            # back to a flat 1-day placeholder only if the earliest-day probe
             # itself degraded to None (e.g. a ClickHouse hiccup for this one
             # agency), matching this function's usual "degrade, don't fail
             # the whole call" shape.
