@@ -84,9 +84,13 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
   last 14 days before the origin, never the origin's own partial day and never
   another agency's day. A target day with no such day is not forecast; it never
   falls back to the same weekday.
-- **A partial day** has fewer than half the route×hour slots of the median of the
-  agency's other days of its type in the last 28 days, and is passed over for
-  the next most recent day of its type.
+- **A partial day** is passed over for the next most recent day of its type. It
+  is one that both has fewer than half the route×hour slots of the median of the
+  agency's other days of its type in the last 28 days, and is cut off: its first
+  run starts, or its last run ends, 4 or more hours past those days' median. A
+  stopped feed or a missing archive cuts a day's span. A timetable cut thins the
+  day but keeps its first and last runs, so the reduced days stay complete and
+  become the templates.
 - **A stopped feed** is not forecast. An agency publishes only while its newest
   complete day is at most 2 days before the origin. The 10:30 sync has ingested
   every closed JST day, so a current feed's newest day is the day before; the

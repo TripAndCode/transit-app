@@ -89,7 +89,13 @@ _REFERENCE_DAYS = 28
 # captures). A second day absorbs one sync or upload that has not landed yet;
 # a newest complete day older than that means the feed or the replica stopped.
 _STALE_AFTER_DAYS = 2
+# A partial day is short of slots AND cut off: its first run starts, or its last
+# run ends, this many hours past the agency's typical one for its day type. A
+# stopped feed or a missing archive cuts a day's span; a timetable cut thins
+# the day but keeps its first and last runs, and a full day's ends wander by an
+# hour or two.
 _PARTIAL_SHARE = 0.5
+_CUT_OFF_HOURS = 4
 
 
 def template_span(origin: date, horizon_days: int = 7) -> tuple[date, date]:
@@ -122,7 +128,9 @@ def template_future_runs(
     from pipeline.day_types.load_day_types); an agency absent from it is typed
     by the weekday rule alone. A day is partial when it ran fewer than half the
     route x hour slots of the median of the agency's other days of its type in
-    the reference window, so a fragment never votes on what is typical. An
+    the reference window, so a fragment never votes on what is typical, and its
+    span is cut off at either end against those days' median first and last
+    hour. An
     agency whose newest complete day is older than origin-_STALE_AFTER_DAYS
     gets no template at all, so a feed that stopped stops being forecast."""
     t = pd.Timestamp(origin)
@@ -155,12 +163,22 @@ def _complete_days(agency_runs: pd.DataFrame, origin: pd.Timestamp, types: DayTy
         (agency_runs["service_date"] >= origin - pd.Timedelta(days=_REFERENCE_DAYS))
         & (agency_runs["service_date"] < origin)
     ]
-    slots = window[["service_date", "route_code", "hour"]].drop_duplicates().groupby("service_date").size()
-    kinds = pd.Series([types.of(day.date()) for day in slots.index], index=slots.index, dtype="object")
+    days = (
+        window[["service_date", "route_code", "hour"]]
+        .drop_duplicates()
+        .groupby("service_date")["hour"]
+        .agg(slots="size", first="min", last="max")
+    )
+    kinds = pd.Series([types.of(day.date()) for day in days.index], index=days.index, dtype="object")
     keep = []
-    for day, count in slots.items():
-        others = slots[(kinds == kinds[day]) & (slots.index != day)]
-        keep.append(others.empty or count >= _PARTIAL_SHARE * others.median())
+    for day, own in days.iterrows():
+        others = days[(kinds == kinds[day]) & (days.index != day)]
+        thin = not others.empty and own["slots"] < _PARTIAL_SHARE * others["slots"].median()
+        cut_off = (
+            own["first"] >= others["first"].median() + _CUT_OFF_HOURS
+            or own["last"] <= others["last"].median() - _CUT_OFF_HOURS
+        )
+        keep.append(not (thin and cut_off))
     return kinds[keep]
 
 

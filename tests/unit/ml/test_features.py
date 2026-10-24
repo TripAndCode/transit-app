@@ -138,11 +138,12 @@ def test_weekend_share_does_not_see_rows_on_or_after_the_origin():
 _TIMETABLE = {"weekday": "W", "saturday": "S", "sunday_holiday": "H"}
 
 
-def _timetable(first: date, last: date, *, agency_id: int = 8, slots: int = 4, short=None, only=None):
+def _timetable(first: date, last: date, *, agency_id: int = 8, slots: int = 4, short=None, only=None, hours=None):
     """An agency running, on every date of [first, last], the timetable the
-    weekday rule gives that date: `slots` hourly runs whose trip ids name the
-    timetable and the date (``W1016-6`` is 10/16's 06:00 weekday run), or
-    ``short[d]`` runs on a partial day. ``only`` keeps the dates of those
+    weekday rule gives that date: `slots` hourly runs from 06:00 whose trip ids
+    name the timetable and the date (``W1016-6`` is 10/16's 06:00 weekday run),
+    or ``short[d]`` runs on a day cut off early. ``hours`` replaces the hourly
+    runs with runs at those hours alone; ``only`` keeps the dates of those
     timetables alone."""
     short = short or {}
     rows = []
@@ -150,7 +151,7 @@ def _timetable(first: date, last: date, *, agency_id: int = 8, slots: int = 4, s
     while d <= last:
         kind = fallback_day_type(d)
         if only is None or kind in only:
-            for hour in range(6, 6 + short.get(d, slots)):
+            for hour in hours or range(6, 6 + short.get(d, slots)):
                 rows.append(
                     {
                         "agency_id": agency_id,
@@ -280,6 +281,34 @@ def test_a_partial_last_day_is_neither_a_template_nor_the_agencys_newest_complet
     template = template_future_runs(runs, date(2026, 10, 22), horizon_days=7)
     assert _sources(template, date(2026, 10, 23)) == {"W1020"}
     assert _sources(template, date(2026, 10, 28)) == {"W1020"}
+
+
+def test_a_day_that_starts_hours_late_with_few_slots_is_partial():
+    # Sat 10/24 has only its last 3 of 8 hours, as when the archive holding a
+    # service day's early hours never arrived.
+    runs = pd.concat(
+        [
+            _timetable(date(2026, 10, 11), date(2026, 10, 23), slots=8),
+            _timetable(date(2026, 10, 24), date(2026, 10, 24), hours=(11, 12, 13)),
+        ],
+        ignore_index=True,
+    )
+    template = template_future_runs(runs, date(2026, 10, 25), horizon_days=7)
+    assert _sources(template, date(2026, 10, 31)) == {"S1017"}
+
+
+def test_a_timetable_cut_that_keeps_its_span_is_not_partial():
+    # From Tue 10/13 (origin-9) weekdays run 4 of their 10 hours, from the same
+    # first to the same last run; weekends are unchanged. The agency is still
+    # current, and weekdays copy the reduced timetable.
+    before = _timetable(date(2026, 9, 24), date(2026, 10, 12), slots=10)
+    cut = _timetable(date(2026, 10, 13), date(2026, 10, 21), only={"weekday"}, hours=(6, 9, 12, 15))
+    weekends = _timetable(date(2026, 10, 13), date(2026, 10, 21), slots=10, only={"saturday", "sunday_holiday"})
+    runs = pd.concat([before, cut, weekends], ignore_index=True)
+    template = template_future_runs(runs, date(2026, 10, 22), horizon_days=7)
+    assert _sources(template, date(2026, 10, 23)) == {"W1021"}
+    assert len(template[template["service_date"] == pd.Timestamp(date(2026, 10, 23))]) == 4
+    assert _sources(template, date(2026, 10, 24)) == {"S1017"}
 
 
 def test_a_fragment_as_the_newest_day_does_not_keep_a_stopped_agency_current():
