@@ -186,9 +186,9 @@ async def _read_day_types(conn, agency_ids: Sequence[int], first: date, last: da
     return {agency_id: await load_day_types(conn, agency_id, first, last) for agency_id in agency_ids}
 
 
-def _calendar_day_types(agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
+def _calendar_day_types(database_url: str, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
     async def read() -> dict[int, DayTypes]:
-        conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+        conn = await asyncpg.connect(database_url)
         try:
             return await _read_day_types(conn, agency_ids, first, last)
         finally:
@@ -206,6 +206,9 @@ def _predict(args: argparse.Namespace) -> int:
     # Read and swap credentials before the heavy predict work, so a
     # misconfigured env fails fast instead of after it.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise SystemExit("DATABASE_URL must be set, not empty: predict reads the feed calendars from the replica")
     _use_store_credentials()
 
     # Imported here: they need the optional `ml` group, which sync and
@@ -231,7 +234,8 @@ def _predict(args: argparse.Namespace) -> int:
     # template_future_runs), not read from `runs` itself. An agency whose feed
     # stopped gets no template, so nothing is published for it.
     first, last = template_span(origin, HORIZON_DAYS)
-    day_types = _calendar_day_types(sorted(int(agency) for agency in runs["agency_id"].unique()), first, last)
+    agency_ids = sorted(int(agency) for agency in runs["agency_id"].unique())
+    day_types = _calendar_day_types(database_url, agency_ids, first, last)
     template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS, day_types=day_types)
     frame = build_frame(
         pd.concat([runs, template], ignore_index=True),

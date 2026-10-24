@@ -225,7 +225,7 @@ def _stub_predict(monkeypatch, raw, origin):
     calendar, `origin` as today. Returns the upload calls."""
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
-    monkeypatch.setattr("ml.cli._calendar_day_types", lambda agency_ids, first, last: {})
+    monkeypatch.setattr("ml.cli._calendar_day_types", lambda database_url, agency_ids, first, last: {})
     monkeypatch.setattr("ml.cli._today_jst", lambda: origin)
     calls = []
     monkeypatch.setattr("ml.cli._run", calls.append)
@@ -233,6 +233,7 @@ def _stub_predict(monkeypatch, raw, origin):
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     # Pre-registered so monkeypatch restores them: _use_store_credentials
     # writes os.environ directly (it must, to reach the real aws CLI), and
     # monkeypatch only undoes a variable it itself set.
@@ -284,6 +285,25 @@ def test_predict_publishes_nothing_for_an_agency_whose_data_stopped(tmp_path, mo
     out = tmp_path / "forecast.parquet"
     assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8", "--agency", "9"]) == 0
     assert set(pd.read_parquet(out)["agency_id"]) == {8}
+
+
+@pytest.mark.parametrize("database_url", [None, ""])
+def test_predict_without_a_database_url_fails_before_reading_the_replica(tmp_path, monkeypatch, database_url):
+    # An unset variable, or the empty one env.example ships for systemd.
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "meta.json").write_text("{}")
+    _stub_predict(monkeypatch, _runs(), START + timedelta(days=DAYS))
+    loads = []
+    monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: loads.append(agency_ids))
+    if database_url is None:
+        monkeypatch.delenv("DATABASE_URL")
+    else:
+        monkeypatch.setenv("DATABASE_URL", database_url)
+
+    with pytest.raises(SystemExit, match="DATABASE_URL"):
+        main(["predict", "--model", str(model_dir), "--out", str(tmp_path / "forecast.parquet")])
+    assert loads == []
 
 
 def test_sync_passes_the_operators_skipped_archives_to_the_replay(monkeypatch, tmp_path, capsys):
