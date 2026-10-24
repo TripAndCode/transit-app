@@ -204,11 +204,13 @@ def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["version"]
+    # A median-point model never needs, so never publishes, a mean booster.
+    assert meta["point"] == "q50" and not (out / "mean.txt").exists() and (out / "q0.5.txt").exists()
     assert (out / "routes.parquet").exists()
     assert len(calls) == 2  # upload_dir (the model) + upload_file (latest.json)
 
 
-def _publish_model(raw, model_dir):
+def _publish_model(raw, model_dir, point="q50"):
     from ml.features import route_ids, with_route_ids
     from ml.model_store import save_model_set
     from ml.models import ModelParams, fit_calibrated
@@ -218,8 +220,17 @@ def _publish_model(raw, model_dir):
     runs = with_route_ids(raw, routes)
     cutoff = START + timedelta(days=DAYS - 1)
     train = training_frame(runs, cutoff, window_days=28, half_life_days=28)
-    models = fit_calibrated(train, ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5), cutoff)
-    save_model_set(models, model_dir, version=cutoff.isoformat(), routes=routes, window_days=28)
+    params = ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5, point=point)
+    models = fit_calibrated(train, params, cutoff)
+    save_model_set(
+        models,
+        model_dir,
+        version=cutoff.isoformat(),
+        routes=routes,
+        window_days=28,
+        point=point,
+        clip_quantile=None,
+    )
 
 
 def _stub_predict(monkeypatch, raw, origin):
@@ -460,6 +471,7 @@ def test_train_fits_and_publishes_exactly_the_params_the_backtest_judged(tmp_pat
     out = tmp_path / "model"
     assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
     assert fitted == [judged]
+    assert (out / "mean.txt").exists()
     meta = read_meta(out)
     assert (meta["point"], meta["clip_quantile"], meta["window_days"]) == ("mean", 0.99, 21)
 
@@ -532,7 +544,7 @@ def test_predict_builds_features_with_the_clip_the_model_was_fit_with(tmp_path, 
 def test_a_model_published_without_point_or_clip_predicts_its_mean_unclipped(tmp_path, monkeypatch):
     raw = _runs()
     model_dir = tmp_path / "model"
-    _publish_model(raw, model_dir)
+    _publish_model(raw, model_dir, point="mean")
     _stub_predict(monkeypatch, raw, START + timedelta(days=DAYS))
     current = tmp_path / "current.parquet"
     assert main(["predict", "--model", str(model_dir), "--out", str(current), "--agency", "8"]) == 0

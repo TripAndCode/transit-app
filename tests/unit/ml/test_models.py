@@ -24,8 +24,9 @@ from ml.models import (  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
 START = date(2026, 6, 1)
-FAST = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=5, half_life_days=28)
-PRODUCTION_SCALE = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=100, half_life_days=28)
+# These test the mean model, so they ask for it as the point.
+FAST = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=5, half_life_days=28, point="mean")
+PRODUCTION_SCALE = ModelParams(rounds=60, num_leaves=7, min_data_in_leaf=100, half_life_days=28, point="mean")
 
 
 def _runs(days=70, seed=3):
@@ -172,7 +173,7 @@ def test_fit_calibrated_falls_back_at_production_scale_even_above_twice_min_data
     assert abs(by_route["LATE"] - by_route["EARLY"]) > 1.0  # not collapsed to one constant
 
 
-ROBUST = ModelParams(rounds=200, learning_rate=0.2, num_leaves=7, min_data_in_leaf=20, bagging_freq=0)
+ROBUST = ModelParams(rounds=200, learning_rate=0.2, num_leaves=7, min_data_in_leaf=20, bagging_freq=0, point="mean")
 
 
 def _outlier_frame(n=400, seed=0):
@@ -269,3 +270,26 @@ def test_a_record_that_is_missing_or_adds_a_fit_setting_is_refused(change):
     record = {key: value for key, value in record.items() if value is not ...}
     with pytest.raises(ValueError):
         ModelParams.from_record(record)
+
+
+def test_a_median_point_model_set_trains_no_mean_booster():
+    frame = _outlier_frame()
+    models = fit(frame, replace(ROBUST, point="q50"))
+    assert models.mean is None
+    preds = predict(models, frame)
+    assert preds.mean is None
+    np.testing.assert_array_equal(point_forecast(preds, "q50"), preds.q50)
+    with pytest.raises(ValueError, match="mean"):
+        point_forecast(preds, "mean")
+
+
+def test_the_mean_booster_is_trained_for_a_mean_point_or_when_a_caller_scores_the_mean():
+    frame = _outlier_frame()
+    median = replace(ROBUST, point="q50")
+    assert fit(frame, ROBUST).mean is not None
+    both = fit(frame, median, points=("mean", "q50"))
+    assert both.mean is not None
+    np.testing.assert_allclose(predict(both, frame).q50, predict(fit(frame, median), frame).q50)
+    # Every row held out for calibration: the fallback path fits the whole frame.
+    dated = frame.assign(service_date=pd.Timestamp(START))
+    assert fit_calibrated(dated, median, START, points=("mean",)).mean is not None

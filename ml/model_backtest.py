@@ -86,7 +86,7 @@ def run_backtests(
             continue
         age_days = (pd.Timestamp(cutoff) - train["service_date"]).dt.days
         train = train.assign(weight=(0.5 ** (age_days / params.half_life_days)).astype("float32"))
-        models = fit_calibrated(train, params, cutoff)
+        models = fit_calibrated(train, params, cutoff, points=points)
         seen = runs[runs["service_date"] <= pd.Timestamp(cutoff)].groupby("agency_id")["service_date"].nunique()
         on_model = {int(agency) for agency, days in seen.items() if days >= MIN_MODEL_DAYS}
         fallback |= all_agencies - on_model

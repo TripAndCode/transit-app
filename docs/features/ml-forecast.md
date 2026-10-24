@@ -96,6 +96,9 @@ Each cell's `mean_min` is the model's point forecast and `q10`/`q90` its interva
 each the mean over the cell's trips. The model's `meta.json` records the point it
 was adopted with and the history clip its features were built with, and `predict`
 uses both; a meta without them belongs to a model that shows its mean, unclipped.
+The mean model is trained, run and published only when something reads it: a
+model whose point is the median has no `mean.txt`, and a backtest trains it only
+when asked to score the mean (`variant-eval --point mean`).
 `predict` needs the target days' rows to already exist in `runs` to build their
 features, which ClickHouse's observed-only history never has for the future. It
 copies each future day's runs from a recent day of the same day type (weekday,

@@ -199,3 +199,29 @@ def test_the_point_forecast_is_the_median_unless_asked_for_the_mean():
     result = run_backtest(_runs(), params=FAST, origin_count=7)
     assert result.params["point"] == "q50"
     assert result == run_backtests(_runs(), params=FAST, origin_count=7, points=("q50",))["q50"]
+
+
+def _count_mean_boosters(monkeypatch):
+    import ml.models
+
+    objectives = []
+    real = ml.models.lgb.train
+
+    def spy(params, *args, **kwargs):
+        objectives.append(params["objective"])
+        return real(params, *args, **kwargs)
+
+    monkeypatch.setattr(ml.models.lgb, "train", spy)
+    return objectives
+
+
+def test_a_median_point_backtest_never_trains_the_mean_booster(monkeypatch):
+    objectives = _count_mean_boosters(monkeypatch)
+    run_backtest(_runs(), params=FAST, origin_count=10)
+    assert objectives and "regression" not in objectives
+
+
+def test_scoring_the_mean_trains_one_mean_booster_per_retrain(monkeypatch):
+    objectives = _count_mean_boosters(monkeypatch)
+    result = run_backtests(_runs(), params=FAST, origin_count=10, points=("mean", "q50"))["q50"]
+    assert objectives.count("regression") == len(result.cutoffs)

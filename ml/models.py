@@ -5,7 +5,7 @@ conformalized quantile regression. Needs the optional `ml` dependency group."""
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import date
 from typing import Any, Protocol
@@ -108,37 +108,47 @@ class Predictor(Protocol):
 
 @dataclass
 class ModelSet:
-    mean: Predictor
+    """`mean` is None for a set fit without the mean model: one whose point is
+    the median and that no caller asked to score the mean of."""
+
+    mean: Predictor | None
     quantiles: dict[float, Predictor]
     interval_shift: float = 0.0
 
 
 @dataclass(frozen=True)
 class Predictions:
-    mean: np.ndarray
+    mean: np.ndarray | None
     q10: np.ndarray
     q50: np.ndarray
     q90: np.ndarray
 
 
-def fit(frame: pd.DataFrame, params: ModelParams) -> ModelSet:
+def fit(frame: pd.DataFrame, params: ModelParams, *, points: Sequence[str] | None = None) -> ModelSet:
+    """`points` are the point forecasts the caller will read (params.point by
+    default). The mean model is trained only when one of them is the mean."""
     if frame.empty:
         raise ValueError("no training rows in this frame")
+    wanted = tuple(points or (params.point,))
+    for point in wanted:
+        _check_point(point)
     data = lgb.Dataset(
         frame[FEATURES],
-        label=_mean_target(frame, params),
+        label=frame[TARGET],
         weight=frame["weight"],
         categorical_feature=CATEGORICAL,
         free_raw_data=False,
     )
     base = params.booster_params()
-    mean = lgb.train({**base, **params.mean_objective_params()}, data, num_boost_round=params.rounds)
-    if params.clip_quantile is not None:
-        data.set_label(frame[TARGET])
     quantiles: dict[float, Predictor] = {
         alpha: lgb.train({**base, "objective": "quantile", "alpha": alpha}, data, num_boost_round=params.rounds)
         for alpha in QUANTILES
     }
+    mean: Predictor | None = None
+    if "mean" in wanted:
+        if params.clip_quantile is not None:
+            data.set_label(_mean_target(frame, params))
+        mean = lgb.train({**base, **params.mean_objective_params()}, data, num_boost_round=params.rounds)
     return ModelSet(mean=mean, quantiles=quantiles)
 
 
@@ -153,10 +163,18 @@ def _mean_target(frame: pd.DataFrame, params: ModelParams) -> pd.Series:
     return frame[TARGET].clip(lower=frame["clip_lo"], upper=frame["clip_hi"])
 
 
-def point_forecast(preds: Predictions, point: str) -> np.ndarray:
+def _check_point(point: str) -> None:
     if point not in POINTS:
         raise ValueError(f"point must be one of {POINTS}, not {point!r}")
-    return preds.mean if point == "mean" else preds.q50
+
+
+def point_forecast(preds: Predictions, point: str) -> np.ndarray:
+    _check_point(point)
+    if point == "q50":
+        return preds.q50
+    if preds.mean is None:
+        raise ValueError("these predictions come from a model set fit without its mean model")
+    return preds.mean
 
 
 def predict(models: ModelSet, frame: pd.DataFrame) -> Predictions:
@@ -169,7 +187,8 @@ def predict(models: ModelSet, frame: pd.DataFrame) -> Predictions:
     q50 = q[:, 1]
     lo = np.minimum(q[:, 0] - models.interval_shift, q50)
     hi = np.maximum(q[:, 2] + models.interval_shift, q50)
-    return Predictions(mean=np.asarray(models.mean.predict(data), dtype=float), q10=lo, q50=q50, q90=hi)
+    mean = None if models.mean is None else np.asarray(models.mean.predict(data), dtype=float)
+    return Predictions(mean=mean, q10=lo, q50=q50, q90=hi)
 
 
 def split_calibration(frame: pd.DataFrame, cutoff: date) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -200,7 +219,9 @@ def _min_rows_to_split(params: ModelParams) -> int:
     return floor
 
 
-def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> ModelSet:
+def fit_calibrated(
+    frame: pd.DataFrame, params: ModelParams, cutoff: date, *, points: Sequence[str] | None = None
+) -> ModelSet:
     """Training on a thin split collapses to one constant prediction with no
     signal; train on the whole frame uncalibrated (interval_shift stays 0.0)
     below _min_rows_to_split instead, the same as when the split leaves
@@ -209,8 +230,8 @@ def fit_calibrated(frame: pd.DataFrame, params: ModelParams, cutoff: date) -> Mo
     collapses either way; see _min_rows_to_split."""
     train, calib = split_calibration(frame, cutoff)
     if len(train) < _min_rows_to_split(params):
-        return fit(frame, params)
-    models = fit(train, params)
+        return fit(frame, params, points=points)
+    models = fit(train, params, points=points)
     if not calib.empty:
         preds = predict(models, calib)
         y = calib[TARGET].to_numpy(dtype=float)

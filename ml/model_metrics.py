@@ -16,7 +16,8 @@ CELL = ["agency_id", "route_code", "service_date", "hour", "h"]
 
 
 def take(preds: Predictions, index: np.ndarray) -> Predictions:
-    return Predictions(mean=preds.mean[index], q10=preds.q10[index], q50=preds.q50[index], q90=preds.q90[index])
+    mean = None if preds.mean is None else preds.mean[index]
+    return Predictions(mean=mean, q10=preds.q10[index], q50=preds.q50[index], q90=preds.q90[index])
 
 
 def add_intervals(model: IntervalStats, baseline: IntervalStats, frame: pd.DataFrame, preds: Predictions) -> None:
