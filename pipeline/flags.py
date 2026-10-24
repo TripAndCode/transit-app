@@ -469,10 +469,9 @@ async def aget_flag_state(key: str) -> FlagState:
 def flag(key: str, env_default: bool) -> bool:
     """Return the current value of the flag `key`.
 
-    `env_default` is the caller's own fallback literal, kept for parity with
-    the direct `os.environ.get(ENV_VAR, default)` this replaces; the
-    registry's `FlagDefinition.env_default` is the source of truth used to
-    build the admin API's response, and the two must agree (see
+    `env_default` is the caller's own fallback literal; the registry's
+    `FlagDefinition.env_default` is the source of truth used to build the
+    admin API's response, and the two must agree (see
     `test_registry_env_defaults_match_prior_hardcoded_defaults`).
     """
     return get_flag_state(key).value

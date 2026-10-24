@@ -18,7 +18,7 @@ import {
 import { ruleBody, decl } from "../test/cssRules";
 
 // Two distinct severe-color surfaces:
-//  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
+//  - `DELAY_RAMP.severe` / `delayColor(>=5)` return the LITERAL string
 //    "var(--delay-severe)" — for DOM/React consumers that render it into an
 //    inline `style` prop, where the browser cascade resolves it to the active
 //    theme's color for free (recolors on toggle, no re-render needed).
@@ -127,16 +127,13 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Design-token contract (global.css)
 //
 // These tokens are a shared vocabulary other stylesheets and components name
 // directly, so their presence and exact values are asserted against the
 // stylesheet source rather than a computed cascade (jsdom applies no author
 // CSS). Reading the file is the point: it is the single source of truth.
-// ---------------------------------------------------------------------------
-// `process.cwd()` is the `frontend/` package root under vitest; the module
-// URL is not a file: URL after vite's transform, so it cannot be used here.
+// `process.cwd()` is the `frontend/` package root under vitest.
 // Comments are stripped before parsing: prose explaining a token routinely
 // contains a `--token: value`-shaped phrase, and `decl()` would otherwise read
 // the sentence instead of the declaration.
@@ -393,9 +390,7 @@ describe("global reduced-motion regime", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Colour identity
-// ---------------------------------------------------------------------------
 
 /** Channel triple of a `#rrggbb` token value. */
 function rgb(hex: string): [number, number, number] {

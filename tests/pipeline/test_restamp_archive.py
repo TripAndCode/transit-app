@@ -35,7 +35,7 @@ def _row(file_name: str, captured_at: str, trip_id: str, header: int | None) -> 
 
 
 # (date dir, member name, header instant or None). Names are the UTC wall
-# clock rt-poller.sh writes; the old reading took them as JST.
+# clock rt-poller.sh writes, never JST.
 ARCHIVE_CASES = {
     "morning": ("20260905", "TripUpdate_054355.pb", "2026-09-05T05:43:50+00:00"),
     "next JST day": ("20260905", "TripUpdate_233000.pb", "2026-09-05T23:29:58+00:00"),

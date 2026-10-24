@@ -531,8 +531,8 @@ def test_oracle_collector_bash_suites_gate_every_pull_request() -> None:
 
     `ci.yml`'s top-level `on:` already covers `pull_request` for every job that
     carries no restriction of its own, so a job-level `if:` is the only thing
-    that could narrow this one back to merges only -- which is exactly the gap
-    issue #892 found, so it is checked explicitly rather than assumed absent.
+    that could narrow this one back to merges only, and it is checked
+    explicitly rather than assumed absent.
     """
     job = _workflow_yaml()["jobs"]["oracle-bash-tests"]
     assert any("scripts/run_oracle_tests.sh" in step.get("run", "") for step in job["steps"])

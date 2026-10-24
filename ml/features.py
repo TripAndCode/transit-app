@@ -94,8 +94,9 @@ _REFERENCE_DAYS = _TEMPLATE_LOOKBACK_DAYS + 7 * _PREVIOUS_DAYS
 # Any observed run counts, so no timetable change can silence an agency.
 _STALE_AFTER_DAYS = 2
 # A template must look like the previous days of its type: a day with fewer
-# than half their median slots, or whose first run starts or last run ends this
-# many hours past their median first or last hour, is partial. A full day's ends
+# than half their median slots, or whose first run starts this many hours after
+# their median first hour or last run ends this many hours before their median
+# last hour, is partial. A full day's ends
 # wander by an hour or two. Judging against only the last few days lets a
 # permanent timetable change become the norm once two days of it have run.
 _PARTIAL_SHARE = 0.5

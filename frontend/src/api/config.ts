@@ -8,7 +8,7 @@ type AppConfig = { auth_enabled: boolean; local_admin_enabled: boolean; login_re
  *  separately shows/hides the break-glass username/password form — the two
  *  are independent (a deployment can have either, both, or neither).
  *  Lets a network/HTTP error surface as `isError` rather than swallowing it
- *  into a fake "both false" success -- that used to hide every sign-in
+ *  into a fake "both false" success, which would hide every sign-in
  *  method behind an infinite staleTime with no way back short of a reload,
  *  indistinguishable from a deployment that genuinely has no SSO configured.
  *  `LoginPage` renders a retry fallback on `isError` instead.

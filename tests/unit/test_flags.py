@@ -325,10 +325,9 @@ def test_registry_keys_are_unique():
 
 
 def test_registry_env_defaults_match_prior_hardcoded_defaults():
-    """Locks each flag's fallback to the literal default its call site used
-    to pass to `os.environ.get(...)` before this task -- a silent flip here
-    would change production behavior for every deployment that has never
-    set the env var and never touched the admin UI."""
+    """Locks each flag's registry fallback to its call sites' literal default
+    -- a silent flip here would change production behavior for every
+    deployment that has never set the env var and never touched the admin UI."""
     expected_defaults = {
         "ask_router_enabled": True,
         "ask_llm_enabled": True,

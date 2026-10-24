@@ -65,9 +65,7 @@ from pipeline.stats import annotate_on_time_pct_confidence
 _JST = ZoneInfo("Asia/Tokyo")
 
 
-# ---------------------------------------------------------------------------
 # Localisation table
-# ---------------------------------------------------------------------------
 
 
 # Keyed by (template_name, locale). Values are ``str.format``-style
@@ -381,9 +379,7 @@ def unnamed_stop_name(stop_sequence: int, locale: str) -> str:
     return _summary("unnamed_stop", lang=locale, stop_sequence=stop_sequence)
 
 
-# ---------------------------------------------------------------------------
 # OpenAI-style function specs (v2 tool surface)
-# ---------------------------------------------------------------------------
 
 _DATE_OVERRIDE_PROPS = {
     "days_back": {
@@ -799,10 +795,9 @@ SYSTEM_PROMPT = """\
 # prompt describing BOTH response shapes measurably confused native
 # tool-calling on some tools: with both formats visible, the model would
 # occasionally echo this JSON shape as plain message content instead of
-# issuing a real tool_calls entry — reproduced deterministically at
-# temperature=0 for segment_hotspots/schedule_realism specifically before
-# this split (see pipeline/query/chat.py's ``use_cache`` branch for where
-# this is conditionally appended).
+# issuing a real tool_calls entry — reproducible at temperature=0 for
+# segment_hotspots/schedule_realism (see pipeline/query/chat.py's
+# ``use_cache`` branch for where this is conditionally appended).
 JSON_MODE_ADDENDUM = """\
 == Output format ==
 Return only a JSON object of this shape:
@@ -825,9 +820,7 @@ or omitted.
 """
 
 
-# ---------------------------------------------------------------------------
 # Tool handlers
-# ---------------------------------------------------------------------------
 
 
 def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
@@ -894,11 +887,11 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
 
     This is the long-lived registry check: it asks "does the agency operate
     this route?" and is true regardless of whether the requested time window
-    contains observations. The previous implementation conflated registry
-    membership with same-period data presence — so a perfectly valid route
-    surfaced "登録されていない" whenever the chosen window happened to be
-    empty (e.g. right after a TRUNCATE). Keep registry separate from period
-    data so the user sees the correct guidance.
+    contains observations. Conflating registry membership with same-period
+    data presence would make a perfectly valid route surface
+    "登録されていない" whenever the chosen window happens to be empty (e.g.
+    right after a TRUNCATE). Keep registry separate from period data so the
+    user sees the correct guidance.
 
     ``ch`` defaults to ``None`` for tests that never exercise the ClickHouse
     fallback (the static_routes / agg_route_daily checks above already cover
@@ -923,7 +916,7 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency_id/date/route_code/service_type) rather than going straight to a
     # live ClickHouse scan of `updates`: route_code there is the 3rd sort-key
     # column behind an unconstrained captured_at, so proving a route was
-    # never observed forces a full-column scan of the whole table. Most
+    # never observed forces a scan of the agency's whole history. Most
     # Ask-tab queries name a route that HAS
     # been analyzed at least once, so this fast path resolves the common case
     # without ever touching ClickHouse.
@@ -946,8 +939,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # analyze() simply hasn't caught up to yet.
     if ch is None:
         return False
-    # Bounded the same way api/routers/map.py's route-scoped fallback probes
-    # are: route_code sits behind an unconstrained captured_at in the sort
+    # Bounded for the same reason as api/routers/map.py's route-scoped fallback
+    # probes: route_code sits behind an unconstrained captured_at in the sort
     # key, so an unbounded scan for a route that genuinely doesn't exist
     # reads the whole agency partition — and this path is reached on
     # arbitrary, LLM/user-supplied route strings from the anonymous /ask
@@ -955,11 +948,10 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     #
     # The bound must NOT be derived from a fixed window or from the user's
     # ctx: this fallback exists ONLY to catch observations analyze() hasn't
-    # consumed yet for THIS agency (the comment above: "a route ingested but
-    # not yet analyzed"), not to re-scope registry membership to a time
-    # window — that is the exact conflation this function's docstring
-    # documents fixing once already ("a perfectly valid route surfaced
-    # 登録されていない whenever the chosen window happened to be empty"). A
+    # consumed yet for THIS agency, not to re-scope registry membership to a
+    # time window — that is the conflation this function's docstring rules
+    # out: a valid route reading as 登録されていない whenever the chosen
+    # window happens to be empty. A
     # fixed 30-day bound reintroduces it for any real route that simply
     # hasn't run in the last 30 days: still absent from agg_route_daily (this
     # code only runs on that miss) but now also excluded from the ClickHouse
@@ -973,7 +965,7 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # recorded was NULL/implausible delay (permanently invisible to
     # agg_route_daily's dedup filter, regardless of recency) still reads as
     # unregistered if its last observation predates the horizon. Accepted —
-    # narrower than the fixed-window regression it replaces, and any
+    # narrower than a fixed window's gap, and any
     # currently-running route (even all-NULL-delay) has captured_at near the
     # horizon regardless of its delay values.
     horizon = await conn.fetchval("SELECT max(date) FROM agg_route_daily WHERE agency_id=$1", agency_id)
@@ -1529,9 +1521,7 @@ async def dispatch(
         return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
 
 
-# ---------------------------------------------------------------------------
 # Rendering — the assistant bubble's text body
-# ---------------------------------------------------------------------------
 
 
 def render_tool_result(result: ToolResult, locale: str = "ja") -> str:

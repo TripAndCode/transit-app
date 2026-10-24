@@ -59,7 +59,7 @@ describe("OverviewTab", () => {
 
   it("shows the empty state when every real signal is empty, even though peak_hour is non-null", () => {
     // peak_hour reads a fixed analyze-period rollup with no date column
-    // (see pipeline/reports/overview.py's _peak_hour docstring) — it stays
+    // (agg_route_hour, read by pipeline/reports/overview.py's _peak_hour) — it stays
     // non-null for any date range once an agency has ever had data, so it
     // must NOT count as evidence that THIS range has data.
     renderOverview(

@@ -34,14 +34,15 @@ What the user sees/does:
   worst-avg-delay first, agencies with no data in range last
   (`byDelayDescending`), each showing: agency name (links to that
   agency's Live view, carrying the current scope minus its `routes` and
-  `stop` params, which name one agency's codes), avg delay (color
-  by `delayColor()`) + on-time % + service-delivered % (executed trips ÷
+  `stop` params, which name one agency's codes), avg delay + on-time % +
+  service-delivered % (executed trips ÷
   planned trips from the static GTFS schedule — reads "—" rather than a
   misleading 100% for an agency whose feed doesn't report cancellations),
-  a relative delay bar (scaled to the worst agency in the list), sample
-  count, and two optional flags: a red dot when `clamp_pct`
-  (implausible/clamped readings) is above 1%, and a "stale" badge when the feed
-  hasn't reported recently. The current agency's own card is visually
+  a delay bar on a fixed 0–6 minute axis shared by every card
+  (`DELAY_AXIS_MAX_MIN`, marked at 5 minutes) and colored by `delayColor()`,
+  sample count, and two optional flags: an amber (`--error-fg`) dot when
+  `clamp_pct` (implausible/clamped readings) is above 1%, and a "Behind" badge
+  (`network.stale_badge`) when the feed hasn't reported recently. The current agency's own card is visually
   highlighted with a "YOU" badge.
 - **Definition metadata block** (`DefinitionMetaBlock`, a collapsed
   `<details>` disclosure above the card list) — states the on-time/late
@@ -69,7 +70,7 @@ What the user sees/does:
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips from Postgres `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); reads `None` for an agency whose `ingest_strategy` isn't `static_join`, or that has no static schedule loaded. `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
+| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips from Postgres `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); reads `None` for an agency without a live, complete RT field-coverage verdict (`rt_field_coverage_confirmed_agencies()` in `pipeline/strategies/static_join.py`, which also requires `ingest_strategy` `static_join`), or that has no static schedule loaded. `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
 
 ## Key files
 
@@ -80,7 +81,7 @@ What the user sees/does:
 | `frontend/src/tabs/NetworkTab.tsx` | Network tab: date pickers, ranked card list rendering |
 | `frontend/src/tabs/CompareTab.tsx` | Compare screen: the `by` switch between this board and `compare_ranking` |
 | `frontend/src/routes/networkRedirect.tsx` | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |
-| `frontend/src/styles/tokens.ts` | `delayColor()` — shared warm-ramp coloring used by the delay value/bar |
+| `frontend/src/styles/tokens.ts` | `delayColor()` — shared warm-ramp coloring used by the delay bar |
 | `frontend/src/api/hooks.ts` | `useNetworkSummary` |
 
 **Backend**
@@ -121,9 +122,9 @@ What the user sees/does:
 5. Change the from/to date pickers — expect the URL's `from`/`to` to update
    and the whole list to refetch and re-rank (note: the figures do **not**
    honor the dow/service/time_band/route filters used elsewhere, by design).
-6. If any agency has a clamp rate above 1% or a stale feed, expect the red dot /
-   "stale" badge to render on that card; hover the badge for its tooltip
-   text.
+6. If any agency has a clamp rate above 1% or a stale feed, expect the amber
+   dot / "Behind" badge to render on that card; hover the badge for its
+   tooltip text.
 7. Visit the bare `/network` URL directly — expect an immediate redirect to
    `/agencies/{lastKnownAgencyId}/compare?by=agencies`.
 8. With no rows in `ridership_weights` for any agency, expect no
@@ -138,5 +139,6 @@ What the user sees/does:
 
 - Frontend strings live under the `network.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus the shared `common.range_separator` string used
-  in the coverage line.
+  `npm run lint:i18n`), plus the shared `common.date_range` string (through
+  `formatDateRange()` in `frontend/src/utils/format.ts`) used in the coverage
+  line.

@@ -88,8 +88,9 @@ nice .venv/bin/python -m ml.cli compare --dir <dir>/variants
 
 An adopted model is written to `/var/lib/transit-ml/model` and uploaded to R2 under
 `models/<version>/` plus a `models/latest.json` pointer, where `<version>` is the
-training cutoff date. The daily `predict` job loads whichever version
-`models/latest.json` names, forecasts each on-model agency's routes for the next
+training cutoff date. The daily `predict` job loads the model `train` last wrote
+to `/var/lib/transit-ml/model` (it does not read `models/latest.json`),
+forecasts each on-model agency's routes for the next
 `HORIZON_DAYS` days, and uploads the result as the latest published forecast.
 Each cell's `mean_min` is the model's point forecast and `q10`/`q90` its interval,
 each the mean over the cell's trips. The model's `meta.json` records the point it
@@ -119,7 +120,8 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
 - **A partial day** is never a template; the next most recent day of its type
   is used instead. A day is partial when, against the median of the previous 3
   days of its type, it has fewer than half the route×hour slots, or its first run
-  starts or its last run ends 4 or more hours past theirs. A stopped feed or a
+  starts 4 or more hours after theirs or its last run ends 4 or more hours before
+  theirs. A stopped feed or a
   missing archive leaves such a fragment. The reference reaches 5 weeks back, so
   even a Saturday at the far end of the 2-week lookback has 3 earlier Saturdays to
   be judged against; a day with no earlier day of its type in that window is not

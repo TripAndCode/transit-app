@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Publish status-snapshot.sh's last document to the VPS operations status
-# picture, over HTTPS to GitHub's `repository_dispatch` API -- never SSH, so
+# Publish one status document (ORACLE_STATUS_FILE: status-snapshot.sh's by
+# default, storage-metrics.sh's for the r2 heartbeat) to the VPS operations
+# status picture, over HTTPS to GitHub's `repository_dispatch` API -- never SSH, so
 # this never needs the Oracle collector's own SSH private key (or any copy of
 # it) to exist on the VPS at all. The VPS already has its own separate `gh`
-# authentication (used by its status collectors) to read `oracle-heartbeat-
-# listener.yml`'s run log back out, so nothing new needs to be granted on the
+# authentication (used by its status collectors) to read each listener
+# workflow's run log (oracle-heartbeat-listener.yml,
+# r2-storage-heartbeat-listener.yml) back out, so nothing new needs to be granted on the
 # VPS side either -- only this script's own GitHub token (unrelated to any
 # SSH key) is new, and it lives only on Oracle.
 #
@@ -15,9 +17,10 @@
 # push-equivalent access to this repo, not a heartbeat-only capability, and
 # must be handled with that same rigor (excluded from logs, rotated like any
 # other write credential).
-# Replay resistance: the receiving collector (`scripts/collect_oracle_status.py`)
-# never lets an older or repeated `observed_at` overwrite a newer one it already
-# accepted, so replaying a captured request can at best re-report a fact
+# Replay resistance: each receiving collector (`scripts/collect_oracle_status.py`,
+# `scripts/collect_r2_status.py`) never lets an older or repeated `observed_at`
+# overwrite a newer one it already accepted, so replaying a captured request can
+# at best re-report a fact
 # already on record -- it can never make stale data look fresh again. This
 # script's own job stops at delivering the document; it does not implement
 # that watermark itself.

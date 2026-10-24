@@ -17,18 +17,19 @@
 # than re-listing per file. A failed or partially uploaded archive (missing
 # from R2, or present with a mismatched size) is left in place for the next
 # sync-r2.sh run to retry: this script only ever deletes a file it has
-# itself just confirmed is byte-identical in R2.
+# itself just confirmed R2 holds at the same byte size.
 #
-# Full removal, not compaction: once a copy verified byte-identical to R2
-# exists, there is nothing left locally worth compacting -- removal reclaims
+# Full removal, not compaction: once R2 holds a copy verified to match in size,
+# there is nothing left locally worth compacting -- removal reclaims
 # all of that file's space, which any local compaction scheme could only do
 # partially.
 #
 # Never touches: the live (still-being-written) day directory (rotate-day.sh
 # only ever produces a *.tar.gz once a day is closed, so the glob below can
 # never match it), and the static latest.zip symlink target, which stays
-# regardless of whether R2 also has it -- deleting the live pointer would
-# break the static poller and health-check the same way prune.sh's own
+# regardless of whether R2 also has it -- deleting it would leave latest.zip
+# dangling, which health-check.sh reports as missing static GTFS and
+# prune-r2.sh treats as an unknown live target: the outcome prune.sh's own
 # keep-latest exception exists to prevent.
 #
 # Bounded by an explicit disk budget (SPOOL_DISK_BUDGET_BYTES, required): once
@@ -124,7 +125,7 @@ remaining_bytes=0
 
 # reclaim_or_keep <local-file> <r2-listing> <r2-prefix>
 # Removes <local-file> when <r2-listing> (the already-fetched listing of
-# <r2-prefix>, see r2_list) already holds a byte-identical object with the
+# <r2-prefix>, see r2_list) already holds a same-size object with the
 # same basename; otherwise leaves it in place (recoverable) and adds its size
 # to the running remaining_bytes total.
 reclaim_or_keep() {

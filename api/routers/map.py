@@ -208,6 +208,11 @@ async def _latest_route_observation(
     Probes `updates_live` first, so a route running today answers from
     today, then `updates`, so one that is not answers from its latest
     closed day.
+
+    The Postgres precheck comes first because the date bound alone does not
+    make a miss cheap: route_code sits behind captured_at in the ClickHouse
+    sort key, so proving a route has no rows in the window still reads the
+    agency's whole window.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
@@ -232,7 +237,7 @@ async def _latest_route_observation(
 # level (like `_HEATMAP_CLUSTER_PROJECTION_SQL` below) so its shape, including
 # the plausibility clamp, is unit-testable without ClickHouse. Clamped the
 # same way `pipeline.db.build_dedup_ch_sql` clamps every averaged surface
-# (see `MAX_PLAUSIBLE_DELAY_SEC`'s docstring) even though this endpoint reports
+# (`pipeline.db.MAX_PLAUSIBLE_DELAY_SEC`) even though this endpoint reports
 # a single current value, not an average: a frozen feed can report the same
 # implausible reading either way -- map and aggregates must agree on
 # plausibility.
@@ -291,10 +296,9 @@ async def live_delays(
     for r in rows_result.result_rows[:limit]:
         row = dict(zip(rows_result.column_names, r, strict=True))
         row["captured_at"] = _as_utc(row["captured_at"])
-        # scheduled_time's wire format used to be uniform (Postgres TIME ->
-        # "HH:MM:SS" for every agency); now it's whatever the ingest strategy
-        # stored ("HH:MM" for aomori_regex, "HH:MM:SS" for static_join).
-        # Restore the original "HH:MM:SS" contract for every agency.
+        # scheduled_time arrives as whatever the ingest strategy stored
+        # ("HH:MM" for aomori_regex, "HH:MM:SS" for static_join); the response
+        # contract is "HH:MM:SS" for every agency.
         if row["scheduled_time"] is not None and len(row["scheduled_time"]) < 8:
             row["scheduled_time"] = f"{row['scheduled_time']}:00"
         out_rows.append(row)
@@ -1038,10 +1042,8 @@ async def route_trips(
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (a date bound alone isn't enough
-    # while every agency's full history still fits inside the bound's
-    # window). See `_latest_route_observation` for the full existence-check
-    # and bound rationale.
+    # just a bounded-but-still-huge scan. See `_latest_route_observation` for
+    # the full existence-check and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     empty = RouteTripsResponse(
         date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE

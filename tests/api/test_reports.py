@@ -748,8 +748,8 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
 @pytest.mark.asyncio
 async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     """NULL-service routes (広島's unmatched rows) must still appear in dow —
-    agg_daily_trend keeps them via the '' sentinel, mapped back to None. Guards
-    the regression where the typed-dedup agg dropped whole routes."""
+    agg_daily_trend keeps them via the '' sentinel, mapped back to None. A
+    typed-dedup aggregate that drops whole routes fails here."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "R_NULL", None, "2026-05-23", [300] * 15)
     _run_analyze(agency_id, ch_client)
@@ -1238,14 +1238,12 @@ async def test_reports_unknown_agency_returns_404(reports_client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
-# AttributeError from `ch.query(...)`. All six compute_* functions in
-# pipeline/reports/rankings.py accept ch=None (for fast-path-only callers);
+# AttributeError from `ch.query(...)`. Every compute_* function in
+# pipeline/reports/rankings.py accepts ch=None (for fast-path-only callers);
 # these guard the live branch instead of letting it fail deep inside
 # clickhouse_connect. No agg/ClickHouse seeding needed — the guard fires
 # before any query is issued.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1603,7 +1601,6 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
     assert offender["avg_min"] == 1.0  # NOT the buggy 0.5 from counting the NULL date's samples
 
 
-# ---------------------------------------------------------------------------
 # GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
 # tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_
 # to_ch already expect) rather than app.state.ch_client: compute_suggestion's
@@ -1611,7 +1608,6 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
 # fast path and never touch `ch` at all -- app.state.ch_client stays at
 # reports_app's default None, and get_ch's lazy-503 stand-in is never
 # exercised.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1864,11 +1860,10 @@ async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_clien
     assert r["run_avg_sec"] == pytest.approx(245.0)
 
 
-# ---------------------------------------------------------------------------
 # council_summary / delay_certificate
-# ---------------------------------------------------------------------------
+#
 # The report list itself is covered by test_reports_list_returns_static_metadata
-# above (now asserting the full 11-type set), so no separate listing test here.
+# above, which asserts the full 11-type set, so no separate listing test here.
 
 
 @pytest.mark.asyncio

@@ -34,8 +34,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Every path in .gitleaks.toml's allowlist under the "BYOK / key-storage
 # flows" comment. Kept as a literal, separate list here (rather than parsed
-# out of .gitleaks.toml) so this test still fails loudly -- "path not
-# found in .gitleaks.toml" -- if the two ever drift apart, instead of
+# out of .gitleaks.toml) so test_reviewed_paths_match_gitleaks_toml_byok_allowlist
+# still fails loudly if the two ever drift apart, instead of
 # silently reviewing a file that isn't actually exempted (or missing one
 # that newly is).
 #

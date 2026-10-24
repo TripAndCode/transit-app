@@ -48,13 +48,16 @@ returns to `:5173` instead of `:8000`.
 The bootstrap database is empty. Choose one path:
 
 ```bash
-# Fallback: load each agency's timetable, sample the current agency feeds,
-# then build every agency's aggregates.
+# Fallback: load each agency's timetable, sample the current agency feeds into
+# updates_live, then build every agency's aggregates. A sample reaches agg_*
+# only once its service day closes and the promotion sweep (the cron poke, or
+# an admin ingest run) copies it into updates.
 poetry run python gtfs_pipeline.py refresh-static
 poetry run python gtfs_pipeline.py ingest_live
 make analyze-all
 
-# Primary development path: replay dense archives from the Oracle collector.
+# Or replay the archives the Oracle collector still holds (the days it has not
+# uploaded to R2 yet).
 make fetch-ingest
 ```
 
@@ -73,10 +76,14 @@ poetry run python gtfs_pipeline.py add_agency \
 
 The admin agencies page's 再集計 and まとめて更新 read the agency's live feed,
 which carries only the present moment, so neither fills a past day. Past days
-come from the collector's daily archives:
+come from the collector's daily archives. The collector VM deletes each archive
+once R2 holds it, so `make fetch-ingest` (and its `SINCE`) reaches only the days
+not uploaded yet; sync older days from the bucket's `rt/<id>/` prefix with the
+`aws s3 sync` recipe in the Makefile's comment above `fetch`, then run
+`make ingest` and `make analyze` on them.
 
 ```bash
-SINCE=20260917 make fetch-ingest   # fetch and ingest archived days from that date on
+SINCE=20260917 make fetch-ingest   # fetch and ingest the days still on the VM from that date on
 make check-aggs                    # confirm the aggregates reach the newest day
 ```
 
@@ -137,9 +144,10 @@ FastAPI + React SPA  <-------------------------------------------------+
   may read ClickHouse directly.
 - `analyze` computes the tables in `pipeline/ch_aggregates.py`'s
   `COPIED_TABLES` in ClickHouse, stores them there and copies them into
-  Postgres; the whole-history ones are finalized from a ClickHouse-only table
-  of delay counts. Those that join the static schedule read `analyze`'s
-  ClickHouse copy of it, `static_stop_times`, refreshed when the schedule
+  Postgres; the whole-history ones are finalized from ClickHouse-only tables
+  of delay counts and of the stop-route pairs each date observed. Those that
+  join the static schedule read `analyze`'s ClickHouse copy of it,
+  `static_stop_times`, refreshed when the schedule
   changes. It builds the rest in Postgres. A ClickHouse that predates one of
   those tables needs `make ch-bootstrap` before the next `analyze`.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
@@ -294,9 +302,9 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   belongs to a real OAuth-linked account, so a collision just logs an error
   and leaves that account untouched.
 - `OPS_STATUS_REPO`: the git checkout the admin board's `github` collector
-  reads, when it differs from their built-in default path. Unset
-  on a host where that path doesn't exist and every collector tile on the
-  board reads `unknown` rather than a real status.
+  reads, when it differs from its built-in default path. Unset
+  on a host where that path doesn't exist and the board's `github` tile
+  reads `unknown` rather than a real status.
 - `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
 
 ### Feature kill switches
@@ -334,7 +342,8 @@ configured.
 historical baseline.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
-can sign in, so the login gate stays open and every page works signed out. Do not
+can sign in through SSO (only the break-glass account, when it is set), so the
+login gate stays open and every page works signed out. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
 
 ### Secret scanning
@@ -346,8 +355,8 @@ its own after a clean checkout, a new machine, or a VPS clone — worktrees of t
 same clone share one `.git/hooks` directory, so one run covers all of them.
 `make doctor` reports whether the hook is currently installed. `make
 verify-secrets` runs the same scanner against the full git history on demand,
-and CI's `secrets-scan.yml` runs it again on every push/PR as a backstop for
-commits made without the hook installed.
+and CI's `secrets-scan.yml` runs it again on every pull request and push to
+`main` as a backstop for commits made without the hook installed.
 
 ## Deployment
 

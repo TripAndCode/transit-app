@@ -68,12 +68,10 @@ def live_table_for(day: date, *, now: datetime | None = None) -> str:
 # file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
 # explicitly, so clickhouse-connect maps by name, not position.
 #
-# The 5 entries stop_id .. feed_timestamp were added after the original 9,
-# and scheduled_sec / static_version_id after that -- a row tuple shorter
-# than this list (the original 8-element parse_feed shape, still used by
-# plenty of tests/fixtures that predate these fields) is right-padded with
-# NULLs for the trailing ones in insert_updates, rather than requiring every
-# caller to be rewritten just to add trailing, currently-unread columns.
+# A row tuple shorter than this list (minus agency_id) -- aomori_regex's
+# 13-tuple, or the 8-element shape many test fixtures build -- is right-padded
+# with NULLs for the trailing columns in insert_updates, rather than requiring
+# every caller to grow its tuple in lockstep with this list.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",

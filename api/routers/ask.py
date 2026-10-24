@@ -355,9 +355,7 @@ async def ask(
     return resp
 
 
-# ---------------------------------------------------------------------------
 # Build-schema metadata
-# ---------------------------------------------------------------------------
 
 # Tools that are useful in the guided builder UI.  capabilities and route_meta
 # are excluded: capabilities is a discovery tool, route_meta requires a route
@@ -467,9 +465,7 @@ async def ask_build_schema(
     return {"tools": tools_out}
 
 
-# ---------------------------------------------------------------------------
 # Suggest endpoint
-# ---------------------------------------------------------------------------
 
 
 class AskSuggestion(BaseModel):
@@ -502,8 +498,8 @@ def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float 
 # log. The first failure of each kind is a warning with its traceback — the
 # signal an operator needs — and the repeats that follow are debug until the
 # path succeeds again, which clears the state so a later outage is announced
-# afresh. Losing the failure entirely to `debug`, as this used to, is the other
-# way to get this wrong.
+# afresh. Losing the failure entirely to `debug` is the other way to get this
+# wrong.
 _SUGGEST_FAILING: set[str] = set()
 
 
@@ -577,9 +573,7 @@ async def ask_suggest(
     return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
 
 
-# ---------------------------------------------------------------------------
 # Edit-action endpoint
-# ---------------------------------------------------------------------------
 
 
 class EditActionRequest(BaseModel):

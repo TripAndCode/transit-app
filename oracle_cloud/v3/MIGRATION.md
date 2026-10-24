@@ -18,7 +18,7 @@ Hiroshima (8/9/10) static IS collected on the VM via `direct_url` curl.
 - [ ] Create 4 checks at https://healthchecks.io (period 10 min, grace 5 min); note ping URLs.
 - [ ] Create a 5th "collector health" check (period 1 h, grace 30 min) for
       `ALERT_PING_URL` — see [11. Alerting](#11-alerting).
-- [ ] `feat/collector-v3` merged; `oracle_cloud/v3/` present on workstation.
+- [ ] `oracle_cloud/v3/` present on workstation.
 
 ## 1. Install tree (no impact on running v1)
     # from workstation repo root:
@@ -90,10 +90,9 @@ confirm the marker is from this morning:
     ls -l /home/opc/collector/.sync-r2.last-ok
 
 ## 9b. Direct-to-R2 sync
-`bin/sync-r2.sh` now runs daily in cron (see `crontab.snippet`), mirroring
-this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 — no more
-manual `make fetch` + `make sync-r2` from a workstation as prune's parity
-gate. `prune.sh` now also refuses to run (exit 65) unless sync-r2.sh's
+`bin/sync-r2.sh` runs daily in cron (see `crontab.snippet`), mirroring
+this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 as prune's
+parity gate. `prune.sh` refuses to run (exit 65) unless sync-r2.sh's
 `.sync-r2.last-ok` marker is fresh, so the parity gate is enforced in code,
 not just documented here.
 
@@ -133,7 +132,7 @@ entry runs immediately once the snippet is installed, so `SPOOL_DISK_BUDGET_BYTE
 must be set in `/etc/environment` alongside the `OBJECT_STORE_*` vars *before*
 running `crontab /home/opc/crontab.snippet` (step 5), not after.
 
-Known gap, unchanged from before: agency 1 (Aomori) has no `static_url` in
+Known gap: agency 1 (Aomori) has no `static_url` in
 `agencies.tsv` (see the note at the top of this file), so this VM never
 collects new Aomori static GTFS at all — sync-r2.sh only mirrors what the
 VM actually has, so agency 1's R2 `static/1/` prefix stays exactly as
@@ -145,8 +144,9 @@ GTFS still needs its own refresh path if that gap matters.
 
 ## 9c. Continuous Oracle -> application ingest
 
-The pollers can stream every successful protobuf to the running API, which is
-the path used when ClickHouse is local today or hosted on Railway later. Set
+Each poller can push a successful protobuf to the running API every
+`COLLECTOR_INGEST_INTERVAL_SEC` (default 300 s; set it equal to the poll
+interval to push every poll). Set
 the same secret on the API and Oracle, and set the Oracle URL to the API's
 reachable base path (without `/updates`):
 
@@ -166,7 +166,7 @@ Then reinstall the unit, reload systemd, and restart all active pollers:
 Each 2xx response means the payload reached `updates_live`, not `updates`:
 history comes from the daily promotion (`POST /internal/cron/ingest`), which
 copies each closed JST day out of `updates_live` into `updates`/`agg_*`. A
-failed push is logged but does not stop polling; the next successful poll
+failed push is logged but does not stop polling; the next due push
 supplies a new snapshot. The endpoint is authenticated and deduplicates
 retries by the collector's source filename.
 
@@ -183,11 +183,12 @@ which report to the single "collector health" check:
     # on VM, /etc/environment (cron does not source ~/.bashrc):
     ALERT_PING_URL=https://hc-ping.com/<collector-health-uuid>
 
-`cron-wrap.sh` wraps every cron job and pings `<url>/fail` with the job's exit
-status and output tail when one fails. `health-check.sh` runs every 30 min and
+`cron-wrap.sh` wraps every cron job except `health-check.sh` and pings
+`<url>/fail` with the job's exit status and output tail when one fails.
+`health-check.sh` runs every 30 min, unwrapped, and
 pings the bare URL when everything is fresh, `<url>/fail` with the specific
 reasons when it is not. Leaving `ALERT_PING_URL` unset is supported and keeps
-the previous log-only behavior — nothing fails, nothing pages.
+the collector log-only — nothing fails, nothing pages.
 
 Thresholds are env-overridable in `/etc/environment` (defaults in
 `health-check.sh`); `SYNC_R2_MAX_STALE_DAYS` is deliberately shared with
@@ -238,9 +239,9 @@ Provisioning: add `ORACLE_STATUS_GH_TOKEN=<token>` to `/etc/environment`
 alongside the other secrets already documented above. Leaving it unset is a
 supported configuration: `publish-status.sh` logs that publishing is
 disabled and exits 0, so a VM without a token (or one where this channel is
-intentionally turned off) still runs every other cron job exactly as before
-— nothing else in `crontab.snippet` depends on either of these two new
-lines succeeding.
+intentionally turned off) still runs every other cron job — nothing else in
+`crontab.snippet` depends on the `status-snapshot.sh` or `publish-status.sh`
+line succeeding.
 
 ## 13. Storage metrics heartbeat
 `bin/storage-metrics.sh` (cron, every 30 min, offset from status-snapshot.sh)

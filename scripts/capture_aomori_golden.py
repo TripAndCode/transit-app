@@ -1,8 +1,9 @@
-"""One-shot: parse tests/fixtures/aomori_sample.pb with the current pre-refactor
-parse_pb and write the resulting rows as JSON to tests/fixtures/aomori_golden.json.
+"""Parse tests/fixtures/aomori_sample.pb with `pipeline.ingest.parse_pb` and write
+the resulting rows as JSON to tests/fixtures/aomori_golden.json.
 
-Run once on the pre-refactor commit. The output is checked into git and
-becomes the regression target for the post-refactor code.
+The output is checked into git and is what tests/ask_eval/test_aomori_regression.py
+compares the Aomori parsers against. Regenerate it only when a change to their
+output is intentional.
 
 Usage:
     python scripts/capture_aomori_golden.py [--date YYYYMMDD]

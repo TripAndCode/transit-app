@@ -75,7 +75,6 @@ def test_is_high_frequency_boundary_and_missing_data():
     assert is_high_frequency(None) is False  # no schedule data is never high-frequency
 
 
-# ---------------------------------------------------------------------------
 # Headway QUALITY metrics: Excess Waiting Time, coefficient of variation,
 # long-gap rate. Two synthetic fixtures:
 #   - EVEN: perfectly regular 8-minute (480s) actual headways, identical to
@@ -84,7 +83,6 @@ def test_is_high_frequency_boundary_and_missing_data():
 #     (same total as two scheduled 480s headways, so the MEAN is unchanged --
 #     isolating the effect of variance/bunching alone) -- EWT must be
 #     positive and the long-gap rate non-zero.
-# ---------------------------------------------------------------------------
 
 _EVEN_GAPS = [480.0, 480.0, 480.0]
 _SCHEDULED_GAPS = [480.0, 480.0]

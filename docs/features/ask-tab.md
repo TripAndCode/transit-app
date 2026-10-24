@@ -327,7 +327,7 @@ so it is a separate mechanism to build, not a knob to turn on.
    version>`); Stage 2 reads only rows matching the running embedder (plus
    unstamped legacy rows) and logs a one-off "re-index required" warning
    when other-version rows are present, so re-run the same command after
-   changing `EMBEDDING_MODEL_ID` or bumping the library's major.
+   changing `EMBEDDING_MODEL_ID` or upgrading the library to any new version.
 4. Open the app — the default route lands on Pulse
    (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
    there too). Click the top bar's search field (or press ⌘K), choose "Ask",

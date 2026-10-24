@@ -17,15 +17,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.service_day import service_date_ch, service_date_of
-
-_JST = ZoneInfo("Asia/Tokyo")
 
 VALID_KINDS = (
     "routes",
@@ -361,7 +358,7 @@ async def describe_data(
         if order not in ("desc", "asc"):
             order = "desc"
         direction = "ASC" if order == "asc" else "DESC"
-        # Every other tool in this module (route_stats, top_n, on_time_rate,
+        # Every other Ask tool (route_stats, top_n, on_time_rate,
         # segment_hotspots, ...) defines "samples" as the deduped
         # latest-observation-per-stop-event count via
         # pipeline.reports.filters._dedup_cte_ch, not a raw poll count. A raw
@@ -369,9 +366,7 @@ async def describe_data(
         # times the deduped figure for the same route/period — sharing this
         # tool's `deduped` CTE keeps "samples" meaning one consistent thing
         # across the whole Ask surface. This also applies ctx's dow/
-        # time_band/service/routes scoping like every other ctx-driven tool
-        # in this file, instead of only date-range like this kind previously
-        # did.
+        # time_band/service/routes scoping like every other ctx-driven Ask tool.
         cte_sql, ch_params = _dedup_cte_ch(ctx)
         ch_result = await ch.query(
             f"""
@@ -559,7 +554,8 @@ async def capabilities(
     locale: str = "ja",
     ch=None,
 ) -> ToolResult:
-    # Deferred import — see the matching comment in describe_data() above.
+    # Deferred import: tools.py imports this module at its own load time, so a
+    # top-level import of tools.py here would be circular.
     from pipeline.query.tools import _summary
 
     table = _CAPABILITY_EXAMPLES_EN if locale == "en" else _CAPABILITY_EXAMPLES_JP

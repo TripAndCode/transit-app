@@ -71,8 +71,7 @@ export function RouteAnalysisTab() {
   // Two plain string keys rather than one JSON-shaped one, so a shared link
   // shows a human-readable stop selection. `stopRouteParam` guards against a
   // stale `stop_seq` matching a different route's stop after the route
-  // changes (the same invalidation the old `selection.route === route` check
-  // did) -- both are cleared together in `setSelection`.
+  // changes -- both are cleared together in `setSelection`.
   const [stopRouteParam] = useUrlState<string>("stop_route", "");
   const [stopSeqParam] = useUrlState<string>("stop_seq", "");
   const patchUrl = useUrlPatch();

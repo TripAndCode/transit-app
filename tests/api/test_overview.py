@@ -242,10 +242,9 @@ async def test_the_overview_never_holds_a_connection_while_it_waits_for_another(
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
     """An agency with no `updates` rows in range returns a zero-filled
     OverviewSummary, not a 404 or 500."""
-    # overview_summary() now declares ch=Depends(get_ch) alongside conn (Task
-    # 8.5's time_band live-fallback) — resolving it needs something present
-    # at app.state.ch_client. This test's default ctx never leaves the
-    # ctx.time_band == 'all' fast path, so None is a safe default here
+    # overview_summary() takes ch=Depends(get_ch); a None app.state.ch_client
+    # resolves to get_ch's lazy-503 stand-in, which this test's default ctx
+    # (the ctx.time_band == 'all' fast path) never touches
     # (same pattern as tests/api/test_reports.py's reports_app fixture).
     from api.main import app
 
@@ -1120,8 +1119,7 @@ async def test_service_split_ignores_the_service_id_and_sparkline_7_points(aconn
 async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aagency_id):
     """End-to-end: seed data, hit the endpoint, every top-level key present
     and headline shape is well-populated."""
-    # See test_overview_endpoint_returns_empty_payload_when_no_data's comment —
-    # default ctx (time_band == 'all') never needs a real ClickHouse client.
+    # The default ctx (time_band == 'all') never needs a real ClickHouse client.
     from api.main import app
 
     app.state.ch_client = None
@@ -1783,7 +1781,6 @@ async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(cli
     assert not any(c.startswith("R_NULL") for c in codes)
 
 
-# ---------------------------------------------------------------------------
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper derives from a single `_fetch_grain` round
@@ -1792,7 +1789,6 @@ async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(cli
 # max_execution_time. These tests pin both halves of that: the round-trip
 # count, and the semantics the consolidation has to preserve (per-consumer
 # date windows, per-consumer DOW, hour-of-day extraction).
-# ---------------------------------------------------------------------------
 
 
 class _CountingCh:
@@ -2261,13 +2257,11 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
     assert seq_out["peak_hour_weekday"]["peak_hour"] == 7
 
 
-# ---------------------------------------------------------------------------
 # ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
 # AttributeError from `ch.query(...)`. These are the 3 spots in
-# pipeline/reports/overview.py that predate the shared _Grain/_require_grain
-# guard pattern. No agg/ClickHouse seeding needed — each guard fires before
+# pipeline/reports/overview.py that check `ch` themselves instead of using the
+# shared _Grain/_require_grain guard. No agg/ClickHouse seeding needed — each guard fires before
 # any query is issued.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -2300,13 +2294,11 @@ async def test_route_weekly_history_slow_path_without_ch_raises(aconn, aagency_i
         await _route_weekly_history(aagency_id, ["R1"], ctx, aconn, ch=None)
 
 
-# ---------------------------------------------------------------------------
 # _peak_hour_by_dow's live scan is the ONLY ClickHouse work in an otherwise
 # all-Postgres request shape (`time_band == 'all'` + a service/routes filter),
 # so a ClickHouse hiccup there must degrade that one field, not 500 the whole
 # payload. Same degrade shape as pipeline.reports.network.compute_network_summary
 # and pipeline.health.aggregate_freshness.
-# ---------------------------------------------------------------------------
 
 
 class _FailingCh:
@@ -2386,12 +2378,10 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     assert len(out["sparkline_points"]) == 14
 
 
-# ---------------------------------------------------------------------------
 # `_route_weekly_history` derives its 4-week sparkline buckets from the shared
 # grain whenever the grain's span reaches back far enough, instead of issuing a
 # second full dedup scan. It keeps the live scan for a `ctx` window too narrow
 # for the grain to cover.
-# ---------------------------------------------------------------------------
 
 
 async def _seed_weekly_history_fixture(aconn, ch_client, agency_id):

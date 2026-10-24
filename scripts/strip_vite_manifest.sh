@@ -3,7 +3,9 @@
 # vite.config.ts's build.manifest: true, used by
 # frontend/scripts/check-entry-chunk.mjs) out of a built frontend tree
 # before it ships as production static assets. It's a build-time-only
-# artifact — api/main.py's SPA fallback would otherwise serve it publicly.
+# artifact: api/main.py's SPA fallback already answers any dot-prefixed path
+# with index.html, and stripping it keeps the file out of the shipped tree
+# whatever serves it.
 #
 # Shared by two independent build paths so they can't drift out of sync:
 #   - Dockerfile: stripped from the frontend stage's dist/ before

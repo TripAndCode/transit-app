@@ -21,11 +21,10 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       fs: { allow: servedRoots() },
       // Backend lives under /api/* and /health. Anything else is owned by
-      // the SPA — including /agencies/:id/map, which used to break in dev
-      // because the proxy intercepted /agencies/* and forwarded it to
-      // FastAPI. Agency CRUD now lives at /api/agencies, so the proxy is
-      // a clean two-line setup, with the target overridable per checkout
-      // so worktrees don't silently share whichever backend holds 8000.
+      // the SPA — including every /agencies/:id/* screen, which must never
+      // reach FastAPI (agency CRUD lives at /api/agencies). The target is
+      // overridable per checkout so worktrees don't silently share
+      // whichever backend holds 8000.
       proxy: {
         "/api": API_TARGET,
         "/health": API_TARGET,

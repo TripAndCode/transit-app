@@ -140,12 +140,14 @@ Every route's baseline for the day is read at most once every five minutes
 per agency, the report caches' lifetime. A timetable load that changes the
 class of any date in the window takes effect on the next request.
 
-Observations split across two ClickHouse tables: `updates_live` holds today
-and any later day, `updates` holds every closed day.
-`pipeline.clickhouse.live_table_for` is the one place a reader picks between
-them, so endpoints that can be asked about either today or a past day (day
-playback, route trips, stop profiles) resolve the table through it rather
-than hardcoding `updates`.
+Observations split across two ClickHouse tables: `updates_live` serves the
+current service day, the one before it and any later day; `updates` serves
+every older day, and any day that arrived by archive ingest.
+`pipeline.clickhouse.live_table_for` holds the date rule, and
+`api.clickhouse.table_holding` builds on it to pick the one table holding a
+whole day, so endpoints that can be asked about either today or a past day
+(day playback, route trips, stop profiles) resolve the table through
+`table_holding` rather than hardcoding `updates`.
 
 ## Key files
 

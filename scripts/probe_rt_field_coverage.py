@@ -179,7 +179,7 @@ def main() -> None:
     try:
         cov = field_coverage(raw)
     except Exception as e:
-        # field_coverage's own top-level _fields(pb_bytes) call already
+        # field_coverage's top-level _fields(pb_bytes) call (in _decode_rows) already
         # swallows a malformed top-level message, but a per-field _dec()
         # (protobuf-bytes -> str) has no such guard -- an HTML error page or
         # a redirect target masquerading as a feed response can still

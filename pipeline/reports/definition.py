@@ -46,10 +46,10 @@ _DEDUP_RULE_TEXT: dict[tuple[str, str], str] = {
     (DEDUP_RULE, "en"): "latest observation per stop event",
 }
 
-# format_definition_csv_line's own Japanese-only lookups -- unchanged shape (a
-# plain {value: text} dict, so an unrecognized value still raises KeyError
-# exactly as before), now sourced from the locale-aware dicts above's "ja"
-# slice instead of repeating either string a second time.
+# format_definition_csv_line's own Japanese-only lookups: a plain
+# {value: text} dict, so an unrecognized value raises KeyError, sourced from
+# the locale-aware dicts above's "ja" slice instead of repeating either string
+# a second time.
 _MEASUREMENT_POINT_CSV_TEXT: dict[str, str] = {MEASUREMENT_POINT: _MEASUREMENT_POINT_TEXT[(MEASUREMENT_POINT, "ja")]}
 _DEDUP_RULE_CSV_TEXT: dict[str, str] = {DEDUP_RULE: _DEDUP_RULE_TEXT[(DEDUP_RULE, "ja")]}
 

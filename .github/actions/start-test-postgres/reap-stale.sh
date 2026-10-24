@@ -10,8 +10,8 @@
 #
 # Scoped by label AND by age, and both halves matter: without the label it
 # reaps unrelated containers on a shared runner, without the age it kills a
-# concurrent job's live database -- the exact failure the per-run naming
-# exists to prevent.
+# concurrent job's live database -- the exact failure the per-scope naming
+# (container-name.sh) exists to prevent.
 #
 # Usage: reap-stale.sh <label> <max-age-seconds>
 #   DOCKER=<cmd>  override the docker binary (used by the tests' shim)

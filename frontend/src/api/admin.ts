@@ -873,9 +873,9 @@ export function useTriggerRun() {
 // nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
 // AGENTS.md's architecture naming, not a transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
-// See api/routers/admin_ask.py's module docstring for why there is no
-// "user" field and why `providers` below is always null: ask_query_log
-// carries neither identity nor a per-query provider/latency column.
+// There is no "user" field and `providers` below is always null because
+// ask_query_log carries neither identity nor a per-query provider/latency
+// column (api.routers.admin_ask).
 
 export type AskRoute = "rules" | "nn" | "rag" | "no_history";
 type AskStatus = "ok" | "error";

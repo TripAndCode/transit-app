@@ -411,9 +411,7 @@ def test_static_join_drops_only_the_stop_time_updates_without_a_stop_sequence(pg
     assert [(r[6], r[7], r[4]) for r in rows] == [(1, -30, "07:05:00")]
 
 
-# ---------------------------------------------------------------------------
 # Integration tests against captured fixtures
-# ---------------------------------------------------------------------------
 
 
 def _make_agency(conn, name: str, feed_url: str) -> int:

@@ -211,8 +211,8 @@ else
 fi
 
 # --- R2 sync (sync-r2.sh's own success marker) ---
-# sync-r2.sh only ever writes OK_MARKER on a fully-successful run (see its
-# own header), so its mere presence already means "sync-r2.sh's last
+# sync-r2.sh only ever writes OK_MARKER on a fully-successful run, so its
+# mere presence already means "sync-r2.sh's last
 # recorded result was ok" -- there is no separate on-disk "fail" signal to
 # read for sync (unlike verify-r2.sh's RESULT_MARKER, written on every
 # completed run either way), so "unknown" is the honest answer for "never

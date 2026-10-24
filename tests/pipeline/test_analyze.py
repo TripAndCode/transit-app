@@ -2112,10 +2112,10 @@ def test_every_incremental_table_can_purge_by_date_from_an_index(pg_conn):
     The purge deletes by `(agency_id, date)` on every incremental run. Where
     no index leads with those two columns, the planner narrows to the agency
     and then reads all of it — which is the cost the incremental rebuild
-    exists to avoid, quietly reintroduced on the table it was added for. Two
-    members reached that state by different routes: one buried `date` behind
-    `route_code` in its primary key, the other behind `route_code` and
-    `stop_id`. Neither was visible from the column list alone.
+    exists to avoid, quietly reintroduced on the table it was added for. A
+    primary key that puts `date` behind `route_code` (or behind `route_code`
+    and `stop_id`) does exactly that, and is not visible from the column list
+    alone.
     """
     from pipeline.analyze import _INCREMENTAL_AGG_TABLES
 

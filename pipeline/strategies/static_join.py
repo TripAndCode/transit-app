@@ -376,8 +376,8 @@ def parse_feed(
         # Two probes, not one three-way join: a single join over a poll with
         # enough distinct keys gives Postgres's planner the choice of
         # scanning most of the agency's static_trips instead of walking a PK
-        # per key, reintroducing close to the whole-schedule cost this
-        # replaces the temp table to avoid. Resolving static_stop_times first
+        # per key, reintroducing close to the whole-schedule cost the per-key
+        # probes exist to avoid. Resolving static_stop_times first
         # bounds the static_trips lookup by the poll's own distinct trip
         # count, never by the agency's trip table size, regardless of how
         # many keys the poll carries. A collector push parses each poll on a
@@ -432,18 +432,16 @@ def parse_feed(
         if route_code is None:
             no_route += 1
         # Single parse drives the extended-hour handling, the zero-pad, AND
-        # the raw scheduled_sec value (see pipeline/strategies/_time.py's
-        # module docstring for why: two independent parses of the same
-        # field -- this used to check sched[:2] for the >=24 decision and
-        # hour_str.isdigit() for padding separately -- can disagree on
-        # malformed multi-digit input, e.g. a 3-digit hour like "125:30:00"
-        # had a fine 2-char prefix but a broken zero-pad, storing an
-        # uncastable value). GTFS's departure_time is raw, unpadded,
+        # the raw scheduled_sec value (see pipeline.strategies._time._GTFS_TIME_RE
+        # for why: two independent parses of the same field -- a sched[:2]
+        # check for the >=24 decision and hour_str.isdigit() for padding --
+        # can disagree on malformed multi-digit input, e.g. a 3-digit hour
+        # like "125:30:00" has a fine 2-char prefix but a broken zero-pad,
+        # storing an uncastable value). GTFS's departure_time is raw, unpadded,
         # unvalidated text -- "7:05:00" is as valid as "07:05:00" per spec,
-        # and nothing guarantees the rest is even numeric. Postgres's old
-        # TIME column validated and normalized this for free; ClickHouse's
-        # plain String does not, so analyze()'s `_analyze_deduped.
-        # scheduled_time time` column is now the only place format errors
+        # and nothing guarantees the rest is even numeric. ClickHouse's plain
+        # String column does not validate it, so analyze()'s `_analyze_deduped.
+        # scheduled_time time` column is the only place format errors
         # surface -- and once a bad value is durably stored in ClickHouse,
         # it fails analyze() for this ENTIRE agency on every subsequent
         # run, not just drops one row. NULL is already a first-class value

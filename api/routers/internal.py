@@ -427,7 +427,7 @@ def _ingest_and_analyze_sweep(
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
         # skip the ClickHouse close on a Postgres close error, silently
-        # reintroducing the client + HTTP pool leak this block exists to fix.
+        # leaking the client and its HTTP pool, which this block exists to prevent.
         # Both guarded with `is not None`: get_client()/psycopg2.connect()
         # itself can be what raised, leaving the other -- or both -- unset.
         try:

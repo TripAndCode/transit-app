@@ -140,8 +140,8 @@ LEGACY_SQL = {
                     -- partition always resolves to a real value instead of
                     -- skipping every row below the threshold. NOTE: this does
                     -- NOT match pipeline/reports/rankings.py's _ranking_live
-                    -- ClickHouse fallback, which intentionally reproduces the
-                    -- old min-rank tie formula this column used to use — see
+                    -- ClickHouse fallback, which intentionally uses a
+                    -- min-rank PERCENT_RANK() tie formula — see
                     -- that function's docstring for the known, accepted
                     -- divergence on tied data. Computing both fractions from
                     -- one ARRAY[...] call (rather than two separate

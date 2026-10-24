@@ -152,13 +152,14 @@ def parse_pb(
     file_name: str,
     pattern: re.Pattern | None = None,
 ) -> list:
-    """Back-compat wrapper used by the regression test and a few unit tests.
+    """Legacy-shape parser behind the Aomori golden fixture, called only by
+    tests/ask_eval/test_aomori_regression.py and scripts/capture_aomori_golden.py.
 
     Returns the legacy 12-tuple shape:
       (file_name, captured_at, trip_id, service, sched, route,
        stop_seq, stop_id, arr_delay, arr_time, dep_delay, dep_time)
 
-    Note: the live ingest path no longer calls this function. New code should
+    Note: the live ingest path never calls this function. New code should
     call the strategy module directly.
     """
     from pipeline.strategies._pb import _dec as _d
@@ -306,7 +307,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     since = _archive_since(tarballs, pb_loose)
     done = distinct_file_names(ch_client, agency_id, since=since)
 
-    # `done` is only updated by _flush() (every _BATCH_ROWS rows),
+    # This run's own files reach `done` only via _flush() (every _BATCH_ROWS rows),
     # so a file buffered but not yet flushed is invisible to any dedup check
     # against `done` alone. `seen` closes that gap: every file key is added
     # to it the instant it's buffered (added to pending_files), not once it's
@@ -319,11 +320,12 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     # file stays in `seen` (so it isn't re-buffered later in THIS run -
     # re-parsing it again would just duplicate the failure accounting, not
     # help) but is absent from `done` (so the NEXT ingest() run, which
-    # recomputes `done` fresh from ClickHouse, retries it - see _flush()'s
-    # docstring for that crash-safety invariant). _flush() retries a failed
-    # whole-batch insert file-by-file, so this divergence is scoped to just
-    # the file(s) that actually failed on retry, not every file that shared
-    # the batch with them.
+    # recomputes `done` fresh from ClickHouse, retries it - a file is marked
+    # `done` only in the operation that inserted its rows). _flush() retries a
+    # batch that fails with a DataError file-by-file, so this divergence is
+    # scoped to just the file(s) that actually failed on retry, not every file
+    # that shared the batch with them; any other insert failure leaves the
+    # whole batch out of `done`.
     seen = set(done)
 
     def _widen_skip_list() -> None:
@@ -372,10 +374,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
     # ClickHouse in one INSERT per _BATCH_ROWS-sized batch instead of one
-    # per source file (see _BATCH_ROWS docstring above for why).
+    # per source file (see _BATCH_ROWS for why).
     #
-    # Crash-safety invariant, preserved from the old per-file code just at
-    # batch grain: a file's rows are only ever marked `done` in the exact
+    # Crash-safety invariant, held at batch grain: a file's rows are only ever
+    # marked `done` in the exact
     # same operation that successfully inserted them. If the whole-batch
     # insert_updates call raises a clickhouse_connect DataError — a
     # client-side columnar serialization failure (e.g. a None in a
@@ -386,9 +388,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     # a batch with them, end up uncounted/undone.
     #
     # Any OTHER exception (connection drop, timeout, server-side error) is
-    # NOT retried per-file and falls back to the old whole-batch-discard
-    # behavior instead: such a failure is either systemic (in which case
-    # ~600 doomed per-file HTTP inserts would just hammer an already-struggling
+    # NOT retried per-file; the whole batch is discarded instead: such a
+    # failure is either systemic (in which case hundreds of doomed per-file
+    # HTTP inserts would just hammer an already-struggling
     # server) or, worse, may have actually committed server-side despite the
     # client raising (e.g. a read timeout after the request body was fully
     # sent) — in which case a per-file retry would silently re-insert and
@@ -468,8 +470,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                 # just hammer an already-struggling server) or the batch may
                 # have actually committed server-side despite the client
                 # raising, in which case a per-file retry would duplicate
-                # every "good" file's rows. Fall back to the old
-                # whole-batch-discard behavior; the next run's
+                # every "good" file's rows. Discard the whole batch; the next run's
                 # distinct_file_names() re-check safely skips whatever
                 # actually landed and re-buffers whatever didn't.
                 logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
@@ -609,9 +610,8 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     # second — a double cron poke, or a retried BackgroundTask (the cron
     # endpoint's worker, api/routers/internal.py) — would otherwise insert
     # the same poll twice with no guard: unlike ingest(), this path has no
-    # done/seen check at all. Postgres's UNIQUE(agency_id, file_name,
-    # trip_id, stop_sequence) + ON CONFLICT DO NOTHING used to absorb this
-    # for free; ClickHouse has no equivalent. A bounded single-file check
+    # done/seen check at all, and ClickHouse has no unique constraint or
+    # ON CONFLICT to absorb the duplicate. A bounded single-file check
     # (not distinct_file_names' unbounded full-partition scan, which would
     # be wasteful to pay on every ~30s poll) mirrors ingest()'s file-level
     # idempotency at this path's much smaller grain.

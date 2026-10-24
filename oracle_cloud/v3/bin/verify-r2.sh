@@ -34,9 +34,9 @@
 # and static-fetch.sh.
 #
 # Unlike sync-r2.sh's OK_MARKER (success-only, so its own absence/staleness
-# already means "trouble"), this script had no persisted result at all before
-# RESULT_MARKER: a positive "verify-r2 last ran and passed/failed at time T"
-# record, written on every completed run (not just successes), plus the total
+# already means "trouble"), RESULT_MARKER is a positive "verify-r2 last ran
+# and passed/failed at time T" record, written on every completed run (not
+# just successes), plus the total
 # object count already gathered for free while listing each agency's own
 # prefixes. status-snapshot.sh reads this to report R2 verify freshness
 # without ever needing R2 credentials or a listing call of its own.

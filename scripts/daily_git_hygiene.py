@@ -100,9 +100,7 @@ class VenvDecision:
     reason: str
 
 
-# ---------------------------------------------------------------------------
 # Concurrency guard
-# ---------------------------------------------------------------------------
 
 
 def try_acquire_lock(lock_path: Path) -> IO[str] | None:
@@ -129,9 +127,7 @@ def release_lock(handle: IO[str]) -> None:
     handle.close()
 
 
-# ---------------------------------------------------------------------------
 # Logging
-# ---------------------------------------------------------------------------
 
 
 def log_line(log_file: Path, message: str) -> None:
@@ -143,9 +139,7 @@ def log_line(log_file: Path, message: str) -> None:
         handle.write(f"{timestamp} {message}\n")
 
 
-# ---------------------------------------------------------------------------
 # Same-day completion marker
-# ---------------------------------------------------------------------------
 
 
 def today_utc() -> str:
@@ -200,9 +194,7 @@ def mark_succeeded_today(state_file: Path, log_file: Path, *, today: str | None 
         log_line(log_file, message)
 
 
-# ---------------------------------------------------------------------------
 # 1. Local branch/worktree cleanup -- delegates to cleanup_git_state.py
-# ---------------------------------------------------------------------------
 
 
 def fast_forward_base(repo: Path, *, base: str, remote: str) -> None:
@@ -320,9 +312,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
     return True
 
 
-# ---------------------------------------------------------------------------
 # 2. Orphaned poetry venv pruning
-# ---------------------------------------------------------------------------
 
 
 _ACTIVE_ENV_VARS = frozenset({"VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"})
@@ -583,12 +573,11 @@ def run_orphaned_venv_pruning(
     # positive control: if `--venv-root` is misconfigured (wrong
     # platform default, including simply not existing) or `POETRY_VENV_GLOB` no
     # longer matches (a renamed project), this stage would otherwise "succeed" by
-    # finding zero candidates forever, silently enforcing nothing -- the one
-    # thing it exists to prevent a repeat of. Checking against the SAME
-    # `candidates` list the rest of this function actually acts on (rather than
-    # a separate parent-path/glob string comparison) means this control can
-    # never pass while the real enumeration it's meant to certify comes back
-    # empty or wrong.
+    # finding zero candidates forever, silently enforcing nothing. Checking
+    # against the SAME `candidates` list the rest of this function actually
+    # acts on (rather than a separate parent-path/glob string comparison)
+    # means this control can never pass while the real enumeration it's meant
+    # to certify comes back empty or wrong.
     if not in_project:
         if not any(candidate.resolve() == main_venv for candidate in candidates):
             raise HygieneError(
@@ -656,9 +645,7 @@ def run_orphaned_venv_pruning(
     return all_clean
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 def main(argv: Sequence[str] | None = None) -> int:

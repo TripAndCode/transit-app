@@ -7,9 +7,8 @@
 #
 # Refuses to run at all unless sync-r2.sh's success marker is fresh --
 # deleting local data that was never confirmed mirrored to R2 would be
-# permanent, unrecoverable loss. This turns "sync-r2.sh mirrors everything
-# before prune runs" from an assumption documented only in crontab.snippet's
-# comment into something this script actually checks.
+# permanent, unrecoverable loss. "sync-r2.sh mirrors everything before prune
+# runs" is checked here, not just assumed.
 #
 # This is a coarse, time-based safety net, not the primary reclaim path:
 # spool-cleanup.sh (runs daily, right after sync-r2.sh/verify-r2.sh) already

@@ -1,8 +1,8 @@
 type PageItem = number | "ellipsis";
 
 /** Numbered-pager items for `page` of `totalPages`: all pages when the count
- *  is small, otherwise first/last plus a fixed 3-wide window slid (never
- *  clamped per-element, which used to collapse the window at the edges). */
+ *  is small, otherwise first/last plus a fixed 3-wide window slid as a whole
+ *  (clamping each element on its own would collapse the window at the edges). */
 export function pageItems(page: number, totalPages: number): PageItem[] {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, i) => i + 1);

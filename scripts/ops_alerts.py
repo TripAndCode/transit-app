@@ -66,7 +66,7 @@ ongoing summary, as the request body) means "something is bad". Like the exit
 code, it follows current health, so a deduplicated poll mid-incident never
 sends a false all-clear. Leaving the variable unset is a supported
 configuration -- delivery becomes a no-op and `main`'s own exit code stays
-the only signal, exactly as before this was added. Delivery is always
+the only signal. Delivery is always
 best-effort: a network failure while posting is logged to stderr and
 swallowed, never allowed to change `main`'s exit code or crash a poll that
 otherwise completed successfully.

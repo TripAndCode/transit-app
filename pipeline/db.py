@@ -67,25 +67,21 @@ def build_dedup_ch_sql(
 
     GTFS-RT feeds publish refining `dep_delay` estimates as the trip nears
     each stop. The latest observation is what passengers actually
-    experienced; `MAX(dep_delay)` (a previous behavior) biased toward
-    the deepest mid-flight overestimate.
+    experienced; `MAX(dep_delay)` would bias toward the deepest mid-flight
+    overestimate.
 
     Picks the latest observation per stop event via a single-pass
-    `GROUP BY` + `argMax`, not a full sort. An earlier version used
-    `ORDER BY captured_at DESC, file_name DESC ... LIMIT 1 BY (...)`,
-    which is semantically identical (both keep the row with the maximal
-    `(captured_at, file_name)` per group) but forces ClickHouse to fully
-    SORT the entire filtered row set before taking the first row of each
-    group. At full-history scale with no date filter — what `analyze()`
-    runs — that sort did not complete in a reasonable time.
+    `GROUP BY` + `argMax`, not a full sort.
+    `ORDER BY captured_at DESC, file_name DESC ... LIMIT 1 BY (...)` keeps
+    the same row (the one with the maximal `(captured_at, file_name)` per
+    group) but forces ClickHouse to fully SORT the entire filtered row set
+    before taking the first row of each group, which at full-history scale
+    with no date filter does not complete in a reasonable time.
     `argMax(dep_delay, (captured_at, file_name))` returns the `dep_delay`
     from the row where the tuple `(captured_at, file_name)` is maximal
-    within the group — same latest-observation-wins, `file_name DESC`
-    tiebreak semantics as the old ORDER BY, computed as a streaming
-    aggregate instead. `id DESC` (a Postgres surrogate key, not carried
-    into the ClickHouse schema) is what `file_name DESC` already replaced
-    here — file names are unique per poll and sort consistently within a
-    day, which is all the original tiebreak needed.
+    within the group — latest observation wins, `file_name` breaks ties —
+    computed as a streaming aggregate. File names are unique per poll and
+    sort consistently within a day, which is all the tiebreak needs.
 
     When `include_captured_at`, the winning row's `captured_at` is exactly
     `max(captured_at)` within the group: ties on `captured_at` (broken by

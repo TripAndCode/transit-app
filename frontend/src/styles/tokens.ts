@@ -102,8 +102,8 @@ const BASE_RAMP = {
 
 export const DELAY_RAMP = {
   ...BASE_RAMP,
-  // Literal CSS var string for DOM/React consumers — see the block comment
-  // above. MapLibre call sites use severeColorResolved() instead.
+  // Literal CSS var string for DOM/React consumers, which the cascade resolves
+  // to the active theme's color. MapLibre call sites use severeColorResolved() instead.
   severe: SEVERE_VAR, // >= 5 min, per-theme via --delay-severe
 } as const;
 
@@ -166,8 +166,8 @@ export function delayTextColor(minutes: number): string {
 // A dense grid of cells encodes one quantity, so it gets one hue that runs
 // light to dark: switching hue at each severity cutoff turns a continuous
 // magnitude into four unordered categories and makes a 2.9-minute cell look
-// unrelated to a 3.1-minute one. The cutoffs still matter, but they are drawn
-// as an outline annotation on top of the ramp, not as its colour. The domain
+// unrelated to a 3.1-minute one. The severe cutoff still matters, but it is
+// drawn as an outline annotation on top of the ramp, not as its colour. The domain
 // runs slightly past `DELAY_THRESHOLDS.severe` so a severe cell reads as
 // "near the top of the scale" instead of every value from 5 minutes upwards
 // saturating to the same ink. The floor is non-zero so a cell holding data is

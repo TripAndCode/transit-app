@@ -38,7 +38,7 @@ _DAY_ROUTES_SQL = """
 # dividing once at the end, rather than re-weighting each service_type's
 # already-rounded avg_min — see pipeline/analyze.py's module docstring.
 # Its numerator/denominator are both FILTERed to sum_delay_sec IS NOT NULL rows,
-# the same defensive pattern base_p90_min already used below: analyze()-written
+# the same defensive pattern as base_p90_min below: analyze()-written
 # rows always populate sum_delay_sec alongside samples together, but a row
 # written any other way (a pre-migration-backfill historical row, a hand-seeded
 # test fixture, or any future non-analyze() writer) could have samples set
@@ -47,7 +47,7 @@ _DAY_ROUTES_SQL = """
 # whenever any contributing service_type is missing the column.
 # base_p90_min's numerator/denominator are both FILTERed to the same
 # p90_min IS NOT NULL rows, the same defensive pattern as base_avg_min above:
-# `analyze()`'s own SQL can no longer produce a null p90_min alongside
+# `analyze()`'s own SQL cannot produce a null p90_min alongside
 # non-null samples for a live group (dep_delay is filtered non-null
 # upstream, and analyze() wipes and rebuilds every row each run), but a
 # pre-migration-backfill historical row, a hand-seeded test fixture, or any
@@ -205,10 +205,10 @@ def build_digest(conn, target_day: date) -> DigestData:
             # Unrounded (but cast to float -- base_avg_min comes back as
             # decimal.Decimal from the ::numeric SQL cast, which can't mix with
             # base_p90_sec's plain float/int below): classify_route accepts a
-            # float baseline, and Mover's own display re-rounds to 1 decimal at
-            # render time (see below) — rounding to whole seconds here would
-            # only lose precision before this value gets weighted into base_w,
-            # the same rounded-then-reweight pattern this diff eliminates
+            # float baseline, and the Mover built below rounds its
+            # baseline_avg_min to 1 decimal itself — rounding to whole seconds
+            # here would only lose precision before this value gets weighted
+            # into base_w, the rounded-then-reweight pattern this module avoids
             # everywhere else.
             base_avg_sec = float(base_avg_min) * 60 if base_avg_min is not None else None
             base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None

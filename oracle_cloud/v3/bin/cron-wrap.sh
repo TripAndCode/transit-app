@@ -4,8 +4,8 @@
 # Usage (from crontab): cron-wrap.sh /path/to/job.sh [args...]
 #
 # cron already appends each job's output to cron.log; what it does not do is
-# tell anyone that a job exited nonzero. This wrapper keeps the logging exactly
-# as it was (the job's combined output is echoed straight through to whatever
+# tell anyone that a job exited nonzero. This wrapper leaves that logging
+# unchanged (the job's combined output is echoed straight through to whatever
 # the crontab line redirects into) and adds the missing half: a failure ping
 # carrying the job name, its exit status, and the tail of what it printed, so
 # an expired R2 credential or an upstream static feed gone 404 reaches a human

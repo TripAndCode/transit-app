@@ -90,7 +90,7 @@ than issuing their own requests.
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
-| `frontend/src/components/analysis/csv.ts` | `downloadCsv()` shared by every analysis/report screen |
+| `frontend/src/components/analysis/csv.ts` | `downloadCsv()`, the browser-side CSV download this screen shares with the route dossier, Live and Ask (the `AnalysisTab` screens link to the API's `?format=csv` instead) |
 | `frontend/src/components/DefinitionMetaBlock.tsx` | Renders the on-time/late definition metadata block |
 | `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useReport`, `useAgencies` |
@@ -127,7 +127,7 @@ than issuing their own requests.
 2. Click "Reports" in the rail → URL `/agencies/:agencyId/reports`;
    expect the trend chart and routes-to-check table to populate (or the
    empty state with no data).
-3. Change the filter bar's date range / dow / time_band / route selection —
+3. Change the scope sentence's period / days / time / routes —
    expect both sections to refetch.
 4. Click a row's "Open analysis →" link in the routes-to-check table —
    expect navigation to that route's dossier,
@@ -150,8 +150,10 @@ than issuing their own requests.
 
 ## i18n
 
-- Frontend strings come from the `design` i18n namespace
-  (`frontend/src/i18n/design.ts`, loaded via `useTranslation("design")`).
+- The period summary's and saved view's strings come from the `design` i18n
+  namespace (`frontend/src/i18n/design.ts`, loaded via
+  `useTranslation("design")`); the screen's heading and `doc` strip use
+  `saved.*` in `frontend/src/i18n/locales/{ja,en}.json`.
   `docs/features/route-analysis-tab.md`'s i18n section describes how its
   `ja`/`en` key parity and wording are checked.
 - Every report response carries the same `definition` block described in
