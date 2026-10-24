@@ -275,6 +275,35 @@ describe("RouteForecastSection", () => {
     expect(within(screen.getByRole("dialog")).getByText("Measurements")).toBeInTheDocument();
   });
 
+  it("marks a route's forecast as the ML model's when its cells come from it", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    renderSection(overview(), "100", ml);
+    expect(screen.getAllByTestId("fc-ml-chip")).toHaveLength(1);
+    expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
+  });
+
+  it("shows no ML mark on a baseline-only route or agency landing", () => {
+    renderSection(overview(), "100");
+    expect(screen.queryByTestId("fc-ml-chip")).toBeNull();
+  });
+
+  it("marks the agency landing when any band comes from the ML model", () => {
+    const ov = overview();
+    ov.grid = ov.grid.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    renderSection(ov);
+    expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
+  });
+
+  it("names an ML cell's source in its label, and leaves a baseline cell's alone", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.dow === 1 && c.hour === 12 ? { ...c, source: "ml" as const } : c));
+    renderSection(overview(), "100", ml);
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const labels = screen.getAllByTestId("hm-cell").map((c) => c.getAttribute("aria-label") ?? "");
+    expect(labels.filter((l) => l.includes("ML forecast"))).toHaveLength(1);
+  });
+
   it("opens a summary card from an explicit Expand button, once, and leaves the card itself non-interactive", () => {
     renderSection(overview(), "100");
     const card = screen.getByTestId("fc-card-dow");

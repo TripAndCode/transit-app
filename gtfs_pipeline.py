@@ -910,6 +910,32 @@ def cmd_ingest_weather(args):
     logger.info(f"ingest_weather: wrote {written} station-day(s) of {considered} examined.")
 
 
+def cmd_ingest_ml(args):
+    """Pull the ML workbench's latest published forecast from R2 into Postgres.
+
+    Operator-run, so it fails loudly: the cron sweep's copy of this step logs
+    and carries on, which would turn a wrong token into a silent "0 rows"."""
+    from pipeline import ml_forecast_ingest
+
+    try:
+        s3, bucket = ml_forecast_ingest.s3_client_from_env()
+    except ml_forecast_ingest.StoreNotConfigured as exc:
+        logger.error(f"ingest_ml: ML store {exc}")
+        sys.exit(2)
+    conn = _get_conn()
+    try:
+        result = ml_forecast_ingest.load_forecast(conn, s3, bucket)
+    except (ml_forecast_ingest.ForecastReadError, ml_forecast_ingest.ForecastWriteError) as exc:
+        logger.error(f"ingest_ml: {type(exc).__name__}: {exc}")
+        sys.exit(1)
+    finally:
+        conn.close()
+    if result.prefix is None:
+        logger.info("ingest_ml: no forecast has been published yet")
+    else:
+        logger.info(f"ingest_ml: upserted {result.rows} row(s) from {result.prefix}")
+
+
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
     from pipeline.static_fetcher import DEFAULT_STATIC_DEST
@@ -1017,6 +1043,7 @@ def main():
             "fetched -- a day in progress cannot be aggregated whole"
         ),
     )
+    sub.add_parser("ingest_ml", help="Pull the latest published ML forecast from R2 into Postgres")
 
     args = parser.parse_args()
     if args.command == "add_agency":
@@ -1057,6 +1084,8 @@ def main():
         cmd_prune_personal_data(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
+    elif args.command == "ingest_ml":
+        cmd_ingest_ml(args)
     else:
         parser.print_help()
 

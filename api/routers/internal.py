@@ -28,7 +28,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
-from pipeline.ml_forecast_ingest import ingest_forecast
+from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
@@ -548,22 +548,14 @@ def _run_agency_update(
 def _ingest_ml_forecast(conn: Any) -> None:
     """Best-effort: a missing/misconfigured ML bucket or a transient R2
     failure must not abort the surrounding ingest+analyze sweep, which is
-    this job's primary purpose. `ingest_forecast` itself never raises for a
-    missing manifest; this guard is for everything else (missing env vars,
-    a broken S3 client, a network error)."""
-    bucket = os.environ.get("ML_STORE_BUCKET")
-    endpoint = os.environ.get("ML_STORE_ENDPOINT")
-    if not bucket or not endpoint:
+    this job's primary purpose. `ingest_forecast` already logs and swallows
+    every read or write failure from R2 or the DB; this guard covers building
+    the S3 client and anything else unexpected. An unconfigured store is
+    skipped, not logged."""
+    if not store_configured():
         return
     try:
-        import boto3
-
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=os.environ.get("ML_STORE_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("ML_STORE_SECRET_ACCESS_KEY"),
-        )
+        s3, bucket = s3_client_from_env()
         count = ingest_forecast(conn, s3, bucket)
         _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
     except Exception:
@@ -582,7 +574,7 @@ def _run_ml_forecast_ingest(db_url: str) -> None:
     `_ingest_ml_forecast`: a deployment with no ML bucket configured should
     not pay for a throwaway connect/close on every sweep.
     """
-    if not os.environ.get("ML_STORE_BUCKET") or not os.environ.get("ML_STORE_ENDPOINT"):
+    if not store_configured():
         return
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 

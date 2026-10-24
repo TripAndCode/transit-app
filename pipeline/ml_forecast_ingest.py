@@ -7,6 +7,8 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
@@ -29,6 +31,48 @@ _COLUMNS = (
 )
 
 
+_STORE_VARS = ("ML_STORE_ENDPOINT", "ML_STORE_BUCKET", "ML_STORE_ACCESS_KEY_ID", "ML_STORE_SECRET_ACCESS_KEY")
+
+
+class StoreNotConfigured(Exception):
+    """One or more `ML_STORE_*` variables are unset or empty."""
+
+
+class ForecastReadError(Exception):
+    """The published forecast could not be listed, fetched, or parsed."""
+
+
+class ForecastWriteError(Exception):
+    """The forecast was read but could not be written; the batch was rolled back."""
+
+
+@dataclass(frozen=True)
+class ForecastIngest:
+    prefix: str | None
+    rows: int
+
+
+def store_configured() -> bool:
+    """Whether every variable `s3_client_from_env` needs is set."""
+    return all(os.environ.get(name) for name in _STORE_VARS)
+
+
+def s3_client_from_env() -> tuple[Any, str]:
+    """The `transit-ml` bucket's S3 client and name, from `ML_STORE_*`."""
+    missing = [name for name in _STORE_VARS if not os.environ.get(name)]
+    if missing:
+        raise StoreNotConfigured("not set: " + ", ".join(missing))
+    import boto3
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=os.environ["ML_STORE_ENDPOINT"],
+        aws_access_key_id=os.environ["ML_STORE_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["ML_STORE_SECRET_ACCESS_KEY"],
+    )
+    return client, os.environ["ML_STORE_BUCKET"]
+
+
 def _as_date(value: Any) -> date:
     # A real service_date column, written from a pandas datetime64 column,
     # round-trips through parquet as a native datetime, not a date; origin_date
@@ -49,7 +93,7 @@ def prune_forecast_ml_sql(days: int) -> str:
     own usefulness window. Not part of `pipeline.retention.policy_prune_sql`:
     that aggregator is reserved for privacy-policy-mandated windows; this one
     is a plain freshness cleanup, run from the same ingest step that writes
-    this table (see `ingest_forecast`), not the daily privacy-prune pass."""
+    this table (see `load_forecast`), not the daily privacy-prune pass."""
     return f"DELETE FROM agg_route_forecast_ml WHERE service_date < now()::date - INTERVAL '{int(days)} days'"
 
 
@@ -83,20 +127,18 @@ def fetch_latest_manifest(s3_client: Any, bucket: str) -> dict[str, Any] | None:
     return manifest
 
 
-def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
+def load_forecast(conn: Any, s3_client: Any, bucket: str) -> ForecastIngest:
     """Upsert the latest published forecast into `agg_route_forecast_ml`,
-    then prune rows whose service_date has aged out, all in one transaction
-    (a failure partway through rolls back the whole batch rather than
-    leaving a half-upserted forecast with the prune skipped). Never raises:
-    a missing/corrupt manifest, a forecast whose rows lack a column or carry
-    a non-ISO date, or a DB failure is logged and answered with `0`, so a bad
-    publish from the VPS side never aborts the caller's wider ingest sweep."""
+    then prune rows whose service_date has aged out, in one transaction: a
+    failure partway through rolls the whole batch back rather than leaving a
+    half-upserted forecast with the prune skipped. The caller's connection
+    must not be in autocommit, or that rollback undoes nothing."""
     import pyarrow.parquet as pq
 
     try:
         manifest = fetch_latest_manifest(s3_client, bucket)
         if manifest is None:
-            return 0
+            return ForecastIngest(prefix=None, rows=0)
         parquet_key = f"{manifest['prefix']}/forecast.parquet"
         body = s3_client.get_object(Bucket=bucket, Key=parquet_key)["Body"].read()
         table = pq.read_table(io.BytesIO(body))
@@ -116,9 +158,8 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
             )
             for row in table.to_pylist()
         ]
-    except Exception:
-        _log.exception("ml_forecast_ingest: could not read the latest forecast from R2")
-        return 0
+    except Exception as exc:
+        raise ForecastReadError(str(exc)) from exc
 
     try:
         from psycopg2.extras import execute_values
@@ -136,13 +177,26 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
                 )
             cur.execute(prune_forecast_ml_sql(FORECAST_ML_RETENTION_DAYS))
         conn.commit()
-    except Exception:
-        _log.exception("ml_forecast_ingest: could not upsert the latest forecast")
+    except Exception as exc:
         # A connection the server dropped refuses the rollback as well; the
-        # failure that matters is already logged.
+        # failure that matters is the one raised below.
         try:
             conn.rollback()
         except Exception:
             _log.debug("ml_forecast_ingest: rollback failed", exc_info=True)
-        return 0
-    return len(pg_rows)
+        raise ForecastWriteError(str(exc)) from exc
+    return ForecastIngest(prefix=manifest["prefix"], rows=len(pg_rows))
+
+
+def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
+    """`load_forecast` for the cron sweep: never raises. A missing/corrupt
+    publish, a forecast whose rows lack a column or carry a non-ISO date, or a
+    DB failure is logged and answered with `0`, so a bad publish from the VPS
+    side never aborts the caller's wider ingest sweep."""
+    try:
+        return load_forecast(conn, s3_client, bucket).rows
+    except ForecastReadError:
+        _log.exception("ml_forecast_ingest: could not read the latest forecast from R2")
+    except ForecastWriteError:
+        _log.exception("ml_forecast_ingest: could not upsert the latest forecast")
+    return 0
