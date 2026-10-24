@@ -768,13 +768,11 @@ async def chat_with_tools(
             temperature=0.0,
         )
 
-    # -----------------------------------------------------------------------
     # When cache is enabled, attempt a cache lookup BEFORE calling the LLM.
     # Stage 1: exact question-text pre-lookup — lets us skip the LLM entirely
     # when the same question has been seen before.
     # Stage 2: if question is new, call LLM → compute sig_hash → sig-hash
     # lookup (covers paraphrases that map to the same canonical intent).
-    # -----------------------------------------------------------------------
     if use_cache:
         # Stage 1: pre-LLM exact question-text lookup.
         #

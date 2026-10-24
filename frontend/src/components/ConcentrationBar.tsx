@@ -168,7 +168,6 @@ export function ConcentrationBar({
   );
 }
 
-// --------------------------------------------------------------------------
 // Lorenz curve overlay — rendered in the concentration modal only.
 //
 // The curve plots cumulative % of routes (x) vs cumulative % of delay (y),
@@ -176,7 +175,6 @@ export function ConcentrationBar({
 // left. The diagonal (perfect equality) is shown for reference. A steeply
 // concave curve indicates that a small number of routes account for most
 // of the lateness — the textbook Pareto signal.
-// --------------------------------------------------------------------------
 
 const LZ_W = 480;
 const LZ_H = 240;

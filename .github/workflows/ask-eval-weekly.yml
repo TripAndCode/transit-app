@@ -139,9 +139,8 @@ jobs:
           echo "API server did not become healthy in time" >&2
           exit 1
 
-      # Scoped to the golden-set aggregate test only. This workflow's job is
-      # automating that one (previously RUN_LLM_EVAL=1 by hand, never run in
-      # CI).
+      # Scoped to the golden-set aggregate test only: it runs nowhere else in
+      # CI, and outside this workflow it needs RUN_LLM_EVAL=1 by hand.
       - name: Run the golden-set eval
         env:
           RUN_LLM_EVAL: "1"

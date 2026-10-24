@@ -35,7 +35,7 @@ type ExportMenuProps<T> = {
  * SVG), CSV (via the shared `buildCsv` helper), a link to the exact current
  * view (every `useUrlState`/`useScope` key is already in the URL, so
  * this is just the current location — no separate query-string assembly to
- * keep in sync, unlike the old per-tab `copyShareLink` functions), and print.
+ * keep in sync), and print.
  */
 export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint = true }: ExportMenuProps<T>) {
   const { t } = useTranslation("design");

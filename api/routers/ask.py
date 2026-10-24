@@ -355,9 +355,7 @@ async def ask(
     return resp
 
 
-# ---------------------------------------------------------------------------
 # Build-schema metadata
-# ---------------------------------------------------------------------------
 
 # Tools that are useful in the guided builder UI.  capabilities and route_meta
 # are excluded: capabilities is a discovery tool, route_meta requires a route
@@ -467,9 +465,7 @@ async def ask_build_schema(
     return {"tools": tools_out}
 
 
-# ---------------------------------------------------------------------------
 # Suggest endpoint
-# ---------------------------------------------------------------------------
 
 
 class AskSuggestion(BaseModel):
@@ -577,9 +573,7 @@ async def ask_suggest(
     return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
 
 
-# ---------------------------------------------------------------------------
 # Edit-action endpoint
-# ---------------------------------------------------------------------------
 
 
 class EditActionRequest(BaseModel):

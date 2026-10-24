@@ -105,9 +105,7 @@ def _calendar_from(ctx: RangeCtx) -> date:
 OVERVIEW_FANOUT_LIMIT = 4
 
 
-# ---------------------------------------------------------------------------
 # Shared slow-path grain
-# ---------------------------------------------------------------------------
 
 # (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
 # ``service_type`` is Nullable in ClickHouse; ``hour`` is None only for rows

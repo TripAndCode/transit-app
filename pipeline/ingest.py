@@ -152,13 +152,14 @@ def parse_pb(
     file_name: str,
     pattern: re.Pattern | None = None,
 ) -> list:
-    """Back-compat wrapper used by the regression test and a few unit tests.
+    """Legacy-shape parser behind the Aomori golden fixture, called only by
+    tests/ask_eval/test_aomori_regression.py and scripts/capture_aomori_golden.py.
 
     Returns the legacy 12-tuple shape:
       (file_name, captured_at, trip_id, service, sched, route,
        stop_seq, stop_id, arr_delay, arr_time, dep_delay, dep_time)
 
-    Note: the live ingest path no longer calls this function. New code should
+    Note: the live ingest path never calls this function. New code should
     call the strategy module directly.
     """
     from pipeline.strategies._pb import _dec as _d

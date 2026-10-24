@@ -168,12 +168,10 @@ export function ServiceSplit({
   );
 }
 
-// --------------------------------------------------------------------------
 // Daily line chart (modal only): one series per day-type bucket over time.
 // Every date belongs to exactly one day type, so each series joins only its
 // own dates; marks keep a series with a single date (one Saturday in range)
 // visible. Hover tooltip, no chart library.
-// --------------------------------------------------------------------------
 
 const DC_W = 830;
 const DC_H = 280;

@@ -35,9 +35,7 @@ except ImportError:
         allow_module_level=True,
     )
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 #: Matches any run of 4+ ASCII letters — a candidate English token.
 WORD_RE = re.compile(r"[a-zA-Z]{4,}")
@@ -48,9 +46,7 @@ ALLOWLIST_PATH = Path(__file__).parent / "i18n_coverage_allowlist.txt"
 _STATIC_INDEX = Path("api/static/index.html")
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _load_allowlist() -> set[str]:
@@ -64,9 +60,7 @@ def _load_allowlist() -> set[str]:
     }
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -89,9 +83,7 @@ def app_server():
         yield base_url
 
 
-# ---------------------------------------------------------------------------
 # Page scanner
-# ---------------------------------------------------------------------------
 
 
 def _scan_page(page, url: str, allow: set[str]) -> list[str]:
@@ -113,9 +105,7 @@ def _scan_page(page, url: str, allow: set[str]) -> list[str]:
     return sorted(offenders)
 
 
-# ---------------------------------------------------------------------------
 # Test
-# ---------------------------------------------------------------------------
 
 
 def test_i18n_no_english_leakage_on_ja(app_server: str) -> None:

@@ -53,9 +53,7 @@ def repository(tmp_path: Path) -> Path:
     return repo
 
 
-# ---------------------------------------------------------------------------
 # End-to-end: local cleanup delegates to cleanup_git_state
-# ---------------------------------------------------------------------------
 
 
 def test_run_local_cleanup_fetches_remote_before_validating_base(
@@ -307,9 +305,7 @@ def test_run_local_cleanup_logs_deleted_local_branches_after_apply(
     assert "local cleanup: DELETED stale-branch" in log_contents
 
 
-# ---------------------------------------------------------------------------
 # Lock file concurrency guard
-# ---------------------------------------------------------------------------
 
 
 def test_lock_round_trip_when_uncontended(tmp_path: Path):
@@ -379,10 +375,8 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
     assert not state_path.exists()
 
 
-# ---------------------------------------------------------------------------
 # Same-day completion marker: turns a lost lock race into an hourly retry
 # instead of a 24-hour one (see `already_succeeded_today`'s own docstring).
-# ---------------------------------------------------------------------------
 
 
 def test_already_succeeded_today_false_when_state_file_missing(tmp_path: Path):
@@ -781,9 +775,7 @@ def test_poetry_virtualenvs_path_expands_the_configured_path(monkeypatch: pytest
     assert hygiene.poetry_virtualenvs_path() == Path.home() / "venvs"
 
 
-# ---------------------------------------------------------------------------
 # Orphaned poetry venv pruning
-# ---------------------------------------------------------------------------
 
 
 def _main_venv_name(checkout: Path, python: str = "3.12") -> str:

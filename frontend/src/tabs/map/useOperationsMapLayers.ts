@@ -63,8 +63,7 @@ export function vehicleCirclePaint(): CirclePaint {
 }
 
 /** Marker labels sit on the basemap, not on a mark, so they take the theme's
- *  own ink and halo rather than a fixed white — the heavy dark casing that
- *  used to back them is gone. */
+ *  own ink and halo rather than a fixed white. */
 export function labelPaint(): SymbolPaint {
   const surface = surfaceColorResolved();
   return {

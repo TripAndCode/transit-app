@@ -797,9 +797,7 @@ async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int | 
     return out[:limit]
 
 
-# ---------------------------------------------------------------------------
 # Trend (new endpoint, not just a report row)
-# ---------------------------------------------------------------------------
 
 
 @perf.timed("reports.hourly_heatmap")

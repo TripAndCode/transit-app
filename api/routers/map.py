@@ -291,10 +291,9 @@ async def live_delays(
     for r in rows_result.result_rows[:limit]:
         row = dict(zip(rows_result.column_names, r, strict=True))
         row["captured_at"] = _as_utc(row["captured_at"])
-        # scheduled_time's wire format used to be uniform (Postgres TIME ->
-        # "HH:MM:SS" for every agency); now it's whatever the ingest strategy
-        # stored ("HH:MM" for aomori_regex, "HH:MM:SS" for static_join).
-        # Restore the original "HH:MM:SS" contract for every agency.
+        # scheduled_time arrives as whatever the ingest strategy stored
+        # ("HH:MM" for aomori_regex, "HH:MM:SS" for static_join); the response
+        # contract is "HH:MM:SS" for every agency.
         if row["scheduled_time"] is not None and len(row["scheduled_time"]) < 8:
             row["scheduled_time"] = f"{row['scheduled_time']}:00"
         out_rows.append(row)

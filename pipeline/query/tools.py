@@ -65,9 +65,7 @@ from pipeline.stats import annotate_on_time_pct_confidence
 _JST = ZoneInfo("Asia/Tokyo")
 
 
-# ---------------------------------------------------------------------------
 # Localisation table
-# ---------------------------------------------------------------------------
 
 
 # Keyed by (template_name, locale). Values are ``str.format``-style
@@ -381,9 +379,7 @@ def unnamed_stop_name(stop_sequence: int, locale: str) -> str:
     return _summary("unnamed_stop", lang=locale, stop_sequence=stop_sequence)
 
 
-# ---------------------------------------------------------------------------
 # OpenAI-style function specs (v2 tool surface)
-# ---------------------------------------------------------------------------
 
 _DATE_OVERRIDE_PROPS = {
     "days_back": {
@@ -825,9 +821,7 @@ or omitted.
 """
 
 
-# ---------------------------------------------------------------------------
 # Tool handlers
-# ---------------------------------------------------------------------------
 
 
 def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
@@ -1529,9 +1523,7 @@ async def dispatch(
         return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
 
 
-# ---------------------------------------------------------------------------
 # Rendering — the assistant bubble's text body
-# ---------------------------------------------------------------------------
 
 
 def render_tool_result(result: ToolResult, locale: str = "ja") -> str:

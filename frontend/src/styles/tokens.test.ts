@@ -127,14 +127,12 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Design-token contract (global.css)
 //
 // These tokens are a shared vocabulary other stylesheets and components name
 // directly, so their presence and exact values are asserted against the
 // stylesheet source rather than a computed cascade (jsdom applies no author
 // CSS). Reading the file is the point: it is the single source of truth.
-// ---------------------------------------------------------------------------
 // `process.cwd()` is the `frontend/` package root under vitest; the module
 // URL is not a file: URL after vite's transform, so it cannot be used here.
 // Comments are stripped before parsing: prose explaining a token routinely
@@ -393,9 +391,7 @@ describe("global reduced-motion regime", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Colour identity
-// ---------------------------------------------------------------------------
 
 /** Channel triple of a `#rrggbb` token value. */
 function rgb(hex: string): [number, number, number] {

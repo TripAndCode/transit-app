@@ -2,13 +2,12 @@ import type { TFunction } from "i18next";
 
 /** The report list's reading order: what ranks, what measures punctuality,
  *  what describes a pattern over time, and what is produced to hand to
- *  someone else. Thirteen identically-shaped buttons gave a reader no way to
- *  tell a ranking from a certificate; the grouping is the difference.
+ *  someone else. A flat run of identically-shaped buttons gives a reader no
+ *  way to tell a ranking from a certificate; the grouping is the difference.
  *
- *  `route_forecast` is listed here like any other type. The reports API does
- *  not return it (it is served by its own endpoint), so it used to be a
- *  second, hand-copied button underneath the mapped list -- data now, not a
- *  special case in the markup. */
+ *  `route_forecast` is listed here like any other type, although the reports
+ *  API does not return it (it is served by its own endpoint), so it stays
+ *  data rather than a special case in the markup. */
 export const REPORT_GROUPS = {
   ranking: ["ranking", "ranking_best", "compare_ranking"],
   punctuality: ["on_time", "worst_5min"],

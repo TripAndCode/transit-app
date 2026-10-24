@@ -1,9 +1,8 @@
 """Aomori regression-lock test.
 
 Runs parse_pb on the captured fixture and asserts byte-identical output
-against tests/fixtures/aomori_golden.json. This test must pass on every
-commit from now on; if a refactor changes Aomori output, the test fails
-and the refactor is rejected.
+against tests/fixtures/aomori_golden.json, so any change to Aomori output
+fails here until the golden file is deliberately regenerated.
 """
 
 import json
