@@ -221,7 +221,7 @@ def test_static_versions_shapes_the_timeline_newest_first():
     rows = [
         {
             "version": "v2026-09-01",
-            "loaded_at": datetime(2026, 9, 1, 2, 0, tzinfo=UTC),
+            "analyzed_at": datetime(2026, 9, 1, 2, 0, tzinfo=UTC),
             "trips": 1204,
             "vehicle_km": 18321.5,
             "routes": 12,
@@ -230,7 +230,7 @@ def test_static_versions_shapes_the_timeline_newest_first():
         },
         {
             "version": "v2026-04-01",
-            "loaded_at": datetime(2026, 4, 1, 2, 0, tzinfo=UTC),
+            "analyzed_at": datetime(2026, 4, 1, 2, 0, tzinfo=UTC),
             "trips": 1188,
             "vehicle_km": None,
             "routes": None,
@@ -240,7 +240,7 @@ def test_static_versions_shapes_the_timeline_newest_first():
     ]
     out = ad.build_static_versions(rows)
     assert [v["version"] for v in out] == ["v2026-09-01", "v2026-04-01"]
-    assert out[0]["loaded_at"] == "2026-09-01T02:00:00+00:00"
+    assert out[0]["analyzed_at"] == "2026-09-01T02:00:00+00:00"
     assert out[0]["calendar_until"] == "2027-03-31"
     assert out[0]["is_current"] is True
     assert out[1]["routes"] is None
@@ -251,7 +251,7 @@ def test_static_versions_passes_through_an_already_dashed_calendar_date():
     rows = [
         {
             "version": "v1",
-            "loaded_at": None,
+            "analyzed_at": None,
             "trips": 1,
             "vehicle_km": None,
             "routes": None,
@@ -375,7 +375,7 @@ def test_agency_health_joins_every_source_onto_each_agency():
         headers=[_header()],
         probes=[dict(_probe(f), agency_id=1) for f in ad.RT_COVERAGE_FIELDS],
         clamps=[{"agency_id": 1, "date": date(2026, 9, 19), "raw_samples": 1000, "clamp_count": 5}],
-        versions=[{"agency_id": 1, "version": "v2026-09-01", "loaded_at": datetime(2026, 9, 1, tzinfo=UTC)}],
+        versions=[{"agency_id": 1, "version": "v2026-09-01", "analyzed_at": datetime(2026, 9, 1, tzinfo=UTC)}],
         today=date(2026, 9, 20),
         now=now,
     )
@@ -389,7 +389,7 @@ def test_agency_health_joins_every_source_onto_each_agency():
     assert row["rt_coverage"]["field_count"] == len(ad.RT_COVERAGE_FIELDS)
     assert len(row["clamp_history"]) == ad.CLAMP_HISTORY_DAYS
     assert row["clamp_history"][-2]["clamp_pct"] == 0.5
-    assert row["static_version"] == {"version": "v2026-09-01", "loaded_at": "2026-09-01T00:00:00+00:00"}
+    assert row["static_version"] == {"version": "v2026-09-01", "analyzed_at": "2026-09-01T00:00:00+00:00"}
 
 
 def test_agency_health_keeps_an_agency_with_no_diagnostics_at_all():
@@ -415,7 +415,7 @@ def test_agency_health_never_mixes_two_agencies_rows():
         headers=[_header(agency_id=1), _header(agency_id=2, name="Kaga")],
         probes=[dict(_probe("stop_id"), agency_id=2)],
         clamps=[{"agency_id": 2, "date": date(2026, 9, 19), "raw_samples": 100, "clamp_count": 1}],
-        versions=[{"agency_id": 2, "version": "v2", "loaded_at": None}],
+        versions=[{"agency_id": 2, "version": "v2", "analyzed_at": None}],
         today=date(2026, 9, 20),
         now=now,
     )
@@ -443,7 +443,9 @@ def test_the_timetable_load_date_is_the_last_successful_static_runs_jst_day():
     """`agg_static_version_summary.computed_at` cannot say this: analyze
     restamps it on every run, so it dates the last analysis, not the load."""
     row = _health(
-        versions=[{"agency_id": 1, "version": "gtfs_static_20260901", "loaded_at": datetime(2026, 9, 19, tzinfo=UTC)}],
+        versions=[
+            {"agency_id": 1, "version": "gtfs_static_20260901", "analyzed_at": datetime(2026, 9, 19, tzinfo=UTC)}
+        ],
         static_loads=[{"agency_id": 1, "finished_at": datetime(2026, 9, 17, 16, 30, tzinfo=UTC)}],
     )
     assert row["static_loaded_on"] == "2026-09-18"
@@ -452,9 +454,9 @@ def test_the_timetable_load_date_is_the_last_successful_static_runs_jst_day():
 def test_without_a_recorded_load_the_date_comes_from_the_loaded_zips_name():
     """Timetables loaded before loads were recorded still say when their zip
     was fetched: the fetchers name it `gtfs_static_YYYYMMDD`."""
-    versions = [{"agency_id": 1, "version": "gtfs_static_20260918", "loaded_at": None}]
+    versions = [{"agency_id": 1, "version": "gtfs_static_20260918", "analyzed_at": None}]
     assert _health(versions=versions)["static_loaded_on"] == "2026-09-18"
-    named = [{"agency_id": 1, "version": "hiroden_static", "loaded_at": None}]
+    named = [{"agency_id": 1, "version": "hiroden_static", "analyzed_at": None}]
     assert _health(versions=named)["static_loaded_on"] is None
     assert _health()["static_loaded_on"] is None
 
