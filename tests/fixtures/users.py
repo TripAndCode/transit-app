@@ -81,12 +81,29 @@ async def add_session(
     column stays NULL.
     """
     sid = secrets.token_urlsafe(32)
+    await add_session_digest(conn, user_id, token_hash(sid), expires_in=expires_in, user_agent=user_agent, ip=ip)
+    return sid
+
+
+async def add_session_digest(
+    conn: asyncpg.Connection,
+    user_id: int,
+    sid_hash: str,
+    *,
+    expires_in: timedelta = _SESSION_LIFETIME,
+    user_agent: str | None = None,
+    ip: str | None = None,
+) -> None:
+    """Insert a session stored under a chosen ``sid_hash``.
+
+    For tests that need stored digests to share a prefix, which digests of
+    random sids never do. No sid signs in with such a session.
+    """
     await conn.execute(
         "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
-        token_hash(sid),
+        sid_hash,
         user_id,
         datetime.now(timezone.utc) + expires_in,
         user_agent,
         ip,
     )
-    return sid

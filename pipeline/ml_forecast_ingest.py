@@ -137,7 +137,12 @@ def ingest_forecast(conn: Any, s3_client: Any, bucket: str) -> int:
             cur.execute(prune_forecast_ml_sql(FORECAST_ML_RETENTION_DAYS))
         conn.commit()
     except Exception:
-        conn.rollback()
         _log.exception("ml_forecast_ingest: could not upsert the latest forecast")
+        # A connection the server dropped refuses the rollback as well; the
+        # failure that matters is already logged.
+        try:
+            conn.rollback()
+        except Exception:
+            _log.debug("ml_forecast_ingest: rollback failed", exc_info=True)
         return 0
     return len(pg_rows)

@@ -1,6 +1,7 @@
 import io
 import logging
 
+import psycopg2
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -151,3 +152,24 @@ def test_ingest_forecast_answers_a_corrupt_publish_with_zero_and_logs_it(row, ca
         assert ingest_forecast(conn, _published(row), "transit-ml") == 0
     assert "could not read the latest forecast" in caplog.text
     assert conn.touched is False
+
+
+class _DroppedConn:
+    """A connection the server has dropped: every call on it raises, the
+    rollback included, as psycopg2 does once the connection is closed."""
+
+    def cursor(self):
+        raise psycopg2.OperationalError("server closed the connection unexpectedly")
+
+    def commit(self):
+        raise psycopg2.InterfaceError("connection already closed")
+
+    def rollback(self):
+        raise psycopg2.InterfaceError("connection already closed")
+
+
+def test_ingest_forecast_answers_a_dropped_connection_with_zero_and_logs_it(caplog):
+    with caplog.at_level(logging.ERROR, logger="pipeline.ml_forecast_ingest"):
+        assert ingest_forecast(_DroppedConn(), _published(_GOOD_ROW), "transit-ml") == 0
+    assert "could not upsert the latest forecast" in caplog.text
+    assert "server closed the connection unexpectedly" in caplog.text

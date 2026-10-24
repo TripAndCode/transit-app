@@ -110,10 +110,11 @@ async def list_sessions(
     ]
 
 
-# Exact-prefix comparison, not LIKE: a LIKE pattern treats an unescaped `_`
-# in sid_prefix as a single-character wildcard, letting a valid-looking
-# prefix match a session it isn't actually a prefix of. Belt and braces with
-# resolve_session_prefix's hex check, so neither alone is load-bearing.
+# Only narrows the fetch to the caller's sessions that start with the prefix.
+# The boundary is resolve_session_prefix: it refuses anything but lowercase
+# hex before this runs and re-checks every returned hash itself. The
+# comparison is exact (left(), not LIKE, which reads `_` as a wildcard) so
+# the two agree on what matches.
 _SID_PREFIX_QUERY = "SELECT sid_hash FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2"
 
 
@@ -126,12 +127,10 @@ async def revoke_session(
 ) -> Response:
     """Revoke the caller's session matching the given ``sid_hash`` prefix.
 
-    :func:`pipeline.admin_users.resolve_session_prefix` decides, among the
-    caller's own sessions only, with the admin revoke route's answers: 400
-    for a malformed prefix, 404 when none matches, and 409 when several do
-    -- the UI passes the 12-char display prefix, which is astronomically
-    unlikely to collide across one user's sessions but the server refuses
-    to guess if it does. Matching a prefix of the digest is safe in a way
+    Delegates to :func:`pipeline.admin_users.resolve_session_prefix` over the
+    caller's own sessions only, answering with its
+    :class:`~pipeline.admin_users.SessionPrefixError` when the prefix names
+    no single session. Matching a prefix of the digest is safe in a way
     matching a prefix of the session id would not be: the digest is not a
     credential, so it can be echoed through a URL path.
     """

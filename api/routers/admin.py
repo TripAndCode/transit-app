@@ -724,12 +724,11 @@ async def revoke_user_session(
     """Revoke one of user ``uid``'s sessions, identified by an admin-visible
     prefix of its ``sid_hash``.
 
-    :func:`pipeline.admin_users.resolve_session_prefix` validates the prefix
-    and picks the match in Python among ``uid``'s session hashes, so a
-    caller-supplied prefix never reaches SQL as a pattern and never matches
-    another user's session. It answers as ``DELETE /api/me/sessions/{p}``
-    does: 400 for a malformed prefix, 404 when none matches, 409 when
-    several do, deleting nothing in each case.
+    Delegates to :func:`pipeline.admin_users.resolve_session_prefix` over
+    ``uid``'s sessions only, answering with its
+    :class:`~pipeline.admin_users.SessionPrefixError`, and deleting and
+    recording nothing, when the prefix names no single session. The prefix
+    never reaches SQL: the match is picked in Python.
     """
     csrf_guard(request)
     ua = request.headers.get("user-agent")
