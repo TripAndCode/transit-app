@@ -208,16 +208,15 @@ async def _ranking_live(
     """Live raw-scan ranking — fallback for time_band-filtered queries.
 
     p50/p90 are computed via `rank()`/`count()` window functions reproducing
-    the OLD min-rank-tie `PERCENT_RANK()` formula the Postgres aggregate path
-    (`agg_route_stats`/`agg_route_hour`) used before it migrated to
-    `PERCENTILE_DISC` — NOT ClickHouse's `quantileExact`, which is a pure
-    positional pick (`sorted[floor(q*n)]`). This is a known, accepted
-    divergence: this ClickHouse fallback can now disagree with the Postgres
-    aggregate path on tied/clustered `dep_delay` data (common: exact-zero
-    delays and clamped/rounded values dominate this column), since the two
-    paths use different tie-handling rules. E.g. sorted `[0]*95 + [600]*5`:
-    this function's p90 is 600s, `PERCENTILE_DISC`'s (the current aggregate
-    path) is 0s, and `quantileExact`'s would also be 0s. Every group here has
+    a min-rank-tie `PERCENT_RANK()` formula — NOT ClickHouse's
+    `quantileExact`, which is a pure positional pick (`sorted[floor(q*n)]`),
+    and not the fast path's histogram interpolation (`percentile_from_hist`
+    over `agg_route_daily_dist`). This is a known, accepted divergence: this
+    ClickHouse fallback can disagree with the fast path on tied/clustered
+    `dep_delay` data (common: exact-zero delays and clamped/rounded values
+    dominate this column), since the two paths use different tie-handling
+    rules. E.g. sorted `[0]*95 + [600]*5`: this function's p90 is 600s, and
+    `quantileExact`'s would be 0s. Every group here has
     at least `min_samples` rows (the HAVING gate), so `avg` is never NULL/NaN
     — no empty-input guard needed.
     """
@@ -252,10 +251,10 @@ async def _ranking_live(
     # p50/p90 can legitimately be None: this function's min-rank tie handling
     # gives every row in an all-tied (or heavily-tied) partition the SAME
     # rank, so `minIf(dep_delay, pct >= q)` matches zero rows once every
-    # row's pct sits below q. The Postgres aggregate path no longer has this
-    # failure mode (`PERCENTILE_DISC` always resolves to a real value for a
-    # non-empty group) — this NULL case is specific to this ClickHouse
-    # fallback's still-old tie formula, per this function's own docstring.
+    # row's pct sits below q. compute_ranking's aggregate path has no such
+    # failure mode (percentile_from_hist resolves for any non-empty
+    # histogram) — this NULL case is specific to this ClickHouse
+    # fallback's min-rank tie formula.
     service = _service_label(ctx)
     return [
         (
@@ -974,7 +973,7 @@ async def compute_trend_series(
     by_date_weighted_sec: dict = {}
     by_date: dict = {}
     for r in per_day:
-        # SQL now aliases the time-bucketed column as "bucket".
+        # The SQL aliases the time-bucketed column as "bucket".
         d = r["bucket"]
         n = r["samples"]
         sum_sec = r["sum_delay_sec"]

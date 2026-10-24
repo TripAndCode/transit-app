@@ -26,12 +26,12 @@ can't serve it (no date column). It falls back to the live path under a
 
 The shared slow-path grain
 --------------------------
-Every slow-path helper used to issue its OWN ``_dedup_cte_ch`` scan of
-``updates``, so one Overview request fanned out ~12 independent full dedup
-scans of *substantially the same rows* — each one reading a large fraction
-of an agency's history over even a 30-day window, which put several of them
-over ``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a
-real 500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
+The slow-path helpers share ONE round trip rather than each issuing its own
+``_dedup_cte_ch`` scan of ``updates``: a dozen independent full dedup scans
+of *substantially the same rows*, each reading a large fraction of an
+agency's history over even a 30-day window, would put several of them over
+``api.clickhouse.get_ch_client``'s ``max_execution_time`` cap and fail the
+request. :func:`_fetch_grain` pre-aggregates the
 dedup output to ``(date, route_code, service_type, hour)`` once, and each
 helper derives its own answer from that grain in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three
@@ -75,7 +75,7 @@ _log = logging.getLogger(__name__)
 # ``cur_ctx``'s own width (at most 7, and exactly 7 whenever the
 # ``max(..., ctx.from_date)`` clamp doesn't bite). So the earliest date any
 # consumer can ask for is ``ctx.from_date - 7`` in the unclamped case — 7
-# remains a safe (if now slightly conservative for a clamped/narrow ctx)
+# is a safe (if slightly conservative for a clamped/narrow ctx)
 # worst case, not a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
@@ -249,8 +249,8 @@ def _grain_sum_by(rows: Iterable[_GrainRow], key_index: int, value_index: int = 
 async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
-    Replaces the ~12 independent ``_dedup_cte_ch`` scans the slow-path stage
-    helpers used to issue (see the module docstring). Three things make a
+    The slow-path stage helpers read this instead of each issuing its own
+    ``_dedup_cte_ch`` scan (see the module docstring). Three things make a
     single shared scan possible:
 
     * ``service``, ``routes`` and ``time_band`` are IDENTICAL across every
@@ -296,18 +296,17 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     another group-by dimension or widening the window further is free to do
     without rechecking against the cap.
 
-    The hour is read off ``scheduled_time``'s first two characters, exactly as
-    ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
+    The hour is read off ``scheduled_time``'s first two characters: it is a
+    zero-padded ``'HH:MM[:SS]'``
     ``Nullable(String)`` in ClickHouse, not a native TIME column (see
     ``api.range.time_band_clause_ch``'s docstring). A NULL ``scheduled_time``
     yields a NULL hour, but cannot actually occur here — ``time_band != 'all'``
     is what puts us on the slow path at all, and ``time_band_clause_ch``'s
     ``substring(scheduled_time, 1, 5) >= ...`` comparison is already NULL for
-    those rows and so drops them. ``toUInt8OrNull`` rather than the live path's
-    bare ``toUInt8``: identical on every real row (all four ingested agencies
-    write a zero-padded 2-digit hour — verified, zero non-matching rows), but a
-    hypothetical malformed value degrades to "excluded from the hour histogram"
-    instead of failing the one query the whole payload now depends on.
+    those rows and so drops them. ``toUInt8OrNull`` rather than a bare
+    ``toUInt8``: identical on a well-formed zero-padded 2-digit hour, but a
+    malformed value degrades to "excluded from the hour histogram" instead of
+    failing the one query the whole payload depends on.
     """
     span_ctx = RangeCtx(
         from_date=ctx.from_date - timedelta(days=_GRAIN_LOOKBACK_DAYS),
@@ -597,7 +596,7 @@ async def _route_weekly_history(
     # whole [ctx.to_date - weeks_back*7 + 1, ctx.to_date] span, bucketed into
     # weeks_back week-index groups via `intDiv(dateDiff('day', date, to_date),
     # 7)` — 0 is the most recent 7-day bucket ending at ctx.to_date,
-    # weeks_back-1 the oldest, matching the original per-week loop's `k` and its
+    # weeks_back-1 the oldest, matching the fast path's per-week loop's `k` and its
     # oldest-first append order into `out[code]`.
     if ch is None:
         raise RuntimeError("_route_weekly_history's live fallback requires a ClickHouse client")
@@ -894,8 +893,8 @@ async def _peak_hour_by_dow(
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW and by the service filter's dates), a sample-weighted average across
-    the range — sub-second instead of the raw dedup scan that used to
-    dominate Overview's cold load. That table is aggregated across all routes,
+    the range — sub-second, where the raw dedup scan would dominate
+    Overview's cold load. That table is aggregated across all routes,
     so a ``routes`` filter, or any ``time_band`` other than ``'all'``, has to
     leave it.
 
@@ -991,7 +990,7 @@ async def _peak_hour_by_dow(
         # ``PeakHour | None = None`` in api.routers.overview, and ``None`` is
         # exactly what ``_peak_from_hour_rows`` returns for "no data". Same
         # try/except-and-degrade shape as
-        # pipeline.reports.network.compute_network_summary's per-agency probe.
+        # api.clickhouse.max_captured_at_before_by_agency's per-agency probe.
         _log.warning(
             "ClickHouse peak-hour probe failed for agency %s (%s) — degrading peak_hour_%s to null",
             agency_id,
@@ -1096,18 +1095,17 @@ async def _movers(
     common = set(cur) & set(prv)
     # (route_code, delta_min_2dp, delta_pct_1dp, delta_min_raw). The RAW delta
     # is carried purely to rank on: ranking on the rounded value manufactures
-    # ties that don't exist — real dev data, agency 1 over a wide morning
-    # window, has two routes at -1.7244 and -1.7203, which both round to -1.72.
-    # Ranking on the rounded value made the top-10 cutoff between them a
-    # coin-flip; ranking on the raw value orders them by their actual deltas.
+    # ties that don't exist (two routes at -1.7244 and -1.7203 both round to
+    # -1.72, making a top-10 cutoff between them a coin-flip); ranking on the
+    # raw value orders them by their actual deltas.
     deltas: list[tuple[str, float, float | None, float]] = []
     MIN_SAMPLES = 10
     # A previous-window average below this floor makes delta_pct meaningless:
     # dividing by a near-zero baseline can turn a trivial absolute change into
     # a triple-digit-or-larger swing that reads as a real signal but isn't,
     # even past the MIN_SAMPLES gate above (a small sample can still average
-    # to a near-zero delay). The floor matches this app's own delay-severity
-    # ramp elsewhere, which already treats anything below it as background
+    # to a near-zero delay). The floor matches the delay-severity ramp's
+    # "mild" threshold (ROUTE_BAND_MIN), which already treats anything below it as background
     # noise rather than a noticeable delay.
     MIN_PRV_AVG_FOR_PCT_MIN = 1.5
     for code in common:
@@ -1120,15 +1118,15 @@ async def _movers(
         deltas.append((code, float(_round2(d_min)), d_pct, d_min))
     # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
     # they're distinct — which is what makes the ranking reproducible: the order
-    # `common` happens to be iterated in cannot influence the result. It used to:
-    # ranking on the rounded delta left genuine ties, and Python's stable sort
-    # then preserved the *set* iteration order, leaking per-process string-hash
-    # randomization into which routes made the top-10. The same request against
-    # the same data returned different movers after an app restart.
+    # `common` happens to be iterated in cannot influence the result. A tie left
+    # to Python's stable sort would keep the *set* iteration order, leaking
+    # per-process string-hash randomization into which routes make the top-10,
+    # so the same request against the same data could return different movers
+    # after an app restart.
     deltas.sort(key=lambda x: (x[3], x[0]))
     # Partition by sign so "worse" only contains routes with positive
     # delta_min and "better" only routes with negative delta_min. With
-    # the wider top-10 limit, sign-partitioning is the right way to
+    # a top-10 limit per list, sign-partitioning is the right way to
     # prevent the two lists from overlapping (a route can't both
     # improve and worsen at once). The partition tests the ROUNDED delta on
     # purpose: a route whose delta rounds to 0.00 belongs in neither list
@@ -1296,12 +1294,11 @@ async def compute_overview_summary(
     pool and deadlock.  The two
     ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
     and the rest share the remaining slots.  When
-    ``pool`` is None (the default) the existing sequential path with
-    per-stage timed_blocks is used unchanged, preserving behaviour for
-    tests and ad-hoc callers.
+    ``pool`` is None (the default) the stages run sequentially on ``conn``,
+    each in its own timed_block, for tests and ad-hoc callers.
 
-    ``ch`` is the ClickHouse client used by the slow path (``updates`` itself
-    now lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
+    ``ch`` is the ClickHouse client used by the slow path (``updates``
+    lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
     that only ever exercise the ``ctx.time_band == 'all'`` fast path (most
     existing tests); real dispatch (the ``/overview/summary`` route) always
     passes the real client.
@@ -1309,12 +1306,12 @@ async def compute_overview_summary(
     On the slow path (``ctx.time_band != 'all'``) the shared ClickHouse query
     the payload needs is issued up front (:func:`_fetch_grain`) and handed to
     every stage helper, which then derives its own numbers from it in Python.
-    Previously each helper ran its own dedup scan — ~12 per request. It is the
+    It is the
     only query for any ``ctx`` wide enough for the grain to also cover
     :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
-    request); a narrower ``ctx`` costs that one helper a second scan. The fast
-    path is unchanged: ``grain`` stays ``None`` and every helper reads its
-    ``agg_*`` table exactly as before.
+    request); a narrower ``ctx`` costs that one helper a second scan. On the
+    fast path ``grain`` stays ``None`` and every helper reads its ``agg_*``
+    table.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1364,7 +1361,7 @@ async def compute_overview_summary(
     # artifact of window width, not a real trend change. Matching widths
     # keeps every comparison "this window vs. the same-length one before
     # it" honest, and is a no-op for the common (ctx >= 7 days) case, since
-    # cur_ctx.days is always 7 there — see the docstring above.
+    # cur_ctx.days is always 7 there.
     base_to = cur_from - timedelta(days=1)
     base_from = base_to - timedelta(days=cur_ctx.days - 1)
     base_ctx = RangeCtx(

@@ -117,37 +117,36 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # route_id across feeds, so joining on trip_id keeps geometry tied
     # to trips actually observed for this route_code). The chosen shape
     # also pins the stops query below so the polyline and circles share
-    # one variant — without this pin, multi-shape routes (e.g. Hiroshima
-    # express bus with several variants) showed stops off the line.
+    # one variant — without this pin, a multi-shape route (e.g. a Hiroshima
+    # express bus with several variants) shows stops off the line.
     #
-    # `updates` now lives in ClickHouse. The shape-vote runs FIRST — WITHOUT
+    # `updates` lives in ClickHouse. The shape-vote runs FIRST — WITHOUT
     # any shape filter, since chosen_shape_id isn't known yet — as a per-trip
     # roll-up of the same dedup subquery the per-stop stats query (below,
     # once a shape is chosen) also uses. "Which trips appear, and how many
     # deduped stop-events each contributes" is a valid (arguably better)
     # proxy for shape-vote weight than the raw per-trip observation count.
     #
-    # Trade-off (deliberate, not proven bit-for-bit equivalent to the old
-    # two-query version): the dedup subquery is filtered by `dep_delay IS NOT
+    # Trade-off (deliberate): the dedup subquery is filtered by `dep_delay IS NOT
     # NULL`, so a trip whose every observed StopTimeUpdate is arrival-only (no
     # `dep_delay` — common at a route's last stop in GTFS-RT) contributes
-    # ZERO weight to the vote here, where the old raw `COUNT(*)` query counted
+    # ZERO weight to the vote here, where a raw per-trip `COUNT(*)` would count
     # it in full. We accept this: it reuses the dedup scan's own established
     # definition of "counted observation" (see `pipeline/db.py::build_dedup_ch_sql`
     # for the same filter-before-dedup ordering elsewhere in this codebase)
     # rather than inventing a second, looser one just for the vote. A route
     # where every trip on one shape variant happens to be arrival-only
     # everywhere could in principle tip the vote toward a less-observed
-    # variant — accepted as a corner case, not chased further; see the
-    # regression test asserting the vote stays sensible (lands on the shape
+    # variant — accepted as a corner case, not chased further;
+    # tests/api/test_api_map.py::test_route_shape_shape_vote_ignores_null_delay_only_trips
+    # asserts the vote stays sensible (lands on the shape
     # with real weighted support) when some trips are entirely NULL-delay.
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
-    # / service) honored by every other analytical endpoint — an earlier
-    # version scanned the route's ENTIRE history here with no date bound,
-    # paying for a full-table scan to return only a small number of rows,
-    # even though the shape should reflect what's actually being shown for the
-    # user's selected range, not all-time history.
+    # / service) honored by every other analytical endpoint: the shape should
+    # reflect what's actually being shown for the user's selected range, not
+    # all-time history, and an unbounded scan of the route's ENTIRE history
+    # would pay for a full-table scan to return only a small number of rows.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
     # only one non-key column (dep_delay) is read off the winning row, so a
@@ -166,11 +165,11 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # Bounded by trip count, not trip x stop count: the vote only needs
     # "how many deduped stop-events did each trip contribute", so the
     # per-(trip, day, stop) dedup runs as a subquery and only its per-trip
-    # roll-up crosses into Python. A prior version transferred every
-    # (trip_id, stop_sequence, dep_delay) row for the whole ctx window here —
-    # for a busy route over a wide window that's easily >200k rows, past the
-    # async client's result_overflow_mode="throw" cap (api/clickhouse.py),
-    # 500ing the endpoint instead of degrading.
+    # roll-up crosses into Python. Transferring every
+    # (trip_id, stop_sequence, dep_delay) row for the whole ctx window instead
+    # would, for a busy route over a wide window, exceed the async client's
+    # result_overflow_mode="throw" cap (api/clickhouse.py) and 500 the
+    # endpoint instead of degrading.
     dedup_cte_sql = _route_shape_vote_dedup_sql(ch_where_frag)
     vote_result = await ch.query(
         f"WITH dedup AS ({dedup_cte_sql}) SELECT trip_id, count() AS n FROM dedup GROUP BY trip_id",
@@ -180,16 +179,16 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
 
     # If the ctx window has zero observations for this route (e.g. it only
     # runs on days outside the selected range, or a time_band excludes every
-    # one of its trips), `dedup_rows`/`trip_counts` above come back empty —
-    # there's no shape-vote signal to derive from them, but the map should
+    # one of its trips), `trip_counts` above comes back empty —
+    # there's no shape-vote signal to derive from it, but the map should
     # still be able to render the route's topology (geometry +
-    # unobserved-stop markers), just with no delay data on it, matching
-    # pre-ClickHouse-migration behavior. Run ONE fallback shape-vote query
+    # unobserved-stop markers), just with no delay data on it. Run ONE
+    # fallback shape-vote query
     # (bounded to the last 30 days off the agency's own latest data — see
     # below), solely to pick a shape for rendering purposes — this only
-    # fires on the empty-window edge case (not the common case), so even
-    # its now-bounded form doesn't reintroduce the unbounded-full-history-scan
-    # problem the ctx bound above exists to fix. The per-stop delay stats
+    # fires on the empty-window edge case (not the common case), and its own
+    # bound keeps it from becoming the unbounded full-history scan the ctx
+    # bound above exists to avoid. The per-stop delay stats
     # (`avg_min`/`samples`) stay empty regardless, since there really are
     # zero observations in the user's selected window.
     if not trip_counts:
@@ -228,16 +227,16 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
             # populated from an unordered Postgres query, so two shape
             # variants tied on vote count would otherwise pick whichever
             # happened to be inserted first that run — non-deterministic
-            # polyline/unobserved_stops between identical requests. Same bug
-            # class already fixed for movers ranking in overview.py.
+            # polyline/unobserved_stops between identical requests. Movers
+            # ranking in overview.py breaks ties the same way.
             chosen_shape_id = max(shape_counts, key=lambda sid: (shape_counts[sid], sid))
 
     # Render every observed shape variant (系統), not just the majority one
     # `chosen_shape_id` above still pins for stops/unobserved_stops below —
     # this repo's Japanese bus operators distinguish 路線 (route_code, the
     # named line) from 系統 (a route's distinct stopping/geometry patterns,
-    # e.g. the Hiroshima express-bus variants the shape-vote comment above
-    # discusses), and collapsing to one shape here hid the others' road
+    # e.g. a Hiroshima express bus's several variants), and collapsing to one
+    # shape here would hide the others' road
     # geometry entirely rather than just under-detailing their stop stats.
     # `shape_counts` (built above from real observed trips, not static-only
     # noise) is the natural variant set: every shape with at least one
@@ -265,25 +264,23 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # Fetch the per-stop delay stats, scoped to the chosen shape's trips WHEN
     # one was chosen — bounded by (trips on one shape variant x its stops),
     # not by the whole route's trip count over the ctx window, so a
-    # multi-variant route (e.g. the Hiroshima express case the shape-vote
-    # comment above discusses) doesn't pay for other variants' rows.
+    # multi-variant route (e.g. a Hiroshima express bus with several
+    # variants) doesn't pay for other variants' rows.
     #
     # Runs UNCONDITIONALLY, not just when chosen_shape_id is not None: an
     # agency with no shapes.txt at all has shape_id NULL for every trip, so
-    # chosen_shape_id is always None there — gating this query on it (an
-    # earlier version of this fix did) silently dropped `stops` to `[]` for
-    # every route on such an agency, a real regression from `main`'s
-    # always-run-the-stats-query behavior (main only used shape_id to PIN an
-    # otherwise-always-populated stops list to one variant, never to gate
-    # whether it ran at all). The trip filter is the only conditional part.
+    # chosen_shape_id is always None there — gating this query on it would
+    # silently drop `stops` to `[]` for every route on such an agency.
+    # shape_id only PINS the stops list to one variant; it never gates
+    # whether the query runs. The trip filter is the only conditional part.
     #
-    # This is a second ClickHouse scan (the vote query above no longer
-    # returns per-stop rows to filter in Python), but it's the one that must
+    # This is a second ClickHouse scan (the vote query above returns only
+    # per-trip counts, not per-stop rows to filter in Python), but it's the one that must
     # stay bounded, so the extra round trip is the right trade. In the
     # empty-ctx-window fallback case above, `{ch_where_frag}` still encodes
     # the real (empty) ctx window, so this query naturally comes back empty —
     # `stops` stays empty while `geometry`/`unobserved_stops` still render
-    # from the fallback shape, matching pre-fix behavior.
+    # from the fallback shape.
     shape_trip_ids: list[str] = []
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
