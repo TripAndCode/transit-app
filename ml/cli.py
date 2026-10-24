@@ -11,6 +11,7 @@ import sys
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -25,7 +26,9 @@ from ml.model_result import result_from_json, result_to_json
 from ml.r2 import upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
-from pipeline.day_types import DayTypes, load_day_types
+
+if TYPE_CHECKING:
+    from pipeline.day_types import DayTypes
 
 
 def _today_jst() -> date:
@@ -174,6 +177,10 @@ async def _read_day_types(conn, agency_ids: Sequence[int], first: date, last: da
     none, so every agency falls back to the weekday rule; so does an agency
     whose calendar is empty, because its timetable loaded before the table
     existed and sync does not reload a timetable it already holds."""
+    # Imported here so sync, which keeps the replica current, does not depend
+    # on what only predict needs.
+    from pipeline.day_types import load_day_types
+
     if await conn.fetchval("SELECT to_regclass('static_calendar')") is None:
         return {}
     return {agency_id: await load_day_types(conn, agency_id, first, last) for agency_id in agency_ids}
