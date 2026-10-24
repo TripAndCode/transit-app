@@ -54,7 +54,7 @@ function nearestSnap(ratio: number): SnapPoint {
 /**
  * Pure snap-resolution for a pointer release: `position` is how expanded the
  * sheet currently is (0 = fully at "peek", 1 = fully at "full"), `velocity`
- * is the release velocity in the same 0..1 units per millisecond (negative
+ * is the release velocity in the same 0..1 units per second (negative
  * while dragging up/toward "full", positive while dragging down/toward
  * "peek"). A release below the fling threshold settles on the nearest snap
  * point to `position`; a fast fling instead moves exactly one snap point

@@ -23,8 +23,8 @@ function writeFlag(key: string, value: string): void {
 
 /**
  * One-time, dismissable hint pointing a brand-new visitor at the User Manual
- * (`/help`) — today it's only reachable via the account-menu popover
- * (`SidebarUserMenu`), which nothing nudges a first-time user toward. This is a
+ * (`/help`). Its nav link sits in the rail's Other group (on a phone, the More
+ * sheet), which nothing nudges a first-time user toward. This is a
  * one-time orientation aid: once dismissed, or once the
  * first-visit window has passed, it never shows again for this browser. Not
  * gated on anonymous/logged-in status — the Help page is equally useful to

@@ -38,7 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at, table_holding
-from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn
+from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit, user_key
 from api.range import (
     MAX_RANGE_DAYS,
@@ -530,20 +530,23 @@ async def route_shape(
     ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
+    locale: str = Depends(get_locale),
 ) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
 
     Returns ``{ route, geometry, stops: [{ stop_sequence, stop_name, stop_id,
     stop_code, platform_code, lon, lat, avg_min, samples }], unobserved_stops }``.
     Powers the Map tab's per-route overlay (polyline + numbered stops) when the
-    user filters to a single route.
+    user filters to a single route. A stop that stops.txt gives no name is
+    named by its sequence in the request's ``Accept-Language``.
 
     The optional GTFS identifiers (``stop_id`` / ``stop_code`` /
     ``platform_code``) are included so the unified popup template renders
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
-    return {**await compute_route_shape(conn, ch, agency_id, str(route), ctx), "scope_applied": _ROUTE_SHAPE_SCOPE}
+    shape = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale)
+    return {**shape, "scope_applied": _ROUTE_SHAPE_SCOPE}
 
 
 # Today's figures per route: one observation per stop event via the shared

@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from api.range import RangeCtx
+from pipeline.query import tools
+from pipeline.query.results import ToolResult
 from pipeline.query.tools import _is_route_registered, dispatch
 from tests.conftest import _test_pool
 from tests.fixtures.clock import jst_midday
@@ -128,6 +130,73 @@ async def test_dispatch_did_you_mean_locale_en(conn_routes_with_alias):
     assert "Did you mean" in result.summary
     # JP phrasing must not leak through.
     assert "もしかして" not in result.summary
+
+
+@pytest.fixture
+async def conn_routes_with_full_width_names(apply_schema):
+    """Routes whose stored names mix ASCII with full-width forms, as real
+    Japanese GTFS feeds do."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+        await conn.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
+            "VALUES ($1, $2, $3, $4)",
+            [
+                (agency_id, "国道線(1021)", "A1 国道・古川線", None),
+                (agency_id, "市内線(2011)", "1 市内線", None),
+                (agency_id, "阿品線(3051)", "Ｊ１　阿品線", "ＪＲ阿品駅経由"),
+            ],
+        )
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.fixture
+def routes_seen_by_handler(monkeypatch) -> list:
+    """The ``route`` argument each dispatch hands to the route_meta handler,
+    after dispatch has resolved it."""
+    seen: list = []
+
+    async def spy(args, ctx, conn, agency_id, locale, ch=None):
+        seen.append(args.get("route"))
+        return ToolResult(kind="empty", summary="")
+
+    monkeypatch.setitem(tools._HANDLERS, "route_meta", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "code"),
+    [
+        ({"route": "１０２１"}, "1021"),
+        ({"route_code": "１０２１"}, "1021"),
+        ({"route": "Ａ１"}, "1021"),
+        ({"route": "ａ１"}, "1021"),
+        ({"route": "１番"}, "2011"),
+        # The stored short name 'Ｊ１　阿品線' folds to 'J1 阿品線'.
+        ({"route": "J1"}, "3051"),
+        # Trigram stage: the stored long name is full-width, so the column is
+        # folded as the argument is, whichever spelling the user typed.
+        ({"route": "JR阿品駅経由"}, "3051"),
+        ({"route": "ＪＲ阿品駅経由"}, "3051"),
+        # Unresolved: the handler still gets the ASCII code to look up.
+        ({"route": "９９９９９"}, "99999"),
+    ],
+)
+async def test_dispatch_resolves_a_full_width_route_like_its_ascii_spelling(
+    conn_routes_with_full_width_names, routes_seen_by_handler, args, code
+):
+    pool, agency_id = conn_routes_with_full_width_names
+    async with pool.acquire() as conn:
+        await dispatch("route_meta", args, _ctx(), conn, agency_id, locale="ja")
+    assert routes_seen_by_handler == [code]
 
 
 @pytest.mark.asyncio
@@ -458,6 +527,49 @@ async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_cli
     assert result.rows[0][1] == "テスト停留所"
     assert result.rows[0][2] == 5.0
     assert result.rows[0][3] == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("locale", "names"), [("ja", ["2番停留所", "3番停留所"]), ("en", ["Stop #2", "Stop #3"])])
+async def test_dispatch_segment_hotspots_names_a_stop_with_no_stop_name_in_the_request_language(
+    aconn, aagency_id, ch_client, ch_async_client, locale, names
+):
+    """A hotspot whose stop has no stops.txt name is named by its sequence in the
+    request's language: stop_sequence 2 has no static_stop_times row at all, and
+    stop_sequence 3's static_stops row carries a NULL name."""
+    now = datetime.now(timezone.utc)
+    for stop_sequence, delay in ((2, 300), (3, 120)):
+        for i in range(6):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', $5, $6)",
+                aagency_id,
+                f"pb_unnamed_{stop_sequence}_{i}",
+                now + timedelta(minutes=i),
+                f"trip_unnamed_{i}",
+                stop_sequence,
+                delay,
+            )
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_nameless', NULL)",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+        "VALUES ($1, $2, 3, 'stop_nameless')",
+        [(aagency_id, f"trip_unnamed_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "segment_hotspots", {"route": "R1"}, ctx, aconn, aagency_id, locale=locale, ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert [(row[0], row[1]) for row in result.rows] == [(2, names[0]), (3, names[1])]
 
 
 @pytest.mark.asyncio

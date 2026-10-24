@@ -54,12 +54,12 @@ describe("RouteDossier", () => {
   });
 
   it("moves to a different single route picked inside it, keeping its other params", async () => {
-    const router = open("/agencies/9/routes/50?routes=51&tab=stops");
+    const router = open("/agencies/9/routes/50?routes=51&sub_tab=marey");
     expect(await screen.findByText("route-tab:51")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/9/routes/51");
     const params = new URLSearchParams(router.state.location.search);
     expect(params.has("routes")).toBe(false);
-    expect(params.get("tab")).toBe("stops");
+    expect(params.get("sub_tab")).toBe("marey");
   });
 
   it("drops a route filter that only repeats its own route", async () => {

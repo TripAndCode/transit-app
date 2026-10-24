@@ -36,8 +36,9 @@ import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
 import { BannerDismissalsProvider } from "./components/BannerDismissals";
 
-// Tabs and pages are code-split per route — MapTab alone pulls in
-// maplibre-gl (~800 KB), which nothing else needs. The tab loaders live in
+// Tabs and pages are code-split per route, which also keeps maplibre-gl out
+// of the entry chunk: it is reached only through the Live tab (MapTab) and
+// the route dossier's lazily loaded map sub-tab. The tab loaders live in
 // routes/lazyTabs.ts so the sidebar can prefetch through the very same
 // import expressions; see that module for why sharing them matters.
 // OnboardingGate is a deliberate exception, imported eagerly above: it sits

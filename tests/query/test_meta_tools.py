@@ -4,6 +4,7 @@ import pytest
 
 from api.range import RangeCtx
 from pipeline.query.meta_tools import capabilities, describe_data
+from pipeline.query.tools import dispatch
 from tests.conftest import _test_pool
 
 
@@ -544,3 +545,92 @@ async def test_stops_offset_past_end_summary_not_inverted(conn_with_observations
     assert len(r.rows) == 0
     # the summary must not claim a positive range (e.g. "100001–100000件") when empty
     assert "100001" not in r.summary
+
+
+@pytest.fixture
+async def conn_with_fold_names(conn_with_seed):
+    """Stop and route names with LIKE metacharacters and full-width forms,
+    stored as real Japanese GTFS feeds spell them."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) "
+            "VALUES ($1, $2, $3, 40.0, 140.0)",
+            [
+                (agency_id, "F1", "ＪＲ阿品駅"),
+                (agency_id, "F2", "警固屋5丁目"),
+                (agency_id, "F3", "50%オフ前"),
+                (agency_id, "F4", "50円前"),
+                (agency_id, "F5", "A_B前"),
+                (agency_id, "F6", "AxB前"),
+            ],
+        )
+        await c.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, $2, $3)",
+            [
+                (agency_id, "割引線(4011)", "50%線"),
+                (agency_id, "均一線(4021)", "50円線"),
+                (agency_id, "ＪＲ線(4031)", "Ｍ１ ＪＲ線"),
+            ],
+        )
+    yield pool, agency_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fragment", "stop"),
+    [
+        ("警固屋５", ["F2", "警固屋5丁目"]),
+        ("JR阿品", ["F1", "ＪＲ阿品駅"]),
+        ("ＪＲ阿品", ["F1", "ＪＲ阿品駅"]),
+    ],
+)
+async def test_dispatch_stops_filter_matches_across_full_width_forms(conn_with_fold_names, fragment, stop):
+    """Both the argument and the stored name are folded, so a fragment finds
+    its stop whichever side is full-width, and the row keeps its stored name."""
+    pool, agency_id = conn_with_fold_names
+    async with pool.acquire() as conn:
+        result = await dispatch(
+            "describe_data", {"kind": "stops", "filter_substring": fragment}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    assert result.rows == [stop]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("fragment", "stop_id"), [("50%", "F3"), ("A_B", "F5")])
+async def test_describe_data_stops_filter_treats_like_metacharacters_literally(conn_with_fold_names, fragment, stop_id):
+    pool, agency_id = conn_with_fold_names
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "stops", "filter_substring": fragment}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert [r[0] for r in result.rows] == [stop_id]
+    assert result.summary == f"「{fragment}」に一致する停留所: 1 件（先頭 1 件を表示）"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_stops_filter_escapes_a_full_width_percent_after_folding(conn_with_fold_names):
+    """NFKC turns '％' into '%', so escaping must come after the fold."""
+    pool, agency_id = conn_with_fold_names
+    async with pool.acquire() as conn:
+        result = await dispatch(
+            "describe_data", {"kind": "stops", "filter_substring": "５０％"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert [r[0] for r in result.rows] == ["F3"]
+    assert result.summary == "「50%」に一致する停留所: 1 件（先頭 1 件を表示）"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fragment", "code", "echoed"),
+    [("Ａ１", "1021", "A1"), ("JR", "4031", "JR"), ("50%", "4011", "50%"), ("５０％", "4011", "50%")],
+)
+async def test_dispatch_routes_filter_folds_and_escapes(conn_with_fold_names, fragment, code, echoed):
+    pool, agency_id = conn_with_fold_names
+    async with pool.acquire() as conn:
+        result = await dispatch(
+            "describe_data", {"kind": "routes", "filter_substring": fragment}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert [r[0] for r in result.rows] == [code]
+    assert result.summary == f"「{echoed}」に一致する路線: 1 件（先頭 1 件を表示）"

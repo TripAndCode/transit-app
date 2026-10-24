@@ -62,14 +62,19 @@ What the user sees/does:
   the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
 - **Report body** (center column) — for most report types,
-  `frontend/src/components/ReportTable.tsx` renders the rows, with a CSV
-  download link and a raw-rows JSON `<details>` dump; `trend` instead
-  renders `TrendBlock` (defined inline in `AnalysisTab.tsx`): a
-  day-of-week x hour heat surface with "By hour" and "By band" profiles
+  `frontend/src/components/ReportTable.tsx` renders the rows, and the report
+  heading carries a CSV download link. An empty result shows `EmptyState`
+  naming the active filters, with recovery actions from
+  `frontend/src/components/emptyStateRecoveries.ts`, each shown only when it
+  applies: clear the route filter, reset the service type to all, and jump
+  to the latest data. Admins also get a collapsed raw-rows `<details>` under
+  any report other than `trend` or `route_forecast` that has rows; it shows
+  the response's text summary. `trend` instead renders `TrendBlock` (defined inline in
+  `AnalysisTab.tsx`): a day-of-week x hour heat surface with "By hour" and
+  "By band" profiles
   (`frontend/src/components/charts/HeatSurface.tsx`), a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
-  (`frontend/src/components/charts/HourlyHeatmap.tsx`). An empty result
-  shows `EmptyState` with a "reset to this week" recovery action. `dwell_run`
+  (`frontend/src/components/charts/HourlyHeatmap.tsx`). `dwell_run`
   instead renders `DwellRunBlock` (defined inline in `AnalysisTab.tsx`): a
   per-route dwell-time/running-time table decomposing `arr_delay` (populated
   only for `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately

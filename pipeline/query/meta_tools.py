@@ -20,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from api.range import RangeCtx
+from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.service_day import service_date_ch, service_date_of
@@ -45,6 +46,23 @@ def _as_utc(dt: datetime | None) -> datetime | None:
     if dt is None or dt.tzinfo is not None:
         return dt
     return dt.replace(tzinfo=timezone.utc)
+
+
+def _name_contains(column: str, n: int) -> str:
+    """Case-insensitive match of the stored name ``column`` against the LIKE
+    pattern in ``$n``.
+
+    Feeds store names with full-width digits and Latin letters and half-width
+    kana, and dispatch hands ``filter_substring`` over NFKC-folded, so the
+    column is folded the same way before it is compared. The per-agency name
+    lists are small enough that the fold needs no expression index.
+    """
+    return f"normalize({column}, NFKC) ILIKE ${n} ESCAPE '\\'"
+
+
+def _contains_pattern(substring: str) -> str:
+    """``substring`` as a LIKE pattern that matches it literally anywhere."""
+    return f"%{escape_like(substring)}%"
 
 
 async def describe_data(
@@ -92,26 +110,27 @@ async def describe_data(
     if kind == "routes":
         substring = args.get("filter_substring")
         if substring:
+            pattern = _contains_pattern(str(substring))
             rows = await conn.fetch(
                 "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
                 "       route_short_name "
                 "FROM static_routes "
-                "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
+                f"WHERE agency_id = $1 AND {_name_contains('route_short_name', 2)} "
                 "ORDER BY route_short_name, route_id "
                 "LIMIT $3 OFFSET $4",
                 agency_id,
-                substring,
+                pattern,
                 limit,
                 offset,
             )
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%'",
+                f"SELECT COUNT(*) FROM static_routes WHERE agency_id = $1 AND {_name_contains('route_short_name', 2)}",
                 agency_id,
-                substring,
+                pattern,
             )
             # A non-empty filter that matches nothing must NOT fall through to
-            # a full dump (the original bug) nor claim "0件表示" beside a high
-            # unfiltered total. Return an unambiguous empty result instead.
+            # a full dump nor claim "0件表示" beside a high unfiltered total.
+            # Return an unambiguous empty result instead.
             if total == 0:
                 return ToolResult(
                     kind="empty",
@@ -172,21 +191,22 @@ async def describe_data(
     if kind == "stops":
         substring = args.get("filter_substring")
         if substring:
+            pattern = _contains_pattern(str(substring))
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
-                "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
+                f"WHERE agency_id = $1 AND {_name_contains('stop_name', 2)} "
                 "ORDER BY stop_name, stop_id LIMIT $3 OFFSET $4",
                 agency_id,
-                substring,
+                pattern,
                 limit,
                 offset,
             )
             # A total scoped only by agency_id would overcount a filtered
             # page, so the COUNT uses the same WHERE the row query does.
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%'",
+                f"SELECT COUNT(*) FROM static_stops WHERE agency_id = $1 AND {_name_contains('stop_name', 2)}",
                 agency_id,
-                substring,
+                pattern,
             )
             if total == 0:
                 return ToolResult(

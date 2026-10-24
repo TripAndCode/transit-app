@@ -1,9 +1,8 @@
 """api/range.py's default date-range window must anchor "today" to
 Asia/Tokyo, matching the JST civil calendar every agg_*/analyze query is
 bucketed against (api/main.py pins the DB session to the same zone). A
-plain ``date.today()`` uses the server's local time, which was a real
-prior bug for analyze() (~20% of rows mis-bucketed) - this is the same
-class of bug for the request-side default window.
+plain ``date.today()`` uses the server's local time, which on a UTC host
+names the previous day for the first nine hours of every JST day.
 """
 
 from datetime import date, datetime, timezone

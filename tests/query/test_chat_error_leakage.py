@@ -270,8 +270,7 @@ async def _seed_cache_row(pool, agency_id: int, question: str, tool: str = "desc
     same question text hits the pre-LLM lookup (Site 2), not the LLM path."""
     from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 
-    ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
-    can_args = canonicalize(tool, {}, ctx_dict)
+    can_args = canonicalize(tool, {})
     sig_hash = signature_hash(tool, can_args)
     sig = IntentSignature(tool=tool, args={}, confidence=0.9)
 

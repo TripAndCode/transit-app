@@ -16,6 +16,7 @@ from typing import Any
 from api.clickhouse import max_captured_at
 from api.range import RangeCtx, build_updates_filter_ch
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+from pipeline.query.tools import unnamed_stop_name
 from pipeline.service_day import service_date_ch
 
 
@@ -91,17 +92,13 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
     """
 
 
-def _unnamed_stop(stop_sequence: int) -> str:
-    """The name a stop goes by when stops.txt gives it none: no name field, or no matching row."""
-    return f"{stop_sequence}番停留所"
-
-
-async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCtx) -> dict[str, Any]:
+async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCtx, *, locale: str) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ``ctx``.
 
     Sorted by ``stop_sequence`` so the caller can draw a polyline straight
     from the result. Stops without coordinates are dropped, so the polyline
-    never includes (NaN, NaN).
+    never includes (NaN, NaN). A stop that stops.txt gives no name is named
+    in ``locale``.
     """
     # Cheap existence precheck FIRST, before touching ClickHouse at all -- ahead
     # of the ctx-bounded dedup query below, not just inside the empty-window
@@ -362,7 +359,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         rows.append(
             {
                 "stop_sequence": stop_sequence,
-                "stop_name": max(a["stop_names"]) if a["stop_names"] else _unnamed_stop(stop_sequence),
+                "stop_name": max(a["stop_names"]) if a["stop_names"] else unnamed_stop_name(stop_sequence, locale),
                 "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
                 "stop_code": max(a["stop_codes"]) if a["stop_codes"] else None,
                 "platform_code": max(a["platform_codes"]) if a["platform_codes"] else None,
@@ -406,7 +403,9 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         unobserved = [
             {
                 "stop_sequence": r["stop_sequence"],
-                "stop_name": r["stop_name"] if r["stop_name"] is not None else _unnamed_stop(r["stop_sequence"]),
+                "stop_name": (
+                    r["stop_name"] if r["stop_name"] is not None else unnamed_stop_name(r["stop_sequence"], locale)
+                ),
                 "stop_id": r["stop_id"],
                 "stop_code": r["stop_code"],
                 "platform_code": r["platform_code"],

@@ -933,14 +933,13 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
 type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
 
 /** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
- * Invalidates the query list so the row's promoted state refreshes. */
+ * Nothing is invalidated: the query-log rows carry no promoted state
+ * (`promotable` depends only on the row having a cached intent), so a
+ * promote leaves the list unchanged, and a repeat click is answered with
+ * `reason: "already_promoted"`. */
 export function usePromoteAskQuery() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["adminAskQueries"] });
-    },
   });
 }
 

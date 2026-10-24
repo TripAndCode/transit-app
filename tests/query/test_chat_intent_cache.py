@@ -142,8 +142,7 @@ async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
 
     _tool = "capabilities"
     _args: dict[str, Any] = {}
-    _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
-    _can_args = canonicalize(_tool, _args, _ctx_dict)
+    _can_args = canonicalize(_tool, _args)
     _hash = _sig_hash(_tool, _can_args)
     _sig = IntentSignature(tool=_tool, args=_args, confidence=0.85)
 
@@ -187,8 +186,7 @@ async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monke
     # pre-hit lookup would return regardless of the current history.
     _stale_tool = "capabilities"
     _stale_args: dict[str, Any] = {}
-    _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
-    _stale_can_args = canonicalize(_stale_tool, _stale_args, _ctx_dict)
+    _stale_can_args = canonicalize(_stale_tool, _stale_args)
     _stale_hash = _sig_hash(_stale_tool, _stale_can_args)
     async with pool.acquire() as conn:
         await ic.upsert(
@@ -478,8 +476,7 @@ async def _seed_cache_row(pool, agency_id, question, tool, args):
     from pipeline.query.intent import IntentSignature, canonicalize
     from pipeline.query.intent import signature_hash as _sig_hash
 
-    ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
-    can_args = canonicalize(tool, args, ctx_dict)
+    can_args = canonicalize(tool, args)
     async with pool.acquire() as conn:
         await ic.upsert(
             conn,
