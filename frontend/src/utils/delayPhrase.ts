@@ -8,3 +8,12 @@ export function avgDelayText(t: TFunction, minutes: number): string {
   const min = fixedTenth(Math.abs(rounded));
   return rounded < 0 ? t("forecast.avg_early", { min }) : t("forecast.avg_late", { min });
 }
+
+/** A forecast figure in words. A forecast model's figure is its point
+ *  forecast, not an average of measurements, so it reads as expected. */
+export function forecastDelayText(t: TFunction, minutes: number, source: "ml" | "baseline"): string {
+  if (source !== "ml") return avgDelayText(t, minutes);
+  const rounded = roundTenth(minutes);
+  const min = fixedTenth(Math.abs(rounded));
+  return rounded < 0 ? t("forecast.expected_early", { min }) : t("forecast.expected_late", { min });
+}

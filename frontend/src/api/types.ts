@@ -791,6 +791,8 @@ export interface ForecastOverviewWorst {
   band: Band;
   expected_avg_min: number;
   samples: number;
+  /** "ml": a forecast model's point forecast, not an average of measurements. */
+  source: "ml" | "baseline";
 }
 
 export interface ForecastOverviewRoute {

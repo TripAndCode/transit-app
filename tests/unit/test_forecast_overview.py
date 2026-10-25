@@ -175,6 +175,7 @@ def test_hourly_cells_to_dow_band_worst_window():
     assert out["worst"]["dow"] == 5
     assert out["worst"]["band"] == "evening"
     assert out["worst"]["expected_avg_min"] == pytest.approx(9.0, abs=0.05)
+    assert out["worst"]["source"] == "baseline"
 
 
 def test_routes_carry_recent_daily_trend_oldest_first():
@@ -239,3 +240,15 @@ def test_the_agency_overview_does_not_call_its_figures_one_routes(locale):
         assert names_the_agency in disclaimer
         assert "この路線" not in disclaimer
         assert "this route" not in disclaimer
+
+
+def test_the_worst_window_says_whether_a_forecast_model_or_past_measurements_set_it():
+    """A forecast band's value is a model's point forecast, not an average of
+    measurements, so the worst window carries where its figure came from."""
+    rows = [
+        {"dow": 3, "hour": 12, "avg_min": 6.0, "samples": 200},
+        {"dow": 1, "hour": 8, "avg_min": 2.0, "samples": 200},
+    ]
+    assert summarize_agency_overview(rows, [])["worst"]["source"] == "baseline"
+    worst = summarize_agency_overview(rows, [], ml_cells=[{"dow": 1, "hour": 8, "mean_min": 9.0}])["worst"]
+    assert (worst["dow"], worst["band"], worst["expected_avg_min"], worst["source"]) == (1, "morning", 9.0, "ml")

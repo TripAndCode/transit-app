@@ -151,7 +151,7 @@ describe("HeatSurface", () => {
     expect(document.activeElement).toBe(cellAt(3, 5));
   });
   it("names the worst weekday band over the range", () => {
-    renderWithProviders(<HeatSurface hourly={hourly} grid={grid} worst={{ dow: 1, band: "morning", expected_avg_min: 2, samples: 10 }} rangeDays={14} />);
+    renderWithProviders(<HeatSurface hourly={hourly} grid={grid} worst={{ dow: 1, band: "morning", expected_avg_min: 2, samples: 10, source: "baseline" }} rangeDays={14} />);
     expect(screen.getByText(/Over the past 14 days, Mon .* runs latest \(avg 2\.0 min late\)/)).toBeTruthy();
   });
 });
