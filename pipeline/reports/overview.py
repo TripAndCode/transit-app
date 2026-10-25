@@ -1329,6 +1329,7 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.sparkline"):
             # Hero card slices `.slice(-7)`; modal shows full series.
             sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
+            period_avg, _ = await _headline_stats(agency_id, ctx, conn, ch=ch, grain=grain)
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
@@ -1374,6 +1375,7 @@ async def compute_overview_summary(
             top_delayed,
             (service_split, service_split_daily),
             sparkline_points,
+            (period_avg, _),
         ) = await asyncio.gather(
             _peak_dow(ctx.dow),
             _peak_dow("weekday"),
@@ -1385,6 +1387,7 @@ async def compute_overview_summary(
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
+            _own_conn(_headline_stats, agency_id, ctx),
         )
 
         delta_min = None
@@ -1413,4 +1416,7 @@ async def compute_overview_summary(
         "service_split": service_split,
         "service_split_daily": service_split_daily,
         "sparkline_points": sparkline_points,
+        # The sparkline's reference line: the whole window's sample-weighted
+        # mean, which a plain mean of the daily points is not.
+        "period_avg_min": float(_round2(period_avg)) if period_avg is not None else None,
     }

@@ -81,7 +81,7 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
     payload = await ov.compute_overview_summary(7, ctx, None, pool=pool)
 
     # The latest-date read ahead of the fan-out takes one, and every stage its own.
-    assert pool.acquires == 11
+    assert pool.acquires == 12
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"
     assert pool.active == 0

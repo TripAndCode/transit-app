@@ -172,6 +172,7 @@ export function OverviewTab() {
               severeThresholdMin={data.top_delayed.band_counts.severe.threshold_min}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
+              periodAvgMin={data.period_avg_min ?? null}
               peakHour={data.peak_hour}
               concentration={data.concentration}
               onOpenFact={openFact}

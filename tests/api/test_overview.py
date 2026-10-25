@@ -1065,6 +1065,21 @@ async def test_peak_hour_answers_for_the_selected_window(aconn, aagency_id):
     assert pk["by_hour"][3] is None
 
 
+async def test_period_avg_weighs_each_day_by_its_samples(aconn, aagency_id):
+    """The period's mean, which anchors the hero sparkline, weighs each day by
+    its observations, like every other figure on the card. A plain mean of
+    the daily points would let a thin day count as much as a busy one."""
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 19), "R_W", "平日", 1.0, 1)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 20), "R_W", "平日", 5.0, 9)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn)
+    assert out["sparkline_points"] == [1.0, 5.0]
+    assert out["period_avg_min"] == pytest.approx(4.6, abs=0.01)
+
+
 @pytest.mark.asyncio
 async def test_service_split_ignores_the_service_id_and_sparkline_7_points(aconn, aagency_id):
     """7 daily inserts whose service_type alternates regardless of the day:
