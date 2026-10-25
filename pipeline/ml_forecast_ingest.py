@@ -97,27 +97,30 @@ def prune_forecast_ml_sql(days: int) -> str:
     return f"DELETE FROM agg_route_forecast_ml WHERE service_date < now()::date - INTERVAL '{int(days)} days'"
 
 
+def list_keys(s3_client: Any, bucket: str, prefix: str, suffix: str) -> list[str]:
+    """Every key under `prefix` ending in `suffix`, paging through the whole
+    prefix: one unpaginated `list_objects_v2` call silently stops at 1000
+    keys, which a daily or weekly publish eventually passes."""
+    keys: list[str] = []
+    continuation_token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        response = s3_client.list_objects_v2(**kwargs)
+        keys.extend(obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(suffix))
+        if not response.get("IsTruncated"):
+            return keys
+        continuation_token = response.get("NextContinuationToken")
+
+
 def fetch_latest_manifest(s3_client: Any, bucket: str) -> dict[str, Any] | None:
     """The most recent `forecasts/<date>/manifest.json`, by its own `prefix`
     (`forecasts/<date>`) sorted lexicographically -- ISO dates sort
     chronologically as plain strings. Pages through the whole `forecasts/`
-    prefix: a single unpaginated `list_objects_v2` call silently truncates
-    past ~500 days of daily publishing (1000 keys / 2 objects a day), which
-    would make this quietly stop seeing newer manifests. `None` when the
-    bucket has no forecast published yet."""
-    manifest_keys: list[str] = []
-    continuation_token: str | None = None
-    while True:
-        kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": "forecasts/"}
-        if continuation_token:
-            kwargs["ContinuationToken"] = continuation_token
-        response = s3_client.list_objects_v2(**kwargs)
-        manifest_keys.extend(
-            obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith("/manifest.json")
-        )
-        if not response.get("IsTruncated"):
-            break
-        continuation_token = response.get("NextContinuationToken")
+    prefix (see `list_keys`). `None` when the bucket has no forecast
+    published yet."""
+    manifest_keys = list_keys(s3_client, bucket, "forecasts/", "/manifest.json")
     if not manifest_keys:
         return None
     key = sorted(manifest_keys)[-1]

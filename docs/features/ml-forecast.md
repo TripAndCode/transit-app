@@ -170,12 +170,21 @@ pruned once its service date is old enough. The `ml_forecast` flag
 (`pipeline/flags.py`, default off) gates whether `/forecast/heatmap` and
 `/forecast/overview` overlay this table's rows (`source: "ml"`) over the seasonal
 baseline (`source: "baseline"`); with the flag off, the ingest still runs and the
-table still fills, but the API never reads it.
+table still fills, but the API never reads it. The same step upserts every weekly
+evaluation summary under `evaluations/` into `ml_evaluations`
+(`pipeline/ml_evaluation_ingest.py`; one row per run date, the document as JSONB),
+skipping by name any document that is not JSON, uses a schema other than 1, is
+missing a field, names a run date other than its key's, or holds a non-finite
+number; a week whose document is unchanged is left as it is. A summary that
+cannot be fetched at all is a read failure, not a skipped document. Each of the two steps is guarded on its
+own, so one failing never skips the other.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
-forecast into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`
+forecast and every evaluation summary into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`
 from the same file (a read-only token is enough). Unlike the sweep it exits
 non-zero on a missing variable, an unreadable publish or a failed upsert, and
-says "no forecast has been published yet" rather than reporting zero rows. The
+says "no forecast has been published yet" (and, for the summaries, "no evaluation
+summary has been published yet") rather than reporting zero rows; a summary it
+skips is named in a warning. The
 heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
 and marks them as the ML model's.

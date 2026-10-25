@@ -28,6 +28,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.ml_evaluation_ingest import ingest_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
 from pipeline.url_guard import redact_urls_in_text
 
@@ -455,10 +456,10 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
-    # The published forecast is fleet-wide too (one R2 object, not one per
-    # agency) -- same scoping as weather, but its own gate rather than
-    # run_weather's: an operator who asked to skip the weather fetch hasn't
-    # said anything about the ML forecast.
+    # The ML store's forecast and evaluation summaries are fleet-wide too
+    # (published once for every agency, not once per agency) -- same scoping
+    # as weather, but its own gate rather than run_weather's: an operator who
+    # asked to skip the weather fetch hasn't said anything about the ML store.
     if kind == "ingest" and requested_agency_ids is None:
         _run_ml_forecast_ingest(db_url)
     if failed:
@@ -546,25 +547,34 @@ def _run_agency_update(
 
 
 def _ingest_ml_forecast(conn: Any) -> None:
-    """Best-effort: a missing/misconfigured ML bucket or a transient R2
-    failure must not abort the surrounding ingest+analyze sweep, which is
-    this job's primary purpose. `ingest_forecast` already logs and swallows
-    every read or write failure from R2 or the DB; this guard covers building
+    """Best-effort: the ML store's latest forecast and its weekly evaluation
+    summaries, each step guarded on its own, so a missing/misconfigured
+    bucket, a transient R2 failure, or one step failing never aborts the
+    other or the surrounding ingest+analyze sweep. Both ingests already log
+    and swallow their own read/write failures; these guards cover building
     the S3 client and anything else unexpected. An unconfigured store is
     skipped, not logged."""
     if not store_configured():
         return
     try:
         s3, bucket = s3_client_from_env()
-        count = ingest_forecast(conn, s3, bucket)
-        _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
+    except Exception:
+        _log.exception("cron: ML store client could not be built")
+        return
+    try:
+        _log.info("cron: ml_forecast ingest upserted %d row(s)", ingest_forecast(conn, s3, bucket))
     except Exception:
         _log.exception("cron: ml_forecast ingest failed")
+    try:
+        _log.info("cron: ml_evaluation ingest upserted %d summary(ies)", ingest_evaluations(conn, s3, bucket))
+    except Exception:
+        _log.exception("cron: ml_evaluation ingest failed")
 
 
 def _run_ml_forecast_ingest(db_url: str) -> None:
-    """Reads the ML workbench's latest published forecast from R2 and
-    upserts it into `agg_route_forecast_ml`, on its own connection opened
+    """Reads the ML workbench's latest published forecast and its weekly
+    evaluation summaries from R2 into `agg_route_forecast_ml` and
+    `ml_evaluations`, on its own connection opened
     only after `_run_ingest_and_analyze`'s advisory lock has already been
     released -- same reasoning as `_run_weather_ingest`'s own dedicated
     connection just below: a slow R2 round trip must not extend the
@@ -581,7 +591,7 @@ def _run_ml_forecast_ingest(db_url: str) -> None:
     try:
         ml_conn = psycopg2.connect(db_url)
     except Exception:
-        _log.exception("cron: ml_forecast ingest failed to connect")
+        _log.exception("cron: ML store ingest failed to connect")
         return
     try:
         _ingest_ml_forecast(ml_conn)
