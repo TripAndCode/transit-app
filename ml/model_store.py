@@ -20,7 +20,7 @@ _META_FILE = "meta.json"
 _ROUTES_FILE = "routes.parquet"
 
 
-def save_model_set(
+def stage_model_set(
     models: ModelSet,
     directory: Path,
     *,
@@ -29,19 +29,21 @@ def save_model_set(
     window_days: int,
     point: str,
     clip_quantile: float | None,
-) -> None:
-    """`version`, `window_days` (the training window the published model was
+) -> Path:
+    """Writes the model set into a sibling temp directory of `directory` and
+    returns it, leaving `directory` itself untouched until `replace_dir` moves
+    the staged set into place. A failure partway through never leaves
+    `directory` holding a mix of a new and a previous fit's files, and the
+    caller can publish the staged set elsewhere before it replaces anything.
+
+    `version`, `window_days` (the training window the published model was
     actually fit with), `clip_quantile` (the history clip its features were
     built with), `point` (the forecast it was adopted to show) and `routes` (the
     vocabulary `ml.features.route_ids` built for this fit) are published
     together with the boosters -- `predict` needs the same vocabulary, window
     and features `train` used, never values rebuilt or re-guessed from its own,
     differently-dated `runs` snapshot or its own CLI default (see `route_ids`'s
-    own docstring on the vocabulary hazard).
-
-    Writes to a sibling temp directory and renames it into place at the end,
-    so a failure partway through never leaves `directory` holding a mix of a
-    new and a previous fit's files."""
+    own docstring on the vocabulary hazard)."""
     if point == "mean" and models.mean is None:
         raise ValueError("a model set without its mean model cannot be published to show the mean")
     directory.parent.mkdir(parents=True, exist_ok=True)
@@ -66,9 +68,15 @@ def save_model_set(
         "clip_quantile": clip_quantile,
     }
     (tmp / _META_FILE).write_text(json.dumps(meta))
+    return tmp
+
+
+def replace_dir(staged: Path, directory: Path) -> None:
+    """Moves `staged` to `directory`, replacing what was there. Both must be
+    on the same filesystem, as `stage_model_set`'s sibling is."""
     if directory.exists():
         shutil.rmtree(directory)
-    tmp.rename(directory)
+    staged.rename(directory)
 
 
 def load_model_set(directory: Path) -> ModelSet:

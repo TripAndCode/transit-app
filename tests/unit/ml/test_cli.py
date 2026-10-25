@@ -1,5 +1,8 @@
+import json
 import os
+import subprocess
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -161,8 +164,11 @@ def test_predict_is_a_command():
     assert exit_info.value.code == 0
 
 
-def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
-    import json
+def _adopted_train(tmp_path, monkeypatch, run):
+    """`train`'s judge, stores and clock stubbed so it fits and publishes,
+    with `run` standing in for the aws CLI. `--out` sits in a directory of
+    its own, beside nothing but what `train` writes. Returns the CLI args,
+    `--out` and the version the fit publishes."""
     from dataclasses import asdict
 
     from ml.adoption import Verdict
@@ -187,8 +193,7 @@ def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
     monkeypatch.setattr("ml.cli._today_jst", lambda: START + timedelta(days=DAYS + 1))
-    calls = []
-    monkeypatch.setattr("ml.cli._run", calls.append)
+    monkeypatch.setattr("ml.cli._run", run)
     monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
@@ -199,20 +204,71 @@ def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
 
-    out = tmp_path / "model"
-    assert main(["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]) == 0
+    out = tmp_path / "ml" / "model"
+    args = ["train", "--backtest", str(backtest), "--out", str(out), "--agency", "8"]
+    return args, out, (START + timedelta(days=DAYS)).isoformat()
 
+
+def _previously_published(out):
+    """A stand-in for the model and pointer an earlier `train` published."""
+    out.mkdir(parents=True)
+    (out / "meta.json").write_text(json.dumps({"version": "previous"}))
+    (out / "q0.5.txt").write_text("previous booster")
+    (out.parent / "latest.json").write_text(json.dumps({"version": "previous"}))
+
+
+def _tree(root):
+    """Every path under `root`, with each file's bytes."""
+    return {str(path.relative_to(root)): path.read_bytes() if path.is_file() else None for path in root.rglob("*")}
+
+
+def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
+    seen = []
+
+    def run(cmd):
+        # The served model is still the previous one while either upload runs.
+        source = Path(cmd[3])
+        uploaded = source / "meta.json" if "--recursive" in cmd else source
+        seen.append((json.loads((out / "meta.json").read_text())["version"], json.loads(uploaded.read_text())))
+
+    args, out, version = _adopted_train(tmp_path, monkeypatch, run)
+    _previously_published(out)
+    assert main(args) == 0
+
+    assert [served for served, _ in seen] == ["previous", "previous"]
+    assert [uploaded["version"] for _, uploaded in seen] == [version, version]
     meta = json.loads((out / "meta.json").read_text())
-    assert meta["version"]
+    assert meta["version"] == version
     # A median-point model never needs, so never publishes, a mean booster.
     assert meta["point"] == "q50" and not (out / "mean.txt").exists() and (out / "q0.5.txt").exists()
     assert (out / "routes.parquet").exists()
-    assert len(calls) == 2  # upload_dir (the model) + upload_file (latest.json)
+    assert json.loads((out.parent / "latest.json").read_text())["version"] == version
+    assert sorted(path.name for path in out.parent.iterdir()) == ["latest.json", "model"]
+
+
+@pytest.mark.parametrize(
+    "fails",
+    [lambda cmd: "--recursive" in cmd, lambda cmd: cmd[4] == "s3://transit-ml/models/latest.json"],
+    ids=["model upload fails", "latest.json upload fails"],
+)
+def test_a_failed_upload_leaves_the_previously_published_model_served(tmp_path, monkeypatch, fails):
+    def run(cmd):
+        if fails(cmd):
+            raise subprocess.CalledProcessError(1, cmd)
+
+    args, out, _ = _adopted_train(tmp_path, monkeypatch, run)
+    _previously_published(out)
+    before = _tree(out.parent)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        main(args)
+
+    assert _tree(out.parent) == before
 
 
 def _publish_model(raw, model_dir, point="q50"):
     from ml.features import route_ids, with_route_ids
-    from ml.model_store import save_model_set
+    from ml.model_store import replace_dir, stage_model_set
     from ml.models import ModelParams, fit_calibrated
     from ml.training import training_frame
 
@@ -222,7 +278,7 @@ def _publish_model(raw, model_dir, point="q50"):
     train = training_frame(runs, cutoff, window_days=28, half_life_days=28)
     params = ModelParams(rounds=40, num_leaves=7, min_data_in_leaf=5, point=point)
     models = fit_calibrated(train, params, cutoff)
-    save_model_set(
+    staged = stage_model_set(
         models,
         model_dir,
         version=cutoff.isoformat(),
@@ -231,6 +287,7 @@ def _publish_model(raw, model_dir, point="q50"):
         point=point,
         clip_quantile=None,
     )
+    replace_dir(staged, model_dir)
 
 
 def _stub_predict(monkeypatch, raw, origin):

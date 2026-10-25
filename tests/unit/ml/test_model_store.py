@@ -11,7 +11,7 @@ require("lightgbm")
 require("pyarrow")
 
 from ml.features import build_frame, route_ids, with_route_ids  # noqa: E402
-from ml.model_store import load_model_set, load_routes, read_meta, save_model_set  # noqa: E402
+from ml.model_store import load_model_set, load_routes, read_meta, replace_dir, stage_model_set  # noqa: E402
 from ml.models import ModelParams, fit_calibrated, predict  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
@@ -62,9 +62,10 @@ def _fitted(params=FAST):
 
 
 def _save(models, directory, routes, version="2026-06-30", point="q50", clip_quantile=None):
-    save_model_set(
+    staged = stage_model_set(
         models, directory, version=version, routes=routes, window_days=28, point=point, clip_quantile=clip_quantile
     )
+    replace_dir(staged, directory)
 
 
 @pytest.mark.parametrize("point", ["q50", "mean"])
