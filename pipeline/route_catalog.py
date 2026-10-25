@@ -66,3 +66,9 @@ async def _retired_between(conn, agency_id: int, from_date: date, to_date: date)
         RECENT_DAYS,
     )
     return frozenset(r["route_code"] for r in rows)
+
+
+def invalidate_retired_routes() -> None:
+    """Forget every cached retired set, after a load replaced an agency's
+    timetable, so the next route list judges codes against the new one."""
+    _retired_between.cache_clear()  # type: ignore[attr-defined]

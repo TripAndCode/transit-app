@@ -574,7 +574,7 @@ describe("AnalysisTab ranking coverage", () => {
   it("says how many retired route codes a list left out, and keeps them on request", async () => {
     const { useReport, router } = setup(
       "/agencies/1/analysis/rider?report=on_time",
-      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_excluded: 2 }),
+      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_rows: 2 }),
     );
     const toggle = screen.getByRole("checkbox", { name: "Include 2 route codes the current timetable no longer runs" });
     expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeRetired: false });
@@ -584,13 +584,14 @@ describe("AnalysisTab ranking coverage", () => {
   });
 
   it("offers no retired-route toggle when a list left none out", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_excluded: 0 }));
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_rows: 0 }));
     expect(screen.queryByRole("checkbox", { name: /no longer runs/ })).not.toBeInTheDocument();
   });
 
   it("exports the retired route codes when the table shows them", () => {
-    setup("/agencies/1/analysis/rider?report=ranking&retired=1", rankingResponse({ retired_excluded: 0 }));
-    expect(screen.getByRole("checkbox", { name: /no longer runs/ })).toBeChecked();
+    setup("/agencies/1/analysis/rider?report=ranking&retired=1", rankingResponse({ retired_rows: 1 }));
+    // One code reads in the singular, and the count holds while they are kept.
+    expect(screen.getByRole("checkbox", { name: "Include 1 route code the current timetable no longer runs" })).toBeChecked();
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_retired=1(&|$)/);
   });
 

@@ -73,3 +73,28 @@ async def test_an_agency_without_a_timetable_retires_nothing(aconn, aagency_id):
     await _observe(aconn, aagency_id, "A", date(2026, 9, 24), date(2026, 10, 23))
     await _observe(aconn, aagency_id, "B", date(2026, 9, 24), date(2026, 9, 30))
     assert await retired_route_codes(aconn, aagency_id, WINDOW) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_timetable_reload_clears_the_cached_set(aconn, aagency_id):
+    """The set is cached; a reload that brings a code back must not wait out
+    the cache, and the static fetcher clears it right after loading."""
+    from pipeline.route_catalog import invalidate_retired_routes
+
+    await _timetable(aconn, aagency_id, "100")
+    await _observe(aconn, aagency_id, "100", date(2026, 9, 24), date(2026, 10, 23))
+    await _observe(aconn, aagency_id, "OLD", date(2026, 9, 24), date(2026, 9, 30))
+    assert await retired_route_codes(aconn, aagency_id, WINDOW) == {"OLD"}
+    await _timetable(aconn, aagency_id, "OLD")
+    assert await retired_route_codes(aconn, aagency_id, WINDOW) == {"OLD"}
+    invalidate_retired_routes()
+    assert await retired_route_codes(aconn, aagency_id, WINDOW) == set()
+
+
+def test_the_static_fetcher_clears_the_set_after_a_load():
+    import inspect
+
+    from pipeline import static_fetcher
+
+    source = inspect.getsource(static_fetcher)
+    assert source.index("load_static(") < source.index("route_catalog.invalidate_retired_routes()")

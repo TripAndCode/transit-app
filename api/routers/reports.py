@@ -268,10 +268,10 @@ class ReportResponse(BaseModel):
     # count below which a route's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
-    # Route lists only (None elsewhere): how many of the list's own rows were
-    # retired route codes (pipeline.route_catalog.retired_route_codes) and so
-    # left out. 0 when asked to keep them.
-    retired_excluded: int | None = None
+    # Route lists only (None elsewhere): how many of the list's own rows are
+    # retired route codes (pipeline.route_catalog.retired_route_codes), left
+    # out by default and kept on include_retired. The same in either mode.
+    retired_rows: int | None = None
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -948,20 +948,24 @@ async def get_report(
     rows: list
     rows_total: int | None = None
     retired: frozenset[str] = frozenset()
-    if report_type in _ROUTE_LIST_TYPES and not include_retired:
+    if report_type in _ROUTE_LIST_TYPES:
         retired = await retired_route_codes(conn, agency_id, ctx)
     # A limited list asks for enough extra rows that dropping every retired
-    # code still leaves `n` current routes when there are that many.
+    # code still leaves `n` current routes when there are that many, and asks
+    # as deep when keeping them, so each mode reaches the same routes.
     n_fetch = n + len(retired)
-    # Counted from the rows each list actually dropped, so a routes filter or a
-    # list's own floor that already kept a retired code out never counts it.
-    retired_dropped = 0
+    # Kept retired rows widen a limited list to the depth that found them, so
+    # every one retired_rows counts is on it.
+    shown = n_fetch if include_retired else n
+    # Counted from the list's own rows, so a routes filter or a list's floor
+    # that already kept a retired code out never counts it.
+    retired_seen = 0
 
     def current(route_rows: list) -> list:
-        nonlocal retired_dropped
+        nonlocal retired_seen
         kept = [r for r in route_rows if r[0] not in retired]
-        retired_dropped += len(route_rows) - len(kept)
-        return kept
+        retired_seen += len(route_rows) - len(kept)
+        return route_rows if include_retired else kept
 
     if report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
@@ -988,7 +992,7 @@ async def get_report(
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=late_tolerance_sec,
         )
-        rows = current(rows)[:n]
+        rows = current(rows)[:shown]
         # Appends a `low_confidence` bool (95% Wilson interval too wide to
         # trust the percentage) as a display-layer annotation — doesn't
         # change compute_on_time's own 5-tuple contract, so pooling callers
@@ -999,7 +1003,7 @@ async def get_report(
         rows = await compute_worst_5min(
             agency_id, ctx, conn, ch=ch, limit=n_fetch, late_tolerance_sec=late_tolerance_sec
         )
-        rows = current(rows)[:n]
+        rows = current(rows)[:shown]
         intent = {"query_type": "worst_5min", "service": _service_label(ctx)}
     elif report_type == "compare_ranking":
         compared = current(await compute_compare_ranking(agency_id, ctx, conn, limit=None, ch=ch))
@@ -1007,10 +1011,14 @@ async def get_report(
         rows = compared[:n]
         intent = {"query_type": "compare_ranking"}
     elif report_type == "dow_weekend":
-        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n_fetch, ch=ch))[:n]
+        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n_fetch, ch=ch))[
+            :shown
+        ]
         intent = {"query_type": "dow_ranking", "dow_group": "weekend"}
     elif report_type == "dow_weekday":
-        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n_fetch, ch=ch))[:n]
+        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n_fetch, ch=ch))[
+            :shown
+        ]
         intent = {"query_type": "dow_ranking", "dow_group": "weekday"}
     elif report_type == "trend":
         # Daily series + hour-of-day heatmap for the granular Trend tab.
@@ -1137,5 +1145,5 @@ async def get_report(
         scope_applied=report_scope_applied(report_type),
         rows_total=rows_total,
         reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _RANKING_TYPES else None,
-        retired_excluded=retired_dropped if report_type in _ROUTE_LIST_TYPES else None,
+        retired_rows=retired_seen if report_type in _ROUTE_LIST_TYPES else None,
     )

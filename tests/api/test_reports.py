@@ -2547,8 +2547,8 @@ async def _seed_observed(pool, agency_id, route_code, first, last):
 @pytest.mark.asyncio
 async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
     """A code the current timetable lacks, last seen weeks before the data
-    ends, is a renumbered route: the lists leave it out, say how many they
-    left, and keep it on request."""
+    ends, is a renumbered route: the lists leave it out, say how many of their
+    rows it is, and keep it on request."""
     client, agency_id, pool = reports_client
     await pool.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, '100')", agency_id)
     await _seed_observed(pool, agency_id, "100", "2026-09-24", "2026-10-23")
@@ -2560,17 +2560,21 @@ async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
         assert resp.status_code == 200, (report, resp.text)
         body = resp.json()
         assert [r[0] for r in body["rows"]] == ["100"], report
-        assert body["retired_excluded"] == 1, report
+        assert body["retired_rows"] == 1, report
 
-    # A routes filter that already keeps the retired code out leaves nothing
-    # for the list to drop, so it counts none.
+    # A routes filter that already keeps the retired code out leaves the list
+    # none to count.
     filtered = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&routes=100")).json()
     assert [r[0] for r in filtered["rows"]] == ["100"]
-    assert filtered["retired_excluded"] == 0
+    assert filtered["retired_rows"] == 0
 
     kept = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&include_retired=1")).json()
     assert {r[0] for r in kept["rows"]} == {"100", "OLD"}
-    assert kept["retired_excluded"] == 0
+    assert kept["retired_rows"] == 1
+
+    # A limited list keeping them reaches as deep as the one leaving them out.
+    one = (await client.get(f"/api/{agency_id}/reports/on_time?{window}&limit=1&include_retired=1")).json()
+    assert {r[0] for r in one["rows"]} == {"100", "OLD"}
 
     trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
-    assert trend["retired_excluded"] is None
+    assert trend["retired_rows"] is None

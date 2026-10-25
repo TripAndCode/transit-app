@@ -22,7 +22,7 @@ export function SparseToggle({
 }
 
 /** Route codes the current timetable no longer runs, left out of a route
- *  list by default; the count is only known while they are left out. */
+ *  list by default. */
 export function RetiredToggle({
   checked,
   count,
@@ -36,9 +36,7 @@ export function RetiredToggle({
   return (
     <label className="ranking-sparse-toggle">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
-      {checked
-        ? t("reports.ranking_coverage.include_retired")
-        : t("reports.ranking_coverage.include_retired_count", { count })}
+      {t("reports.ranking_coverage.include_retired", { count })}
     </label>
   );
 }

@@ -252,12 +252,8 @@ export function AnalysisTab({
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
             )}
-            {detail.data.retired_excluded != null && (includeRetired || detail.data.retired_excluded > 0) && (
-              <RetiredToggle
-                checked={includeRetired}
-                count={detail.data.retired_excluded}
-                onChange={setIncludeRetired}
-              />
+            {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
+              <RetiredToggle checked={includeRetired} count={detail.data.retired_rows} onChange={setIncludeRetired} />
             )}
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
