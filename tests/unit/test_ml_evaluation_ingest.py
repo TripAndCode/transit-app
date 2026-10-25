@@ -75,7 +75,12 @@ class _RecordingConn:
 @pytest.fixture
 def captured(monkeypatch):
     rows = []
-    monkeypatch.setattr("psycopg2.extras.execute_values", lambda cur, sql, values, **kwargs: rows.extend(values))
+
+    def fake_execute_values(cur, sql, values, **kwargs):
+        rows.extend(values)
+        return [(row[0],) for row in values]
+
+    monkeypatch.setattr("psycopg2.extras.execute_values", fake_execute_values)
     return rows
 
 
@@ -123,6 +128,7 @@ _KEY = "evaluations/2026-11-01/summary.json"
             json.dumps({**_summary("2026-11-01"), "agencies": [{"lgbm_mae": float("nan")}]}).encode(),
             id="non-finite-number",
         ),
+        pytest.param(json.dumps(_summary("2026-11-01", skill="6.3%")).encode(), id="non-numeric-skill"),
     ],
 )
 def test_one_untrustworthy_document_is_skipped_by_name_and_the_rest_ingested(captured, caplog, body):
@@ -160,7 +166,7 @@ def test_the_cron_wrapper_never_raises(caplog):
         assert ingest_evaluations(_DroppedConn(), _published(_summary("2026-10-18")), "transit-ml") == 0
         assert ingest_evaluations(_RecordingConn(), _FakeS3({}, fail_listing=True), "transit-ml") == 0
     assert "could not upsert the evaluation summaries" in caplog.text
-    assert "could not list the evaluation summaries" in caplog.text
+    assert "could not read the evaluation summaries from R2" in caplog.text
 
 
 class _FailingGetS3(_FakeS3):

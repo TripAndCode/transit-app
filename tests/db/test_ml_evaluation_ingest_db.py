@@ -59,7 +59,7 @@ def test_an_unchanged_week_is_left_alone_so_ingested_at_means_when_it_last_chang
         cur.execute("UPDATE ml_evaluations SET ingested_at = '2026-01-01T00:00:00Z'")
     pg_conn.commit()
 
-    load_evaluations(pg_conn, store, "transit-ml")
+    assert load_evaluations(pg_conn, store, "transit-ml").upserted == 0
     with pg_conn.cursor() as cur:
         cur.execute("SELECT ingested_at::date FROM ml_evaluations")
         assert cur.fetchone()[0] == date(2026, 1, 1)

@@ -180,6 +180,8 @@ Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
 forecast and every evaluation summary into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`
 from the same file (a read-only token is enough). Unlike the sweep it exits
 non-zero on a missing variable, an unreadable publish or a failed upsert, and
-says "no forecast has been published yet" rather than reporting zero rows. The
+says "no forecast has been published yet" (and, for the summaries, "no evaluation
+summary has been published yet") rather than reporting zero rows; a summary it
+skips is named in a warning. The
 heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
 and marks them as the ML model's.

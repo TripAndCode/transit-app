@@ -32,6 +32,9 @@ class EvaluationWriteError(Exception):
 
 @dataclass(frozen=True)
 class EvaluationIngest:
+    """`upserted` counts the weeks inserted or changed; an unchanged week is
+    listed but not upserted."""
+
     listed: int
     upserted: int
     skipped: tuple[str, ...]
@@ -40,16 +43,20 @@ class EvaluationIngest:
 def _row(key: str, body: bytes) -> tuple[Any, ...]:
     """The table row for one summary. Raises for a document that cannot be
     trusted: not JSON, a schema this code does not read, a missing field, a run
-    date other than the one its key files it under, or a non-finite number,
-    which jsonb refuses and which would fail the whole batch's write."""
+    date other than the one its key files it under, a skill that is not a
+    number, or a non-finite number anywhere -- either of the last two would
+    otherwise fail the whole batch's write, not just this document's."""
     summary = json.loads(body)
     if summary.get("schema") != SUPPORTED_SCHEMA:
         raise ValueError(f"schema {summary.get('schema')!r} is not {SUPPORTED_SCHEMA}")
     run_date = date.fromisoformat(summary["run_date"])
     if key != f"{_PREFIX}{run_date.isoformat()}{_SUFFIX}":
         raise ValueError(f"run_date {run_date} does not match its key")
+    skill = summary["headline"]["skill"]
+    if skill is not None and (isinstance(skill, bool) or not isinstance(skill, int | float)):
+        raise ValueError(f"headline skill {skill!r} is not a number")
     document = json.dumps(summary, allow_nan=False)
-    return (run_date, SUPPORTED_SCHEMA, bool(summary["adopted"]), summary["headline"]["skill"], document)
+    return (run_date, SUPPORTED_SCHEMA, bool(summary["adopted"]), skill, document)
 
 
 def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest:
@@ -78,17 +85,19 @@ def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest
     try:
         from psycopg2.extras import execute_values
 
+        changed: list[Any] = []
         with conn.cursor() as cur:
             if rows:
-                execute_values(
+                changed = execute_values(
                     cur,
                     "INSERT INTO ml_evaluations (run_date, schema_version, adopted, overall_skill, summary) "
                     "VALUES %s ON CONFLICT (run_date) DO UPDATE SET schema_version = EXCLUDED.schema_version, "
                     "adopted = EXCLUDED.adopted, overall_skill = EXCLUDED.overall_skill, "
                     "summary = EXCLUDED.summary, ingested_at = now() "
-                    "WHERE ml_evaluations.summary IS DISTINCT FROM EXCLUDED.summary",
+                    "WHERE ml_evaluations.summary IS DISTINCT FROM EXCLUDED.summary RETURNING run_date",
                     rows,
                     template="(%s, %s, %s, %s, %s::jsonb)",
+                    fetch=True,
                 )
         conn.commit()
     except Exception as exc:
@@ -97,7 +106,7 @@ def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest
         except Exception:
             _log.debug("ml_evaluation_ingest: rollback failed", exc_info=True)
         raise EvaluationWriteError(str(exc)) from exc
-    return EvaluationIngest(listed=len(keys), upserted=len(rows), skipped=tuple(skipped))
+    return EvaluationIngest(listed=len(keys), upserted=len(changed), skipped=tuple(skipped))
 
 
 def ingest_evaluations(conn: Any, s3_client: Any, bucket: str) -> int:
@@ -106,7 +115,7 @@ def ingest_evaluations(conn: Any, s3_client: Any, bucket: str) -> int:
     try:
         return load_evaluations(conn, s3_client, bucket).upserted
     except EvaluationReadError:
-        _log.exception("ml_evaluation_ingest: could not list the evaluation summaries")
+        _log.exception("ml_evaluation_ingest: could not read the evaluation summaries from R2")
     except EvaluationWriteError:
         _log.exception("ml_evaluation_ingest: could not upsert the evaluation summaries")
     return 0
