@@ -194,6 +194,19 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
+  // jsdom has no layout, so this pins the two styles that decide reachability;
+  // a flex `align-items: center` overlay pushes a tall list above the top edge,
+  // where no scroll position can reach it.
+  it("scrolls the picker, centred only while it fits, when the cards outgrow the screen", () => {
+    mockAgencies(Array.from({ length: 14 }, (_, i) => agency({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })));
+    renderGate();
+    const content = screen.getByRole("heading", { level: 1 }).parentElement!.parentElement!;
+    const overlay = content.parentElement!;
+    expect(overlay.style.overflowY).toBe("auto");
+    expect(overlay.style.alignItems).toBe("");
+    expect(content.style.margin).toBe("auto");
+  });
+
   it("lets a visitor switch language before choosing", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
