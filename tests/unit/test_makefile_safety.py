@@ -12,6 +12,7 @@ own default) can only be caught by reading the text.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -172,3 +173,27 @@ def test_database_targets_go_through_the_guarded_expansion():
     assert "db_url = $(if $(DATABASE_URL)," in text, "the guarded expansion is gone"
     direct = [line for line in text.splitlines() if "DATABASE_URL=$(DATABASE_URL)" in line]
     assert direct == [], f"recipes must use $(db_url): {direct}"
+
+
+def _serve_reload_dirs() -> list[str]:
+    tokens = shlex.split(_target_recipe(MAKEFILE.read_text(), "serve"), comments=False)
+    spaced = [tokens[i + 1] for i, tok in enumerate(tokens) if tok == "--reload-dir"]
+    joined = [tok.removeprefix("--reload-dir=") for tok in tokens if tok.startswith("--reload-dir=")]
+    return spaced + joined
+
+
+def test_serve_reloads_only_on_source_directories():
+    """`make serve` must not watch the whole checkout.
+
+    A bare `--reload` watches the working directory, which holds `.worktrees/`.
+    Every file another session writes there restarts the API, and a restart
+    that waits on a background task never finishes, leaving the server
+    accepting connections but never answering them.
+    """
+    dirs = _serve_reload_dirs()
+    assert dirs, "serve must name its --reload-dir directories"
+    for d in dirs:
+        path = (REPO_ROOT / d).resolve()
+        assert path.is_dir(), f"--reload-dir {d} does not exist"
+        assert path != REPO_ROOT, "--reload-dir . watches .worktrees/ again"
+        assert (REPO_ROOT / ".worktrees").resolve() not in [path, *path.parents]
