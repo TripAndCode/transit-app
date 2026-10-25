@@ -571,6 +571,29 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.getByRole("checkbox", TOGGLE)).toBeChecked();
   });
 
+  it("says how many retired route codes a list left out, and keeps them on request", async () => {
+    const { useReport, router } = setup(
+      "/agencies/1/analysis/rider?report=on_time",
+      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_excluded: 2 }),
+    );
+    const toggle = screen.getByRole("checkbox", { name: "Include 2 route codes the current timetable no longer runs" });
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeRetired: false });
+    await userEvent.click(toggle);
+    expect(new URLSearchParams(router.state.location.search).get("retired")).toBe("1");
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeRetired: true });
+  });
+
+  it("offers no retired-route toggle when a list left none out", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_excluded: 0 }));
+    expect(screen.queryByRole("checkbox", { name: /no longer runs/ })).not.toBeInTheDocument();
+  });
+
+  it("exports the retired route codes when the table shows them", () => {
+    setup("/agencies/1/analysis/rider?report=ranking&retired=1", rankingResponse({ retired_excluded: 0 }));
+    expect(screen.getByRole("checkbox", { name: /no longer runs/ })).toBeChecked();
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_retired=1(&|$)/);
+  });
+
   it("keeps the toggle in reach when no route clears the floor", () => {
     setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByRole("checkbox", TOGGLE)).toBeInTheDocument();
@@ -624,7 +647,7 @@ describe("AnalysisTab ranking coverage", () => {
 
   it("asks for the API's longest compare list, since the bars re-rank it by period rather than by gap", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
-    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500 });
+    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500, includeRetired: false });
     const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
     expect(href).toMatch(/[?&]limit=500(&|$)/);
     expect(href).not.toContain("include_sparse");

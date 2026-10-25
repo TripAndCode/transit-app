@@ -1216,6 +1216,8 @@
     "service_note": "種別：その便が走った時刻表（平日・土日祝・特別ダイヤなど）",
     "ranking_coverage": {
       "include_sparse": "観測{{floor}}回未満の系統も含める",
+      "include_retired": "時刻表にない運行終了の系統コードも含める",
+      "include_retired_count": "時刻表にない運行終了の系統コード{{count}}件も含める",
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
     },

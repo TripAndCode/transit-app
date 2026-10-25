@@ -46,9 +46,20 @@ import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock"
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
 import { destHref, pickReport, reportHref } from "../routes/destinations";
-import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
+import { RetiredToggle, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
 const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
+// The reports that list one row per route, which leave retired route codes
+// out unless asked (api/routers/reports.py's _ROUTE_LIST_TYPES).
+const ROUTE_LIST_TYPES = new Set([
+  "ranking",
+  "ranking_best",
+  "on_time",
+  "worst_5min",
+  "compare_ranking",
+  "dow_weekday",
+  "dow_weekend",
+]);
 
 /** Whether a report has rows to export: the trend is a chart, and a dwell
  *  and running-time split this feed or filter can't make has none. */
@@ -73,10 +84,12 @@ function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
   allRowsFor: string | null,
+  includeRetired: boolean,
 ): ReportOptions | undefined {
-  if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX };
-  if (reportType == null || !RANKING_TYPES.has(reportType)) return undefined;
-  return { includeSparse, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
+  if (reportType == null || !ROUTE_LIST_TYPES.has(reportType)) return undefined;
+  if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX, includeRetired };
+  if (!RANKING_TYPES.has(reportType)) return { includeRetired };
+  return { includeSparse, includeRetired, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
 }
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
@@ -103,6 +116,15 @@ export function AnalysisTab({
     });
   }
   const includeSparse = searchParams.get("sparse") === "1";
+  const includeRetired = searchParams.get("retired") === "1";
+  function setIncludeRetired(on: boolean) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (on) next.set("retired", "1");
+      else next.delete("retired");
+      return next;
+    });
+  }
   function setIncludeSparse(on: boolean) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -122,7 +144,7 @@ export function AnalysisTab({
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
     ctx,
-    rankingOptions(reportType, includeSparse, allRowsFor),
+    rankingOptions(reportType, includeSparse, allRowsFor, includeRetired),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
@@ -146,7 +168,7 @@ export function AnalysisTab({
           : undefined;
 
   function csvHref(type: string): string {
-    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`);
+    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor, includeRetired))}&format=csv`);
   }
 
   // `route_forecast` is served by its own endpoint, so the reports list never
@@ -228,6 +250,13 @@ export function AnalysisTab({
             <ReportMeta data={detail.data} />
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
+            )}
+            {detail.data.retired_excluded != null && (includeRetired || detail.data.retired_excluded > 0) && (
+              <RetiredToggle
+                checked={includeRetired}
+                count={detail.data.retired_excluded}
+                onChange={setIncludeRetired}
+              />
             )}
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />

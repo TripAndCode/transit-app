@@ -143,6 +143,19 @@ describe("useReport's ranking options", () => {
     expect(url).not.toContain("limit=");
   });
 
+  it("asks for retired route codes as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ a: useReport(1, "on_time", baseCtx()), b: useReport(1, "on_time", baseCtx(), { includeRetired: true }) }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("include_retired");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]include_retired=1(&|$)/);
+  });
+
   it("asks for thinly observed groups and more rows as a separate query", async () => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

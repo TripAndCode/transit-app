@@ -152,7 +152,14 @@ export function useScopeSummary(
 /** `observeOnly` reads whatever another caller fetched under the same query
  *  without ever fetching itself, so a screen can show a report's metadata
  *  without paying for a report that only an opened section asks for. */
-export type ReportOptions = { includeSparse?: boolean; limit?: number; thresholdSec?: number; observeOnly?: boolean };
+export type ReportOptions = {
+  includeSparse?: boolean;
+  /** Route lists: keep route codes the current timetable no longer runs. */
+  includeRetired?: boolean;
+  limit?: number;
+  thresholdSec?: number;
+  observeOnly?: boolean;
+};
 
 /** The most rows the reports API returns in one response. */
 export const REPORT_ROWS_MAX = 500;
@@ -160,6 +167,7 @@ export const REPORT_ROWS_MAX = 500;
 export function reportQueryString(ctx: Scope, options: ReportOptions = {}): string {
   const parts = [scopeToQueryString(ctx)];
   if (options.includeSparse) parts.push("include_sparse=1");
+  if (options.includeRetired) parts.push("include_retired=1");
   if (options.limit != null) parts.push(`limit=${options.limit}`);
   if (options.thresholdSec != null) parts.push(`threshold_sec=${options.thresholdSec}`);
   return parts.filter(Boolean).join("&");
@@ -172,7 +180,16 @@ export function useReport(
   options: ReportOptions = {},
 ): UseQueryResult<ReportResponse> {
   return useLocalizedQuery({
-    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx), !!options.includeSparse, options.limit ?? null, options.thresholdSec ?? null],
+    queryKey: [
+      "reports",
+      agencyId,
+      reportType,
+      ...scopeKey(ctx),
+      !!options.includeSparse,
+      !!options.includeRetired,
+      options.limit ?? null,
+      options.thresholdSec ?? null,
+    ],
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${reportQueryString(ctx, options)}`, { signal }),
     enabled: agencyId != null && !!reportType && !options.observeOnly,

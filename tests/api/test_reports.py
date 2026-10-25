@@ -2512,3 +2512,59 @@ async def test_the_service_filter_reads_the_agencys_timetable_days(reports_clien
         assert await ranked("日祝", **extra) == [("RW", 5.0, 25)]
         # Both weekend days carry the same (empty) service_type, so they pool.
         assert await ranked("土日祝", **extra) == [("RW", 7.5, 50)]
+
+
+async def _seed_observed(pool, agency_id, route_code, first, last):
+    """A route seen every day from ``first`` to ``last``, in the daily tables
+    the retired check and each route list read."""
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    day = _date.fromisoformat(first)
+    while day <= _date.fromisoformat(last):
+        await pool.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
+            "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES ($1, $2, $3, '', 400, 400, 1, 25, NOW(), 10000)",
+            agency_id,
+            day,
+            route_code,
+        )
+        await pool.execute(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
+            "sum_delay_sec, sum_late_sec) VALUES ($1, $2, $3, '', 6.67, 25, 10000, 10000)",
+            agency_id,
+            day,
+            route_code,
+        )
+        # Over five minutes late, so the late-departure list has it too.
+        await seed_route_dist_day(pool, agency_id, route_code, day, [400] * 25)
+        day += _td(days=1)
+
+
+@pytest.mark.asyncio
+async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
+    """A code the current timetable lacks, last seen weeks before the data
+    ends, is a renumbered route: the lists leave it out, say how many they
+    left, and keep it on request."""
+    client, agency_id, pool = reports_client
+    await pool.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, '100')", agency_id)
+    await _seed_observed(pool, agency_id, "100", "2026-09-24", "2026-10-23")
+    await _seed_observed(pool, agency_id, "OLD", "2026-09-24", "2026-09-30")
+    window = "from=2026-09-24&to=2026-10-23"
+
+    for report in ("ranking", "ranking_best", "on_time", "worst_5min", "dow_weekday"):
+        resp = await client.get(f"/api/{agency_id}/reports/{report}?{window}")
+        assert resp.status_code == 200, (report, resp.text)
+        body = resp.json()
+        assert [r[0] for r in body["rows"]] == ["100"], report
+        assert body["retired_excluded"] == 1, report
+
+    kept = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&include_retired=1")).json()
+    assert {r[0] for r in kept["rows"]} == {"100", "OLD"}
+    assert kept["retired_excluded"] == 0
+
+    trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
+    assert trend["retired_excluded"] is None

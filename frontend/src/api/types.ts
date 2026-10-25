@@ -423,6 +423,9 @@ type ReportEnvelope<T extends ReportType, Row> = {
    *  group's average is too thin to trust. */
   rows_total?: number | null;
   reliable_min_samples?: number | null;
+  /** Route lists: how many retired route codes the list left out; 0 when
+   *  asked to keep them. */
+  retired_excluded?: number | null;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is
