@@ -1038,37 +1038,18 @@ async def test_top_delayed_routes_uses_cur_ctx_not_full_ctx(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
-    """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg.
-
-    Peak hour reads from ``agg_route_hour``; one row per (route, svc,
-    scheduled_time). Two rows at 08:00 collapse to one agg row with the
-    weighted mean (9.0 min, samples=2).
+async def test_peak_hour_answers_for_the_selected_window(aconn, aagency_id):
+    """The peak hour pools each hour sample-weighted across the window's days,
+    and a worse hour on a day outside the window does not win: the hero card
+    shows it beside the window's other figures.
     """
-    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
-    rows = [
-        ("06:00", 60),
-        ("08:00", 600),
-        ("08:00", 480),
-        ("17:00", 120),
-    ]
-    for i, (sched, dep) in enumerate(rows):
-        await aconn.execute(
-            "INSERT INTO updates "
-            "(agency_id, file_name, captured_at, trip_id, service_type, "
-            " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_pk_' || $4, '平日', ($5::text)::time, 'R_P', 1, $6)",
-            aagency_id,
-            f"pk_{i}",
-            base + timedelta(minutes=i),
-            str(i),
-            sched,
-            dep,
-        )
-    # Aggregated mirror in agg_route_hour: one row per scheduled_time.
-    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "06:00", 1.0, 1)
-    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "08:00", 9.0, 2)
-    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "17:00", 2.0, 1)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 6, 1.0, 1)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 9.0, 2)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 20), 8, 3.0, 2)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 17, 2.0, 1)
+    # Outside the window, and far worse: it would win if the window were ignored.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 4, 1), 17, 30.0, 50)
+    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "17:00", 30.0, 50)
 
     from pipeline.reports import compute_overview_summary
 
@@ -1078,8 +1059,9 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
     assert pk is not None
     assert pk["peak_hour"] == 8
     assert len(pk["by_hour"]) == 24
-    assert pk["by_hour"][8] == pytest.approx(9.0, abs=0.1)
-    assert pk["by_hour"][6] == pytest.approx(1.0, abs=0.1)
+    assert pk["by_hour"][8] == pytest.approx(6.0, abs=0.01)
+    assert pk["by_hour"][17] == pytest.approx(2.0, abs=0.01)
+    assert pk["by_hour"][6] == pytest.approx(1.0, abs=0.01)
     assert pk["by_hour"][3] is None
 
 
@@ -1522,7 +1504,7 @@ async def test_service_split_daily_rounds_same_precision_as_service_split(aconn,
 async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     """Pool-gather path and sequential path return identical payloads.
 
-    Seeds a representative dataset (agg_daily_trend + agg_route_hour +
+    Seeds a representative dataset (agg_daily_trend + agg_hour_daily +
     updates for the live-path callers) then calls compute_overview_summary
     twice on the same seeded data: once with conn only (sequential) and
     once with pool=<real pool> (gather). Both results must be equal.
@@ -1535,9 +1517,9 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     # One baseline-week row so delta is non-None.
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 11), "R_PP", "平日", 1.5, 5)
 
-    # Seed agg_route_hour for _peak_hour (fast-path).
-    await _seed_agg_route_hour(aconn, aagency_id, "R_PP", "平日", "08:00", 4.0, 5)
-    await _seed_agg_route_hour(aconn, aagency_id, "R_PP", "平日", "17:00", 2.0, 3)
+    # Seed agg_hour_daily for _peak_hour (fast-path).
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 4.0, 5)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 20), 17, 2.0, 3)
 
     # Seed updates rows for _peak_hour_by_dow (live-path only callers).
     # 2026-05-19 is Tuesday (weekday), 2026-05-23 is Saturday (weekend).
@@ -2335,9 +2317,9 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     `_peak_hour_by_dow`'s live branch.
 
     In this request shape (`time_band == 'all'` + a routes filter) every other
-    surface — headline, movers, concentration, top_delayed, peak_hour,
-    service_split, sparkline — is served from Postgres `agg_*` tables, so
-    letting the exception propagate would sink an otherwise complete response.
+    surface — headline, movers, concentration, top_delayed, service_split,
+    sparkline — is served from Postgres `agg_*` tables, so letting the
+    exception propagate would sink an otherwise complete response.
     `peak_hour_weekday`/`peak_hour_weekend` are already `PeakHour | None = None`
     in api.routers.overview, so degrading them to null is free.
     """
@@ -2347,10 +2329,6 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
         await _seed_agg_daily(aconn, aagency_id, date(2026, 6, d), "R_DEG", "平日", 2.0, 20)
     for d in range(22, 29):
         await _seed_agg_daily(aconn, aagency_id, date(2026, 6, d), "R_DEG", "平日", 5.0, 20)
-    # agg_route_hour backs `peak_hour` (the non-DOW one) — it must still come
-    # through, proving only the two CH-derived fields degraded.
-    await _seed_agg_route_hour(aconn, aagency_id, "R_DEG", "平日", "08:00", 7.0, 30)
-    await _seed_agg_route_hour(aconn, aagency_id, "R_DEG", "平日", "17:00", 3.0, 30)
 
     from pipeline.reports import compute_overview_summary
 
@@ -2358,10 +2336,11 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     failing = _FailingCh()
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
 
-    # The two ClickHouse-derived fields degrade to null...
+    # The three ClickHouse-derived peak fields degrade to null...
+    assert out["peak_hour"] is None
     assert out["peak_hour_weekday"] is None
     assert out["peak_hour_weekend"] is None
-    assert failing.attempts == 2
+    assert failing.attempts == 3
     # ...and every Postgres-served surface is fully populated.
     assert out["headline"]["avg_min"] == pytest.approx(5.0, abs=0.01)
     assert out["headline"]["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
@@ -2372,7 +2351,6 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     assert out["movers"]["worse"][0]["delta_min"] == pytest.approx(3.0, abs=0.01)
     assert out["concentration"]["top_routes"][0]["route_code"] == "R_DEG"
     assert out["top_delayed"]["routes"][0]["route_code"] == "R_DEG"
-    assert out["peak_hour"]["peak_hour"] == 8
     # 06-15 is a Monday: each type sees five days at 2.0 min and five at 5.0.
     assert out["service_split"] == _split(weekday=(3.5, 10, 200), saturday=(3.5, 2, 40), sunday_holiday=(3.5, 2, 40))
     assert len(out["sparkline_points"]) == 14

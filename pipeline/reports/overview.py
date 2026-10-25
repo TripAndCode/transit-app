@@ -13,16 +13,18 @@ Fast vs slow paths
 Most helpers have two internal branches:
 
 * **Fast path** (``ctx.time_band == "all"``) — reads the pre-aggregated
-  ``agg_daily_trend`` / ``agg_route_hour`` tables, sub-millisecond even
+  ``agg_daily_trend`` / ``agg_hour_daily`` tables, sub-millisecond even
   over multi-month ranges.
 * **Slow path** (any other time_band) — falls back to the live ``updates``
   table (ClickHouse, via ``pipeline.reports.filters._dedup_cte_ch``) so the
   hour-of-day filter is honoured.
 
-``_peak_hour_by_dow`` reads the per-day ``agg_hour_daily`` (filtering dates by
-DOW, and by the service filter's dates) on the fast path; ``agg_route_hour``
-can't serve it (no date column). It falls back to the live path under a
-``routes`` filter, since that table aggregates across all routes.
+``_peak_hour`` and ``_peak_hour_by_dow`` read the per-day ``agg_hour_daily``
+(filtering dates by the window, by DOW, and by the service filter's dates) on
+the fast path. ``agg_route_hour`` can't serve them: it has no date column, so
+it would answer for every analysed day instead of the window. They fall back
+to the live path under a ``routes`` filter, since ``agg_hour_daily``
+aggregates across all routes.
 
 The shared slow-path grain
 --------------------------
@@ -63,7 +65,7 @@ from api.range import (
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import DayTypes
-from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
+from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2
 from pipeline.reports.rankings import _round1
 
 _log = logging.getLogger(__name__)
@@ -843,53 +845,22 @@ async def _top_delayed_routes(
 
 
 async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict | None:
-    """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
+    """24-bucket avg delay by scheduled hour over ``ctx``'s window and days of
+    the week, plus the peak hour: :func:`_peak_hour_by_dow` for ``ctx.dow``.
 
-    Reads from ``agg_route_hour``, which is a fixed analyze-period rollup
-    (no date column). Consequence: the date range and DOW in ``ctx`` are
-    ignored — but ``routes`` and ``time_band`` apply, because
-    ``agg_route_hour`` does carry a TIME column.
-
-    A service filter is a set of dates (:func:`api.range.resolve_service_dates`),
-    which a table without a date column cannot apply. Under one this reads
-    the dated sources :func:`_peak_hour_by_dow` reads instead, over ``ctx``'s
-    own window and days of the week; ``ch`` and ``grain`` serve that branch.
+    The hero card shows it beside the window's other figures, so it must
+    answer for the same dates; ``agg_route_hour`` has no date column and would
+    answer for every analysed day instead.
     """
-    if ctx.service != "all":
-        return await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain)
-    n = 2
-    params: list = []
-    parts: list[str] = []
-    if ctx.routes:
-        parts.append(f"route_code = ANY(${n}::text[])")
-        params.append(list(ctx.routes))
-        n += 1
-    tb_frag, tb_params, n = _time_band_sql_on("scheduled_time", ctx.time_band, n)
-    if tb_frag:
-        parts.append(tb_frag)
-        params.extend(tb_params)
-    where_clause = (" AND " + " AND ".join(parts)) if parts else ""
-    sql = (
-        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to
-        # the same row population — see _route_weekly_history's identical
-        # rationale.
-        "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
-        "FROM agg_route_hour\n"
-        f"WHERE agency_id=$1{where_clause}\n"
-        "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
-    )
-    rows = await conn.fetch(sql, agency_id, *params)
-    return _peak_from_hour_rows(rows)
+    return await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain)
 
 
 async def _peak_hour_by_dow(
     agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
 ) -> dict | None:
     """24-hour avg delay over the days of the week ``dow_group`` names —
-    ``'weekday'`` or ``'weekend'`` for the payload's pair, any canonical
-    ``dow`` for :func:`_peak_hour`'s service-filtered branch.
+    ``'weekday'`` or ``'weekend'`` for the payload's pair, ``ctx.dow`` for
+    :func:`_peak_hour`.
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW and by the service filter's dates), a sample-weighted average across
