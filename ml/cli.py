@@ -21,8 +21,9 @@ from ml import sync
 from ml.adoption import judge
 from ml.backtest import DataSpan, evaluate_agency, lookback_days, needs_older_cells, results_from_json, results_to_json
 from ml.cells import Cell
+from ml.compare import DEFAULT_BASELINE, FITS, compare, render_markdown, variant_name
 from ml.data import agencies_with_data, count_days, date_span, fetch_cells
-from ml.model_result import result_from_json, result_to_json
+from ml.model_result import DEFAULT_POINT, POINTS, result_from_json, result_to_json
 from ml.r2 import upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
@@ -129,11 +130,64 @@ def _train_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def _snapshot_runs(args: argparse.Namespace) -> int:
+    from ml.dataset import load_runs, write_runs
+
+    client = get_client()
+    write_runs(load_runs(client, args.agency or agencies_with_data(client)), args.out)
+    return 0
+
+
+def _variant_eval(args: argparse.Namespace) -> int:
+    """Writes one result per point, `<out-dir>/<variant>.json`, never touching
+    the weekly job's own files unless pointed at them."""
+    from dataclasses import replace
+
+    from ml.dataset import read_runs
+    from ml.model_backtest import run_backtests
+    from ml.models import ModelParams
+
+    points = tuple(dict.fromkeys(args.point or [DEFAULT_POINT]))
+    if "mean_objective" in FITS[args.fit] and "mean" not in points:
+        # The objective shapes only the mean model, so without it the result
+        # would be the plain fit's under this fit's name.
+        raise SystemExit(f"--fit {args.fit} changes only the mean model: score it with --point mean")
+    params = replace(ModelParams(window_days=args.window), **FITS[args.fit])
+    results = run_backtests(read_runs(args.runs), params=params, origin_count=args.origins, points=points)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    for point, result in results.items():
+        (args.out_dir / f"{variant_name(args.fit, point)}.json").write_text(result_to_json(result))
+    return 0
+
+
+_COMPARISON = "comparison"
+
+
+def _compare(args: argparse.Namespace) -> int:
+    results = {
+        path.stem: result_from_json(path.read_text())
+        for path in sorted(args.dir.glob("*.json"))
+        if path.stem != _COMPARISON
+    }
+    comparison = compare(results, baseline=args.baseline)
+    text = render_markdown(comparison)
+    (args.dir / f"{_COMPARISON}.json").write_text(json.dumps(comparison, indent=1))
+    (args.dir / f"{_COMPARISON}.md").write_text(text)
+    sys.stdout.write(text)
+    return 0
+
+
 def _train(args: argparse.Namespace) -> int:
-    verdict = judge(result_from_json(args.backtest.read_text()))
+    judged = result_from_json(args.backtest.read_text())
+    verdict = judge(judged)
     if not verdict.adopted:
         sys.stderr.write(f"not adopted, keeping the previous model: {'; '.join(verdict.reasons)}\n")
         return 0
+    # Imported here: it needs the optional `ml` group, which the adoption gate
+    # above does not. The model is fit with exactly the params that were judged.
+    from ml.models import ModelParams
+
+    params = ModelParams.from_record(judged.params)
 
     # Read and swap credentials before the fit, so a misconfigured env fails
     # fast instead of after a full fit plus a local overwrite.
@@ -145,7 +199,7 @@ def _train(args: argparse.Namespace) -> int:
     from ml.dataset import load_runs
     from ml.features import route_ids, with_route_ids
     from ml.model_store import save_model_set
-    from ml.models import ModelParams, fit_calibrated
+    from ml.models import fit_calibrated
     from ml.training import training_frame
 
     client = get_client()
@@ -153,14 +207,28 @@ def _train(args: argparse.Namespace) -> int:
     routes = route_ids(runs)
     runs = with_route_ids(runs, routes)
     cutoff = _today_jst() - timedelta(days=1)
-    params = ModelParams(window_days=args.window)
-    train = training_frame(runs, cutoff, window_days=params.window_days, half_life_days=params.half_life_days)
+    train = training_frame(
+        runs,
+        cutoff,
+        window_days=params.window_days,
+        half_life_days=params.half_life_days,
+        seed=params.seed,
+        clip_quantile=params.clip_quantile,
+    )
     if train.empty:
         sys.stderr.write("not enough history to train; keeping the previous model\n")
         return 0
     models = fit_calibrated(train, params, cutoff)
     version = cutoff.isoformat()
-    save_model_set(models, args.out, version=version, routes=routes, window_days=params.window_days)
+    save_model_set(
+        models,
+        args.out,
+        version=version,
+        routes=routes,
+        window_days=params.window_days,
+        point=params.point,
+        clip_quantile=params.clip_quantile,
+    )
 
     upload_dir(args.out, bucket, f"models/{version}", endpoint, run=_run)
     latest_path = args.out.parent / "latest.json"
@@ -220,7 +288,7 @@ def _predict(args: argparse.Namespace) -> int:
     from ml.features import build_frame, template_future_runs, template_span, with_route_ids
     from ml.model_result import MIN_MODEL_DAYS
     from ml.model_store import load_model_set, load_routes, read_meta
-    from ml.models import predict
+    from ml.models import point_forecast, predict
     from ml.training import HORIZON_DAYS
 
     models = load_model_set(model_dir)
@@ -238,13 +306,17 @@ def _predict(args: argparse.Namespace) -> int:
     agency_ids = sorted(int(agency) for agency in runs["agency_id"].unique())
     day_types = _calendar_day_types(database_url, agency_ids, first, last)
     template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS, day_types=day_types)
+    # A meta with no clip_quantile or point belongs to a model fit on unclipped
+    # features that shows its mean.
     frame = build_frame(
         pd.concat([runs, template], ignore_index=True),
         origin,
         window_days=meta["window_days"],
         horizon_days=HORIZON_DAYS,
+        clip_quantile=meta.get("clip_quantile"),
     )
     preds = predict(models, frame)
+    point = point_forecast(preds, meta.get("point", "mean"))
 
     # Below MIN_MODEL_DAYS of its own history, an agency's forecast is worse
     # than its own slot average (see ml.model_backtest's own fallback gate) --
@@ -252,7 +324,7 @@ def _predict(args: argparse.Namespace) -> int:
     seen = runs[runs["service_date"] < pd.Timestamp(origin)].groupby("agency_id")["service_date"].nunique()
     on_model = {int(agency) for agency, days in seen.items() if days >= MIN_MODEL_DAYS}
 
-    cells = frame[_CELL].assign(mean_min=preds.mean, q10=preds.q10, q50=preds.q50, q90=preds.q90)
+    cells = frame[_CELL].assign(mean_min=point, q10=preds.q10, q50=preds.q50, q90=preds.q90)
     cells = cells[cells["agency_id"].isin(on_model)]
     # One run per trip, but one forecast per (route, date, hour) slot: several
     # trips can share an hour, and agg_route_forecast_ml's primary key is the
@@ -342,10 +414,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_train.add_argument("--agency", type=int, action="append")
     p_train.set_defaults(handler=_train_eval)
 
+    p_snapshot = sub.add_parser("snapshot-runs", help="Save the replica's runs for variant-eval")
+    p_snapshot.add_argument("--out", type=Path, required=True)
+    p_snapshot.add_argument("--agency", type=int, action="append")
+    p_snapshot.set_defaults(handler=_snapshot_runs)
+
+    p_variant = sub.add_parser("variant-eval", help="Backtest one model variant from a runs snapshot")
+    p_variant.add_argument("--runs", type=Path, required=True)
+    p_variant.add_argument("--fit", choices=sorted(FITS), required=True)
+    p_variant.add_argument("--point", choices=POINTS, action="append")
+    p_variant.add_argument("--out-dir", type=Path, required=True)
+    p_variant.add_argument("--origins", type=int, default=28)
+    p_variant.add_argument("--window", type=int, default=28)
+    p_variant.set_defaults(handler=_variant_eval)
+
+    p_compare = sub.add_parser("compare", help="Compare the variant backtests in a directory")
+    p_compare.add_argument("--dir", type=Path, required=True)
+    p_compare.add_argument("--baseline", default=DEFAULT_BASELINE)
+    p_compare.set_defaults(handler=_compare)
+
     p_train_live = sub.add_parser("train", help="Fit and publish this week's live model, if adopted")
     p_train_live.add_argument("--backtest", type=Path, required=True)
     p_train_live.add_argument("--out", type=Path, required=True)
-    p_train_live.add_argument("--window", type=int, default=28)
     p_train_live.add_argument("--agency", type=int, action="append")
     p_train_live.set_defaults(handler=_train)
 

@@ -89,6 +89,7 @@ async def test_overview_grid_worst_and_routes(overview_client):
     assert body["worst"]["dow"] == 1
     assert body["worst"]["band"] == "midday"
     assert body["worst"]["expected_avg_min"] == pytest.approx(6.8, abs=0.05)
+    assert body["worst"]["source"] == "baseline"
     by_code = {x["route_code"]: x for x in body["routes"]}
     assert by_code["100"]["route_name"] == "100"  # short_name preferred over long_name
     assert by_code["200"]["route_name"] == "200"  # no static label -> falls back to code

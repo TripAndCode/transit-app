@@ -68,14 +68,36 @@ B0 is a seasonal-naive baseline: the same route×weekday×hour, pooled by runs, 
 
 ## Models
 
-The weekly job also backtests LightGBM forecasters of each trip run's mean delay: one model for the mean and one each for the 10th, 50th and 90th percentiles. They are trained on runs from every agency (`python -m ml.cli train-eval`, which needs the optional `ml` Poetry group the bootstrap installs).
+The weekly job also backtests LightGBM forecasters of each trip run's delay: one model each for the 10th, 50th and 90th percentiles, plus a mean model only when a variant or the published point reads it. They are trained on runs from every agency (`python -m ml.cli train-eval`, which needs the optional `ml` Poetry group the bootstrap installs). The forecast a cell shows, and the one scored against B0, is the median model's (`ModelParams.point`): a cell is scored by its absolute error, and the median does not follow one extreme run in a slot's history the way the squared-error mean does.
 
 - **Features** come from runs on or before the day before the forecast is made: the route×weekday×hour slot's mean (B0), count, spread and latest day (B1); the route's means over the window, the last week, the last three days and the day before; the trip's own mean, typical stop count and scheduled span; and how many days the agency was observed in the window. The run's own timetable facts are added: hour, weekday, days ahead, and how often its service runs at weekends, which marks holiday timetables.
 - **Training** makes every past run a target once, forecast from an origin 1–7 days earlier with the lead drawn at random, so the lead never stands in for the weekday. Older targets weigh less.
 - **Intervals**: the quantile models are trained without the last week before the cutoff, and that week calibrates the 10th–90th percentile interval to hold 80% of runs (conformalized quantile regression).
-- **Evaluation** chooses 28 origins from every agency's pooled dates, the same way the baselines do from one agency's, retraining once per week of origins on data before it. Point error is compared with B0 on the cells both predict. Intervals are scored per run, against B0's own slot 10th–90th percentile.
+- **Evaluation** chooses 28 origins from every agency's pooled dates, the same way the baselines do from one agency's, retraining once per week of origins on data before it. Point error is compared with B0 on the cells both predict. Intervals are scored per run, against B0's own slot 10th–90th percentile. The backtest also scores the interval `predict` publishes, one per route×date×hour cell made of its runs' mean bounds, against each run in the cell (`LGBM slot`). Its bounds are one pair per cell rather than per run, so its coverage can differ from the per-run interval's wherever a cell's trips differ.
 - **Short history**: an agency with fewer than 56 days of history before a cutoff keeps B0, because a model trained mostly on other agencies forecasts it worse. It moves to the model on its own once it has the history, and the report names the agencies kept on B0.
-- **Adoption** requires at least 5% better error than B0 overall, no agency worse than B0, and an interval that holds 75–85% of runs. The report states the verdict and the reasons it fails. Weekly retraining means this is re-decided every run: a week that clears the bar publishes a new model version; a week that doesn't keeps serving whichever version is already published (or none, if none ever has).
+- **Adoption** requires at least 5% better error than B0 overall, no agency worse than B0, and an interval that holds 75–85% of runs. The report states the verdict and the reasons it fails. `train` fits the published model with exactly the parameters the judged backtest recorded, so what is published is what was judged. Weekly retraining means this is re-decided every run: a week that clears the bar publishes a new model version; a week that doesn't keeps serving whichever version is already published (or none, if none ever has).
+
+### Comparing variants
+
+`ml.compare.FITS` names the fits a backtest can compare:
+
+- `base`, the default parameters;
+- `clip`, which winsorizes each agency's window history at its own 1st and 99th percentiles before the delay features are built, and clips the mean model's training target to the same bounds;
+- `huber`, which trains the mean model with a Huber loss;
+- `clip-huber`, both.
+
+Each fit is scored with the median model's forecast as the point (`--point q50`, named `<fit>-q50`), the mean model's (`--point mean`, named `<fit>`), or both from one fit. B0 is always the slot's raw mean, so every variant is scored against the same baseline. Each variant is one full `train-eval` with its memory peak, so run them one process at a time, outside the timers' windows, from one snapshot of the replica so that every variant scores the same origins:
+
+```
+cd /root/transit-app && set -a && . /etc/transit-ml/env && set +a
+nice .venv/bin/python -m ml.cli snapshot-runs --out <dir>/runs.parquet
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit base --point mean --point q50 --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit clip --point mean --point q50 --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli variant-eval --runs <dir>/runs.parquet --fit huber --point mean --out-dir <dir>/variants
+nice .venv/bin/python -m ml.cli compare --dir <dir>/variants
+```
+
+`compare` refuses variants scored on different origins. It writes `comparison.json` and `comparison.md` beside the variants: each variant's skill against B0 overall, per agency and by days ahead, RMSE, both intervals' coverage, its adoption verdict, and on how many origins it beats the `--baseline` variant: by default `base-q50`, what is published. `variant-eval` scores the published point unless `--point` names others.
 
 ## Publishing and serving the forecast
 
@@ -85,6 +107,13 @@ training cutoff date. The daily `predict` job loads the model `train` last wrote
 to `/var/lib/transit-ml/model` (it does not read `models/latest.json`),
 forecasts each on-model agency's routes for the next
 `HORIZON_DAYS` days, and uploads the result as the latest published forecast.
+Each cell's `mean_min` is the model's point forecast and `q10`/`q90` its interval,
+each the mean over the cell's trips. The model's `meta.json` records the point it
+was adopted with and the history clip its features were built with, and `predict`
+uses both; a meta without them belongs to a model that shows its mean, unclipped.
+The mean model is trained, run and published only when something reads it: a
+model whose point is the median has no `mean.txt`, and a backtest trains it only
+when asked to score the mean (`variant-eval --point mean`).
 `predict` needs the target days' rows to already exist in `runs` to build their
 features, which ClickHouse's observed-only history never has for the future. It
 copies each future day's runs from a recent day of the same day type (weekday,

@@ -198,13 +198,16 @@
     "stat_worst": "Worst",
     "stat_calmest": "Calmest",
     "stat_mean": "Route avg",
+    "stat_mean_expected": "Route expected",
     "stat_samples": "Measurements",
     "stat_samples_history": "Past observations",
     "ml_source": "ML forecast",
     "route_picker_label": "Route",
     "route_picker_all": "All routes",
     "avg_late": "avg {{min}} min late",
-    "avg_early": "avg {{min}} min early"
+    "avg_early": "avg {{min}} min early",
+    "expected_late": "{{min}} min late expected",
+    "expected_early": "{{min}} min early expected"
   },
   "network": {
     "title": "Compare agencies",

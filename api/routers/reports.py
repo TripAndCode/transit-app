@@ -602,12 +602,14 @@ class ForecastOverviewGridCell(BaseModel):
 
 
 class ForecastOverviewWorst(BaseModel):
-    """The single worst (highest pooled delay) window agency-wide."""
+    """The single worst (highest pooled delay) window agency-wide. `source` is
+    its band's: an "ml" figure is a forecast model's point, not an average."""
 
     dow: int
     band: str
     expected_avg_min: float
     samples: int
+    source: Literal["ml", "baseline"]
 
 
 class ForecastOverviewRoute(BaseModel):

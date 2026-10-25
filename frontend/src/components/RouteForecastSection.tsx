@@ -32,7 +32,7 @@ import { useRovingCells } from "../hooks/useRovingCells";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
-import { avgDelayText } from "../utils/delayPhrase";
+import { forecastDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
   bandOf,
@@ -503,7 +503,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: avgDelayText(t, w.expected_avg_min) })}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: forecastDelayText(t, w.expected_avg_min, w.source) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
@@ -693,7 +693,9 @@ function RouteDetail({
   const { populated, min, max } = populatedRange(cells);
   const totalN = populated.reduce((a, c) => a + c.samples, 0);
   // An ML cell's `samples` is its hour's past observations, not measurements
-  // behind the forecast, so the count is labelled for what it is.
+  // behind the forecast, so the count is labelled for what it is. The route
+  // figure pools the same cells the bars and grid show, ML ones included, so
+  // it agrees with them; it is then named as expected, not as an average.
   const mlBacked = populated.some((c) => c.source === "ml");
   const mean = totalN ? populated.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / totalN : 0;
   const allNull = data != null && populated.length === 0;
@@ -747,7 +749,7 @@ function RouteDetail({
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: avgDelayText(t, worstBand.expected_avg_min as number) })}
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: forecastDelayText(t, worstBand.expected_avg_min as number, worstBand.source) })}
         </div>
       )}
 
@@ -797,7 +799,7 @@ function RouteDetail({
                   stats={[
                     { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
                     { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
-                    { label: t("forecast.stat_mean"), value: formatMinutes(mean) },
+                    { label: t(mlBacked ? "forecast.stat_mean_expected" : "forecast.stat_mean"), value: formatMinutes(mean) },
                     { label: t(mlBacked ? "forecast.stat_samples_history" : "forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />

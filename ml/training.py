@@ -32,12 +32,19 @@ def training_targets(first_day: date, cutoff: date, *, seed: int, min_history_da
 
 
 def training_frame(
-    runs: pd.DataFrame, cutoff: date, *, window_days: int, half_life_days: float, seed: int = 7
+    runs: pd.DataFrame,
+    cutoff: date,
+    *,
+    window_days: int,
+    half_life_days: float,
+    seed: int = 7,
+    clip_quantile: float | None = None,
 ) -> pd.DataFrame:
     """One forecast row per run up to the cutoff, each from its drawn origin,
     weighted so a target's weight halves every half_life_days back from the
     cutoff. Each agency's own history floors its own targets: in a multi-agency
-    `runs`, a later-starting agency does not borrow an earlier agency's floor."""
+    `runs`, a later-starting agency does not borrow an earlier agency's floor.
+    `clip_quantile` is build_frame's."""
     if runs.empty:
         return pd.DataFrame()
     targets_by_origin: dict[date, dict[int, list[date]]] = {}
@@ -50,7 +57,12 @@ def training_frame(
     frames = []
     for origin, by_agency in sorted(targets_by_origin.items()):
         frame = build_frame(
-            runs, origin, window_days=window_days, horizon_days=HORIZON_DAYS, precomputed_weekend_days=days_table
+            runs,
+            origin,
+            window_days=window_days,
+            horizon_days=HORIZON_DAYS,
+            precomputed_weekend_days=days_table,
+            clip_quantile=clip_quantile,
         )
         parts = [
             frame[(frame["agency_id"] == agency_id) & frame["service_date"].isin(pd.to_datetime(days))]

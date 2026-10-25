@@ -20,17 +20,30 @@ _META_FILE = "meta.json"
 _ROUTES_FILE = "routes.parquet"
 
 
-def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: pd.DataFrame, window_days: int) -> None:
+def save_model_set(
+    models: ModelSet,
+    directory: Path,
+    *,
+    version: str,
+    routes: pd.DataFrame,
+    window_days: int,
+    point: str,
+    clip_quantile: float | None,
+) -> None:
     """`version`, `window_days` (the training window the published model was
-    actually fit with) and `routes` (the vocabulary `ml.features.route_ids`
-    built for this fit) are published together with the boosters -- `predict`
-    needs the same vocabulary and window `train` used, never values rebuilt or
-    re-guessed from its own, differently-dated `runs` snapshot or its own CLI
-    default (see `route_ids`'s own docstring on the vocabulary hazard).
+    actually fit with), `clip_quantile` (the history clip its features were
+    built with), `point` (the forecast it was adopted to show) and `routes` (the
+    vocabulary `ml.features.route_ids` built for this fit) are published
+    together with the boosters -- `predict` needs the same vocabulary, window
+    and features `train` used, never values rebuilt or re-guessed from its own,
+    differently-dated `runs` snapshot or its own CLI default (see `route_ids`'s
+    own docstring on the vocabulary hazard).
 
     Writes to a sibling temp directory and renames it into place at the end,
     so a failure partway through never leaves `directory` holding a mix of a
     new and a previous fit's files."""
+    if point == "mean" and models.mean is None:
+        raise ValueError("a model set without its mean model cannot be published to show the mean")
     directory.parent.mkdir(parents=True, exist_ok=True)
     tmp = directory.with_name(directory.name + ".tmp")
     if tmp.exists():
@@ -40,11 +53,18 @@ def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: p
     # (just .predict), but fit() only ever constructs them from lgb.train,
     # so save_model is always actually there -- cast rather than widen
     # ModelSet's own type for one caller.
-    cast(lgb.Booster, models.mean).save_model(str(tmp / _MEAN_FILE))
+    if models.mean is not None:
+        cast(lgb.Booster, models.mean).save_model(str(tmp / _MEAN_FILE))
     for alpha, booster in models.quantiles.items():
         cast(lgb.Booster, booster).save_model(str(tmp / _QUANTILE_FILES[alpha]))
     routes.to_parquet(tmp / _ROUTES_FILE)
-    meta = {"interval_shift": models.interval_shift, "version": version, "window_days": window_days}
+    meta = {
+        "interval_shift": models.interval_shift,
+        "version": version,
+        "window_days": window_days,
+        "point": point,
+        "clip_quantile": clip_quantile,
+    }
     (tmp / _META_FILE).write_text(json.dumps(meta))
     if directory.exists():
         shutil.rmtree(directory)
@@ -52,7 +72,9 @@ def save_model_set(models: ModelSet, directory: Path, *, version: str, routes: p
 
 
 def load_model_set(directory: Path) -> ModelSet:
-    mean = lgb.Booster(model_file=str(directory / _MEAN_FILE))
+    """A model set published without its mean model loads with `mean` None."""
+    mean_file = directory / _MEAN_FILE
+    mean = lgb.Booster(model_file=str(mean_file)) if mean_file.exists() else None
     quantiles: dict[float, Predictor] = {
         alpha: lgb.Booster(model_file=str(directory / name)) for alpha, name in _QUANTILE_FILES.items()
     }
