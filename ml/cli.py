@@ -47,8 +47,9 @@ def _capture(cmd: Sequence[str]) -> str:
 def _use_store_credentials() -> None:
     # `sync` reads this same EnvironmentFile and must keep using the read-only
     # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
-    # `train`/`predict` swap in the read-write transit-ml pair only for their
-    # own (separate, short-lived) process, from distinctly named variables.
+    # each job that writes the transit-ml bucket swaps in its read-write pair
+    # only for its own (separate, short-lived) process, from distinctly named
+    # variables.
     access_key, secret_key = os.environ["ML_STORE_ACCESS_KEY_ID"], os.environ["ML_STORE_SECRET_ACCESS_KEY"]
     # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=` --
     # env.example ships exactly that, so a `KeyError` alone would not catch
@@ -285,7 +286,7 @@ def _predict(args: argparse.Namespace) -> int:
 
     from ml.dataset import load_runs
     from ml.features import build_frame, template_future_runs, template_span, with_route_ids
-    from ml.model_backtest import MIN_MODEL_DAYS
+    from ml.model_result import MIN_MODEL_DAYS
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import point_forecast, predict
     from ml.training import HORIZON_DAYS
@@ -351,6 +352,28 @@ def _report(args: argparse.Namespace) -> int:
     models = result_from_json(args.models.read_text()) if args.models else None
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(results, generated=_today_jst(), models=models))
+    return 0
+
+
+def _publish_eval(args: argparse.Namespace) -> int:
+    """Publish this week's evaluation summary for the web app, adopted or not:
+    a rejected week is as much a result as an adopted one."""
+    from ml.evaluation import build_summary
+
+    # Read and swap credentials first, so a misconfigured env fails before
+    # anything is written.
+    bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    _use_store_credentials()
+
+    result = result_from_json(args.models.read_text())
+    meta = json.loads(args.model_meta.read_text()) if args.model_meta and args.model_meta.exists() else None
+    run_date = args.run_date or _today_jst()
+    summary = build_summary(
+        result, run_date=run_date, generated_at=datetime.now(ZoneInfo("Asia/Tokyo")), serving_meta=meta
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(summary, indent=1))
+    upload_file(args.out, bucket, f"evaluations/{run_date.isoformat()}/summary.json", endpoint, run=_run)
     return 0
 
 
@@ -421,6 +444,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_predict.add_argument("--out", type=Path, required=True)
     p_predict.add_argument("--agency", type=int, action="append")
     p_predict.set_defaults(handler=_predict)
+
+    p_eval = sub.add_parser("publish-eval", help="Publish this week's evaluation summary for the web app")
+    p_eval.add_argument("--models", type=Path, required=True)
+    p_eval.add_argument("--out", type=Path, required=True)
+    p_eval.add_argument("--model-meta", type=Path)
+    p_eval.add_argument("--run-date", type=date.fromisoformat)
+    p_eval.set_defaults(handler=_publish_eval)
 
     args = parser.parse_args(argv)
     return int(args.handler(args))

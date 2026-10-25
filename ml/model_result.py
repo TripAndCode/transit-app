@@ -12,6 +12,10 @@ from typing import Any
 from ml.backtest import AgencyResult, results_from_json, results_to_json
 
 MODEL = "LGBM"
+# Below this many days of history before a cutoff, an agency keeps B0. A model
+# trained mostly on other agencies forecasts one it has barely seen worse than
+# that agency's own slot averages.
+MIN_MODEL_DAYS = 56
 # The point forecasts a model result can score, and the one published.
 POINTS = ("mean", "q50")
 DEFAULT_POINT = "q50"
@@ -62,6 +66,15 @@ def merged_intervals(result: ModelBacktestResult, method: str) -> IntervalStats:
     for stats in result.intervals.get(method, {}).values():
         total.merge(stats)
     return total
+
+
+def origin_skill_spread(result: ModelBacktestResult) -> dict[str, Any]:
+    """How skill against B0 varied across origins: the count of origins that
+    had cells both predict, and the min, median and max of their skill."""
+    skills = sorted(s for _, s in result.origin_skill if s is not None)
+    if not skills:
+        return {"count": 0, "min": None, "median": None, "max": None}
+    return {"count": len(skills), "min": skills[0], "median": skills[len(skills) // 2], "max": skills[-1]}
 
 
 def result_to_json(result: ModelBacktestResult) -> str:

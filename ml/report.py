@@ -12,7 +12,7 @@ from html import escape
 
 from ml.adoption import judge
 from ml.backtest import HORIZONS, METHODS, SPARSE_RUNS, AgencyResult
-from ml.model_result import MODEL, ModelBacktestResult, merged_intervals
+from ml.model_result import MODEL, ModelBacktestResult, merged_intervals, origin_skill_spread
 from ml.summary import summarize
 
 
@@ -93,10 +93,10 @@ def _fallback_note(models: ModelBacktestResult) -> str:
 def _model_section(models: ModelBacktestResult) -> str:
     verdict = judge(models)
     status = "adopted" if verdict.adopted else "not adopted: " + "; ".join(escape(r) for r in verdict.reasons)
-    skills = sorted(s for _, s in models.origin_skill if s is not None)
+    skill = origin_skill_spread(models)
     spread = (
-        f"skill per origin ranges {_pct(skills[0])} to {_pct(skills[-1])}, median {_pct(skills[len(skills) // 2])}"
-        if skills
+        f"skill per origin ranges {_pct(skill['min'])} to {_pct(skill['max'])}, median {_pct(skill['median'])}"
+        if skill["count"]
         else "no origin had cells both predict"
     )
     agencies = "".join(f"<h3>Agency {r.agency_id}</h3>{_table([r], methods=MODEL_METHODS)}" for r in models.agencies)

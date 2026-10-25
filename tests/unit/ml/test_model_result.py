@@ -36,3 +36,13 @@ def test_agencies_merge_into_one_interval_figure():
 def test_a_result_survives_a_json_round_trip():
     result = _result()
     assert result_from_json(result_to_json(result)) == result
+
+
+def test_origin_skill_spread_is_the_one_figure_the_report_and_summary_share():
+    from ml.model_result import origin_skill_spread
+
+    result = _result()
+    result.origin_skill = [(date(2026, 8, 20), 0.12), (date(2026, 8, 13), -0.03), (date(2026, 8, 6), None)]
+    assert origin_skill_spread(result) == {"count": 2, "min": -0.03, "median": 0.12, "max": 0.12}
+    result.origin_skill = [(date(2026, 8, 20), None)]
+    assert origin_skill_spread(result) == {"count": 0, "min": None, "median": None, "max": None}
