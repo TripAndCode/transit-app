@@ -12,6 +12,10 @@ from typing import Any
 from ml.backtest import AgencyResult, results_from_json, results_to_json
 
 MODEL = "LGBM"
+# Below this many days of history before a cutoff, an agency keeps B0. A model
+# trained mostly on other agencies forecasts one it has barely seen worse than
+# that agency's own slot averages.
+MIN_MODEL_DAYS = 56
 
 
 @dataclass

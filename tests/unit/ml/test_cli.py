@@ -181,7 +181,7 @@ def test_train_fits_and_publishes_the_model_when_adopted(tmp_path, monkeypatch):
             )
         )
     )
-    monkeypatch.setattr("ml.cli.judge", lambda result: Verdict(adopted=True, reasons=()))
+    monkeypatch.setattr("ml.cli.judge", lambda result: Verdict(adopted=True))
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
     monkeypatch.setattr("ml.cli._today_jst", lambda: START + timedelta(days=DAYS + 1))

@@ -15,15 +15,11 @@ from ml.backtest import AgencyResult, SliceRow, choose_origins
 from ml.features import build_frame, route_ids, weekend_days, with_route_ids
 from ml.metrics import ErrorStats
 from ml.model_metrics import MODEL, add_cells, add_intervals, cell_frame, take
-from ml.model_result import IntervalStats, ModelBacktestResult
+from ml.model_result import MIN_MODEL_DAYS, IntervalStats, ModelBacktestResult
 from ml.models import ModelParams, fit_calibrated, predict
 from ml.training import HORIZON_DAYS, training_frame
 
 RETRAIN_EVERY = 7
-# Below this many days of history before a cutoff, an agency keeps B0. A model
-# trained mostly on other agencies forecasts one it has barely seen worse than
-# that agency's own slot averages.
-MIN_MODEL_DAYS = 56
 
 
 def run_backtest(
