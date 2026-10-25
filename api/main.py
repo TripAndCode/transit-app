@@ -14,6 +14,7 @@ import os.path
 from contextlib import asynccontextmanager
 
 import asyncpg
+from clickhouse_connect.driver.exceptions import DatabaseError as ClickHouseDatabaseError
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -36,6 +37,7 @@ from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_activ
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
+from api.query_timeout import clickhouse_error_handler
 from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
@@ -317,6 +319,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
 # on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
+# A ClickHouse read that runs out its time budget answers a localized 504 the
+# client does not retry; any other ClickHouse error stays a 500.
+app.add_exception_handler(ClickHouseDatabaseError, clickhouse_error_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. The add_middleware calls below, outermost
 # (runs first on a request) to innermost (closest to the routers):

@@ -1263,6 +1263,7 @@
     "not_found": "No data available yet.",
     "server_5xx": "Couldn't load data just now. Please retry.",
     "aggregate_not_ready": "Data for this view isn't ready in this environment yet. It will appear once the data has been prepared.",
+    "query_too_slow": "This took too long to count. Try a shorter period or fewer routes.",
     "generic_status": "Failed to load ({{status}})",
     "network": "Connection dropped for a moment. Please retry.",
     "timeout": "The request timed out. Please try again.",

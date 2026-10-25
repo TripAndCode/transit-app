@@ -104,6 +104,29 @@ async def test_clickhouse_query_error_hides_exception_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_clickhouse_timeout_asks_for_a_narrower_question(monkeypatch):
+    """A query that ran out its time budget would again on a retry, so the
+    answer asks for a shorter period or fewer routes instead of "retry later",
+    still without the raw ClickHouse text."""
+
+    async def _raise_timeout(*a, **k):
+        raise clickhouse_connect.driver.exceptions.DatabaseError(_SECRET, code=159)
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise_timeout)
+
+    ja = await chat.chat_with_tools("質問", _ctx(), conn=None, agency_id=1, locale="ja")
+    en = await chat.chat_with_tools("question", _ctx(), conn=None, agency_id=1, locale="en")
+
+    assert ja["success"] is False
+    assert _SECRET not in ja["answer"]
+    assert ja["answer"] == (
+        "ツール describe_data の集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
+    )
+    assert en["answer"] == "Tool describe_data took too long to count. Try a shorter period or fewer routes."
+
+
+@pytest.mark.asyncio
 async def test_generic_exception_no_longer_interpolates_exception_text(monkeypatch):
     """A generic/unexpected exception must not leak its message either — the
     tool_error string is now a fixed template with no {exc} placeholder."""
@@ -188,9 +211,10 @@ async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
     [
         (lambda: HTTPException(status_code=503, detail=_SECRET), "service_unavailable"),
         (lambda: clickhouse_connect.driver.exceptions.DatabaseError(_SECRET), "service_unavailable"),
+        (lambda: clickhouse_connect.driver.exceptions.DatabaseError(_SECRET, code=159), "query_timeout"),
         (lambda: ValueError(_SECRET), "tool_error"),
     ],
-    ids=["http_503", "clickhouse_error", "generic_exception"],
+    ids=["http_503", "clickhouse_error", "clickhouse_timeout", "generic_exception"],
 )
 async def test_build_mode_sentinel_hides_exception_text(monkeypatch, raiser, expected_key):
     """The build-mode dispatch except-block must degrade to the safe locale

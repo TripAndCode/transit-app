@@ -1,4 +1,4 @@
-import { ApiError, isAggregateNotReady, isLlmNotApproved } from "./client";
+import { ApiError, isAggregateNotReady, isLlmNotApproved, isQueryTooSlow } from "./client";
 
 /**
  * The error classes `ErrorBanner` gives distinct copy and a distinct
@@ -11,6 +11,7 @@ export type ErrorClass =
   | "network"
   | "timeout"
   | "not_ready"
+  | "too_slow"
   | "not_approved"
   | "not_found"
   | "rate_limited"
@@ -25,13 +26,14 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /** Classify an unknown error thrown by the API client. Order matters: the
- *  two standing-condition checks run before the generic ApiError status
- *  branches so a 403/503 that also happens to carry one of those specific
+ *  standing-condition checks run before the generic ApiError status
+ *  branches so a 403/503/504 that also happens to carry one of those specific
  *  machine-readable codes is never mistaken for a plain permission/server
  *  error. */
 export function classifyError(err: unknown): ErrorClass {
   if (isLlmNotApproved(err)) return "not_approved";
   if (isAggregateNotReady(err)) return "not_ready";
+  if (isQueryTooSlow(err)) return "too_slow";
   if (err instanceof ApiError) {
     if (err.status === 429) return "rate_limited";
     if (err.status === 404) return "not_found";

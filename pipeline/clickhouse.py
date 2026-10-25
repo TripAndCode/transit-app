@@ -22,6 +22,19 @@ LIVE_TABLE = "updates_live"
 _OBSERVATION_TABLES = frozenset({UPDATES_TABLE, LIVE_TABLE})
 
 
+# ClickHouse's TIMEOUT_EXCEEDED server error code.
+CH_TIMEOUT_EXCEEDED = 159
+
+
+def is_query_timeout(exc: BaseException) -> bool:
+    """Whether a ClickHouse error is a query that ran out its ``max_execution_time``.
+
+    The same request would time out again, so callers answer it with "narrow
+    the question" rather than "retry later".
+    """
+    return getattr(exc, "code", None) == CH_TIMEOUT_EXCEEDED
+
+
 def checked_table(table: str) -> str:
     """*table*, if it names one of the two observation tables.
 

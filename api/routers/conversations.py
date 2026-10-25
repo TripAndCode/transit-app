@@ -19,7 +19,7 @@ from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
-from pipeline.query.chat import _chat_str
+from pipeline.query.chat import _chat_str, ch_failure_str
 from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
@@ -397,9 +397,9 @@ async def append_message_endpoint(
                 rendered_summary=rendered,
             )
             return {"user": user_msg, "assistant": assistant_msg}
-        except clickhouse_connect.driver.exceptions.Error:
+        except clickhouse_connect.driver.exceptions.Error as exc:
             _log.exception("Tool %s failed: ClickHouse query error", resolved_tool)
-            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
+            rendered = ch_failure_str(exc, locale, name=resolved_tool)
             assistant_msg = await _conv.append_message(
                 conn,
                 conversation_id,

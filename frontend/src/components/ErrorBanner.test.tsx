@@ -25,6 +25,17 @@ describe("ErrorBanner", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("asks for a narrower view, calmly and with no retry, when a query ran out its time budget", () => {
+    renderWithProviders(
+      <ErrorBanner
+        error={new ApiError(504, JSON.stringify({ detail: "x", code: "query_timeout" }))}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("This took too long to count. Try a shorter period or fewer routes.");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("renders a calm explanation (not a generic error banner) for the admin-approval-required 403", () => {
     renderWithProviders(
       <MemoryRouter>

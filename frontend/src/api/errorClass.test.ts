@@ -11,6 +11,11 @@ describe("classifyError", () => {
     expect(classifyError(new ApiError(403, JSON.stringify({ detail: "forbidden" })))).toBe("generic");
   });
 
+  it("classifies a query that ran out its time budget as too_slow, and any other 504 as server", () => {
+    expect(classifyError(new ApiError(504, JSON.stringify({ detail: "x", code: "query_timeout" })))).toBe("too_slow");
+    expect(classifyError(new ApiError(504, "gateway timeout"))).toBe("server");
+  });
+
   it("classifies the aggregate_not_ready 503 as not_ready", () => {
     expect(classifyError(new ApiError(503, JSON.stringify({ code: "aggregate_not_ready" })))).toBe("not_ready");
   });
@@ -67,7 +72,7 @@ describe("isTransientErrorClass", () => {
   });
 
   it("is not transient for every other class", () => {
-    for (const cls of ["not_ready", "not_approved", "not_found", "rate_limited", "server", "generic"] as const) {
+    for (const cls of ["not_ready", "too_slow", "not_approved", "not_found", "rate_limited", "server", "generic"] as const) {
       expect(isTransientErrorClass(cls)).toBe(false);
     }
   });

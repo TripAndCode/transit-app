@@ -444,6 +444,36 @@ async def test_append_message_clickhouse_unavailable_hides_exception_text(conv_a
 
 
 @pytest.mark.asyncio
+async def test_append_message_clickhouse_timeout_asks_for_a_narrower_question(conv_app, monkeypatch):
+    """A ClickHouse query that ran out its time budget is answered with the
+    narrower-question line, not "retry later", which would time out again."""
+    import clickhouse_connect
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_timeout(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise clickhouse_connect.driver.exceptions.DatabaseError(_SECRET, code=159)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_timeout)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("query_timeout", "ja", name="describe_data")
+
+
+@pytest.mark.asyncio
 async def test_append_message_clickhouse_query_error_hides_exception_text(conv_app, monkeypatch):
     """A mid-query clickhouse_connect error (real client, query failed) gets
     the same graceful degrade as the client-unavailable stand-in."""
