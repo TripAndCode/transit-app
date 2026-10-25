@@ -91,3 +91,8 @@ async def test_the_live_agency_lookup_degrades_to_none_rather_than_failing():
     from api.routers.reports import fetch_live_ml_agencies
 
     assert await fetch_live_ml_agencies(_FailingConn()) == set()
+
+
+def test_an_explicit_null_point_metric_reads_as_the_mean_like_the_history_does():
+    latest = shape_latest({**_SUMMARY, "point_metric": None}, date(2026, 10, 25), {}, set())
+    assert latest["point_metric"] == "mean"

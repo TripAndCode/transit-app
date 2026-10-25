@@ -36,7 +36,7 @@ def shape_latest(
         "coverage": headline.get("coverage"),
         "interval_coverage": _interval_coverage(summary),
         "thresholds": dict(summary.get("thresholds") or {}),
-        "point_metric": summary.get("point_metric", "mean"),
+        "point_metric": summary.get("point_metric") or "mean",
         "serving_model_version": serving.get("version"),
         "origin_skill": dict(summary.get("origin_skill") or {}),
         "agencies": [

@@ -144,8 +144,9 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
 
 
 async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
-    """Agencies with any row `_fetch_ml_cells` would overlay now. Never
-    raises, for the same reason: a failed read reports no agency live."""
+    """Agencies with any row `_fetch_ml_cells` would overlay while the
+    `ml_forecast` flag is on; the flag check is the caller's. Never raises,
+    for the same reason: a failed read reports no agency live."""
     try:
         rows = await conn.fetch(f"SELECT DISTINCT agency_id FROM agg_route_forecast_ml WHERE {_ML_FRESH_ROWS}")
     except Exception:
