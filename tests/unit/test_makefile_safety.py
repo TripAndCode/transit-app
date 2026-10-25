@@ -177,7 +177,9 @@ def test_database_targets_go_through_the_guarded_expansion():
 
 def _serve_reload_dirs() -> list[str]:
     tokens = shlex.split(_target_recipe(MAKEFILE.read_text(), "serve"), comments=False)
-    return [tokens[i + 1] for i, tok in enumerate(tokens) if tok == "--reload-dir"]
+    spaced = [tokens[i + 1] for i, tok in enumerate(tokens) if tok == "--reload-dir"]
+    joined = [tok.removeprefix("--reload-dir=") for tok in tokens if tok.startswith("--reload-dir=")]
+    return spaced + joined
 
 
 def test_serve_reloads_only_on_source_directories():
