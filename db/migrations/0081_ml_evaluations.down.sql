@@ -1,3 +1,4 @@
--- Not destructive: every row is re-ingested from the evaluations/ prefix in
--- R2, which keeps every week's summary.
+-- DESTRUCTIVE: drops ml_evaluations; the next ingest (the cron sweep or the
+-- operator ingest command) restores every week from R2's evaluations/ prefix,
+-- which keeps each week's summary.
 DROP TABLE IF EXISTS ml_evaluations;
