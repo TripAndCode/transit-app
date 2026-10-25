@@ -28,6 +28,8 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
       { day_type: "sunday_holiday", avg_min: null, days: 0, samples: 0, insufficient: true },
     ],
     sparkline_points: [],
+    period_from: "2026-05-11",
+    period_to: "2026-06-09",
     ...partial,
   };
 }

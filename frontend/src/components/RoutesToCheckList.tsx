@@ -17,7 +17,7 @@ type Props = {
   /** Each band's routes over every route, not only the listed ones: the list
    *  is the worst few, so whichever band it runs out in is truncated. */
   bandCounts: OverviewBandCounts;
-  /** The days the list counts: the headline's week, not the selected period. */
+  /** The days the list counts: the headline's window, not the whole period. */
   range: string;
 };
 

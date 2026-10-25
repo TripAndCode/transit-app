@@ -74,7 +74,8 @@ function renderHero(overrides: {
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       periodAvgMin={overrides.periodAvgMin === undefined ? 2.7 : overrides.periodAvgMin}
-      period={{ from: "2026-05-11", to: "2026-06-09" }}
+      headlineRange={formatDateRange("2026-06-03", "2026-06-09", { year: false })}
+      periodRange={formatDateRange("2026-05-11", "2026-06-09", { year: false })}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
@@ -142,8 +143,8 @@ describe("OverviewHeroRow", () => {
   it("dates each fact by the days it counts", () => {
     mockHooks(38, 0.1);
     renderHero();
-    // The heaviest hour and the delay share count the whole selected period;
-    // the late-route count, like the headline, counts its last week.
+    // The heaviest hour and the delay share count the whole period; the
+    // late-route count, like the headline, counts the headline's window.
     const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
     expect(screen.getByRole("button", { name: /Heaviest hour/ })).toHaveTextContent(period);

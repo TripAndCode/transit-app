@@ -55,7 +55,7 @@ describe("RoutesToCheckList", () => {
 
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
-    // The list counts the headline's week, not the whole selected period.
+    // The list counts the headline's window, not the whole period.
     expect(screen.getByText("Routes to check · Sep 24 – Sep 30")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);

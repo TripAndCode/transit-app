@@ -11,7 +11,7 @@ import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
-import { EM_DASH, fixedTenth, formatDateRange, formatHourRange, formatReportTime } from "../utils/format";
+import { EM_DASH, fixedTenth, formatHourRange, formatReportTime } from "../utils/format";
 
 /** A hero fact row, named for the card that explains it. */
 export type HeroFact = "peak_hour" | "concentration" | "late_routes";
@@ -28,9 +28,11 @@ type Props = {
   /** The window's sample-weighted mean, from the API: the sparkline's
    *  reference line. */
   periodAvgMin: number | null;
-  /** The selected period: the days the heaviest hour, the delay share and
-   *  the sparkline count, where the headline counts only its last week. */
-  period: { from: string; to: string };
+  /** The headline's window as text: the headline and the late-route count. */
+  headlineRange: string;
+  /** The period the API counted, as text: the heaviest hour, the delay share
+   *  and the sparkline's reference line. */
+  periodRange: string;
   peakHour: OverviewPeakHour | null;
   concentration: OverviewConcentration;
   /** Opens the card behind a fact row. Each row exists only while that card
@@ -91,7 +93,8 @@ export function OverviewHeroRow({
   agencyId,
   sparklinePoints,
   periodAvgMin,
-  period,
+  headlineRange: range,
+  periodRange,
   peakHour,
   concentration,
   onOpenFact,
@@ -127,8 +130,6 @@ export function OverviewHeroRow({
     if (MAX_REPORT_AGE_MS - age >= 0) timers.push(window.setTimeout(() => setLiveClosedFor(captured), MAX_REPORT_AGE_MS - age + 1));
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [captured]);
-  const range = formatDateRange(headline.window_from, headline.window_to, { year: false });
-  const periodRange = formatDateRange(period.from, period.to, { year: false });
 
   // The sparkline scales to its own min..max, so it is anchored on the period
   // mean rather than 0: the absolute figure is already shown beside it, and a
@@ -262,7 +263,7 @@ function FactRow({
     <li>
       <button type="button" className={`ov-hero-fact${attention ? " ov-hero-fact--attn" : ""}`} onClick={onClick}>
         <span className="ov-hero-fact-label">
-          {label}
+          {label}{" "}
           <span className="ov-hero-fact-period">{period}</span>
         </span>
         <span className="ov-hero-fact-value num">{children}</span>

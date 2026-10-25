@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import type { OverviewSummary } from "../api/types";
 import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
@@ -42,6 +43,12 @@ function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; 
   if (!/^\d+$/.test(dowParam)) return null;
   const dow = Number(dowParam);
   return dow >= 1 && dow <= 7 ? { hour, dow } : null;
+}
+
+/** The headline's window as text, shared by the hero and the routes-to-check
+ *  header so both name it the same way. */
+function headlineRange(summary: OverviewSummary): string {
+  return formatDateRange(summary.headline.window_from, summary.headline.window_to, { year: false });
 }
 
 export function OverviewTab() {
@@ -174,7 +181,8 @@ export function OverviewTab() {
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               periodAvgMin={data.period_avg_min ?? null}
-              period={{ from: ctx.from, to: ctx.to }}
+              headlineRange={headlineRange(data)}
+              periodRange={formatDateRange(data.period_from, data.period_to, { year: false })}
               peakHour={data.peak_hour}
               concentration={data.concentration}
               onOpenFact={openFact}
@@ -183,7 +191,7 @@ export function OverviewTab() {
               <RoutesToCheckList
                 routes={data.top_delayed.routes}
                 bandCounts={data.top_delayed.band_counts}
-                range={formatDateRange(data.headline.window_from, data.headline.window_to, { year: false })}
+                range={headlineRange(data)}
               />
             </div>
             {/* The stagger index counts the sections that actually render.

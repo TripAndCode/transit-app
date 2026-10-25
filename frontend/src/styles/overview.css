@@ -632,8 +632,9 @@
   color: var(--text-secondary);
   font-weight: 700;
 }
-/* The findings: a label, the value in the numeral face as the anchor, and a
-   chevron. Each row is a button that opens the card explaining it. */
+/* The findings: a label over the days it counts, the value in the numeral
+   face as the anchor, and a chevron. Each row is a button that opens the
+   card explaining it. */
 .ov-hero-facts {
   list-style: none;
   margin: 0;
