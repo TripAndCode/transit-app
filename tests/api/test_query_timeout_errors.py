@@ -1,4 +1,4 @@
-"""Unit tests for the ClickHouse query-timeout exception handler (DB-free)."""
+"""Tests for the ClickHouse query-timeout exception handler."""
 
 import json
 import types
