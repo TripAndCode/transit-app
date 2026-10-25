@@ -161,7 +161,8 @@ export type ReportOptions = {
   observeOnly?: boolean;
 };
 
-/** The most rows the reports API returns in one response. */
+/** The most current routes a report lists in one response; a route list
+ *  keeping retired route codes lists those on top. */
 export const REPORT_ROWS_MAX = 500;
 
 export function reportQueryString(ctx: Scope, options: ReportOptions = {}): string {

@@ -951,21 +951,30 @@ async def get_report(
     if report_type in _ROUTE_LIST_TYPES:
         retired = await retired_route_codes(conn, agency_id, ctx)
     # A limited list asks for enough extra rows that dropping every retired
-    # code still leaves `n` current routes when there are that many, and asks
-    # as deep when keeping them, so each mode reaches the same routes.
+    # code still leaves `n` current routes when there are that many.
     n_fetch = n + len(retired)
-    # Kept retired rows widen a limited list to the depth that found them, so
-    # every one retired_rows counts is on it.
-    shown = n_fetch if include_retired else n
-    # Counted from the list's own rows, so a routes filter or a list's floor
-    # that already kept a retired code out never counts it.
     retired_seen = 0
 
-    def current(route_rows: list) -> list:
+    def route_list(route_rows: list) -> list:
+        """The rows through the list's n-th current route, retired codes among
+        them left out unless kept. Both modes list the same current routes, and
+        keeping adds exactly the retired rows retired_rows counts: the ones
+        ranked among them, never one a routes filter or a floor already left
+        out. Kept retired rows come on top of `limit`."""
         nonlocal retired_seen
-        kept = [r for r in route_rows if r[0] not in retired]
-        retired_seen += len(route_rows) - len(kept)
-        return route_rows if include_retired else kept
+        prefix: list = []
+        current_count = 0
+        for r in route_rows:
+            if current_count == n:
+                break
+            prefix.append(r)
+            if r[0] not in retired:
+                current_count += 1
+        retired_seen = sum(1 for r in prefix if r[0] in retired)
+        return prefix if include_retired else [r for r in prefix if r[0] not in retired]
+
+    def listed_total(route_rows: list) -> int:
+        return len(route_rows) if include_retired else sum(1 for r in route_rows if r[0] not in retired)
 
     if report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
@@ -978,9 +987,8 @@ async def get_report(
             limit=None,
             min_samples=MIN_GROUP_SAMPLES if include_sparse else RANKING_MIN_SAMPLES,
         )
-        ranked = current(ranked)
-        rows_total = len(ranked)
-        rows = ranked[:n]
+        rows_total = listed_total(ranked)
+        rows = route_list(ranked)
         intent = {"query_type": "ranking", "sort_order": sort_order, "service": _service_label(ctx)}
     elif report_type == "on_time":
         rows = await compute_on_time(
@@ -992,7 +1000,7 @@ async def get_report(
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=late_tolerance_sec,
         )
-        rows = current(rows)[:shown]
+        rows = route_list(rows)
         # Appends a `low_confidence` bool (95% Wilson interval too wide to
         # trust the percentage) as a display-layer annotation — doesn't
         # change compute_on_time's own 5-tuple contract, so pooling callers
@@ -1003,22 +1011,18 @@ async def get_report(
         rows = await compute_worst_5min(
             agency_id, ctx, conn, ch=ch, limit=n_fetch, late_tolerance_sec=late_tolerance_sec
         )
-        rows = current(rows)[:shown]
+        rows = route_list(rows)
         intent = {"query_type": "worst_5min", "service": _service_label(ctx)}
     elif report_type == "compare_ranking":
-        compared = current(await compute_compare_ranking(agency_id, ctx, conn, limit=None, ch=ch))
-        rows_total = len(compared)
-        rows = compared[:n]
+        compared = await compute_compare_ranking(agency_id, ctx, conn, limit=None, ch=ch)
+        rows_total = listed_total(compared)
+        rows = route_list(compared)
         intent = {"query_type": "compare_ranking"}
     elif report_type == "dow_weekend":
-        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n_fetch, ch=ch))[
-            :shown
-        ]
+        rows = route_list(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n_fetch, ch=ch))
         intent = {"query_type": "dow_ranking", "dow_group": "weekend"}
     elif report_type == "dow_weekday":
-        rows = current(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n_fetch, ch=ch))[
-            :shown
-        ]
+        rows = route_list(await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n_fetch, ch=ch))
         intent = {"query_type": "dow_ranking", "dow_group": "weekday"}
     elif report_type == "trend":
         # Daily series + hour-of-day heatmap for the granular Trend tab.

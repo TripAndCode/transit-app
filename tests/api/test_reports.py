@@ -2514,7 +2514,7 @@ async def test_the_service_filter_reads_the_agencys_timetable_days(reports_clien
         assert await ranked("土日祝", **extra) == [("RW", 7.5, 50)]
 
 
-async def _seed_observed(pool, agency_id, route_code, first, last):
+async def _seed_observed(pool, agency_id, route_code, first, last, delay=400):
     """A route seen every day from ``first`` to ``last``, in the daily tables
     the retired check and each route list read."""
     from datetime import date as _date
@@ -2527,20 +2527,24 @@ async def _seed_observed(pool, agency_id, route_code, first, last):
         await pool.execute(
             "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
             "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
-            "VALUES ($1, $2, $3, '', 400, 400, 1, 25, NOW(), 10000)",
+            "VALUES ($1, $2, $3, '', $4, $4, 1, 25, NOW(), $5)",
             agency_id,
             day,
             route_code,
+            delay,
+            delay * 25,
         )
         await pool.execute(
             "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
-            "sum_delay_sec, sum_late_sec) VALUES ($1, $2, $3, '', 6.67, 25, 10000, 10000)",
+            "sum_delay_sec, sum_late_sec) VALUES ($1, $2, $3, '', $4, 25, $5, $5)",
             agency_id,
             day,
             route_code,
+            delay / 60,
+            delay * 25,
         )
         # Over five minutes late, so the late-departure list has it too.
-        await seed_route_dist_day(pool, agency_id, route_code, day, [400] * 25)
+        await seed_route_dist_day(pool, agency_id, route_code, day, [delay] * 25)
         day += _td(days=1)
 
 
@@ -2572,9 +2576,39 @@ async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
     assert {r[0] for r in kept["rows"]} == {"100", "OLD"}
     assert kept["retired_rows"] == 1
 
-    # A limited list keeping them reaches as deep as the one leaving them out.
-    one = (await client.get(f"/api/{agency_id}/reports/on_time?{window}&limit=1&include_retired=1")).json()
-    assert {r[0] for r in one["rows"]} == {"100", "OLD"}
-
     trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
     assert trend["retired_rows"] is None
+
+
+@pytest.mark.asyncio
+async def test_keeping_retired_codes_adds_only_them(reports_client):
+    """Both modes list the same current routes: keeping retired codes adds the
+    ones ranked among them and nothing else, whatever the agency's whole
+    retired set holds."""
+    client, agency_id, pool = reports_client
+    await pool.execute(
+        "INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C1'), ($1, 'C2')",
+        agency_id,
+    )
+    await _seed_observed(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=900)
+    await _seed_observed(pool, agency_id, "OLD_A", "2026-09-24", "2026-09-30", delay=600)
+    await _seed_observed(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=500)
+    await _seed_observed(pool, agency_id, "OLD_B", "2026-09-24", "2026-09-30", delay=100)
+    window = "from=2026-09-24&to=2026-10-23&include_sparse=1"
+
+    # Worst first: C1, OLD_A, C2, OLD_B. One current route is C1; nothing
+    # retired ranks above it.
+    left = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&limit=1")).json()
+    kept = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&limit=1&include_retired=1")).json()
+    assert [r[0] for r in left["rows"]] == ["C1"]
+    assert [r[0] for r in kept["rows"]] == ["C1"]
+    assert left["retired_rows"] == kept["retired_rows"] == 0
+
+    # Two current routes reach past OLD_A, which keeping adds, and not past C2.
+    left = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&limit=2")).json()
+    kept = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&limit=2&include_retired=1")).json()
+    assert [r[0] for r in left["rows"]] == ["C1", "C2"]
+    assert [r[0] for r in kept["rows"]] == ["C1", "OLD_A", "C2"]
+    assert left["retired_rows"] == kept["retired_rows"] == 1
+    assert left["rows_total"] == 2
+    assert kept["rows_total"] == 4
