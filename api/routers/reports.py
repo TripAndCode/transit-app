@@ -93,7 +93,7 @@ _POOLED_DELAY_PROJECTION_SQL = (
 # seasonal baseline -- matches the parent spec's own freshness rule (the VPS
 # workbench's daily predict job republishes well inside this window, so a
 # stale row here means the job itself has stopped running, not a slow day).
-_ML_FRESHNESS_DAYS = 2
+ML_FRESHNESS_DAYS = 2
 
 # Mirrors ml.training.HORIZON_DAYS, duplicated (not imported) since this
 # module runs in the production image, which never installs the optional
@@ -101,7 +101,7 @@ _ML_FRESHNESS_DAYS = 2
 # recency) keeps each (route, weekday) slot to at most one row -- an older
 # run's still origin-fresh leftover outside its own horizon would otherwise
 # share a weekday with the new horizon's row for that slot.
-_ML_HORIZON_DAYS = 7
+ML_HORIZON_DAYS = 7
 
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
@@ -130,8 +130,8 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
             "AND hour < 24",
             agency_id,
             route_code,
-            _ML_HORIZON_DAYS,
-            _ML_FRESHNESS_DAYS,
+            ML_HORIZON_DAYS,
+            ML_FRESHNESS_DAYS,
         )
     except Exception:
         _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)

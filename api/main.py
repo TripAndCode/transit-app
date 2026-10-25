@@ -52,6 +52,7 @@ from api.routers.internal import collector_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
 from api.routers.me import router as me_router
+from api.routers.ml import router as ml_router
 from api.routers.network import router as network_router
 from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
@@ -382,6 +383,7 @@ app.include_router(conversations_router)
 app.include_router(copilot_router)
 app.include_router(debug_router)
 app.include_router(map_router)
+app.include_router(ml_router)
 app.include_router(me_router)
 app.include_router(network_router)
 app.include_router(overview_router)
