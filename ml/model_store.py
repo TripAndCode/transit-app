@@ -73,10 +73,18 @@ def stage_model_set(
 
 def replace_dir(staged: Path, directory: Path) -> None:
     """Moves `staged` to `directory`, replacing what was there. Both must be
-    on the same filesystem, as `stage_model_set`'s sibling is."""
+    on the same filesystem, as `stage_model_set`'s sibling is.
+
+    The old copy is renamed aside before the new one moves in and removed only
+    after, so `directory` is always one whole copy: a removal that stops
+    partway leaves only the aside copy behind, which the next replace clears.
+    """
+    aside = directory.with_name(directory.name + ".old")
+    shutil.rmtree(aside, ignore_errors=True)
     if directory.exists():
-        shutil.rmtree(directory)
+        directory.rename(aside)
     staged.rename(directory)
+    shutil.rmtree(aside, ignore_errors=True)
 
 
 def load_model_set(directory: Path) -> ModelSet:

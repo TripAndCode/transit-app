@@ -232,8 +232,9 @@ def _train(args: argparse.Namespace) -> int:
     latest_path = args.out.parent / "latest.json"
     staged_latest = latest_path.with_name(latest_path.name + ".tmp")
     # `--out` is what predict serves, so the new model replaces it only after
-    # R2 holds it and latest.json names it: a failed upload leaves predict on
-    # the last published model, so every forecast names a model R2 holds.
+    # R2 holds it and latest.json names it, and every forecast names a model R2
+    # holds. The local latest.json is for an operator to read which model is
+    # served; nothing in the code reads it.
     try:
         upload_dir(staged, bucket, f"models/{version}", endpoint, run=_run)
         staged_latest.write_text(json.dumps({"version": version, "window_days": params.window_days}))

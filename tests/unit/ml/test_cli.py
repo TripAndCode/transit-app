@@ -218,7 +218,7 @@ def _previously_published(out):
 
 
 def _tree(root):
-    """Every path under `root`, with each file's bytes."""
+    """Each path under `root`: a file's bytes, None for a directory."""
     return {str(path.relative_to(root)): path.read_bytes() if path.is_file() else None for path in root.rglob("*")}
 
 

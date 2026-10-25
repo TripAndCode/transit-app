@@ -148,3 +148,26 @@ def test_a_failed_save_leaves_the_previously_published_model_untouched(tmp_path,
 
     assert (directory / "q0.5.txt").read_bytes() == original
     assert read_meta(directory)["version"] == "v1"
+
+
+def test_replacing_a_served_directory_never_leaves_it_partly_removed(tmp_path, monkeypatch):
+    # Removing the old copy can stop partway (a permission error, a kill); by
+    # then the served directory must already be the whole new copy.
+    import ml.model_store as model_store
+
+    served = tmp_path / "model"
+    served.mkdir()
+    (served / "meta.json").write_text("old")
+    (served / "mean.txt").write_text("old")
+    staged = tmp_path / "model.tmp"
+    staged.mkdir()
+    (staged / "meta.json").write_text("new")
+
+    def remove_one_file_only(path, *args, **kwargs):
+        if path.exists():
+            sorted(path.iterdir())[0].unlink()
+
+    monkeypatch.setattr(model_store.shutil, "rmtree", remove_one_file_only)
+    replace_dir(staged, served)
+    assert {p.name: p.read_text() for p in served.iterdir()} == {"meta.json": "new"}
+    assert not staged.exists()
