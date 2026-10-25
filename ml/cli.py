@@ -282,6 +282,28 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _publish_eval(args: argparse.Namespace) -> int:
+    """Publish this week's evaluation summary for the web app, adopted or not:
+    a rejected week is as much a result as an adopted one."""
+    from ml.evaluation import build_summary
+
+    # Read and swap credentials first, so a misconfigured env fails before
+    # anything is written.
+    bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    _use_store_credentials()
+
+    result = result_from_json(args.models.read_text())
+    meta = json.loads(args.model_meta.read_text()) if args.model_meta and args.model_meta.exists() else None
+    run_date = args.run_date or _today_jst()
+    summary = build_summary(
+        result, run_date=run_date, generated_at=datetime.now(ZoneInfo("Asia/Tokyo")), serving_meta=meta
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(summary, indent=1))
+    upload_file(args.out, bucket, f"evaluations/{run_date.isoformat()}/summary.json", endpoint, run=_run)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ml.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -331,6 +353,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_predict.add_argument("--out", type=Path, required=True)
     p_predict.add_argument("--agency", type=int, action="append")
     p_predict.set_defaults(handler=_predict)
+
+    p_eval = sub.add_parser("publish-eval", help="Publish this week's evaluation summary for the web app")
+    p_eval.add_argument("--models", type=Path, required=True)
+    p_eval.add_argument("--out", type=Path, required=True)
+    p_eval.add_argument("--model-meta", type=Path)
+    p_eval.add_argument("--run-date", type=date.fromisoformat)
+    p_eval.set_defaults(handler=_publish_eval)
 
     args = parser.parse_args(argv)
     return int(args.handler(args))

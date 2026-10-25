@@ -14,12 +14,24 @@ After that, each nightly run adds only the archives that have become final.
 | Timer (Asia/Tokyo) | Job | Output |
 |---|---|---|
 | daily 10:30 | `python -m ml.cli sync` | R2 archives replayed into the replica in timeline order; done-set in `/var/lib/transit-ml/sync-state.json` |
-| Sundays 04:00 | `backtest` → `train-eval` → `report` → `train`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models) |
+| Sundays 04:00 | `backtest` → `train-eval` → `report` → `train` → `publish-eval`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models); `publish-eval` uploads `evaluations/<run_date>/summary.json` to the `transit-ml` bucket whatever the verdict |
 | daily 11:00 | `python -m ml.cli predict` | `/var/lib/transit-ml/forecast/forecast.parquet`, uploaded to R2 as the latest published forecast |
 
-`train` runs last in the Sunday chain so a publish failure can never suppress the
-report. Each job reports to healthchecks.io through `deploy/vps/run-with-ping.sh`
-(`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`, `HC_PING_URL_PREDICT`).
+`train` runs after the report so a model-publish failure can never suppress the
+report, and `publish-eval` runs last so a failed summary upload can never stop an
+adopted model going out (`train` exits 0 on a rejected week, so the summary is
+still published). Each job reports to healthchecks.io through
+`deploy/vps/run-with-ping.sh` (`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`,
+`HC_PING_URL_PREDICT`).
+
+The evaluation summary is the web app's copy of that week's verdict: `adopted`,
+the `failures` as codes with their measured values (worded by the app, not the
+workbench), the judged headline skill and coverage with the thresholds, overall
+and per-agency figures, every interval method, the origin-skill spread, the
+`params` and `point_metric` the run scored with, and the serving model's
+`meta.json` (`null` before any model is published). An agency kept on B0 for
+short history carries `scored_on_model: false` and no skill, since its 0% is how
+it was scored, not how the model did. `schema` versions the document.
 
 The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, so it does not run `analyze_all`.
 
