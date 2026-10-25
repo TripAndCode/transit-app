@@ -5,6 +5,7 @@ predict without retraining. Needs the optional `ml` dependency group."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import cast
@@ -76,11 +77,14 @@ def replace_dir(staged: Path, directory: Path) -> None:
     on the same filesystem, as `stage_model_set`'s sibling is.
 
     The old copy is renamed aside before the new one moves in and removed only
-    after, so `directory` is always one whole copy: a removal that stops
-    partway leaves only the aside copy behind, which the next replace clears.
+    after, so `directory` holds one whole copy except between those two
+    renames, when the old one sits aside. Each run's aside copy has its own
+    name, so one an earlier run could not remove never blocks the swap; later
+    runs keep trying to clear it.
     """
-    aside = directory.with_name(directory.name + ".old")
-    shutil.rmtree(aside, ignore_errors=True)
+    for leftover in directory.parent.glob(directory.name + ".old-*"):
+        shutil.rmtree(leftover, ignore_errors=True)
+    aside = directory.with_name(f"{directory.name}.old-{os.getpid()}")
     if directory.exists():
         directory.rename(aside)
     staged.rename(directory)

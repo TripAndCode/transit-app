@@ -171,3 +171,31 @@ def test_replacing_a_served_directory_never_leaves_it_partly_removed(tmp_path, m
     replace_dir(staged, served)
     assert {p.name: p.read_text() for p in served.iterdir()} == {"meta.json": "new"}
     assert not staged.exists()
+
+
+def test_a_stuck_aside_copy_from_an_earlier_run_does_not_block_the_swap(tmp_path, monkeypatch):
+    # An earlier run's aside copy that cannot be removed (a permission error)
+    # must not stop this run's new model from going in.
+    import ml.model_store as model_store
+
+    served = tmp_path / "model"
+    served.mkdir()
+    (served / "meta.json").write_text("old")
+    stuck = [tmp_path / "model.old", tmp_path / "model.old-1"]
+    for path in stuck:
+        path.mkdir()
+        (path / "meta.json").write_text("older")
+    staged = tmp_path / "model.tmp"
+    staged.mkdir()
+    (staged / "meta.json").write_text("new")
+
+    real_rmtree = model_store.shutil.rmtree
+
+    def cannot_remove_the_stuck_copy(path, *args, **kwargs):
+        if path in stuck:
+            return
+        real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(model_store.shutil, "rmtree", cannot_remove_the_stuck_copy)
+    replace_dir(staged, served)
+    assert (served / "meta.json").read_text() == "new"
