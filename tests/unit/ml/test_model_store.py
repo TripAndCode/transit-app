@@ -11,7 +11,7 @@ require("lightgbm")
 require("pyarrow")
 
 from ml.features import build_frame, route_ids, with_route_ids  # noqa: E402
-from ml.model_store import load_model_set, load_routes, read_meta, save_model_set  # noqa: E402
+from ml.model_store import load_model_set, load_routes, read_meta, replace_dir, stage_model_set  # noqa: E402
 from ml.models import ModelParams, fit_calibrated, predict  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
@@ -62,9 +62,10 @@ def _fitted(params=FAST):
 
 
 def _save(models, directory, routes, version="2026-06-30", point="q50", clip_quantile=None):
-    save_model_set(
+    staged = stage_model_set(
         models, directory, version=version, routes=routes, window_days=28, point=point, clip_quantile=clip_quantile
     )
+    replace_dir(staged, directory)
 
 
 @pytest.mark.parametrize("point", ["q50", "mean"])
@@ -147,3 +148,54 @@ def test_a_failed_save_leaves_the_previously_published_model_untouched(tmp_path,
 
     assert (directory / "q0.5.txt").read_bytes() == original
     assert read_meta(directory)["version"] == "v1"
+
+
+def test_replacing_a_served_directory_never_leaves_it_partly_removed(tmp_path, monkeypatch):
+    # Removing the old copy can stop partway (a permission error, a kill); by
+    # then the served directory must already be the whole new copy.
+    import ml.model_store as model_store
+
+    served = tmp_path / "model"
+    served.mkdir()
+    (served / "meta.json").write_text("old")
+    (served / "mean.txt").write_text("old")
+    staged = tmp_path / "model.tmp"
+    staged.mkdir()
+    (staged / "meta.json").write_text("new")
+
+    def remove_one_file_only(path, *args, **kwargs):
+        if path.exists():
+            sorted(path.iterdir())[0].unlink()
+
+    monkeypatch.setattr(model_store.shutil, "rmtree", remove_one_file_only)
+    replace_dir(staged, served)
+    assert {p.name: p.read_text() for p in served.iterdir()} == {"meta.json": "new"}
+    assert not staged.exists()
+
+
+def test_a_stuck_aside_copy_from_an_earlier_run_does_not_block_the_swap(tmp_path, monkeypatch):
+    # An earlier run's aside copy that cannot be removed (a permission error)
+    # must not stop this run's new model from going in.
+    import ml.model_store as model_store
+
+    served = tmp_path / "model"
+    served.mkdir()
+    (served / "meta.json").write_text("old")
+    stuck = [tmp_path / "model.old", tmp_path / "model.old-1"]
+    for path in stuck:
+        path.mkdir()
+        (path / "meta.json").write_text("older")
+    staged = tmp_path / "model.tmp"
+    staged.mkdir()
+    (staged / "meta.json").write_text("new")
+
+    real_rmtree = model_store.shutil.rmtree
+
+    def cannot_remove_the_stuck_copy(path, *args, **kwargs):
+        if path in stuck:
+            return
+        real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(model_store.shutil, "rmtree", cannot_remove_the_stuck_copy)
+    replace_dir(staged, served)
+    assert (served / "meta.json").read_text() == "new"

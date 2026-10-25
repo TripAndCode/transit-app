@@ -101,10 +101,13 @@ nice .venv/bin/python -m ml.cli compare --dir <dir>/variants
 
 ## Publishing and serving the forecast
 
-An adopted model is written to `/var/lib/transit-ml/model` and uploaded to R2 under
-`models/<version>/` plus a `models/latest.json` pointer, where `<version>` is the
-training cutoff date. The daily `predict` job loads the model `train` last wrote
-to `/var/lib/transit-ml/model` (it does not read `models/latest.json`),
+An adopted model is uploaded to R2 under `models/<version>/` plus a
+`models/latest.json` pointer, where `<version>` is the training cutoff date, and
+only then replaces `/var/lib/transit-ml/model`. `train` stages it in a sibling
+directory first, so a failed upload leaves the last published model in place and
+every forecast names a model R2 holds. The daily `predict` job loads the model
+`train` last wrote to `/var/lib/transit-ml/model` (it does not read
+`models/latest.json`),
 forecasts each on-model agency's routes for the next
 `HORIZON_DAYS` days, and uploads the result as the latest published forecast.
 Each cell's `mean_min` is the model's point forecast and `q10`/`q90` its interval,
