@@ -318,8 +318,9 @@ describe("OverviewHeroRow", () => {
 
   it("anchors the sparkline on the period's sample-weighted mean, labelled in words", () => {
     mockHooks(38, 0.1);
-    // A thin day at 1 min and a busy one at 5: the plain mean of the points
-    // would say 3.0, the period's own mean says 4.6.
+    // The line is the API's period_avg_min, not a mean of the points: [1, 5]
+    // would average to 3.0. The weighting itself is the backend's, tested in
+    // tests/api/test_overview.py.
     const { container } = renderHero({ sparklinePoints: [1, 5], periodAvgMin: 4.6 });
     // Without a reference the reader cannot tell a half-minute wobble from a
     // ten-minute climb: the shape is auto-scaled to the window's own extremes.

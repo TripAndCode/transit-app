@@ -53,7 +53,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 from api.range import (
     RangeCtx,
@@ -1125,17 +1125,26 @@ def _service_split(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> 
     ]
 
 
-async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
-    """Daily avg_min points (oldest first) over ``ctx``.
+async def _daily_sparkline(
+    agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> tuple[list[float], float | None]:
+    """Daily avg_min points (oldest first) over ``ctx``, and the window's mean.
 
     Returns the FULL daily series (typically 30+ points for a 30-day
     default range) and leaves any windowing to the caller, so a consumer
-    that wants a shorter tail can take one without a second query.
+    that wants a shorter tail can take one without a second query. The mean
+    pools the same per-day sums and samples, so it weighs each day by its
+    observations, as every other figure on the hero card does; a plain mean
+    of the points would let a thin day count as much as a busy one.
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted average per date. Slow path reads the shared grain
-    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``. Slow
+    path reads the shared grain (:func:`_fetch_grain`) so the hour-of-day
+    filter is honored.
     """
+    # (samples, total delay seconds) per day with observations: Postgres
+    # numerics on the fast path, so the rounding below stays exact like the
+    # SQL it replaced; plain ints on the slow path.
+    days: list[tuple[int, Any]]
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
@@ -1148,8 +1157,8 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
             # population so SUM(samples) never counts a row SUM(sum_delay_sec)
             # silently dropped, matching pipeline/digest/build.py's
             # _ROUTE_BASELINE_SQL.
-            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
+            "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric AS total,\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS n\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date\n"
@@ -1157,13 +1166,14 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
             agency_id,
             *params,
         )
+        days = [(r["n"], r["total"]) for r in rows if r["n"]]
     else:
         by_day = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=0)
-        rows = [
-            {"day": d, "avg_min": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0])
-        ]
-    pts = [float(_round2(r["avg_min"])) for r in rows if r["avg_min"] is not None]
-    return pts
+        days = [(n, total) for _d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0]) if n]
+    pts = [float(_round2(total / n / 60)) for n, total in days]
+    samples = sum(n for n, _total in days)
+    mean = float(_round2(sum(total for _n, total in days) / samples / 60)) if samples else None
+    return pts, mean
 
 
 @perf.timed("reports.overview")
@@ -1327,9 +1337,7 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.service_split"):
             service_split, service_split_daily = await _service_day_split(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
-            # Hero card slices `.slice(-7)`; modal shows full series.
-            sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
-            period_avg, _ = await _headline_stats(agency_id, ctx, conn, ch=ch, grain=grain)
+            sparkline_points, period_avg = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
@@ -1374,8 +1382,7 @@ async def compute_overview_summary(
             concentration,
             top_delayed,
             (service_split, service_split_daily),
-            sparkline_points,
-            (period_avg, _),
+            (sparkline_points, period_avg),
         ) = await asyncio.gather(
             _peak_dow(ctx.dow),
             _peak_dow("weekday"),
@@ -1387,7 +1394,6 @@ async def compute_overview_summary(
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
-            _own_conn(_headline_stats, agency_id, ctx),
         )
 
         delta_min = None
@@ -1416,7 +1422,5 @@ async def compute_overview_summary(
         "service_split": service_split,
         "service_split_daily": service_split_daily,
         "sparkline_points": sparkline_points,
-        # The sparkline's reference line: the whole window's sample-weighted
-        # mean, which a plain mean of the daily points is not.
-        "period_avg_min": float(_round2(period_avg)) if period_avg is not None else None,
+        "period_avg_min": period_avg,
     }
