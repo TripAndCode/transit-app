@@ -773,6 +773,31 @@ describe("AnalysisTab delay certificate", () => {
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
   });
 
+  it("counts the period's full list only once staff open it", async () => {
+    showCertificate();
+    const asked = () => vi.mocked(hooks.useReport).mock.calls.filter(([, type]) => type === "delay_certificate");
+    expect(asked()).toEqual([]);
+    await userEvent.click(screen.getByText("All late departures in the period"));
+    expect(asked().length).toBeGreaterThan(0);
+  });
+
+  it("keeps the passenger's lookup when the period's full list fails", async () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: undefined,
+      isFetching: false,
+      isPlaceholderData: false,
+      error: new Error("query timed out"),
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
+    expect(screen.getByLabelText("Date")).toBeInTheDocument();
+    const summary = screen.getByText("All late departures in the period");
+    await userEvent.click(summary);
+    expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
+  });
+
   it("prints a report without the list, the insights or, beside a certificate, the screen's scope", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");

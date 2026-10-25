@@ -111,14 +111,18 @@ export function AnalysisTab({
   // at the default length.
   const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
   const list = useReports(id);
+  const [staffOpen, setStaffOpen] = useState(false);
+  // A passenger starts from the lookup, which fetches one day and one route.
+  // The certificate's period-wide list is far heavier and only staff ask for
+  // it, so it is counted once they open it and can never hold the lookup back.
+  const isCertificate = reportType === "delay_certificate";
   const detail = useReport(
     id,
-    reportType && reportType !== "route_forecast" ? reportType : null,
+    reportType && reportType !== "route_forecast" && (!isCertificate || staffOpen) ? reportType : null,
     ctx,
     rankingOptions(reportType, includeSparse, allRowsFor),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
-  const [staffOpen, setStaffOpen] = useState(false);
   const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoints, so their own map
   // applies: one chosen route opens that route's forecast, which honours the
@@ -137,7 +141,6 @@ export function AnalysisTab({
         ? detail.data.scope_applied
         : undefined;
 
-  const isCertificate = detail.data?.report_type === "delay_certificate";
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`);
   }
@@ -200,24 +203,49 @@ export function AnalysisTab({
             <RouteForecastSection aid={id} />
           </div>
         )}
-        {reportType && reportType !== "route_forecast" && detail.error && (
+        {isCertificate && id != null && (
+          <div>
+            <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
+            <DelayCertificateLookup aid={id} />
+            {/* The period's whole list, under the page's scope and the
+                report's own threshold, is for staff; a passenger starts
+                from the lookup above. */}
+            <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
+              <summary>{t("reports.certificate.all_late")}</summary>
+              {staffOpen && detail.error && <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />}
+              {staffOpen && detail.isFetching && (
+                <>
+                  <SkeletonTable rows={6} rowHeight={36} />
+                  <StillWorking scope={ctx} update={update} />
+                </>
+              )}
+              {staffOpen && !detail.isFetching && detail.data?.report_type === "delay_certificate" && (
+                <>
+                  <ReportMeta data={detail.data} />
+                  <p className="cert-staff__summary">{detail.data.text}</p>
+                  <CsvLink href={csvHref(detail.data.report_type)} />
+                  {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
+                </>
+              )}
+            </details>
+          </div>
+        )}
+        {reportType && reportType !== "route_forecast" && !isCertificate && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && (
+        {reportType && reportType !== "route_forecast" && !isCertificate && detail.isFetching && (
           <>
             <SkeletonChart height={360} />
             <StillWorking scope={ctx} update={update} />
           </>
         )}
-        {reportType !== "route_forecast" && detail.data && (
+        {reportType !== "route_forecast" && !isCertificate && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
-              {hasCsv(detail.data) && !isCertificate && (
-                <CsvLink href={csvHref(detail.data.report_type)} />
-              )}
+              {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
             </div>
-            {!isCertificate && <ReportMeta data={detail.data} />}
+            <ReportMeta data={detail.data} />
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
             )}
@@ -227,24 +255,6 @@ export function AnalysisTab({
               <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               <CouncilSummaryBlock report={detail.data} />
-            ) : detail.data.report_type === "delay_certificate" && id != null ? (
-              <>
-                <DelayCertificateLookup aid={id} />
-                {/* The period's whole list, under the page's scope and the
-                    report's own threshold, is for staff; a passenger starts
-                    from the lookup above. */}
-                <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
-                  <summary>{t("reports.certificate.all_late")}</summary>
-                  {staffOpen && (
-                    <>
-                      <ReportMeta data={detail.data} />
-                      <p className="cert-staff__summary">{detail.data.text}</p>
-                      <CsvLink href={csvHref(detail.data.report_type)} />
-                      {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
-                    </>
-                  )}
-                </details>
-              </>
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
               <>
                 <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
