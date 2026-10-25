@@ -46,8 +46,9 @@ def _capture(cmd: Sequence[str]) -> str:
 def _use_store_credentials() -> None:
     # `sync` reads this same EnvironmentFile and must keep using the read-only
     # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
-    # `train`/`predict` swap in the read-write transit-ml pair only for their
-    # own (separate, short-lived) process, from distinctly named variables.
+    # each job that writes the transit-ml bucket swaps in its read-write pair
+    # only for its own (separate, short-lived) process, from distinctly named
+    # variables.
     access_key, secret_key = os.environ["ML_STORE_ACCESS_KEY_ID"], os.environ["ML_STORE_SECRET_ACCESS_KEY"]
     # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=` --
     # env.example ships exactly that, so a `KeyError` alone would not catch
@@ -217,7 +218,7 @@ def _predict(args: argparse.Namespace) -> int:
 
     from ml.dataset import load_runs
     from ml.features import build_frame, template_future_runs, template_span, with_route_ids
-    from ml.model_backtest import MIN_MODEL_DAYS
+    from ml.model_result import MIN_MODEL_DAYS
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import predict
     from ml.training import HORIZON_DAYS

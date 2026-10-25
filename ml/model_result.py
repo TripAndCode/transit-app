@@ -62,6 +62,15 @@ def merged_intervals(result: ModelBacktestResult, method: str) -> IntervalStats:
     return total
 
 
+def origin_skill_spread(result: ModelBacktestResult) -> dict[str, Any]:
+    """How skill against B0 varied across origins: the count of origins that
+    had cells both predict, and the min, median and max of their skill."""
+    skills = sorted(s for _, s in result.origin_skill if s is not None)
+    if not skills:
+        return {"count": 0, "min": None, "median": None, "max": None}
+    return {"count": len(skills), "min": skills[0], "median": skills[len(skills) // 2], "max": skills[-1]}
+
+
 def result_to_json(result: ModelBacktestResult) -> str:
     return json.dumps(
         {

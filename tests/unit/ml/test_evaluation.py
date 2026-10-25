@@ -1,6 +1,6 @@
 """The weekly evaluation summary the web app ingests. Fixture: agency 8 is
-scored on the model (+10% vs B0); agency 11 sits on B0 for short history, so
-its 0% skill is an artefact of scoring B0 as the model and must not be shown."""
+scored on the model (+10% vs B0); agency 11 sat on B0 at every cutoff, so its
+"model" rows repeat B0's exactly and its 0% must not be shown as the model's."""
 
 import json
 from datetime import date, datetime
@@ -73,15 +73,34 @@ def test_a_not_adopted_week_is_summarized_with_its_failure_as_data():
 def test_an_agency_on_b0_shows_no_skill_rather_than_a_misleading_zero():
     summary = build_summary(_result(), run_date=RUN, generated_at=AT, serving_meta=None)
     rows = {a["agency_id"]: a for a in summary["agencies"]}
-    assert rows[8]["scored_on_model"] is True
+    assert rows[8]["model_status"] == "model"
     assert rows[8]["skill"] == pytest.approx(0.1)
     assert rows[8]["lgbm_mae"] == pytest.approx(0.9)
     assert rows[8]["b0_mae"] == pytest.approx(1.0)
     assert rows[8]["interval_coverage"] == pytest.approx(0.8)
     assert rows[8]["days_of_data"] == 140
-    assert rows[11]["scored_on_model"] is False
+    assert rows[11]["model_status"] == "b0"
     assert rows[11]["skill"] is None
     assert rows[11]["short_history"] is True
+
+
+def test_an_agency_on_b0_at_only_some_cutoffs_keeps_its_blended_skill():
+    """`fallback_agencies` holds every agency on B0 at any cutoff. One that
+    crossed the history threshold mid-backtest was scored on the model for
+    its later weeks, so its skill is real, and a negative one is what the
+    verdict names: the document must show it, not hide the reason it failed."""
+    result = _result()
+    day = date(2026, 10, 24)
+    twelve = AgencyResult(
+        12, date(2026, 8, 20), day, 66, [day], True, [_row("LGBM", 11.0, 11.0, 10.0), _row("B0", 10.0, 10.0, 10.0)]
+    )
+    result.agencies.append(twelve)
+    result.fallback_agencies.append(12)
+    summary = build_summary(result, run_date=RUN, generated_at=AT, serving_meta=None)
+    rows = {a["agency_id"]: a for a in summary["agencies"]}
+    assert rows[12]["model_status"] == "partial"
+    assert rows[12]["skill"] == pytest.approx(-0.1)
+    assert {"code": "agency_worse", "value": None, "agencies": [12]} in summary["failures"]
 
 
 def test_overall_figures_and_every_interval_method_pass_through():
@@ -96,7 +115,6 @@ def test_overall_figures_and_every_interval_method_pass_through():
 
 def test_origin_skill_is_summarized_like_the_report_does():
     summary = build_summary(_result(), run_date=RUN, generated_at=AT, serving_meta=None)
-    # The HTML report's median is sorted(skills)[len // 2]; the summary must agree with it.
     assert summary["origin_skill"] == {"count": 2, "min": -0.03, "median": 0.12, "max": 0.12}
 
 

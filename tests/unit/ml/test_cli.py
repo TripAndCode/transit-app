@@ -16,7 +16,7 @@ from ml.cells import Cell  # noqa: E402
 from ml.cli import main  # noqa: E402
 
 START = date(2026, 1, 1)
-DAYS = 70  # >= ml.model_backtest.MIN_MODEL_DAYS, so the fixture agency is "on model"
+DAYS = 70  # >= ml.model_result.MIN_MODEL_DAYS, so the fixture agency is "on model"
 
 
 def _runs():

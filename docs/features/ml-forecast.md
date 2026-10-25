@@ -29,9 +29,12 @@ the `failures` as codes with their measured values (worded by the app, not the
 workbench), the judged headline skill and coverage with the thresholds, overall
 and per-agency figures, every interval method, the origin-skill spread, the
 `params` and `point_metric` the run scored with, and the serving model's
-`meta.json` (`null` before any model is published). An agency kept on B0 for
-short history carries `scored_on_model: false` and no skill, since its 0% is how
-it was scored, not how the model did. `schema` versions the document.
+`meta.json` (`null` before any model is published). Each agency carries a
+`model_status`: `model` (on the model at every cutoff), `b0` (on B0 at every
+cutoff for too little history, so no skill: its 0% is how it was scored, not how
+the model did) or `partial` (it crossed the history threshold mid-backtest, so
+its skill blends B0 weeks with model weeks and is shown, since the verdict
+judges it). `schema` versions the document.
 
 The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, so it does not run `analyze_all`.
 
