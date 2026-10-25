@@ -28,6 +28,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.ml_evaluation_ingest import ingest_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
 from pipeline.url_guard import redact_urls_in_text
 
@@ -546,20 +547,28 @@ def _run_agency_update(
 
 
 def _ingest_ml_forecast(conn: Any) -> None:
-    """Best-effort: a missing/misconfigured ML bucket or a transient R2
-    failure must not abort the surrounding ingest+analyze sweep, which is
-    this job's primary purpose. `ingest_forecast` already logs and swallows
-    every read or write failure from R2 or the DB; this guard covers building
+    """Best-effort: the ML store's latest forecast and its weekly evaluation
+    summaries, each step guarded on its own, so a missing/misconfigured
+    bucket, a transient R2 failure, or one step failing never aborts the
+    other or the surrounding ingest+analyze sweep. Both ingests already log
+    and swallow their own read/write failures; these guards cover building
     the S3 client and anything else unexpected. An unconfigured store is
     skipped, not logged."""
     if not store_configured():
         return
     try:
         s3, bucket = s3_client_from_env()
-        count = ingest_forecast(conn, s3, bucket)
-        _log.info("cron: ml_forecast ingest upserted %d row(s)", count)
+    except Exception:
+        _log.exception("cron: ML store client could not be built")
+        return
+    try:
+        _log.info("cron: ml_forecast ingest upserted %d row(s)", ingest_forecast(conn, s3, bucket))
     except Exception:
         _log.exception("cron: ml_forecast ingest failed")
+    try:
+        _log.info("cron: ml_evaluation ingest upserted %d summary(ies)", ingest_evaluations(conn, s3, bucket))
+    except Exception:
+        _log.exception("cron: ml_evaluation ingest failed")
 
 
 def _run_ml_forecast_ingest(db_url: str) -> None:

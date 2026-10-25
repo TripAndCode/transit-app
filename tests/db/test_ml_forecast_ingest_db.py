@@ -1,4 +1,5 @@
 import io
+import json
 from argparse import Namespace
 from datetime import date, datetime, timedelta
 
@@ -186,6 +187,14 @@ def test_the_ingest_ml_command_upserts_the_latest_forecast_through_a_real_connec
         {
             f"{prefix}/manifest.json": b'{"rows": 1}',
             f"{prefix}/forecast.parquet": _parquet_bytes(rows),
+            f"evaluations/{origin.isoformat()}/summary.json": json.dumps(
+                {
+                    "schema": 1,
+                    "run_date": origin.isoformat(),
+                    "adopted": True,
+                    "headline": {"skill": 0.06, "coverage": 0.8},
+                }
+            ).encode(),
         }
     )
     monkeypatch.setattr(ml_forecast_ingest, "s3_client_from_env", lambda: (s3, "transit-ml"))
@@ -195,3 +204,5 @@ def test_the_ingest_ml_command_upserts_the_latest_forecast_through_a_real_connec
     with pg_conn.cursor() as cur:
         cur.execute("SELECT mean_min FROM agg_route_forecast_ml WHERE agency_id = 8 AND route_code = 'R1'")
         assert cur.fetchone()[0] == 4.5
+        cur.execute("SELECT adopted FROM ml_evaluations WHERE run_date = %s", (origin,))
+        assert cur.fetchone()[0] is True

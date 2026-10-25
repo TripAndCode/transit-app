@@ -911,11 +911,11 @@ def cmd_ingest_weather(args):
 
 
 def cmd_ingest_ml(args):
-    """Pull the ML workbench's latest published forecast from R2 into Postgres.
+    """Pull the ML workbench's latest published forecast and its weekly evaluation summaries from R2 into Postgres.
 
     Operator-run, so it fails loudly: the cron sweep's copy of this step logs
     and carries on, which would turn a wrong token into a silent "0 rows"."""
-    from pipeline import ml_forecast_ingest
+    from pipeline import ml_evaluation_ingest, ml_forecast_ingest
 
     try:
         s3, bucket = ml_forecast_ingest.s3_client_from_env()
@@ -924,16 +924,25 @@ def cmd_ingest_ml(args):
         sys.exit(2)
     conn = _get_conn()
     try:
-        result = ml_forecast_ingest.load_forecast(conn, s3, bucket)
-    except (ml_forecast_ingest.ForecastReadError, ml_forecast_ingest.ForecastWriteError) as exc:
+        forecast = ml_forecast_ingest.load_forecast(conn, s3, bucket)
+        evaluations = ml_evaluation_ingest.load_evaluations(conn, s3, bucket)
+    except (
+        ml_forecast_ingest.ForecastReadError,
+        ml_forecast_ingest.ForecastWriteError,
+        ml_evaluation_ingest.EvaluationReadError,
+        ml_evaluation_ingest.EvaluationWriteError,
+    ) as exc:
         logger.error(f"ingest_ml: {type(exc).__name__}: {exc}")
         sys.exit(1)
     finally:
         conn.close()
-    if result.prefix is None:
+    if forecast.prefix is None:
         logger.info("ingest_ml: no forecast has been published yet")
     else:
-        logger.info(f"ingest_ml: upserted {result.rows} row(s) from {result.prefix}")
+        logger.info(f"ingest_ml: upserted {forecast.rows} row(s) from {forecast.prefix}")
+    logger.info(f"ingest_ml: upserted {evaluations.upserted} evaluation summary(ies)")
+    if evaluations.skipped:
+        logger.warning(f"ingest_ml: skipped unreadable or unsupported summaries: {', '.join(evaluations.skipped)}")
 
 
 def main():

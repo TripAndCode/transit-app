@@ -370,3 +370,43 @@ def test_ml_forecast_ingest_runs_only_after_the_advisory_lock_is_released(two_ag
 
     fake_ml.assert_called_once()
     assert lock_was_free_during_ml_forecast is True
+
+
+def _configured_store(monkeypatch):
+    for name, value in (
+        ("ML_STORE_BUCKET", "transit-ml"),
+        ("ML_STORE_ENDPOINT", "https://example.r2"),
+        ("ML_STORE_ACCESS_KEY_ID", "test"),
+        ("ML_STORE_SECRET_ACCESS_KEY", "test"),
+    ):
+        monkeypatch.setenv(name, value)
+
+
+def test_the_sweep_also_ingests_the_evaluation_summaries(monkeypatch):
+    import api.routers.internal as internal_module
+
+    calls = []
+    monkeypatch.setattr(internal_module, "ingest_forecast", lambda conn, s3, bucket: calls.append("forecast") or 0)
+    monkeypatch.setattr(
+        internal_module, "ingest_evaluations", lambda conn, s3, bucket: calls.append("evaluations") or 0
+    )
+    _configured_store(monkeypatch)
+    internal_module._ingest_ml_forecast(object())
+    assert calls == ["forecast", "evaluations"]
+
+
+def test_a_forecast_step_that_raises_does_not_skip_the_evaluations(monkeypatch):
+    import api.routers.internal as internal_module
+
+    calls = []
+
+    def boom(conn, s3, bucket):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(internal_module, "ingest_forecast", boom)
+    monkeypatch.setattr(
+        internal_module, "ingest_evaluations", lambda conn, s3, bucket: calls.append("evaluations") or 0
+    )
+    _configured_store(monkeypatch)
+    internal_module._ingest_ml_forecast(object())  # must not raise
+    assert calls == ["evaluations"]
