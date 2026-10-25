@@ -194,6 +194,18 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
+  // jsdom has no layout, so this pins the overlay's inline styles rather than
+  // its rendered position.
+  it("scrolls the overlay and centres its content with auto margins, not flex alignment", () => {
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    const content = screen.getByRole("heading", { level: 1 }).parentElement!.parentElement!;
+    const overlay = content.parentElement!;
+    expect(overlay.style.overflowY).toBe("auto");
+    expect(overlay.style.alignItems).toBe("");
+    expect(content.style.margin).toBe("auto");
+  });
+
   it("lets a visitor switch language before choosing", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();

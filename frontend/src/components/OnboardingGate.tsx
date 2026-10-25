@@ -92,6 +92,11 @@ export function OnboardingGate() {
     (a) => !searchable || searchKey(a.agency_name).includes(needle),
   );
 
+  // The list can outgrow a phone screen. `margin: auto` centres the content
+  // while it fits and falls back to top-aligned once it doesn't; flex
+  // `align-items: center` would instead push the overflow above the top edge,
+  // out of scroll reach. The extra top padding keeps the heading clear of the
+  // language toggle once the content is top-aligned.
   return (
     <div
       style={{
@@ -99,16 +104,15 @@ export function OnboardingGate() {
         inset: 0,
         background: "var(--bg-page)",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 40,
+        overflowY: "auto",
+        padding: "64px 40px 40px",
         zIndex: Z_INDEX.modal,
       }}
     >
       <div style={{ position: "absolute", top: 16, right: 16 }}>
         <LanguageToggle />
       </div>
-      <div style={{ width: "100%", maxWidth: 640, textAlign: "center" }}>
+      <div style={{ width: "100%", maxWidth: 640, margin: "auto", textAlign: "center" }}>
         <div style={{ marginBottom: 36 }}>
           <h1
             style={{
