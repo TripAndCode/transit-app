@@ -1,4 +1,7 @@
+from dataclasses import replace
 from datetime import date, timedelta
+
+import pytest
 
 from tests.unit.ml.ml_group import require
 
@@ -7,8 +10,8 @@ np = require("numpy")
 require("lightgbm")
 
 from ml.features import route_ids, with_route_ids  # noqa: E402
-from ml.model_backtest import run_backtest  # noqa: E402
-from ml.model_result import result_from_json, result_to_json  # noqa: E402
+from ml.model_backtest import run_backtest, run_backtests  # noqa: E402
+from ml.model_result import MODEL, SLOT_INTERVAL, result_from_json, result_to_json  # noqa: E402
 from ml.models import ModelParams  # noqa: E402
 from ml.training import training_frame  # noqa: E402
 
@@ -107,16 +110,19 @@ def test_fallback_agencies_only_names_agencies_the_report_can_show():
     assert 50 not in result.fallback_agencies
 
 
-def test_a_sliced_week_matches_training_frame_at_its_own_cutoff():
+@pytest.mark.parametrize("clip_quantile", [None, 0.9])
+def test_a_sliced_week_matches_training_frame_at_its_own_cutoff(clip_quantile):
     """Pins the prefix property run_backtest's single training_frame build relies
     on: an earlier cutoff's own training_frame call must equal the later cutoff's
-    frame, filtered to that cutoff and reweighted from it."""
+    frame, filtered to that cutoff and reweighted from it. Clipping keeps it, as
+    each row's cap comes from its own origin's window, never from the cutoff."""
     runs = with_route_ids(_runs(), route_ids(_runs()))
     early_cutoff = START + timedelta(days=20)
     late_cutoff = START + timedelta(days=60)
+    options = {"window_days": FAST.window_days, "half_life_days": FAST.half_life_days, "clip_quantile": clip_quantile}
 
-    direct = training_frame(runs, early_cutoff, window_days=FAST.window_days, half_life_days=FAST.half_life_days)
-    sliced = training_frame(runs, late_cutoff, window_days=FAST.window_days, half_life_days=FAST.half_life_days)
+    direct = training_frame(runs, early_cutoff, **options)
+    sliced = training_frame(runs, late_cutoff, **options)
     sliced = sliced[sliced["service_date"] <= pd.Timestamp(early_cutoff)]
     age_days = (pd.Timestamp(early_cutoff) - sliced["service_date"]).dt.days
     sliced = sliced.assign(weight=(0.5 ** (age_days / FAST.half_life_days)).astype("float32"))
@@ -140,3 +146,82 @@ def test_training_frame_is_built_once_for_every_retrain_week(monkeypatch):
     monkeypatch.setattr(model_backtest, "training_frame", spy)
     run_backtest(_runs(), params=FAST, origin_count=28)
     assert len(calls) == 1
+
+
+def _with_outliers():
+    runs = _runs()
+    late = runs.index % 37 == 0
+    return runs.assign(delay_min=runs["delay_min"].where(~late, 90.0).astype("float32"))
+
+
+def _b0_scores(result):
+    rows = {(a.agency_id, r.horizon, r.peak, r.sparse): r for a in result.agencies for r in a.rows if r.method == "B0"}
+    return {key: (r.errors.abs_err, r.errors.weight) for key, r in rows.items()}, result.intervals["B0"]
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        {"clip_quantile": 0.95},
+        {"mean_objective": "huber", "point": "mean"},
+        {"point": "mean"},
+        {"clip_quantile": 0.95, "point": "mean"},
+    ],
+)
+def test_every_variant_is_scored_against_the_same_raw_b0(variant):
+    runs = _with_outliers()
+    live = run_backtest(runs, params=FAST, origin_count=7)
+    other = run_backtest(runs, params=replace(FAST, **variant), origin_count=7)
+    assert other.origins == live.origins
+    assert _b0_scores(other) == _b0_scores(live)
+    assert other.params != live.params
+
+
+def test_one_fit_scores_each_point_forecast_as_its_own_result():
+    runs = _with_outliers()
+    both = run_backtests(runs, params=FAST, origin_count=7, points=("mean", "q50"))
+    assert both["mean"] == run_backtest(runs, params=replace(FAST, point="mean"), origin_count=7)
+    assert both["q50"] == run_backtest(runs, params=replace(FAST, point="q50"), origin_count=7)
+    assert both["mean"].intervals == both["q50"].intervals
+    model_errors = {
+        p: sum(r.errors.abs_err for a in both[p].agencies for r in a.rows if r.method == MODEL) for p in both
+    }
+    assert model_errors["mean"] != model_errors["q50"]
+
+
+def test_the_published_slot_interval_is_scored_beside_the_per_run_one():
+    result = run_backtest(_runs(), params=FAST, origin_count=7)
+    per_run = sum(s.runs for s in result.intervals[MODEL].values())
+    assert per_run > 0 and sum(s.runs for s in result.intervals[SLOT_INTERVAL].values()) == per_run
+
+
+def test_the_point_forecast_is_the_median_unless_asked_for_the_mean():
+    result = run_backtest(_runs(), params=FAST, origin_count=7)
+    assert result.params["point"] == "q50"
+    assert result == run_backtests(_runs(), params=FAST, origin_count=7, points=("q50",))["q50"]
+
+
+def _count_mean_boosters(monkeypatch):
+    import ml.models
+
+    objectives = []
+    real = ml.models.lgb.train
+
+    def spy(params, *args, **kwargs):
+        objectives.append(params["objective"])
+        return real(params, *args, **kwargs)
+
+    monkeypatch.setattr(ml.models.lgb, "train", spy)
+    return objectives
+
+
+def test_a_median_point_backtest_never_trains_the_mean_booster(monkeypatch):
+    objectives = _count_mean_boosters(monkeypatch)
+    run_backtest(_runs(), params=FAST, origin_count=10)
+    assert objectives and "regression" not in objectives
+
+
+def test_scoring_the_mean_trains_one_mean_booster_per_retrain(monkeypatch):
+    objectives = _count_mean_boosters(monkeypatch)
+    result = run_backtests(_runs(), params=FAST, origin_count=10, points=("mean", "q50"))["q50"]
+    assert objectives.count("regression") == len(result.cutoffs)

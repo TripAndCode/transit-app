@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import timedelta
+from pathlib import Path
 
 import pandas as pd
 from clickhouse_connect.driver.client import Client
@@ -48,6 +49,17 @@ def load_runs(client: Client, agency_ids: Iterable[int]) -> pd.DataFrame:
     if not agency_ids:
         return _typed(pd.DataFrame({column: [] for column in RUN_COLUMNS}))
     return pd.concat([fetch_runs(client, agency_id) for agency_id in agency_ids], ignore_index=True)
+
+
+def write_runs(runs: pd.DataFrame, path: Path) -> None:
+    """A snapshot of `runs`, so several backtests in separate processes score
+    exactly the same history."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    runs.to_parquet(path)
+
+
+def read_runs(path: Path) -> pd.DataFrame:
+    return _typed(pd.read_parquet(path))
 
 
 def _typed(frame: pd.DataFrame) -> pd.DataFrame:

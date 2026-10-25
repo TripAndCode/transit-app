@@ -256,6 +256,9 @@ def summarize_agency_overview(
     that mean replaces ``expected_avg_min`` and ``source`` becomes ``"ml"``;
     ``samples``/``low_confidence`` stay whatever the historical baseline
     already computed, for the same reason as the heatmap's own ``ml_cells``.
+    A published forecast's ``mean_min`` is the model's point forecast, which
+    need not be a mean, so ``worst`` carries its band's ``source`` too: a
+    caller must not word an ML-sourced figure as an average of measurements.
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     ml_buckets: dict[tuple[int, str], list[float]] = {}
@@ -318,6 +321,7 @@ def summarize_agency_overview(
                     "band": band,
                     "expected_avg_min": round(display_mean, 1),
                     "samples": n,
+                    "source": source,
                     "_m": display_mean,
                 }
     if worst is not None:

@@ -448,3 +448,77 @@ def test_a_year_end_day_no_calendar_types_is_not_a_template():
     template = template_future_runs(runs, date(2027, 1, 2), horizon_days=7)
     assert _sources(template, date(2027, 1, 4)) == {"W1228"}
     assert _sources(template, date(2027, 1, 3)) == {"H1227"}
+
+
+def _outlier_history(agency_id=8):
+    """Twenty days of one trip near 1 minute late, and one 100 minutes late on
+    the target's own weekday (-6 and +1 are Wednesdays)."""
+    rows = [(-d, "R1", "T1", 8, 100.0 if d == 6 else 1.0 + 0.1 * (d % 3), "wk") for d in range(1, 21)]
+    runs = _runs([*rows, (1, "R1", "T1", 8, 0.0, "wk")])
+    return runs.assign(agency_id=np.int16(agency_id))
+
+
+def test_clipping_winsorizes_the_history_at_the_agencys_own_quantiles():
+    runs = _outlier_history()
+    before = runs[runs["service_date"] < pd.Timestamp(ORIGIN)]
+    history = before["delay_min"].to_numpy(dtype=float)
+    lo, hi = np.quantile(history, [0.1, 0.9])
+    row = build_frame(runs, ORIGIN, clip_quantile=0.9).iloc[0]
+    assert row.clip_lo == pytest.approx(lo) and row.clip_hi == pytest.approx(hi)
+    clipped = np.clip(history, lo, hi)
+    wednesdays = np.clip(before.loc[before["service_date"].dt.dayofweek == 2, "delay_min"].to_numpy(float), lo, hi)
+    assert row.slot_mean == pytest.approx(wednesdays.mean(), rel=1e-5)
+    assert row.slot_std == pytest.approx(wednesdays.std(ddof=1), rel=1e-4)
+    assert row.route_mean == pytest.approx(clipped.mean(), rel=1e-5)
+    assert row.trip_mean == pytest.approx(clipped.mean(), rel=1e-5)
+    assert row.slot_mean < 2.0
+
+
+def test_b0_and_its_interval_stay_raw_when_the_features_are_clipped():
+    runs = _outlier_history()
+    raw = build_frame(runs, ORIGIN).iloc[0]
+    clipped = build_frame(runs, ORIGIN, clip_quantile=0.9).iloc[0]
+    assert raw.b0 == raw.slot_mean
+    assert clipped.b0 == raw.b0 and clipped.b0 > 5.0
+    assert (clipped.slot_p10, clipped.slot_p90) == (raw.slot_p10, raw.slot_p90)
+
+
+def test_no_clipped_feature_or_cap_reads_the_origin_day_or_later():
+    history = [(-d, "R1", f"T{d % 3}", 8 + d % 2, float(d % 5), "wk") for d in range(1, 40)]
+    future = [(d, "R1", f"T{d % 3}", 8 + d % 2, 1.0, "wk") for d in range(0, 9)]
+    runs = _runs(history + future)
+    later = runs["service_date"] >= pd.Timestamp(ORIGIN)
+    leaked = runs.assign(delay_min=runs["delay_min"].where(~later, 1000.0))
+    columns = [*FEATURES, "clip_lo", "clip_hi"]
+    before, after = build_frame(runs, ORIGIN, clip_quantile=0.9), build_frame(leaked, ORIGIN, clip_quantile=0.9)
+    pd.testing.assert_frame_equal(before[columns], after[columns])
+
+
+def test_one_agencys_outlier_does_not_move_another_agencys_cap():
+    calm = _runs(
+        [(-d, "R1", "T1", 8, 1.0 + 0.1 * (d % 3), "wk") for d in range(1, 21)] + [(1, "R1", "T1", 8, 0.0, "wk")]
+    )
+    noisy = _outlier_history(agency_id=9)
+    alone = build_frame(calm, ORIGIN, clip_quantile=0.9)
+    together = build_frame(pd.concat([calm, noisy], ignore_index=True), ORIGIN, clip_quantile=0.9)
+    columns = ["slot_mean", "route_mean", "trip_mean", "clip_lo", "clip_hi"]
+    pd.testing.assert_frame_equal(
+        alone[columns].reset_index(drop=True),
+        together.loc[together["agency_id"] == 8, columns].reset_index(drop=True),
+    )
+
+
+def test_an_agency_with_no_history_gets_no_cap_rather_than_a_crash():
+    runs = _runs([(-7, "R1", "T1", 8, 2.0, "wk"), (1, "R1", "T1", 8, 3.0, "wk")])
+    late = _runs([(1, "B1", "N1", 8, 3.0, "wk")]).assign(agency_id=np.int16(9))
+    frame = build_frame(pd.concat([runs, late], ignore_index=True), ORIGIN, clip_quantile=0.99).set_index("agency_id")
+    assert frame.loc[8, "clip_lo"] == frame.loc[8, "clip_hi"] == 2.0
+    assert np.isnan(frame.loc[9, "clip_lo"]) and np.isnan(frame.loc[9, "clip_hi"])
+    empty = build_frame(_runs([(1, "R1", "T1", 8, 3.0, "wk")]), ORIGIN, clip_quantile=0.99).iloc[0]
+    assert np.isnan(empty.clip_hi) and np.isnan(empty.b0)
+
+
+@pytest.mark.parametrize("quantile", [0.5, 1.0, 0.2])
+def test_a_clip_quantile_must_name_an_upper_tail(quantile):
+    with pytest.raises(ValueError, match="clip_quantile"):
+        build_frame(_outlier_history(), ORIGIN, clip_quantile=quantile)

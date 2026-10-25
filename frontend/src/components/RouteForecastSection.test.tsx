@@ -28,7 +28,7 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
 function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
   return {
     grid: fullGrid([{ dow: 1, band: "midday", v: 6.8, n: 250 }]),
-    worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250 },
+    worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
     routes: [
       { route_code: "100", route_name: "Main Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
       { route_code: "200", route_name: "Side Line", expected_avg_min: 9.9, samples: 5, low_confidence: true },
@@ -157,8 +157,23 @@ describe("RouteForecastSection", () => {
   });
 
   it("says an early-running worst window is early, not late", () => {
-    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250 } }));
+    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250, source: "baseline" } }));
     expect(screen.getByTestId("worst-headline")).toHaveTextContent("avg 0.4 min early");
+  });
+
+  it("words a worst window the ML model set as expected, not as an average", () => {
+    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "ml" } }));
+    const headline = screen.getByTestId("worst-headline");
+    expect(headline).toHaveTextContent("6.8 min late expected");
+    expect(headline).not.toHaveTextContent("avg");
+  });
+
+  it("words a route's ML-forecast worst window as expected too", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    renderSection(overview(), "100", ml);
+    expect(screen.getByTestId("detail-worst")).toHaveTextContent(/12\.0 min late expected/);
+    expect(screen.getByTestId("detail-worst")).not.toHaveTextContent("avg");
   });
 
   it("says how late a route's worst window runs in words too", () => {
@@ -267,12 +282,16 @@ describe("RouteForecastSection", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Past observations")).toBeInTheDocument();
     expect(within(dialog).queryByText("Measurements")).toBeNull();
+    // The route figure pools the model's forecasts, so it is not called an average.
+    expect(within(dialog).getByText("Route expected")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Route avg")).toBeNull();
   });
 
   it("keeps calling the detail's count measurements for a baseline forecast", () => {
     renderSection(overview(), "100");
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
     expect(within(screen.getByRole("dialog")).getByText("Measurements")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("Route avg")).toBeInTheDocument();
   });
 
   it("marks a route's forecast as the ML model's when its cells come from it", () => {
