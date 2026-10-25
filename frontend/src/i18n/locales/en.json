@@ -1984,6 +1984,7 @@
     "skill_bar": "Adoption bar: at least {{value}}",
     "coverage_label": "Runs inside the forecast range",
     "coverage_target": "Target {{low}}–{{high}}",
+    "slot_coverage": "Per time slot, as published: {{value}}",
     "failures_title": "Why it was not adopted",
     "failure_skill_below_min": "Error improved by only {{value}} against B0, short of the {{threshold}} bar",
     "failure_agency_worse": "Some agencies had more error than B0: {{agencies}}",

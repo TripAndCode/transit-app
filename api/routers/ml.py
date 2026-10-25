@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from api.deps import get_conn
 from api.middleware.ratelimit import limiter, tier_limit
-from api.routers.reports import ML_FRESHNESS_DAYS, ML_HORIZON_DAYS
+from api.routers.reports import fetch_live_ml_agencies
 from pipeline.flags import aflag
 from pipeline.reports.ml_evaluation import shape_history, shape_latest
 
@@ -79,40 +79,25 @@ class MlEvaluationsResponse(BaseModel):
     forecast_in_use: bool
 
 
-def _document(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else json.loads(value)
-
-
 @router.get("/evaluations", response_model=MlEvaluationsResponse)
 @limiter.limit(tier_limit)
 async def ml_evaluations(request: Request, conn: asyncpg.Connection = Depends(get_conn)) -> dict[str, Any]:
     """Every week the workbench evaluated, newest first, with the newest
     week's detail. `forecast_live` uses the heatmap's own freshness rule, so
     it says whether that agency's heatmap shows ML values right now."""
-    rows = await conn.fetch(
-        "SELECT run_date, adopted, overall_skill, summary FROM ml_evaluations ORDER BY run_date DESC"
+    weeks = await conn.fetch(
+        "SELECT run_date, adopted, overall_skill, COALESCE(summary->>'point_metric', 'mean') AS point_metric "
+        "FROM ml_evaluations ORDER BY run_date DESC"
     )
     forecast_in_use = await aflag("ml_forecast")
-    if not rows:
+    if not weeks:
         return {"latest": None, "history": [], "forecast_in_use": forecast_in_use}
+    newest = weeks[0]["run_date"]
+    summary = json.loads(await conn.fetchval("SELECT summary FROM ml_evaluations WHERE run_date = $1", newest))
     names = {r["agency_id"]: r["agency_name"] for r in await conn.fetch("SELECT agency_id, agency_name FROM agencies")}
-    live: set[int] = set()
-    if forecast_in_use:
-        live = {
-            r["agency_id"]
-            for r in await conn.fetch(
-                "SELECT DISTINCT agency_id FROM agg_route_forecast_ml "
-                "WHERE service_date > now()::date AND service_date <= now()::date + $1::int "
-                "AND origin_date >= now()::date - $2::int AND hour < 24",
-                ML_HORIZON_DAYS,
-                ML_FRESHNESS_DAYS,
-            )
-        }
-    newest = rows[0]
+    live = await fetch_live_ml_agencies(conn) if forecast_in_use else set()
     return {
-        "latest": shape_latest(_document(newest["summary"]), newest["run_date"], names, live),
-        "history": shape_history(
-            [(r["run_date"], r["adopted"], r["overall_skill"], _document(r["summary"])) for r in rows]
-        ),
+        "latest": shape_latest(summary, newest, names, live),
+        "history": shape_history([(w["run_date"], w["adopted"], w["overall_skill"], w["point_metric"]) for w in weeks]),
         "forecast_in_use": forecast_in_use,
     }

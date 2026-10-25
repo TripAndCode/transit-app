@@ -1984,6 +1984,7 @@
     "skill_bar": "採用基準: {{value}}以上",
     "coverage_label": "予測範囲に収まった割合",
     "coverage_target": "目標 {{low}}〜{{high}}",
+    "slot_coverage": "時間枠ごとの予測範囲（公開している範囲）: {{value}}",
     "failures_title": "採用されなかった理由",
     "failure_skill_below_min": "B0との比較で誤差の改善が{{value}}にとどまり、基準の{{threshold}}に届かなかった",
     "failure_agency_worse": "B0より誤差が大きいエージェンシーがある: {{agencies}}",

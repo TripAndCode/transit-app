@@ -77,10 +77,13 @@ function Headline({ latest }: { latest: MlEvaluationLatest }) {
       </Card>
       <Card data-testid="model-coverage">
         <div style={muted}>{t("model.coverage_label")}</div>
-        <div style={{ fontSize: 20, fontWeight: 600 }}>{fmtRatioPct(latest.interval_coverage)}</div>
+        <div style={{ fontSize: 20, fontWeight: 600 }}>{fmtRatioPct(latest.coverage)}</div>
         <div style={muted}>
           {t("model.coverage_target", { low: fmtRatioPct(th.coverage_low), high: fmtRatioPct(th.coverage_high) })}
         </div>
+        {latest.interval_coverage != null && latest.interval_coverage !== latest.coverage && (
+          <div style={muted}>{t("model.slot_coverage", { value: fmtRatioPct(latest.interval_coverage) })}</div>
+        )}
       </Card>
     </div>
   );

@@ -55,13 +55,8 @@ def shape_latest(
     }
 
 
-def shape_history(rows: Sequence[tuple[date, bool, float | None, Mapping[str, Any]]]) -> list[dict[str, Any]]:
+def shape_history(rows: Sequence[tuple[date, bool, float | None, str]]) -> list[dict[str, Any]]:
     return [
-        {
-            "run_date": run_date,
-            "adopted": adopted,
-            "overall_skill": skill,
-            "point_metric": summary.get("point_metric", "mean"),
-        }
-        for run_date, adopted, skill, summary in sorted(rows, key=lambda row: row[0], reverse=True)
+        {"run_date": run_date, "adopted": adopted, "overall_skill": skill, "point_metric": point_metric}
+        for run_date, adopted, skill, point_metric in sorted(rows, key=lambda row: row[0], reverse=True)
     ]

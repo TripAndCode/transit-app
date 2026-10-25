@@ -86,6 +86,15 @@ describe("ModelPage", () => {
     expect(screen.getByText(/the ML forecast flag is off/)).toBeInTheDocument();
   });
 
+  it("shows the coverage the adoption gate judged, and the published slot range apart from it", () => {
+    const data = evaluations();
+    data.latest = { ...data.latest!, coverage: 0.74, interval_coverage: 0.781 };
+    renderPage(data);
+    const card = screen.getByTestId("model-coverage");
+    expect(card).toHaveTextContent("74.0%");
+    expect(card).toHaveTextContent("Per time slot, as published: 78.1%");
+  });
+
   it("shows a calm empty state before the first evaluation", () => {
     renderPage(evaluations({ latest: null, history: [] }));
     expect(screen.getByText("No evaluation yet. It is updated every Sunday.")).toBeInTheDocument();

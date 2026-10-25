@@ -98,3 +98,20 @@ async def test_with_the_flag_off_nothing_is_live(client, aconn, aagency_id, monk
     body = (await client.get("/api/ml/evaluations")).json()
     assert body["forecast_in_use"] is False
     assert body["latest"]["agencies"][0]["forecast_live"] is False
+
+
+async def test_a_stale_forecast_is_not_live(client, aconn, aagency_id, monkeypatch):
+    monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
+    flags.reset_cache()
+    await _seed_week(aconn, date(2026, 10, 25), True, 0.051, aagency_id)
+    stale_origin = jst_today() - timedelta(days=10)
+    await aconn.execute(
+        f"INSERT INTO agg_route_forecast_ml ({_FORECAST_COLUMNS}) "
+        "VALUES ($1, 'R1', $2, 8, 3.0, 1.0, 3.0, 5.0, 'v1', $3, now())",
+        aagency_id,
+        jst_today() + timedelta(days=1),
+        stale_origin,
+    )
+
+    body = (await client.get("/api/ml/evaluations")).json()
+    assert body["latest"]["agencies"][0]["forecast_live"] is False

@@ -93,7 +93,7 @@ _POOLED_DELAY_PROJECTION_SQL = (
 # seasonal baseline -- matches the parent spec's own freshness rule (the VPS
 # workbench's daily predict job republishes well inside this window, so a
 # stale row here means the job itself has stopped running, not a slow day).
-ML_FRESHNESS_DAYS = 2
+_ML_FRESHNESS_DAYS = 2
 
 # Mirrors ml.training.HORIZON_DAYS, duplicated (not imported) since this
 # module runs in the production image, which never installs the optional
@@ -101,7 +101,18 @@ ML_FRESHNESS_DAYS = 2
 # recency) keeps each (route, weekday) slot to at most one row -- an older
 # run's still origin-fresh leftover outside its own horizon would otherwise
 # share a weekday with the new horizon's row for that slot.
-ML_HORIZON_DAYS = 7
+_ML_HORIZON_DAYS = 7
+
+# The rows the heatmap overlays: inside the forecast horizon, from a recent
+# publish, and within a day's 24 hours -- a run starting after midnight of its
+# service day keeps an hour of 24 or more, which no band covers and the
+# baseline leaves out too. Built from the constants above, never from input.
+_ML_FRESH_ROWS = (
+    "service_date > now()::date "
+    f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
+    f"AND origin_date >= now()::date - {_ML_FRESHNESS_DAYS} "
+    "AND hour < 24"
+)
 
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
@@ -122,21 +133,25 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
     try:
         rows = await conn.fetch(
             "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
-            "WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) "
-            "AND service_date > now()::date AND service_date <= now()::date + $3::int "
-            "AND origin_date >= now()::date - $4::int "
-            # A run starting after midnight of its service day keeps an hour of
-            # 24 or more. No band covers it, and the baseline leaves it out too.
-            "AND hour < 24",
+            f"WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) AND {_ML_FRESH_ROWS}",
             agency_id,
             route_code,
-            ML_HORIZON_DAYS,
-            ML_FRESHNESS_DAYS,
         )
     except Exception:
         _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)
         return []
     return [{"dow": row["service_date"].isoweekday(), "hour": row["hour"], "mean_min": row["mean_min"]} for row in rows]
+
+
+async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
+    """Agencies with any row `_fetch_ml_cells` would overlay now. Never
+    raises, for the same reason: a failed read reports no agency live."""
+    try:
+        rows = await conn.fetch(f"SELECT DISTINCT agency_id FROM agg_route_forecast_ml WHERE {_ML_FRESH_ROWS}")
+    except Exception:
+        _log.warning("fetch_live_ml_agencies: could not read agg_route_forecast_ml -- none live", exc_info=True)
+        return set()
+    return {row["agency_id"] for row in rows}
 
 
 # Static metadata for the listing endpoint. Ordered for sidebar display.

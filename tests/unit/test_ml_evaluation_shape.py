@@ -71,12 +71,23 @@ def test_a_summary_without_a_slot_interval_or_serving_model_still_shapes():
 
 def test_history_is_newest_first_with_each_weeks_metric():
     rows = [
-        (date(2026, 10, 18), True, 0.063, {"point_metric": "mean"}),
-        (date(2026, 11, 1), True, 0.10, {"point_metric": "q50"}),
-        (date(2026, 10, 25), True, 0.051, {}),
+        (date(2026, 10, 18), True, 0.063, "mean"),
+        (date(2026, 11, 1), True, 0.10, "q50"),
+        (date(2026, 10, 25), True, 0.051, "mean"),
     ]
     assert shape_history(rows) == [
         {"run_date": date(2026, 11, 1), "adopted": True, "overall_skill": 0.10, "point_metric": "q50"},
         {"run_date": date(2026, 10, 25), "adopted": True, "overall_skill": 0.051, "point_metric": "mean"},
         {"run_date": date(2026, 10, 18), "adopted": True, "overall_skill": 0.063, "point_metric": "mean"},
     ]
+
+
+class _FailingConn:
+    async def fetch(self, *args):
+        raise RuntimeError("relation does not exist")
+
+
+async def test_the_live_agency_lookup_degrades_to_none_rather_than_failing():
+    from api.routers.reports import fetch_live_ml_agencies
+
+    assert await fetch_live_ml_agencies(_FailingConn()) == set()
