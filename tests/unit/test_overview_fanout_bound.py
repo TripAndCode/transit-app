@@ -63,7 +63,6 @@ def stages(monkeypatch):
         "_movers": [],
         "_concentration": None,
         "_top_delayed_routes": [],
-        "_peak_hour": None,
         "_peak_hour_by_dow": None,
         "_service_day_split": ([], []),
         "_daily_sparkline": [],
@@ -90,10 +89,10 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
 
 
 @pytest.mark.asyncio
-async def test_the_peak_hour_pair_takes_the_first_slots(stages):
-    """The two `_peak_hour_by_dow` reads dominate a cold load, so under the
+async def test_the_hour_profiles_take_the_first_slots(stages):
+    """The three `_peak_hour_by_dow` reads dominate a cold load, so under the
     bound they must not queue behind stages that finish quickly."""
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
     await ov.compute_overview_summary(7, ctx, None, pool=_FakePool())
 
-    assert stages[:2] == ["_peak_hour_by_dow", "_peak_hour_by_dow"]
+    assert stages[:3] == ["_peak_hour_by_dow"] * 3

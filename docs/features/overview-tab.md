@@ -34,8 +34,8 @@ What the user sees/does:
 - **Empty state** — `frontend/src/components/EmptyState.tsx` when the agency
   has zero samples, zero concentration routes, and an empty service split for
   the current range (`hasAnyData` in `OverviewTab.tsx`; `movers` and
-  `peak_hour` are deliberately excluded from that check — see the inline
-  comments in `OverviewTab.tsx` for why each would give a false positive).
+  `peak_hour` are left out of that check — see the inline comments in
+  `OverviewTab.tsx` for why).
 - **Hero row** — `frontend/src/components/OverviewHeroRow.tsx`: the headline
   avg-delay delta vs. a prior-week baseline, delayed-route count, and a
   sparkline.
@@ -73,7 +73,7 @@ What the user sees/does:
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). **`peak_hour` is the one exception**: without a service filter it reads `agg_route_hour` (a fixed analyze-period rollup with no date column) regardless of the range, so it need not reflect "no data in this range" — `OverviewTab.tsx` deliberately excludes it from the empty-state check for this reason. A service filter is a set of dates, which that table cannot apply, so under one `peak_hour` reads what `_peak_hour_by_dow()` reads over the range instead. `_peak_hour_by_dow()` (used for the modal's weekday/weekend split) reads the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the live scan only under a `routes` or `time_band` filter. |
+| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). The three hour profiles (`peak_hour` and the modal's weekday/weekend split) all come from `_peak_hour_by_dow()` over the range: the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the shared live scan only under a `routes` or `time_band` filter. Under a `routes` filter alone that scan is the request's only ClickHouse work, so a failure degrades just those three fields to null. |
 | `usePeakHourBreakdown(agencyId, hour, dow)` (fires only once an hour is clicked on the ribbon) | `GET /api/{agency_id}/peak-hour-breakdown` (`api/routers/overview.py: peak_hour_breakdown`) | `agg_route_hour_dow`, one row per route pooled across its raw service ids, and across DOWs when `dow` is omitted; routes with fewer than 3 samples are excluded. Returns up to 20 routes, worst avg delay first. |
 
 ## Key files
@@ -101,7 +101,7 @@ What the user sees/does:
 |---|---|
 | `api/routers/overview.py` | `GET /overview/summary`, `GET /peak-hour-breakdown` |
 | `pipeline/reports/overview.py` | `compute_overview_summary()` and its per-module helpers (headline, movers, concentration, top-delayed, peak-hour, service-split); fast-path-vs-live-scan pattern documented in the module docstring |
-| `pipeline/analyze.py`, `pipeline/ch_aggregates.py` | Build `agg_daily_trend`, `agg_route_hour`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads. `ch_aggregates` computes all four in ClickHouse; `analyze` copies them into Postgres |
+| `pipeline/analyze.py`, `pipeline/ch_aggregates.py` | Build `agg_daily_trend`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads. `ch_aggregates` computes them in ClickHouse; `analyze` copies them into Postgres |
 | `pipeline/day_types.py` | Files each service date under a day type from the agency's `static_calendar` / `static_calendar_dates` (loaded by `pipeline/static_loader.py`), with the weekday rule as fallback |
 
 ## How to verify manually
