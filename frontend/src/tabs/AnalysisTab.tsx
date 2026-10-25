@@ -65,6 +65,10 @@ function hasCsv(data: ReportResponse): boolean {
  *  other report. The compare report is drawn re-ranked by one period's delay,
  *  so it asks for the API's maximum length: the default length keeps only the
  *  widest gaps, which would drop a route that is slow in both periods. */
+/** The certificate's period list is fetched by its own section; the screen
+ *  only reads it back for the scope sentence. */
+const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
+
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
@@ -111,14 +115,16 @@ export function AnalysisTab({
   // at the default length.
   const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
   const list = useReports(id);
+  // The certificate, like route_forecast, owns its section and its queries.
+  const isCertificate = reportType === "delay_certificate";
+  const certificateList = useReport(id, isCertificate ? "delay_certificate" : null, ctx, OBSERVE_ONLY);
   const detail = useReport(
     id,
-    reportType && reportType !== "route_forecast" ? reportType : null,
+    reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
     ctx,
     rankingOptions(reportType, includeSparse, allRowsFor),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
-  const [staffOpen, setStaffOpen] = useState(false);
   const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoints, so their own map
   // applies: one chosen route opens that route's forecast, which honours the
@@ -133,11 +139,12 @@ export function AnalysisTab({
       ? forecastRoute != null
         ? routeForecast.data?.scope_applied
         : forecast.data?.scope_applied
-      : detail.data?.report_type === reportType
-        ? detail.data.scope_applied
-        : undefined;
+      : isCertificate
+        ? certificateList.data?.scope_applied
+        : detail.data?.report_type === reportType
+          ? detail.data.scope_applied
+          : undefined;
 
-  const isCertificate = detail.data?.report_type === "delay_certificate";
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`);
   }
@@ -200,24 +207,25 @@ export function AnalysisTab({
             <RouteForecastSection aid={id} />
           </div>
         )}
-        {reportType && reportType !== "route_forecast" && detail.error && (
+        {isCertificate && id != null && (
+          <CertificateSection key={id} aid={id} csvHref={csvHref("delay_certificate")} />
+        )}
+        {reportType && reportType !== "route_forecast" && !isCertificate && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && (
+        {reportType && reportType !== "route_forecast" && !isCertificate && detail.isFetching && (
           <>
             <SkeletonChart height={360} />
             <StillWorking scope={ctx} update={update} />
           </>
         )}
-        {reportType !== "route_forecast" && detail.data && (
+        {reportType !== "route_forecast" && !isCertificate && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
-              {hasCsv(detail.data) && !isCertificate && (
-                <CsvLink href={csvHref(detail.data.report_type)} />
-              )}
+              {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
             </div>
-            {!isCertificate && <ReportMeta data={detail.data} />}
+            <ReportMeta data={detail.data} />
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
             )}
@@ -227,24 +235,6 @@ export function AnalysisTab({
               <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               <CouncilSummaryBlock report={detail.data} />
-            ) : detail.data.report_type === "delay_certificate" && id != null ? (
-              <>
-                <DelayCertificateLookup aid={id} />
-                {/* The period's whole list, under the page's scope and the
-                    report's own threshold, is for staff; a passenger starts
-                    from the lookup above. */}
-                <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
-                  <summary>{t("reports.certificate.all_late")}</summary>
-                  {staffOpen && (
-                    <>
-                      <ReportMeta data={detail.data} />
-                      <p className="cert-staff__summary">{detail.data.text}</p>
-                      <CsvLink href={csvHref(detail.data.report_type)} />
-                      {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
-                    </>
-                  )}
-                </details>
-              </>
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
               <>
                 <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
@@ -339,6 +329,43 @@ export function AnalysisTab({
           in React state even though its sessionStorage key is now separate. */}
       <InsightPanel key={id} className="analysis-insights" />
       </div>
+    </div>
+  );
+}
+
+/** A passenger starts from the lookup, which fetches one day and one route.
+ *  The period's every late departure is a far heavier scan that only staff
+ *  ask for, so it is fetched once they open its section and can never hold
+ *  the lookup back. The open state lives here, so leaving the certificate
+ *  drops it and a return starts folded. */
+function CertificateSection({ aid, csvHref }: { aid: number; csvHref: string }) {
+  const { t } = useTranslation();
+  const [ctx, update] = useScope();
+  const [staffOpen, setStaffOpen] = useState(false);
+  const all = useReport(aid, staffOpen ? "delay_certificate" : null, ctx);
+  const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
+  return (
+    <div>
+      <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
+      <DelayCertificateLookup aid={aid} />
+      <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
+        <summary>{t("reports.certificate.all_late")}</summary>
+        {staffOpen && all.error && <ErrorBanner error={all.error} onRetry={() => all.refetch()} />}
+        {staffOpen && all.isFetching && (
+          <>
+            {!data && <SkeletonTable rows={6} rowHeight={36} />}
+            <StillWorking scope={ctx} update={update} />
+          </>
+        )}
+        {staffOpen && data && (
+          <>
+            <ReportMeta data={data} />
+            <p className="cert-staff__summary">{data.text}</p>
+            <CsvLink href={csvHref} />
+            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
+          </>
+        )}
+      </details>
     </div>
   );
 }
