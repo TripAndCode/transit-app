@@ -28,9 +28,11 @@ async def test_the_raw_route_name_trigram_index_is_gone(aconn, indexname):
 
 
 def test_rolling_back_restores_the_raw_indexes_and_migrating_up_drops_them(apply_schema):
+    """`force_destructive=True` because the rollback spans every migration
+    above 0079, and this database is thrown away between runs."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
-        migrate_down("0079", conn)
+        migrate_down("0079", conn, force_destructive=True)
         indexes = _static_routes_indexes(conn)
         for indexname, column in _RAW.items():
             assert indexes.get(indexname, "").endswith(f"USING gin ({column} gin_trgm_ops)"), indexes
