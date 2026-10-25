@@ -302,6 +302,13 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
   });
 
+  it("links the ML mark to the model evaluation page", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+    renderSection(overview(), "100", ml);
+    expect(screen.getByTestId("fc-ml-chip")).toHaveAttribute("href", "/model");
+  });
+
   it("shows no ML mark on a baseline-only route or agency landing", () => {
     renderSection(overview(), "100");
     expect(screen.queryByTestId("fc-ml-chip")).toBeNull();

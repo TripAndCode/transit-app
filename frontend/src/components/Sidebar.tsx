@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
+  Gauge,
   HelpCircle,
   Info,
   ChevronLeft,
@@ -223,6 +224,17 @@ export function Sidebar() {
               {t("nav.other")}
             </div>
           )}
+          <RailTooltip collapsed={collapsedFlag} label={t("nav.model")}>
+            <PendingNavLink
+              to="/model"
+              aria-label={collapsedFlag ? t("nav.model") : undefined}
+              onClick={() => onNavigate?.()}
+              style={railLinkStyle(collapsedFlag)}
+            >
+              <Gauge size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
+              {!collapsedFlag && <span>{t("nav.model")}</span>}
+            </PendingNavLink>
+          </RailTooltip>
           <RailTooltip collapsed={collapsedFlag} label={t("nav.help")}>
             <PendingNavLink
               to="/help"

@@ -15,6 +15,7 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
@@ -576,9 +577,9 @@ function MlForecastChip() {
   const { t } = useTranslation();
   return (
     <div style={{ marginBottom: 8 }}>
-      <span className="caveat-badge" data-testid="fc-ml-chip">
+      <Link to="/model" className="caveat-badge" data-testid="fc-ml-chip">
         {t("forecast.ml_source")}
-      </span>
+      </Link>
     </div>
   );
 }

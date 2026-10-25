@@ -1,5 +1,6 @@
 {
   "nav": {
+    "model": "モデル評価",
     "ask": "質問",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
@@ -1967,5 +1968,42 @@
   "print": {
     "generated_at": "作成日時 {{time}}",
     "routes": "路線: {{names}}"
+  },
+  "model": {
+    "title": "ML予測モデルの評価",
+    "subtitle": "毎週の検証で、モデルの予測がB0（同じ曜日・時間帯の過去28日間の平均遅延）よりどれだけ正確かを確かめています。",
+    "empty": "まだ評価がありません。毎週日曜に更新されます。",
+    "adopted": "採用",
+    "not_adopted": "不採用（前のモデルを継続）",
+    "run_date": "評価日 {{date}}",
+    "serving": "使用中のモデル: {{version}}",
+    "serving_none": "公開中のモデルはまだありません",
+    "skill_label": "B0との比較",
+    "skill_better": "誤差が{{value}}小さい",
+    "skill_worse": "誤差が{{value}}大きい",
+    "skill_bar": "採用基準: {{value}}以上",
+    "coverage_label": "予測範囲に収まった割合",
+    "coverage_target": "目標 {{low}}〜{{high}}",
+    "failures_title": "採用されなかった理由",
+    "failure_skill_below_min": "B0との比較で誤差の改善が{{value}}にとどまり、基準の{{threshold}}に届かなかった",
+    "failure_agency_worse": "B0より誤差が大きいエージェンシーがある: {{agencies}}",
+    "failure_coverage_out_of_range": "予測範囲に収まった割合が{{value}}で、目標の{{low}}〜{{high}}から外れた",
+    "failure_other": "その他の基準を満たさなかった（{{code}}）",
+    "flag_off": "ML予測は現在ヒートマップに出ていません（管理画面の「ML予測」フラグがオフ）。",
+    "agencies_title": "エージェンシー別",
+    "col_agency": "エージェンシー",
+    "col_status": "評価のされ方",
+    "col_skill": "B0との比較",
+    "col_mae": "平均誤差（モデル / B0）",
+    "status_model": "モデルで評価",
+    "status_partial": "途中からモデルで評価",
+    "status_b0": "履歴不足のためB0",
+    "live": "ヒートマップに表示中",
+    "history_title": "これまでの評価",
+    "col_week": "評価日",
+    "col_verdict": "判定",
+    "metric_changed": "この週から{{metric}}で評価（それ以前の週とは直接比べられない）",
+    "metric_mean": "平均",
+    "metric_q50": "中央値"
   }
 }

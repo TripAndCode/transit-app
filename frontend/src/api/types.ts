@@ -1002,3 +1002,48 @@ export type ScopeSummary = {
   ctx: ResponseCtx;
   scope_applied?: ScopeApplied;
 };
+
+/** GET /api/ml/evaluations — api/routers/ml.py is the source of truth. */
+export interface MlFailure {
+  code: string;
+  value: number | null;
+  agencies: number[];
+}
+
+export interface MlAgencyEvaluation {
+  agency_id: number;
+  agency_name: string | null;
+  model_status: "model" | "partial" | "b0";
+  skill: number | null;
+  lgbm_mae: number | null;
+  b0_mae: number | null;
+  days_of_data: number | null;
+  forecast_live: boolean;
+}
+
+export interface MlEvaluationLatest {
+  run_date: string;
+  adopted: boolean;
+  failures: MlFailure[];
+  skill: number | null;
+  coverage: number | null;
+  interval_coverage: number | null;
+  thresholds: { min_skill: number | null; coverage_low: number | null; coverage_high: number | null; min_model_days: number | null };
+  point_metric: string;
+  serving_model_version: string | null;
+  origin_skill: { count: number | null; min: number | null; median: number | null; max: number | null };
+  agencies: MlAgencyEvaluation[];
+}
+
+export interface MlEvaluationWeek {
+  run_date: string;
+  adopted: boolean;
+  overall_skill: number | null;
+  point_metric: string;
+}
+
+export interface MlEvaluations {
+  latest: MlEvaluationLatest | null;
+  history: MlEvaluationWeek[];
+  forecast_in_use: boolean;
+}
