@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -190,7 +191,7 @@ def _train(args: argparse.Namespace) -> int:
     params = ModelParams.from_record(judged.params)
 
     # Read and swap credentials before the fit, so a misconfigured env fails
-    # fast instead of after a full fit plus a local overwrite.
+    # fast instead of after a full fit.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
     _use_store_credentials()
 
@@ -198,7 +199,7 @@ def _train(args: argparse.Namespace) -> int:
     # and the adoption gate above do not.
     from ml.dataset import load_runs
     from ml.features import route_ids, with_route_ids
-    from ml.model_store import save_model_set
+    from ml.model_store import replace_dir, stage_model_set
     from ml.models import fit_calibrated
     from ml.training import training_frame
 
@@ -220,7 +221,7 @@ def _train(args: argparse.Namespace) -> int:
         return 0
     models = fit_calibrated(train, params, cutoff)
     version = cutoff.isoformat()
-    save_model_set(
+    staged = stage_model_set(
         models,
         args.out,
         version=version,
@@ -229,11 +230,22 @@ def _train(args: argparse.Namespace) -> int:
         point=params.point,
         clip_quantile=params.clip_quantile,
     )
-
-    upload_dir(args.out, bucket, f"models/{version}", endpoint, run=_run)
     latest_path = args.out.parent / "latest.json"
-    latest_path.write_text(json.dumps({"version": version, "window_days": params.window_days}))
-    upload_file(latest_path, bucket, "models/latest.json", endpoint, run=_run)
+    staged_latest = latest_path.with_name(latest_path.name + ".tmp")
+    # `--out` is what predict serves, so the new model replaces it only after
+    # R2 holds it and latest.json names it, and every forecast names a model R2
+    # holds. The local latest.json is for an operator to read which model is
+    # served; nothing in the code reads it.
+    try:
+        upload_dir(staged, bucket, f"models/{version}", endpoint, run=_run)
+        staged_latest.write_text(json.dumps({"version": version, "window_days": params.window_days}))
+        upload_file(staged_latest, bucket, "models/latest.json", endpoint, run=_run)
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        staged_latest.unlink(missing_ok=True)
+        raise
+    replace_dir(staged, args.out)
+    staged_latest.replace(latest_path)
     return 0
 
 
