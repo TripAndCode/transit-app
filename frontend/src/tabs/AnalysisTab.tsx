@@ -65,6 +65,10 @@ function hasCsv(data: ReportResponse): boolean {
  *  other report. The compare report is drawn re-ranked by one period's delay,
  *  so it asks for the API's maximum length: the default length keeps only the
  *  widest gaps, which would drop a route that is slow in both periods. */
+/** The certificate's period list is fetched by its own section; the screen
+ *  only reads it back for the scope sentence. */
+const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
+
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
@@ -113,6 +117,7 @@ export function AnalysisTab({
   const list = useReports(id);
   // The certificate, like route_forecast, owns its section and its queries.
   const isCertificate = reportType === "delay_certificate";
+  const certificateList = useReport(id, isCertificate ? "delay_certificate" : null, ctx, OBSERVE_ONLY);
   const detail = useReport(
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
@@ -134,9 +139,11 @@ export function AnalysisTab({
       ? forecastRoute != null
         ? routeForecast.data?.scope_applied
         : forecast.data?.scope_applied
-      : detail.data?.report_type === reportType
-        ? detail.data.scope_applied
-        : undefined;
+      : isCertificate
+        ? certificateList.data?.scope_applied
+        : detail.data?.report_type === reportType
+          ? detail.data.scope_applied
+          : undefined;
 
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`);
@@ -346,11 +353,11 @@ function CertificateSection({ aid, csvHref }: { aid: number; csvHref: string }) 
         {staffOpen && all.error && <ErrorBanner error={all.error} onRetry={() => all.refetch()} />}
         {staffOpen && all.isFetching && (
           <>
-            <SkeletonTable rows={6} rowHeight={36} />
+            {!data && <SkeletonTable rows={6} rowHeight={36} />}
             <StillWorking scope={ctx} update={update} />
           </>
         )}
-        {staffOpen && !all.isFetching && data && (
+        {staffOpen && data && (
           <>
             <ReportMeta data={data} />
             <p className="cert-staff__summary">{data.text}</p>

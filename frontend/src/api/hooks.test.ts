@@ -160,6 +160,23 @@ describe("useReport's ranking options", () => {
     expect(url).toMatch(/[?&]limit=500(&|$)/);
   });
 
+  it("reads a report another caller fetched without fetching it itself", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ fetch }: { fetch: boolean }) => ({
+        observer: useReport(1, "ranking", baseCtx(), { observeOnly: true }),
+        fetcher: useReport(1, fetch ? "ranking" : null, baseCtx()),
+      }),
+      { ...withProviders(queryClient), initialProps: { fetch: false } },
+    );
+    expect(mockApiGet).not.toHaveBeenCalled();
+    expect(result.current.observer.data).toBeUndefined();
+    rerender({ fetch: true });
+    await waitFor(() => expect(result.current.observer.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+  });
+
   it("asks the certificate for departures past a threshold, zero included, as a separate query", async () => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
