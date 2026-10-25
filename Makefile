@@ -291,10 +291,10 @@ digest:
 ingest-weather:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
 
-# Pulls the ML workbench's latest published forecast (R2 `transit-ml`, read
-# with ML_STORE_* from .env) into agg_route_forecast_ml. Idempotent: upserts
-# on (agency_id, route_code, service_date, hour). Writes $(db_url), so it is an
-# operator step against the dev database.
+# Pulls the ML workbench's latest published forecast and every weekly
+# evaluation summary (R2 `transit-ml`, read with ML_STORE_* from .env) into
+# agg_route_forecast_ml and ml_evaluations. Idempotent: upserts on each table's
+# key. Writes $(db_url), so it is an operator step against the dev database.
 ingest-ml:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_ml
 

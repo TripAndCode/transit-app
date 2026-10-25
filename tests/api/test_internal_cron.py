@@ -238,6 +238,16 @@ def test_weather_ingest_runs_only_after_the_advisory_lock_is_released(two_agenci
     assert lock_was_free_during_weather is True
 
 
+@pytest.fixture(autouse=True)
+def _no_evaluation_ingest(monkeypatch):
+    """Keeps every test here off the network: a configured ML store would
+    otherwise send the evaluation step's listing to the fake endpoint. A test
+    about that step replaces this stub with its own."""
+    import api.routers.internal as internal_module
+
+    monkeypatch.setattr(internal_module, "ingest_evaluations", lambda conn, s3, bucket: 0)
+
+
 def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
     import api.routers.internal as internal_module
 

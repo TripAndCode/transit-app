@@ -50,3 +50,21 @@ def test_every_week_lands_and_a_republished_week_replaces_its_row(pg_conn):
         (date(2026, 10, 25), True, 0.051),
     ]
     assert rows[1][3]["headline"]["skill"] == 0.051
+
+
+def test_an_unchanged_week_is_left_alone_so_ingested_at_means_when_it_last_changed(pg_conn):
+    store = _store(**{"2026-10-18": (True, 0.063)})
+    load_evaluations(pg_conn, store, "transit-ml")
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE ml_evaluations SET ingested_at = '2026-01-01T00:00:00Z'")
+    pg_conn.commit()
+
+    load_evaluations(pg_conn, store, "transit-ml")
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingested_at::date FROM ml_evaluations")
+        assert cur.fetchone()[0] == date(2026, 1, 1)
+
+    load_evaluations(pg_conn, _store(**{"2026-10-18": (True, 0.064)}), "transit-ml")
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingested_at::date FROM ml_evaluations")
+        assert cur.fetchone()[0] != date(2026, 1, 1)

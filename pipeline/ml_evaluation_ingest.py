@@ -22,7 +22,8 @@ _SUFFIX = "/summary.json"
 
 
 class EvaluationReadError(Exception):
-    """The evaluations prefix could not be listed."""
+    """The evaluations prefix could not be listed, or a listed summary could
+    not be fetched: a store problem, never a property of one document."""
 
 
 class EvaluationWriteError(Exception):
@@ -38,20 +39,24 @@ class EvaluationIngest:
 
 def _row(key: str, body: bytes) -> tuple[Any, ...]:
     """The table row for one summary. Raises for a document that cannot be
-    trusted: not JSON, a schema this code does not read, a missing field, or a
-    run date other than the one its key files it under."""
+    trusted: not JSON, a schema this code does not read, a missing field, a run
+    date other than the one its key files it under, or a non-finite number,
+    which jsonb refuses and which would fail the whole batch's write."""
     summary = json.loads(body)
     if summary.get("schema") != SUPPORTED_SCHEMA:
         raise ValueError(f"schema {summary.get('schema')!r} is not {SUPPORTED_SCHEMA}")
     run_date = date.fromisoformat(summary["run_date"])
     if key != f"{_PREFIX}{run_date.isoformat()}{_SUFFIX}":
         raise ValueError(f"run_date {run_date} does not match its key")
-    return (run_date, SUPPORTED_SCHEMA, bool(summary["adopted"]), summary["headline"]["skill"], json.dumps(summary))
+    document = json.dumps(summary, allow_nan=False)
+    return (run_date, SUPPORTED_SCHEMA, bool(summary["adopted"]), summary["headline"]["skill"], document)
 
 
 def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest:
-    """Upsert every published summary, in one transaction. The caller's
-    connection must not be in autocommit, or a failed batch is not undone."""
+    """Upsert every published summary, in one transaction; a week whose
+    document is unchanged is left as it is, so `ingested_at` records when its
+    row last changed. The caller's connection must not be in autocommit, or a
+    failed batch is not undone."""
     try:
         keys = list_keys(s3_client, bucket, _PREFIX, _SUFFIX)
     except Exception as exc:
@@ -62,6 +67,9 @@ def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest
     for key in keys:
         try:
             body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        except Exception as exc:
+            raise EvaluationReadError(f"{key}: {exc}") from exc
+        try:
             rows.append(_row(key, body))
         except Exception as exc:
             _log.warning("ml_evaluation_ingest: skipped %s: %s", key, exc)
@@ -77,7 +85,8 @@ def load_evaluations(conn: Any, s3_client: Any, bucket: str) -> EvaluationIngest
                     "INSERT INTO ml_evaluations (run_date, schema_version, adopted, overall_skill, summary) "
                     "VALUES %s ON CONFLICT (run_date) DO UPDATE SET schema_version = EXCLUDED.schema_version, "
                     "adopted = EXCLUDED.adopted, overall_skill = EXCLUDED.overall_skill, "
-                    "summary = EXCLUDED.summary, ingested_at = now()",
+                    "summary = EXCLUDED.summary, ingested_at = now() "
+                    "WHERE ml_evaluations.summary IS DISTINCT FROM EXCLUDED.summary",
                     rows,
                     template="(%s, %s, %s, %s, %s::jsonb)",
                 )

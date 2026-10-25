@@ -100,3 +100,10 @@ def test_exits_nonzero_when_the_evaluations_cannot_be_read(caplog):
         _run(load_result=ForecastIngest(prefix=None, rows=0), eval_error=EvaluationReadError("AccessDenied"))
     assert excinfo.value.code == 1
     assert "EvaluationReadError: AccessDenied" in caplog.text
+
+
+def test_says_no_summary_is_published_rather_than_zero_summaries(caplog):
+    with caplog.at_level(logging.INFO):
+        _run(load_result=ForecastIngest(prefix=None, rows=0))
+    assert "no evaluation summary has been published yet" in caplog.text
+    assert "upserted 0 evaluation" not in caplog.text

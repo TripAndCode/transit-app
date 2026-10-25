@@ -456,10 +456,10 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
-    # The published forecast is fleet-wide too (one R2 object, not one per
-    # agency) -- same scoping as weather, but its own gate rather than
-    # run_weather's: an operator who asked to skip the weather fetch hasn't
-    # said anything about the ML forecast.
+    # The ML store's forecast and evaluation summaries are fleet-wide too
+    # (published once for every agency, not once per agency) -- same scoping
+    # as weather, but its own gate rather than run_weather's: an operator who
+    # asked to skip the weather fetch hasn't said anything about the ML store.
     if kind == "ingest" and requested_agency_ids is None:
         _run_ml_forecast_ingest(db_url)
     if failed:
@@ -572,8 +572,9 @@ def _ingest_ml_forecast(conn: Any) -> None:
 
 
 def _run_ml_forecast_ingest(db_url: str) -> None:
-    """Reads the ML workbench's latest published forecast from R2 and
-    upserts it into `agg_route_forecast_ml`, on its own connection opened
+    """Reads the ML workbench's latest published forecast and its weekly
+    evaluation summaries from R2 into `agg_route_forecast_ml` and
+    `ml_evaluations`, on its own connection opened
     only after `_run_ingest_and_analyze`'s advisory lock has already been
     released -- same reasoning as `_run_weather_ingest`'s own dedicated
     connection just below: a slow R2 round trip must not extend the
@@ -590,7 +591,7 @@ def _run_ml_forecast_ingest(db_url: str) -> None:
     try:
         ml_conn = psycopg2.connect(db_url)
     except Exception:
-        _log.exception("cron: ml_forecast ingest failed to connect")
+        _log.exception("cron: ML store ingest failed to connect")
         return
     try:
         _ingest_ml_forecast(ml_conn)

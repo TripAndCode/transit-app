@@ -119,6 +119,10 @@ _KEY = "evaluations/2026-11-01/summary.json"
         pytest.param(json.dumps(_summary("2026-11-01", schema=2)).encode(), id="newer-schema"),
         pytest.param(json.dumps(_summary("2026-10-25")).encode(), id="run-date-mismatch"),
         pytest.param(json.dumps({"schema": 1, "run_date": "2026-11-01"}).encode(), id="missing-field"),
+        pytest.param(
+            json.dumps({**_summary("2026-11-01"), "agencies": [{"lgbm_mae": float("nan")}]}).encode(),
+            id="non-finite-number",
+        ),
     ],
 )
 def test_one_untrustworthy_document_is_skipped_by_name_and_the_rest_ingested(captured, caplog, body):
@@ -157,3 +161,15 @@ def test_the_cron_wrapper_never_raises(caplog):
         assert ingest_evaluations(_RecordingConn(), _FakeS3({}, fail_listing=True), "transit-ml") == 0
     assert "could not upsert the evaluation summaries" in caplog.text
     assert "could not list the evaluation summaries" in caplog.text
+
+
+class _FailingGetS3(_FakeS3):
+    def get_object(self, Bucket, Key):
+        raise RuntimeError("AccessDenied on GetObject")
+
+
+def test_a_failed_fetch_is_a_read_error_not_a_skipped_document(captured):
+    store = _FailingGetS3({"evaluations/2026-10-18/summary.json": json.dumps(_summary("2026-10-18")).encode()})
+    with pytest.raises(EvaluationReadError, match="AccessDenied on GetObject"):
+        load_evaluations(_RecordingConn(), store, "transit-ml")
+    assert captured == []

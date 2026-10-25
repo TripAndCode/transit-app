@@ -940,7 +940,10 @@ def cmd_ingest_ml(args):
         logger.info("ingest_ml: no forecast has been published yet")
     else:
         logger.info(f"ingest_ml: upserted {forecast.rows} row(s) from {forecast.prefix}")
-    logger.info(f"ingest_ml: upserted {evaluations.upserted} evaluation summary(ies)")
+    if evaluations.listed == 0:
+        logger.info("ingest_ml: no evaluation summary has been published yet")
+    else:
+        logger.info(f"ingest_ml: upserted {evaluations.upserted} evaluation summary(ies)")
     if evaluations.skipped:
         logger.warning(f"ingest_ml: skipped unreadable or unsupported summaries: {', '.join(evaluations.skipped)}")
 
