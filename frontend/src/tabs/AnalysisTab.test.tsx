@@ -737,9 +737,9 @@ describe("AnalysisTab delay certificate", () => {
     vi.restoreAllMocks();
   });
 
-  function showCertificate() {
+  function showCertificate(types: ReportType[] = ["delay_certificate"]) {
     mockSupportHooks();
-    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: types.map(reportMeta), isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockImplementation(
       (_aid, reportType) =>
         (reportType == null
@@ -757,7 +757,7 @@ describe("AnalysisTab delay certificate", () => {
               refetch: vi.fn(),
             }) as never,
     );
-    return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
+    return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", types);
   }
 
   it("opens on the passenger's lookup, with the period's full list folded away until asked for", async () => {
@@ -779,6 +779,17 @@ describe("AnalysisTab delay certificate", () => {
     expect(asked()).toEqual([]);
     await userEvent.click(screen.getByText("All late departures in the period"));
     expect(asked().length).toBeGreaterThan(0);
+  });
+
+  it("starts folded again after staff leave the certificate, without counting the list", async () => {
+    const { router } = showCertificate(["council_summary", "delay_certificate"]);
+    await userEvent.click(screen.getByText("All late departures in the period"));
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
+    const before = vi.mocked(hooks.useReport).mock.calls.length;
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=delay_certificate"));
+    const asked = vi.mocked(hooks.useReport).mock.calls.slice(before).filter(([, type]) => type === "delay_certificate");
+    expect(asked).toEqual([]);
+    expect(screen.getByText("All late departures in the period").closest("details")).not.toHaveAttribute("open");
   });
 
   it("keeps the passenger's lookup when the period's full list fails", async () => {

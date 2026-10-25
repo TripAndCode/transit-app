@@ -111,14 +111,11 @@ export function AnalysisTab({
   // at the default length.
   const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
   const list = useReports(id);
-  const [staffOpen, setStaffOpen] = useState(false);
-  // A passenger starts from the lookup, which fetches one day and one route.
-  // The certificate's period-wide list is far heavier and only staff ask for
-  // it, so it is counted once they open it and can never hold the lookup back.
+  // The certificate, like route_forecast, owns its section and its queries.
   const isCertificate = reportType === "delay_certificate";
   const detail = useReport(
     id,
-    reportType && reportType !== "route_forecast" && (!isCertificate || staffOpen) ? reportType : null,
+    reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
     ctx,
     rankingOptions(reportType, includeSparse, allRowsFor),
   );
@@ -204,31 +201,7 @@ export function AnalysisTab({
           </div>
         )}
         {isCertificate && id != null && (
-          <div>
-            <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
-            <DelayCertificateLookup aid={id} />
-            {/* The period's whole list, under the page's scope and the
-                report's own threshold, is for staff; a passenger starts
-                from the lookup above. */}
-            <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
-              <summary>{t("reports.certificate.all_late")}</summary>
-              {staffOpen && detail.error && <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />}
-              {staffOpen && detail.isFetching && (
-                <>
-                  <SkeletonTable rows={6} rowHeight={36} />
-                  <StillWorking scope={ctx} update={update} />
-                </>
-              )}
-              {staffOpen && !detail.isFetching && detail.data?.report_type === "delay_certificate" && (
-                <>
-                  <ReportMeta data={detail.data} />
-                  <p className="cert-staff__summary">{detail.data.text}</p>
-                  <CsvLink href={csvHref(detail.data.report_type)} />
-                  {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
-                </>
-              )}
-            </details>
-          </div>
+          <CertificateSection key={id} aid={id} csvHref={csvHref("delay_certificate")} />
         )}
         {reportType && reportType !== "route_forecast" && !isCertificate && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
@@ -349,6 +322,43 @@ export function AnalysisTab({
           in React state even though its sessionStorage key is now separate. */}
       <InsightPanel key={id} className="analysis-insights" />
       </div>
+    </div>
+  );
+}
+
+/** A passenger starts from the lookup, which fetches one day and one route.
+ *  The period's every late departure is a far heavier scan that only staff
+ *  ask for, so it is fetched once they open its section and can never hold
+ *  the lookup back. The open state lives here, so leaving the certificate
+ *  drops it and a return starts folded. */
+function CertificateSection({ aid, csvHref }: { aid: number; csvHref: string }) {
+  const { t } = useTranslation();
+  const [ctx, update] = useScope();
+  const [staffOpen, setStaffOpen] = useState(false);
+  const all = useReport(aid, staffOpen ? "delay_certificate" : null, ctx);
+  const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
+  return (
+    <div>
+      <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
+      <DelayCertificateLookup aid={aid} />
+      <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
+        <summary>{t("reports.certificate.all_late")}</summary>
+        {staffOpen && all.error && <ErrorBanner error={all.error} onRetry={() => all.refetch()} />}
+        {staffOpen && all.isFetching && (
+          <>
+            <SkeletonTable rows={6} rowHeight={36} />
+            <StillWorking scope={ctx} update={update} />
+          </>
+        )}
+        {staffOpen && !all.isFetching && data && (
+          <>
+            <ReportMeta data={data} />
+            <p className="cert-staff__summary">{data.text}</p>
+            <CsvLink href={csvHref} />
+            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
+          </>
+        )}
+      </details>
     </div>
   );
 }
