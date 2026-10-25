@@ -1,6 +1,7 @@
-"""LightGBM forecasters of a trip run's mean delay: one model for the mean and
-one per quantile. Their interval is widened or narrowed on held-out days by
-conformalized quantile regression. Needs the optional `ml` dependency group."""
+"""LightGBM forecasters of a trip run's delay: one model per quantile, plus a
+mean model only when a requested point reads it. Their interval is widened or
+narrowed on held-out days by conformalized quantile regression. Needs the
+optional `ml` dependency group."""
 
 from __future__ import annotations
 
@@ -153,11 +154,9 @@ def fit(frame: pd.DataFrame, params: ModelParams, *, points: Sequence[str] | Non
 
 
 def _mean_target(frame: pd.DataFrame, params: ModelParams) -> pd.Series:
-    """The raw target, or with clip_quantile, each row's target clipped to its
-    agency's bounds from that row's own origin window. A row whose agency had no
-    history there has no bounds and keeps its target."""
-    if params.clip_quantile is None:
-        return frame[TARGET]
+    """Each row's target clipped to its agency's bounds from that row's own
+    origin window. A row whose agency had no history there has no bounds and
+    keeps its target."""
     if not {"clip_lo", "clip_hi"} <= set(frame.columns):
         raise ValueError("clip_quantile needs a frame built with it: clip_lo/clip_hi are missing")
     return frame[TARGET].clip(lower=frame["clip_lo"], upper=frame["clip_hi"])

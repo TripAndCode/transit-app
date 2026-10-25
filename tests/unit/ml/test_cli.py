@@ -399,6 +399,14 @@ def test_variant_eval_refuses_a_fit_it_does_not_know(tmp_path):
         main(["variant-eval", "--runs", "x.parquet", "--fit", "lasso", "--out-dir", str(tmp_path)])
 
 
+@pytest.mark.parametrize("fit", ["huber", "clip-huber"])
+def test_variant_eval_refuses_a_mean_objective_fit_scored_without_the_mean(tmp_path, fit):
+    # The mean objective shapes only the mean model, so scoring the median
+    # alone would write the plain fit's result under the Huber name.
+    with pytest.raises(SystemExit, match="--point mean"):
+        main(["variant-eval", "--runs", "x.parquet", "--fit", fit, "--point", "q50", "--out-dir", str(tmp_path)])
+
+
 def test_compare_summarizes_every_variant_in_the_directory(tmp_path, capsys):
     import json
 

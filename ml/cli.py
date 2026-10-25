@@ -146,8 +146,12 @@ def _variant_eval(args: argparse.Namespace) -> int:
     from ml.model_backtest import run_backtests
     from ml.models import ModelParams
 
-    params = replace(ModelParams(window_days=args.window), **FITS[args.fit])
     points = tuple(dict.fromkeys(args.point or [DEFAULT_POINT]))
+    if "mean_objective" in FITS[args.fit] and "mean" not in points:
+        # The objective shapes only the mean model, so without it the result
+        # would be the plain fit's under this fit's name.
+        raise SystemExit(f"--fit {args.fit} changes only the mean model: score it with --point mean")
+    params = replace(ModelParams(window_days=args.window), **FITS[args.fit])
     results = run_backtests(read_runs(args.runs), params=params, origin_count=args.origins, points=points)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for point, result in results.items():

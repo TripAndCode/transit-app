@@ -198,7 +198,7 @@
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",
-    "stat_mean_expected": "路線の見込み",
+    "stat_mean_expected": "路線の予測",
     "stat_samples": "計測回数",
     "stat_samples_history": "過去の観測数",
     "ml_source": "ML予測",
