@@ -170,7 +170,9 @@ serve:
 	if [ "$${LOCAL_RT_POLL:-0}" = "1" ]; then \
 		LOCAL_RT_POLL_INTERVAL_SEC=$${LOCAL_RT_POLL_INTERVAL_SEC:-30} bash scripts/dev/local_rt_poller.sh >>/tmp/transit-local-rt-poller.log 2>&1 & \
 	fi; \
-	DATABASE_URL=$(db_url) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
+	DATABASE_URL=$(db_url) poetry run uvicorn api.main:app --reload \
+		--reload-dir api --reload-dir pipeline --reload-dir db --reload-dir ml \
+		--port $(PORT) --no-access-log
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
