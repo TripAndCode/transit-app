@@ -23,6 +23,7 @@ import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { formatDateRange } from "../utils/format";
 import { prefersReducedMotion } from "../utils/motion";
 
 import "../styles/overview.css";
@@ -173,12 +174,17 @@ export function OverviewTab() {
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               periodAvgMin={data.period_avg_min ?? null}
+              period={{ from: ctx.from, to: ctx.to }}
               peakHour={data.peak_hour}
               concentration={data.concentration}
               onOpenFact={openFact}
             />
             <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
-              <RoutesToCheckList routes={data.top_delayed.routes} bandCounts={data.top_delayed.band_counts} />
+              <RoutesToCheckList
+                routes={data.top_delayed.routes}
+                bandCounts={data.top_delayed.band_counts}
+                range={formatDateRange(data.headline.window_from, data.headline.window_to, { year: false })}
+              />
             </div>
             {/* The stagger index counts the sections that actually render.
                 Any of these can be absent for an agency, and a fixed index

@@ -663,6 +663,11 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
+.ov-hero-fact-period {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
 .ov-hero-fact-value {
   font-size: var(--text-xl);
   font-weight: 600;

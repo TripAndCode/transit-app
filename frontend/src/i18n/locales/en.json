@@ -29,8 +29,8 @@
     "pinned_route_label": "{{route}}, today's mean {{delay}}",
     "pin_route": "Pin",
     "pin_route_full": "Up to {{max}} pinned routes",
-    "station_figure_mean": "Mean {{delay}}",
-    "station_figure_unusual": "{{n}} unusually late"
+    "station_figure_mean": "Today's mean {{delay}}",
+    "station_figure_unusual": "{{n}} unusually late today"
   },
   "compare": {
     "mode_periods": "Weekdays and weekends",
@@ -301,7 +301,7 @@
       "fact_late_routes_of_other": "/ {{count}} routes",
       "fact_late_routes_unit_one": "route",
       "fact_late_routes_unit_other": "routes",
-      "sparkline_baseline": "Selected period's average {{value}} min",
+      "sparkline_baseline": "{{range}} average {{value}} min",
       "feed_status_live": "Reporting live",
       "feed_status_quiet": "Feed quiet for {{duration}}",
       "feed_status_none": "No reports yet",
@@ -316,7 +316,7 @@
       "flat": "Delay is about the same as in the {{days}}-day period before."
     },
     "routes_to_check": {
-      "title": "Routes to check now",
+      "title": "Routes to check · {{range}}",
       "empty": "No routes need attention",
       "band_severe_one": "{{count}} route averaging {{min}} min or more late",
       "band_severe_other": "{{count}} routes averaging {{min}} min or more late",

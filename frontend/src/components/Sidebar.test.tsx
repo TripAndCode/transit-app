@@ -259,8 +259,8 @@ describe("Sidebar", () => {
         { route_code: "3", avg_delay_sec: 240, trips_observed: 10, bucket: "anomaly" },
       ]);
       renderSidebar("/agencies/8/time");
-      expect(screen.getByRole("link", { name: "Pulse" })).toHaveAccessibleDescription("Mean 2.0 min");
-      expect(screen.getByRole("link", { name: "Live" })).toHaveAccessibleDescription("2 unusually late");
+      expect(screen.getByRole("link", { name: "Pulse" })).toHaveAccessibleDescription("Today's mean 2.0 min");
+      expect(screen.getByRole("link", { name: "Live" })).toHaveAccessibleDescription("2 unusually late today");
       expect(screen.getByRole("link", { name: "Routes" })).not.toHaveAttribute("aria-describedby");
     });
 

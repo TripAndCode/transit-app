@@ -108,7 +108,7 @@ describe("OverviewTab", () => {
         },
       }),
     );
-    expect(screen.getByText("Routes to check now")).toBeInTheDocument();
+    expect(screen.getByText(/^Routes to check · /)).toBeInTheDocument();
     // Asserted on the map container MapLibre itself creates, not on a class
     // name this screen once used: `.ov-map-strip` exists in no stylesheet and
     // no component, so asserting its absence could never fail and guarded
@@ -239,7 +239,7 @@ describe("OverviewTab", () => {
       try {
         renderOverview(withFacts());
         await userEvent.click(lateRow());
-        const list = screen.getByText("Routes to check now").closest(".ov-routes-anchor");
+        const list = screen.getByText(/^Routes to check · /).closest(".ov-routes-anchor");
         expect(list).not.toBeNull();
         expect(scrollIntoView.mock.contexts).toEqual([list]);
         expect(document.activeElement).toBe(list);
