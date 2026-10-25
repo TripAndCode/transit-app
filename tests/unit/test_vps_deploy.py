@@ -228,3 +228,16 @@ def test_the_daily_predict_job_runs_in_jst_through_the_ping_wrapper():
     exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-predict.service"), re.MULTILINE)[1]
     assert "-m ml.cli predict" in exec_start
     assert "deploy/vps/run-with-ping.sh PREDICT" in exec_start
+
+
+def test_the_weekly_job_publishes_its_evaluation_last_whatever_the_verdict():
+    """`train` exits 0 on a rejected week, so a link after it still runs; and
+    placed last, a failed publish can never stop an adopted model going out."""
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-backtest.service"), re.MULTILINE)[1]
+    train, publish = exec_start.index("-m ml.cli train "), exec_start.index("-m ml.cli publish-eval")
+    assert train < publish
+    assert exec_start.rstrip("'").endswith(
+        "--models /var/lib/transit-ml/backtests/models.json"
+        " --out /var/lib/transit-ml/backtests/summary.json"
+        " --model-meta /var/lib/transit-ml/model/meta.json"
+    )

@@ -14,18 +14,33 @@ After that, each nightly run adds only the archives that have become final.
 | Timer (Asia/Tokyo) | Job | Output |
 |---|---|---|
 | daily 10:30 | `python -m ml.cli sync` | R2 archives replayed into the replica in timeline order; done-set in `/var/lib/transit-ml/sync-state.json` |
-| Sundays 04:00 | `backtest` → `train-eval` → `report` → `train`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models) |
+| Sundays 04:00 | `backtest` → `train-eval` → `report` → `train` → `publish-eval`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models); `publish-eval` uploads `evaluations/<run_date>/summary.json` to the `transit-ml` bucket whatever the verdict |
 | daily 11:00 | `python -m ml.cli predict` | `/var/lib/transit-ml/forecast/forecast.parquet`, uploaded to R2 as the latest published forecast |
 
-`train` runs last in the Sunday chain so a publish failure can never suppress the
-report. Each job reports to healthchecks.io through `deploy/vps/run-with-ping.sh`
-(`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`, `HC_PING_URL_PREDICT`).
+`train` runs after the report so a model-publish failure can never suppress the
+report, and `publish-eval` runs last so a failed summary upload can never stop an
+adopted model going out (`train` exits 0 on a rejected week, so the summary is
+still published). Each job reports to healthchecks.io through
+`deploy/vps/run-with-ping.sh` (`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`,
+`HC_PING_URL_PREDICT`).
+
+The evaluation summary is the web app's copy of that week's verdict: `adopted`,
+the `failures` as codes with their measured values (worded by the app, not the
+workbench), the judged headline skill and coverage with the thresholds, overall
+and per-agency figures, every interval method, the origin-skill spread, the
+`params` and `point_metric` the run scored with, and the serving model's
+`meta.json` (`null` before any model is published). Each agency carries a
+`model_status`: `model` (on the model at every cutoff), `b0` (on B0 at every
+cutoff for too little history, so no skill: its 0% is how it was scored, not how
+the model did) or `partial` (it crossed the history threshold mid-backtest, so
+its skill blends B0 weeks with model weeks and is shown, since the verdict
+judges it). `schema` versions the document.
 
 The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, so it does not run `analyze_all`.
 
 ## Setup
 
-1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict` publish to). `train` and `predict` swap `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for their own short-lived process, so the read-only pair is never exposed to a process that writes.
+1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict`/`publish-eval` publish to). Each of those jobs swaps `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for its own short-lived process, so the read-only pair is never exposed to a process that writes.
 2. `bash deploy/vps/bootstrap.sh` from `/root/transit-app`. It is safe to re-run.
 
 ## Operating it

@@ -19,7 +19,7 @@ from ml.cells import Cell  # noqa: E402
 from ml.cli import main  # noqa: E402
 
 START = date(2026, 1, 1)
-DAYS = 70  # >= ml.model_backtest.MIN_MODEL_DAYS, so the fixture agency is "on model"
+DAYS = 70  # >= ml.model_result.MIN_MODEL_DAYS, so the fixture agency is "on model"
 
 
 def _runs():
@@ -189,7 +189,7 @@ def _adopted_train(tmp_path, monkeypatch, run):
             )
         )
     )
-    monkeypatch.setattr("ml.cli.judge", lambda result: Verdict(adopted=True, reasons=()))
+    monkeypatch.setattr("ml.cli.judge", lambda result: Verdict(adopted=True))
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: _runs())
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
     monkeypatch.setattr("ml.cli._today_jst", lambda: START + timedelta(days=DAYS + 1))
@@ -417,6 +417,106 @@ def test_use_store_credentials_rejects_an_unset_but_present_variable(monkeypatch
         cli._use_store_credentials()
 
     assert os.environ["AWS_ACCESS_KEY_ID"] == "archive-readonly-key"
+
+
+def _rejected_backtest(path):
+    """A one-agency result with no slice rows: unmeasured, so judge() rejects it."""
+    from ml.backtest import AgencyResult
+    from ml.model_result import ModelBacktestResult, result_to_json
+
+    path.write_text(
+        result_to_json(
+            ModelBacktestResult(
+                params={},
+                origins=[date(2026, 6, 1)],
+                cutoffs=[date(2026, 5, 31)],
+                agencies=[AgencyResult(8, date(2026, 6, 1), date(2026, 6, 1), 1, [date(2026, 6, 1)], False, [])],
+                intervals={},
+                origin_skill=[],
+            )
+        )
+    )
+    return path
+
+
+def _store_env(monkeypatch, key="store-key", secret="store-secret"):
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", key)
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", secret)
+    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # writes os.environ directly.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
+
+
+def test_publish_eval_is_a_command():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["publish-eval", "--help"])
+    assert exit_info.value.code == 0
+
+
+def test_publish_eval_publishes_a_not_adopted_week_with_the_serving_model(tmp_path, monkeypatch):
+    import json
+
+    models = _rejected_backtest(tmp_path / "models.json")
+    meta = tmp_path / "meta.json"
+    meta.write_text('{"version": "2026-10-17", "window_days": 28, "interval_shift": 0.04}')
+    out = tmp_path / "eval" / "summary.json"
+    calls = []
+    monkeypatch.setattr("ml.cli._run", calls.append)
+    _store_env(monkeypatch)
+
+    argv = [
+        "publish-eval",
+        "--models",
+        str(models),
+        "--out",
+        str(out),
+        "--model-meta",
+        str(meta),
+        "--run-date",
+        "2026-10-18",
+    ]
+    assert main(argv) == 0
+
+    summary = json.loads(out.read_text())
+    assert summary["run_date"] == "2026-10-18"
+    assert summary["adopted"] is False
+    assert summary["serving_model"]["version"] == "2026-10-17"
+    assert len(calls) == 1
+    assert "s3://transit-ml/evaluations/2026-10-18/summary.json" in calls[0]
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "store-key"
+
+
+def test_publish_eval_without_a_published_model_reports_none(tmp_path, monkeypatch):
+    import json
+
+    models = _rejected_backtest(tmp_path / "models.json")
+    out = tmp_path / "summary.json"
+    monkeypatch.setattr("ml.cli._run", lambda cmd: None)
+    monkeypatch.setattr("ml.cli._today_jst", lambda: date(2026, 10, 25))
+    _store_env(monkeypatch)
+
+    missing = tmp_path / "model" / "meta.json"
+    assert main(["publish-eval", "--models", str(models), "--out", str(out), "--model-meta", str(missing)]) == 0
+    summary = json.loads(out.read_text())
+    assert summary["serving_model"] is None
+    assert summary["run_date"] == "2026-10-25"
+
+
+def test_publish_eval_refuses_empty_store_credentials_before_writing(tmp_path, monkeypatch):
+    models = _rejected_backtest(tmp_path / "models.json")
+    out = tmp_path / "summary.json"
+    calls = []
+    monkeypatch.setattr("ml.cli._run", calls.append)
+    _store_env(monkeypatch, key="", secret="")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["publish-eval", "--models", str(models), "--out", str(out)])
+    assert "must be set" in str(exit_info.value.code)
+    assert calls == []
+    assert not out.exists()
 
 
 def test_snapshot_runs_saves_the_replicas_runs_for_a_later_variant_eval(tmp_path, monkeypatch):
