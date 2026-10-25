@@ -65,7 +65,7 @@ def stages(monkeypatch):
         "_top_delayed_routes": [],
         "_peak_hour_by_dow": None,
         "_service_day_split": ([], []),
-        "_daily_sparkline": [],
+        "_daily_sparkline": ([], None),
     }
     monkeypatch.setattr(ov, "_latest_data_date", _stage(date(2026, 5, 24)))
     for name, value in gathered.items():

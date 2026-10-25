@@ -6,7 +6,6 @@ import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, RouteSu
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
-import { periodMean } from "./periodMean";
 import { storyVerdict, topRoutesShare } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
@@ -26,6 +25,9 @@ type Props = {
   severeThresholdMin: number;
   agencyId: number;
   sparklinePoints: number[];
+  /** The window's sample-weighted mean, from the API: the sparkline's
+   *  reference line. */
+  periodAvgMin: number | null;
   peakHour: OverviewPeakHour | null;
   concentration: OverviewConcentration;
   /** Opens the card behind a fact row. Each row exists only while that card
@@ -85,6 +87,7 @@ export function OverviewHeroRow({
   severeThresholdMin,
   agencyId,
   sparklinePoints,
+  periodAvgMin,
   peakHour,
   concentration,
   onOpenFact,
@@ -125,7 +128,9 @@ export function OverviewHeroRow({
   // The sparkline scales to its own min..max, so it is anchored on the period
   // mean rather than 0: the absolute figure is already shown beside it, and a
   // 0 axis would flatten the day-to-day variation the sparkline exists to show.
-  const sparklineMean = periodMean(sparklinePoints);
+  // No line under two points, which InlineSparkline refuses to draw: a legend
+  // keyed on it would caption a chart that never rendered.
+  const sparklineMean = sparklinePoints.length >= 2 ? periodAvgMin : null;
 
   // Called unconditionally (hooks can't branch on headline.avg_min's
   // nullability) -- the "—" fallback below still renders in place of it when

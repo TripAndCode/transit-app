@@ -936,6 +936,8 @@ export type OverviewSummary = {
   /** One row per date with data, tagged with its day type; used by the service-split modal. */
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
+  /** The window's sample-weighted mean delay; null without observations. */
+  period_avg_min?: number | null;
 };
 
 export type NetworkAgencyRow = {

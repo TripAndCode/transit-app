@@ -204,6 +204,7 @@ class OverviewSummary(BaseModel):
     service_split: list[ServiceSplitEntry]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
+    period_avg_min: float | None = None
     scope_applied: dict[str, bool]
 
 

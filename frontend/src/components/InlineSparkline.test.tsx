@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "@testing-library/react";
 import { InlineSparkline } from "./InlineSparkline";
-import { periodMean } from "./periodMean";
 
 describe("InlineSparkline", () => {
   afterEach(() => {
@@ -62,13 +61,5 @@ describe("InlineSparkline", () => {
       <InlineSparkline points={[0, 10]} baseline={5} preserveAspectRatio="none" />,
     );
     expect(container.querySelectorAll("text")).toHaveLength(0);
-  });
-
-  it("periodMean averages the series, and reports nothing the chart would not draw", () => {
-    expect(periodMean([1, 2, 6])).toBe(3);
-    expect(periodMean([])).toBeNull();
-    // Same threshold the sparkline refuses to render at, so a caller cannot
-    // caption a baseline onto a chart that never appeared.
-    expect(periodMean([4])).toBeNull();
   });
 });
