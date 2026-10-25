@@ -95,7 +95,8 @@ export function OnboardingGate() {
   // The list can outgrow a phone screen. `margin: auto` centres the content
   // while it fits and falls back to top-aligned once it doesn't; flex
   // `align-items: center` would instead push the overflow above the top edge,
-  // out of scroll reach.
+  // out of scroll reach. The extra top padding keeps the heading clear of the
+  // language toggle once the content is top-aligned.
   return (
     <div
       style={{
@@ -104,7 +105,7 @@ export function OnboardingGate() {
         background: "var(--bg-page)",
         display: "flex",
         overflowY: "auto",
-        padding: 40,
+        padding: "64px 40px 40px",
         zIndex: Z_INDEX.modal,
       }}
     >
