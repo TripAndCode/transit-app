@@ -17,6 +17,8 @@ type Props = {
   /** Each band's routes over every route, not only the listed ones: the list
    *  is the worst few, so whichever band it runs out in is truncated. */
   bandCounts: OverviewBandCounts;
+  /** The days the list counts: the headline's window, not the whole period. */
+  range: string;
 };
 
 /** A row's figure: printed as it is on first paint, travelling from the
@@ -28,7 +30,7 @@ function CheckValue({ value }: { value: number }) {
   return <span className="ov-check-value num">{formatMinutes(shown)}</span>;
 }
 
-export function RoutesToCheckList({ routes, bandCounts }: Props) {
+export function RoutesToCheckList({ routes, bandCounts, range }: Props) {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
   const { search } = useLocation();
@@ -46,7 +48,7 @@ export function RoutesToCheckList({ routes, bandCounts }: Props) {
 
   return (
     <div ref={listRef}>
-      <p className="ov-check-section-hd">{t("overview.routes_to_check.title")}</p>
+      <p className="ov-check-section-hd">{t("overview.routes_to_check.title", { range })}</p>
       {/* groups.length, not routes.length: the backend's worst-N list has no
           minimum-delay floor, so a healthy agency's routes can all land in
           the excluded "ok" band, leaving groups empty even when routes isn't —

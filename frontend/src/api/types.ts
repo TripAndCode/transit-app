@@ -938,6 +938,9 @@ export type OverviewSummary = {
   sparkline_points: number[];
   /** The window's sample-weighted mean delay; null without observations. */
   period_avg_min?: number | null;
+  /** The period the period-wide figures counted, after the API's clamp. */
+  period_from: string;
+  period_to: string;
 };
 
 export type NetworkAgencyRow = {

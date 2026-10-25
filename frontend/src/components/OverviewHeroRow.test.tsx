@@ -74,6 +74,8 @@ function renderHero(overrides: {
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       periodAvgMin={overrides.periodAvgMin === undefined ? 2.7 : overrides.periodAvgMin}
+      headlineRange={formatDateRange("2026-06-03", "2026-06-09", { year: false })}
+      periodRange={formatDateRange("2026-05-11", "2026-06-09", { year: false })}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
@@ -136,6 +138,18 @@ describe("OverviewHeroRow", () => {
     });
     expect(screen.getByText("No comparison data")).toBeInTheDocument();
     expect(container.querySelector(".ov-hero-state")).toBeNull();
+  });
+
+  it("dates each fact by the days it counts", () => {
+    mockHooks(38, 0.1);
+    renderHero();
+    // The heaviest hour and the delay share count the whole period; the
+    // late-route count, like the headline, counts the headline's window.
+    const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
+    const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
+    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toHaveTextContent(period);
+    expect(screen.getByRole("button", { name: /Share of delay/ })).toHaveTextContent(period);
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent(week);
   });
 
   it("lists the heaviest hour as a fact row that opens the peak-hour card", async () => {
@@ -325,7 +339,8 @@ describe("OverviewHeroRow", () => {
     // Without a reference the reader cannot tell a half-minute wobble from a
     // ten-minute climb: the shape is auto-scaled to the window's own extremes.
     expect(container.querySelector('[data-testid="sparkline-baseline"]')).not.toBeNull();
-    expect(screen.getByText("Selected period's average 4.6 min")).toBeInTheDocument();
+    const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
+    expect(screen.getByText(`${period} average 4.6 min`)).toBeInTheDocument();
   });
 
   it("drops the reference line when the sparkline has too few points to draw", () => {
@@ -333,7 +348,7 @@ describe("OverviewHeroRow", () => {
     for (const sparklinePoints of [[], [4]]) {
       const { container, unmount } = renderHero({ sparklinePoints, periodAvgMin: 4 });
       expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
-      expect(screen.queryByText(/Selected period's average/)).toBeNull();
+      expect(screen.queryByText(/ average /)).toBeNull();
       unmount();
     }
   });

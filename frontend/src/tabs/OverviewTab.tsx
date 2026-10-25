@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import type { OverviewSummary } from "../api/types";
 import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
@@ -23,6 +24,7 @@ import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { formatDateRange } from "../utils/format";
 import { prefersReducedMotion } from "../utils/motion";
 
 import "../styles/overview.css";
@@ -41,6 +43,12 @@ function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; 
   if (!/^\d+$/.test(dowParam)) return null;
   const dow = Number(dowParam);
   return dow >= 1 && dow <= 7 ? { hour, dow } : null;
+}
+
+/** The headline's window as text, shared by the hero and the routes-to-check
+ *  header so both name it the same way. */
+function headlineRange(summary: OverviewSummary): string {
+  return formatDateRange(summary.headline.window_from, summary.headline.window_to, { year: false });
 }
 
 export function OverviewTab() {
@@ -173,12 +181,18 @@ export function OverviewTab() {
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               periodAvgMin={data.period_avg_min ?? null}
+              headlineRange={headlineRange(data)}
+              periodRange={formatDateRange(data.period_from, data.period_to, { year: false })}
               peakHour={data.peak_hour}
               concentration={data.concentration}
               onOpenFact={openFact}
             />
             <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
-              <RoutesToCheckList routes={data.top_delayed.routes} bandCounts={data.top_delayed.band_counts} />
+              <RoutesToCheckList
+                routes={data.top_delayed.routes}
+                bandCounts={data.top_delayed.band_counts}
+                range={headlineRange(data)}
+              />
             </div>
             {/* The stagger index counts the sections that actually render.
                 Any of these can be absent for an agency, and a fixed index

@@ -11,7 +11,7 @@ import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
-import { EM_DASH, fixedTenth, formatDateRange, formatHourRange, formatReportTime } from "../utils/format";
+import { EM_DASH, fixedTenth, formatHourRange, formatReportTime } from "../utils/format";
 
 /** A hero fact row, named for the card that explains it. */
 export type HeroFact = "peak_hour" | "concentration" | "late_routes";
@@ -28,6 +28,11 @@ type Props = {
   /** The window's sample-weighted mean, from the API: the sparkline's
    *  reference line. */
   periodAvgMin: number | null;
+  /** The headline's window as text: the headline and the late-route count. */
+  headlineRange: string;
+  /** The period the API counted, as text: the heaviest hour, the delay share
+   *  and the sparkline's reference line. */
+  periodRange: string;
   peakHour: OverviewPeakHour | null;
   concentration: OverviewConcentration;
   /** Opens the card behind a fact row. Each row exists only while that card
@@ -88,6 +93,8 @@ export function OverviewHeroRow({
   agencyId,
   sparklinePoints,
   periodAvgMin,
+  headlineRange: range,
+  periodRange,
   peakHour,
   concentration,
   onOpenFact,
@@ -123,7 +130,6 @@ export function OverviewHeroRow({
     if (MAX_REPORT_AGE_MS - age >= 0) timers.push(window.setTimeout(() => setLiveClosedFor(captured), MAX_REPORT_AGE_MS - age + 1));
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [captured]);
-  const range = formatDateRange(headline.window_from, headline.window_to, { year: false });
 
   // The sparkline scales to its own min..max, so it is anchored on the period
   // mean rather than 0: the absolute figure is already shown beside it, and a
@@ -179,7 +185,7 @@ export function OverviewHeroRow({
           </div>
           {sparklineMean != null && (
             <div className="ov-hero-baseline">
-              {t("overview.hero_row.sparkline_baseline", { value: fixedTenth(sparklineMean) })}
+              {t("overview.hero_row.sparkline_baseline", { range: periodRange, value: fixedTenth(sparklineMean) })}
             </div>
           )}
           <div className="ov-hero-feed">
@@ -198,13 +204,18 @@ export function OverviewHeroRow({
         <div className="ov-hero-text">
           <ul className="ov-hero-facts">
             {peakHour && (
-              <FactRow label={t("overview.hero_row.fact_peak_hour")} onClick={() => onOpenFact("peak_hour")}>
+              <FactRow
+                label={t("overview.hero_row.fact_peak_hour")}
+                period={periodRange}
+                onClick={() => onOpenFact("peak_hour")}
+              >
                 {formatHourRange(peakHour.peak_hour)}
               </FactRow>
             )}
             {share && (
               <FactRow
                 label={t("overview.hero_row.fact_concentration", { count: share.count })}
+                period={periodRange}
                 onClick={() => onOpenFact("concentration")}
               >
                 {share.share}
@@ -216,6 +227,7 @@ export function OverviewHeroRow({
                 real count, not the counting-up display, which starts from 0. */}
             <FactRow
               label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
+              period={range}
               onClick={() => onOpenFact("late_routes")}
               attention={severeCount > 0}
             >
@@ -233,13 +245,16 @@ export function OverviewHeroRow({
   );
 }
 
+/** One fact, dated: the facts count different windows, so each says which. */
 function FactRow({
   label,
+  period,
   onClick,
   attention = false,
   children,
 }: {
   label: string;
+  period: string;
   onClick: () => void;
   attention?: boolean;
   children: ReactNode;
@@ -247,7 +262,10 @@ function FactRow({
   return (
     <li>
       <button type="button" className={`ov-hero-fact${attention ? " ov-hero-fact--attn" : ""}`} onClick={onClick}>
-        <span className="ov-hero-fact-label">{label}</span>
+        <span className="ov-hero-fact-label">
+          {label}{" "}
+          <span className="ov-hero-fact-period">{period}</span>
+        </span>
         <span className="ov-hero-fact-value num">{children}</span>
         <span className="ov-hero-fact-go" aria-hidden="true">›</span>
       </button>

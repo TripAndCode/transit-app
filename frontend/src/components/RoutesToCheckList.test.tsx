@@ -35,7 +35,10 @@ function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs)) {
   return (
     <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} bandCounts={bandCounts} />} />
+        <Route
+          path="/agencies/:agencyId/pulse"
+          element={<RoutesToCheckList routes={rs} bandCounts={bandCounts} range="Sep 24 – Sep 30" />}
+        />
       </Routes>
     </MemoryRouter>
   );
@@ -52,7 +55,8 @@ describe("RoutesToCheckList", () => {
 
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
-    expect(screen.getByText("Routes to check now")).toBeInTheDocument();
+    // The list counts the headline's window, not the whole period.
+    expect(screen.getByText("Routes to check · Sep 24 – Sep 30")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);
   });

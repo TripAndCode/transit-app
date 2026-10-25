@@ -29,8 +29,8 @@
     "pinned_route_label": "{{route}}、今日の平均 {{delay}}",
     "pin_route": "ピン留め",
     "pin_route_full": "ピン留めは{{max}}系統まで",
-    "station_figure_mean": "平均 {{delay}}",
-    "station_figure_unusual": "要注意 {{n}}"
+    "station_figure_mean": "今日の平均 {{delay}}",
+    "station_figure_unusual": "今日の要注意 {{n}}"
   },
   "compare": {
     "mode_periods": "平日と土日",
@@ -301,7 +301,7 @@
       "fact_late_routes_of_other": "/ {{count}}路線",
       "fact_late_routes_unit_one": "路線",
       "fact_late_routes_unit_other": "路線",
-      "sparkline_baseline": "選択期間の平均 {{value}}分",
+      "sparkline_baseline": "{{range}}の平均 {{value}}分",
       "feed_status_live": "受信中",
       "feed_status_quiet": "フィード停止 {{duration}}",
       "feed_status_none": "まだ受信していません",
@@ -316,7 +316,7 @@
       "flat": "遅延は直前の{{days}}日間とほぼ同じです。"
     },
     "routes_to_check": {
-      "title": "今すぐ確認すべき路線",
+      "title": "確認が必要な路線 · {{range}}",
       "empty": "確認が必要な路線はありません",
       "band_severe_one": "平均{{min}}分以上の遅れ：{{count}}路線",
       "band_severe_other": "平均{{min}}分以上の遅れ：{{count}}路線",

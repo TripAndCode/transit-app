@@ -209,6 +209,18 @@ async def _seed_agg_route_hour_dow(
 
 
 @pytest.mark.asyncio
+async def test_overview_echoes_the_period_it_counted_after_clamping(client, aagency_id):
+    """The page dates its period-wide figures from the payload, not from the
+    URL: a window wider than MAX_RANGE_DAYS is narrowed at its start, and the
+    labels must name the days actually counted."""
+    r = await client.get(f"/api/{aagency_id}/overview/summary?from=2024-01-01&to=2026-05-24")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["period_to"] == "2026-05-24"
+    assert body["period_from"] == "2025-05-25"
+
+
+@pytest.mark.asyncio
 async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aagency_id):
     """get_agency() must reject soft-deleted agencies like every other
     agency lookup in the codebase, not just the admin list endpoint."""

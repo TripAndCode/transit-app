@@ -1423,4 +1423,8 @@ async def compute_overview_summary(
         "service_split_daily": service_split_daily,
         "sparkline_points": sparkline_points,
         "period_avg_min": period_avg,
+        # The window the period-wide figures count, after the router's clamp,
+        # so a client labels them by the days counted rather than its own URL.
+        "period_from": ctx.from_date.isoformat(),
+        "period_to": ctx.to_date.isoformat(),
     }
