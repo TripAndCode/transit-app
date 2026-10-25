@@ -97,11 +97,8 @@ export function OverviewTab() {
   // (it's only consumed inside ConcentrationBar). Checking it would let an
   // agency with movers but no other signal skip EmptyState and render a
   // hero row of "—" plus an empty routes list and no revealed sections.
-  // peak_hour is excluded for the same reason, but structurally: without a
-  // service filter it reads agg_route_hour, a fixed analyze-period rollup with
-  // no date column (pipeline/reports/overview.py's _peak_hour), so it ignores
-  // ctx's date range entirely and stays non-null for any range once an
-  // agency has ever had data — it can never signal "no data in THIS range".
+  // peak_hour adds nothing to the check: it reads the same window as
+  // concentration, so it has data exactly when concentration does.
   const hasAnyData = (summary: NonNullable<typeof data>) =>
     summary.headline.samples > 0 ||
     summary.concentration.top_routes.length > 0 ||

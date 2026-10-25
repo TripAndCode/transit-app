@@ -13,16 +13,19 @@ Fast vs slow paths
 Most helpers have two internal branches:
 
 * **Fast path** (``ctx.time_band == "all"``) — reads the pre-aggregated
-  ``agg_daily_trend`` / ``agg_route_hour`` tables, sub-millisecond even
+  ``agg_daily_trend`` / ``agg_hour_daily`` tables, sub-millisecond even
   over multi-month ranges.
 * **Slow path** (any other time_band) — falls back to the live ``updates``
   table (ClickHouse, via ``pipeline.reports.filters._dedup_cte_ch``) so the
   hour-of-day filter is honoured.
 
-``_peak_hour_by_dow`` reads the per-day ``agg_hour_daily`` (filtering dates by
-DOW, and by the service filter's dates) on the fast path; ``agg_route_hour``
-can't serve it (no date column). It falls back to the live path under a
-``routes`` filter, since that table aggregates across all routes.
+The three hour profiles (``peak_hour`` and its weekday/weekend pair, all from
+``_peak_hour_by_dow``) read the per-day ``agg_hour_daily`` (filtering dates by
+the window, by DOW, and by the service filter's dates) on the fast path.
+``agg_route_hour`` can't serve them: it has no date column, so it would answer
+for every analysed day instead of the window. Under a ``routes`` filter they
+read the shared grain instead, since ``agg_hour_daily`` aggregates across all
+routes.
 
 The shared slow-path grain
 --------------------------
@@ -63,7 +66,7 @@ from api.range import (
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import DayTypes
-from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
+from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
 from pipeline.reports.rankings import _round1
 
 _log = logging.getLogger(__name__)
@@ -108,9 +111,10 @@ OVERVIEW_FANOUT_LIMIT = 4
 # Shared slow-path grain
 
 # (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
-# ``service_type`` is Nullable in ClickHouse; ``hour`` is None only for rows
-# with a NULL ``scheduled_time`` (which the time-band filter already excludes —
-# see _fetch_grain), so consumers that need an hour skip None defensively.
+# ``service_type`` is Nullable in ClickHouse; ``hour`` is None for a row with
+# a NULL ``scheduled_time``: the time-band filter excludes those, but under a
+# routes filter alone they reach the grain (see _fetch_grain), so consumers
+# that need an hour skip None.
 # ``sum_delay_sec`` / ``sum_late_sec`` stay in SECONDS as exact integers, so
 # summing partial groups in Python is lossless and the single trailing
 # ``/ 60.0`` reproduces the SQL's own ``/ 60.0`` bit-for-bit.
@@ -138,9 +142,9 @@ def _require_grain(grain: _Grain | None) -> _Grain:
 
     Every helper below is module-private and only ever reached through
     :func:`compute_overview_summary`, which prefetches the grain whenever
-    ``ctx.time_band != 'all'`` — i.e. exactly when a slow-path branch can be
-    taken. An explicit raise rather than ``assert`` so the invariant still
-    holds under ``python -O``.
+    ``ctx.time_band != 'all'`` or a ``routes`` filter is set — i.e. exactly when
+    a slow-path branch can be taken. An explicit raise rather than ``assert``
+    so the invariant still holds under ``python -O``.
     """
     if grain is None:  # pragma: no cover - unreachable via the public entry point
         raise RuntimeError("overview slow path reached without a prefetched grain")
@@ -254,9 +258,10 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     single shared scan possible:
 
     * ``service``, ``routes`` and ``time_band`` are IDENTICAL across every
-      consumer within one ``compute_overview_summary`` call — ``cur_ctx``,
-      ``base_ctx`` and ``_peak_hour_by_dow``'s override all copy them verbatim
-      from ``ctx`` — so they are pushed into the shared server-side WHERE.
+      consumer within one ``compute_overview_summary`` call — ``cur_ctx`` and
+      ``base_ctx`` copy them verbatim from ``ctx``, and ``_peak_hour_by_dow``
+      reads ``ctx`` itself — so they are pushed into the shared server-side
+      WHERE.
     * ``dow`` is NOT: ``_peak_hour_by_dow`` deliberately REPLACES ``ctx.dow``
       with ``weekday``/``weekend`` regardless of what the user chose. So no DOW
       filter is applied here at all; each consumer applies its own in Python
@@ -294,16 +299,20 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     a full-365-day window stays under ``get_ch_client``'s 200 k-row
     ``max_result_rows`` cap, though not with so much headroom that adding
     another group-by dimension or widening the window further is free to do
-    without rechecking against the cap.
+    without rechecking against the cap. A routes filter alone fetches all 24
+    hours for just those routes; were that ever to pass the cap, the client
+    raises rather than truncating, and the caller degrades the hour profiles
+    to null.
 
     The hour is read off ``scheduled_time``'s first two characters: it is a
     zero-padded ``'HH:MM[:SS]'``
     ``Nullable(String)`` in ClickHouse, not a native TIME column (see
     ``api.range.time_band_clause_ch``'s docstring). A NULL ``scheduled_time``
-    yields a NULL hour, but cannot actually occur here — ``time_band != 'all'``
-    is what puts us on the slow path at all, and ``time_band_clause_ch``'s
-    ``substring(scheduled_time, 1, 5) >= ...`` comparison is already NULL for
-    those rows and so drops them. ``toUInt8OrNull`` rather than a bare
+    yields a NULL hour. Under ``time_band != 'all'`` none reach the grain,
+    since ``time_band_clause_ch``'s ``substring(scheduled_time, 1, 5) >= ...``
+    comparison is already NULL for those rows and so drops them; under a
+    ``routes`` filter alone they do, and the hour profiles, the only consumers
+    in that shape, skip them. ``toUInt8OrNull`` rather than a bare
     ``toUInt8``: identical on a well-formed zero-padded 2-digit hour, but a
     malformed value degrades to "excluded from the hour histogram" instead of
     failing the one query the whole payload depends on.
@@ -842,74 +851,25 @@ async def _top_delayed_routes(
     }
 
 
-async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict | None:
-    """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
-
-    Reads from ``agg_route_hour``, which is a fixed analyze-period rollup
-    (no date column). Consequence: the date range and DOW in ``ctx`` are
-    ignored — but ``routes`` and ``time_band`` apply, because
-    ``agg_route_hour`` does carry a TIME column.
-
-    A service filter is a set of dates (:func:`api.range.resolve_service_dates`),
-    which a table without a date column cannot apply. Under one this reads
-    the dated sources :func:`_peak_hour_by_dow` reads instead, over ``ctx``'s
-    own window and days of the week; ``ch`` and ``grain`` serve that branch.
-    """
-    if ctx.service != "all":
-        return await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain)
-    n = 2
-    params: list = []
-    parts: list[str] = []
-    if ctx.routes:
-        parts.append(f"route_code = ANY(${n}::text[])")
-        params.append(list(ctx.routes))
-        n += 1
-    tb_frag, tb_params, n = _time_band_sql_on("scheduled_time", ctx.time_band, n)
-    if tb_frag:
-        parts.append(tb_frag)
-        params.extend(tb_params)
-    where_clause = (" AND " + " AND ".join(parts)) if parts else ""
-    sql = (
-        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to
-        # the same row population — see _route_weekly_history's identical
-        # rationale.
-        "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
-        "FROM agg_route_hour\n"
-        f"WHERE agency_id=$1{where_clause}\n"
-        "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
-    )
-    rows = await conn.fetch(sql, agency_id, *params)
-    return _peak_from_hour_rows(rows)
-
-
 async def _peak_hour_by_dow(
     agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
 ) -> dict | None:
-    """24-hour avg delay over the days of the week ``dow_group`` names —
-    ``'weekday'`` or ``'weekend'`` for the payload's pair, any canonical
-    ``dow`` for :func:`_peak_hour`'s service-filtered branch.
+    """24-hour avg delay over ``ctx``'s window and the days of the week
+    ``dow_group`` names, plus the peak hour: ``ctx.dow`` for the payload's
+    ``peak_hour``, ``'weekday'``/``'weekend'`` for its pair.
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW and by the service filter's dates), a sample-weighted average across
     the range — sub-second, where the raw dedup scan would dominate
-    Overview's cold load. That table is aggregated across all routes,
-    so a ``routes`` filter, or any ``time_band`` other than ``'all'``, has to
-    leave it.
+    Overview's cold load. That table is aggregated across all routes, so a
+    ``routes`` filter, or any ``time_band`` other than ``'all'``, has to leave
+    it for the shared grain, which :func:`compute_overview_summary` prefetches
+    for exactly those shapes. One scan then serves all three profiles.
 
-    ``time_band != 'all'`` (the case that also puts every other stage helper on
-    its slow path) is served from the shared grain. The remaining case —
-    ``time_band == 'all'`` but a ``routes`` filter, where nothing else in the
-    payload needs live ``updates`` and so no grain was fetched — still runs its
-    own dedup scan. That scan is the only ClickHouse work in an otherwise
-    all-Postgres request, so it degrades to ``None`` on failure instead of
-    failing the whole payload (see the ``except`` below).
-
-    Either way, ``dow_group`` REPLACES ``ctx.dow``: the question asked here is
-    "weekday vs weekend", regardless of any day-of-week the user had already
-    narrowed to. That is exactly why the grain carries no DOW filter of its own
-    (see :func:`_fetch_grain`).
+    ``dow_group`` REPLACES ``ctx.dow``: the pair asks "weekday vs weekend",
+    regardless of any day-of-week the user had already narrowed to. That is
+    exactly why the grain carries no DOW filter of its own (see
+    :func:`_fetch_grain`).
     """
     if ctx.time_band == "all" and not ctx.routes:
         dow_frag, _, n = dow_clause("date", replace(ctx, dow=dow_group), 4)
@@ -929,78 +889,21 @@ async def _peak_hour_by_dow(
         rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date), *service_params)
         return _peak_from_hour_rows(rows)
 
-    if grain is not None:
-        # Iterates `grain.rows` directly rather than going through
-        # `_grain_window` (the DOW filter here is `dow_group`, not `ctx.dow`),
-        # so the coverage invariant has to be asserted explicitly.
-        _check_grain_covers(grain, ctx.from_date, ctx.to_date)
-        # `hour is None` <=> the row's scheduled_time was NULL, which is what
-        # the live query below excludes with `WHERE scheduled_time IS NOT NULL`.
-        by_hour: dict[int, list[int]] = {}
-        lo, hi = ctx.from_date, ctx.to_date
-        for d, _route_code, _service_type, hour, samples, sum_delay, _sum_late in grain.rows:
-            if hour is None or not (lo <= d <= hi) or not _dow_matches(d, dow_group):
-                continue
-            slot = by_hour.setdefault(hour, [0, 0])
-            slot[0] += samples
-            slot[1] += sum_delay
-        return _peak_from_hour_rows(
-            [{"h": h, "avg_min": (total / n) / 60.0} for h, (n, total) in sorted(by_hour.items())]
-        )
-
-    if ch is None:
-        raise RuntimeError("_peak_hour_by_dow's live fallback requires a ClickHouse client")
-
-    overridden = RangeCtx(
-        from_date=ctx.from_date,
-        to_date=ctx.to_date,
-        dow=dow_group,  # type: ignore[arg-type]
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=ctx.routes,
-        service_dates=ctx.service_dates,
-    )
-    cte_sql, ch_params = _dedup_cte_ch(overridden)
-    # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse (not a
-    # native TIME column) — see api.range.time_band_clause_ch's docstring —
-    # so the hour is read off the first two characters rather than EXTRACT().
-    # OrNull, not a bare cast: a scheduled_time whose first two characters are
-    # not an hour drops out of the histogram instead of raising
-    # CANNOT_PARSE_TEXT and failing the payload, as in _fetch_grain and
-    # rankings.py.
-    hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
-    try:
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            f"SELECT {hour_expr} AS h,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min\n"
-            "FROM deduped\n"
-            "WHERE scheduled_time IS NOT NULL\n"
-            f"GROUP BY {hour_expr}\n"
-            "HAVING h IS NOT NULL",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-    except Exception:
-        # This is the ONLY ClickHouse call the whole Overview payload makes in
-        # this request shape (``time_band == 'all'`` + a routes filter):
-        # headline, movers, concentration, top_delayed, service_split and the
-        # sparkline are all served from Postgres ``agg_*`` tables here. So a
-        # ClickHouse hiccup must degrade THIS field rather than 500 the whole
-        # response — ``peak_hour_weekday``/``peak_hour_weekend`` are already
-        # ``PeakHour | None = None`` in api.routers.overview, and ``None`` is
-        # exactly what ``_peak_from_hour_rows`` returns for "no data". Same
-        # try/except-and-degrade shape as
-        # api.clickhouse.max_captured_at_before_by_agency's per-agency probe.
-        _log.warning(
-            "ClickHouse peak-hour probe failed for agency %s (%s) — degrading peak_hour_%s to null",
-            agency_id,
-            dow_group,
-            dow_group,
-            exc_info=True,
-        )
-        return None
-    rows = _ch_rows(result)
-    return _peak_from_hour_rows(rows)
+    grain = _require_grain(grain)
+    # Iterates `grain.rows` directly rather than going through `_grain_window`
+    # (the DOW filter here is `dow_group`, not `ctx.dow`), so the coverage
+    # invariant has to be asserted explicitly.
+    _check_grain_covers(grain, ctx.from_date, ctx.to_date)
+    # `hour is None` <=> the row's scheduled_time was NULL: no hour to bucket.
+    by_hour: dict[int, list[int]] = {}
+    lo, hi = ctx.from_date, ctx.to_date
+    for d, _route_code, _service_type, hour, samples, sum_delay, _sum_late in grain.rows:
+        if hour is None or not (lo <= d <= hi) or not _dow_matches(d, dow_group):
+            continue
+        slot = by_hour.setdefault(hour, [0, 0])
+        slot[0] += samples
+        slot[1] += sum_delay
+    return _peak_from_hour_rows([{"h": h, "avg_min": (total / n) / 60.0} for h, (n, total) in sorted(by_hour.items())])
 
 
 def _peak_from_hour_rows(rows) -> dict | None:
@@ -1291,17 +1194,17 @@ async def compute_overview_summary(
     with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time. ``conn`` is
     then unused and may be None: no task waits for a connection while one is
     held for it, so concurrent requests cannot starve each other of the
-    pool and deadlock.  The two
+    pool and deadlock.  The three
     ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
     and the rest share the remaining slots.  When
     ``pool`` is None (the default) the stages run sequentially on ``conn``,
     each in its own timed_block, for tests and ad-hoc callers.
 
-    ``ch`` is the ClickHouse client used by the slow path (``updates``
-    lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
-    that only ever exercise the ``ctx.time_band == 'all'`` fast path (most
-    existing tests); real dispatch (the ``/overview/summary`` route) always
-    passes the real client.
+    ``ch`` is the ClickHouse client used whenever live rows are needed
+    (``updates`` lives in ClickHouse, not Postgres). Defaults to ``None`` for
+    callers that only ever exercise the full fast path (``time_band == 'all'``
+    and no routes filter; most existing tests); real dispatch (the
+    ``/overview/summary`` route) always passes the real client.
 
     On the slow path (``ctx.time_band != 'all'``) the shared ClickHouse query
     the payload needs is issued up front (:func:`_fetch_grain`) and handed to
@@ -1309,9 +1212,12 @@ async def compute_overview_summary(
     It is the
     only query for any ``ctx`` wide enough for the grain to also cover
     :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
-    request); a narrower ``ctx`` costs that one helper a second scan. On the
-    fast path ``grain`` stays ``None`` and every helper reads its ``agg_*``
-    table.
+    request); a narrower ``ctx`` costs that one helper a second scan. Under a
+    routes filter alone the grain is fetched only for the three hour profiles,
+    whose ``agg_hour_daily`` is aggregated across routes; every other helper
+    still reads its ``agg_*`` table, and a failed fetch degrades just those
+    three fields to null. With neither filter ``grain`` stays ``None`` and
+    every helper reads its ``agg_*`` table.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1322,11 +1228,27 @@ async def compute_overview_summary(
                 ctx = await resolve_service_dates(ctx, c, agency_id, from_date=_calendar_from(ctx))
 
     grain: _Grain | None = None
-    if ctx.time_band != "all":
+    # Under a routes filter alone only the three hour profiles need live rows
+    # (agg_hour_daily is aggregated across routes; every other stage reads its
+    # agg_* table), so the grain is fetched for them, and a ClickHouse failure
+    # degrades just those three fields to null rather than failing the payload.
+    peaks_unavailable = False
+    if ctx.time_band != "all" or ctx.routes:
         if ch is None:
             raise RuntimeError("overview slow path requires a ClickHouse client")
         async with perf.timed_block("overview.grain"):
-            grain = await _fetch_grain(agency_id, ctx, ch)
+            if ctx.time_band != "all":
+                grain = await _fetch_grain(agency_id, ctx, ch)
+            else:
+                try:
+                    grain = await _fetch_grain(agency_id, ctx, ch)
+                except Exception:
+                    _log.warning(
+                        "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
+                        agency_id,
+                        exc_info=True,
+                    )
+                    peaks_unavailable = True
 
     async with perf.timed_block("overview.latest_date"):
         if pool is None:
@@ -1393,9 +1315,15 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.top_delayed"):
             top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.peaks"):
-            peak = await _peak_hour(agency_id, ctx, conn, ch=ch, grain=grain)
-            peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain)
-            peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain)
+            peak, peak_weekday, peak_weekend = (
+                (None, None, None)
+                if peaks_unavailable
+                else (
+                    await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain),
+                    await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain),
+                    await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain),
+                )
+            )
         async with perf.timed_block("overview.service_split"):
             service_split, service_split_daily = await _service_day_split(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
@@ -1412,10 +1340,10 @@ async def compute_overview_summary(
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
-        # label captures the wall-clock total. On the slow path the shared
-        # ClickHouse grain query has already run (above, before this branch),
-        # so what still fans out here is mostly Postgres work — `_peak_hour`,
-        # `_route_short_names`, and every fast-path helper's `agg_*` read (plus
+        # label captures the wall-clock total. Whenever a stage needs live rows
+        # the shared ClickHouse grain query has already run (above, before this
+        # branch), so what still fans out here is mostly Postgres work —
+        # `_route_short_names` and every fast-path helper's `agg_*` read (plus
         # `_route_weekly_history`'s live scan, in the narrow-`ctx` case where
         # the grain can't cover its span).
         fanout = asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)
@@ -1427,12 +1355,16 @@ async def compute_overview_summary(
 
         async def _peak_dow(group: str) -> dict | None:
             """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
+            if peaks_unavailable:
+                return None
             async with fanout, pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
-        # Stages take fan-out slots in argument order, so the slowest pair
-        # goes first rather than queueing behind stages that finish quickly.
+        # Stages take fan-out slots in argument order, so the hour profiles,
+        # the slowest reads on the fast path, go first rather than queueing
+        # behind stages that finish quickly.
         (
+            peak,
             peak_weekday,
             peak_weekend,
             (avg_min, samples),
@@ -1440,10 +1372,10 @@ async def compute_overview_summary(
             movers,
             concentration,
             top_delayed,
-            peak,
             (service_split, service_split_daily),
             sparkline_points,
         ) = await asyncio.gather(
+            _peak_dow(ctx.dow),
             _peak_dow("weekday"),
             _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
@@ -1451,7 +1383,6 @@ async def compute_overview_summary(
             _own_conn(_movers, agency_id, cur_ctx, base_ctx),
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
-            _own_conn(_peak_hour, agency_id, ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )
