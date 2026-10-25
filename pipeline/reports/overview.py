@@ -111,9 +111,10 @@ OVERVIEW_FANOUT_LIMIT = 4
 # Shared slow-path grain
 
 # (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
-# ``service_type`` is Nullable in ClickHouse; ``hour`` is None only for rows
-# with a NULL ``scheduled_time`` (which the time-band filter already excludes —
-# see _fetch_grain), so consumers that need an hour skip None defensively.
+# ``service_type`` is Nullable in ClickHouse; ``hour`` is None for a row with
+# a NULL ``scheduled_time``: the time-band filter excludes those, but under a
+# routes filter alone they reach the grain (see _fetch_grain), so consumers
+# that need an hour skip None.
 # ``sum_delay_sec`` / ``sum_late_sec`` stay in SECONDS as exact integers, so
 # summing partial groups in Python is lossless and the single trailing
 # ``/ 60.0`` reproduces the SQL's own ``/ 60.0`` bit-for-bit.
@@ -257,9 +258,10 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     single shared scan possible:
 
     * ``service``, ``routes`` and ``time_band`` are IDENTICAL across every
-      consumer within one ``compute_overview_summary`` call — ``cur_ctx``,
-      ``base_ctx`` and ``_peak_hour_by_dow``'s override all copy them verbatim
-      from ``ctx`` — so they are pushed into the shared server-side WHERE.
+      consumer within one ``compute_overview_summary`` call — ``cur_ctx`` and
+      ``base_ctx`` copy them verbatim from ``ctx``, and ``_peak_hour_by_dow``
+      reads ``ctx`` itself — so they are pushed into the shared server-side
+      WHERE.
     * ``dow`` is NOT: ``_peak_hour_by_dow`` deliberately REPLACES ``ctx.dow``
       with ``weekday``/``weekend`` regardless of what the user chose. So no DOW
       filter is applied here at all; each consumer applies its own in Python
@@ -297,7 +299,10 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     a full-365-day window stays under ``get_ch_client``'s 200 k-row
     ``max_result_rows`` cap, though not with so much headroom that adding
     another group-by dimension or widening the window further is free to do
-    without rechecking against the cap.
+    without rechecking against the cap. A routes filter alone fetches all 24
+    hours for just those routes; were that ever to pass the cap, the client
+    raises rather than truncating, and the caller degrades the hour profiles
+    to null.
 
     The hour is read off ``scheduled_time``'s first two characters: it is a
     zero-padded ``'HH:MM[:SS]'``
@@ -1195,11 +1200,11 @@ async def compute_overview_summary(
     ``pool`` is None (the default) the stages run sequentially on ``conn``,
     each in its own timed_block, for tests and ad-hoc callers.
 
-    ``ch`` is the ClickHouse client used by the slow path (``updates``
-    lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
-    that only ever exercise the ``ctx.time_band == 'all'`` fast path (most
-    existing tests); real dispatch (the ``/overview/summary`` route) always
-    passes the real client.
+    ``ch`` is the ClickHouse client used whenever live rows are needed
+    (``updates`` lives in ClickHouse, not Postgres). Defaults to ``None`` for
+    callers that only ever exercise the full fast path (``time_band == 'all'``
+    and no routes filter; most existing tests); real dispatch (the
+    ``/overview/summary`` route) always passes the real client.
 
     On the slow path (``ctx.time_band != 'all'``) the shared ClickHouse query
     the payload needs is issued up front (:func:`_fetch_grain`) and handed to
@@ -1207,9 +1212,12 @@ async def compute_overview_summary(
     It is the
     only query for any ``ctx`` wide enough for the grain to also cover
     :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
-    request); a narrower ``ctx`` costs that one helper a second scan. On the
-    fast path ``grain`` stays ``None`` and every helper reads its ``agg_*``
-    table.
+    request); a narrower ``ctx`` costs that one helper a second scan. Under a
+    routes filter alone the grain is fetched only for the three hour profiles,
+    whose ``agg_hour_daily`` is aggregated across routes; every other helper
+    still reads its ``agg_*`` table, and a failed fetch degrades just those
+    three fields to null. With neither filter ``grain`` stays ``None`` and
+    every helper reads its ``agg_*`` table.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).

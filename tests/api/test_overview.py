@@ -133,9 +133,9 @@ async def _seed_agg_route_hour(
     schema column is TIME (post 0011), so we cast on the server side.
 
     ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)``, the
-    same exact-reconstruction convention ``_seed_agg_daily`` above uses, so
-    ``_peak_hour``'s ``SUM(sum_delay_sec) / SUM(samples)`` fast path reproduces
-    the same figure these tests were already asserting on.
+    same exact-reconstruction convention ``_seed_agg_daily`` above uses. The
+    overview no longer reads this table, so tests seed it as a decoy that the
+    windowed hour profiles must ignore.
     """
     sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     await aconn.execute(
@@ -1517,7 +1517,7 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     # One baseline-week row so delta is non-None.
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 11), "R_PP", "平日", 1.5, 5)
 
-    # Seed agg_hour_daily for _peak_hour (fast-path).
+    # Seed agg_hour_daily for the peak_hour profile (fast path).
     await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 4.0, 5)
     await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 20), 17, 2.0, 3)
 
