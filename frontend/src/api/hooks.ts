@@ -179,8 +179,9 @@ export function useReport(
     // Keep the prior report mounted while a new report type or filter change
     // loads, so callers can gate their skeleton on `isPending` (first load
     // only) instead of `isFetching` (every refetch), matching AnalysisTab's
-    // report-switch UX to useNetworkSummary/useForecastOverview's.
-    placeholderData: keepPreviousData,
+    // report-switch UX to useNetworkSummary/useForecastOverview's. An
+    // observer never loads, so a kept report would never be replaced.
+    placeholderData: options.observeOnly ? undefined : keepPreviousData,
   });
 }
 

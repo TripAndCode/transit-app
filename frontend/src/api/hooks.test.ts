@@ -177,6 +177,24 @@ describe("useReport's ranking options", () => {
     expect(mockApiGet).toHaveBeenCalledTimes(1);
   });
 
+  it("reads nothing, not the last scope's report, for a scope nobody fetched", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const january = baseCtx();
+    const february = { ...baseCtx(), from: "2026-02-01", to: "2026-02-28" };
+    const { result, rerender } = renderHook(
+      ({ ctx, fetch }: { ctx: Scope; fetch: boolean }) => ({
+        observer: useReport(1, "ranking", ctx, { observeOnly: true }),
+        fetcher: useReport(1, fetch ? "ranking" : null, ctx),
+      }),
+      { ...withProviders(queryClient), initialProps: { ctx: january, fetch: true } },
+    );
+    await waitFor(() => expect(result.current.observer.isSuccess).toBe(true));
+    rerender({ ctx: february, fetch: false });
+    expect(result.current.observer.data).toBeUndefined();
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+  });
+
   it("asks the certificate for departures past a threshold, zero included, as a separate query", async () => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
