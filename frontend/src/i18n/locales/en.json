@@ -1,5 +1,6 @@
 {
   "nav": {
+    "model": "Model evaluation",
     "ask": "Ask",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
@@ -1967,5 +1968,43 @@
   "print": {
     "generated_at": "Generated {{time}}",
     "routes": "Routes: {{names}}"
+  },
+  "model": {
+    "title": "ML forecast model evaluation",
+    "subtitle": "A weekly check of how much more accurate the model is than B0: the average delay of the same weekday and hour over the previous 28 days.",
+    "empty": "No evaluation yet. It is updated every Sunday.",
+    "adopted": "Adopted",
+    "not_adopted": "Not adopted (the previous model stays in use)",
+    "run_date": "Evaluated {{date}}",
+    "serving": "Model in use: {{version}}",
+    "serving_none": "No model is published yet",
+    "skill_label": "Against B0",
+    "skill_better": "{{value}} less error",
+    "skill_worse": "{{value}} more error",
+    "skill_bar": "Adoption bar: at least {{value}}",
+    "coverage_label": "Runs inside the forecast range",
+    "coverage_target": "Target {{low}}–{{high}}",
+    "slot_coverage": "Per time slot, as published: {{value}}",
+    "failures_title": "Why it was not adopted",
+    "failure_skill_below_min": "Error improved by only {{value}} against B0, short of the {{threshold}} bar",
+    "failure_agency_worse": "Some agencies had more error than B0: {{agencies}}",
+    "failure_coverage_out_of_range": "{{value}} of runs fell inside the forecast range, outside the {{low}}–{{high}} target",
+    "failure_other": "Another check did not pass ({{code}})",
+    "flag_off": "ML forecasts are not on the heatmap right now: the ML forecast flag is off in admin → Flags.",
+    "agencies_title": "By agency",
+    "col_agency": "Agency",
+    "col_status": "How it was scored",
+    "col_skill": "Against B0",
+    "col_mae": "Mean error (model / B0)",
+    "status_model": "On the model",
+    "status_partial": "Partly on the model",
+    "status_b0": "On B0 (too little history)",
+    "live": "On the heatmap now",
+    "history_title": "Past evaluations",
+    "col_week": "Week",
+    "col_verdict": "Verdict",
+    "metric_changed": "From this week on, scored with the {{metric}} (not directly comparable with earlier weeks)",
+    "metric_mean": "mean",
+    "metric_q50": "median"
   }
 }

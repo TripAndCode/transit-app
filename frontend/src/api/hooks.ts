@@ -16,6 +16,7 @@ import { conversationsAnon } from "./conversationsAnon";
 import { scopeSummaryQuery } from "./scopeSummaryQuery";
 import type {
   Agency,
+  MlEvaluations,
   ScopeSummary,
   AnonThread,
   AppendMessageResult,
@@ -737,5 +738,12 @@ export function useMigrateAnon(agencyId: number) {
       return r;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+export function useMlEvaluations(): UseQueryResult<MlEvaluations> {
+  return useLocalizedQuery({
+    queryKey: ["ml-evaluations"],
+    queryFn: ({ signal }) => apiGet<MlEvaluations>("/api/ml/evaluations", { signal }),
   });
 }

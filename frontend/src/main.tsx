@@ -58,6 +58,7 @@ const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ defa
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
+const ModelPage = lazy(() => import("./pages/ModelPage").then((m) => ({ default: m.ModelPage })));
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const AdminUserDetailPage = lazy(() =>
@@ -153,6 +154,7 @@ const router = createBrowserRouter([
       { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
       { path: "me", element: <AccountPage /> },
       { path: "help", element: <HelpPage /> },
+      { path: "model", element: <ModelPage /> },
       {
         path: "admin",
         element: <RequireAdmin><AdminLayout /></RequireAdmin>,

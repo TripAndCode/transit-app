@@ -116,6 +116,12 @@ describe("Sidebar", () => {
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
+  it("lists the model evaluation page under Other", () => {
+    renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model");
+  });
+
   it("links the welcome page under Other, for signed-in and signed-out visitors alike", () => {
     renderSidebar();
     const other = screen.getByRole("navigation", { name: "Other" });
