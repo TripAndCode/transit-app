@@ -137,6 +137,10 @@ export function ErrorBanner({ error, onRetry, message, prefix }: Props) {
   // in a neutral tone and offer no retry (retrying can't build the data).
   if (cls === "not_ready") return <CalmStatus>{t("errors.aggregate_not_ready")}</CalmStatus>;
 
+  // A query that ran out its time budget would again on a retry; only a
+  // narrower view helps, so say that instead of offering one.
+  if (cls === "too_slow") return <CalmStatus>{t("errors.query_too_slow")}</CalmStatus>;
+
   const reason = messageFor(error, cls, t);
   return <Alert onRetry={onRetry}>{prefix ? `${prefix} ${reason}` : reason}</Alert>;
 }

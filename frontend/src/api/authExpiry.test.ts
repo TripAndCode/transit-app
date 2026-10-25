@@ -64,6 +64,10 @@ describe("retryTransientOnce", () => {
     ).toBe(false);
   });
 
+  it("does not repeat a query that ran out its time budget, since it would again", () => {
+    expect(retryTransientOnce(0, new ApiError(504, JSON.stringify({ detail: "x", code: "query_timeout" })))).toBe(false);
+  });
+
   it("does not repeat a request that already waited out the full request timeout", () => {
     expect(retryTransientOnce(0, new DOMException("timed out", "TimeoutError"))).toBe(false);
   });

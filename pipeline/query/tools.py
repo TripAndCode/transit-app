@@ -205,6 +205,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("aggregate_not_ready", "en"): (
         "Data for this view hasn't been prepared in this environment yet. Please try again later."
     ),
+    ("query_timeout", "ja"): (
+        "この条件では集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
+    ),
+    ("query_timeout", "en"): "This took too long to count. Try a shorter period or fewer routes.",
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",

@@ -25,6 +25,17 @@ export class ApiError extends Error {
  * behind). Mirrors api/aggregate_errors.py::AGGREGATE_NOT_READY_CODE. */
 const AGGREGATE_NOT_READY_CODE = "aggregate_not_ready";
 
+/** Machine `code` on the 504 the API answers when a ClickHouse read ran out its
+ * time budget. Mirrors api/query_timeout.py::QUERY_TIMEOUT_CODE. */
+const QUERY_TIMEOUT_CODE = "query_timeout";
+
+/** True when a query ran out its time budget. The same request would again, so
+ * the UI asks for a narrower view instead of offering a retry. */
+export function isQueryTooSlow(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 504) return false;
+  return apiErrorField(err, "code") === QUERY_TIMEOUT_CODE;
+}
+
 /** True when an error is the "aggregates not built in this environment" 503 —
  * a persistent, not-transient condition, so the UI should explain it calmly and
  * NOT offer a futile retry. */
