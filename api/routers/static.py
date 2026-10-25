@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
+from pipeline.route_catalog import route_code_sql
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["static"])
 
@@ -70,7 +71,7 @@ async def list_routes(
     """
     rows = await conn.fetch(
         "SELECT r.route_id, r.route_short_name, r.route_long_name, "
-        "  regexp_replace(r.route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, "
+        f"  {route_code_sql('r.route_id')} AS route_code, "
         "  ARRAY(SELECT DISTINCT t.trip_headsign "
         "        FROM static_trips t "
         "        WHERE t.agency_id = r.agency_id "

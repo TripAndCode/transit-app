@@ -1216,6 +1216,8 @@
     "service_note": "Service: the timetable the trip ran on (weekday, weekend and holiday, or a special day).",
     "ranking_coverage": {
       "include_sparse": "Include routes observed fewer than {{floor}} times",
+      "include_retired_one": "Include {{count}} route code the current timetable no longer runs",
+      "include_retired_other": "Include {{count}} route codes the current timetable no longer runs",
       "rows_shown": "Showing {{shown}} of {{total}}",
       "show_all": "Show all"
     },

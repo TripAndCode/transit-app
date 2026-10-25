@@ -21,6 +21,26 @@ export function SparseToggle({
   );
 }
 
+/** Route codes the current timetable no longer runs, left out of a route
+ *  list by default. */
+export function RetiredToggle({
+  checked,
+  count,
+  onChange,
+}: {
+  checked: boolean;
+  count: number;
+  onChange: (checked: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <label className="ranking-sparse-toggle">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
+      {t("reports.ranking_coverage.include_retired", { count })}
+    </label>
+  );
+}
+
 /** How much of the ranking is on screen, with the rest one click away. */
 export function RowsShown({ shown, total, onShowAll }: { shown: number; total: number; onShowAll?: () => void }) {
   const { t } = useTranslation();
