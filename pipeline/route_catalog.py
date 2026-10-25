@@ -10,7 +10,10 @@ route list can leave them out by default and say how many it left.
 
 from __future__ import annotations
 
+from datetime import date
+
 from api.range import RangeCtx
+from pipeline.cache import async_lru_cache
 
 # The route_code a static route's id maps to. Aomori's ids carry the code in a
 # parenthesised tail ('国道・古川線(1021)'); every other feed's id is its code,
@@ -27,7 +30,7 @@ def route_code_sql(route_id_column: str) -> str:
     return ROUTE_CODE_SQL.format(route_id=route_id_column)
 
 
-async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> set[str]:
+async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozenset[str]:
     """Route codes observed in ``ctx`` that the current timetable lacks and
     that went unobserved over the last :data:`RECENT_DAYS` of the agency's data.
 
@@ -35,7 +38,15 @@ async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> set[str]:
     ``ctx.to_date``: an agency whose data stops early would otherwise have
     every route look retired. An agency with no timetable loaded retires
     nothing, since there is nothing to compare against.
+
+    Only the window's dates decide the set, so the cache is keyed on them alone
+    and every route list over one window shares it.
     """
+    return await _retired_between(conn, agency_id, ctx.from_date, ctx.to_date)
+
+
+@async_lru_cache(maxsize=64, ttl_seconds=300)
+async def _retired_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     rows = await conn.fetch(
         "WITH seen AS ("
         "  SELECT route_code, max(date) AS last_seen FROM agg_route_daily"
@@ -50,8 +61,8 @@ async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> set[str]:
         "  AND s.route_code NOT IN (SELECT route_code FROM timetable) "
         "  AND s.last_seen <= (SELECT max(last_seen) FROM seen) - $4::int",
         agency_id,
-        ctx.from_date,
-        ctx.to_date,
+        from_date,
+        to_date,
         RECENT_DAYS,
     )
-    return {r["route_code"] for r in rows}
+    return frozenset(r["route_code"] for r in rows)

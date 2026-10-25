@@ -2562,6 +2562,12 @@ async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
         assert [r[0] for r in body["rows"]] == ["100"], report
         assert body["retired_excluded"] == 1, report
 
+    # A routes filter that already keeps the retired code out leaves nothing
+    # for the list to drop, so it counts none.
+    filtered = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&routes=100")).json()
+    assert [r[0] for r in filtered["rows"]] == ["100"]
+    assert filtered["retired_excluded"] == 0
+
     kept = (await client.get(f"/api/{agency_id}/reports/ranking?{window}&include_retired=1")).json()
     assert {r[0] for r in kept["rows"]} == {"100", "OLD"}
     assert kept["retired_excluded"] == 0

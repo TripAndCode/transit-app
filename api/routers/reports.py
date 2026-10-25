@@ -268,9 +268,9 @@ class ReportResponse(BaseModel):
     # count below which a route's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
-    # Route lists only (None elsewhere): how many retired route codes — gone
-    # from the current timetable, unobserved over the agency's last week of
-    # data — the list left out. 0 when asked to keep them.
+    # Route lists only (None elsewhere): how many of the list's own rows were
+    # retired route codes (pipeline.route_catalog.retired_route_codes) and so
+    # left out. 0 when asked to keep them.
     retired_excluded: int | None = None
 
 
@@ -947,15 +947,21 @@ async def get_report(
     intent: dict = {}
     rows: list
     rows_total: int | None = None
-    retired: set[str] = set()
+    retired: frozenset[str] = frozenset()
     if report_type in _ROUTE_LIST_TYPES and not include_retired:
         retired = await retired_route_codes(conn, agency_id, ctx)
     # A limited list asks for enough extra rows that dropping every retired
     # code still leaves `n` current routes when there are that many.
     n_fetch = n + len(retired)
+    # Counted from the rows each list actually dropped, so a routes filter or a
+    # list's own floor that already kept a retired code out never counts it.
+    retired_dropped = 0
 
     def current(route_rows: list) -> list:
-        return [r for r in route_rows if r[0] not in retired]
+        nonlocal retired_dropped
+        kept = [r for r in route_rows if r[0] not in retired]
+        retired_dropped += len(route_rows) - len(kept)
+        return kept
 
     if report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
@@ -1131,5 +1137,5 @@ async def get_report(
         scope_applied=report_scope_applied(report_type),
         rows_total=rows_total,
         reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _RANKING_TYPES else None,
-        retired_excluded=len(retired) if report_type in _ROUTE_LIST_TYPES else None,
+        retired_excluded=retired_dropped if report_type in _ROUTE_LIST_TYPES else None,
     )

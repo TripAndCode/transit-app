@@ -72,14 +72,15 @@ function hasCsv(data: ReportResponse): boolean {
   return true;
 }
 
-/** A ranking's coverage options; the API refuses `include_sparse` on every
- *  other report. The compare report is drawn re-ranked by one period's delay,
- *  so it asks for the API's maximum length: the default length keeps only the
- *  widest gaps, which would drop a route that is slow in both periods. */
 /** The certificate's period list is fetched by its own section; the screen
  *  only reads it back for the scope sentence. */
 const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
 
+/** A route list's options. Every route list can keep retired route codes;
+ *  only the rankings take `include_sparse`, which the API refuses elsewhere.
+ *  The compare report is drawn re-ranked by one period's delay, so it asks
+ *  for the API's maximum length: the default length keeps only the widest
+ *  gaps, which would drop a route that is slow in both periods. */
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
