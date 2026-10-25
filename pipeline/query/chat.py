@@ -39,6 +39,7 @@ import clickhouse_connect
 from fastapi import HTTPException
 
 from api.range import RangeCtx
+from pipeline.clickhouse import is_query_timeout
 from pipeline.flags import aflag, flag
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
@@ -196,6 +197,12 @@ _CHAT_STRINGS = {
     ("service_unavailable", "en"): (
         "Could not run tool {name} right now (temporary service issue). Please retry later."
     ),
+    # A ClickHouse query that ran out its time budget: a retry would time out
+    # again, so this asks for a narrower question instead.
+    ("query_timeout", "ja"): (
+        "ツール {name} の集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
+    ),
+    ("query_timeout", "en"): "Tool {name} took too long to count. Try a shorter period or fewer routes.",
 }
 
 
@@ -205,6 +212,13 @@ def _chat_str(template: str, locale: str, **vars) -> str:
         locale = "ja"
     tpl = _CHAT_STRINGS.get((template, locale)) or _CHAT_STRINGS.get((template, "ja"), template)
     return tpl.format(**vars) if vars else tpl
+
+
+def ch_failure_str(exc: BaseException, locale: str, name: str) -> str:
+    """The chat line for a tool whose ClickHouse query failed: a timeout asks
+    for a narrower question, since a retry would time out again; any other
+    failure is temporary. Never the exception text itself."""
+    return _chat_str("query_timeout" if is_query_timeout(exc) else "service_unavailable", locale, name=name)
 
 
 def _get_client():
@@ -331,10 +345,10 @@ async def _dispatch_and_respond(
             "numeric_guard_triggered": None,
             **extra,
         }
-    except clickhouse_connect.driver.exceptions.Error:
+    except clickhouse_connect.driver.exceptions.Error as exc:
         _log.exception("Tool %s failed%s: ClickHouse query error", name, verb_suffix)
         return {
-            "answer": _chat_str("service_unavailable", locale, name=name),
+            "answer": ch_failure_str(exc, locale, name=name),
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
@@ -588,10 +602,10 @@ async def chat_with_tools(
                     "canonical_args": can_args,
                     "cache_outcome": "bypass",
                 }
-            except clickhouse_connect.driver.exceptions.Error:
+            except clickhouse_connect.driver.exceptions.Error as exc:
                 _log.exception("Build-mode dispatch for %s: ClickHouse query error", build_tool)
                 return {
-                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
+                    "answer": ch_failure_str(exc, locale, name=build_tool),
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,

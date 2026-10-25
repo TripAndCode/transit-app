@@ -16,18 +16,17 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from api.deps import get_locale
+from pipeline.clickhouse import is_query_timeout
 from pipeline.query.tools import _summary
 
 logger = logging.getLogger("api.clickhouse")
 
 QUERY_TIMEOUT_CODE = "query_timeout"
-# ClickHouse's TIMEOUT_EXCEEDED.
-_CH_TIMEOUT_EXCEEDED = 159
 
 
 async def clickhouse_error_handler(request: Request, exc: DatabaseError) -> JSONResponse:
     """Map a timed-out ClickHouse read to a localized 504; re-raise anything else."""
-    if exc.code != _CH_TIMEOUT_EXCEEDED:
+    if not is_query_timeout(exc):
         raise exc
     logger.warning("ClickHouse query exceeded its time budget: %s", exc)
     detail = _summary(QUERY_TIMEOUT_CODE, lang=get_locale(request))

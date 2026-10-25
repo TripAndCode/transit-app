@@ -32,7 +32,7 @@ from api.range import (
 from api.security import User, csrf_guard
 from pipeline.flags import aflag
 from pipeline.query import intent_cache as _intent_cache
-from pipeline.query.chat import _chat_str, chat_with_tools
+from pipeline.query.chat import _chat_str, ch_failure_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
 from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
@@ -273,14 +273,14 @@ async def ask(
                 ctx=ctx_dict,
                 router_stage=stage,
             )
-        except clickhouse_connect.driver.exceptions.Error:
+        except clickhouse_connect.driver.exceptions.Error as exc:
             # A real ClickHouse client was created, but the query itself
             # failed mid-flight (network blip, server error, etc.) — distinct
             # from the stand-in above, but the same graceful degrade applies.
             _log.exception("Tool %s failed (stage %s dispatch): ClickHouse query error", decision.tool, stage)
             success = False
             resp = AskResponse(
-                answer=_chat_str("service_unavailable", locale, name=decision.tool),
+                answer=ch_failure_str(exc, locale, name=decision.tool),
                 tool_call={"name": decision.tool, "arguments": decision.args},
                 result=None,
                 ctx=ctx_dict,
