@@ -4,11 +4,32 @@ import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { formatDate, formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
 import { niceAxis } from "./niceAxis";
 import { useScope } from "../../api/scope";
+import { useElementWidth } from "../../hooks/useElementWidth";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
 import { brushIndices, brushRange } from "./brush";
 import { isoDow, useTrendFocus } from "./trendFocus";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
+
+/** The width drawn at until the container has been measured, and wherever
+ *  nothing is laid out (tests, a server render). */
+const DEFAULT_WIDTH = 760;
+/** Narrower than this the plot stops reading as a trend; a container that
+ *  narrow scrolls the chart sideways instead of squeezing it further. */
+const MIN_WIDTH = 280;
+/** The closest two date labels may sit, centre to centre. A "10/23" label at
+ *  12px is about 40px wide. */
+const MIN_TICK_GAP = 48;
+
+/** Which days carry a date label: every `stride`-th day counted back from the
+ *  latest, so the most recent day is always labelled and no two labels sit
+ *  closer than MIN_TICK_GAP however narrow the plot is. */
+function dateTickIndices(count: number, stepX: number): number[] {
+  const stride = Math.max(1, Math.ceil(MIN_TICK_GAP / stepX));
+  const indices: number[] = [];
+  for (let i = count - 1; i >= 0; i -= stride) indices.unshift(i);
+  return indices;
+}
 
 /** The width of one bucket in `days`; each entry's `date` is its first day. */
 export type TrendGranularity = "day" | "week" | "month";
@@ -43,6 +64,7 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
   const { setFocus } = useTrendFocus();
   const lineRef = useRef<SVGPolylineElement | null>(null);
   useDrawOn(lineRef, days.length > 0);
+  const [measureRef, measuredWidth] = useElementWidth<HTMLDivElement>();
 
   // If the data shrinks (filter narrowed), a stale hover index would
   // dereference out-of-bounds — clamp during render instead of an effect.
@@ -52,10 +74,13 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
   // days than the user drew is worse than no range at all.
   const drag =
     rawDrag != null && rawDrag.anchor < days.length && rawDrag.head < days.length ? rawDrag : null;
-  const W = 760;
+  // Drawn at the container's own width, so the latest days are never cut off
+  // past a narrow column's edge, and at 1:1 so every label keeps its 12px.
+  const W = Math.max(MIN_WIDTH, measuredWidth ?? DEFAULT_WIDTH);
   const H = height;
   const padL = 64;
-  const padR = 12;
+  // Room past the plot for the observation bars' own axis label.
+  const padR = 46;
   const padT = 12;
   const padB = 28;
   const innerW = W - padL - padR;
@@ -133,13 +158,20 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
     );
   }
 
-  const stepX = innerW / Math.max(1, days.length - 1);
+  // Each day owns an equal band of the plot and is drawn at its centre, so
+  // the first and last days' bars and labels stay inside the plot instead of
+  // hanging half out past its edges.
+  const stepX = innerW / days.length;
+  const dayX = (i: number) => padL + (i + 0.5) * stepX;
   // Value → y, clamped to the plotted band so an annotation can be asked for
   // a threshold sitting above everything in range without escaping the plot.
   const toY = (value: number) =>
     padT + innerH - (Math.min(Math.max(value, 0), stats.maxAvg) / stats.maxAvg) * innerH * 0.65;
-  const bandX = (i: number) => padL + i * stepX - stepX / 2;
-  const linePts = days.map((d, i) => [padL + i * stepX, toY(d.avg_min ?? 0)] as [number, number]);
+  const bandX = (i: number) => padL + i * stepX;
+  // A marker in the right half of the plot labels toward the middle, so its
+  // label never runs off the chart's right edge.
+  const markerLabelSide = (i: number) => (dayX(i) > padL + innerW / 2 ? "before" : "after");
+  const linePts = days.map((d, i) => [dayX(i), toY(d.avg_min ?? 0)] as [number, number]);
   // Trailing 7-day average sits ALONGSIDE the raw line (not a replacement) —
   // a low-traffic day's noisy raw figure is easier to read against a smooth
   // reference. Absent entirely for week/month-bucketed series, so only draw
@@ -148,7 +180,7 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
   // simply skipped rather than breaking the line at 0.
   const smoothedPts = days
     .map((d, i) =>
-      d.avg_min_smoothed != null ? ([padL + i * stepX, toY(d.avg_min_smoothed)] as [number, number]) : null,
+      d.avg_min_smoothed != null ? ([dayX(i), toY(d.avg_min_smoothed)] as [number, number]) : null,
     )
     .filter((p): p is [number, number] => p !== null);
   const hasSmoothed = smoothedPts.length > 0;
@@ -171,9 +203,10 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
   const showWorst = days.length > 1 && (days[worstIdx].avg_min ?? 0) > 0;
   const selected = drag ? brushIndices(drag.anchor, drag.head) : [];
   const cursor = drag ? drag.head : hover;
+  const tickIndices = dateTickIndices(days.length, stepX);
 
   return (
-    <div data-focus-viewer="daily" style={{ position: "relative", width: "100%" }}>
+    <div ref={measureRef} data-focus-viewer="daily" style={{ position: "relative", width: "100%" }}>
       {brushable && (
         <div
           style={{
@@ -261,7 +294,7 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
           <ShadedDays days={selected} toX={bandX} bandWidth={stepX} y={padT} height={innerH} />
           {/* Sample-count bars (lower 30% of chart) */}
           {days.map((d, i) => {
-            const x = padL + i * stepX - Math.max(1, stepX * 0.4);
+            const x = dayX(i) - Math.max(1, stepX * 0.4);
             const w = Math.max(2, stepX * 0.8);
             const h = ((d.samples ?? 0) / stats.maxSamples) * innerH * 0.3;
             const y = padT + innerH - h;
@@ -288,19 +321,21 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
           {boundaryIndices.map((i) => (
             <VerticalMarker
               key={`rev-${i}`}
-              x={padL + i * stepX}
+              x={dayX(i)}
               y1={padT}
               y2={padT + innerH}
+              labelSide={markerLabelSide(i)}
               label={t("reports.daily.revision_boundary_label")}
               title={t("reports.daily.revision_boundary_aria", { date: days[i].date })}
             />
           ))}
           {showWorst && (
             <VerticalMarker
-              x={padL + worstIdx * stepX}
+              x={dayX(worstIdx)}
               y1={padT}
               y2={padT + innerH}
               variant="highlight"
+              labelSide={markerLabelSide(worstIdx)}
               label={t(`reports.daily.worst_day_label${suffix}`)}
               title={days[worstIdx].date}
             />
@@ -371,43 +406,67 @@ export function DailyChart({ days, granularity = "day", height = 240, revisionBo
               </g>
             );
           })}
-          {/* X axis tick labels (every Nth day) */}
-          {days.map((d, i) => {
-            const stride = Math.max(1, Math.floor(days.length / 8));
-            if (i % stride !== 0 && i !== days.length - 1) return null;
-            const x = padL + i * stepX;
-            return (
-              <text
-                key={`xt-${i}`}
-                x={x}
-                y={H - 8}
-                fontSize="12"
-                fill="var(--text-tertiary)"
-                textAnchor="middle"
-              >
-                {formatShortDate(d.date)}
-              </text>
-            );
-          })}
+          {tickIndices.map((i) => (
+            <text
+              key={`xt-${i}`}
+              data-testid="daily-x-label"
+              x={dayX(i)}
+              y={H - 8}
+              fontSize="12"
+              fill="var(--text-tertiary)"
+              textAnchor="middle"
+            >
+              {formatShortDate(days[i].date)}
+            </text>
+          ))}
+          {/* The bars carry their own label on the side away from the
+              minutes axis, so a dip in observations isn't read off the
+              minutes as a drop in delay. */}
+          <text
+            data-testid="daily-samples-axis"
+            x={padL + innerW + 6}
+            y={padT + innerH - innerH * 0.15 + 4}
+            fontSize="12"
+            fill="var(--text-tertiary)"
+          >
+            {t("reports.daily.samples_axis")}
+          </text>
         </svg>
       </div>
-      {hasSmoothed && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: "var(--text-xs)",
-            color: "var(--text-tertiary)",
-            marginTop: 4,
-          }}
-        >
+      <div
+        data-testid="daily-legend"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          columnGap: 16,
+          rowGap: 4,
+          fontSize: "var(--text-xs)",
+          color: "var(--text-tertiary)",
+          marginTop: 4,
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <svg width="16" height="2" aria-hidden="true">
-            <line x1="0" y1="1" x2="16" y2="1" stroke="var(--text-secondary)" strokeWidth="1.5" strokeDasharray="4 3" />
+            <line x1="0" y1="1" x2="16" y2="1" stroke="var(--accent)" strokeWidth="2" />
           </svg>
-          <span>{t("reports.daily.smoothed_label")}</span>
-        </div>
-      )}
+          {t("reports.daily.legend_avg")}
+        </span>
+        {hasSmoothed && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <svg width="16" height="2" aria-hidden="true">
+              <line x1="0" y1="1" x2="16" y2="1" stroke="var(--text-secondary)" strokeWidth="1.5" strokeDasharray="4 3" />
+            </svg>
+            {t("reports.daily.smoothed_label")}
+          </span>
+        )}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <svg width="8" height="12" aria-hidden="true">
+            <rect width="8" height="12" fill="var(--accent-soft)" opacity={0.7} />
+          </svg>
+          {t("reports.daily.legend_samples")}
+        </span>
+      </div>
       {cursor != null && cursor < days.length && (
         <div
           style={{

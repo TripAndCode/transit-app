@@ -74,15 +74,6 @@ describe("landing reveal CSS", () => {
 
   /** Body of the first rule whose selector text starts at `selector`. */
 
-  it("sizes the column so the fixed-width sample trend chart fills its card", () => {
-    // DailyChart draws at a fixed 760px; the card's inner width is the
-    // column, less its side padding and the card's padding and border.
-    const column = Number.parseFloat(decl(ruleBody(css, ".landing-narrative {"), "max-width") ?? "");
-    const inner = column - 2 * 24 - 2 * 20 - 2 * 1;
-    expect(inner).toBeGreaterThanOrEqual(760);
-    expect(inner).toBeLessThan(760 + 24);
-  });
-
   it("keeps the stop chart at a readable size at every width, scrolling sideways instead", () => {
     const minWidth = Number.parseFloat(decl(ruleBody(css, ".landing-narrative-section__figure .focus-chart {"), "min-width") ?? "");
     expect(minWidth).toBeGreaterThanOrEqual(700);

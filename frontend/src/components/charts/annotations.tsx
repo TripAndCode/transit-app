@@ -9,7 +9,9 @@
 type ThresholdBandProps = {
   /** Value-domain lower edge of the band (the threshold itself). */
   min: number;
-  /** Value-domain upper edge — normally the top of the plotted axis. */
+  /** Value-domain upper edge — normally the top of the plotted axis. The
+   *  label sits just above it, so the caller leaves a label's height of room
+   *  there. */
   max: number;
   /** The chart's value → y mapping, clamped to the plot by the caller. */
   toY: (value: number) => number;
@@ -22,8 +24,10 @@ type ThresholdBandProps = {
  * The region beyond a threshold. Rendered as a faint tint plus a dashed rule
  * on the threshold line: the severity is an annotation, so the series keeps
  * its own encoding instead of a value's colour changing when it crosses.
- * Renders nothing when the band collapses — a threshold above everything
- * plotted has nothing to say.
+ * The label names the band from just above its top edge: no plotted value
+ * reaches past the top of the axis, so the label never sits across the line
+ * it is labelling, as it would anywhere inside the band. Renders nothing when
+ * the band collapses — a threshold above everything plotted has nothing to say.
  */
 export function ThresholdBand({ min, max, toY, x, width, label }: ThresholdBandProps) {
   const yMin = toY(min);
@@ -45,7 +49,7 @@ export function ThresholdBand({ min, max, toY, x, width, label }: ThresholdBandP
         opacity={0.5}
       />
       {label && (
-        <text x={x + width - 4} y={yMin - 4} textAnchor="end" fontSize="12" fill="var(--text-tertiary)">
+        <text x={x + width - 4} y={top - 4} textAnchor="end" fontSize="12" fill="var(--text-tertiary)">
           {label}
         </text>
       )}
@@ -64,10 +68,13 @@ type VerticalMarkerProps = {
   /** `context` is background information the reader should be able to ignore
    *  (a schedule revision); `highlight` is a mark the chart is pointing at. */
   variant?: "context" | "highlight";
+  /** Which side of the rule the label reads on. `before` is for a rule near
+   *  the plot's right edge, where a label set after it would run off the chart. */
+  labelSide?: "after" | "before";
 };
 
 /** A full-height rule at one x position, optionally labelled. */
-export function VerticalMarker({ x, y1, y2, label, title, variant = "context" }: VerticalMarkerProps) {
+export function VerticalMarker({ x, y1, y2, label, title, variant = "context", labelSide = "after" }: VerticalMarkerProps) {
   const highlight = variant === "highlight";
   const stroke = highlight ? "var(--accent-strong)" : "var(--text-tertiary)";
   return (
@@ -87,7 +94,13 @@ export function VerticalMarker({ x, y1, y2, label, title, variant = "context" }:
       {label && (
         // A highlight labels from the baseline so it can't collide with the
         // context markers, which all label from the top.
-        <text x={x + 3} y={highlight ? y2 - 3 : y1 + 12} fontSize="12" fill={stroke}>
+        <text
+          x={labelSide === "before" ? x - 3 : x + 3}
+          y={highlight ? y2 - 3 : y1 + 12}
+          textAnchor={labelSide === "before" ? "end" : undefined}
+          fontSize="12"
+          fill={stroke}
+        >
           {label}
         </text>
       )}
