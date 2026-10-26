@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
@@ -53,6 +53,19 @@ describe("LandingPage", () => {
     renderLanding();
     expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
     expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+  });
+
+  it("credits the open-data sources in its footer", () => {
+    renderLanding();
+    const credits = within(screen.getByRole("contentinfo")).getByRole("region", { name: "Data sources" });
+    expect(within(credits).getByRole("link", { name: "Aomori City Bus information" })).toHaveAttribute(
+      "href",
+      "https://ckan.odpt.org/dataset/aomori_city_all_lines",
+    );
+    expect(within(credits).getByRole("link", { name: "Creative Commons CC0" })).toHaveAttribute(
+      "href",
+      "https://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    );
   });
 
   it("stays open to a signed-in visitor and offers the dashboard in place of sign-in", () => {
