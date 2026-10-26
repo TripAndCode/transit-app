@@ -1241,6 +1241,7 @@
       "departure_option": "{{time}} ({{delay}} late)",
       "loading": "Looking up late departures…",
       "none": "No departure of this route left late on this day.",
+      "no_data": "There is no live-feed data for this route on this day, so whether a departure left late can't be checked.",
       "not_listed": "A departure that isn't listed left on time or early, or wasn't in the live feed.",
       "card": "Delay certificate for the chosen departure",
       "statement": "On {{date}}, the {{scheduled}} departure of {{route}} left its first recorded stop at {{actual}}, {{delay}} late.",

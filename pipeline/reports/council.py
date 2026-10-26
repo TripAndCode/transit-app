@@ -364,3 +364,20 @@ async def compute_delay_certificate(
             )
         )
     return rows, total
+
+
+async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
+    """Whether ``ctx`` holds any departure observation at all.
+
+    A certificate lookup that lists nothing means either that no departure
+    left late or that the feed reported nothing for that day and route; only
+    the second is a gap in the data, so a passenger must be told which.
+    """
+    if ch is None:
+        raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\nSELECT 1 FROM deduped WHERE scheduled_time IS NOT NULL LIMIT 1",
+        parameters={"agency_id": agency_id, **ch_params},
+    )
+    return bool(result.result_rows)

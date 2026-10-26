@@ -152,6 +152,17 @@ describe("DelayCertificateLookup", () => {
     expect(screen.queryByLabelText("Scheduled departure")).toBeNull();
   });
 
+  it("says the day has no data, not that nothing left late, when the feed reported nothing", async () => {
+    mockReport({ data: { ...certificate([]), observed: false } });
+    renderLookup();
+    await chooseRoute();
+    expect(
+      screen.getByText("There is no live-feed data for this route on this day, so whether a departure left late can't be checked."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No departure of this route left late on this day.")).toBeNull();
+    expect(screen.queryByText(/wasn't in the live feed/)).toBeNull();
+  });
+
   it("shows another route's departures as still loading, not as this route's", async () => {
     mockReport({ data: certificate(ROWS), isPlaceholderData: true });
     renderLookup();
