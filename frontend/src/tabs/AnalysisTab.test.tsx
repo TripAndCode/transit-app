@@ -595,6 +595,33 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_retired=1(&|$)/);
   });
 
+  it("says how many zero-delay routes a list left out, and keeps them on request", async () => {
+    const { useReport, router } = setup(
+      "/agencies/1/analysis/rider?report=on_time",
+      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_rows: 0, zero_delay_rows: 2 }),
+    );
+    const toggle = screen.getByRole("checkbox", { name: "Include 2 routes whose feeds always report zero delay" });
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeZeroDelay: false });
+    await userEvent.click(toggle);
+    expect(new URLSearchParams(router.state.location.search).get("zero_delay")).toBe("1");
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeZeroDelay: true, includeRetired: false });
+  });
+
+  it("offers no zero-delay toggle when a list left none out", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_rows: 1, zero_delay_rows: 0 }));
+    expect(screen.queryByRole("checkbox", { name: /zero delay/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /no longer runs/ })).toBeInTheDocument();
+  });
+
+  it("exports the zero-delay routes when the table shows them", () => {
+    setup("/agencies/1/analysis/rider?report=ranking&zero_delay=1", rankingResponse({ zero_delay_rows: 1 }));
+    // One route reads in the singular, and the count holds while they are kept.
+    expect(screen.getByRole("checkbox", { name: "Include 1 route whose feed always reports zero delay" })).toBeChecked();
+    const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
+    expect(href).toMatch(/[?&]include_zero_delay=1(&|$)/);
+    expect(href).not.toContain("include_retired");
+  });
+
   it("keeps the toggle in reach when no route clears the floor", () => {
     setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByRole("checkbox", TOGGLE)).toBeInTheDocument();
@@ -648,7 +675,7 @@ describe("AnalysisTab ranking coverage", () => {
 
   it("asks for the API's longest compare list, since the bars re-rank it by period rather than by gap", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
-    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500, includeRetired: false });
+    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500, includeRetired: false, includeZeroDelay: false });
     const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
     expect(href).toMatch(/[?&]limit=500(&|$)/);
     expect(href).not.toContain("include_sparse");

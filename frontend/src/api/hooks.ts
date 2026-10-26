@@ -156,19 +156,22 @@ export type ReportOptions = {
   includeSparse?: boolean;
   /** Route lists: keep route codes the current timetable no longer runs. */
   includeRetired?: boolean;
+  /** Route lists: keep routes whose feed always reports zero delay. */
+  includeZeroDelay?: boolean;
   limit?: number;
   thresholdSec?: number;
   observeOnly?: boolean;
 };
 
-/** The most current routes a report lists in one response; a route list
- *  keeping retired route codes lists those on top. */
+/** The most rows a report lists in one response, not counting the routes a
+ *  route list leaves out by default and was asked to keep, which come on top. */
 export const REPORT_ROWS_MAX = 500;
 
 export function reportQueryString(ctx: Scope, options: ReportOptions = {}): string {
   const parts = [scopeToQueryString(ctx)];
   if (options.includeSparse) parts.push("include_sparse=1");
   if (options.includeRetired) parts.push("include_retired=1");
+  if (options.includeZeroDelay) parts.push("include_zero_delay=1");
   if (options.limit != null) parts.push(`limit=${options.limit}`);
   if (options.thresholdSec != null) parts.push(`threshold_sec=${options.thresholdSec}`);
   return parts.filter(Boolean).join("&");
@@ -188,6 +191,7 @@ export function useReport(
       ...scopeKey(ctx),
       !!options.includeSparse,
       !!options.includeRetired,
+      !!options.includeZeroDelay,
       options.limit ?? null,
       options.thresholdSec ?? null,
     ],

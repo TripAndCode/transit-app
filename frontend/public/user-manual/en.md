@@ -191,6 +191,8 @@ Each row is one route, over all of its observations in the period. The columns:
 
 **Delay ranking** and **Lowest average delay** leave out routes observed fewer than 100 times in the period, so a route seen on only a handful of trips cannot top them. Tick “Include routes observed fewer than 100 times” to rank those routes too; their samples carry a “few data” badge. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest.
 
+The route lists also leave out route codes the current timetable no longer runs, and routes whose feed always reports zero delay (a feed that repeats the timetable instead of reporting delay says nothing about punctuality). When a list leaves any out, a tick box above the table says how many, and ticking it brings them back.
+
 **Download CSV** at the top right of the report downloads the table.
 
 ### 5-5. On-time rate and delays over 5 min
