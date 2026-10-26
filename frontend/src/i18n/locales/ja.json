@@ -254,7 +254,7 @@
     "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行率」も参照）。",
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
     "delivered_partly_timetabled": "{{value}}（時刻表のある{{covered}}/{{window}}日分）",
-    "plan_coverage_footnote": "※ 運行率に「時刻表のある日数/期間の日数」と添えた事業者は、運行率・走行キロ達成率とも、読み込み済みの時刻表がある日だけを数えています。時刻表が期間の一部しか含まないため、ほかの事業者とは数えた日数が異なります。",
+    "plan_coverage_footnote": "※ 運行率に「時刻表のあるN/M日分」と添えた事業者は、運行率・走行キロ達成率とも、読み込み済みの時刻表がある日だけを数えています。時刻表が期間の一部しか含まないため、ほかの事業者とは数えた日数が異なります。",
     "schedule_version_title": "静的ダイヤバージョン: {{version}}",
     "col_agency": "事業者",
     "axis_caption": "共通軸 · 0〜{{max}} 分"
