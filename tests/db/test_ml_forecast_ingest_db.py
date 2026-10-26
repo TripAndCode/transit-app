@@ -1,7 +1,7 @@
 import io
 import json
 from argparse import Namespace
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pandas as pd
 import pyarrow as pa
@@ -106,7 +106,7 @@ def test_ingest_forecast_handles_a_production_shaped_parquet_frame(pg_conn):
                 "q90": 5.0,
                 "model_version": _MODEL_VERSION,
                 "origin_date": _ORIGIN.isoformat(),
-                "generated_at": datetime(_ORIGIN.year, _ORIGIN.month, _ORIGIN.day, 2, 0, 0).isoformat(),
+                "generated_at": f"{_ORIGIN.isoformat()}T02:00:00",
             }
         ]
     )
@@ -177,31 +177,30 @@ def test_the_ingest_ml_command_upserts_the_latest_forecast_through_a_real_connec
     really returns, which a mocked connection cannot stand in for: that one
     arrives mid-transaction from its schema probe."""
     _seed_agency(pg_conn)
-    origin = date.today()
     rows = [
         {
             "agency_id": 8,
             "route_code": "R1",
-            "service_date": (origin + timedelta(days=1)).isoformat(),
+            "service_date": _SERVICE_DATE.isoformat(),
             "hour": 8,
             "mean_min": 4.5,
             "q10": 1.0,
             "q50": 4.0,
             "q90": 8.0,
             "model_version": "test",
-            "origin_date": origin.isoformat(),
-            "generated_at": f"{origin.isoformat()}T11:00:00",
+            "origin_date": _ORIGIN.isoformat(),
+            "generated_at": f"{_ORIGIN.isoformat()}T11:00:00",
         }
     ]
-    prefix = f"forecasts/{origin.isoformat()}"
+    prefix = f"forecasts/{_ORIGIN.isoformat()}"
     s3 = _FakeS3(
         {
             f"{prefix}/manifest.json": b'{"rows": 1}',
             f"{prefix}/forecast.parquet": _parquet_bytes(rows),
-            f"evaluations/{origin.isoformat()}/summary.json": json.dumps(
+            f"evaluations/{_ORIGIN.isoformat()}/summary.json": json.dumps(
                 {
                     "schema": 1,
-                    "run_date": origin.isoformat(),
+                    "run_date": _ORIGIN.isoformat(),
                     "adopted": True,
                     "headline": {"skill": 0.06, "coverage": 0.8},
                 }
@@ -215,5 +214,5 @@ def test_the_ingest_ml_command_upserts_the_latest_forecast_through_a_real_connec
     with pg_conn.cursor() as cur:
         cur.execute("SELECT mean_min FROM agg_route_forecast_ml WHERE agency_id = 8 AND route_code = 'R1'")
         assert cur.fetchone()[0] == 4.5
-        cur.execute("SELECT adopted FROM ml_evaluations WHERE run_date = %s", (origin,))
+        cur.execute("SELECT adopted FROM ml_evaluations WHERE run_date = %s", (_ORIGIN,))
         assert cur.fetchone()[0] is True
