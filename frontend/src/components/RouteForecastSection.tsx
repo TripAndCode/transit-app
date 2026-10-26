@@ -573,11 +573,11 @@ function RoutePicker({
 
 /** Marks a forecast whose values come from the ML model rather than the
  *  seasonal baseline; rendered once per view, never per cell. */
-function MlForecastChip() {
+function MlForecastChip({ aid }: { aid: number }) {
   const { t } = useTranslation();
   return (
     <div style={{ marginBottom: 8 }}>
-      <Link to="/model" className="caveat-badge" data-testid="fc-ml-chip">
+      <Link to={`/model?from=${aid}`} className="caveat-badge" data-testid="fc-ml-chip">
         {t("forecast.ml_source")}
       </Link>
     </div>
@@ -635,7 +635,7 @@ function AgencyLanding({
 
   return (
     <>
-      {data.grid.some((c) => c.source === "ml") && <MlForecastChip />}
+      {data.grid.some((c) => c.source === "ml") && <MlForecastChip aid={aid} />}
       {data.worst && (
         <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
@@ -744,7 +744,7 @@ function RouteDetail({
 
   return (
     <>
-      {mlBacked && <MlForecastChip />}
+      {mlBacked && <MlForecastChip aid={aid} />}
       {worstBand && (
         <div
           data-testid="detail-worst"

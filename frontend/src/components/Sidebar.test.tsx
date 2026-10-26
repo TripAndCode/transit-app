@@ -116,8 +116,14 @@ describe("Sidebar", () => {
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
-  it("lists the model evaluation page under Other", () => {
+  it("lists the model evaluation page under Other, carrying the agency it was opened from", () => {
     renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model?from=1");
+  });
+
+  it("links the model evaluation page bare when no agency is known", () => {
+    renderSidebar("/help");
     const other = screen.getByRole("navigation", { name: "Other" });
     expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model");
   });

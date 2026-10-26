@@ -1,0 +1,59 @@
+/* Japanese has no spaces to break at: break between phrases, so prose such
+   as the subtitle and the notes never splits mid-word. The figures that must
+   stay whole are pinned further by .model-nowrap. */
+.model-page {
+  word-break: auto-phrase;
+}
+
+/* Phone list form of the agency and history tables (ModelPage below BP.sm):
+   their columns can't share a phone's width without characters stacking one
+   per line, so each row becomes one item. */
+.model-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.model-card {
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.model-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+}
+.model-card__title {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.model-card__skill {
+  margin-top: var(--space-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.model-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.model-card__label {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+.model-note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+/* A short figure read as one unit; the line breaks around it instead. */
+.model-nowrap {
+  white-space: nowrap;
+}
