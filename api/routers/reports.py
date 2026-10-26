@@ -775,6 +775,11 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "delay_certificate": ["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"],
 }
 
+# A downloaded file's name, where the report's user-facing name differs from
+# its type identifier: the delay_certificate type is shown to users as a
+# delay record, which is not an official certificate.
+_CSV_FILE_STEMS: dict[str, str] = {"delay_certificate": "delay_record"}
+
 
 def _csv_response(
     report_type: str,
@@ -842,7 +847,7 @@ def _csv_response(
         for r in rows:
             w.writerow(list(r))
     buf.seek(0)
-    fname = f"{report_type}_{ctx.from_date}_{ctx.to_date}.csv"
+    fname = f"{_CSV_FILE_STEMS.get(report_type, report_type)}_{ctx.from_date}_{ctx.to_date}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv; charset=utf-8",

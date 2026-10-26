@@ -19,7 +19,7 @@
     "compare": "比較",
     "reports": "レポート",
     "destinations_label": "画面",
-    "other": "そのほか",
+    "other": "その他",
     "transfer": "乗換",
     "ticket_agency": "事業者",
     "ticket_period": "期間",
@@ -45,10 +45,10 @@
     "title": "レポート",
     "view_summary": "期間のまとめ",
     "view_saved": "保存した分析",
-    "view_reports": "協議会向けまとめ・遅延証明",
+    "view_reports": "協議会向けまとめ・遅延の記録",
     "subtitle_summary": "期間中の運行を、印刷できる一枚にまとめます。",
     "subtitle_saved": "このブラウザで路線のページから保存した分析です。",
-    "subtitle_reports": "協議会や役員会向けのまとめと、遅延の証明です。"
+    "subtitle_reports": "協議会や役員会向けのまとめと、遅延の記録（参考）です。"
   },
   "sheet": {
     "handle": "シートの高さを変える"
@@ -540,31 +540,31 @@
       },
       "sso_disabled_title": "SSO 未設定",
       "sso_disabled_body": "このビルドでは SSO が無効です。匿名で閲覧できます。",
-      "config_error_title": "サインインオプションを読み込めませんでした",
+      "config_error_title": "ログイン方法を読み込めませんでした",
       "config_error_body": "サーバーへの接続で問題が発生しました。もう一度お試しください。",
       "back_to_top": "トップへ戻る",
       "welcome_back": "おかえりなさい",
       "choose_provider": "アカウントを選択してログイン",
-      "username_prompt": "ユーザー名でサインイン",
+      "username_prompt": "ユーザー名でログイン",
       "google_aria": "Googleでログイン",
-      "google_continue": "Googleで続ける",
+      "google_continue": "Googleでログイン",
       "github_aria": "GitHubでログイン",
-      "github_continue": "GitHubで続ける",
+      "github_continue": "GitHubでログイン",
       "or_divider": "または",
       "username_label": "ユーザー名",
       "password_label": "パスワード",
-      "local_submit": "サインイン",
-      "terms_consent": "続行すると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+      "local_submit": "ログイン",
+      "terms_consent": "ログインすると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
     },
     "back_to_agency": "← {{agency}}に戻る",
     "linked_none": "連携なし",
     "session_device": "{{os}} の {{browser}}",
     "session_unknown_device": "不明な端末",
     "this_device": "この端末",
-    "session_sign_out": "サインアウト",
-    "session_sign_out_aria": "このセッションをサインアウト",
+    "session_sign_out": "ログアウト",
+    "session_sign_out_aria": "このセッションをログアウト",
     "sessions_load_error": "セッションを読み込めませんでした。",
-    "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
+    "session_sign_out_error": "そのセッションをログアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
     "login_to_save_tooltip": "ログインで保存",
@@ -1025,7 +1025,7 @@
       "dwell_run": "滞留・走行時間",
       "route_forecast": "路線別予測",
       "council_summary": "協議会向け報告",
-      "delay_certificate": "遅延証明書"
+      "delay_certificate": "遅延の記録（参考）"
     },
     "col": {
       "service": "種別",
@@ -1215,7 +1215,7 @@
       "ranking": "順位",
       "punctuality": "定時性",
       "pattern": "傾向",
-      "forecast": "予測・証明",
+      "forecast": "予測・記録",
       "other": "その他"
     },
     "desc": {
@@ -1230,7 +1230,7 @@
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
       "route_forecast": "系統ごとに、曜日と時間帯で遅れやすい時を示します。",
       "council_summary": "協議会・取締役会向けの期間まとめです。",
-      "delay_certificate": "特定の遅延便を証明する書類です。"
+      "delay_certificate": "特定の便の遅れを記録した参考資料です。"
     },
     "card": {
       "value_with_unit": "{{value}}{{unit}}"
@@ -1259,7 +1259,7 @@
     },
     "print": "印刷 / PDFで保存",
     "certificate": {
-      "intro": "乗車した日と路線、便を選ぶと、その便の遅延証明を表示します。",
+      "intro": "乗車した日と路線、便を選ぶと、その便の遅れの記録を表示します。",
       "date": "日付",
       "route": "路線",
       "route_placeholder": "路線を検索",
@@ -1271,13 +1271,14 @@
       "no_data": "この日、この路線のリアルタイムデータはありません。遅れて発車した便があったかは確かめられません。",
       "unconfirmed": "遅れて発車した便は見つかりませんでした。この日のデータの有無は確認できませんでした。",
       "not_listed": "一覧にない便は、定刻どおりか早く発車したか、リアルタイムデータに含まれていません。",
-      "card": "選んだ便の遅延証明書",
+      "card": "選んだ便の遅延の記録",
       "statement": "{{date}}、{{route}} {{scheduled}}発の便は、最初に記録された停留所を{{actual}}に発車し、{{delay}}遅れました。",
       "operator": "事業者",
       "scheduled": "定刻の発車",
       "actual": "実際の発車",
       "delay": "遅れ",
       "measured_at": "時刻は、事業者のリアルタイムデータでこの便が最初に記録された停留所でのものです。",
+      "disclaimer": "この記録は、{{operator}}が公開しているリアルタイムデータをもとに本サービスが作成した参考資料です。事業者が発行する遅延証明書ではありません。",
       "all_late": "期間内のすべての遅延便"
     }
   },

@@ -834,7 +834,7 @@ describe("AnalysisTab council report", () => {
   });
 });
 
-describe("AnalysisTab delay certificate", () => {
+describe("AnalysisTab delay record", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -55,14 +55,14 @@ describe("LoginPage", () => {
     await i18n.changeLanguage("en");
     const { container } = renderLogin();
     const footer = container.querySelector(".login-card__footer")!;
-    expect(footer.textContent).toBe("By continuing, you agree to the Terms of Service and Privacy Policy.");
+    expect(footer.textContent).toBe("By signing in, you agree to the Terms of Service and Privacy Policy.");
     expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
     expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
     try {
       await i18n.changeLanguage("ja");
       await waitFor(() =>
         expect(container.querySelector(".login-card__footer")!.textContent).toBe(
-          "続行すると、利用規約とプライバシーポリシーに同意したものとみなされます。",
+          "ログインすると、利用規約とプライバシーポリシーに同意したものとみなされます。",
         ),
       );
     } finally {

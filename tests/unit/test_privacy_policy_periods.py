@@ -16,7 +16,7 @@ LEGAL_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public" / "legal
 PERIOD_ROWS = {
     "ja": [
         f"| セッション | 最長{SESSION_TTL_DAYS}日 |",
-        f"| サインインの記録 | {PERSONAL_DATA_RETENTION_MONTHS}か月 |",
+        f"| ログインの記録 | {PERSONAL_DATA_RETENTION_MONTHS}か月 |",
         f"| 日ごとの利用回数 | {PERSONAL_DATA_RETENTION_MONTHS}か月 |",
         f"| アカウントと結びつけない Ask の質問文 | {QUERY_LOG_RETENTION_DAYS}日 |",
         f"| 管理者の操作記録（あなたのアカウントに対する操作を含む） | {ADMIN_AUDIT_RETENTION_DAYS}日 |",

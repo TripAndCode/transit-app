@@ -49,8 +49,8 @@ LABELS = {
         "you_badge": "あなた",
         "ask_card": "遅延の大きい路線：上位5件",
         "returned_data": "取得したデータ",
-        "council_tab": "協議会向けまとめ・遅延証明",
-        "certificate": "遅延証明書",
+        "council_tab": "協議会向けまとめ・遅延の記録",
+        "certificate": "遅延の記録（参考）",
         "route_label": "路線",
         "route_placeholder": "路線を検索",
         "playback_toggle": "1日の動きを再生",
@@ -64,7 +64,7 @@ LABELS = {
         "ask_card": "most delayed routes",
         "returned_data": "View returned data",
         "council_tab": "Council report",
-        "certificate": "Delay certificate",
+        "certificate": "Delay record (for reference)",
         "route_label": "Route",
         "route_placeholder": "Search routes",
         "playback_toggle": "Play the day",
@@ -242,7 +242,7 @@ def capture(base: str, locale: str) -> None:
         page.wait_for_timeout(300)
         shot(page, "13-ask-answer", locale)
 
-        # 15: the delay-certificate's full three-step flow -- the same
+        # 15: the delay record's full three-step flow -- the same
         # top-ranked route read off the ranking report earlier, then
         # whichever departure its own data returns.
         page.goto(f"{agency}/reports")

@@ -33,6 +33,14 @@ saved-analysis bookmarks — plus a link out to Time for deeper reports.
   the export documents render `AnalysisTab` with the two export types,
   opening `delay_certificate` for `doc=certificate` and `council_summary`
   otherwise.
+- Users see `delay_certificate` as 「遅延の記録（参考）」 / "Delay record (for
+  reference)". It is the service's reference document built from the
+  operator's real-time feed, not a certificate the operator issues, so its
+  copy, CSV file name and footnotes never call it a certificate, and the
+  printable card carries a disclaimer naming the operator. The type id, the
+  `doc=certificate` param and the API keep the old name so links and saved
+  views keep working. `tests/frontend/i18n_glossary.test.mjs` holds the copy
+  to that name.
 
 What the user sees/does:
 
