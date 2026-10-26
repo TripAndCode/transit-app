@@ -57,8 +57,15 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
       : undefined;
   const row = chosen == null ? undefined : rows?.find((r) => departureKey(r) === chosen);
   // An empty list is "nothing left late" only when the feed reported the day;
-  // without any observation, whether one left late can't be told.
-  const noData = rows !== undefined && rows.length === 0 && departures.data?.observed === false;
+  // without any observation, or when that couldn't be checked, it says so.
+  const observed = departures.data?.observed;
+  const emptyKey =
+    observed === false
+      ? "reports.certificate.no_data"
+      : observed === null
+        ? "reports.certificate.unconfirmed"
+        : "reports.certificate.none";
+  const noData = rows !== undefined && rows.length === 0 && observed === false;
 
   return (
     <div className="cert-lookup">
@@ -96,7 +103,7 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
           </>
         )}
         {rows !== undefined && rows.length === 0 && (
-          <p className="cert-lookup__note">{t(noData ? "reports.certificate.no_data" : "reports.certificate.none")}</p>
+          <p className="cert-lookup__note">{t(emptyKey)}</p>
         )}
         {rows !== undefined && rows.length > 0 && (
           <label className="cert-lookup__field">

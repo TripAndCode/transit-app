@@ -107,6 +107,14 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
     ("delay_certificate_no_data", "ja"): "この期間・条件のリアルタイムデータはありません。",
     ("delay_certificate_no_data", "en"): "There is no live-feed data for this period and these conditions.",
+    (
+        "delay_certificate_unconfirmed",
+        "ja",
+    ): "遅延{threshold}秒超の便は見つかりませんでした。データの有無は確認できませんでした。",
+    ("delay_certificate_unconfirmed", "en"): (
+        "No trip over the {threshold}s delay threshold was found; "
+        "whether the feed reported this period couldn't be checked."
+    ),
     ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
     ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
     ("delay_certificate_summary_capped", "ja"): (
@@ -448,12 +456,15 @@ def format_delay_certificate_text(
     count + threshold statement, not a per-row transcript (this export can
     run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
     not this text body). The count is *total*, every qualifying trip, which
-    the row cap can leave larger than ``len(rows)``. An empty scope the feed
-    never reported (``observed`` False) says so, never "no trip exceeded".
+    the row cap can leave larger than ``len(rows)``. An empty list says "no
+    trip exceeded" only when the feed reported the scope (``observed`` True);
+    otherwise it says there is no data, or that which one couldn't be checked.
     """
     if not rows:
         if observed is False:
             return _t("delay_certificate_no_data", locale)
+        if observed is None:
+            return _t("delay_certificate_unconfirmed", locale, threshold=threshold_sec)
         return _t("delay_certificate_empty", locale, threshold=threshold_sec)
     if total > len(rows):
         return _t("delay_certificate_summary_capped", locale, count=total, shown=len(rows), threshold=threshold_sec)

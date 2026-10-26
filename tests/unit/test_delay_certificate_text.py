@@ -35,6 +35,28 @@ def test_summary_states_the_total_and_the_cut_when_rows_were_capped(locale, expe
     assert format_delay_certificate_text(_ROWS, 300, total=1234, locale=locale) == expected
 
 
+@pytest.mark.parametrize(
+    ("observed", "locale", "expected"),
+    [
+        (True, "ja", "遅延300秒超の便はありませんでした。"),
+        (True, "en", "No trips exceeded the 300s delay threshold."),
+        (False, "ja", "この期間・条件のリアルタイムデータはありません。"),
+        (False, "en", "There is no live-feed data for this period and these conditions."),
+        (None, "ja", "遅延300秒超の便は見つかりませんでした。データの有無は確認できませんでした。"),
+        (
+            None,
+            "en",
+            "No trip over the 300s delay threshold was found; "
+            "whether the feed reported this period couldn't be checked.",
+        ),
+    ],
+)
+def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale, expected):
+    """An empty list claims "no trip exceeded" only when the feed reported the
+    scope, and says when that couldn't be checked."""
+    assert format_delay_certificate_text([], 300, total=0, locale=locale, observed=observed) == expected
+
+
 def test_csv_footnotes_add_the_cut_only_when_rows_were_capped():
     assert format_delay_certificate_footnotes(300, shown=2, total=2) == ["遅延300秒超の便のみを掲載しています。"]
     assert format_delay_certificate_footnotes(300, shown=2, total=1234) == [
