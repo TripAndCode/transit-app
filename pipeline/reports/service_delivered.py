@@ -43,7 +43,14 @@ from pipeline.strategies.static_join import rt_field_coverage_confirmed_agencies
 # matching it to the generated series' text drops a malformed row the
 # lexicographic bounds would let through. Trips are counted once per service
 # and multiplied by its running days, never joined row-per-trip-per-day.
-_PLANNED_TRIPS_SQL = """
+#
+# `covered` is the days the loaded timetable says anything about: inside a
+# calendar.txt service's range, or named by a calendar_dates.txt row. A reload
+# replaces the agency's calendar, so a window reaching back before the load has
+# days no plan covers, and missed trips count only on covered days, the ones the
+# plan counted. agg_service_delivered_daily has a row only for a day with a
+# missed trip, so an agency with none reads 0, not "not available".
+_SERVICE_SQL = """
     WITH days AS (
         SELECT day, to_char(day, 'YYYYMMDD') AS ymd, EXTRACT(ISODOW FROM day)::int AS isodow
         FROM (SELECT $2::date + i AS day FROM generate_series(0, $3::date - $2::date) AS i) AS d
@@ -75,45 +82,65 @@ _PLANNED_TRIPS_SQL = """
         WHERE cd.agency_id = ANY($1::int[])
           AND cd.exception_type = 1
           AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
+    ),
+    covered AS (
+        SELECT c.agency_id, days.day
+        FROM static_calendar c
+        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
+        WHERE c.agency_id = ANY($1::int[])
+        UNION
+        SELECT cd.agency_id, days.day
+        FROM static_calendar_dates cd
+        JOIN days ON days.ymd = cd.date
+        WHERE cd.agency_id = ANY($1::int[])
+          AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
+    ),
+    planned AS (
+        SELECT r.agency_id, SUM(t.trips) AS planned
+        FROM running r
+        JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
+        GROUP BY r.agency_id
+    ),
+    coverage AS (
+        SELECT agency_id, COUNT(*) AS covered_days FROM covered GROUP BY agency_id
+    ),
+    missed AS (
+        SELECT s.agency_id, SUM(s.non_executed_trips) AS non_executed
+        FROM agg_service_delivered_daily s
+        JOIN covered c ON c.agency_id = s.agency_id AND c.day = s.date
+        GROUP BY s.agency_id
     )
-    SELECT r.agency_id, SUM(t.trips) AS planned
-    FROM running r
-    JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
-    GROUP BY r.agency_id
-"""
-
-_NON_EXECUTED_TRIPS_SQL = """
-    SELECT agency_id, SUM(non_executed_trips) AS non_executed
-    FROM agg_service_delivered_daily
-    WHERE date BETWEEN $1 AND $2
-    GROUP BY agency_id
+    SELECT a.agency_id,
+           COALESCE(p.planned, 0) AS planned,
+           COALESCE(cv.covered_days, 0) AS covered_days,
+           COALESCE(m.non_executed, 0) AS non_executed
+    FROM unnest($1::int[]) AS a(agency_id)
+    LEFT JOIN planned p USING (agency_id)
+    LEFT JOIN coverage cv USING (agency_id)
+    LEFT JOIN missed m USING (agency_id)
 """
 
 
 async def compute_service_delivered_by_agency(
     conn, agency_ids: list[int], from_date: date, to_date: date
 ) -> dict[int, dict[str, Any]]:
-    """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct"}``
-    over ``[from_date, to_date]``.
+    """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct",
+    "covered_days", "window_days"}`` over ``[from_date, to_date]``.
+
+    ``covered_days`` counts the window's days the loaded timetable covers;
+    both sides of the ratio count only those days.
 
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     whenever the ratio isn't computable for this agency/range (see module
-    docstring) — never silently 0 canceled / 100% delivered. Both queries
-    below read the loaded static schedule and a precomputed aggregate in
-    Postgres — no ClickHouse access on this read path.
+    docstring) — never silently 0 canceled / 100% delivered. One query reads
+    the loaded static schedule and a precomputed aggregate in Postgres — no
+    ClickHouse access on this read path.
     """
     if not agency_ids:
         return {}
-    planned_rows = await conn.fetch(_PLANNED_TRIPS_SQL, agency_ids, from_date, to_date)
-    planned = {r["agency_id"]: int(r["planned"]) for r in planned_rows}
-
-    # agg_service_delivered_daily only carries a row for a (agency, date) that
-    # actually had a non-executed trip -- a day with zero cancellations has no
-    # row at all, so an agency with no row in range still legitimately reads
-    # non_executed=0 via the .get(..., 0) default below, not "not available".
-    non_executed_rows = await conn.fetch(_NON_EXECUTED_TRIPS_SQL, from_date, to_date)
-    non_executed = {r["agency_id"]: int(r["non_executed"]) for r in non_executed_rows}
+    window_days = (to_date - from_date).days + 1
+    rows = {r["agency_id"]: r for r in await conn.fetch(_SERVICE_SQL, agency_ids, from_date, to_date)}
 
     # An agency must satisfy both halves of the shared gate: an ingest
     # strategy that CAN send this field, and a live probe verdict saying its
@@ -123,18 +150,20 @@ async def compute_service_delivered_by_agency(
 
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:
-        p = planned.get(aid, 0)
+        p = int(rows[aid]["planned"])
+        coverage = {"covered_days": int(rows[aid]["covered_days"]), "window_days": window_days}
         if aid not in populated_ids or p <= 0:
-            result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None}
+            result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None, **coverage}
             continue
         # Clamp at 0: a canceled/skipped trip-day whose trip_id doesn't
         # actually match anything in the static schedule (feed drift, or a
         # RT-only ADDED trip marked CANCELED) must not drive the ratio
         # negative.
-        executed = max(p - non_executed.get(aid, 0), 0)
+        executed = max(p - int(rows[aid]["non_executed"]), 0)
         result[aid] = {
             "planned_trips": p,
             "executed_trips": executed,
             "service_delivered_pct": round(executed / p * 100, 1),
+            **coverage,
         }
     return result

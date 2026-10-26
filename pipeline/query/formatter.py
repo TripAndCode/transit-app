@@ -85,6 +85,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_headline_delivered", "en"): ", service-delivered rate {delivered}%",
     ("council_headline_delivered_agency_wide", "ja"): "、運行実績率 {delivered}%（事業者全体）",
     ("council_headline_delivered_agency_wide", "en"): ", service-delivered rate {delivered}% (whole agency)",
+    ("council_planned_coverage_caveat", "ja"): (
+        "計画本数・運行本数・運行実績率は、読み込み済みの時刻表がある{covered}日分（期間{window}日中）だけを数えています。"
+    ),
+    ("council_planned_coverage_caveat", "en"): (
+        "Planned and executed trips and the service-delivered rate count only the {covered} of the period's "
+        "{window} days the loaded timetable covers."
+    ),
     ("council_agency_wide_caveat", "ja"): (
         "計画本数・運行本数・運行実績率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
         "この期間の事業者全体の値です。"
@@ -391,6 +398,11 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
         lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
     if payload.get("service_delivered_pct") is None:
         lines.append(_t("council_service_delivered_unavailable", locale))
+    # An agency with no plan at all already reads "unavailable" above; the
+    # coverage note is for a plan that covers only part of the period.
+    covered, window = payload.get("covered_days"), payload.get("window_days")
+    if payload.get("planned_trips") and covered is not None and window and covered < window:
+        lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))
     return lines
 
 

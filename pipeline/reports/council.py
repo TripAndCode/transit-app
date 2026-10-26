@@ -190,8 +190,10 @@ async def compute_council_summary(
     (:func:`~pipeline.reports.definition.resolve_definition_meta`).
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
-    "executed_trips", "service_delivered_pct", "is_stale", "clamp_pct",
-    "filtered"}``. ``filtered`` is :func:`on_time_filter_narrows`: true when
+    "executed_trips", "service_delivered_pct", "covered_days", "window_days",
+    "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    are the days the loaded timetable covers, the only ones the planned and
+    executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
     the first three cover less of the agency than the planned/executed/delivered
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
@@ -205,7 +207,7 @@ async def compute_council_summary(
     )
 
     delivered = await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date)
-    d = delivered.get(agency_id, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
+    d = delivered[agency_id]
 
     # Freshness (agg-lag) + quality (implausible-reading share), scoped to
     # THIS agency's ctx.from_date/to_date range -- the same two signals
@@ -245,6 +247,8 @@ async def compute_council_summary(
         "planned_trips": d["planned_trips"],
         "executed_trips": d["executed_trips"],
         "service_delivered_pct": d["service_delivered_pct"],
+        "covered_days": d["covered_days"],
+        "window_days": d["window_days"],
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),

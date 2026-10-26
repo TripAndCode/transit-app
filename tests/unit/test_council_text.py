@@ -77,3 +77,33 @@ def test_footnotes_say_the_delivered_figures_are_agency_wide_under_a_narrower_fi
     assert any(note in line for line in format_council_summary_footnotes(_DEFINITION, payload, locale))
     unfiltered = _payload(service_delivered_pct=delivered)
     assert not any(note in line for line in format_council_summary_footnotes(_DEFINITION, unfiltered, locale))
+
+
+@pytest.mark.parametrize(
+    ("locale", "note"),
+    [
+        (
+            "ja",
+            "計画本数・運行本数・運行実績率は、読み込み済みの時刻表がある16日分（期間30日中）だけを数えています。",
+        ),
+        (
+            "en",
+            "Planned and executed trips and the service-delivered rate count only the 16 of the period's "
+            "30 days the loaded timetable covers.",
+        ),
+    ],
+)
+def test_footnotes_say_how_much_of_the_period_the_timetable_covers(locale, note):
+    """A timetable loaded mid-period plans only the days it covers, so the
+    planned figures say which; a fully covered period says nothing."""
+
+    def footnotes(**coverage):
+        return format_council_summary_footnotes(_DEFINITION, _payload(planned_trips=57887, **coverage), locale)
+
+    assert note in footnotes(covered_days=16, window_days=30)
+    assert note not in footnotes(covered_days=30, window_days=30)
+    # No plan at all is already "unavailable"; it is not a partly covered one.
+    no_plan = format_council_summary_footnotes(
+        _DEFINITION, _payload(planned_trips=0, service_delivered_pct=None, covered_days=0, window_days=30), locale
+    )
+    assert note.replace("16", "0") not in no_plan
