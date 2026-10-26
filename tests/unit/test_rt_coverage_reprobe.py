@@ -285,3 +285,23 @@ def test_an_overnight_run_opens_no_run_and_fetches_nothing(run_env):
     reprobe.reprobe_due_agencies(object(), "postgresql://x", now=datetime(2026, 10, 27, 0, 5, tzinfo=JST), fetch=_fetch)
 
     assert runs.closed == []
+
+
+def test_a_run_row_that_cannot_be_written_does_not_cost_the_verdict(monkeypatch):
+    """A `pipeline_runs` that predates the `probe` kind refuses the row; the
+    bookkeeping is lost and the verdict is still written."""
+    recorded: list[int] = []
+
+    async def _record(_db_url, agency_id, _feed_url, _cov):
+        recorded.append(agency_id)
+        return {field: True for field in RT_COVERAGE_FIELDS}
+
+    monkeypatch.setattr(reprobe, "_record", _record)
+    monkeypatch.setattr(reprobe, "load_candidates", lambda _conn: [_candidate(9, fields=())])
+    monkeypatch.setattr(reprobe, "field_coverage", lambda raw: _cov(int(raw)))
+    monkeypatch.setattr(pipeline_runs, "start_run", lambda *_a, **_k: None)
+
+    outcome = reprobe.reprobe_due_agencies(object(), "postgresql://x", now=NOON_ISH, fetch=lambda _url: b"300")
+
+    assert recorded == [9]
+    assert outcome.recorded == [9]

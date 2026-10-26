@@ -14,6 +14,15 @@ from tests.conftest import _test_pool
 DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 
+@pytest.fixture(autouse=True)
+def _no_coverage_reprobe(monkeypatch):
+    """The sweep's last pass fetches live feeds for any static_join agency
+    left in the database, and only in service hours, so it would make these
+    tests depend on the clock. It has its own tests in
+    tests/pipeline/test_rt_coverage_reprobe.py."""
+    monkeypatch.setattr("api.routers.internal._run_rt_coverage_reprobe", lambda _db_url: None)
+
+
 @pytest.fixture
 async def cron_app(apply_schema):
     from api.main import app
