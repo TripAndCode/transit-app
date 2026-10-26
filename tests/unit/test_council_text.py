@@ -96,7 +96,14 @@ def test_footnotes_say_the_delivered_figures_are_agency_wide_under_a_narrower_fi
 def test_footnotes_say_how_much_of_the_period_the_timetable_covers(locale, note):
     """A timetable loaded mid-period plans only the days it covers, so the
     planned figures say which; a fully covered period says nothing."""
-    partial = format_council_summary_footnotes(_DEFINITION, _payload(covered_days=16, window_days=30), locale)
-    full = format_council_summary_footnotes(_DEFINITION, _payload(covered_days=30, window_days=30), locale)
-    assert note in partial
-    assert note not in full
+
+    def footnotes(**coverage):
+        return format_council_summary_footnotes(_DEFINITION, _payload(planned_trips=57887, **coverage), locale)
+
+    assert note in footnotes(covered_days=16, window_days=30)
+    assert note not in footnotes(covered_days=30, window_days=30)
+    # No plan at all is already "unavailable"; it is not a partly covered one.
+    no_plan = format_council_summary_footnotes(
+        _DEFINITION, _payload(planned_trips=0, service_delivered_pct=None, covered_days=0, window_days=30), locale
+    )
+    assert note.replace("16", "0") not in no_plan

@@ -398,8 +398,10 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
         lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
     if payload.get("service_delivered_pct") is None:
         lines.append(_t("council_service_delivered_unavailable", locale))
+    # An agency with no plan at all already reads "unavailable" above; the
+    # coverage note is for a plan that covers only part of the period.
     covered, window = payload.get("covered_days"), payload.get("window_days")
-    if covered is not None and window and covered < window:
+    if payload.get("planned_trips") and covered is not None and window and covered < window:
         lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))
     return lines
 
