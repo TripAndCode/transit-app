@@ -223,10 +223,7 @@ async def _ranking_live(
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     params = {"agency_id": agency_id, "rk_min": min_samples, **ch_params}
-    limit_sql = ""
-    if limit is not None:
-        limit_sql = "\nLIMIT {rk_limit:UInt32}"
-        params["rk_limit"] = limit
+    limit_sql = _limit_clause(params, limit, "rk_limit")
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "deduped_ranked AS (\n"
@@ -277,7 +274,7 @@ async def compute_on_time(
     conn,
     ch=None,
     threshold_sec: int = 60,
-    limit: int = 100,
+    limit: int | None = 100,
     sort_order: str = "desc",
     early_tolerance_sec: int | None = None,
     late_tolerance_sec: int | None = None,
@@ -286,6 +283,7 @@ async def compute_on_time(
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
     ``sort_order='asc'`` returns worst routes first (lowest %).
+    ``limit=None`` returns every route with more than 20 observations.
 
     ``early_tolerance_sec``/``late_tolerance_sec`` generalize the on-time
     window to ``-early_tolerance_sec <= dep_delay <= late_tolerance_sec`` (an
@@ -342,7 +340,7 @@ async def compute_on_time(
         # unordered-GROUP-BY source as compute_ranking above.
         out.sort(key=lambda t: t[0])
         out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
-        return out[:limit]
+        return out if limit is None else out[:limit]
 
     # Custom on-time window: estimate from the merged histogram at query time.
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
@@ -372,11 +370,19 @@ async def compute_on_time(
         )
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
-    return out[:limit]
+    return out if limit is None else out[:limit]
+
+
+def _limit_clause(params: dict, limit: int | None, name: str) -> str:
+    """A ``LIMIT`` clause bound into ``params`` as ``name``, or none for every row."""
+    if limit is None:
+        return ""
+    params[name] = limit
+    return f"\nLIMIT {{{name}:UInt32}}"
 
 
 async def _on_time_live(
-    agency_id: int, ctx: RangeCtx, conn, ch, threshold_sec: int, limit: int, sort_order: str
+    agency_id: int, ctx: RangeCtx, conn, ch, threshold_sec: int, limit: int | None, sort_order: str
 ) -> list[tuple]:
     """Live raw-scan on-time — fallback for time_band / custom-threshold queries.
 
@@ -385,6 +391,8 @@ async def _on_time_live(
     """
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
+    params = {"agency_id": agency_id, "ot_threshold": threshold_sec, **ch_params}
+    limit_sql = _limit_clause(params, limit, "ot_limit")
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"
@@ -395,9 +403,8 @@ async def _on_time_live(
         "FROM deduped\n"
         "GROUP BY route_code\n"
         "HAVING count(*) > 20\n"
-        f"ORDER BY on_time_pct {order}, route_code\n"
-        "LIMIT {ot_limit:UInt32}",
-        parameters={"agency_id": agency_id, "ot_threshold": threshold_sec, "ot_limit": limit, **ch_params},
+        f"ORDER BY on_time_pct {order}, route_code" + limit_sql,
+        parameters=params,
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     service = _service_label(ctx)
@@ -414,7 +421,7 @@ async def _on_time_live_window(
     ch,
     low_sec: int | None,
     high_sec: int,
-    limit: int,
+    limit: int | None,
     sort_order: str,
 ) -> list[tuple]:
     """Live raw-scan on-time window — fallback for time_band + custom-tolerance
@@ -428,6 +435,13 @@ async def _on_time_live_window(
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
+    params = {
+        "agency_id": agency_id,
+        "ot_high": high_sec,
+        "ot_low": 0 if low_sec is None else low_sec,
+        **ch_params,
+    }
+    limit_sql = _limit_clause(params, limit, "ot_limit")
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"
@@ -438,15 +452,8 @@ async def _on_time_live_window(
         "FROM deduped\n"
         "GROUP BY route_code\n"
         "HAVING count(*) > 20\n"
-        f"ORDER BY on_time_pct {order}, route_code\n"
-        "LIMIT {ot_limit:UInt32}",
-        parameters={
-            "agency_id": agency_id,
-            "ot_high": high_sec,
-            "ot_low": 0 if low_sec is None else low_sec,
-            "ot_limit": limit,
-            **ch_params,
-        },
+        f"ORDER BY on_time_pct {order}, route_code" + limit_sql,
+        parameters=params,
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     service = _service_label(ctx)

@@ -158,6 +158,8 @@ export type ReportOptions = {
   includeRetired?: boolean;
   /** Route lists: keep routes whose feed always reports zero delay. */
   includeZeroDelay?: boolean;
+  /** The on-time list: highest rate first instead of the API's lowest first. */
+  order?: "best";
   limit?: number;
   thresholdSec?: number;
   observeOnly?: boolean;
@@ -172,6 +174,7 @@ export function reportQueryString(ctx: Scope, options: ReportOptions = {}): stri
   if (options.includeSparse) parts.push("include_sparse=1");
   if (options.includeRetired) parts.push("include_retired=1");
   if (options.includeZeroDelay) parts.push("include_zero_delay=1");
+  if (options.order) parts.push(`order=${options.order}`);
   if (options.limit != null) parts.push(`limit=${options.limit}`);
   if (options.thresholdSec != null) parts.push(`threshold_sec=${options.thresholdSec}`);
   return parts.filter(Boolean).join("&");
@@ -192,6 +195,7 @@ export function useReport(
       !!options.includeSparse,
       !!options.includeRetired,
       !!options.includeZeroDelay,
+      options.order ?? null,
       options.limit ?? null,
       options.thresholdSec ?? null,
     ],

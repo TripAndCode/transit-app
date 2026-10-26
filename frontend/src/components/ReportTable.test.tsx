@@ -185,17 +185,26 @@ describe("ReportTable on_time confidence column", () => {
     vi.restoreAllMocks();
   });
 
-  it("marks a low-confidence percentage with a muted few-data badge", () => {
+  // The flag measures the percentage's 95% interval, which narrows toward
+  // 0% and 100%, so it is named for the margin and never for the count.
+  it("marks a percentage with a wide interval by its margin, naming the points on focus", async () => {
     mockRoutes([]);
-    renderTable([["39061", "平日", 80.0, 0.5, 25, true]], "on_time");
-    expect(screen.getByText("few data")).toHaveClass("caveat-badge");
-    expect(screen.getByRole("columnheader", { name: "Data" })).toBeInTheDocument();
+    renderTable([["39061", "平日", 59.8, 0.5, 189, true, 7.0]], "on_time");
+    const badge = screen.getByText("wide margin");
+    expect(badge).toHaveClass("caveat-badge");
+    expect(screen.getByRole("columnheader", { name: "Margin" })).toBeInTheDocument();
+    expect(screen.queryByText("few data")).not.toBeInTheDocument();
+    // Past the row's route link, the badge is the next stop on the keyboard.
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(badge).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Margin of error ±7.0 points (95% interval)");
   });
 
-  it("renders no badge for a confident percentage", () => {
+  it("renders no badge for a percentage with a narrow interval, however few its observations", () => {
     mockRoutes([]);
-    renderTable([["39061", "平日", 90.0, 0.5, 300, false]], "on_time");
-    expect(screen.queryByText("few data")).not.toBeInTheDocument();
+    renderTable([["39061", "平日", 100.0, 0.0, 112, false, 1.7]], "on_time");
+    expect(screen.queryByText("wide margin")).not.toBeInTheDocument();
   });
 });
 
@@ -226,6 +235,19 @@ describe("ReportTable inline bars", () => {
     expect(track).not.toContainElement(value);
     expect(track.style.position).not.toBe("absolute");
     expect(value.closest("td")).toContainElement(track);
+  });
+
+  it("draws an on-time bar against 100%, so a list of low rates never fills its bars", () => {
+    mockRoutes([]);
+    renderTable(
+      [
+        ["A", "平日", 11.3, 4.0, 300, false, 3.6],
+        ["B", "平日", 22.6, 3.0, 300, false, 4.8],
+      ],
+      "on_time",
+    );
+    const fills = screen.getAllByTestId("bar-track").map((track) => (track.firstElementChild as HTMLElement).style.width);
+    expect(fills).toEqual(["11.3%", "22.6%"]);
   });
 });
 
@@ -311,7 +333,7 @@ describe("ReportTable service column", () => {
   it.each([
     ["ranking", ["39061", "平日", 5.2, 3.1, 8.4, 120]],
     ["ranking_best", ["39061", "平日", 5.2, 3.1, 8.4, 120]],
-    ["on_time", ["39061", "平日", 80.0, 0.5, 300, false]],
+    ["on_time", ["39061", "平日", 80.0, 0.5, 300, false, 3.5]],
     ["worst_5min", ["39061", "平日", 12, 3.4, 300]],
     ["dow_weekday", ["39061", null, "平日", 3.4, 120]],
     ["dow_weekend", ["39061", null, "週末", 3.4, 120]],
@@ -363,15 +385,15 @@ describe("ReportTable on a phone", () => {
   it("leaves out a field with nothing to show, rather than a bare label", () => {
     renderTable(
       [
-        ["39061", "平日", 0.92, 1.2, 300, false],
-        ["39061", "平日", 0.5, 4.0, 8, true],
+        ["39061", "平日", 0.92, 1.2, 300, false, 1.2],
+        ["39061", "平日", 0.5, 4.0, 8, true, 9.4],
       ],
       "on_time",
     );
     const [confident, wide] = screen.getAllByRole("listitem");
-    expect(within(confident).queryByText("Data")).not.toBeInTheDocument();
-    expect(within(wide).getByText("Data")).toBeInTheDocument();
-    expect(within(wide).getByText("few data")).toBeInTheDocument();
+    expect(within(confident).queryByText("Margin")).not.toBeInTheDocument();
+    expect(within(wide).getByText("Margin")).toBeInTheDocument();
+    expect(within(wide).getByText("wide margin")).toBeInTheDocument();
   });
 
   it("shows a missing service as a dash, not as the word null", () => {

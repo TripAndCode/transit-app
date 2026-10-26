@@ -174,7 +174,7 @@ Click anywhere else, or press Escape, to close it.
 |---|---|
 | **Delay ranking** | Which routes run latest, worst first |
 | **Lowest average delay** | Routes with the lowest average delay, best first |
-| **On-time rate** | Share of departures inside the on-time threshold, by route |
+| **On-time rate** | Share of departures inside the on-time threshold, by route, lowest first |
 | **Delays over 5 min** | Routes with the most departures more than five minutes late |
 
 If you are not sure where to start, open **Delay ranking** to see which routes are worst, then the **Trend** on **Time** to see when.
@@ -199,7 +199,7 @@ The route lists also leave out route codes the current timetable no longer runs,
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-**On-time rate** lists routes with their “On-time %”: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “few data” mark in the **Data** column means there were too few departures to trust the percentage. Under the table, “Headway quality” covers the routes scheduled every 12 minutes or more often, and “Minimum performance standard” appears when the agency has set targets for its routes.
+**On-time rate** lists routes with their “On-time %”: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A line above the table says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”). The list starts from the lowest rate; under **Order**, “Highest on-time rate first” turns it around. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. A “wide margin” mark in the **Margin** column means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points. Under the table, “Headway quality” covers the routes scheduled every 12 minutes or more often, and “Minimum performance standard” appears when the agency has set targets for its routes.
 
 **Delays over 5 min** counts, route by route, the departures that left more than five minutes late (“Over 5 min late”).
 

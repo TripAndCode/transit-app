@@ -209,6 +209,18 @@ def test_fmt_service_filtered_headers_name_the_filter(query_type, service, local
     assert format_result(query_type, rows, {"service": service}, locale=locale).split("\n")[0] == header
 
 
+@pytest.mark.parametrize(
+    ("locale", "header"),
+    [("ja", "【土曜の定時率の低い順】"), ("en", "[Saturday: On-time rate, lowest first]")],
+)
+def test_fmt_on_time_header_says_when_the_lowest_rate_comes_first(locale, header):
+    """Rank 1 of an ascending list is the least punctual route, so the header
+    must not read as a best-first ranking."""
+    rows = [("14081", "土曜", 11.3, 4.2, 205)]
+    intent = {"service": "土曜", "sort_order": "asc"}
+    assert format_result("on_time", rows, intent, locale=locale).split("\n")[0] == header
+
+
 def test_format_trend_text_empty_days_list():
     result = format_trend_text([], date(2026, 4, 1), date(2026, 4, 3))
     assert "データがありません" in result

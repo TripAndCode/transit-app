@@ -31,7 +31,7 @@ import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber, formatDateRange } from "../utils/format";
-import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
@@ -46,7 +46,7 @@ import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock"
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
 import { destHref, pickReport, reportHref } from "../routes/destinations";
-import { LeftOutToggle, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
+import { LeftOutToggle, OnTimeOrderToggle, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
 const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
 // The reports that list one row per route, which leave retired route codes
@@ -81,21 +81,26 @@ const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
 type KeptRoutes = Required<Pick<ReportOptions, "includeRetired" | "includeZeroDelay">>;
 
 /** A route list's options. Every route list can keep the routes it leaves
- *  out by default; only the rankings take `include_sparse`, which the API
- *  refuses elsewhere. The compare report is drawn re-ranked by one period's
- *  delay, so it asks for the API's maximum length: the default length keeps
- *  only the widest gaps, which would drop a route that is slow in both
+ *  out by default; only the rankings take `include_sparse`, and only the
+ *  on-time list an order, which the API refuses elsewhere. The rankings and
+ *  the on-time list count every route they rank, so "show all" asks them for
+ *  the API's maximum length. The compare report is drawn re-ranked by one
+ *  period's delay, so it always asks for that length: the default length
+ *  keeps only the widest gaps, which would drop a route that is slow in both
  *  periods. */
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
   allRowsFor: string | null,
   kept: KeptRoutes,
+  onTimeOrder: "worst" | "best",
 ): ReportOptions | undefined {
   if (reportType == null || !ROUTE_LIST_TYPES.has(reportType)) return undefined;
   if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX, ...kept };
-  if (!RANKING_TYPES.has(reportType)) return { ...kept };
-  return { includeSparse, ...kept, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
+  const limit = allRowsFor === reportType ? REPORT_ROWS_MAX : undefined;
+  if (RANKING_TYPES.has(reportType)) return { includeSparse, ...kept, limit };
+  if (reportType === "on_time") return { ...kept, limit, order: onTimeOrder === "best" ? "best" : undefined };
+  return { ...kept };
 }
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
@@ -134,6 +139,15 @@ export function AnalysisTab({
     includeRetired: searchParams.get("retired") === "1",
     includeZeroDelay: searchParams.get("zero_delay") === "1",
   };
+  const onTimeOrder = searchParams.get("order") === "best" ? "best" : "worst";
+  function setOnTimeOrder(order: "worst" | "best") {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (order === "best") next.set("order", "best");
+      else next.delete("order");
+      return next;
+    });
+  }
   // "Show all" belongs to the ranking it was asked on; another report opens
   // at the default length.
   const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
@@ -145,7 +159,7 @@ export function AnalysisTab({
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
     ctx,
-    rankingOptions(reportType, includeSparse, allRowsFor, kept),
+    rankingOptions(reportType, includeSparse, allRowsFor, kept, onTimeOrder),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
@@ -169,7 +183,7 @@ export function AnalysisTab({
           : undefined;
 
   function csvHref(type: string): string {
-    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor, kept))}&format=csv`);
+    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor, kept, onTimeOrder))}&format=csv`);
   }
 
   // `route_forecast` is served by its own endpoint, so the reports list never
@@ -249,6 +263,12 @@ export function AnalysisTab({
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
             </div>
             <ReportMeta data={detail.data} />
+            {detail.data.report_type === "on_time" && (
+              <>
+                {detail.data.definition && <OnTimeDefinition definition={detail.data.definition} />}
+                <OnTimeOrderToggle value={onTimeOrder} onChange={setOnTimeOrder} />
+              </>
+            )}
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={(on) => setFlag("sparse", on)} />
             )}

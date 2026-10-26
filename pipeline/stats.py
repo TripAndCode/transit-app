@@ -12,6 +12,7 @@ single binomial proportion (e.g. an on-time or late-5-minute rate).
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 # Standard normal critical value for a 95% two-sided interval.
 _Z95 = 1.959964
@@ -43,18 +44,21 @@ def wilson_interval(successes: int, n: int, z: float = _Z95) -> tuple[float, flo
 def pct_is_uncertain(successes: int, n: int, max_half_width_pp: float = 5.0) -> bool:
     """True when a percentage's 95% Wilson interval half-width exceeds the cutoff.
 
-    ``max_half_width_pp`` is in percentage points (default +/-5pp). Calibrated
-    against typical late-5-minute/on-time rates (single digits to ~20%,
-    well away from the high-variance 50% midpoint): at that range, a
-    comfortably large baseline sample (roughly n > 200) stays under a 5pp
-    half-width, while a genuinely thin history does not -- so this rarely
-    trips for an established route and reliably catches a new/sparse one.
-    ``n <= 0`` is always uncertain (no data to estimate from).
+    ``max_half_width_pp`` is in percentage points (default +/-5pp). The
+    half-width peaks at a 50% rate and shrinks toward 0% and 100%, so the
+    same sample can be certain enough for a rate near either end and too
+    thin for one near the middle. ``n <= 0`` is always uncertain (no data
+    to estimate from).
     """
     if n <= 0:
         return True
+    return _half_width_pp(successes, n) > max_half_width_pp
+
+
+def _half_width_pp(successes: int, n: int) -> float:
+    """Half the 95% Wilson interval's width, in percentage points."""
     low, high = wilson_interval(successes, n, _Z95)
-    return (high - low) * 100 / 2 > max_half_width_pp
+    return (high - low) * 100 / 2
 
 
 def linear_percentile(values: list[float], q: float) -> float | None:
@@ -97,15 +101,39 @@ def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
 
     ``successes`` is back-derived from the already-rounded percentage
     (``round(pct/100 * samples)``) rather than re-read from an exact count
-    column. That reintroduces at most rounding-sized slop into the
-    confidence flag itself, which is acceptable here: the result only
-    drives a coarse pass/fail caveat for display, never a stored or pooled
-    statistic (unlike this codebase's exact-sum pooling elsewhere, which
-    matters because it compounds across many rows).
+    column. That slop is bounded by the displayed percentage's own rounding,
+    finer than the 0.1-point precision ``on_time_pct_margin_pp`` shows, and
+    the result is a display annotation, never a stored or pooled statistic
+    (unlike this codebase's exact-sum pooling elsewhere, which matters
+    because it compounds across many rows).
     """
     out: list[tuple] = []
     for r in rows:
         pct, samples = float(r[2]), int(r[4])
-        successes = max(0, min(samples, round(pct / 100 * samples)))
-        out.append((*r, pct_is_uncertain(successes, samples)))
+        out.append((*r, pct_is_uncertain(_successes(pct, samples), samples)))
     return out
+
+
+def on_time_pct_margin_pp(pct: float | Decimal, samples: int) -> float:
+    """The ± a reader should put on an on-time percentage: half its 95% Wilson
+    interval's width, in percentage points, to one decimal.
+
+    ``successes`` is back-derived from the rounded percentage exactly as
+    :func:`annotate_on_time_pct_confidence` derives it, so the two agree on
+    every row. The margin rounds up, never to nearest: a percentage that
+    function flags for a half-width over its cutoff never shows a margin at
+    or under that cutoff. ``samples <= 0`` has no interval, so its margin is
+    the widest possible, 50 points.
+    """
+    samples = int(samples)
+    if samples <= 0:
+        return 50.0
+    half_width = _half_width_pp(_successes(float(pct), samples), samples)
+    # The inner round drops float noise, so an exact tenth is not pushed up.
+    return math.ceil(round(half_width * 10, 9)) / 10
+
+
+def _successes(pct: float, samples: int) -> int:
+    """The on-time count behind a percentage rounded from it, clamped to the
+    observations it came from."""
+    return max(0, min(samples, round(pct / 100 * samples)))

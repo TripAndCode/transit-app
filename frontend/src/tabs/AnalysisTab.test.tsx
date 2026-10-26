@@ -681,6 +681,57 @@ describe("AnalysisTab ranking coverage", () => {
     expect(href).not.toContain("include_sparse");
   });
 
+  function onTimeResponse(overrides: Record<string, unknown> = {}): ReportResponse {
+    return {
+      ...reportResponse("on_time"),
+      rows: [
+        ["70-3", "平日", 11.3, 6.2, 400, false, 3.2], // i18n-ignore: GTFS service name
+        ["42", "平日", 12.3, 5.1, 380, false, 3.4], // i18n-ignore: GTFS service name
+      ],
+      rows_total: 175,
+      retired_rows: 0,
+      ...overrides,
+    } as ReportResponse;
+  }
+
+  it("opens the on-time list on its least punctual routes, and turns it around on request", async () => {
+    const { useReport, router } = setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
+    expect(screen.getByRole("radio", { name: "Lowest on-time rate first" })).toBeChecked();
+    expect(useReport.mock.calls.at(-1)?.[3]?.order).toBeUndefined();
+    await userEvent.click(screen.getByRole("radio", { name: "Highest on-time rate first" }));
+    expect(new URLSearchParams(router.state.location.search).get("order")).toBe("best");
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ order: "best" });
+    expect(screen.getByRole("radio", { name: "Highest on-time rate first" })).toBeChecked();
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]order=best(&|$)/);
+  });
+
+  it("says how much of the on-time list is shown, and shows the rest on request", async () => {
+    const { useReport } = setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
+    expect(screen.getByText("Showing 2 of 175")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ limit: 500 });
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  it("states what counts as on time in view, from the definition the rows were computed under", () => {
+    setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
+    const line = screen.getByText("On time = no more than 1 min late (early departures count as on time).");
+    expect(line.closest("details")).toBeNull();
+  });
+
+  it("states the early bound when the rows were computed with one", () => {
+    const definition = { ...DEFINITION, preset: "custom", early_tolerance_sec: 30, late_tolerance_sec: 120 };
+    setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse({ definition }));
+    const line = screen.getByText("On time = no more than 2 min late and no more than 30 s early.");
+    expect(line.closest("details")).toBeNull();
+  });
+
+  it("offers no order choice on a list it does not apply to", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^On time =/)).not.toBeInTheDocument();
+  });
+
   it("asks a report without a ranking floor for nothing extra", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=on_time&sparse=1", reportResponse("on_time"));
     expect(screen.queryByRole("checkbox", TOGGLE)).not.toBeInTheDocument();

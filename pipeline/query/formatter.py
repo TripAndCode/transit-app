@@ -30,6 +30,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("ranking_row", "en"): "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)",
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
     ("on_time_header", "en"): "[{label}On-time rate ranking]",
+    ("on_time_header_worst", "ja"): "【{label}定時率の低い順】",
+    ("on_time_header_worst", "en"): "[{label}On-time rate, lowest first]",
     ("on_time_row", "ja"): "{rank}位: 路線{route} 定時率{pct}%、平均{avg}分（{samples}件）",
     ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
@@ -211,7 +213,7 @@ def _fmt_ranking(rows: list, intent: dict, locale: str) -> str:
 
 
 def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
-    """Render the on-time-rate ranking. Row: ``(route, service, on_time_pct, avg_min, samples)``."""
+    """Render the on-time-rate ranking. Row: ``(route, service, on_time_pct, avg_min, samples, ...)``."""
     label = _service_prefix(intent, locale)
     lines = [
         _t(
@@ -225,7 +227,10 @@ def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
         )
         for i, r in enumerate(rows, 1)
     ]
-    return _t("on_time_header", locale, label=label) + "\n" + "\n".join(lines)
+    # Ascending puts the least punctual route at rank 1, which a plain
+    # "ranking" header would read as the best.
+    key = "on_time_header_worst" if intent.get("sort_order") == "asc" else "on_time_header"
+    return _t(key, locale, label=label) + "\n" + "\n".join(lines)
 
 
 def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:

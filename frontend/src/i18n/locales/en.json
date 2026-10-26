@@ -259,7 +259,7 @@
     "exclusion_hours_one": "Readings more than {{count}} hour off are ignored as errors.",
     "exclusion_hours_other": "Readings more than {{count}} hours off are ignored as errors.",
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
-    "on_time_late": "On time = no more than {{late}} late.",
+    "on_time_late": "On time = no more than {{late}} late (early departures count as on time).",
     "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
     "sentence_separator": " "
   },
@@ -852,9 +852,9 @@
       "actual_run_p85_min": "Actual run p85 (min)",
       "padding_min": "Padding (min)",
       "time_adjustment_rate": "Held for schedule (rate)",
-      "low_confidence": "Confidence"
+      "low_confidence": "Margin"
     },
-    "low_confidence_mark": "wide range",
+    "low_confidence_mark": "wide margin",
     "more_rows": "…and {{count}} more",
     "build_labels": {
       "summary": "🛠 {{tool}}",
@@ -1032,7 +1032,7 @@
       "over_5min_count": "Over 5 min late",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Data",
+      "confidence": "Margin",
       "agency_name": "Agency",
       "date": "Date",
       "scheduled_time": "Scheduled",
@@ -1041,6 +1041,13 @@
       "delay": "Delay"
     },
     "confidence_low_mark": "few data",
+    "wide_margin_mark": "wide margin",
+    "wide_margin_tip": "Margin of error ±{{margin}} points (95% interval)",
+    "on_time_order": {
+      "label": "Order",
+      "worst": "Lowest on-time rate first",
+      "best": "Highest on-time rate first"
+    },
     "direction": {
       "weekend_higher": "Weekend > Weekday",
       "weekday_higher": "Weekday > Weekend"
@@ -1209,7 +1216,7 @@
     "desc": {
       "ranking": "Which routes run latest, worst first.",
       "ranking_best": "Routes with the lowest average delay, best first.",
-      "on_time": "Share of departures inside the on-time threshold, by route.",
+      "on_time": "Share of departures inside the on-time threshold, by route, lowest first.",
       "worst_5min": "Routes with the most departures more than five minutes late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
       "compare_ranking": "Each route's weekday or weekend delay, worst first for the period you pick, with the other period as a dashed outline.",
