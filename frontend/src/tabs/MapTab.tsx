@@ -327,11 +327,12 @@ export function MapTab() {
   // history. The header, the empty map and the tiles all read this one value.
   const latestReport = liveQuery.data?.latest_captured_at ?? summaryQuery.data?.latest_captured_at ?? null;
   const freshness = freshnessFor(latestReport, clock);
-  // The tiles count trips reporting now. A trip on the map proves the feed
-  // current; with none, zero is a claim only a current feed can make, so a
-  // stalled or silent one reads unknown.
-  const countsKnown = liveRows.length > 0 || freshness === "normal" || freshness === "delayed";
   const emptyReason = emptyMapReason(latestReport, clock);
+  // The tiles count trips reporting now. A trip on the map proves the feed
+  // current; with none, zero is a claim only a current feed or the overnight
+  // break can make, so a stalled or silent one reads unknown.
+  const countsKnown = liveRows.length > 0 || freshness === "normal" || freshness === "delayed"
+    || emptyReason === "overnight";
   const lastReportedRows = emptyReason === "stale" ? filterLastReportedRows(liveQuery.data?.rows ?? [], ctx.routes) : [];
   const showingLastReported = !playbackOn && liveRows.length === 0 && lastReportedRows.length > 0
     && lastReportedFor != null && lastReportedFor === latestReport;
@@ -593,8 +594,8 @@ export function MapTab() {
           <h2 className="focus-queue-title">{td("attention")}</h2>
           {/* The only live reading of these counts on the screen. Repeating
               them next to the filters invited the reader to check whether the
-              two agreed instead of reading either; staleness likewise reads
-              once, from the header's freshness dot. */}
+              two agreed instead of reading either. A stalled feed shows here
+              only as "—", since a zero would claim no trip is reporting. */}
           <div className="focus-summary-strip">
             <StatTile label={td("observedLabel")} value={countsKnown ? liveRows.length : EM_DASH} />
             <StatTile label={td("delayedLabel")} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />

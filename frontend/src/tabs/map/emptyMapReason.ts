@@ -5,7 +5,9 @@ import { MAX_REPORT_AGE_MS } from "./liveRowsFilter";
  *  - `overnight`: it is the overnight break and the feed last reported during
  *    the service day that the night closes;
  *  - `stale`: the feed has sent nothing for longer than the live window;
- *  - `quiet`: the feed is current, so nothing is reporting on the routes shown. */
+ *  - `quiet`: the feed is current, so nothing is reporting on the routes shown,
+ *    or its timestamp is unreadable or ahead of the clock, so neither the night
+ *    nor a stall can be claimed. */
 export type EmptyMapReason = "none" | "overnight" | "stale" | "quiet";
 
 const HOUR_MS = 3_600_000;

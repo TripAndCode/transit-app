@@ -1,7 +1,8 @@
 import type { LiveTrip } from "../../api/types";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../../utils/clockSkew";
 
-/** A report older than this is dropped from the view entirely; MapTab's freshness badge turns "stale" at the same age. */
+/** A report older than this is never drawn as a current trip; MapTab's freshness badge turns "stale" at the same age.
+ *  A stalled feed's last positions are drawn only through filterLastReportedRows, labelled as such. */
 export const MAX_REPORT_AGE_MS = 10 * 60_000;
 
 function onRoutes(trip: LiveTrip, routeFilter: string[]): boolean {

@@ -234,7 +234,7 @@ describe("MapTab when no trip is reporting", () => {
     return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
   }
 
-  // 18:16 JST, eleven minutes after a feed that carried 161 trips last reported.
+  // 18:16 JST, eleven minutes after the feed last reported.
   const DAYTIME = "2026-10-25T09:16:49Z";
   const LAST_REPORT = "2026-10-25T09:05:49Z";
 
@@ -271,6 +271,7 @@ describe("MapTab when no trip is reporting", () => {
     expect(empty).toHaveTextContent("No vehicles are reporting right now");
     expect(empty).toHaveTextContent("late at night");
     expect(empty).not.toHaveTextContent("may have stopped");
+    expect(tileValue("Observed")).toBe("0");
   });
 
   it("names neither the night nor the feed when a fresh feed has nothing on the filtered routes, and counts zero", () => {
