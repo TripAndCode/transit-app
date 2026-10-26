@@ -48,4 +48,9 @@ describe("emptyMapReason", () => {
   it("claims neither a stall nor the night for an unreadable timestamp", () => {
     expect(emptyMapReason("not a time", at("2026-10-25T09:16:00Z"))).toBe("quiet");
   });
+
+  it("claims neither a stall nor the night for a report ahead of the clock, even overnight", () => {
+    // 02:30 JST, and the feed is stamped an hour later than the client clock.
+    expect(emptyMapReason("2026-10-25T18:30:00Z", at("2026-10-25T17:30:00Z"))).toBe("quiet");
+  });
 });

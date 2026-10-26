@@ -1,3 +1,4 @@
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../../utils/clockSkew";
 import { MAX_REPORT_AGE_MS } from "./liveRowsFilter";
 
 /** Why the live map has no vehicle to draw:
@@ -41,7 +42,10 @@ function overnightSilence(lastReportMs: number, clock: number): boolean {
 export function emptyMapReason(lastReport: string | null, clock: number): EmptyMapReason {
   if (lastReport == null) return "none";
   const lastReportMs = Date.parse(lastReport);
-  if (!Number.isFinite(lastReportMs)) return "quiet";
+  const age = clock - lastReportMs;
+  // A report further ahead of the clock than the skew allowance can't date the
+  // silence, the same rule MapTab's freshness badge and filterLiveRows apply.
+  if (!Number.isFinite(age) || age < CLOCK_SKEW_ALLOWANCE_MS) return "quiet";
   if (overnightSilence(lastReportMs, clock)) return "overnight";
-  return clock - lastReportMs > MAX_REPORT_AGE_MS ? "stale" : "quiet";
+  return age > MAX_REPORT_AGE_MS ? "stale" : "quiet";
 }
