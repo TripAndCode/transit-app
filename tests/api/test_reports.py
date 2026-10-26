@@ -2646,3 +2646,72 @@ async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_
 
     ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
     assert ranking["observed"] is None
+
+
+@pytest.mark.asyncio
+async def test_route_lists_leave_out_zero_delay_routes_unless_asked(reports_client):
+    """A route whose feed reports every departure exactly on time says nothing
+    about punctuality: the lists leave it out rather than rank it first, say
+    how many of their rows it is, and keep it on request."""
+    client, agency_id, pool = reports_client
+    await _seed_observed(pool, agency_id, "LATE", "2026-09-24", "2026-10-23", delay=400)
+    await _seed_observed(pool, agency_id, "PUNCTUAL", "2026-09-24", "2026-10-23", delay=30)
+    await _seed_observed(pool, agency_id, "ECHO", "2026-09-24", "2026-10-23", delay=0)
+    window = "from=2026-09-24&to=2026-10-23"
+
+    for report in ("ranking", "ranking_best", "on_time", "dow_weekday"):
+        resp = await client.get(f"/api/{agency_id}/reports/{report}?{window}")
+        assert resp.status_code == 200, (report, resp.text)
+        body = resp.json()
+        assert "ECHO" not in [r[0] for r in body["rows"]], report
+        assert body["zero_delay_rows"] == 1, report
+        assert body["retired_rows"] == 0, report
+
+    best = (await client.get(f"/api/{agency_id}/reports/ranking_best?{window}")).json()
+    assert [r[0] for r in best["rows"]] == ["PUNCTUAL", "LATE"]
+    assert best["rows_total"] == 2
+
+    kept = (await client.get(f"/api/{agency_id}/reports/ranking_best?{window}&include_zero_delay=1")).json()
+    assert [r[0] for r in kept["rows"]] == ["ECHO", "PUNCTUAL", "LATE"]
+    assert kept["zero_delay_rows"] == 1
+    assert kept["rows_total"] == 3
+
+    on_time = (await client.get(f"/api/{agency_id}/reports/on_time?{window}&include_zero_delay=1")).json()
+    assert "ECHO" in [r[0] for r in on_time["rows"]]
+
+    trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
+    assert trend["zero_delay_rows"] is None
+    refused = await client.get(f"/api/{agency_id}/reports/trend?{window}&include_zero_delay=1")
+    assert refused.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_each_kept_reason_adds_only_its_own_routes(reports_client):
+    """Retired and zero-delay codes are left out under their own toggles: every
+    combination lists the same current routes, each toggle adds only the rows
+    its count names, and a retired code that also reads zero counts once."""
+    client, agency_id, pool = reports_client
+    await pool.execute(
+        "INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C1'), ($1, 'C2'), ($1, 'ZERO')",
+        agency_id,
+    )
+    await _seed_observed(pool, agency_id, "ZERO", "2026-09-24", "2026-10-23", delay=0)
+    await _seed_observed(pool, agency_id, "BOTH", "2026-09-24", "2026-09-30", delay=0)
+    await _seed_observed(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=100)
+    await _seed_observed(pool, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=200)
+    await _seed_observed(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=300)
+    window = "from=2026-09-24&to=2026-10-23&include_sparse=1&limit=2"
+
+    # Best first: BOTH and ZERO tie at 0 and break on the code, then C1, OLD, C2.
+    expected = {
+        "": (["C1", "C2"], 2),
+        "&include_retired=1": (["BOTH", "C1", "OLD", "C2"], 4),
+        "&include_zero_delay=1": (["ZERO", "C1", "C2"], 3),
+        "&include_retired=1&include_zero_delay=1": (["BOTH", "ZERO", "C1", "OLD", "C2"], 5),
+    }
+    for toggles, (codes, total) in expected.items():
+        body = (await client.get(f"/api/{agency_id}/reports/ranking_best?{window}{toggles}")).json()
+        assert [r[0] for r in body["rows"]] == codes, toggles
+        assert body["rows_total"] == total, toggles
+        assert body["retired_rows"] == 2, toggles
+        assert body["zero_delay_rows"] == 1, toggles

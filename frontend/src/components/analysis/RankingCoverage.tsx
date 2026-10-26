@@ -21,13 +21,24 @@ export function SparseToggle({
   );
 }
 
-/** Route codes the current timetable no longer runs, left out of a route
- *  list by default. */
-export function RetiredToggle({
+/** Why a route list leaves a route out by default, each reason with its own
+ *  toggle: a route code the current timetable no longer runs, or a route
+ *  whose feed always reports zero delay and so says nothing about
+ *  punctuality. */
+const LEFT_OUT_LABELS = {
+  retired: "reports.ranking_coverage.include_retired",
+  zero_delay: "reports.ranking_coverage.include_zero_delay",
+} as const;
+
+type LeftOutReason = keyof typeof LEFT_OUT_LABELS;
+
+export function LeftOutToggle({
+  reason,
   checked,
   count,
   onChange,
 }: {
+  reason: LeftOutReason;
   checked: boolean;
   count: number;
   onChange: (checked: boolean) => void;
@@ -36,7 +47,7 @@ export function RetiredToggle({
   return (
     <label className="ranking-sparse-toggle">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
-      {t("reports.ranking_coverage.include_retired", { count })}
+      {t(LEFT_OUT_LABELS[reason], { count })}
     </label>
   );
 }

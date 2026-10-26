@@ -429,6 +429,10 @@ type ReportEnvelope<T extends ReportType, Row> = {
   /** Route lists: how many of the list's own rows are retired route codes,
    *  left out by default and kept on request; the same in either mode. */
   retired_rows?: number | null;
+  /** Route lists: how many of the list's own rows are routes whose feed
+   *  always reports zero delay, left out by default and kept on request;
+   *  the same in either mode. */
+  zero_delay_rows?: number | null;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is

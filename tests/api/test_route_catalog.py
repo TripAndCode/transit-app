@@ -1,5 +1,6 @@
-"""Which observed route codes count as retired: gone from the current timetable,
-and unobserved over the last week of the agency's data in the window."""
+"""Which observed route codes a route list leaves out: retired ones, gone from
+the current timetable and unobserved over the last week of the agency's data
+in the window, and ones whose feed reports every departure exactly on time."""
 
 from datetime import date, timedelta
 
@@ -98,3 +99,99 @@ def test_the_static_fetcher_clears_the_set_after_a_load():
 
     source = inspect.getsource(static_fetcher)
     assert source.index("load_static(") < source.index("route_catalog.invalidate_retired_routes()")
+
+
+async def _report(conn, agency_id, route_code, first: date, last: date, delays):
+    """``delays`` on each day from ``first`` to ``last``, in the per-day histogram table."""
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    day = first
+    while day <= last:
+        await seed_route_dist_day(conn, agency_id, route_code, day, delays)
+        day += timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_a_route_reporting_every_departure_exactly_on_time_has_no_delay_signal(aconn, aagency_id):
+    from pipeline.route_catalog import zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "ECHO", date(2026, 9, 24), date(2026, 10, 23), [0] * 10)
+    # Punctual, but a departure a minute late now and then is a signal.
+    await _report(aconn, aagency_id, "PUNCTUAL", date(2026, 9, 24), date(2026, 10, 23), [0] * 9 + [60])
+    assert await zero_delay_route_codes(aconn, aagency_id, WINDOW) == {"ECHO"}
+
+
+@pytest.mark.asyncio
+async def test_delays_that_cancel_out_are_still_a_signal(aconn, aagency_id):
+    from pipeline.route_catalog import zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "EVEN", date(2026, 9, 24), date(2026, 10, 23), [-60, 60] * 5)
+    assert await zero_delay_route_codes(aconn, aagency_id, WINDOW) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_thinly_observed_route_is_not_judged(aconn, aagency_id):
+    """A punctual route on a feed that reports whole minutes reads 0 most of
+    the time, so a few dozen zeros in a row are chance."""
+    from pipeline.route_catalog import ZERO_DELAY_MIN_SAMPLES, zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "THIN", date(2026, 10, 23), date(2026, 10, 23), [0] * (ZERO_DELAY_MIN_SAMPLES - 1))
+    await _report(aconn, aagency_id, "ENOUGH", date(2026, 10, 23), date(2026, 10, 23), [0] * ZERO_DELAY_MIN_SAMPLES)
+    assert await zero_delay_route_codes(aconn, aagency_id, WINDOW) == {"ENOUGH"}
+
+
+@pytest.mark.asyncio
+async def test_a_short_window_is_judged_over_the_weeks_before_it_ends(aconn, aagency_id):
+    """A route that reported delays earlier in the lookback keeps its signal
+    through a day or a week of zeros."""
+    from pipeline.route_catalog import zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "REAL", date(2026, 10, 1), date(2026, 10, 15), [60] * 10)
+    await _report(aconn, aagency_id, "REAL", date(2026, 10, 16), date(2026, 10, 23), [0] * 200)
+    await _report(aconn, aagency_id, "ECHO", date(2026, 9, 24), date(2026, 10, 23), [0] * 10)
+    for first in (date(2026, 10, 23), date(2026, 10, 17)):
+        window = RangeCtx(from_date=first, to_date=date(2026, 10, 23))
+        assert await zero_delay_route_codes(aconn, aagency_id, window) == {"ECHO"}, first
+
+
+@pytest.mark.asyncio
+async def test_a_long_window_is_judged_over_all_of_it(aconn, aagency_id):
+    """Every flagged route reads exactly 0 throughout the window it is left out of."""
+    from pipeline.route_catalog import zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "TURNED", date(2026, 8, 20), date(2026, 8, 25), [120] * 10)
+    await _report(aconn, aagency_id, "TURNED", date(2026, 8, 26), date(2026, 10, 23), [0] * 10)
+    long_window = RangeCtx(from_date=date(2026, 8, 20), to_date=date(2026, 10, 23))
+    assert await zero_delay_route_codes(aconn, aagency_id, long_window) == set()
+    assert await zero_delay_route_codes(aconn, aagency_id, WINDOW) == {"TURNED"}
+
+
+@pytest.mark.asyncio
+async def test_the_lookback_ends_on_the_agencys_last_observed_day(aconn, aagency_id):
+    """The agency's data stops before the window does, so the weeks judged end
+    on its own last day, not the window's."""
+    from pipeline.route_catalog import zero_delay_route_codes
+
+    await _report(aconn, aagency_id, "REAL", date(2026, 9, 18), date(2026, 9, 18), [180] * 10)
+    await _report(aconn, aagency_id, "REAL", date(2026, 9, 19), date(2026, 10, 14), [0] * 10)
+    window = RangeCtx(from_date=date(2026, 10, 10), to_date=date(2026, 10, 23))
+    assert await zero_delay_route_codes(aconn, aagency_id, window) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_retired_zero_delay_code_is_left_out_as_retired(aconn, aagency_id):
+    """Each left-out code has one reason, so a list counts it once."""
+    from pipeline.route_catalog import RETIRED, ZERO_DELAY, left_out_route_codes
+
+    await _timetable(aconn, aagency_id, "100", "ECHO")
+    for code, first, last, delay in (
+        ("100", date(2026, 9, 24), date(2026, 10, 23), 60),
+        ("ECHO", date(2026, 9, 24), date(2026, 10, 23), 0),
+        ("OLD_ECHO", date(2026, 9, 24), date(2026, 9, 30), 0),
+    ):
+        await _observe(aconn, aagency_id, code, first, last)
+        await _report(aconn, aagency_id, code, first, last, [delay] * 20)
+    assert await left_out_route_codes(aconn, aagency_id, WINDOW) == {
+        RETIRED: {"OLD_ECHO"},
+        ZERO_DELAY: {"ECHO"},
+    }

@@ -1228,6 +1228,8 @@
       "include_sparse": "観測{{floor}}回未満の系統も含める",
       "include_retired_one": "時刻表にない運行終了の系統コード{{count}}件も含める",
       "include_retired_other": "時刻表にない運行終了の系統コード{{count}}件も含める",
+      "include_zero_delay_one": "遅れが常に0と報告される系統{{count}}件も含める",
+      "include_zero_delay_other": "遅れが常に0と報告される系統{{count}}件も含める",
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
     },
