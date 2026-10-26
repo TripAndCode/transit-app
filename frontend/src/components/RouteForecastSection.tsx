@@ -646,6 +646,10 @@ function AgencyLanding({
   }
   const forecastDay = datedDayLabel(t, dayLabel, data.forecast_days);
 
+  const shownRoutes = data.routes.slice(0, 8);
+  // InlineSparkline draws nothing from fewer than two days, so the note that
+  // explains the line names its window only when some shown route has one.
+  const linesDrawn = shownRoutes.some((r) => (r.recent_daily?.length ?? 0) >= 2);
   return (
     <>
       {data.grid.some((c) => c.source === "ml") && <MlForecastChip aid={aid} />}
@@ -665,10 +669,15 @@ function AgencyLanding({
         <p style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
       )}
 
-      {data.routes.length > 0 && (
-        <ForecastHistory from={data.history_from} to={data.history_to} recentFrom={data.recent_from} recentTo={data.recent_to}>
+      {shownRoutes.length > 0 && (
+        <ForecastHistory
+          from={data.history_from}
+          to={data.history_to}
+          recentFrom={linesDrawn ? data.recent_from : null}
+          recentTo={linesDrawn ? data.recent_to : null}
+        >
           <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+            <RankedRoutes routes={shownRoutes} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
           </SectionCard>
         </ForecastHistory>
       )}

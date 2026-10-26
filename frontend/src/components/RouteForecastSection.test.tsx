@@ -227,9 +227,18 @@ describe("RouteForecastSection", () => {
   });
 
   it("says what the small line beside each route shows, and over which days", () => {
-    renderSection();
+    const routes = overview().routes.map((r, i) => (i === 0 ? { ...r, recent_daily: [2.0, 4.0] } : r));
+    renderSection(overview({ routes }));
     expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).toHaveTextContent(
       "The small line traces its daily average on the days with data over Oct 17 – Oct 23.",
+    );
+  });
+
+  it("leaves the small line unexplained when no shown route has two days to draw it from", () => {
+    const routes = overview().routes.map((r) => ({ ...r, recent_daily: [3.0] }));
+    renderSection(overview({ routes }));
+    expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).not.toHaveTextContent(
+      "The small line traces",
     );
   });
 
