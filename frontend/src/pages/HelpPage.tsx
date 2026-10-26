@@ -9,6 +9,7 @@ import { DataSourceCredits } from "../components/DataSourceCredits";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
 import { PageHeader } from "../components/ui/PageHeader";
+import { contentLocale } from "../i18n/contentLocale";
 import { coalesceToFrame } from "../utils/frameCoalesce";
 import { searchKey } from "../utils/searchText";
 
@@ -136,10 +137,7 @@ function scrollerOf(target: EventTarget | null): Element | null {
  *  opens it further down. */
 export function HelpPage() {
   const { t, i18n } = useTranslation();
-  // Same fallback chain as api/client.ts's Accept-Language header, not the
-  // raw (possibly still-detecting) i18n.language other call sites use.
-  const resolved = i18n.resolvedLanguage ?? i18n.language ?? "ja";
-  const locale = resolved.startsWith("en") ? "en" : "ja";
+  const locale = contentLocale(i18n);
 
   const { data: content, error, refetch } = useQuery({
     queryKey: ["userManual", locale],

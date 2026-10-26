@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LanguageToggle } from "../components/LanguageToggle";
+import { contentLocale } from "../i18n/contentLocale";
 import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import "./LegalPage.css";
 
@@ -27,8 +28,7 @@ async function fetchLegalDoc(doc: LegalDoc, locale: string, signal: AbortSignal)
 export function LegalPage({ doc }: { doc: LegalDoc }) {
   const { t, i18n } = useTranslation();
   useDocumentLocale();
-  const resolved = i18n.resolvedLanguage ?? i18n.language ?? "ja";
-  const locale = resolved.startsWith("en") ? "en" : "ja";
+  const locale = contentLocale(i18n);
   const { data, error, refetch } = useQuery({
     queryKey: ["legalDoc", doc, locale],
     queryFn: ({ signal }) => fetchLegalDoc(doc, locale, signal),

@@ -5,11 +5,10 @@ import { screen, within } from "@testing-library/react";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { DataSourceCredits } from "./DataSourceCredits";
+import { DATA_SOURCES, type DataSource } from "./dataSources";
 
 const AOMORI_STATIC = "https://ckan.odpt.org/dataset/aomori_city_all_lines";
 const AOMORI_REALTIME = "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines";
-// The association asks visitors to link only its top page, which links on to
-// the GTFS open data page.
 const BUS_KYO_TOP = "https://www.bus-kyo.or.jp/";
 
 function creditParagraphs() {
@@ -84,19 +83,43 @@ describe("DataSourceCredits", () => {
     }
   });
 
-  // Each source's licence asks for (CC BY) or invites (CC0) a credit, so an
-  // agency seeded from a host none of the credits covers would show figures
-  // with no credit for them.
-  it("covers the host of every seeded agency feed", () => {
-    const creditedHosts = new Set(["aomoricitybus.com", "ajt-mobusta-gtfs.mcapps.jp"]);
-    const [header, ...rows] = readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8").trim().split("\n");
-    const columns = header.split(",");
-    const urls = rows.flatMap((row) => {
-      const cells = row.split(",");
-      return [cells[columns.indexOf("feed_url")], cells[columns.indexOf("static_url")]].filter(Boolean);
-    });
+  // A licence asks for (CC BY) or invites (CC0) a credit, so an agency seeded
+  // from a host that no rendered credit covers would show figures with no
+  // credit for them.
+  it.each(["en", "ja"] as const)("renders a credit covering the host of every seeded agency feed (%s)", async (locale) => {
+    await i18n.changeLanguage(locale);
+    renderWithProviders(<DataSourceCredits />);
+    const rendered = [...creditParagraphs().section.querySelectorAll("p")];
 
-    expect(urls.length).toBeGreaterThan(0);
-    for (const url of urls) expect(creditedHosts, url).toContain(new URL(url).hostname);
+    for (const host of seededFeedHosts()) {
+      const source = sourceCovering(host);
+      const credit = rendered.find((p) => p.textContent === i18n.t(source.creditKey).replace(/<\/?[a-z]+>/g, ""));
+      expect(credit, `${host}: no rendered ${source.creditKey}`).toBeDefined();
+      const hrefs = [...(credit?.querySelectorAll("a") ?? [])].map((a) => a.getAttribute("href"));
+      expect(hrefs.sort(), host).toEqual(Object.values(source.links(locale)).sort());
+    }
   });
 });
+
+function seededFeedHosts(): Set<string> {
+  const [header, ...rows] = readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8").trim().split("\n");
+  const columns = header.split(",");
+  const feed = columns.indexOf("feed_url");
+  const staticFeed = columns.indexOf("static_url");
+  expect(feed, "agencies.csv has a feed_url column").toBeGreaterThanOrEqual(0);
+  expect(staticFeed, "agencies.csv has a static_url column").toBeGreaterThanOrEqual(0);
+  const hosts = new Set(
+    rows.flatMap((row) => {
+      const cells = row.split(",");
+      return [cells[feed], cells[staticFeed]].filter(Boolean).map((url) => new URL(url).hostname);
+    }),
+  );
+  expect(hosts.size).toBeGreaterThan(0);
+  return hosts;
+}
+
+function sourceCovering(host: string): DataSource {
+  const source = DATA_SOURCES.find((s) => s.feedHosts.includes(host));
+  if (!source) throw new Error(`no credited data source covers ${host}`);
+  return source;
+}

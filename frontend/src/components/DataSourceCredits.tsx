@@ -1,25 +1,22 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { contentLocale } from "../i18n/contentLocale";
+import { DATA_SOURCES } from "./dataSources";
 
-/** The open data behind every figure, credited where a reader can see it.
- *
- *  - Aomori City Bus publishes its GTFS and GTFS-RT under CC BY 4.0 (its
- *    ckan.odpt.org dataset pages). The licence requires naming the provider,
- *    linking the material and the licence, and saying the data was modified;
- *    the wording follows ODPT's own template for modified CC BY material.
- *  - The Hiroshima Bus Association publishes its operators' feeds under CC0,
- *    which requires no credit; it is credited anyway. Its site asks visitors
- *    to link only its top page, which links on to the GTFS page.
- *
- *  public/legal/terms.{ja,en}.md repeats these sentences verbatim
- *  (legalDocs.test.ts holds the two together), and an agency seeded from a
- *  host these credits don't cover fails DataSourceCredits.test.tsx. */
+const PARAGRAPH: CSSProperties = {
+  margin: "4px 0 0",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-tertiary)",
+  lineHeight: 1.6,
+};
+
+/** The open data behind every figure, credited where a reader can see it:
+ *  one line per entry of `DATA_SOURCES`, which says why each is worded and
+ *  linked as it is. */
 export function DataSourceCredits({ className, style }: { className?: string; style?: CSSProperties }) {
   const { t, i18n } = useTranslation();
   const headingId = useId();
-  const resolved = i18n.resolvedLanguage ?? i18n.language ?? "ja";
-  const deed = resolved.startsWith("en") ? "en" : "ja";
-  const paragraph = { margin: "4px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", lineHeight: 1.6 };
+  const locale = contentLocale(i18n);
 
   return (
     <section className={className} style={style} aria-labelledby={headingId}>
@@ -29,27 +26,17 @@ export function DataSourceCredits({ className, style }: { className?: string; st
       >
         {t("credits.title")}
       </h2>
-      <p style={paragraph}>
-        <Trans
-          t={t}
-          i18nKey="credits.aomori"
-          components={{
-            static: <SourceLink href="https://ckan.odpt.org/dataset/aomori_city_all_lines" />,
-            realtime: <SourceLink href="https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines" />,
-            license: <SourceLink href={`https://creativecommons.org/licenses/by/4.0/deed.${deed}`} />,
-          }}
-        />
-      </p>
-      <p style={paragraph}>
-        <Trans
-          t={t}
-          i18nKey="credits.hiroshima"
-          components={{
-            site: <SourceLink href="https://www.bus-kyo.or.jp/" />,
-            license: <SourceLink href={`https://creativecommons.org/publicdomain/zero/1.0/deed.${deed}`} />,
-          }}
-        />
-      </p>
+      {DATA_SOURCES.map((source) => (
+        <p key={source.creditKey} style={PARAGRAPH}>
+          <Trans
+            t={t}
+            i18nKey={source.creditKey}
+            components={Object.fromEntries(
+              Object.entries(source.links(locale)).map(([tag, href]) => [tag, <SourceLink key={tag} href={href} />]),
+            )}
+          />
+        </p>
+      ))}
     </section>
   );
 }

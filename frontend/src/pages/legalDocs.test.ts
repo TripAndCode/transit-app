@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
+import { DATA_SOURCES } from "../components/dataSources";
 
 const LEGAL_DIR = resolve(__dirname, "../../public/legal");
 
@@ -37,11 +38,12 @@ describe("public/legal/terms data-source credits", () => {
 
   it.each(["ja", "en"])("states each credit exactly as the app does (%s)", (locale) => {
     const terms = linkText(readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8"));
-    const { credits } = JSON.parse(readFileSync(resolve(LOCALES_DIR, `${locale}.json`), "utf8")) as {
-      credits: { aomori: string; hiroshima: string };
-    };
-    expect(terms).toContain(untagged(credits.aomori));
-    expect(terms).toContain(untagged(credits.hiroshima));
+    const strings: unknown = JSON.parse(readFileSync(resolve(LOCALES_DIR, `${locale}.json`), "utf8"));
+    for (const { creditKey } of DATA_SOURCES) {
+      const credit = creditKey.split(".").reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], strings);
+      expect(typeof credit, creditKey).toBe("string");
+      expect(terms).toContain(untagged(credit as string));
+    }
   });
 
   // Weather and map tiles carry their own credits where they are shown; the
@@ -54,16 +56,10 @@ describe("public/legal/terms data-source credits", () => {
     for (const source of sources) expect(terms).toContain(source);
   });
 
-  it.each(["ja", "en"])("links the licensed data and each licence deed (%s)", (locale) => {
+  it.each(["ja", "en"] as const)("links each source's data and licence deed as the app does (%s)", (locale) => {
     const terms = readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8");
-    for (const url of [
-      "https://ckan.odpt.org/dataset/aomori_city_all_lines",
-      "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines",
-      `https://creativecommons.org/licenses/by/4.0/deed.${locale}`,
-      "https://www.bus-kyo.or.jp/",
-      `https://creativecommons.org/publicdomain/zero/1.0/deed.${locale}`,
-    ]) {
-      expect(terms).toContain(`](${url})`);
+    for (const source of DATA_SOURCES) {
+      for (const url of Object.values(source.links(locale))) expect(terms, source.creditKey).toContain(`](${url})`);
     }
   });
 });
