@@ -254,6 +254,12 @@ describe("ModelPage way back to an agency", () => {
     renderPage(evaluations(), "/model?from=999");
     expect(screen.queryByRole("link", { name: /Back to/ })).toBeNull();
   });
+
+  it("falls back to the last chosen agency when the link names one it does not know", () => {
+    writeLastAgency(1);
+    renderPage(evaluations(), "/model?from=999");
+    expect(screen.getByRole("link", { name: "← Back to Aomori" })).toHaveAttribute("href", "/agencies/1/pulse");
+  });
 });
 
 describe("ModelPage in Japanese", () => {

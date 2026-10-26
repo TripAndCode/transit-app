@@ -1,5 +1,6 @@
-/* Japanese has no spaces to break at: break between phrases, so a figure
-   such as 誤差が6.6%小さい never splits mid-word. */
+/* Japanese has no spaces to break at: break between phrases, so prose such
+   as the subtitle and the notes never splits mid-word. The figures that must
+   stay whole are pinned further by .model-nowrap. */
 .model-page {
   word-break: auto-phrase;
 }

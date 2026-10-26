@@ -34,14 +34,20 @@ function maeSeconds(t: TFunction, minutes: number | null): string {
   return t("common.duration_sec", { sec: Math.round(minutes * 60) });
 }
 
+/** Whether the agency stayed on the usual estimate throughout. Its model
+ *  figures are then that estimate's own error plus the model's only where
+ *  the estimate had no history, not how the model did, so the page shows
+ *  neither the model's skill nor its error for it, as the API withholds the
+ *  skill. */
+function onUsualEstimate(a: MlAgencyEvaluation): boolean {
+  return a.model_status === "b0";
+}
+
 function MaeText({ a }: { a: MlAgencyEvaluation }) {
   const { t } = useTranslation();
   const b0 = maeSeconds(t, a.b0_mae);
   const b0Text = <span className="model-nowrap">{t("model.mae_b0", { value: b0 })}</span>;
-  // On the usual estimate throughout, the model's figure is that estimate's
-  // own error plus the model's only where the estimate had no history: not
-  // how the model did, for the same reason its skill is withheld.
-  if (a.model_status === "b0") return b0Text;
+  if (onUsualEstimate(a)) return b0Text;
   return (
     <>
       <span className="model-nowrap">{t("model.mae_model", { value: maeSeconds(t, a.lgbm_mae) })}</span>
@@ -93,15 +99,18 @@ function failureText(t: TFunction, f: MlFailure, latest: MlEvaluationLatest): st
 }
 
 /** The agency the visitor opened this page from (`from`, set by the links
- *  that lead here), else the last one chosen: the page belongs to no agency,
- *  so without it the way back would be the picker. */
+ *  that lead here), else the last one chosen, whichever names a known agency:
+ *  the page belongs to no agency, so without it the way back would be the
+ *  picker. */
 function BackToAgency() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
   const [stored] = useState(readLastAgency);
   const from = params.get("from");
-  const id = from != null ? Number(from) : stored;
-  const agency = useAgencies().data?.find((a) => a.agency_id === id);
+  const agencies = useAgencies().data;
+  const agency =
+    (from != null ? agencies?.find((a) => a.agency_id === Number(from)) : undefined) ??
+    agencies?.find((a) => a.agency_id === stored);
   if (!agency) return null;
   return (
     <Link to={`/agencies/${agency.agency_id}/pulse`} style={{ justifySelf: "start", fontSize: "var(--text-sm)" }}>
@@ -186,7 +195,7 @@ function AgencyRow({ a }: { a: MlAgencyEvaluation }) {
       </td>
       <td style={cell}>{t(`model.status_${a.model_status}`)}</td>
       <td style={cell}>
-        <SkillText skill={a.model_status === "b0" ? null : a.skill} />
+        <SkillText skill={onUsualEstimate(a) ? null : a.skill} />
       </td>
       <td style={cell}>
         <MaeText a={a} />
@@ -203,7 +212,7 @@ function AgencyCard({ a }: { a: MlAgencyEvaluation }) {
         <span className="model-card__title">{a.agency_name ?? a.agency_id}</span>
         {a.forecast_live && <span className="caveat-badge">{t("model.live")}</span>}
       </div>
-      {a.model_status !== "b0" && (
+      {!onUsualEstimate(a) && (
         <div className="model-card__skill">
           <span className="model-card__label">{t("model.col_skill")}</span> <SkillText skill={a.skill} />
         </div>
