@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
+import { design } from "./design";
 
 // The compare ranking and the dow reports split days by the agency's day
 // types, so their weekend side is 土日祝: public holidays and any other day the
@@ -27,6 +28,7 @@ const SAT_SUN_STRINGS: Record<string, string> = {
   "overview.peak_hour.weekend_empty": ja.overview.peak_hour.weekend_empty,
   "overview.modal.peak_hour": ja.overview.modal.peak_hour,
   "overview.peak_explainer": ja.overview.peak_explainer,
+  "design.weekend": design.ja.weekend,
 };
 
 describe("ja day-group wording", () => {
@@ -47,5 +49,6 @@ describe("en day-group wording", () => {
     expect(en.reports.desc.dow_weekday).toMatch(/holiday/i);
     expect(en.ask.filter_bar.dow_weekend).not.toMatch(/holiday/i);
     expect(en.overview.peak_explainer).not.toMatch(/weekend\/holiday/i);
+    expect(design.en.weekend).not.toMatch(/holiday/i);
   });
 });

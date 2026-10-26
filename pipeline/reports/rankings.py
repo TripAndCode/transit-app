@@ -789,10 +789,10 @@ async def _route_wd_we_avg_ch(
     result = await ch.query(
         f"""
         SELECT route_code,
-               avgIf(dep_delay, has({{cmp_wd:Array(Date)}}, sd)) AS wd_avg,
-               countIf(has({{cmp_wd:Array(Date)}}, sd))          AS wd_n,
-               avgIf(dep_delay, has({{cmp_we:Array(Date)}}, sd)) AS we_avg,
-               countIf(has({{cmp_we:Array(Date)}}, sd))          AS we_n
+               avgIf(dep_delay, sd IN {{cmp_wd:Array(Date)}}) AS wd_avg,
+               countIf(sd IN {{cmp_wd:Array(Date)}})          AS wd_n,
+               avgIf(dep_delay, sd IN {{cmp_we:Array(Date)}}) AS we_avg,
+               countIf(sd IN {{cmp_we:Array(Date)}})          AS we_n
         FROM (
             SELECT u.route_code AS route_code,
                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
