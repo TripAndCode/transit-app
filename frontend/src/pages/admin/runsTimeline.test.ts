@@ -57,6 +57,20 @@ describe("runsToBars", () => {
     expect(lanes.map((l) => l.key)).toEqual(["ingest:all", "ingest:2", "analyze:2", "weather:all"]);
   });
 
+  it("draws the coverage probes after the fleet passes the sweep runs before them", () => {
+    const lanes = runsToBars(
+      [
+        run({ run_id: 1, kind: "static" }),
+        run({ run_id: 2, kind: "probe" }),
+        run({ run_id: 3, kind: "weather", agency_id: null, agency_name: null }),
+        run({ run_id: 4, kind: "analyze" }),
+      ],
+      DAY_START,
+      DAY_START,
+    );
+    expect(lanes.map((l) => l.kind)).toEqual(["analyze", "weather", "probe", "static"]);
+  });
+
   it("draws a chained update's umbrella above the steps it spans", () => {
     const lanes = runsToBars(
       [run({ run_id: 1, kind: "static" }), run({ run_id: 2, kind: "ingest" }), run({ run_id: 3, kind: "update" })],

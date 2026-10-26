@@ -77,7 +77,7 @@ class _Conn:
 
 
 def test_kind_and_status_vocabularies_match_the_table_constraints():
-    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update")
+    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update", "probe")
     assert RUN_STATUSES == ("running", "ok", "skipped", "error", "unchanged")
 
 

@@ -91,6 +91,7 @@ class _Env:
         self.started: list[tuple] = []
         self.recorded: list[tuple] = []
         self.weather: list[str] = []
+        self.reprobes: list[str] = []
         self.conn = _Conn([1])
 
 
@@ -106,6 +107,7 @@ def sweep(monkeypatch) -> _Env:
     monkeypatch.setattr(pipeline.analyze, "analyze", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline.freshness, "check_agg_freshness", lambda *_a, **_k: [])
     monkeypatch.setattr(internal, "_run_weather_ingest", lambda db_url: env.weather.append(db_url))
+    monkeypatch.setattr(internal, "_run_rt_coverage_reprobe", lambda db_url: env.reprobes.append(db_url))
 
     def _start_run(_conn, kind, **kwargs):
         env.started.append((kind, kwargs.get("status", "running")))
@@ -191,6 +193,60 @@ def test_the_scheduled_sweep_still_drives_the_fleet_weather_pass(sweep):
 def test_a_sweep_told_not_to_fetch_weather_leaves_the_third_party_alone(sweep):
     assert internal._ingest_and_analyze_sweep(_DB_URL, run_weather=False).status == "ok"
     assert sweep.weather == []
+
+
+def test_the_scheduled_sweep_renews_lapsing_coverage_verdicts(sweep):
+    assert internal._ingest_and_analyze_sweep(_DB_URL).status == "ok"
+    assert sweep.reprobes == [_DB_URL]
+
+
+def test_a_sweep_without_the_weather_pass_still_renews_coverage_verdicts(sweep):
+    """The operator's fleet run skips a third party's weather, not the
+    agencies' own feeds."""
+    internal._ingest_and_analyze_sweep(_DB_URL, run_weather=False)
+    assert sweep.reprobes == [_DB_URL]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"agency_ids": [1]}, {"kind": "analyze"}],
+    ids=["one agency's run", "analyze only"],
+)
+def test_a_scoped_or_analyze_only_sweep_leaves_the_feeds_alone(sweep, kwargs):
+    internal._ingest_and_analyze_sweep(_DB_URL, **kwargs)
+    assert sweep.reprobes == []
+
+
+def test_a_displaced_sweep_does_not_probe(sweep):
+    sweep.got_lock = False
+    internal._ingest_and_analyze_sweep(_DB_URL)
+    assert sweep.reprobes == []
+
+
+def test_a_failed_reprobe_pass_never_fails_the_sweep(monkeypatch):
+    """The pass's own guard: a connection that cannot be opened, or a job
+    that raises, is logged and the sweep's outcome stands."""
+    import pipeline.rt_coverage_reprobe as reprobe
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("registry unreadable")
+
+    closed: list[bool] = []
+
+    class _Closing:
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(psycopg2, "connect", lambda _url: _Closing())
+    monkeypatch.setattr(reprobe, "reprobe_due_agencies", _boom)
+    internal._run_rt_coverage_reprobe(_DB_URL)
+    assert closed == [True]
+
+    def _refused(_url):
+        raise psycopg2.OperationalError("connection refused")
+
+    monkeypatch.setattr(psycopg2, "connect", _refused)
+    internal._run_rt_coverage_reprobe(_DB_URL)
 
 
 def test_the_runner_passes_its_weather_decision_through_to_the_sweep(monkeypatch):

@@ -171,6 +171,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
+| `make reprobe-rt-coverage` | Re-probe each agency whose RT field-coverage verdict is missing, refuted or about to lapse; probes only in service hours, so schedule it daily in the late morning |
 | `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |

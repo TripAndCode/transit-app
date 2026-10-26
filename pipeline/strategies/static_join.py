@@ -25,6 +25,8 @@ Verifying a feed is an operational act, not a code change: run
 An empty/overnight capture (no stop_time_updates at all) confirms nothing
 and is refused rather than recorded, and a recorded verdict carries an
 expiry so trust in a feed that later changes shape lapses on its own.
+``pipeline.rt_coverage_reprobe`` renews each verdict daily, in service
+hours, before that expiry arrives.
 """
 
 import logging
@@ -67,9 +69,9 @@ RT_COVERAGE_FIELDS = (
 
 # How long a recorded probe verdict is trusted before it must be re-run. A
 # feed's field population is a property of a vendor deployment that can
-# change without notice, so a verdict decays instead of standing forever;
-# the horizon is long enough that re-probing stays a periodic operational
-# chore rather than a continuous one.
+# change without notice, so a verdict decays instead of standing forever.
+# `pipeline.rt_coverage_reprobe` renews a verdict ahead of this, so the
+# horizon bounds how long a verdict stands once that renewal stops running.
 DEFAULT_PROBE_TTL_DAYS = 180
 
 # Coverage fractions separating "this feed populates the field" from "this

@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -299,6 +299,13 @@ ingest-weather:
 # key. Writes $(db_url), so it is an operator step against the dev database.
 ingest-ml:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_ml
+
+# Renews each agency's RT field-coverage verdict that is missing, refuted or
+# about to lapse, by probing its live feed (pipeline/rt_coverage_reprobe.py).
+# Probes only inside each agency's service hours and does nothing otherwise,
+# so schedule it daily in the late morning. Writes $(db_url).
+reprobe-rt-coverage:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py reprobe_rt_coverage
 
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:

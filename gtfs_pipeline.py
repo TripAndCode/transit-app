@@ -910,6 +910,31 @@ def cmd_ingest_weather(args):
     logger.info(f"ingest_weather: wrote {written} station-day(s) of {considered} examined.")
 
 
+def cmd_reprobe_rt_coverage(args):
+    """Re-probe every agency whose RT field-coverage verdict is missing,
+    refuted or about to lapse, during its service hours.
+
+    A poll too thin to count is not a failure: the next run tries again. An
+    agency whose feed could not be fetched or decoded fails the command, so
+    a scheduler that pages on a nonzero exit hears about it."""
+    from pipeline import rt_coverage_reprobe
+
+    conn = _get_conn()
+    try:
+        outcome = rt_coverage_reprobe.reprobe_due_agencies(conn, DATABASE_URL)
+    finally:
+        conn.close()
+    if not (outcome.recorded or outcome.skipped or outcome.failed):
+        logger.info("reprobe_rt_coverage: nothing due in service hours")
+        return
+    logger.info(
+        f"reprobe_rt_coverage: recorded {len(outcome.recorded)} agency(ies) {outcome.recorded}, "
+        f"skipped {len(outcome.skipped)} {outcome.skipped}, failed {len(outcome.failed)} {outcome.failed}"
+    )
+    if outcome.failed:
+        sys.exit(1)
+
+
 def cmd_ingest_ml(args):
     """Pull the ML workbench's latest published forecast and its weekly evaluation summaries from R2 into Postgres.
 
@@ -1056,6 +1081,10 @@ def main():
         ),
     )
     sub.add_parser("ingest_ml", help="Pull the latest published ML forecast from R2 into Postgres")
+    sub.add_parser(
+        "reprobe_rt_coverage",
+        help="Re-probe each agency whose RT field-coverage verdict is missing, refuted or about to lapse",
+    )
 
     args = parser.parse_args()
     if args.command == "add_agency":
@@ -1098,6 +1127,8 @@ def main():
         cmd_ingest_weather(args)
     elif args.command == "ingest_ml":
         cmd_ingest_ml(args)
+    elif args.command == "reprobe_rt_coverage":
+        cmd_reprobe_rt_coverage(args)
     else:
         parser.print_help()
 

@@ -1734,6 +1734,7 @@
         "promote": "履歴へ移行",
         "analyze": "集計",
         "weather": "気象",
+        "probe": "RT 項目の計測",
         "static": "静的データ",
         "update": "まとめて更新"
       },
