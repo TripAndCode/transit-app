@@ -35,7 +35,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { forecastDelayText } from "../utils/delayPhrase";
 import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
-import { datedDayLabel } from "../utils/forecastDays";
+import { datedDayLabel, forecastDayOfMonth } from "../utils/forecastDays";
 import {
   BAND_ORDER,
   bandOf,
@@ -143,21 +143,27 @@ function RankedRoutes({
   );
 }
 
+/** Row-label width that fits a dated weekday ("10/27(火)", "Tue 10/27") at the grid's label size. */
+const DATED_ROW_LABEL_PX = 64;
+
 function HeatmapGrid({
   cells,
   big,
   dayLabel,
+  dated,
   ariaLabel,
 }: {
   cells: ForecastHeatmapCell[];
   big: boolean;
   dayLabel: (dow: number) => string;
+  /** Some row labels carry a date, so the label column is widened to fit one. */
+  dated: boolean;
   ariaLabel: string;
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
   const byKey = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
-  const labelW = big ? 30 : 22;
+  const labelW = dated ? DATED_ROW_LABEL_PX : big ? 30 : 22;
   const cellH = big ? 26 : 13;
   const gap = big ? 3 : 2;
   const cols = `${labelW}px repeat(24, 1fr)`;
@@ -200,7 +206,7 @@ function HeatmapGrid({
             <div key={`r${dow}`} role="row" style={{ display: "contents" }}>
               <div
                 role="rowheader"
-                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}
+                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5, whiteSpace: "nowrap" }}
               >
                 {dayLabel(dow)}
               </div>
@@ -296,6 +302,7 @@ function HeatmapGrid({
 function MarginBars({
   values,
   labels,
+  axisLabels,
   testid,
   big,
   sparse,
@@ -303,6 +310,8 @@ function MarginBars({
 }: {
   values: (number | null)[];
   labels: string[];
+  /** What the axis shows under each bar, when it differs from `labels`. */
+  axisLabels?: React.ReactNode[];
   testid: string;
   big: boolean;
   sparse: boolean;
@@ -313,7 +322,7 @@ function MarginBars({
   const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, values.length);
 
   return (
-    <div ref={containerRef} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
+    <div ref={containerRef} className={big ? undefined : "fc-bars--compact"} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
       <div
         role="row"
         style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}
@@ -338,8 +347,9 @@ function MarginBars({
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: 4 }} aria-hidden="true">
         {labels.map((l, i) => (
-          <span key={i} style={{ flex: 1, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
-            {sparse ? (i % 6 === 0 ? i : "") : l}
+          // nowrap: a column narrower than "12" or "28" must not stack its digits.
+          <span key={i} style={{ flex: 1, minWidth: 0, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
+            {sparse ? (i % 6 === 0 ? i : "") : (axisLabels?.[i] ?? l)}
           </span>
         ))}
       </div>
@@ -723,7 +733,21 @@ function RouteDetail({
     });
   const dowAvg = margin((c) => c.dow - 1, 7);
   const hourAvg = margin((c) => c.hour, 24);
-  const dowLabels = Array.from({ length: 7 }, (_, i) => dayLabel(i + 1));
+  const dowLabels = Array.from({ length: 7 }, (_, i) => forecastDay(i + 1));
+  // Each day's axis column is narrow, so a forecast day shows its day of the
+  // month under the weekday; its tooltip and name carry the whole date.
+  const forecastDays = forecastDayOfMonth(data?.forecast_days ?? []);
+  const dowAxis = Array.from({ length: 7 }, (_, i) => {
+    const day = forecastDays.get(i + 1);
+    return day ? (
+      <>
+        {dayLabel(i + 1)}
+        <span className="fc-axis-day">{day}</span>
+      </>
+    ) : (
+      dayLabel(i + 1)
+    );
+  });
   const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}:00`);
 
   const argExtreme = (vals: (number | null)[], worst: boolean) => {
@@ -764,7 +788,7 @@ function RouteDetail({
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
         <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
+          <MarginBars values={dowAvg} labels={dowLabels} axisLabels={dowAxis} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
         <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-hr" onOpen={() => setView("hr")}>
           <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
@@ -781,7 +805,7 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
+          <HeatmapGrid cells={cells} big dayLabel={forecastDay} dated={forecastDays.size > 0} ariaLabel={t("forecast.heatmap_aria")} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
       )}
@@ -807,7 +831,7 @@ function RouteDetail({
                     { label: t(mlBacked ? "forecast.stat_samples_history" : "forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
+                <MarginBars values={vals} labels={labels} axisLabels={view === "dow" ? dowAxis : undefined} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
               </>
             );
           })()}

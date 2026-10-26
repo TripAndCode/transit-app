@@ -135,13 +135,11 @@ describe("calmDelayColor() (continuous calm ramp, anchored on minutes)", () => {
   });
 
   it("gives a delay the same colour whatever else the view holds, so a seven-minute delay is never the ok end", () => {
-    // A view whose values all sit at 7.3-10.6 min once painted its smallest green.
     expect(calmDelayColor(7.3)).toBe(calmDelayColor(10.6));
     expect(calmDelayColor(7.3)).not.toBe(rgbCss(DELAY_RAMP.ok));
   });
 
   it("keeps a small delay at the calm end, even when it is the largest in its view", () => {
-    // A calm agency's worst band (under two minutes) once painted orange.
     expect(calmDelayColor(1.8)).not.toBe(rgbCss(DELAY_RAMP.moderate));
     expect(calmDelayColor(1.8)).not.toBe(calmDelayColor(DELAY_THRESHOLDS.moderate));
   });

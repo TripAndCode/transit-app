@@ -291,6 +291,23 @@ describe("RouteForecastSection", () => {
     expect(fill(better)).not.toBe(calmDelayColor(0));
   });
 
+  it("dates a chosen route's full day × hour rows and its by-day bars where its forecast covers them", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.dow === 2 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
+    ml.forecast_days = [{ dow: 2, service_date: "2026-10-27" }];
+    renderSection(overview(), "100", ml);
+
+    const dayBars = screen.getAllByTestId("dow-bar");
+    expect(dayBars[1]).toHaveAccessibleName(/^Tue 10\/27 · /);
+    expect(dayBars[0]).toHaveAccessibleName(/^Mon · /);
+    // The bar axis has a narrow column per day, so the day of the month sits under the weekday.
+    expect(within(screen.getByTestId("fc-card-dow")).getByText("27")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show day × hour detail" }));
+    const rows = within(screen.getByTestId("fc-detail-fullgrid")).getAllByRole("rowheader").map((h) => h.textContent);
+    expect(rows).toEqual(["Mon", "Tue 10/27", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  });
+
   it("dates a chosen route's forecast rows from that route's own forecast", () => {
     const ml = heatmap();
     ml.cells = ml.cells.map((c) => (c.dow === 2 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));

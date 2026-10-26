@@ -27,12 +27,16 @@ function forecastDates(t: TFunction, days: ForecastDay[]): string {
  *  other cell shows, or, with no forecast, that the grid is a typical week. */
 export function ForecastPeriodNote({ aid, route }: { aid: number; route: string | null }) {
   const { t } = useTranslation();
-  const overview = useForecastOverview(aid);
+  const overview = useForecastOverview(route == null ? aid : null);
   const heatmap = useForecastHeatmap(route != null ? aid : null, route ?? "");
   const data = route == null ? overview.data : heatmap.data;
   if (!data) return null;
 
+  // The same emptiness the view below goes by, so no period is named above
+  // its no-measurements message.
   const cells = "grid" in data ? data.grid : data.cells;
+  const routes = "routes" in data ? data.routes : [];
+  if (!cells.some((c) => c.expected_avg_min != null) && routes.length === 0) return null;
   const history = data.history_from && data.history_to ? period(data.history_from, data.history_to) : null;
   if (data.forecast_days.length > 0) {
     const pastShown = cells.some((c) => c.source !== "ml" && c.expected_avg_min != null);

@@ -149,6 +149,10 @@ async def test_overview_recent_daily_failure_degrades_gracefully(overview_client
     body = r.json()
     assert len(body["routes"]) > 0
     assert all(x["recent_daily"] == [] for x in body["routes"])
+    # No sparkline is drawn, so no sparkline window is named.
+    assert body["recent_from"] is None
+    assert body["recent_to"] is None
+    assert body["history_from"] == "2026-05-28"
 
 
 async def test_overview_names_the_window_its_past_figures_cover(overview_client):

@@ -7,6 +7,7 @@ to be logged, not silently dropped.
 """
 
 import logging
+from datetime import date
 from unittest.mock import AsyncMock
 
 import api.routers.reports as reports_mod
@@ -20,8 +21,7 @@ async def test_forecast_overview_logs_recent_daily_fetch_failure(caplog, monkeyp
         raise RuntimeError("simulated recent-daily fetch failure")
 
     monkeypatch.setattr(reports_mod, "_fetch_recent_daily_rows", boom)
-    no_days = dict.fromkeys(("history_from", "history_to", "recent_from", "recent_to"))
-    monkeypatch.setattr(reports_mod, "_fetch_overview_spans", AsyncMock(return_value=no_days))
+    conn.fetchrow = AsyncMock(return_value={"first": date(2026, 7, 12), "last": date(2026, 10, 23)})
 
     # __wrapped__: the raw endpoint function under slowapi's @limiter.limit,
     # which otherwise requires a real starlette Request to check the rate
@@ -31,6 +31,11 @@ async def test_forecast_overview_logs_recent_daily_fetch_failure(caplog, monkeyp
         result = await endpoint(request=None, agency_id=1, conn=conn, locale="ja")
 
     assert result["routes"] == []
+    # No sparkline is drawn, so no sparkline window is named; the past
+    # averages' own span does not depend on that read.
+    assert result["recent_from"] is None
+    assert result["recent_to"] is None
+    assert result["history_from"] == date(2026, 7, 12)
     records = [r for r in caplog.records if r.name == "api.routers.reports"]
     assert records, "expected a warning log from forecast_overview on recent-daily fetch failure"
     assert any(r.exc_info for r in records), "expected exc_info=True so the traceback is captured"

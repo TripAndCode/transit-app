@@ -91,6 +91,21 @@ describe("ForecastPeriodNote", () => {
     expect(screen.getByTestId("fc-period")).toHaveTextContent("Days and times without a forecast show the average of past measurements.");
   });
 
+  it("reads only the chosen route's forecast on a route's view, never the agency overview", () => {
+    mockData(overview(), { route: "100", cells: [], forecast_days: [], history_from: null, history_to: null, disclaimer: "" });
+    renderWithProviders(<ForecastPeriodNote aid={1} route="100" />);
+    expect(hooks.useForecastOverview).toHaveBeenCalledWith(null);
+    expect(hooks.useForecastOverview).not.toHaveBeenCalledWith(1);
+    expect(hooks.useForecastHeatmap).toHaveBeenCalledWith(1, "100");
+  });
+
+  it("names no period above a view that shows no figures, whatever period the aggregates span", () => {
+    const empty = grid([]).map((c) => ({ ...c, expected_avg_min: null }));
+    mockData(overview({ grid: empty, routes: [] }));
+    renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
+    expect(screen.queryByTestId("fc-period")).toBeNull();
+  });
+
   it("renders nothing before the data arrives, or for an agency with neither forecast nor measurements", () => {
     mockData(undefined);
     const { container, unmount } = renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);

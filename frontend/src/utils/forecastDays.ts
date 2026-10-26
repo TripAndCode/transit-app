@@ -11,3 +11,9 @@ export function datedDayLabel(t: TFunction, dayLabel: (dow: number) => string, d
     return iso ? t("forecast.dow_dated", { day: dayLabel(dow), date: formatShortDate(iso) }) : dayLabel(dow);
   };
 }
+
+/** The day of the month ("27") each weekday the forecast model covers stands
+ *  for: a chart axis's per-day column is too narrow for a whole date. */
+export function forecastDayOfMonth(days: ForecastDay[]): Map<number, string> {
+  return new Map(days.map((d) => [d.dow, String(Number(d.service_date.slice(8, 10)))]));
+}
