@@ -17,14 +17,14 @@ const JA_VARIANTS = [
   [/サインアウト/, "ログアウト"],
   [/そのほか/, "その他"],
   // The service's own record of a late departure is never called a
-  // certificate; the copy names the operator's certificate only to say the
-  // record is not one.
-  [/遅延証明(?!書では)/, "遅延の記録（参考）"],
+  // certificate or proof; the copy names the operator's certificate only to
+  // say the record is not one.
+  [/証明(?!書では)/, "遅延の記録（参考）"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],
   [/Continue with/, "Sign in with"],
-  [/delay certificate(?! issued)/i, "Delay record (for reference)"],
+  [/certificate(?! issued)/i, "Delay record (for reference)"],
 ];
 
 const JA_SOURCES = [
@@ -42,9 +42,24 @@ const EN_SOURCES = [
   "frontend/public/legal/privacy.en.md",
 ];
 
+/** The words a reader sees in a file: a locale file's values, not its keys,
+ *  and a Markdown page's prose, not its link and image targets. */
+function copyText(file) {
+  const text = readFileSync(file, "utf8");
+  if (file.endsWith(".json")) return jsonValues(JSON.parse(text)).join("\n");
+  if (file.endsWith(".md")) return text.replace(/\]\([^)]*\)/g, "]");
+  return text;
+}
+
+function jsonValues(node) {
+  if (typeof node === "string") return [node];
+  if (node && typeof node === "object") return Object.values(node).flatMap(jsonValues);
+  return [];
+}
+
 function assertAbsent(variants, sources) {
   for (const file of sources) {
-    const text = readFileSync(file, "utf8");
+    const text = copyText(file);
     for (const [variant, preferred] of variants) {
       assert.equal(text.match(variant), null, `${file} uses ${variant.source}; say ${preferred}`);
     }
