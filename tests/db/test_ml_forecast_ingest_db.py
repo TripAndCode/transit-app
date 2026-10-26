@@ -11,6 +11,13 @@ import gtfs_pipeline
 from pipeline import ml_forecast_ingest
 from pipeline.ml_forecast_ingest import ingest_forecast
 
+# The ingest prunes rows whose service_date has aged past its retention
+# window, so every fixture date follows the clock rather than a fixed day.
+_ORIGIN = date.today()
+_NEXT_ORIGIN = _ORIGIN + timedelta(days=1)
+_SERVICE_DATE = _ORIGIN + timedelta(days=1)
+_MODEL_VERSION = (_ORIGIN - timedelta(days=1)).isoformat()
+
 
 class _FakeS3:
     def __init__(self, objects: dict[str, bytes]):
@@ -54,21 +61,23 @@ def test_ingest_forecast_upserts_rows_from_the_latest_manifest(pg_conn):
         {
             "agency_id": 8,
             "route_code": "R1",
-            "service_date": "2026-10-12",
+            "service_date": _SERVICE_DATE.isoformat(),
             "hour": 8,
             "mean_min": 3.0,
             "q10": 1.0,
             "q50": 3.0,
             "q90": 5.0,
-            "model_version": "2026-10-10",
-            "origin_date": "2026-10-11",
-            "generated_at": "2026-10-11T02:00:00",
+            "model_version": _MODEL_VERSION,
+            "origin_date": _ORIGIN.isoformat(),
+            "generated_at": f"{_ORIGIN.isoformat()}T02:00:00",
         }
     ]
     s3 = _FakeS3(
         {
-            "forecasts/2026-10-11/manifest.json": b'{"rows": 1, "origin_date": "2026-10-11"}',
-            "forecasts/2026-10-11/forecast.parquet": _parquet_bytes(rows),
+            f"forecasts/{_ORIGIN.isoformat()}/manifest.json": json.dumps(
+                {"rows": 1, "origin_date": _ORIGIN.isoformat()}
+            ).encode(),
+            f"forecasts/{_ORIGIN.isoformat()}/forecast.parquet": _parquet_bytes(rows),
         }
     )
     count = ingest_forecast(pg_conn, s3, "transit-ml")
@@ -89,15 +98,15 @@ def test_ingest_forecast_handles_a_production_shaped_parquet_frame(pg_conn):
             {
                 "agency_id": 8,
                 "route_code": "R1",
-                "service_date": pd.Timestamp("2026-10-12"),
+                "service_date": pd.Timestamp(_SERVICE_DATE),
                 "hour": 8,
                 "mean_min": 3.0,
                 "q10": 1.0,
                 "q50": 3.0,
                 "q90": 5.0,
-                "model_version": "2026-10-10",
-                "origin_date": "2026-10-11",
-                "generated_at": datetime(2026, 10, 11, 2, 0, 0).isoformat(),
+                "model_version": _MODEL_VERSION,
+                "origin_date": _ORIGIN.isoformat(),
+                "generated_at": datetime(_ORIGIN.year, _ORIGIN.month, _ORIGIN.day, 2, 0, 0).isoformat(),
             }
         ]
     )
@@ -105,15 +114,17 @@ def test_ingest_forecast_handles_a_production_shaped_parquet_frame(pg_conn):
     pq.write_table(pa.Table.from_pandas(frame, preserve_index=False), buf)
     s3 = _FakeS3(
         {
-            "forecasts/2026-10-11/manifest.json": b'{"rows": 1, "origin_date": "2026-10-11"}',
-            "forecasts/2026-10-11/forecast.parquet": buf.getvalue(),
+            f"forecasts/{_ORIGIN.isoformat()}/manifest.json": json.dumps(
+                {"rows": 1, "origin_date": _ORIGIN.isoformat()}
+            ).encode(),
+            f"forecasts/{_ORIGIN.isoformat()}/forecast.parquet": buf.getvalue(),
         }
     )
     count = ingest_forecast(pg_conn, s3, "transit-ml")
     assert count == 1
     with pg_conn.cursor() as cur:
         cur.execute("SELECT service_date FROM agg_route_forecast_ml WHERE agency_id = 8")
-        assert cur.fetchone()[0].isoformat() == "2026-10-12"
+        assert cur.fetchone()[0] == _SERVICE_DATE
 
 
 def test_ingest_forecast_upserts_rather_than_duplicates_the_same_slot(pg_conn):
@@ -124,29 +135,29 @@ def test_ingest_forecast_upserts_rather_than_duplicates_the_same_slot(pg_conn):
             {
                 "agency_id": 8,
                 "route_code": "R1",
-                "service_date": "2026-10-12",
+                "service_date": _SERVICE_DATE.isoformat(),
                 "hour": 8,
                 "mean_min": mean_min,
                 "q10": 1.0,
                 "q50": mean_min,
                 "q90": 5.0,
                 "model_version": "v",
-                "origin_date": "2026-10-11",
-                "generated_at": "2026-10-11T02:00:00",
+                "origin_date": _ORIGIN.isoformat(),
+                "generated_at": f"{_ORIGIN.isoformat()}T02:00:00",
             }
         ]
 
     s3_first = _FakeS3(
         {
-            "forecasts/2026-10-11/manifest.json": b'{"rows": 1}',
-            "forecasts/2026-10-11/forecast.parquet": _parquet_bytes(_rows(3.0)),
+            f"forecasts/{_ORIGIN.isoformat()}/manifest.json": b'{"rows": 1}',
+            f"forecasts/{_ORIGIN.isoformat()}/forecast.parquet": _parquet_bytes(_rows(3.0)),
         }
     )
     assert ingest_forecast(pg_conn, s3_first, "transit-ml") == 1
     s3_second = _FakeS3(
         {
-            "forecasts/2026-10-12/manifest.json": b'{"rows": 1}',
-            "forecasts/2026-10-12/forecast.parquet": _parquet_bytes(_rows(4.0)),
+            f"forecasts/{_NEXT_ORIGIN.isoformat()}/manifest.json": b'{"rows": 1}',
+            f"forecasts/{_NEXT_ORIGIN.isoformat()}/forecast.parquet": _parquet_bytes(_rows(4.0)),
         }
     )
     assert ingest_forecast(pg_conn, s3_second, "transit-ml") == 1
