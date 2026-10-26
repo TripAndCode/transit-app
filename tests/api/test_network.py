@@ -494,12 +494,29 @@ async def test_network_summary_endpoint(net_client, ch_client):
         "planned_trips",
         "executed_trips",
         "service_delivered_pct",
+        "covered_days",
+        "window_days",
         "has_ridership_weights",
         "weighted_on_time_pct",
     }
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
     assert brow["is_stale"] is True
+
+
+async def test_network_summary_says_how_many_of_the_window_days_the_timetable_covers(net_client):
+    """The board's rates count only the days the loaded timetable covers, so
+    each row carries that count beside the window's length: a reader can then
+    tell an agency whose rate spans 1 of 7 days from one whose rate spans all 7."""
+    client, pool, a, b, _cc = net_client
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260403")
+    await _set_ingest_strategy(pool, a, "static_join")
+
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    by = {x["agency_id"]: x for x in r.json()["agencies"]}
+    assert (by[a]["planned_trips"], by[a]["covered_days"], by[a]["window_days"]) == (2, 1, 7)
+    assert (by[b]["planned_trips"], by[b]["covered_days"], by[b]["window_days"]) == (0, 0, 7)
 
 
 async def test_network_summary_includes_definition_metadata(net_client):

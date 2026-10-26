@@ -253,6 +253,8 @@
     "col_vehicle_km_delivered": "Vehicle-km delivered %",
     "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
     "planned_trip_count_fallback": "Planned trips {{count}} (vehicle-km not available)",
+    "delivered_partly_timetabled": "{{value}} (timetable covers {{covered}}/{{window}} days)",
+    "plan_coverage_footnote": "* Where Service delivered % reads “timetable covers N/M days”, that agency's Service delivered % and Vehicle-km delivered % count only the days the loaded timetable covers. Its timetable spans only part of the period, so those rates cover fewer days than other agencies'.",
     "schedule_version_title": "Static schedule version: {{version}}",
     "col_agency": "Agency",
     "axis_caption": "Shared axis · 0–{{max}} min"

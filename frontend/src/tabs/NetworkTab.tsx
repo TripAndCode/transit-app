@@ -34,6 +34,13 @@ function byDelayDescending(a: NetworkAgencyRow, b: NetworkAgencyRow): number {
   return b.avg_delay_min - a.avg_delay_min;
 }
 
+/** A delivered rate counts only the days the loaded timetable covers, so a
+ *  timetable covering part of the window gives a rate over fewer days than
+ *  its neighbours'. A rate the feed cannot measure has nothing to qualify. */
+function isPartlyTimetabled(a: NetworkAgencyRow): boolean {
+  return a.service_delivered_pct != null && a.covered_days < a.window_days;
+}
+
 /** The schedule version is only known for some agencies; with none there is
  *  nothing to describe, so the value renders bare rather than behind an empty
  *  bubble.
@@ -85,6 +92,7 @@ function AgencyRow({
   const a = agency;
   const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
   const axisPct = delayAxisShare(a.avg_delay_min) * 100;
+  const delivered = a.service_delivered_pct == null ? "—" : `${fixedTenth(a.service_delivered_pct)}%`;
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
@@ -141,7 +149,13 @@ function AgencyRow({
       <div className="network-row__meta">
         <span>
           {t("network.col_delivered")}{" "}
-          {a.service_delivered_pct == null ? "—" : `${fixedTenth(a.service_delivered_pct)}%`}
+          {isPartlyTimetabled(a)
+            ? t("network.delivered_partly_timetabled", {
+                value: delivered,
+                covered: a.covered_days,
+                window: a.window_days,
+              })
+            : delivered}
         </span>
         <ScheduleVersionTooltip
           label={
@@ -289,32 +303,39 @@ export function NetworkTab() {
         }
       >
         {() => (
-          <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
-            <div className="network-row network-row--head" aria-hidden="true">
-              <span>{t("network.col_agency")}</span>
-              <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
-              <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
-              <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
+          <>
+            <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
+              <div className="network-row network-row--head" aria-hidden="true">
+                <span>{t("network.col_agency")}</span>
+                <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
+                <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
+                <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
+              </div>
+              {cappedAgencies.visible.map((a) => (
+                <AgencyRow
+                  key={a.agency_id}
+                  agency={a}
+                  isCurrent={currentAgencyId != null && a.agency_id === currentAgencyId}
+                  // Falls back to this agency's own unweighted on_time_pct when
+                  // the toggle is on but THIS agency has no configured weight --
+                  // never blocks rendering, just can't show a weighted figure
+                  // that doesn't exist.
+                  weightedView={showRidershipWeighted && a.has_ridership_weights}
+                  linkSuffix={suffix}
+                />
+              ))}
+              {cappedAgencies.remaining > 0 && (
+                <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                  {t("common.show_more", { count: cappedAgencies.remaining })}
+                </button>
+              )}
             </div>
-            {cappedAgencies.visible.map((a) => (
-              <AgencyRow
-                key={a.agency_id}
-                agency={a}
-                isCurrent={currentAgencyId != null && a.agency_id === currentAgencyId}
-                // Falls back to this agency's own unweighted on_time_pct when
-                // the toggle is on but THIS agency has no configured weight --
-                // never blocks rendering, just can't show a weighted figure
-                // that doesn't exist.
-                weightedView={showRidershipWeighted && a.has_ridership_weights}
-                linkSuffix={suffix}
-              />
-            ))}
-            {cappedAgencies.remaining > 0 && (
-              <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
-                {t("common.show_more", { count: cappedAgencies.remaining })}
-              </button>
+            {cappedAgencies.visible.some(isPartlyTimetabled) && (
+              <p className="network-footnote" data-testid="network-plan-coverage-footnote">
+                {t("network.plan_coverage_footnote")}
+              </p>
             )}
-          </div>
+          </>
         )}
       </AsyncSection>
     </div>

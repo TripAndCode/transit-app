@@ -13,7 +13,10 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 `pipeline.reports.service_delivered.compute_service_delivered_by_agency` —
 see that module for the executed/planned definition and why the latter two
 read `None` ("not available") for an agency whose feed doesn't populate
-`schedule_relationship_trip`.
+`schedule_relationship_trip`. ``covered_days`` of ``window_days`` is how many
+of the range's days the loaded timetable covers; all three count only those,
+so a row whose ``covered_days`` falls short is comparable to its neighbours
+only with that note beside it.
 
 ``has_ridership_weights``/``weighted_on_time_pct`` come from
 `pipeline.reports.ridership.compute_ridership_weighted_on_time_by_agency` —
@@ -139,7 +142,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         clamp_pct = round(clamp / raw * 100, 2) if raw else None
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
-        d = delivered.get(aid, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
+        d = delivered[aid]
         s = supply.get(
             aid,
             {
@@ -166,6 +169,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "planned_trips": d["planned_trips"],
                 "executed_trips": d["executed_trips"],
                 "service_delivered_pct": d["service_delivered_pct"],
+                "covered_days": d["covered_days"],
+                "window_days": d["window_days"],
                 # has_ridership_weights distinguishes "not configured for
                 # this agency" (weighted_on_time_pct is meaningless, hide any
                 # toggle) from "configured, but None because there were no
