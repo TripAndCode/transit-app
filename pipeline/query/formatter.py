@@ -133,6 +133,14 @@ _LOCALES: dict[tuple[str, str], str] = {
         "{count} trip(s) exceeded the {threshold}s delay threshold; the earliest {shown} are listed. "
         "Narrow the date range to see the rest."
     ),
+    ("delay_certificate_reference_footnote", "ja"): (
+        "この一覧は、事業者が公開しているリアルタイムデータをもとに本サービスが作成した参考資料です。"
+        "事業者が発行する遅延証明書ではありません。"
+    ),
+    ("delay_certificate_reference_footnote", "en"): (
+        "This list is a reference document this service made from the real-time data the operator publishes. "
+        "It is not a delay certificate issued by the operator."
+    ),
     ("delay_certificate_threshold_footnote", "ja"): "遅延{threshold}秒超の便のみを掲載しています。",
     ("delay_certificate_threshold_footnote", "en"): "Only trips exceeding the {threshold}s delay threshold are listed.",
     ("delay_certificate_capped_footnote", "ja"): (
@@ -452,10 +460,15 @@ def format_council_summary_text(
 
 def format_delay_certificate_footnotes(threshold_sec: int, shown: int, total: int, locale: str = "ja") -> list[str]:
     """The CSV export's caveats, mirroring :func:`format_council_summary_footnotes`'s
-    pattern: the exceeds-threshold used, and, when the row cap cut the list
-    (*shown* of *total* qualifying trips), that the file is not the whole set.
+    pattern: that the list is the service's reference document and not the
+    operator's delay certificate, the exceeds-threshold used, and, when the
+    row cap cut the list (*shown* of *total* qualifying trips), that the file
+    is not the whole set.
     """
-    lines = [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
+    lines = [
+        _t("delay_certificate_reference_footnote", locale),
+        _t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec),
+    ]
     if total > shown:
         lines.append(_t("delay_certificate_capped_footnote", locale, count=total, shown=shown))
     return lines

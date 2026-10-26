@@ -154,6 +154,7 @@ function CertificateCard({ row, routeName }: { row: DelayCertificateRow; routeNa
         ))}
       </dl>
       <p className="report-footnote">{t("reports.certificate.measured_at")}</p>
+      <p className="cert-card__disclaimer">{t("reports.certificate.disclaimer", { operator: agencyName })}</p>
       <button type="button" className="btn-ghost cert-card__print" onClick={() => window.print()}>
         {t("reports.print")}
       </button>

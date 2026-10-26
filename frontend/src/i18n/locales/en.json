@@ -45,10 +45,10 @@
     "title": "Reports",
     "view_summary": "Period summary",
     "view_saved": "Saved analyses",
-    "view_reports": "Council report & delay certificate",
+    "view_reports": "Council report & delay record",
     "subtitle_summary": "How service ran over the period, on one printable page.",
     "subtitle_saved": "Analyses saved on route pages in this browser.",
-    "subtitle_reports": "A summary for a council or board, and proof of a late departure."
+    "subtitle_reports": "A summary for a council or board, and a delay record for reference."
   },
   "sheet": {
     "handle": "Resize the sheet"
@@ -547,14 +547,14 @@
       "choose_provider": "Choose an account to sign in",
       "username_prompt": "Sign in with your username",
       "google_aria": "Sign in with Google",
-      "google_continue": "Continue with Google",
+      "google_continue": "Sign in with Google",
       "github_aria": "Sign in with GitHub",
-      "github_continue": "Continue with GitHub",
+      "github_continue": "Sign in with GitHub",
       "or_divider": "or",
       "username_label": "Username",
       "password_label": "Password",
       "local_submit": "Sign in",
-      "terms_consent": "By continuing, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
+      "terms_consent": "By signing in, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
     },
     "back_to_agency": "← Back to {{agency}}",
     "linked_none": "None linked",
@@ -1025,7 +1025,7 @@
       "dwell_run": "Dwell/running time",
       "route_forecast": "Route forecast",
       "council_summary": "Council report",
-      "delay_certificate": "Delay certificate"
+      "delay_certificate": "Delay record (for reference)"
     },
     "col": {
       "service": "Service",
@@ -1215,7 +1215,7 @@
       "ranking": "Rankings",
       "punctuality": "Punctuality",
       "pattern": "Patterns over time",
-      "forecast": "Forecasts and evidence",
+      "forecast": "Forecasts and records",
       "other": "Other"
     },
     "desc": {
@@ -1230,7 +1230,7 @@
       "dwell_run": "Where time goes: waiting at stops against running between them.",
       "route_forecast": "When routes tend to run late, by day of week and time of day.",
       "council_summary": "A period summary written for a council or board.",
-      "delay_certificate": "Proof of a specific late departure, for a passenger."
+      "delay_certificate": "A reference record of a specific late departure, for a passenger."
     },
     "card": {
       "value_with_unit": "{{value}} {{unit}}"
@@ -1259,7 +1259,7 @@
     },
     "print": "Print / Save as PDF",
     "certificate": {
-      "intro": "Choose the day and route you travelled on, then your departure, to get a certificate of its delay.",
+      "intro": "Choose the day and route you travelled on, then your departure, to get a record of its delay.",
       "date": "Date",
       "route": "Route",
       "route_placeholder": "Search routes",
@@ -1271,13 +1271,14 @@
       "no_data": "There is no live-feed data for this route on this day, so whether a departure left late can't be checked.",
       "unconfirmed": "No late departure was found; whether the feed reported this day couldn't be checked.",
       "not_listed": "A departure that isn't listed left on time or early, or wasn't in the live feed.",
-      "card": "Delay certificate for the chosen departure",
+      "card": "Delay record for the chosen departure",
       "statement": "On {{date}}, the {{scheduled}} departure of {{route}} left its first recorded stop at {{actual}}, {{delay}} late.",
       "operator": "Operator",
       "scheduled": "Scheduled departure",
       "actual": "Actual departure",
       "delay": "Delay",
       "measured_at": "Times are at the first stop recorded for this trip in the operator's real-time feed.",
+      "disclaimer": "This record is a reference document this service made from the real-time data that {{operator}} publishes. It is not a delay certificate issued by the operator.",
       "all_late": "All late departures in the period"
     }
   },

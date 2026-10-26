@@ -16,7 +16,7 @@ describe("ReportList", () => {
       />,
     );
     const headings = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Rankings", "Punctuality", "Patterns over time", "Forecasts and evidence"]);
+    expect(headings).toEqual(["Rankings", "Punctuality", "Patterns over time", "Forecasts and records"]);
     const rankings = screen.getByRole("group", { name: "Rankings" });
     expect(within(rankings).getAllByRole("button")).toHaveLength(1);
   });

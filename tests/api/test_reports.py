@@ -2172,6 +2172,8 @@ async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_
         f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300&format=csv"
     )
     assert resp.status_code == 200
+    # The saved file is named for what the page calls it, a delay record.
+    assert resp.headers["content-disposition"] == f'attachment; filename="delay_record_{day}_{day}.csv"'
     rows = list(csv.reader(io.StringIO(resp.text)))
     header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
     data = [r for r in rows[header_idx + 1 :] if r and r[1] == "RCSV"]

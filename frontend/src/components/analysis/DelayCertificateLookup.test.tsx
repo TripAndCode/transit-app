@@ -8,6 +8,7 @@ import { decl, ruleBody } from "../../test/cssRules";
 import * as hooks from "../../api/hooks";
 import { DataEndContext, isoDaysAgo } from "../../api/scope";
 import type { DefinitionMeta, DelayCertificateRow, ReportResponse } from "../../api/types";
+import i18n from "../../i18n";
 import { DelayCertificateLookup } from "./DelayCertificateLookup";
 import { STILL_WORKING_AFTER_MS } from "../StillWorking";
 
@@ -92,13 +93,13 @@ describe("DelayCertificateLookup", () => {
     expect(screen.getByText("A departure that isn't listed left on time or early, or wasn't in the live feed.")).toBeInTheDocument();
   });
 
-  it("certifies the chosen departure in words and figures, ready to print", async () => {
+  it("records the chosen departure in words and figures, ready to print", async () => {
     const print = vi.spyOn(window, "print").mockImplementation(() => {});
     mockReport({ data: certificate(ROWS) });
     renderLookup();
     await chooseRoute();
     await userEvent.selectOptions(screen.getByLabelText("Scheduled departure"), "14:45 (5 min 55 s late)");
-    const card = screen.getByRole("region", { name: "Delay certificate for the chosen departure" });
+    const card = screen.getByRole("region", { name: "Delay record for the chosen departure" });
     expect(card).toHaveTextContent(
       "On Wed, Sep 2, 2026, the 14:45 departure of W54 left its first recorded stop at 14:50:55, 5 min 55 s late.",
     );
@@ -108,7 +109,29 @@ describe("DelayCertificateLookup", () => {
     expect(print).toHaveBeenCalledOnce();
   });
 
-  it("keeps certifying the chosen departure when a refetch adds an earlier one", async () => {
+  it("says on the record that the service made it from the operator's data and that it is no certificate", async () => {
+    mockReport({ data: certificate(ROWS) });
+    renderLookup();
+    await chooseRoute();
+    await userEvent.selectOptions(screen.getByLabelText("Scheduled departure"), "14:45 (5 min 55 s late)");
+    const card = screen.getByRole("region", { name: "Delay record for the chosen departure" });
+    expect(card).toHaveTextContent(
+      "This record is a reference document this service made from the real-time data that Aomori City Bus publishes. " +
+        "It is not a delay certificate issued by the operator.",
+    );
+    try {
+      await i18n.changeLanguage("ja");
+      const ja = await screen.findByRole("region", { name: "選んだ便の遅延の記録" });
+      expect(ja).toHaveTextContent(
+        "この記録は、Aomori City Busが公開しているリアルタイムデータをもとに本サービスが作成した参考資料です。" +
+          "事業者が発行する遅延証明書ではありません。",
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("keeps recording the chosen departure when a refetch adds an earlier one", async () => {
     let rows = ROWS;
     vi.spyOn(hooks, "useReport").mockImplementation(
       (_aid, reportType) =>
@@ -123,7 +146,7 @@ describe("DelayCertificateLookup", () => {
         <DelayCertificateLookup aid={1} />
       </DataEndContext>,
     );
-    const card = screen.getByRole("region", { name: "Delay certificate for the chosen departure" });
+    const card = screen.getByRole("region", { name: "Delay record for the chosen departure" });
     expect(within(card).getByText("Scheduled departure").nextElementSibling).toHaveTextContent("15:15");
   });
 
@@ -141,7 +164,7 @@ describe("DelayCertificateLookup", () => {
     await chooseRoute();
     await userEvent.selectOptions(screen.getByLabelText("Scheduled departure"), "14:45 (5 min 55 s late)");
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-09-01" } });
-    expect(screen.queryByRole("region", { name: "Delay certificate for the chosen departure" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Delay record for the chosen departure" })).toBeNull();
   });
 
   it("says so when the route ran no late departure that day", async () => {
@@ -202,9 +225,10 @@ describe("DelayCertificateLookup", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("prints the certificate without the controls that found it", () => {
+  it("prints the record and its disclaimer without the controls that found it", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./DelayCertificateLookup.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".cert-lookup__controls"), "display")).toBe("none");
     expect(decl(ruleBody(print, ".cert-card__print"), "display")).toBe("none");
+    expect(print).not.toContain(".cert-card__disclaimer");
   });
 });

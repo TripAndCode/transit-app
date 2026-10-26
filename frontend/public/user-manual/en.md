@@ -56,7 +56,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Why** | Where the time goes: waiting at stops or running between them |
 | **Compare** | Weekdays against weekends route by route, and agencies against each other |
 | **Live** | The trips running now |
-| **Reports** | Pages to print or hand on: a period summary, a council report, a delay certificate |
+| **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Ask** | Ready-made questions, answered as tables and charts |
 
 Under **Other** are **Help** (this manual) and **About this app**. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
@@ -84,7 +84,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ## 3. The scope sentence: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends), and the period summary, council report and delay certificate in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends), and the period summary, council report and delay record (for reference) in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
 
@@ -140,7 +140,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends) share one layout, as do the council report and the delay certificate in **Reports**.
+**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends) share one layout, as do the council report and the delay record (for reference) in **Reports**.
 
 ![Routes screen](./05-routes-ranking.en.png)
 
@@ -292,7 +292,7 @@ The first time you open Live, a three-step tour points out the filters, the trip
 
 ## 10. Reports — documents to hand on
 
-Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay certificate**.
+Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
 
 ### 10-1. Period summary
 
@@ -304,19 +304,19 @@ Missing observations are not counted as on time; only the periods with observati
 
 The analyses you saved with **Save analysis** on a route’s page. Click one to reopen it with the latest data; **Delete** removes it. They are kept in this browser only, so another browser or device will not show them.
 
-### 10-3. Council report & delay certificate
+### 10-3. Council report & delay record
 
-The list on the left holds **Council report** and **Delay certificate**.
+The list on the left holds **Council report** and **Delay record (for reference)**.
 
 **Council report** is a period summary written for a council or board: four headline figures (“On time”, “Average delay”, “Departures observed”, “Planned trips”), a written summary with its notes, and **Print / Save as PDF**. Planned trips, the service-delivered rate and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tile and the summary say “whole agency”.
 
-**Delay certificate** gives a passenger proof of a late departure:
+**Delay record (for reference)** gives a passenger a record of a late departure. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
 
-![Delay certificate](./15-reports-certificate.en.png)
+![Delay record (for reference)](./15-reports-certificate.en.png)
 
 1. Choose the “Date” and the “Route” they travelled on (“Search routes”).
 2. Under “Scheduled departure”, pick their departure (“Choose a departure”). Each one shows how late it left.
-3. The certificate appears with a statement and the “Operator”, “Route”, “Date”, “Scheduled departure”, “Actual departure” and “Delay”. Times are at the first stop recorded for that trip in the operator’s real-time feed. Press **Print / Save as PDF**.
+3. The record appears with a statement and the “Operator”, “Route”, “Date”, “Scheduled departure”, “Actual departure” and “Delay”. Times are at the first stop recorded for that trip in the operator’s real-time feed. Press **Print / Save as PDF**.
 
 The list holds only departures that left late. A departure missing from it left on time or early, or was not in the live feed. If no departure of the route left late that day, the page says so.
 
