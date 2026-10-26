@@ -79,6 +79,12 @@
    present and would otherwise paint over this button's lower half. */
 .ops-map-fit { position: absolute; right: 14px; bottom: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: var(--card-radius); color: var(--text-primary); font-size: var(--text-xs); font-weight: 700; }
 .ops-map-fit:disabled { color: var(--text-tertiary); box-shadow: none; cursor: default; }
+/* A stalled feed's last positions, labelled in the fit-all button's corner:
+   that button needs current trips and this note shows only while there are
+   none, so the two never meet. Glass comes from .map-chrome. */
+.ops-map__last-reported { position: absolute; right: 14px; bottom: 44px; z-index: var(--z-map-overlay); display: flex; align-items: center; gap: 10px; max-width: min(360px, calc(100% - 120px)); padding: 8px 8px 8px 12px; border-radius: var(--card-radius); color: var(--text-primary); font-size: var(--text-xs); line-height: 1.45; }
+.ops-map__last-reported button { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--border-soft); border-radius: var(--radius); color: var(--text-secondary); background: none; font: inherit; cursor: pointer; }
+.ops-map__last-reported button:hover { color: var(--text-primary); background: var(--bg-soft); }
 
 /* Shared floating-control chrome: one glass fill/blur/border/elevation for
    every control docked on the map (filter dock, legend, basemap switcher,
@@ -389,6 +395,7 @@
      if they drift); dragging the sheet above peek deliberately trades this
      chrome away for queue height. */
   .ops-map-fit { bottom: calc(14vh + 44px); }
+  .ops-map__last-reported { bottom: calc(14vh + 44px); }
   .ops-style-control { bottom: calc(14vh + 28px); }
   .ops-playback { bottom: calc(14vh + 12px); }
 }

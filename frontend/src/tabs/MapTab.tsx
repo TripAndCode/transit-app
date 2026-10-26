@@ -24,7 +24,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { ApiError, apiPost } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
-import { FILTER_SEPARATOR, formatReportTime } from "../utils/format";
+import { EM_DASH, FILTER_SEPARATOR, formatReportTime } from "../utils/format";
 import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
@@ -42,7 +42,8 @@ import { meanRouteDelaySec } from "./map/selectedRouteDelay";
 import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
-import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { filterLastReportedRows, filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { emptyMapReason, type EmptyMapReason } from "./map/emptyMapReason";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../utils/clockSkew";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
@@ -101,6 +102,28 @@ function freshnessFor(timestamp: string | null | undefined, now: number): Freshn
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
+}
+
+/** The empty map's explanation. The night is named only when it accounts for
+ *  the silence, and a stalled feed says since when it has been quiet. */
+function emptyMapCopy(
+  reason: EmptyMapReason,
+  latestReport: string | null,
+  clock: number,
+  t: ReturnType<typeof useTranslation>["t"],
+): { title: string; hint?: string } {
+  if (reason === "none") return { title: t("operations.empty.none_title"), hint: t("operations.empty.none_hint") };
+  if (reason === "overnight") return { title: t("operations.empty.title"), hint: t("operations.empty.overnight_hint") };
+  if (reason === "stale" && latestReport) {
+    return {
+      title: t("operations.empty.stale_title", {
+        time: formatReportTime(latestReport),
+        duration: quietFor(clock - Date.parse(latestReport), t),
+      }),
+      hint: t("operations.empty.stale_hint"),
+    };
+  }
+  return { title: t("operations.empty.title") };
 }
 
 /** Asks the server to poll the feed now, refetches what the feed drives, and
@@ -192,6 +215,9 @@ export function MapTab() {
   const [hoveredTripId, setHoveredTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [playbackOn, setPlaybackOn] = useState(false);
+  // The stalled report whose last positions the operator asked to see. Keyed
+  // by that report, so a newer one closes the view without an effect.
+  const [lastReportedFor, setLastReportedFor] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // The relief is opt-in and follows the style's URL-over-localStorage rule:
@@ -296,12 +322,30 @@ export function MapTab() {
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
-  const latestReport = liveQuery.data?.latest_captured_at ?? null;
+  // The live table keeps only the last few days, so a feed stalled longer has
+  // no live timestamp; the summary then dates its newest report from the
+  // history. The header, the empty map and the tiles all read this one value.
+  const latestReport = liveQuery.data?.latest_captured_at ?? summaryQuery.data?.latest_captured_at ?? null;
   const freshness = freshnessFor(latestReport, clock);
+  const emptyReason = emptyMapReason(latestReport, clock);
+  // The tiles count trips reporting now. A trip on the map proves the feed
+  // current; with none, zero is a claim only a current feed or the overnight
+  // break can make, so a stalled or silent one reads unknown.
+  const countsKnown = liveRows.length > 0 || freshness === "normal" || freshness === "delayed"
+    || emptyReason === "overnight";
+  const lastReportedRows = emptyReason === "stale" ? filterLastReportedRows(liveQuery.data?.rows ?? [], ctx.routes) : [];
+  const showingLastReported = !playbackOn && liveRows.length === 0 && lastReportedRows.length > 0
+    && lastReportedFor != null && lastReportedFor === latestReport;
+  // Without a live timestamp the summary dates the feed, so until it answers
+  // the empty map names no reason.
+  const emptyReasonPending = liveQuery.data?.latest_captured_at == null && (summaryQuery.isLoading || !!summaryQuery.error);
+  const emptyCopy = emptyMapCopy(emptyReason, latestReport, clock, t);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
-    const trip = liveQuery.data?.rows.find((row) => row.trip_id === tripId);
+    // Current rows only: a stalled feed's last positions are drawn for
+    // reference and open nothing that would read them as current.
+    const trip = liveRows.find((row) => row.trip_id === tripId);
     if (!trip || trip.stop_lon == null || trip.stop_lat == null) return;
     patchSelection({
       ...(trip.route_code ? { route: trip.route_code } : {}),
@@ -422,9 +466,11 @@ export function MapTab() {
   const playbackFrame = playbackOn ? playback.frames[playback.index] : undefined;
   const light = lightFor(playbackFrame ? frameHour(playbackFrame.t) : null, lightOn && !playback.steppingOnly);
   useBasemapDim(mapRef, styleEpoch, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  // Only the map ever draws the last reported positions, and only under
+  // their own label; every count, list and card reads liveRows.
   useOperationsMapLayers(
     mapRef,
-    liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
+    liveQuery.data ? { ...liveQuery.data, rows: showingLastReported ? lastReportedRows : liveRows } : undefined,
     shapeQuery.data,
     effectiveRoute,
     meanRouteDelaySec(liveRows, effectiveRoute),
@@ -548,11 +594,11 @@ export function MapTab() {
           <h2 className="focus-queue-title">{td("attention")}</h2>
           {/* The only live reading of these counts on the screen. Repeating
               them next to the filters invited the reader to check whether the
-              two agreed instead of reading either; staleness likewise reads
-              once, from the header's freshness dot. */}
+              two agreed instead of reading either. A stalled feed shows here
+              only as "—", since a zero would claim no trip is reporting. */}
           <div className="focus-summary-strip">
-            <StatTile label={td("observedLabel")} value={liveRows.length} />
-            <StatTile label={td("delayedLabel")} value={delayedRows.length} flagged={delayedRows.length > 0} />
+            <StatTile label={td("observedLabel")} value={countsKnown ? liveRows.length : EM_DASH} />
+            <StatTile label={td("delayedLabel")} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
           {liveQuery.data?.truncated && (
@@ -699,13 +745,26 @@ export function MapTab() {
           {/* Playback draws the day's frames on this same map, so the empty
               overlay steps aside while it runs. A failed fetch also leaves no
               rows; the error banner above speaks for it instead. */}
-          {!mapUnavailable && !liveQuery.isLoading && !liveQuery.error && !playbackOn && liveRows.length === 0 && (
+          {!mapUnavailable && !liveQuery.isLoading && !liveQuery.error && !emptyReasonPending && !playbackOn && !showingLastReported && liveRows.length === 0 && (
             <div className="ops-map__empty">
               <EmptyState
-                title={t("operations.empty.title")}
-                hint={t("operations.empty.hint")}
-                recoveries={[{ label: t("operations.playback.toggle_on"), onClick: () => setPlaybackOn(true) }]}
+                title={emptyCopy.title}
+                hint={emptyCopy.hint}
+                recoveries={[
+                  ...(lastReportedRows.length > 0
+                    ? [{ label: t("operations.empty.show_last_reported"), onClick: () => setLastReportedFor(latestReport) }]
+                    : []),
+                  { label: t("operations.playback.toggle_on"), onClick: () => setPlaybackOn(true) },
+                ]}
               />
+            </div>
+          )}
+          {showingLastReported && latestReport && (
+            <div className="ops-map__last-reported map-chrome" role="status">
+              <span>{t("operations.last_reported.note", { time: formatReportTime(latestReport) })}</span>
+              <button type="button" aria-label={t("operations.last_reported.hide_label")} onClick={() => setLastReportedFor(null)}>
+                {t("operations.last_reported.hide")}
+              </button>
             </div>
           )}
           {inspected && (

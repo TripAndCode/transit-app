@@ -683,7 +683,17 @@
     },
     "empty": {
       "title": "No vehicles are reporting right now",
-      "hint": "This is normal late at night. If it lasts through service hours, the operator's feed may be down."
+      "overnight_hint": "Few or no trips run late at night (00:00–05:00), so this is normal.",
+      "stale_title": "No new reports since {{time}} ({{duration}})",
+      "stale_hint": "The operator's feed may have stopped.",
+      "none_title": "No live reports received yet",
+      "none_hint": "Vehicles appear here once the operator's feed starts reporting.",
+      "show_last_reported": "Show last reported positions"
+    },
+    "last_reported": {
+      "note": "Last reported positions as of {{time}}, not where vehicles are now",
+      "hide": "Hide",
+      "hide_label": "Hide last reported positions"
     },
     "playback": {
       "aria_label": "Day playback",
