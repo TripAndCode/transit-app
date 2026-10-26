@@ -28,3 +28,32 @@ describe.each(["privacy", "terms"])("public/legal/%s naming", (doc) => {
     expect(text).not.toMatch(/"the Service"/);
   });
 });
+
+describe("public/legal/terms data-source credits", () => {
+  const LOCALES_DIR = resolve(__dirname, "../i18n/locales");
+  // `[text](url)` to `text`, allowing one level of brackets inside the text.
+  const linkText = (markdown: string) => markdown.replace(/\[((?:[^[\]]|\[[^\]]*\])*)\]\([^)]*\)/g, "$1");
+  const untagged = (translation: string) => translation.replace(/<\/?[a-z]+>/g, "");
+
+  it.each(["ja", "en"])("states each credit exactly as the app does (%s)", (locale) => {
+    const terms = linkText(readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8"));
+    const { credits } = JSON.parse(readFileSync(resolve(LOCALES_DIR, `${locale}.json`), "utf8")) as {
+      credits: { aomori: string; hiroshima: string };
+    };
+    expect(terms).toContain(untagged(credits.aomori));
+    expect(terms).toContain(untagged(credits.hiroshima));
+  });
+
+  it.each(["ja", "en"])("links the licensed data and each licence deed (%s)", (locale) => {
+    const terms = readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8");
+    for (const url of [
+      "https://ckan.odpt.org/dataset/aomori_city_all_lines",
+      "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines",
+      `https://creativecommons.org/licenses/by/4.0/deed.${locale}`,
+      "https://www.bus-kyo.or.jp/",
+      `https://creativecommons.org/publicdomain/zero/1.0/deed.${locale}`,
+    ]) {
+      expect(terms).toContain(`](${url})`);
+    }
+  });
+});

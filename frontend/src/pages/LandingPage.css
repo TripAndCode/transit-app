@@ -137,6 +137,11 @@
   color: var(--text-secondary);
 }
 
+.landing-footer__credits {
+  max-width: 720px;
+  margin: 16px auto 0;
+}
+
 /* Narrow screens (LiveMapHero's WIDE_LAYOUT_MIN_WIDTH mirrors this
    breakpoint): the headline needs the full width, and the scene's labels
    would cross it, so the map gets its own box below the text instead of

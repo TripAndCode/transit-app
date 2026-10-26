@@ -93,6 +93,27 @@ describe("HelpPage", () => {
     expect(screen.getByRole("button")).toBeInTheDocument();
   });
 
+  it("credits the open-data sources below the manual, outside its sections", async () => {
+    renderWithProviders(<HelpPage />);
+    await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+    const credits = screen.getByRole("region", { name: "Data sources" });
+    expect(credits.closest("[data-section]")).toBeNull();
+    expect(
+      within(credits).getByRole("link", { name: "Creative Commons License Attribution 4.0 International" }),
+    ).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/deed.en");
+  });
+
+  it("keeps the credits when a search matches no section", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HelpPage />);
+    await screen.findByRole("heading", { name: "Section one", level: 2 });
+    await user.type(screen.getByRole("searchbox"), "zzzz-no-such-text");
+
+    expect(screen.getByText("No matches")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Data sources" })).toBeInTheDocument();
+  });
+
   it("renders the manual's intro above the document", async () => {
     stubManualFetch(MANUAL_WITH_PREAMBLE);
     renderWithProviders(<HelpPage />);

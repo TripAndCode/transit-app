@@ -1,6 +1,6 @@
 # Terms of Service
 
-Last updated: September 30, 2026
+Last updated: October 26, 2026
 
 These terms are the conditions for using Delay Dashboard (“the Service”), run by TripAndCode, an individual. By signing in, you agree to them. The Japanese version of these terms is the authoritative one.
 
@@ -24,7 +24,12 @@ The Service aggregates and shows bus delays from GTFS and GTFS-Realtime data tha
 
 ## Where the data comes from
 
-The Service's data is based on open data that operators and others publish. When you use the data, follow the license of its original provider.
+The figures the Service shows are aggregated and derived by the Service from the open data below. The data's providers did not make them.
+
+- Aomori City Bus: This service uses the following copyrighted material with modifications. Aomori City, [Aomori City Bus information](https://ckan.odpt.org/dataset/aomori_city_all_lines) and [[realtime information] Aomori City Bus information](https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines), [Creative Commons License Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/deed.en)
+- Operators in Hiroshima Prefecture: This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its [GTFS open data site](https://www.bus-kyo.or.jp/) under [Creative Commons CC0](https://creativecommons.org/publicdomain/zero/1.0/deed.en).
+
+When you use the data, follow the license of its original provider.
 
 ## No warranty
 

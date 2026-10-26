@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { ApiError } from "../api/client";
+import { DataSourceCredits } from "../components/DataSourceCredits";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -325,6 +326,9 @@ export function HelpPage() {
           )}
         </div>
       )}
+      {/* Outside the manual's sections, so neither search nor the scroll
+          marker treats the credits as one of them. */}
+      <DataSourceCredits style={{ marginTop: 48, paddingTop: 16, borderTop: "1px solid var(--border-soft)" }} />
     </div>
   );
 }
