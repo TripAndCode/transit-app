@@ -1123,11 +1123,19 @@ async def get_report(
         rows, rows_total = await compute_delay_certificate(
             agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n, locale="ja" if format == "csv" else locale
         )
-        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale)
-        observed = rows_total > 0 or await delay_certificate_observed(agency_id, ctx, ch)
         if format == "csv":
             footnotes = format_delay_certificate_footnotes(threshold, len(rows), rows_total, locale="ja")
             return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
+        observed: bool | None = True
+        if rows_total == 0:
+            # Only tells an empty list's two causes apart, so a failed probe
+            # leaves that unknown rather than failing a complete response.
+            try:
+                observed = await delay_certificate_observed(agency_id, ctx, ch)
+            except Exception:
+                _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
+                observed = None
+        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale, observed=observed)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),

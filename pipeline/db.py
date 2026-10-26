@@ -52,6 +52,19 @@ MAX_PLAUSIBLE_DELAY_SEC = 7200
 _ARR_DELAY_NULL_SENTINEL = -MAX_PLAUSIBLE_DELAY_SEC - 1
 
 
+def observation_filter_ch(extra_where: str = "") -> str:
+    """The row-level WHERE every read of observations shares: the agency, a
+    measured `dep_delay` inside the plausibility clamp, and the caller's own
+    filter. Columns are `u.`-qualified for the alias rule
+    :func:`build_dedup_ch_sql` explains."""
+    # Wrap in parens so a fragment containing a top-level OR composes correctly.
+    extra = f" AND ({extra_where})" if extra_where else ""
+    return (
+        "u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra}"
+    )
+
+
 def build_dedup_ch_sql(
     *,
     extra_where: str = "",
@@ -183,8 +196,6 @@ def build_dedup_ch_sql(
     substitution rule doesn't match, so the WHERE clause still sees the
     plain row-level column. Confirmed against a live ClickHouse instance.
     """
-    # Wrap in parens so a fragment containing a top-level OR composes correctly.
-    extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
     scheduled_sec = (
         ", tupleElement(argMax(tuple(u.scheduled_sec), (u.captured_at, u.file_name)), 1) AS scheduled_sec"
@@ -204,8 +215,7 @@ def build_dedup_ch_sql(
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
         f"FROM {checked_table(table)} AS u "
-        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
-        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        f"WHERE {observation_filter_ch(extra_where)} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )

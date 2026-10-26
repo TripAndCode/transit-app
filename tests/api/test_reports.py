@@ -2640,6 +2640,9 @@ async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_
     ).json()
     assert empty["rows"] == []
     assert empty["observed"] is False
+    # The staff summary says the same, never "no trip exceeded the threshold".
+    assert empty["text"] == "この期間・条件のリアルタイムデータはありません。"
+    assert on_time["text"] == "遅延300秒超の便はありませんでした。"
 
     ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
     assert ranking["observed"] is None

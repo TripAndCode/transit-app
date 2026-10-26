@@ -105,6 +105,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
     ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_no_data", "ja"): "この期間・条件のリアルタイムデータはありません。",
+    ("delay_certificate_no_data", "en"): "There is no live-feed data for this period and these conditions.",
     ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
     ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
     ("delay_certificate_summary_capped", "ja"): (
@@ -439,14 +441,19 @@ def format_day_marker(offset: int, locale: str = "ja") -> str:
     return _t("delay_certificate_day_marker", locale, offset=offset)
 
 
-def format_delay_certificate_text(rows: list, threshold_sec: int, total: int, locale: str = "ja") -> str:
+def format_delay_certificate_text(
+    rows: list, threshold_sec: int, total: int, locale: str = "ja", observed: bool | None = True
+) -> str:
     """Locale-aware summary line for the delay-certificate export -- a short
     count + threshold statement, not a per-row transcript (this export can
     run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
     not this text body). The count is *total*, every qualifying trip, which
-    the row cap can leave larger than ``len(rows)``.
+    the row cap can leave larger than ``len(rows)``. An empty scope the feed
+    never reported (``observed`` False) says so, never "no trip exceeded".
     """
     if not rows:
+        if observed is False:
+            return _t("delay_certificate_no_data", locale)
         return _t("delay_certificate_empty", locale, threshold=threshold_sec)
     if total > len(rows):
         return _t("delay_certificate_summary_capped", locale, count=total, shown=len(rows), threshold=threshold_sec)
