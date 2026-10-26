@@ -842,8 +842,9 @@ export interface ForecastOverview {
    *  every route's figure); null when the agency has none. */
   history_from: string | null;
   history_to: string | null;
-  /** First day of the window `recent_daily` draws from; it ends on `history_to`. */
+  /** First and last day of the window `recent_daily` draws from. */
   recent_from: string | null;
+  recent_to: string | null;
   disclaimer: string;
 }
 

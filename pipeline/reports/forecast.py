@@ -97,17 +97,13 @@ def _disclaimer(case: str, locale: str, **vars: Any) -> str:
 RECENT_DAYS = 7
 
 
-def history_window(first: date | None, last: date | None) -> dict[str, date | None]:
-    """The first and last analyzed day the past averages pool, and the first
-    day of the `recent_daily` window, which ends on that same last day and
-    never starts before the history does."""
+def recent_window(first: date | None, last: date | None) -> tuple[date | None, date | None]:
+    """First and last day of the `recent_daily` window, given the first and
+    last analyzed day of the table it reads: its last RECENT_DAYS calendar
+    days, never starting before the first."""
     if first is None or last is None:
-        return {"history_from": None, "history_to": None, "recent_from": None}
-    return {
-        "history_from": first,
-        "history_to": last,
-        "recent_from": max(first, last - timedelta(days=RECENT_DAYS - 1)),
-    }
+        return None, None
+    return max(first, last - timedelta(days=RECENT_DAYS - 1)), last
 
 
 def forecast_days(ml_cells: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

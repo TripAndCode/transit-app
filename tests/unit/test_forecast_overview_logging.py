@@ -20,6 +20,8 @@ async def test_forecast_overview_logs_recent_daily_fetch_failure(caplog, monkeyp
         raise RuntimeError("simulated recent-daily fetch failure")
 
     monkeypatch.setattr(reports_mod, "_fetch_recent_daily_rows", boom)
+    no_days = dict.fromkeys(("history_from", "history_to", "recent_from", "recent_to"))
+    monkeypatch.setattr(reports_mod, "_fetch_overview_spans", AsyncMock(return_value=no_days))
 
     # __wrapped__: the raw endpoint function under slowapi's @limiter.limit,
     # which otherwise requires a real starlette Request to check the rate

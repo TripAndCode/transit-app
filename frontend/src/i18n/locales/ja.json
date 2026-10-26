@@ -216,7 +216,7 @@
     "period_typical": "特定の日の予測ではありません。{{period}}の計測から、曜日・時間帯ごとの平均を出しています。",
     "history_heading": "これまでの計測（{{period}}）",
     "history_heading_undated": "これまでの計測",
-    "history_routes_note": "各系統の数値は、この期間のすべての計測の平均です。",
+    "history_routes_note": "各系統の数値は、この期間の計測の平均です。",
     "history_recent_note": "小さな線は、{{period}}のうちデータのある日の日平均です。"
   },
   "network": {

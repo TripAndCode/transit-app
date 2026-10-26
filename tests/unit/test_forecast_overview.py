@@ -7,8 +7,8 @@ from pipeline.reports.forecast import (
     BANDS,
     _pooled,
     band_of,
-    history_window,
     hourly_cells_to_dow_band,
+    recent_window,
     summarize_agency_overview,
 )
 
@@ -281,11 +281,7 @@ def test_a_baseline_only_overview_forecasts_no_date():
     assert summarize_agency_overview(rows, [])["forecast_days"] == []
 
 
-def test_the_recent_window_is_the_last_week_of_the_history_and_never_starts_before_it():
-    assert history_window(date(2026, 5, 1), date(2026, 6, 2)) == {
-        "history_from": date(2026, 5, 1),
-        "history_to": date(2026, 6, 2),
-        "recent_from": date(2026, 5, 27),
-    }
-    assert history_window(date(2026, 6, 1), date(2026, 6, 2))["recent_from"] == date(2026, 6, 1)
-    assert history_window(None, None) == {"history_from": None, "history_to": None, "recent_from": None}
+def test_the_recent_window_is_the_last_week_of_the_analyzed_days_and_never_starts_before_them():
+    assert recent_window(date(2026, 5, 1), date(2026, 6, 2)) == (date(2026, 5, 27), date(2026, 6, 2))
+    assert recent_window(date(2026, 6, 1), date(2026, 6, 2)) == (date(2026, 6, 1), date(2026, 6, 2))
+    assert recent_window(None, None) == (None, None)

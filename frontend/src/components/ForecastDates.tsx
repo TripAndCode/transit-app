@@ -56,17 +56,19 @@ export function ForecastPeriodNote({ aid, route }: { aid: number; route: string 
 }
 
 /** The past-measurements part of the page, headed with the window it covers
- *  so it never reads as part of the forecast above it. `recentFrom`..`to` is
- *  the window the routes' sparklines draw from. */
+ *  so it never reads as part of the forecast above it. `recentFrom`..`recentTo`
+ *  is the window the routes' sparklines draw from. */
 export function ForecastHistory({
   from,
   to,
   recentFrom,
+  recentTo,
   children,
 }: {
   from: string | null;
   to: string | null;
   recentFrom: string | null;
+  recentTo: string | null;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -78,7 +80,7 @@ export function ForecastHistory({
       </h3>
       <p>
         {t("forecast.history_routes_note")}
-        {recentFrom && to && <> {t("forecast.history_recent_note", { period: period(recentFrom, to) })}</>}
+        {recentFrom && recentTo && <> {t("forecast.history_recent_note", { period: period(recentFrom, recentTo) })}</>}
       </p>
       {children}
     </section>

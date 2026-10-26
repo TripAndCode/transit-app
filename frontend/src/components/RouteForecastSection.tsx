@@ -656,7 +656,7 @@ function AgencyLanding({
       )}
 
       {data.routes.length > 0 && (
-        <ForecastHistory from={data.history_from} to={data.history_to} recentFrom={data.recent_from}>
+        <ForecastHistory from={data.history_from} to={data.history_to} recentFrom={data.recent_from} recentTo={data.recent_to}>
           <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
             <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
           </SectionCard>

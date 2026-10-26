@@ -38,6 +38,7 @@ function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
     history_from: "2026-07-12",
     history_to: "2026-10-23",
     recent_from: "2026-10-17",
+    recent_to: "2026-10-23",
     disclaimer: "test disclaimer",
     ...partial,
   };

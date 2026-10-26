@@ -216,7 +216,7 @@
     "period_typical": "Not a forecast for particular dates: the average by day and time of day of measurements over {{period}}.",
     "history_heading": "Past measurements ({{period}})",
     "history_heading_undated": "Past measurements",
-    "history_routes_note": "Each route's figure averages every measurement in this period.",
+    "history_routes_note": "Each route's figure is the average of its measurements in this period.",
     "history_recent_note": "The small line traces its daily average on the days with data over {{period}}."
   },
   "network": {

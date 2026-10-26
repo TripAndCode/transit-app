@@ -72,10 +72,20 @@ async def overview_client(apply_schema):
         # explicit casts on a parameter already typed by its own column.
         [(*row, row[4] * row[7]) for row in daily_rows],
     )
+    # The per-hour aggregate keeps the same rows the pooled grid does (those
+    # with a scheduled time), so its days, not agg_route_daily's, bound the
+    # past averages; here it starts later and ends earlier than agg_route_daily.
+    await pool.executemany(
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 12, 2.0, 50, 6000)",
+        [(aid, date(2026, 5, 28)), (aid, date(2026, 6, 1))],
+    )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, aid, aid_empty
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE agencies, agg_route_hour_dow, agg_route_daily, static_routes CASCADE")
+        await conn.execute(
+            "TRUNCATE agencies, agg_route_hour_dow, agg_route_daily, agg_hour_daily, static_routes CASCADE"
+        )
     await pool.close()
 
 
@@ -144,15 +154,15 @@ async def test_overview_recent_daily_failure_degrades_gracefully(overview_client
 async def test_overview_names_the_window_its_past_figures_cover(overview_client):
     client, aid, aid_empty = overview_client
     body = (await client.get(f"/api/{aid}/forecast/overview")).json()
-    # The analyzed days the past averages pool, and the sparklines' window,
-    # which ends on the same last day: (latest-7, latest].
-    assert body["history_from"] == "2026-05-26"
-    assert body["history_to"] == "2026-06-02"
+    # The days the pooled averages cover come from the per-hour aggregate.
+    assert body["history_from"] == "2026-05-28"
+    assert body["history_to"] == "2026-06-01"
+    # The sparklines read agg_route_daily, so their window is (latest-7, latest] there.
     assert body["recent_from"] == "2026-05-27"
+    assert body["recent_to"] == "2026-06-02"
     assert body["forecast_days"] == []
 
     empty = (await client.get(f"/api/{aid_empty}/forecast/overview")).json()
-    assert empty["history_from"] is None
-    assert empty["history_to"] is None
-    assert empty["recent_from"] is None
+    for key in ("history_from", "history_to", "recent_from", "recent_to"):
+        assert empty[key] is None
     assert empty["forecast_days"] == []
