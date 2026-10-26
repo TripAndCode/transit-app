@@ -427,11 +427,11 @@ type ReportEnvelope<T extends ReportType, Row> = {
    *  empty list can tell "no data" from "nothing left late". */
   observed?: boolean | null;
   /** Route lists: how many of the list's own rows are retired route codes,
-   *  left out by default and kept on request; the same in either mode. */
+   *  left out by default and kept on request; the same in every mode. */
   retired_rows?: number | null;
   /** Route lists: how many of the list's own rows are routes whose feed
    *  always reports zero delay, left out by default and kept on request;
-   *  the same in either mode. */
+   *  the same in every mode. */
   zero_delay_rows?: number | null;
 };
 
