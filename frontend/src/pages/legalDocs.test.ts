@@ -44,6 +44,16 @@ describe("public/legal/terms data-source credits", () => {
     expect(terms).toContain(untagged(credits.hiroshima));
   });
 
+  // Weather and map tiles carry their own credits where they are shown; the
+  // terms name them so the section doesn't read as the complete list without them.
+  it.each([
+    ["ja", ["気象庁", "国土地理院", "OpenStreetMap"]],
+    ["en", ["Japan Meteorological Agency", "Geospatial Information Authority of Japan", "OpenStreetMap"]],
+  ])("names the sources credited in place (%s)", (locale, sources) => {
+    const terms = readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8");
+    for (const source of sources) expect(terms).toContain(source);
+  });
+
   it.each(["ja", "en"])("links the licensed data and each licence deed (%s)", (locale) => {
     const terms = readFileSync(resolve(LEGAL_DIR, `terms.${locale}.md`), "utf8");
     for (const url of [

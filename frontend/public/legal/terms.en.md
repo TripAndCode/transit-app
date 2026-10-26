@@ -24,10 +24,12 @@ The Service aggregates and shows bus delays from GTFS and GTFS-Realtime data tha
 
 ## Where the data comes from
 
-The figures the Service shows are aggregated and derived by the Service from the open data below. The data's providers did not make them.
+The delay and service figures the Service shows are aggregated and derived by the Service from the open data below. The data's providers did not make them.
 
 - Aomori City Bus: This service uses the following copyrighted material with modifications. Aomori City, [Aomori City Bus information](https://ckan.odpt.org/dataset/aomori_city_all_lines) and [[realtime information] Aomori City Bus information](https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines), [Creative Commons License Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/deed.en)
 - Operators in Hiroshima Prefecture: This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its [GTFS open data site](https://www.bus-kyo.or.jp/) under [Creative Commons CC0](https://creativecommons.org/publicdomain/zero/1.0/deed.en).
+
+Weather figures (Japan Meteorological Agency observations) and maps (Geospatial Information Authority of Japan, OpenStreetMap contributors) are credited where they appear.
 
 When you use the data, follow the license of its original provider.
 
