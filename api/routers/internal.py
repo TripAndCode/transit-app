@@ -8,9 +8,8 @@ deployment must poke it at least once a day after JST midnight;
 ``updates_live``'s TTL drops a day that is never promoted. A poke that lands
 in service hours also renews lapsing RT field-coverage verdicts
 (:mod:`pipeline.rt_coverage_reprobe`), so a deployment needs one daytime poke
-as well. Every endpoint is
-gated by :envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header —
-anything without the matching header gets 401.
+as well. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
+``X-Cron-Secret`` header — anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
 the cron caller gets a fast 202 and doesn't block on the multi-minute
