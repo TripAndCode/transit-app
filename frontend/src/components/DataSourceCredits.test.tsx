@@ -102,19 +102,33 @@ describe("DataSourceCredits", () => {
 });
 
 function seededFeedHosts(): Set<string> {
-  const [header, ...rows] = readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8").trim().split("\n");
-  const columns = header.split(",");
+  const hosts = new Set([
+    ...tableHosts(readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8"), ",", "agencies.csv"),
+    // The collector reads its own table; its header is the last commented line.
+    ...tableHosts(
+      readFileSync(resolve(__dirname, "../../../oracle_cloud/v3/etc/agencies.tsv.example"), "utf8").replace(/^# (?=id\t)/m, ""),
+      "\t",
+      "agencies.tsv.example",
+    ),
+  ]);
+  return hosts;
+}
+
+/** The feed and static hosts of a delimited agency table, columns found by header name. */
+function tableHosts(text: string, delimiter: string, name: string): string[] {
+  const [header, ...rows] = text
+    .split("\n")
+    .filter((line) => line.trim() && !line.startsWith("#"));
+  const columns = header.split(delimiter);
   const feed = columns.indexOf("feed_url");
   const staticFeed = columns.indexOf("static_url");
-  expect(feed, "agencies.csv has a feed_url column").toBeGreaterThanOrEqual(0);
-  expect(staticFeed, "agencies.csv has a static_url column").toBeGreaterThanOrEqual(0);
-  const hosts = new Set(
-    rows.flatMap((row) => {
-      const cells = row.split(",");
-      return [cells[feed], cells[staticFeed]].filter(Boolean).map((url) => new URL(url).hostname);
-    }),
-  );
-  expect(hosts.size).toBeGreaterThan(0);
+  expect(feed, `${name} has a feed_url column`).toBeGreaterThanOrEqual(0);
+  expect(staticFeed, `${name} has a static_url column`).toBeGreaterThanOrEqual(0);
+  const hosts = rows.flatMap((row) => {
+    const cells = row.split(delimiter);
+    return [cells[feed], cells[staticFeed]].filter(Boolean).map((url) => new URL(url).hostname);
+  });
+  expect(hosts.length, `${name} lists feeds`).toBeGreaterThan(0);
   return hosts;
 }
 

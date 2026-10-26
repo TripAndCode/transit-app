@@ -18,7 +18,8 @@ export const DATA_SOURCES: readonly DataSource[] = [
   // CC BY 4.0, which requires naming the provider, linking the material and
   // the licence, and saying the data was modified; the credit follows ODPT's
   // own template for modified CC BY material. The operator's own site serves
-  // the static feed; ODPT's key-less mirror serves the realtime one.
+  // both feeds; the collector polls ODPT's key-less mirror of the realtime one,
+  // because the operator's site drops the collector's address.
   {
     creditKey: "credits.aomori",
     feedHosts: ["aomoricitybus.com", "api-public.odpt.org"],
