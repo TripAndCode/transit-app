@@ -82,19 +82,42 @@ _PLANNED_TRIPS_SQL = """
     GROUP BY r.agency_id
 """
 
+# The days a loaded timetable says anything about: inside a calendar.txt
+# service's date range, or named by a calendar_dates.txt row. A timetable
+# reload replaces the agency's calendar, so a window reaching back before the
+# load has days no plan covers; those count toward neither side of the ratio.
+_COVERED_DAYS_SQL = """
+    WITH days AS (
+        SELECT day, to_char(day, 'YYYYMMDD') AS ymd
+        FROM (SELECT $2::date + i AS day FROM generate_series(0, $3::date - $2::date) AS i) AS d
+    )
+    SELECT c.agency_id, days.day
+    FROM static_calendar c
+    JOIN days ON days.day BETWEEN c.start_date AND c.end_date
+    WHERE c.agency_id = ANY($1::int[])
+    UNION
+    SELECT cd.agency_id, days.day
+    FROM static_calendar_dates cd
+    JOIN days ON days.ymd = cd.date
+    WHERE cd.agency_id = ANY($1::int[])
+      AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
+"""
+
 _NON_EXECUTED_TRIPS_SQL = """
-    SELECT agency_id, SUM(non_executed_trips) AS non_executed
+    SELECT agency_id, date, non_executed_trips
     FROM agg_service_delivered_daily
     WHERE date BETWEEN $1 AND $2
-    GROUP BY agency_id
 """
 
 
 async def compute_service_delivered_by_agency(
     conn, agency_ids: list[int], from_date: date, to_date: date
 ) -> dict[int, dict[str, Any]]:
-    """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct"}``
-    over ``[from_date, to_date]``.
+    """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct",
+    "covered_days", "window_days"}`` over ``[from_date, to_date]``.
+
+    ``covered_days`` counts the window's days the loaded timetable covers;
+    both sides of the ratio count only those days.
 
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
@@ -108,12 +131,20 @@ async def compute_service_delivered_by_agency(
     planned_rows = await conn.fetch(_PLANNED_TRIPS_SQL, agency_ids, from_date, to_date)
     planned = {r["agency_id"]: int(r["planned"]) for r in planned_rows}
 
+    covered: dict[int, set[date]] = {}
+    for r in await conn.fetch(_COVERED_DAYS_SQL, agency_ids, from_date, to_date):
+        covered.setdefault(r["agency_id"], set()).add(r["day"])
+    window_days = (to_date - from_date).days + 1
+
     # agg_service_delivered_daily only carries a row for a (agency, date) that
     # actually had a non-executed trip -- a day with zero cancellations has no
     # row at all, so an agency with no row in range still legitimately reads
     # non_executed=0 via the .get(..., 0) default below, not "not available".
-    non_executed_rows = await conn.fetch(_NON_EXECUTED_TRIPS_SQL, from_date, to_date)
-    non_executed = {r["agency_id"]: int(r["non_executed"]) for r in non_executed_rows}
+    # Only covered days count: the plan above never counted the others.
+    non_executed: dict[int, int] = {}
+    for r in await conn.fetch(_NON_EXECUTED_TRIPS_SQL, from_date, to_date):
+        if r["date"] in covered.get(r["agency_id"], ()):
+            non_executed[r["agency_id"]] = non_executed.get(r["agency_id"], 0) + int(r["non_executed_trips"])
 
     # An agency must satisfy both halves of the shared gate: an ingest
     # strategy that CAN send this field, and a live probe verdict saying its
@@ -124,8 +155,9 @@ async def compute_service_delivered_by_agency(
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:
         p = planned.get(aid, 0)
+        coverage = {"covered_days": len(covered.get(aid, ())), "window_days": window_days}
         if aid not in populated_ids or p <= 0:
-            result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None}
+            result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None, **coverage}
             continue
         # Clamp at 0: a canceled/skipped trip-day whose trip_id doesn't
         # actually match anything in the static schedule (feed drift, or a
@@ -136,5 +168,6 @@ async def compute_service_delivered_by_agency(
             "planned_trips": p,
             "executed_trips": executed,
             "service_delivered_pct": round(executed / p * 100, 1),
+            **coverage,
         }
     return result

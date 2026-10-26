@@ -205,7 +205,17 @@ async def compute_council_summary(
     )
 
     delivered = await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date)
-    d = delivered.get(agency_id, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
+    window_days = (ctx.to_date - ctx.from_date).days + 1
+    d = delivered.get(
+        agency_id,
+        {
+            "planned_trips": 0,
+            "executed_trips": None,
+            "service_delivered_pct": None,
+            "covered_days": 0,
+            "window_days": window_days,
+        },
+    )
 
     # Freshness (agg-lag) + quality (implausible-reading share), scoped to
     # THIS agency's ctx.from_date/to_date range -- the same two signals
@@ -245,6 +255,8 @@ async def compute_council_summary(
         "planned_trips": d["planned_trips"],
         "executed_trips": d["executed_trips"],
         "service_delivered_pct": d["service_delivered_pct"],
+        "covered_days": d["covered_days"],
+        "window_days": d["window_days"],
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),

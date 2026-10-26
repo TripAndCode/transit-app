@@ -154,3 +154,41 @@ async def test_another_agencys_calendar_and_trips_do_not_leak_in(aconn):
 
     assert await _planned(aconn, [a], date(2026, 4, 6), date(2026, 4, 12)) == {a: 3}
     assert await _planned(aconn, [a, b], date(2026, 4, 6), date(2026, 4, 12)) == {a: 3, b: 6 * 5}
+
+
+async def test_counts_only_the_days_a_timetable_covers_and_says_how_many(aconn):
+    """A timetable loaded mid-window plans only the days it covers. The
+    non-executed trips are counted over the same days, so the ratio compares
+    like with like, and the result says how much of the window it covers."""
+    from tests.conftest import confirm_rt_field_coverage
+
+    a = await _agency(aconn, "a")
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", a)
+    await confirm_rt_field_coverage(aconn, a)
+    # Every day from Monday the 13th; the window opens on Monday the 6th.
+    await _weekly(aconn, a, "ALL", "1111111", date(2026, 4, 13), date(2026, 6, 30))
+    await _trips(aconn, a, "ALL", 10)
+    for day, missed in ((date(2026, 4, 8), 4), (date(2026, 4, 15), 2)):
+        await aconn.execute(
+            "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES ($1, $2, $3)",
+            a,
+            day,
+            missed,
+        )
+
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 19)))[a]
+    assert result["planned_trips"] == 7 * 10
+    # The 8th predates the timetable, so its missed trips are not taken from
+    # a plan that never counted that day.
+    assert result["executed_trips"] == 70 - 2
+    assert result["covered_days"] == 7
+    assert result["window_days"] == 14
+
+
+async def test_a_window_inside_the_timetable_is_fully_covered(aconn):
+    a = await _agency(aconn, "a")
+    await _weekly(aconn, a, "WD", "1111100", date(2026, 4, 1), date(2026, 4, 30))
+    await _trips(aconn, a, "WD", 3)
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 19)))[a]
+    # Weekends carry no trips but are still covered by the timetable.
+    assert result["covered_days"] == result["window_days"] == 14
