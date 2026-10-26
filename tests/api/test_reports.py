@@ -2612,3 +2612,37 @@ async def test_keeping_retired_codes_adds_only_them(reports_client):
     assert left["retired_rows"] == kept["retired_rows"] == 1
     assert left["rows_total"] == 2
     assert kept["rows_total"] == 4
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_departures(
+    reports_client, ch_client, ch_async_client
+):
+    """No late departure and no data at all both list nothing; `observed`
+    tells the passenger which, since "nothing left late" would be false for
+    a day the feed never reported."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-20"
+    await _seed_route(pool, agency_id, "RCERT", "平日", day, [0, 30])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    on_time = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&routes=RCERT")).json()
+    assert on_time["rows"] == []
+    assert on_time["observed"] is True
+
+    empty = (
+        await client.get(f"/api/{agency_id}/reports/delay_certificate?from=2026-06-21&to=2026-06-21&routes=RCERT")
+    ).json()
+    assert empty["rows"] == []
+    assert empty["observed"] is False
+    # The staff summary says the same, never "no trip exceeded the threshold".
+    assert empty["text"] == "この期間・条件のリアルタイムデータはありません。"
+    assert on_time["text"] == "遅延300秒超の便はありませんでした。"
+
+    ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
+    assert ranking["observed"] is None

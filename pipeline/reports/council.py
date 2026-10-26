@@ -40,8 +40,10 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at_before_by_agency
-from api.range import RangeCtx
+from api.range import RangeCtx, build_updates_filter_ch
 from api.scope_applied import ALL_SIX
+from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.db import observation_filter_ch
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -364,3 +366,27 @@ async def compute_delay_certificate(
             )
         )
     return rows, total
+
+
+async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
+    """Whether ``ctx`` holds any departure observation at all.
+
+    A certificate lookup that lists nothing means either that no departure
+    left late or that the feed reported nothing for that day and route; only
+    the second is a gap in the data, so a passenger must be told which.
+
+    The certificate's rows come from the latest observation of each stop
+    event, and that dedup keeps every event a raw row starts, so a raw row
+    passing the same filters exists exactly when the certificate had an
+    event to judge. Reading raw rows lets the probe stop at the first one
+    instead of aggregating the whole scope.
+    """
+    if ch is None:
+        raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
+    where, ch_params = build_updates_filter_ch(ctx)
+    result = await ch.query(
+        f"SELECT 1 FROM {checked_table(UPDATES_TABLE)} AS u "
+        f"WHERE {observation_filter_ch(where)} AND u.scheduled_time IS NOT NULL LIMIT 1",
+        parameters={"agency_id": agency_id, **ch_params},
+    )
+    return bool(result.result_rows)

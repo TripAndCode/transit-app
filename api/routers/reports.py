@@ -54,6 +54,7 @@ from pipeline.reports import (
     compute_ranking,
     compute_trend_series,
     compute_worst_5min,
+    delay_certificate_observed,
     format_definition_csv_line,
     observation_disclaimer,
     resolve_definition_meta,
@@ -268,6 +269,10 @@ class ReportResponse(BaseModel):
     # count below which a route's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
+    # delay_certificate only (None elsewhere): whether the scope holds any
+    # observed departure, so an empty list can say "no data" rather than
+    # "nothing left late".
+    observed: bool | None = None
     # Route lists only (None elsewhere): how many of the list's own rows are
     # retired route codes (pipeline.route_catalog.retired_route_codes), left
     # out by default and kept on include_retired. The same in either mode.
@@ -1118,10 +1123,19 @@ async def get_report(
         rows, rows_total = await compute_delay_certificate(
             agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n, locale="ja" if format == "csv" else locale
         )
-        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale)
         if format == "csv":
             footnotes = format_delay_certificate_footnotes(threshold, len(rows), rows_total, locale="ja")
             return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
+        observed: bool | None = True
+        if rows_total == 0:
+            # Only tells an empty list's two causes apart, so a failed probe
+            # leaves that unknown rather than failing a complete response.
+            try:
+                observed = await delay_certificate_observed(agency_id, ctx, ch)
+            except Exception:
+                _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
+                observed = None
+        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale, observed=observed)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
@@ -1131,6 +1145,7 @@ async def get_report(
             definition=definition,
             scope_applied=report_scope_applied(report_type),
             rows_total=rows_total,
+            observed=observed,
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")

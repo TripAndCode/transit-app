@@ -12,6 +12,7 @@ from pipeline.reports.council import (
     DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
     compute_council_summary,
     compute_delay_certificate,
+    delay_certificate_observed,
 )
 from pipeline.reports.definition import (
     DefinitionMeta,
@@ -58,6 +59,7 @@ __all__ = [
     "compute_ranking",
     "compute_trend_series",
     "compute_worst_5min",
+    "delay_certificate_observed",
     "format_definition_csv_line",
     "format_definition_footnotes",
     "observation_disclaimer",
