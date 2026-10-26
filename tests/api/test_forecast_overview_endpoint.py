@@ -139,3 +139,20 @@ async def test_overview_recent_daily_failure_degrades_gracefully(overview_client
     body = r.json()
     assert len(body["routes"]) > 0
     assert all(x["recent_daily"] == [] for x in body["routes"])
+
+
+async def test_overview_names_the_window_its_past_figures_cover(overview_client):
+    client, aid, aid_empty = overview_client
+    body = (await client.get(f"/api/{aid}/forecast/overview")).json()
+    # The analyzed days the past averages pool, and the sparklines' window,
+    # which ends on the same last day: (latest-7, latest].
+    assert body["history_from"] == "2026-05-26"
+    assert body["history_to"] == "2026-06-02"
+    assert body["recent_from"] == "2026-05-27"
+    assert body["forecast_days"] == []
+
+    empty = (await client.get(f"/api/{aid_empty}/forecast/overview")).json()
+    assert empty["history_from"] is None
+    assert empty["history_to"] is None
+    assert empty["recent_from"] is None
+    assert empty["forecast_days"] == []

@@ -166,8 +166,8 @@
     "overview_grid_title": "曜日 × 時間帯（全路線）",
     "route_grid_title": "曜日 × 時間帯（この路線）",
     "overview_grid_caption": "事業者全体で、いつ遅れやすいか — 濃いほど遅延が大きい。",
-    "overview_routes_title": "遅れやすい路線",
-    "overview_routes_caption": "系統をクリックすると内訳を表示します。小さな線は、データのある直近7日間の日平均です。",
+    "overview_routes_title": "遅れやすかった路線",
+    "overview_routes_caption": "系統をクリックすると内訳を表示します。",
     "overview_no_data": "計測記録がまだありません。",
     "band_early": "早朝",
     "band_morning": "朝",
@@ -208,7 +208,16 @@
     "avg_late": "平均{{min}}分の遅れ",
     "avg_early": "平均{{min}}分の早発",
     "expected_late": "予測{{min}}分の遅れ",
-    "expected_early": "予測{{min}}分の早発"
+    "expected_early": "予測{{min}}分の早発",
+    "dow_dated": "{{date}}({{day}})",
+    "period_forecast": "{{dates}}の予測です。",
+    "period_rest_history": "予測のない曜日・時間帯は、{{period}}の計測の平均です。",
+    "period_rest_history_undated": "予測のない曜日・時間帯は、過去の計測の平均です。",
+    "period_typical": "特定の日の予測ではありません。{{period}}の計測から、曜日・時間帯ごとの平均を出しています。",
+    "history_heading": "これまでの計測（{{period}}）",
+    "history_heading_undated": "これまでの計測",
+    "history_routes_note": "各系統の数値は、この期間のすべての計測の平均です。",
+    "history_recent_note": "小さな線は、{{period}}のうちデータのある日の日平均です。"
   },
   "network": {
     "title": "事業者比較",

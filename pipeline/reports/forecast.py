@@ -24,7 +24,7 @@ percentile, and percentiles cannot be recovered from per-bucket percentiles).
 """
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from api.triage import LOW_CONFIDENCE_SAMPLES
@@ -92,6 +92,33 @@ def _disclaimer(case: str, locale: str, **vars: Any) -> str:
         return tpl
 
 
+# Calendar days a route's `recent_daily` sparkline spans, ending on the
+# agency's last analyzed day.
+RECENT_DAYS = 7
+
+
+def history_window(first: date | None, last: date | None) -> dict[str, date | None]:
+    """The first and last analyzed day the past averages pool, and the first
+    day of the `recent_daily` window, which ends on that same last day and
+    never starts before the history does."""
+    if first is None or last is None:
+        return {"history_from": None, "history_to": None, "recent_from": None}
+    return {
+        "history_from": first,
+        "history_to": last,
+        "recent_from": max(first, last - timedelta(days=RECENT_DAYS - 1)),
+    }
+
+
+def forecast_days(ml_cells: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The service date each forecast-model weekday row stands for, oldest
+    first. The caller's horizon is seven consecutive days, so a weekday names
+    at most one date; a weekday with no ML cell is a past average and is not
+    listed."""
+    dates = {r["service_date"] for r in ml_cells if r.get("service_date") is not None}
+    return [{"dow": d.isoweekday(), "service_date": d} for d in sorted(dates)]
+
+
 def summarize_expected_delay_heatmap(
     rows: Iterable[Mapping[str, Any]],
     route: str,
@@ -109,7 +136,8 @@ def summarize_expected_delay_heatmap(
 
     `ml_cells`: published-forecast rows (already flag- and freshness-
     filtered by the caller, bounded to the forward horizon the daily publish
-    job actually covers) with keys ``dow``, ``hour``, ``mean_min`` -- this
+    job actually covers) with keys ``dow``, ``hour``, ``mean_min`` and the
+    ``service_date`` that `forecast_days` names -- this
     `route`'s own forecast, so at most one row per (dow, hour). When present
     for a cell, its `mean_min` replaces `expected_avg_min` and `source`
     becomes ``"ml"``; `samples` stays whatever the historical baseline above
@@ -121,6 +149,7 @@ def summarize_expected_delay_heatmap(
     prediction has no local history to compare against."
     """
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    ml_cells = list(ml_cells)
     ml_by = {(int(r["dow"]), int(r["hour"])): float(r["mean_min"]) for r in ml_cells}
     cells: list[dict[str, Any]] = []
     for d in range(1, 8):
@@ -142,7 +171,12 @@ def summarize_expected_delay_heatmap(
                 }
             )
     case = "heatmap_ml" if any(c["source"] == "ml" for c in cells) else "heatmap"
-    return {"route": route, "cells": cells, "disclaimer": _disclaimer(case, locale)}
+    return {
+        "route": route,
+        "cells": cells,
+        "forecast_days": forecast_days(ml_cells),
+        "disclaimer": _disclaimer(case, locale),
+    }
 
 
 # Ordered hour→band mapping. SINGLE SOURCE OF TRUTH for the time bands (the
@@ -247,7 +281,8 @@ def summarize_agency_overview(
     can never headline. No percentile (cannot pool per-bucket percentiles).
 
     ``ml_cells``: published-forecast rows (already flag- and freshness-
-    filtered by the caller) with keys ``dow``, ``hour``, ``mean_min``, one
+    filtered by the caller) with keys ``dow``, ``hour``, ``mean_min`` and the
+    ``service_date`` that `forecast_days` names, one
     row per (route, upcoming slot) -- unlike the heatmap's single-route
     ``ml_cells``, this agency-wide grid can see several routes sharing a
     (dow, hour), and several hours sharing a (dow, band); both are pooled
@@ -261,6 +296,7 @@ def summarize_agency_overview(
     caller must not word an ML-sourced figure as an average of measurements.
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
+    ml_cells = list(ml_cells)
     ml_buckets: dict[tuple[int, str], list[float]] = {}
     for r in ml_cells:
         key = (int(r["dow"]), band_of(int(r["hour"])))
@@ -364,4 +400,10 @@ def summarize_agency_overview(
         routes = routes[:top_n]
 
     case = "overview_ml" if any(c["source"] == "ml" for c in grid) else "overview"
-    return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer(case, locale)}
+    return {
+        "grid": grid,
+        "worst": worst,
+        "routes": routes,
+        "forecast_days": forecast_days(ml_cells),
+        "disclaimer": _disclaimer(case, locale),
+    }

@@ -1,8 +1,16 @@
+from datetime import date
 from typing import Any
 
 import pytest
 
-from pipeline.reports.forecast import BANDS, _pooled, band_of, hourly_cells_to_dow_band, summarize_agency_overview
+from pipeline.reports.forecast import (
+    BANDS,
+    _pooled,
+    band_of,
+    history_window,
+    hourly_cells_to_dow_band,
+    summarize_agency_overview,
+)
 
 
 def test_band_of_boundaries():
@@ -252,3 +260,32 @@ def test_the_worst_window_says_whether_a_forecast_model_or_past_measurements_set
     assert summarize_agency_overview(rows, [])["worst"]["source"] == "baseline"
     worst = summarize_agency_overview(rows, [], ml_cells=[{"dow": 1, "hour": 8, "mean_min": 9.0}])["worst"]
     assert (worst["dow"], worst["band"], worst["expected_avg_min"], worst["source"]) == (1, "morning", 9.0, "ml")
+
+
+def test_the_overview_names_each_forecast_weekday_by_its_service_date_once():
+    # Several routes and hours share a day; the date is named once per day.
+    ml_cells = [
+        {"dow": 3, "hour": 17, "mean_min": 4.0, "service_date": date(2026, 10, 28)},
+        {"dow": 2, "hour": 8, "mean_min": 2.0, "service_date": date(2026, 10, 27)},
+        {"dow": 2, "hour": 18, "mean_min": 3.0, "service_date": date(2026, 10, 27)},
+    ]
+    out = summarize_agency_overview([], [], ml_cells=ml_cells)
+    assert out["forecast_days"] == [
+        {"dow": 2, "service_date": date(2026, 10, 27)},
+        {"dow": 3, "service_date": date(2026, 10, 28)},
+    ]
+
+
+def test_a_baseline_only_overview_forecasts_no_date():
+    rows = [{"dow": 1, "hour": 9, "avg_min": 2.0, "samples": 100}]
+    assert summarize_agency_overview(rows, [])["forecast_days"] == []
+
+
+def test_the_recent_window_is_the_last_week_of_the_history_and_never_starts_before_it():
+    assert history_window(date(2026, 5, 1), date(2026, 6, 2)) == {
+        "history_from": date(2026, 5, 1),
+        "history_to": date(2026, 6, 2),
+        "recent_from": date(2026, 5, 27),
+    }
+    assert history_window(date(2026, 6, 1), date(2026, 6, 2))["recent_from"] == date(2026, 6, 1)
+    assert history_window(None, None) == {"history_from": None, "history_to": None, "recent_from": None}

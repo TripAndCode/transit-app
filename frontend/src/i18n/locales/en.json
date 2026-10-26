@@ -166,8 +166,8 @@
     "overview_grid_title": "Day × time of day (all routes)",
     "route_grid_title": "Day × time of day (this route)",
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
-    "overview_routes_title": "Routes that run late",
-    "overview_routes_caption": "Click a route for its breakdown. The small line traces its daily average over its last 7 days of data.",
+    "overview_routes_title": "Routes that ran late",
+    "overview_routes_caption": "Click a route for its breakdown.",
     "overview_no_data": "No measurements yet.",
     "band_early": "Early",
     "band_morning": "Morning",
@@ -208,7 +208,16 @@
     "avg_late": "avg {{min}} min late",
     "avg_early": "avg {{min}} min early",
     "expected_late": "{{min}} min late expected",
-    "expected_early": "{{min}} min early expected"
+    "expected_early": "{{min}} min early expected",
+    "dow_dated": "{{day}} {{date}}",
+    "period_forecast": "Forecast for {{dates}}.",
+    "period_rest_history": "Days and times without a forecast show the average of measurements over {{period}}.",
+    "period_rest_history_undated": "Days and times without a forecast show the average of past measurements.",
+    "period_typical": "Not a forecast for particular dates: the average by day and time of day of measurements over {{period}}.",
+    "history_heading": "Past measurements ({{period}})",
+    "history_heading_undated": "Past measurements",
+    "history_routes_note": "Each route's figure averages every measurement in this period.",
+    "history_recent_note": "The small line traces its daily average on the days with data over {{period}}."
   },
   "network": {
     "title": "Compare agencies",
