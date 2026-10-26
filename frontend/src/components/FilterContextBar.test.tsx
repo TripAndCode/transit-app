@@ -97,9 +97,9 @@ describe("FilterContextBar", () => {
       const pressed = screen.getAllByRole("button", { pressed: true }).map((b) => b.textContent);
       expect(pressed).toContain("Weekdays only");
       expect(pressed).toContain(i18n.t("filters.time_band.morning"));
-      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: false })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Weekends/holidays only" }));
-      expect(screen.getByRole("button", { name: "Weekends/holidays only", pressed: true })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Weekends only", pressed: false })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Weekends only" }));
+      expect(screen.getByRole("button", { name: "Weekends only", pressed: true })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Weekdays only", pressed: false })).toBeInTheDocument();
     });
   });

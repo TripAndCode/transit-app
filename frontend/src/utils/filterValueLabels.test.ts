@@ -6,9 +6,10 @@ const t = i18n.getFixedT("en");
 const tDesignNs = i18n.getFixedT("en", "design");
 
 describe("filter value labels", () => {
-  it("maps dow wire values onto the shared service-value copy", () => {
+  it("names the weekend day-of-week group by its days, without the holidays it leaves out", () => {
     expect(dowValueLabel("weekday", t)).toBe("Weekday");
-    expect(dowValueLabel("weekend", t)).toBe("Weekend/Holiday");
+    expect(dowValueLabel("weekend", t)).toBe("Weekend");
+    expect(dowValueLabel("weekend", i18n.getFixedT("ja"))).toBe("土日");
   });
 
   it("names each day of a weekday list, in both languages", () => {

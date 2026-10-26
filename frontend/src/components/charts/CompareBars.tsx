@@ -9,7 +9,7 @@ import { useCappedList } from "../../hooks/useCappedList";
 import { useCountUp } from "../../hooks/useCountUp";
 import { useFlipRows } from "../../hooks/useFlipRows";
 import { delayColor, delayTextColor } from "../../styles/tokens";
-import { dowValueLabel } from "../../utils/filterValueLabels";
+import { serviceValueLabel, type LabelT } from "../../utils/filterValueLabels";
 import { RouteLabel } from "../RouteLabel";
 import { PERIODS, deltaFor, orderByPeriod, otherPeriod, parseCompareRows, type Period } from "./compareBarMath";
 import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "./delayAxis";
@@ -17,6 +17,12 @@ import "./compareBars.css";
 import { fixedTenth, roundTenth } from "../../utils/format";
 
 const ROWS_CAP = 200;
+
+/** The compare report splits days by the agency's day types, so each period
+ *  reads as the service value naming that side. */
+function periodLabel(period: Period, t: LabelT): string {
+  return serviceValueLabel(period === "weekday" ? "平日" : "土日祝", t); // i18n-ignore: query contract
+}
 
 function Figure({ value }: { value: number }) {
   const shown = useCountUp(value, { decimals: 1 });
@@ -50,17 +56,17 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
         <div className="compare-bars__seg" role="group" aria-label={t("compare.bars.period_label")}>
           {PERIODS.map((p) => (
             <button key={p} type="button" aria-pressed={period === p} onClick={() => setPeriod(p)}>
-              {dowValueLabel(p, t)}
+              {periodLabel(p, t)}
             </button>
           ))}
         </div>
-        <span className="compare-bars__legend">{t("compare.bars.ghost_legend", { period: dowValueLabel(ghost, t) })}</span>
+        <span className="compare-bars__legend">{t("compare.bars.ghost_legend", { period: periodLabel(ghost, t) })}</span>
       </div>
       <div
         ref={listRef}
         className="compare-bars__list"
         role="list"
-        aria-label={t("compare.bars.aria", { period: dowValueLabel(period, t), max: DELAY_AXIS_MAX_MIN })}
+        aria-label={t("compare.bars.aria", { period: periodLabel(period, t), max: DELAY_AXIS_MAX_MIN })}
       >
         {capped.visible.map((row) => {
           const v = row[period];

@@ -28,9 +28,12 @@ export function serviceLabel(service: string, t: LabelT): { text: string; transl
   return text ? { text, translated: true } : { text: service, translated: false };
 }
 
+/** A `dow` filter value as display text. The filter selects days of the week,
+ *  so `weekend` is Saturday and Sunday: a public holiday keeps its own weekday
+ *  and is not in it, unlike the 土日祝 service filter. */ // i18n-ignore: JSDoc names the service value
 export function dowValueLabel(dow: string, t: LabelT): string {
   if (dow === "weekday") return translationT(t, "common.service_value.平日"); // i18n-ignore: query contract
-  if (dow === "weekend") return translationT(t, "common.service_value.土日祝"); // i18n-ignore: query contract
+  if (dow === "weekend") return translationT(t, "common.service_value.土日"); // i18n-ignore: Sat/Sun split label
   const days = dow.split(",");
   if (days.every((day) => (WEEKDAYS as readonly string[]).includes(day))) {
     return days.map((day) => translationT(t, `forecast.dow_${day}`)).join(translationT(t, "common.list_separator"));

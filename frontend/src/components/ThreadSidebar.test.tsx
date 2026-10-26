@@ -59,7 +59,8 @@ describe("ThreadSidebar", () => {
       conv({ conversation_id: "c2", title: "Weekday delays", filter_ctx: { dow: "weekday" } }),
     ]);
     render();
-    expect(screen.getByText(/Weekend\/Holiday/)).toBeInTheDocument();
+    expect(screen.getByText(/Weekend$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Holiday/)).toBeNull();
     expect(screen.getByText(/Weekday$/)).toBeInTheDocument();
   });
   it("shows the empty state when there are no conversations", () => {
