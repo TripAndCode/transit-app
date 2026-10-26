@@ -13,7 +13,7 @@ import * as mapStyle from "../styles/mapStyle";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
 import { decl, ruleBody } from "../test/cssRules";
-import { formatDateTime } from "../utils/format";
+import { formatDateTime, formatReportTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
 import { MockMap } from "../test/maplibreMock";
 
@@ -73,7 +73,7 @@ describe("MapTab", () => {
     } as never);
     renderMap();
     expect(screen.getByRole("heading", { name: "Current observations" })).toBeInTheDocument();
-    expect(screen.getByText("No vehicles are reporting right now")).toBeInTheDocument();
+    expect(screen.getByText("No live reports received yet")).toBeInTheDocument();
   });
 
   it("leaves a failed live fetch to the error banner instead of saying no vehicle is reporting", () => {
@@ -88,7 +88,7 @@ describe("MapTab", () => {
     } as never);
     renderMap();
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("No vehicles are reporting right now")).toBeNull();
+    expect(document.querySelector(".ops-map__empty")).toBeNull();
   });
 
   it("does not show the empty state and counts observed trips once live rows arrive", () => {
@@ -188,16 +188,164 @@ describe("MapTab when no trip is reporting", () => {
     vi.restoreAllMocks();
   });
 
-  function mockLive(latest: string | null) {
+  function mockLive(latest: string | null, rows: LiveTrip[] = []) {
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
       dataUpdatedAt: 0,
-      data: { latest_captured_at: latest, rows: [] },
+      data: { latest_captured_at: latest, rows },
       error: null,
       isLoading: false,
       isFetching: false,
       refetch: vi.fn(),
     } as never);
   }
+
+  function mockSummary(latest: string | null, isLoading = false) {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: isLoading ? undefined : { ...todaySummary(), latest_captured_at: latest },
+      error: null,
+      isLoading,
+      isFetching: isLoading,
+      refetch: vi.fn(),
+    } as never);
+  }
+
+  function reported(tripId: string, capturedAt: string, routeCode = "R1"): LiveTrip {
+    return {
+      trip_id: tripId,
+      route_code: routeCode,
+      service_type: null,
+      scheduled_time: "18:00:00",
+      dep_delay: 420,
+      captured_at: capturedAt,
+      stop_id: `s-${tripId}`,
+      stop_sequence: 3,
+      stop_name: "Stop",
+      stop_lat: 34.39,
+      stop_lon: 132.46,
+      headsign: "Downtown",
+    };
+  }
+
+  function emptyOverlay(): HTMLElement | null {
+    return document.querySelector<HTMLElement>(".ops-map__empty");
+  }
+
+  function tileValue(label: string | RegExp): string | null {
+    return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+  }
+
+  // 18:16 JST, eleven minutes after a feed that carried 161 trips last reported.
+  const DAYTIME = "2026-10-25T09:16:49Z";
+  const LAST_REPORT = "2026-10-25T09:05:49Z";
+
+  it("says since when no report has arrived in the daytime, instead of calling it night", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(LAST_REPORT, [reported("t1", LAST_REPORT)]);
+    renderMap();
+    const time = formatDateTime(LAST_REPORT, { timeStyle: "short", timeZone: "Asia/Tokyo" });
+    const empty = emptyOverlay()!;
+    expect(empty).toHaveTextContent(`No new reports since ${time} JST (11 min)`);
+    expect(empty).toHaveTextContent("The operator's feed may have stopped.");
+    expect(empty).not.toHaveTextContent("late at night");
+    expect(empty).not.toHaveTextContent("No vehicles are reporting right now");
+  });
+
+  it("reads the counts as unknown, not zero, while the feed is stale", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(LAST_REPORT, [reported("t1", LAST_REPORT)]);
+    renderMap();
+    expect(tileValue("Observed")).toBe("—");
+    expect(tileValue(/^5\+\smin late$/)).toBe("—");
+    expect(screen.queryByText("On-time rate")).toBeNull();
+  });
+
+  it("explains an empty map overnight by the hour, after the evening's last report", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 02:30 JST; the last report came at 23:40 JST.
+    vi.setSystemTime(new Date("2026-10-25T17:30:00Z"));
+    mockLive("2026-10-25T14:40:00Z");
+    renderMap();
+    const empty = emptyOverlay()!;
+    expect(empty).toHaveTextContent("No vehicles are reporting right now");
+    expect(empty).toHaveTextContent("late at night");
+    expect(empty).not.toHaveTextContent("may have stopped");
+  });
+
+  it("names neither the night nor the feed when a fresh feed has nothing on the filtered routes, and counts zero", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 14:00 JST; the feed reported a minute ago, on a route the filter leaves out.
+    vi.setSystemTime(new Date("2026-10-25T05:00:00Z"));
+    mockLive("2026-10-25T04:59:00Z", [reported("t1", "2026-10-25T04:59:00Z", "R1")]);
+    renderMap("1", "?routes=R2");
+    const empty = emptyOverlay()!;
+    expect(empty).toHaveTextContent("No vehicles are reporting right now");
+    expect(empty).not.toHaveTextContent("late at night");
+    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(tileValue("Observed")).toBe("0");
+  });
+
+  it("says nothing has been received when neither the live feed nor the history has a report", () => {
+    mockLive(null);
+    renderMap();
+    expect(emptyOverlay()).toHaveTextContent("No live reports received yet");
+    expect(emptyOverlay()).not.toHaveTextContent("late at night");
+    expect(tileValue("Observed")).toBe("—");
+  });
+
+  it("dates a feed whose live rows have aged out by the summary's newest report, in the header and on the map", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(null);
+    mockSummary("2026-10-22T12:59:00Z");
+    renderMap();
+    const time = formatReportTime("2026-10-22T12:59:00Z");
+    expect(screen.getByText(`Feed quiet for 2 days · last report ${time}`)).toBeInTheDocument();
+    expect(emptyOverlay()).toHaveTextContent(`No new reports since ${time} (2 days)`);
+    expect(tileValue("Observed")).toBe("—");
+  });
+
+  it("decides nothing about an empty map while the summary that dates it is still loading", () => {
+    mockLive(null);
+    mockSummary(null, true);
+    renderMap();
+    expect(emptyOverlay()).toBeNull();
+  });
+
+  it("offers the last reported positions of a stalled feed, labelled as not current", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    const addSource = vi.spyOn(MockMap.prototype, "addSource");
+    const liveSourceFeatures = () => {
+      const calls = addSource.mock.calls as unknown as [string, { data?: GeoJSON.FeatureCollection }][];
+      return calls.filter(([id]) => id === "live-trips").at(-1)?.[1].data?.features.length ?? 0;
+    };
+    mockLive(LAST_REPORT, [reported("t1", LAST_REPORT), reported("t2", LAST_REPORT)]);
+    renderMap();
+    expect(liveSourceFeatures()).toBe(0);
+
+    fireEvent.click(within(emptyOverlay()!).getByRole("button", { name: "Show last reported positions" }));
+    const time = formatDateTime(LAST_REPORT, { timeStyle: "short", timeZone: "Asia/Tokyo" });
+    expect(emptyOverlay()).toBeNull();
+    expect(screen.getByText(`Last reported positions as of ${time} JST, not where vehicles are now`)).toBeInTheDocument();
+    expect(liveSourceFeatures()).toBe(2);
+    // The snapshot is drawn, not counted: the tiles still describe now.
+    expect(tileValue("Observed")).toBe("—");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide last reported positions" }));
+    expect(emptyOverlay()).toHaveTextContent(`No new reports since ${time} JST`);
+    expect(liveSourceFeatures()).toBe(0);
+  });
+
+  it("offers no last positions when the feed left none to show", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(null);
+    mockSummary(LAST_REPORT);
+    renderMap();
+    expect(within(emptyOverlay()!).queryByRole("button", { name: "Show last reported positions" })).toBeNull();
+  });
 
   it("says how long the feed has been quiet and when it last reported", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -239,13 +387,12 @@ describe("MapTab when no trip is reporting", () => {
     expect(decl(ruleBody(css, ".ops-freshness--stale > span"), "background")).toBe("var(--color-warning)");
   });
 
-  it("explains the empty map and offers the day's replay, which then has the map to itself", async () => {
+  it("offers the day's replay on an empty map, which then has the map to itself", async () => {
     mockLive(null);
     renderMap();
-    const empty = screen.getByText("No vehicles are reporting right now").closest(".ops-map__empty") as HTMLElement;
-    expect(empty).toHaveTextContent("This is normal late at night");
+    const empty = emptyOverlay()!;
     await userEvent.click(within(empty).getByRole("button", { name: "Play the day" }));
-    expect(screen.queryByText("No vehicles are reporting right now")).toBeNull();
+    expect(emptyOverlay()).toBeNull();
     expect(screen.getByRole("button", { name: "Back to current observations" })).toHaveAttribute("aria-pressed", "true");
   });
 

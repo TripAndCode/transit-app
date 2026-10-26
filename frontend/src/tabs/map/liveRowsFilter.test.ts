@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { LiveTrip } from "../../api/types";
-import { filterLiveRows } from "./liveRowsFilter";
+import { filterLastReportedRows, filterLiveRows } from "./liveRowsFilter";
 
 const NOW = Date.parse("2026-09-11T01:10:00Z");
 
@@ -63,5 +63,14 @@ describe("filterLiveRows", () => {
     const a = trip({ route_code: "R1" });
     const b = trip({ route_code: "R2" });
     expect(filterLiveRows([a, b], NOW, [])).toEqual([a, b]);
+  });
+});
+
+describe("filterLastReportedRows", () => {
+  it("keeps a stalled feed's reports however old, on the filtered routes only", () => {
+    const old = trip({ captured_at: "2026-09-10T09:00:00Z", route_code: "R1" });
+    const other = trip({ trip_id: "T2", captured_at: "2026-09-10T09:00:00Z", route_code: "R2" });
+    expect(filterLastReportedRows([old, other], ["R1"])).toEqual([old]);
+    expect(filterLastReportedRows([old, other], [])).toEqual([old, other]);
   });
 });

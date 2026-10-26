@@ -282,7 +282,7 @@ Live shows the trips reporting now, under the heading “Current observations”
 - **Play the day** replays the day’s observations on the map; “Back to current observations” returns to now.
 - **Trips to check**, on the right: “Observed”, “5+ min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
 
-When no vehicle is reporting, the map says “No vehicles are reporting right now”. That is normal late at night; if it lasts through service hours, the agency’s feed may be down.
+When no vehicle is reporting, the map says why. Late at night (00:00–05:00) it says “No vehicles are reporting right now”, which is normal. When no new report has arrived for more than ten minutes during service hours, it says when the last one came and how long ago, and that the operator’s feed may have stopped. “Observed” and “5+ min late” then read “—” rather than 0, and “Show last reported positions” draws the last reported positions on the map, labelled as not current.
 
 The first time you open Live, a three-step tour points out the filters, the trip list and the search field. “Later” closes it for now; “Got it” finishes it.
 
