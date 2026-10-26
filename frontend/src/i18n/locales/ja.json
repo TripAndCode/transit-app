@@ -33,7 +33,7 @@
     "station_figure_unusual": "今日の要注意 {{n}}"
   },
   "compare": {
-    "mode_periods": "平日と土日",
+    "mode_periods": "平日と土日祝",
     "mode_agencies": "事業者どうし",
     "bars": {
       "period_label": "期間",
@@ -357,17 +357,17 @@
       "max_label": "最大 {{avg}}分",
       "avg_label": "平均",
       "weekday_empty": "平日のデータがありません。",
-      "weekend_empty": "土日祝のデータがありません。",
+      "weekend_empty": "土日のデータがありません。",
       "spread_legend": "網掛け：1日の平均より遅れの大きい時間帯"
     },
     "modal": {
       "concentration": "遅延の集中度 (上位20)",
-      "peak_hour": "時間帯別の悪化 (平日 vs 土日祝)",
+      "peak_hour": "時間帯別の悪化 (平日 vs 土日)",
       "service_split": "サービス日別の推移"
     },
     "empty": "この期間の観測データがありません。期間を広げてください。",
     "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
-    "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
+    "peak_explainer": "時間帯別 (0〜23時) の平均遅延を、曜日で平日（月〜金）と土日に分けて表示します。祝日も曜日どおりに数えます。通勤ピークと週末の傾向を比較できます。",
     "service_split_explainer": "日種別（平日・土曜・日祝、または平日・土日祝）ごとの平均遅延です。日種別は事業者の時刻表がその日に走らせたダイヤで決まります。日数か観測数が少ない日種別は「データ不足」とし、比較から外します。下の日別推移から、差が恒常的か一時的かを確認できます。",
     "never_collected": "{{agency}}のデータはまだ収集していません。",
     "choose_another_agency": "別の事業者を選ぶ"
@@ -844,7 +844,7 @@
       "on_time_pct": "定時率",
       "late5_count": "5分超回数",
       "heijitsu_min": "平日(分)",
-      "kyujitsu_min": "土日(分)",
+      "kyujitsu_min": "土日祝(分)",
       "abs_delta": "遅延差（絶対値）",
       "signed_delta": "遅延差（符号付き）",
       "stop_sequence": "停留所順",
@@ -939,7 +939,7 @@
       "label_routes": "路線",
       "dow_all": "すべて",
       "dow_weekday": "平日のみ",
-      "dow_weekend": "土日祝のみ",
+      "dow_weekend": "土日のみ",
       "no_routes_selected": "路線指定なし"
     },
     "card": {
@@ -1019,7 +1019,7 @@
       "on_time": "定時率",
       "worst_5min": "5分超の遅延",
       "trend": "トレンド",
-      "compare_ranking": "平日・土日の差",
+      "compare_ranking": "平日・土日祝の差",
       "dow_weekday": "平日の系統別遅延",
       "dow_weekend": "土日祝の系統別遅延",
       "dwell_run": "滞留・走行時間",
@@ -1054,8 +1054,8 @@
       "best": "定時率の高い順"
     },
     "direction": {
-      "weekend_higher": "土日>平日",
-      "weekday_higher": "平日>土日"
+      "weekend_higher": "土日祝>平日",
+      "weekday_higher": "平日>土日祝"
     },
     "hint": {
       "title": "レポートの読み分け",
@@ -1066,7 +1066,7 @@
       "heatmap_strong": "時間帯ヒートマップ",
       "heatmap_body": "：1 日のうちのピーク時間。朝夕の通勤帯と昼間の差を比較。",
       "dow_strong": "平日 / 土日祝の系統別遅延",
-      "dow_body": "：その曜日区分での系統ごとの平均遅延。両方を比べると、週末に遅れやすい系統がわかります。",
+      "dow_body": "：事業者の時刻表がその日に走らせたダイヤで分けた、系統ごとの平均遅延。祝日は土日祝に入ります。両方を比べると、土日祝に遅れやすい系統がわかります。",
       "csv": "CSV エクスポートで Excel / BI ツールに渡せます。"
     },
     "empty": {
@@ -1152,7 +1152,7 @@
       },
       "needs_arrivals": "遅れの内訳には到着時刻が必要です",
       "see_when": "いつ遅れるかを見る",
-      "compare_day_types": "平日と土日を比べる"
+      "compare_day_types": "平日と土日祝を比べる"
     },
     "headway_quality": {
       "title": "運行間隔の質",
@@ -1224,9 +1224,9 @@
       "on_time": "定時基準内に収まった出発の割合を、低い系統から並べます。",
       "worst_5min": "5分を超える遅れが多い系統を抽出します。",
       "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
-      "compare_ranking": "路線ごとの平日または土日の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。",
-      "dow_weekday": "平日の系統ごとの平均遅延です。",
-      "dow_weekend": "土日祝の系統ごとの平均遅延です。",
+      "compare_ranking": "路線ごとの平日または土日祝の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。各日は、事業者の時刻表がその日に走らせたダイヤで平日か土日祝に分けます。",
+      "dow_weekday": "平日ダイヤで運行した日の、系統ごとの平均遅延です。祝日など、時刻表が土日祝のダイヤを走らせた日は土日祝に数えます。",
+      "dow_weekend": "土日祝のダイヤで運行した日の、系統ごとの平均遅延です。土曜・日曜のほか、祝日など時刻表が土日祝のダイヤを走らせた平日も含みます。",
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
       "route_forecast": "系統ごとに、曜日と時間帯で遅れやすい時を示します。",
       "council_summary": "協議会・取締役会向けの期間まとめです。",
@@ -1876,7 +1876,7 @@
     "nav_routes_sublabel": "どの路線が、どの時間帯に",
     "nav_time_sublabel": "ネットワーク全体で、いつ遅れるか",
     "nav_why_sublabel": "データで説明できること・できないこと",
-    "nav_compare_sublabel": "平日と土日、事業者どうしを比べる",
+    "nav_compare_sublabel": "平日と土日祝、事業者どうしを比べる",
     "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
     "group": {

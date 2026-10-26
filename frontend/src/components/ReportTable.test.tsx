@@ -141,10 +141,9 @@ describe("ReportTable route column", () => {
     vi.restoreAllMocks();
   });
 
-  it("labels the compare ranking's weekend column as the plain Sat/Sun split, not weekend/holiday", () => {
+  it("labels the compare ranking's weekend column as the weekend/holiday day type it counts", () => {
     renderTable([["39061", 5.2, 3.1, 2.1, 2.1]], "compare_ranking");
-    expect(screen.getByRole("columnheader", { name: /^Weekend\b/ })).toBeInTheDocument();
-    expect(screen.queryByText(/Weekend\/Holiday/)).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /^Weekend\/Holiday\b/ })).toBeInTheDocument();
   });
 
   it("renders a matched route by its plate, line name and terminals, keeping the route_id in the tooltip", () => {
@@ -336,7 +335,7 @@ describe("ReportTable service column", () => {
     ["on_time", ["39061", "平日", 80.0, 0.5, 300, false, 3.5]],
     ["worst_5min", ["39061", "平日", 12, 3.4, 300]],
     ["dow_weekday", ["39061", null, "平日", 3.4, 120]],
-    ["dow_weekend", ["39061", null, "週末", 3.4, 120]],
+    ["dow_weekend", ["39061", null, "土日祝", 3.4, 120]],
   ])("gives the per-route %s report no service column or note", (reportType, row) => {
     mockRoutes([]);
     renderTable([row], reportType);

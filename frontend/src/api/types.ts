@@ -322,10 +322,9 @@ type Worst5MinRow = [
   samples: number,
 ];
 
-/** `compare_ranking` -- per-route weekday-vs-weekend delay, sorted by the
- *  absolute difference. Carries no service_type: the comparison drops the
- *  service filter on purpose (a weekday-schedule service never runs on a
- *  weekend, so the pairing would always be empty). */
+/** `compare_ranking` -- per-route delay on the agency's 平日 days vs its
+ *  土日祝 days (public holidays included), sorted by the absolute difference.
+ *  Carries no service_type: the two day types replace the service filter. */ // i18n-ignore: JSDoc names the day types
 type CompareRankingRow = [
   route_code: string,
   weekday_avg_min: DecimalCell,
@@ -335,8 +334,9 @@ type CompareRankingRow = [
 ];
 
 /** `dow_weekday` and `dow_weekend`. `dow_label` is the backend's own
- *  Japanese group label for the half the rows were restricted to. These
- *  reports drop the service filter, so `service` is always null. */
+ *  Japanese day-type label (平日 or 土日祝) for the days the rows were
+ *  restricted to. That day type replaces the service filter, so `service` is
+ *  always null. */ // i18n-ignore: JSDoc names the day types
 type DowRankingRow = [
   route_code: string,
   service: RowService,

@@ -115,8 +115,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("label_ranking_late5", "en"): "Count of delays over 5 min",
     ("compare_no_data", "ja"): "比較に必要なデータがありません。",
     ("compare_no_data", "en"): "Not enough data to compare.",
-    ("compare_summary_dow", "ja"): "平日 vs 土日 遅延比較",
-    ("compare_summary_dow", "en"): "Weekday vs weekend delay comparison",
+    ("compare_summary_dow", "ja"): "平日 vs 土日祝 遅延比較",
+    ("compare_summary_dow", "en"): "Weekday vs weekend/holiday delay comparison",
     ("compare_service_needs_route", "ja"): "dimension=service_type の場合は route が必要です。",
     ("compare_service_needs_route", "en"): "dimension=service_type requires a route argument.",
     ("compare_route_no_data", "ja"): "路線{route} の比較データなし。",
@@ -497,12 +497,13 @@ TOOLS: list[dict] = [
         "function": {
             "name": "compare_segments",
             "description": (
-                "Weekday vs weekend delay comparison over the request window. dimension=dow splits "
-                "by calendar day of week (Mon–Fri vs Sat–Sun; a public holiday falling on a weekday "
-                "counts as a weekday) and ignores the UI day-of-week and service-type filters: omit "
-                "route to rank up to 50 routes by the absolute weekday/weekend gap, or set route to "
-                "compare that one route. Returns weekday and weekend average delay (minutes), the "
-                "absolute gap, and signed_delta = weekend minus weekday. dimension=service_type "
+                "Weekday vs weekend/holiday delay comparison over the request window. dimension=dow "
+                "splits the dates into the agency's 平日 days and its 土日祝 days, as its calendar "
+                "runs them (weekends, public holidays and any other day on a weekend or holiday "
+                "timetable fall under 土日祝), and ignores the UI day-of-week and service-type "
+                "filters: omit route to rank up to 50 routes by the absolute 平日/土日祝 gap, or set "
+                "route to compare that one route. Returns 平日 and 土日祝 average delay (minutes), the "
+                "absolute gap, and signed_delta = 土日祝 minus 平日. dimension=service_type "
                 "requires route and returns that route's average delay and sample count per day "
                 "type, filing each date under the timetable the agency's calendar ran that day: "
                 "平日, 土曜 and 日祝, or 平日 and 土日祝 for an agency with one timetable for "
@@ -517,7 +518,8 @@ TOOLS: list[dict] = [
                         "type": "string",
                         "enum": ["dow", "service_type"],
                         "description": (
-                            "dow = calendar Mon–Fri vs Sat–Sun (all routes, or one route); "
+                            "dow = the agency's 平日 days vs its 土日祝 days, holidays included in "
+                            "土日祝 (all routes, or one route); "
                             "service_type = one route split by the day types its agency's calendar "
                             "runs, holidays included in 日祝 or 土日祝 (requires route)."
                         ),
@@ -747,8 +749,8 @@ SYSTEM_PROMPT = """\
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 路線の遅延統計
 - top_n(metric, n?, best_first?, days_back?, from?, to?): 全路線ランキング
-- compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 週末の比較
-  (dimension=dow: 暦の月〜金 vs 土日。route 省略で全路線の差ランキング /
+- compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 土日祝の比較
+  (dimension=dow: 時刻表の平日 vs 土日祝（祝日は土日祝）。route 省略で全路線の差ランキング /
    dimension=service_type: 1路線の日種別(平日・土曜・日祝、または平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, best_first?, days_back?, from?, to?): 定時率ランキング

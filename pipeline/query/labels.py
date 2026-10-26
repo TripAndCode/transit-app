@@ -7,10 +7,10 @@ report-layer formatter module. The leading underscore from the
 formatter-internal names was dropped because these are now public API
 of this module.
 
-DOW rendering now honours a ``lang`` parameter so the Ask tab and the
-reports text body can speak the user's UI locale. Rollup labels
-(``平日`` / ``週末``) are translated as well so the formatter doesn't
-have to special-case them at the call site.
+DOW rendering honours a ``lang`` parameter so the Ask tab and the reports
+text body can speak the user's UI locale. Day-type labels (``平日`` /
+``土日祝``) are translated as well so the formatter doesn't have to
+special-case them at the call site.
 """
 
 from datetime import time as _time
@@ -21,13 +21,10 @@ from pipeline.db import _DOW_ISO_TO_JP
 # in display tables ('Mon' / 'Tue' / …).
 _DOW_ISO_TO_EN = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
 
-# Japanese day-group words → EN: the rollup labels the weekday/weekend
-# grouping SQL emits, and the service filter's values (api.range.ServiceType).
-# The DOW values dow_label renders are ISODOW ints or the 平日/週末 rollups,
-# never 土曜 or 日祝, so the service values change no DOW rendering.
+# The service filter's values (api.range.ServiceType) → EN. The day-type
+# reports label their rows with them too (平日 / 土日祝).
 _DAY_GROUP_JP_TO_EN = {
     "平日": "Weekday",
-    "週末": "Weekend",
     "土曜": "Saturday",
     "日祝": "Sunday/Holiday",
     "土日祝": "Weekend/Holiday",
@@ -45,8 +42,8 @@ def dow_label(value, lang: str = "ja") -> str:
 
     Accepts an ISODOW int (1..7) and returns the matching locale-appropriate
     label ('月'..'日' for ``ja``, 'Mon'..'Sun' for ``en``). Strings pass
-    through after a rollup-label translation pass — that path covers
-    '平日'/'週末' (and tolerates legacy Japanese-char input).
+    through after a day-type translation pass — that path covers
+    '平日'/'土日祝' (and tolerates legacy Japanese-char input).
     """
     en = lang == "en"
     if isinstance(value, int):

@@ -22,7 +22,7 @@ describe("buildFilterCtxReasons", () => {
       routeName,
     );
     expect(reasons).toEqual([
-      "Day: Weekend/Holiday",
+      "Day: Weekend",
       "Time band: Morning (05–09)",
       "Service: Weekday",
       "Route: Asahi Line, Kita Loop",
@@ -118,7 +118,7 @@ describe("buildFilterCtxRecoveries", () => {
       "Jump to the latest data",
     ]);
     expect(buildFilterCtxReasons({ service: "平日", dow: "weekend" }, tDesignNs, routeName)).toEqual([
-      "Day: Weekend/Holiday",
+      "Day: Weekend",
       "Service: Weekday",
     ]);
   });

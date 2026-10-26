@@ -433,7 +433,7 @@ describe("Sidebar", () => {
       renderSidebar("/agencies/8/compare");
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       const stops = within(screen.getByRole("group", { name: "Compare views" })).getAllByRole("link");
-      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends", "Agencies"]);
+      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies"]);
     });
 
     it("names Ask by its label alone, leaving the transfer mark to sight", () => {

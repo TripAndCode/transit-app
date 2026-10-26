@@ -85,7 +85,7 @@ describe("conditionsLabel", () => {
 
   it("joins the non-default dims", () => {
     expect(conditionsLabel({ dow: "weekend", time_band: "morning", service: "all" }, t)).toBe(
-      `${t("common.service_value.土日祝")} · ${t("filters.time_band.morning")}`,
+      `${t("common.service_value.土日")} · ${t("filters.time_band.morning")}`,
     );
   });
 
