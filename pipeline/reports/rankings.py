@@ -223,10 +223,7 @@ async def _ranking_live(
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     params = {"agency_id": agency_id, "rk_min": min_samples, **ch_params}
-    limit_sql = ""
-    if limit is not None:
-        limit_sql = "\nLIMIT {rk_limit:UInt32}"
-        params["rk_limit"] = limit
+    limit_sql = _limit_clause(params, limit, "rk_limit")
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "deduped_ranked AS (\n"
@@ -376,12 +373,12 @@ async def compute_on_time(
     return out if limit is None else out[:limit]
 
 
-def _limit_clause(params: dict, limit: int | None) -> str:
-    """A ``LIMIT`` clause bound into ``params``, or none for every row."""
+def _limit_clause(params: dict, limit: int | None, name: str) -> str:
+    """A ``LIMIT`` clause bound into ``params`` as ``name``, or none for every row."""
     if limit is None:
         return ""
-    params["ot_limit"] = limit
-    return "\nLIMIT {ot_limit:UInt32}"
+    params[name] = limit
+    return f"\nLIMIT {{{name}:UInt32}}"
 
 
 async def _on_time_live(
@@ -395,7 +392,7 @@ async def _on_time_live(
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     params = {"agency_id": agency_id, "ot_threshold": threshold_sec, **ch_params}
-    limit_sql = _limit_clause(params, limit)
+    limit_sql = _limit_clause(params, limit, "ot_limit")
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"
@@ -444,7 +441,7 @@ async def _on_time_live_window(
         "ot_low": 0 if low_sec is None else low_sec,
         **ch_params,
     }
-    limit_sql = _limit_clause(params, limit)
+    limit_sql = _limit_clause(params, limit, "ot_limit")
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"

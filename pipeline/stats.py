@@ -44,13 +44,11 @@ def wilson_interval(successes: int, n: int, z: float = _Z95) -> tuple[float, flo
 def pct_is_uncertain(successes: int, n: int, max_half_width_pp: float = 5.0) -> bool:
     """True when a percentage's 95% Wilson interval half-width exceeds the cutoff.
 
-    ``max_half_width_pp`` is in percentage points (default +/-5pp). Calibrated
-    against typical late-5-minute/on-time rates (single digits to ~20%,
-    well away from the high-variance 50% midpoint): at that range, a
-    comfortably large baseline sample (roughly n > 200) stays under a 5pp
-    half-width, while a genuinely thin history does not -- so this rarely
-    trips for an established route and reliably catches a new/sparse one.
-    ``n <= 0`` is always uncertain (no data to estimate from).
+    ``max_half_width_pp`` is in percentage points (default +/-5pp). The
+    half-width peaks at a 50% rate and shrinks toward 0% and 100%, so the
+    same sample can be certain enough for a rate near either end and too
+    thin for one near the middle. ``n <= 0`` is always uncertain (no data
+    to estimate from).
     """
     if n <= 0:
         return True
@@ -103,11 +101,11 @@ def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
 
     ``successes`` is back-derived from the already-rounded percentage
     (``round(pct/100 * samples)``) rather than re-read from an exact count
-    column. That reintroduces at most rounding-sized slop into the
-    confidence flag itself, which is acceptable here: the result only
-    drives a coarse pass/fail caveat for display, never a stored or pooled
-    statistic (unlike this codebase's exact-sum pooling elsewhere, which
-    matters because it compounds across many rows).
+    column. That slop is bounded by the displayed percentage's own rounding,
+    finer than the 0.1-point precision ``on_time_pct_margin_pp`` shows, and
+    the result is a display annotation, never a stored or pooled statistic
+    (unlike this codebase's exact-sum pooling elsewhere, which matters
+    because it compounds across many rows).
     """
     out: list[tuple] = []
     for r in rows:
