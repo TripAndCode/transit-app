@@ -1,8 +1,5 @@
 /* Landing page: the post-hero scroll narrative (ScrollNarrative.tsx). */
 
-/* Sized to the sample trend chart, which DailyChart draws at a fixed 760px:
-   the column less its padding and the card's padding and border leaves the
-   chart its card's full width instead of two thirds of it. */
 .landing-narrative {
   display: flex;
   flex-direction: column;

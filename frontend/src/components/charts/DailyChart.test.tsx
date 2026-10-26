@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DailyChart } from "./DailyChart";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
-import { formatMinutes } from "../../utils/format";
+import { formatMinutes, formatShortDate } from "../../utils/format";
+import ja from "../../i18n/locales/ja.json";
+import en from "../../i18n/locales/en.json";
 import type { TrendDay } from "../../api/types";
 
 function day(overrides: Partial<TrendDay> & { date: string }): TrendDay {
@@ -412,5 +414,148 @@ describe("DailyChart brush", () => {
     expect(container.querySelector("[data-testid='shaded-days']")).not.toBeNull();
     fireEvent.keyDown(surface, { key: "Escape" });
     expect(container.querySelector("[data-testid='shaded-days']")).toBeNull();
+  });
+});
+
+/** Reports `width` as the chart container's laid-out width, the way a browser
+ *  would: synchronously on mount and again through ResizeObserver on every
+ *  resize. jsdom lays nothing out, so both are stubbed. */
+function mockContainerWidth(width: number) {
+  let callback: (entries: { contentRect: { width: number } }[]) => void = () => {};
+  class Stub {
+    constructor(cb: typeof callback) {
+      callback = cb;
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  vi.stubGlobal("ResizeObserver", Stub);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width } as DOMRect);
+  return {
+    resize(next: number) {
+      act(() => callback([{ contentRect: { width: next } }]));
+    },
+  };
+}
+
+/** Thirty consecutive days ending on `last`, the default trend window's shape. */
+function month(last = "2026-10-23", overrides: (i: number) => Partial<TrendDay> = () => ({})): TrendDay[] {
+  const end = new Date(`${last}T00:00:00Z`).getTime();
+  return Array.from({ length: 30 }, (_, i) =>
+    day({ date: new Date(end - (29 - i) * 86400000).toISOString().slice(0, 10), ...overrides(i) }),
+  );
+}
+
+const num = (el: Element, attr: string) => Number(el.getAttribute(attr));
+
+/** The plot's right edge: where the last day's hover band ends. */
+function plotRight(container: HTMLElement) {
+  const last = dayRects(container).at(-1)!;
+  return num(last, "x") + num(last, "width");
+}
+
+describe("DailyChart sizing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("draws at its container's width instead of a fixed 760px", () => {
+    mockContainerWidth(358);
+    const { container } = renderChart(<DailyChart days={month()} />);
+    expect(screen.getByRole("img").getAttribute("width")).toBe("358");
+    for (const dot of container.querySelectorAll("[data-testid='daily-dot']")) {
+      expect(num(dot, "cx")).toBeLessThanOrEqual(358);
+    }
+  });
+
+  it("redraws at the new width when its container resizes", () => {
+    const box = mockContainerWidth(572);
+    renderChart(<DailyChart days={month()} />);
+    box.resize(358);
+    expect(screen.getByRole("img").getAttribute("width")).toBe("358");
+    box.resize(900);
+    expect(screen.getByRole("img").getAttribute("width")).toBe("900");
+  });
+
+  it("labels the latest day and spaces the date labels so they never touch at phone width", () => {
+    mockContainerWidth(358);
+    const days = month();
+    const { container } = renderChart(<DailyChart days={days} />);
+    const labels = Array.from(container.querySelectorAll("[data-testid='daily-x-label']"));
+    expect(labels.at(-1)!.textContent).toBe(formatShortDate(days[days.length - 1].date));
+    const xs = labels.map((l) => num(l, "x"));
+    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(48);
+    // Each label is centred on its day; half of a "10/23" label is about 20px.
+    for (const x of xs) {
+      expect(x - 22).toBeGreaterThanOrEqual(0);
+      expect(x + 22).toBeLessThanOrEqual(358);
+    }
+  });
+
+  it("keeps the 5-minute band's label inside the plot", () => {
+    mockContainerWidth(358);
+    const { container } = renderChart(<DailyChart days={month("2026-10-23", (i) => ({ avg_min: i === 4 ? 7 : 3 }))} />);
+    const label = container.querySelector("[data-testid='threshold-band'] text")!;
+    expect(label.getAttribute("text-anchor")).toBe("end");
+    expect(num(label, "x")).toBeLessThanOrEqual(plotRight(container));
+    // Its baseline leaves a 12px line of room below the top of the chart.
+    expect(num(label, "y")).toBeGreaterThanOrEqual(12);
+  });
+
+  it("turns the worst-day label inward when the worst day is the latest one", () => {
+    mockContainerWidth(358);
+    const { container } = renderChart(<DailyChart days={month("2026-10-23", (i) => ({ avg_min: i === 29 ? 9 : 2 }))} />);
+    const marker = container.querySelector("[data-testid='vertical-marker'][data-variant='highlight']")!;
+    const rule = marker.querySelector("line")!;
+    const text = marker.querySelector("text")!;
+    expect(text.getAttribute("text-anchor")).toBe("end");
+    expect(num(text, "x")).toBeLessThan(num(rule, "x1"));
+  });
+
+  it("keeps the worst-day label to the right of its rule in the left half of the plot", () => {
+    mockContainerWidth(358);
+    const { container } = renderChart(<DailyChart days={month("2026-10-23", (i) => ({ avg_min: i === 4 ? 9 : 2 }))} />);
+    const marker = container.querySelector("[data-testid='vertical-marker'][data-variant='highlight']")!;
+    expect(num(marker.querySelector("text")!, "x")).toBeGreaterThan(num(marker.querySelector("line")!, "x1"));
+  });
+});
+
+describe("DailyChart legend", () => {
+  it("names the observation-count bars even when there is no smoothed line", () => {
+    renderChart(<DailyChart days={[day({ date: "2026-05-18" }), day({ date: "2026-05-19" })]} />);
+    const legend = screen.getByTestId("daily-legend");
+    expect(legend.textContent).toContain(i18n.t("reports.daily.legend_avg"));
+    expect(legend.textContent).toContain(i18n.t("reports.daily.legend_samples"));
+  });
+
+  it("labels the bars on their own axis, apart from the minutes axis", () => {
+    const { container } = renderChart(<DailyChart days={[day({ date: "2026-05-18" }), day({ date: "2026-05-19" })]} />);
+    const axis = container.querySelector("[data-testid='daily-samples-axis']")!;
+    expect(axis.textContent).toBe(i18n.t("reports.daily.samples_axis"));
+    // Minutes read off the left gutter; the bars' label sits past the plot's right edge.
+    expect(num(axis, "x")).toBeGreaterThan(plotRight(container));
+    expect(num(axis, "x")).toBeGreaterThan(num(container.querySelector("[data-testid='daily-grid-label']")!, "x"));
+  });
+});
+
+describe("DailyChart wording", () => {
+  it.each([
+    ["ja", ja.reports.daily],
+    ["en", en.reports.daily],
+  ])("%s: the smoothed legend leaves the dash to its swatch", (_lang, strings) => {
+    // A free-standing dash is a drawn line typed out; "7-day" is a word.
+    expect(strings.smoothed_label).not.toMatch(/(^|\s)-(\s|$)/);
+  });
+
+  it("names the 5-minute band as a plain amount of lateness", () => {
+    expect(ja.reports.daily.severe_band_label).toBe("{{min}}分以上の遅れ");
+    expect(en.reports.daily.severe_band_label).toBe("{{min}}+ min late");
+  });
+
+  it("names the bars as an approximate count in the legend", () => {
+    expect(ja.reports.daily.legend_samples).toBe("観測数（目安）");
+    expect(en.reports.daily.legend_samples).toBe("Observations (approx.)");
   });
 });

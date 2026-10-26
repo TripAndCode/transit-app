@@ -32,6 +32,14 @@ describe("ThresholdBand", () => {
     expect(getByText("Severe")).toBeInTheDocument();
   });
 
+  it("sets its label just above the band, clear of the values plotted inside it", () => {
+    const { container, getByText } = renderSvg(
+      <ThresholdBand min={5} max={8} toY={identityY} x={10} width={200} label="Severe" />,
+    );
+    const top = Number(container.querySelector("[data-testid='threshold-band'] rect")!.getAttribute("y"));
+    expect(Number(getByText("Severe").getAttribute("y"))).toBeLessThan(top);
+  });
+
   it("renders nothing when the threshold sits above the plotted maximum", () => {
     const { container } = renderSvg(<ThresholdBand min={5} max={5} toY={identityY} x={10} width={200} />);
     expect(container.querySelector("[data-testid='threshold-band']")).toBeNull();
@@ -59,6 +67,20 @@ describe("VerticalMarker", () => {
   it("distinguishes a highlight marker from a background context one", () => {
     const { container } = renderSvg(<VerticalMarker x={40} y1={10} y2={90} variant="highlight" />);
     expect(container.querySelector("[data-variant='highlight']")).not.toBeNull();
+  });
+
+  it("sets its label after the rule by default", () => {
+    const { getByText } = renderSvg(<VerticalMarker x={40} y1={10} y2={90} label="Rev" />);
+    const text = getByText("Rev");
+    expect(Number(text.getAttribute("x"))).toBeGreaterThan(40);
+    expect(text.getAttribute("text-anchor")).toBeNull();
+  });
+
+  it("sets its label before the rule when asked, for a rule near the plot's right edge", () => {
+    const { getByText } = renderSvg(<VerticalMarker x={40} y1={10} y2={90} label="Rev" labelSide="before" />);
+    const text = getByText("Rev");
+    expect(Number(text.getAttribute("x"))).toBeLessThan(40);
+    expect(text.getAttribute("text-anchor")).toBe("end");
   });
 });
 
