@@ -816,6 +816,23 @@ async def test_compare_ranking_splits_days_as_the_dow_reports_do(reports_client,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_compare_ranking_over_a_window_with_no_weekday_compares_nothing(
+    reports_client, ch_client, ch_async_client, path
+):
+    """A window of one Saturday leaves the 平日 side no dates at all: the
+    comparison answers with no rows rather than failing."""
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "R_SAT", "土日祝", "2026-05-23", "08:00", [300] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-23&to=2026-05-23{band}")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["rows"] == []
+
+
+@pytest.mark.asyncio
 async def test_dow_reports_follow_the_calendar_on_a_weekday_run_on_the_weekend_timetable(reports_client, ch_client):
     """A weekday the agency's calendar runs on its weekend timetable, the way a
     feed runs Obon, is a 土日祝 day although it is no public holiday; a
