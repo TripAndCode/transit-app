@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { DefinitionMeta } from "../api/types";
 import { formatDuration } from "../utils/format";
 
@@ -24,14 +25,8 @@ export function DefinitionMetaBlock({ definition }: Props) {
       ? t("definitionMeta.exclusion_hours", { count: exclusion / 3600 })
       : t("definitionMeta.exclusion_limit", { limit: formatDuration(exclusion) }),
   ];
-  if (definition.late_tolerance_sec != null) {
-    const late = formatDuration(definition.late_tolerance_sec);
-    sentences.push(
-      definition.early_tolerance_sec == null
-        ? t("definitionMeta.on_time_late", { late })
-        : t("definitionMeta.on_time_late_early", { late, early: formatDuration(definition.early_tolerance_sec) }),
-    );
-  }
+  const onTime = onTimeSentence(definition, t);
+  if (onTime != null) sentences.push(onTime);
 
   return (
     <details data-testid="definition-meta" className="definition-meta" style={{ margin: "2px 0 14px" }}>
@@ -39,4 +34,23 @@ export function DefinitionMetaBlock({ definition }: Props) {
       <p>{sentences.join(t("definitionMeta.sentence_separator"))}</p>
     </details>
   );
+}
+
+/** What the rows counted as on time, kept in view beside a list of on-time
+ *  rates, which mean nothing without it. */
+export function OnTimeDefinition({ definition }: Props) {
+  const { t } = useTranslation();
+  const sentence = onTimeSentence(definition, t);
+  return sentence == null ? null : <p className="on-time-definition">{sentence}</p>;
+}
+
+/** The definition's on-time rule, or null for a report without one. An
+ *  unbounded early side lets every early departure count as on time, which
+ *  the sentence says outright: a reader otherwise assumes a window. */
+function onTimeSentence(definition: DefinitionMeta, t: TFunction): string | null {
+  if (definition.late_tolerance_sec == null) return null;
+  const late = formatDuration(definition.late_tolerance_sec);
+  return definition.early_tolerance_sec == null
+    ? t("definitionMeta.on_time_late", { late })
+    : t("definitionMeta.on_time_late_early", { late, early: formatDuration(definition.early_tolerance_sec) });
 }

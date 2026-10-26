@@ -299,9 +299,10 @@ export type RankingRow = [
   samples: number,
 ];
 
-/** `on_time`. The trailing `low_confidence` flag is appended by
- *  pipeline/stats.py's annotate_on_time_pct_confidence as a display-layer
- *  caveat (95% Wilson interval too wide to trust `on_time_pct`). */
+/** `on_time`. The trailing pair is a display-layer caveat from
+ *  pipeline/stats.py: `margin_pp` is the half-width of `on_time_pct`'s 95%
+ *  Wilson interval in percentage points, and `low_confidence` says it is too
+ *  wide to trust the percentage. */
 type OnTimeRow = [
   route_code: string,
   service: RowService,
@@ -309,6 +310,7 @@ type OnTimeRow = [
   avg_min: DecimalCell,
   samples: number,
   low_confidence: boolean,
+  margin_pp: number,
 ];
 
 /** `worst_5min` -- routes ranked by count of severely-late observations. */

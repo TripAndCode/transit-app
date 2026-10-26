@@ -169,6 +169,19 @@ describe("useReport's ranking options", () => {
     expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]include_zero_delay=1(&|$)/);
   });
 
+  it("asks for the on-time list's best-first order as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ a: useReport(1, "on_time", baseCtx()), b: useReport(1, "on_time", baseCtx(), { order: "best" }) }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("order=");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]order=best(&|$)/);
+  });
+
   it("asks for thinly observed groups and more rows as a separate query", async () => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

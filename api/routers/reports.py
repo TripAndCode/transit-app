@@ -71,7 +71,7 @@ from pipeline.reports.forecast import (
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import RETIRED, ZERO_DELAY, left_out_route_codes, listed_count, route_list
-from pipeline.stats import annotate_on_time_pct_confidence
+from pipeline.stats import annotate_on_time_pct_confidence, on_time_pct_margin_pp
 from pipeline.weather import attribution as weather_attribution
 
 _log = logging.getLogger(__name__)
@@ -264,9 +264,9 @@ class ReportResponse(BaseModel):
     # is the scope of its on-time figures, which follow the whole filter.
     delivered_scope_applied: dict[str, bool] | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
-    # the list (ranking, ranking_best, compare_ranking and delay_certificate;
-    # None elsewhere), and, for ranking/ranking_best only, the observation
-    # count below which a route's average is too thin to trust.
+    # the list (ranking, ranking_best, on_time, compare_ranking and
+    # delay_certificate; None elsewhere), and, for ranking/ranking_best only,
+    # the observation count below which a route's average is too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
     # delay_certificate only (None elsewhere): whether the scope holds any
@@ -751,19 +751,20 @@ async def forecast_overview(
     }
 
 
-# Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
-# export, mirroring the caveat mark frontend/src/components/ReportTable.tsx's
+# Marker for an "on_time" row's `low_confidence` flag in the CSV export,
+# mirroring the caveat mark frontend/src/components/ReportTable.tsx's
 # fmtConfidence and frontend/src/tabs/ask/RichResult.tsx render for the same
 # signal (a short mark when true, blank when false) rather than the raw
-# Python bool's str() form.
-_LOW_CONFIDENCE_CSV_MARK = "幅あり"
+# Python bool's str() form. The flag measures the percentage's interval, not
+# its observation count, and the mark says so.
+_LOW_CONFIDENCE_CSV_MARK = "誤差大"
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing
 # downloads. Must match the row tuple shape produced by each compute_*.
 _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "ranking": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
     "ranking_best": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
-    "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "確信度低"],
+    "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "誤差大", "誤差(±ポイント)"],
     "worst_5min": ["系統コード", "種別", "5分超回数", "平均遅延(分)", "観測数"],
     "compare_ranking": ["系統コード", "平日(分)", "土日(分)", "差(絶対値)", "差(符号付き)"],
     "dow_weekend": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
@@ -823,8 +824,8 @@ def _csv_response(
             w.writerow([d.get("date"), d.get("avg_min"), d.get("avg_min_smoothed"), d.get("samples"), offenders])
     elif report_type == "on_time":
         for r in rows:
-            *lead, low_confidence = r
-            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else ""])
+            *lead, low_confidence, margin_pp = r
+            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp])
     elif report_type == "dwell_run":
         for r in rows:
             w.writerow(
@@ -911,6 +912,12 @@ async def get_report(
         description="Route lists only: keep routes whose every observation reads exactly 0 seconds of "
         "delay (see pipeline.route_catalog.zero_delay_route_codes), which are left out by default.",
     ),
+    order: str | None = Query(
+        default=None,
+        pattern="^(worst|best)$",
+        description="on_time only: 'worst' (the default) lists the lowest on-time rate first, "
+        "the routes that need attention; 'best' the highest first.",
+    ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -954,6 +961,8 @@ async def get_report(
         raise HTTPException(status_code=400, detail="include_retired only applies to the route lists")
     if include_zero_delay and report_type not in _ROUTE_LIST_TYPES:
         raise HTTPException(status_code=400, detail="include_zero_delay only applies to the route lists")
+    if order is not None and report_type != "on_time":
+        raise HTTPException(status_code=400, detail="order only applies to the on_time report")
 
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
@@ -998,22 +1007,25 @@ async def get_report(
         rows = listed(ranked)
         intent = {"query_type": "ranking", "sort_order": sort_order, "service": _service_label(ctx)}
     elif report_type == "on_time":
-        rows = await compute_on_time(
+        sort_order = "desc" if order == "best" else "asc"
+        rated = await compute_on_time(
             agency_id,
             ctx,
             conn,
             ch=ch,
-            limit=n_fetch,
+            limit=None,
+            sort_order=sort_order,
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=late_tolerance_sec,
         )
-        rows = listed(rows)
-        # Appends a `low_confidence` bool (95% Wilson interval too wide to
-        # trust the percentage) as a display-layer annotation — doesn't
-        # change compute_on_time's own 5-tuple contract, so pooling callers
-        # (pipeline.reports.suggest) are unaffected. See pipeline/stats.py.
-        rows = annotate_on_time_pct_confidence(rows)
-        intent = {"query_type": "on_time", "service": _service_label(ctx)}
+        rows_total = listed_total(rated)
+        # Appends `low_confidence` (95% Wilson interval too wide to trust the
+        # percentage) and `margin_pp` (that interval's half-width) as a
+        # display-layer annotation — doesn't change compute_on_time's own
+        # 5-tuple contract, so pooling callers (pipeline.reports.suggest) and
+        # the Ask tools' columns are unaffected. See pipeline/stats.py.
+        rows = [(*r, on_time_pct_margin_pp(r[2], r[4])) for r in annotate_on_time_pct_confidence(listed(rated))]
+        intent = {"query_type": "on_time", "sort_order": sort_order, "service": _service_label(ctx)}
     elif report_type == "worst_5min":
         rows = await compute_worst_5min(
             agency_id, ctx, conn, ch=ch, limit=n_fetch, late_tolerance_sec=late_tolerance_sec

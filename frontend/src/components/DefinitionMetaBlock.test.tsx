@@ -32,7 +32,7 @@ describe("DefinitionMetaBlock", () => {
     expect(block).toHaveTextContent("Average of every recorded departure at every stop.");
     expect(block).toHaveTextContent("When a departure is reported more than once, the latest report counts.");
     expect(block).toHaveTextContent("Readings more than 2 hours off are ignored as errors.");
-    expect(block).toHaveTextContent("On time = no more than 1 min late.");
+    expect(block).toHaveTextContent("On time = no more than 1 min late (early departures count as on time).");
     expect(block).not.toHaveTextContent("legacy_60s");
     expect(block).not.toHaveTextContent("7200");
   });

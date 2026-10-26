@@ -21,6 +21,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, fmtPct, formatDuration, formatNumber } from "../utils/format";
 import "./ReportTable.css";
 import { ServiceNote } from "./ServiceNote";
+import { Tooltip } from "./Tooltip";
 
 const ROWS_CAP = 200;
 // A phone list item is several times a table row's height, so the first
@@ -46,6 +47,9 @@ type Schema = {
   route?: true;
   /** A non-empty cell is a caveat, shown as a muted badge. */
   badge?: true;
+  /** What a badge measures for its row, shown when the badge is hovered or
+   *  focused. */
+  badgeTip?: (row: unknown[], t: TFunction) => string | undefined;
   /** The cell is the row's observation count; under the report's floor it
    *  carries the few-data badge. */
   samples?: true;
@@ -87,8 +91,17 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
     // 95% Wilson interval too wide to trust the percentage (see
     // pipeline/stats.py) — a caveat marker, not a plain value, so it's
-    // blank rather than "false" for the common (confident) case.
-    { index: 5, labelKey: "reports.col.confidence", align: "left", badge: true, format: (v, t) => fmtConfidence(v, t) },
+    // blank rather than "false" for the common (confident) case. The
+    // interval narrows toward 0% and 100%, so it says nothing about the
+    // observation count on its own.
+    {
+      index: 5,
+      labelKey: "reports.col.confidence",
+      align: "left",
+      badge: true,
+      format: (v, t) => fmtConfidence(v, t),
+      badgeTip: (row, t) => (row[6] == null ? undefined : t("reports.wide_margin_tip", { margin: fixedTenth(Number(row[6])) })),
+    },
   ],
   worst_5min: [
     ROUTE_COL,
@@ -143,7 +156,7 @@ function fmtNum(v: unknown, _t: TFunction): string {
 }
 
 function fmtConfidence(v: unknown, t: TFunction): string {
-  return v === true ? t("reports.confidence_low_mark") : "";
+  return v === true ? t("reports.wide_margin_mark") : "";
 }
 
 // Module-scope pure function rather than an in-render IIFE — see
@@ -154,6 +167,12 @@ function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Ma
   const m = new Map<number, number>();
   for (const col of schema) {
     if (!col.bar) continue;
+    // A percentage has a fixed whole; scaled to the column's best instead, a
+    // list of low rates would draw its top row as a full bar.
+    if (col.bar === "pct") {
+      m.set(col.index, 100);
+      continue;
+    }
     let mx = 0;
     for (const row of rows) {
       const v = Number(row[col.index]);
@@ -250,7 +269,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <CellValue column={c} raw={row[c.index]} text={text} caveat={caveatOf(c, row[c.index])} />
+                        <CellValue column={c} raw={row[c.index]} text={text} caveat={caveatOf(c, row[c.index])} tip={c.badgeTip?.(row, t)} />
                       </span>
                     );
                   })}
@@ -323,7 +342,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
                 }
                 return (
                   <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
-                    <CellValue column={c} raw={raw} text={text} caveat={caveatOf(c, raw)} />
+                    <CellValue column={c} raw={raw} text={text} caveat={caveatOf(c, raw)} tip={c.badgeTip?.(row, t)} />
                   </td>
                 );
               })}
@@ -398,9 +417,32 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
 
 /** A plain cell: a service in the UI's language where it has copy, a caveat
  *  as a muted badge, anything else as its formatted text, followed by the
- *  row's own caveat when it has one. */
-function CellValue({ column, raw, text, caveat }: { column: Schema; raw: unknown; text: string; caveat?: string }) {
+ *  row's own caveat when it has one. A badge with a tip takes keyboard focus,
+ *  so the tip is reachable without a pointer. */
+function CellValue({
+  column,
+  raw,
+  text,
+  caveat,
+  tip,
+}: {
+  column: Schema;
+  raw: unknown;
+  text: string;
+  caveat?: string;
+  tip?: string;
+}) {
   if (column.service && raw != null) return <ServiceName value={String(raw)} />;
+  if (column.badge && text && tip) {
+    return (
+      <Tooltip label={tip}>
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the margin it stands for is reachable */}
+        <span className="caveat-badge" tabIndex={0}>
+          {text}
+        </span>
+      </Tooltip>
+    );
+  }
   if (column.badge && text) return <span className="caveat-badge">{text}</span>;
   if (caveat) {
     return (

@@ -426,6 +426,7 @@ input[type="date"] { color-scheme: light; }
 }
 .definition-meta > summary::before { content: "ⓘ "; color: var(--accent); }
 .definition-meta > p { margin: 6px 0 0; max-width: 60ch; }
+.on-time-definition { margin: 0 0 8px; max-width: 60ch; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
 html, body, #root { height: 100%; margin: 0; }
 
 /* In flow at the top of <main>, not floating over it. The layout around this

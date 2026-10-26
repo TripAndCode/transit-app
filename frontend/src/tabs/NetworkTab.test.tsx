@@ -320,7 +320,7 @@ describe("NetworkTab", () => {
     expect(block.tagName).toBe("DETAILS");
     expect(block).not.toHaveAttribute("open");
     expect(block.parentElement?.closest("details")).toBeNull();
-    expect(block).toHaveTextContent("On time = no more than 1 min late.");
+    expect(block).toHaveTextContent("On time = no more than 1 min late (early departures count as on time).");
   });
 
   it("hides the ridership-weighted toggle when no agency has configured weights", () => {

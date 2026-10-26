@@ -357,7 +357,7 @@ async def test_csv_export_definition_metadata_preamble_reflects_custom_tolerance
     assert "legacy_60s" not in preamble
     assert "7200" in preamble
     # The header row (系統コード, ...) must still be exactly the second row.
-    assert rows[1] == ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "確信度低"]
+    assert rows[1] == ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "誤差大", "誤差(±ポイント)"]
 
 
 @pytest.mark.asyncio
@@ -428,6 +428,10 @@ async def test_on_time_appends_pct_low_confidence_flag(reports_client, ch_client
     assert uncertain[5] is True
     assert float(confident[2]) == 90.0
     assert confident[5] is False
+    # Index 6 is the margin the flag is judged on: the 95% interval's
+    # half-width in percentage points.
+    assert uncertain[6] == 15.2
+    assert confident[6] == 3.5
 
 
 @pytest.mark.asyncio
@@ -459,11 +463,11 @@ async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, 
     # test_csv_export_definition_metadata_preamble_reflects_custom_tolerance
     # below) -- the column header is the second row.
     header, data_rows = rows[1], rows[2:]
-    assert header[-1] == "確信度低"
+    assert header[-2:] == ["誤差大", "誤差(±ポイント)"]
     uncertain = next(r for r in data_rows if r[0] == "R_UNCERTAIN")
     confident = next(r for r in data_rows if r[0] == "R_CONFIDENT")
-    assert uncertain[-1] == "幅あり"
-    assert confident[-1] == ""
+    assert uncertain[-2:] == ["誤差大", "15.2"]
+    assert confident[-2:] == ["", "3.5"]
 
 
 @pytest.mark.asyncio
@@ -1003,11 +1007,12 @@ _LIMIT_CASES = {
         ],
         "R_STEADY",
     ),
+    # Lowest rate first: R_FRAG's 0% fragment would lead, its 80% whole does not.
     "on_time": (
         [
-            ("R_FRAG", "1_土曜(共通)", "06:00", [0] * 25),
-            ("R_FRAG", None, "07:00", [600] * 100),
-            ("R_STEADY", "11_平日(共通)", "08:00", [0] * 20 + [600] * 5),
+            ("R_FRAG", "1_土曜(共通)", "06:00", [600] * 25),
+            ("R_FRAG", None, "07:00", [0] * 100),
+            ("R_STEADY", "11_平日(共通)", "08:00", [0] * 10 + [600] * 15),
         ],
         "R_STEADY",
     ),
@@ -1071,7 +1076,8 @@ async def test_ranking_csv_service_column_holds_the_active_filter(reports_client
         ("ranking", "en", "[Weekday: Delay ranking — top 2 routes]"),
         ("ranking_best", "ja", "【平日の平均遅延の少ない順 上位2路線】"),
         ("ranking_best", "en", "[Weekday: Lowest average delay — top 2 routes]"),
-        ("on_time", "ja", "【平日の定時率ランキング】"),
+        ("on_time", "ja", "【平日の定時率の低い順】"),
+        ("on_time", "en", "[Weekday: On-time rate, lowest first]"),
         ("worst_5min", "ja", "【平日の5分超遅延ランキング】"),
         # compute_dow_ranking drops the service filter, so its header names none.
         ("dow_weekday", "ja", "【平日遅延ランキング】"),
@@ -2451,9 +2457,43 @@ async def test_live_compare_ranking_counts_every_compared_route_beyond_the_limit
 @pytest.mark.asyncio
 async def test_non_ranking_reports_carry_no_ranking_counts(reports_client):
     client, agency_id, _ = reports_client
-    data = (await client.get(f"/api/{agency_id}/reports/on_time")).json()
+    data = (await client.get(f"/api/{agency_id}/reports/worst_5min")).json()
     assert data["rows_total"] is None
     assert data["reliable_min_samples"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tolerance", ["", "&late_tolerance_sec=120"])
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_on_time_lists_the_least_punctual_routes_first_and_counts_every_route(
+    reports_client, ch_client, ch_async_client, path, tolerance
+):
+    """The list opens on the routes that most need attention and counts every
+    route it ranked, so the ones past the limit stay reachable; order=best
+    turns it around. Each way compute_on_time reads (the exact column, the
+    histogram window, and both live scans) ranks the whole set."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    for code, delays in (("OT_HI", [0] * 25), ("OT_LO", [0] * 10 + [600] * 15), ("OT_MID", [0] * 20 + [600] * 5)):
+        await _seed_route_at(pool, agency_id, code, "平日", day, "08:00", delays)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}{tolerance}&limit=2"
+
+    worst = (await client.get(url)).json()
+    assert [r[0] for r in worst["rows"]] == ["OT_LO", "OT_MID"]
+    assert worst["rows_total"] == 3
+    assert worst["reliable_min_samples"] is None
+
+    best = (await client.get(url + "&order=best")).json()
+    assert [r[0] for r in best["rows"]] == ["OT_HI", "OT_MID"]
+    assert best["rows_total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_order_applies_only_to_the_on_time_list(reports_client):
+    client, agency_id, _ = reports_client
+    assert (await client.get(f"/api/{agency_id}/reports/ranking?order=best")).status_code == 400
+    assert (await client.get(f"/api/{agency_id}/reports/on_time?order=sideways")).status_code == 422
 
 
 @pytest.mark.asyncio
@@ -2576,6 +2616,13 @@ async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
     assert {r[0] for r in kept["rows"]} == {"100", "OLD"}
     assert kept["retired_rows"] == 1
 
+    # The on-time count is of the routes it lists, retired codes only when kept.
+    on_time = (await client.get(f"/api/{agency_id}/reports/on_time?{window}")).json()
+    assert on_time["rows_total"] == 1
+    on_time_kept = (await client.get(f"/api/{agency_id}/reports/on_time?{window}&include_retired=1")).json()
+    assert {r[0] for r in on_time_kept["rows"]} == {"100", "OLD"}
+    assert on_time_kept["rows_total"] == 2
+
     trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
     assert trend["retired_rows"] is None
 
@@ -2678,6 +2725,9 @@ async def test_route_lists_leave_out_zero_delay_routes_unless_asked(reports_clie
 
     on_time = (await client.get(f"/api/{agency_id}/reports/on_time?{window}&include_zero_delay=1")).json()
     assert "ECHO" in [r[0] for r in on_time["rows"]]
+    # The on-time count leaves the zero-delay route out the same way.
+    assert on_time["rows_total"] == 3
+    assert (await client.get(f"/api/{agency_id}/reports/on_time?{window}")).json()["rows_total"] == 2
 
     trend = (await client.get(f"/api/{agency_id}/reports/trend?{window}")).json()
     assert trend["zero_delay_rows"] is None

@@ -5,7 +5,13 @@ import statistics
 
 import pytest
 
-from pipeline.stats import annotate_on_time_pct_confidence, linear_percentile, pct_is_uncertain, wilson_interval
+from pipeline.stats import (
+    annotate_on_time_pct_confidence,
+    linear_percentile,
+    on_time_pct_margin_pp,
+    pct_is_uncertain,
+    wilson_interval,
+)
 
 
 def test_wilson_interval_matches_known_reference():
@@ -76,6 +82,33 @@ def test_annotate_on_time_pct_confidence_appends_bool_without_mutating_input():
 
 def test_annotate_on_time_pct_confidence_empty_list():
     assert annotate_on_time_pct_confidence([]) == []
+
+
+@pytest.mark.parametrize(
+    ("pct", "samples", "margin"),
+    [
+        # The width follows the percentage as much as the count: a route
+        # observed 112 times at 100% is tighter than one observed 189 times
+        # at 59.8%.
+        (100.0, 112, 1.7),
+        (59.8, 189, 7.0),
+        (67.9, 28, 16.4),
+        (90.0, 300, 3.5),
+    ],
+)
+def test_on_time_pct_margin_is_the_wilson_half_width_in_points(pct, samples, margin):
+    assert on_time_pct_margin_pp(pct, samples) == margin
+
+
+def test_a_flagged_percentage_never_reads_as_within_the_cutoff():
+    """The margin rounds up, so a percentage the caveat flags never shows a
+    margin at or under the 5-point cutoff it was flagged for exceeding."""
+    for samples in range(21, 600):
+        for tenths in range(0, 1001, 7):
+            pct = tenths / 10
+            successes = round(pct / 100 * samples)
+            if pct_is_uncertain(successes, samples):
+                assert on_time_pct_margin_pp(pct, samples) > 5.0, (pct, samples)
 
 
 def test_wilson_interval_symmetry_around_half():

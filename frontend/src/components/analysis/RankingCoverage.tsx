@@ -52,6 +52,33 @@ export function LeftOutToggle({
   );
 }
 
+const ON_TIME_ORDERS = [
+  ["worst", "reports.on_time_order.worst"],
+  ["best", "reports.on_time_order.best"],
+] as const;
+
+/** Which end of the on-time list comes first. The lowest rates lead by
+ *  default: the list is where a route that needs attention is found. */
+export function OnTimeOrderToggle({
+  value,
+  onChange,
+}: {
+  value: "worst" | "best";
+  onChange: (value: "worst" | "best") => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div role="radiogroup" aria-label={t("reports.on_time_order.label")} className="ranking-order">
+      {ON_TIME_ORDERS.map(([option, labelKey]) => (
+        <label key={option} className="ranking-sparse-toggle">
+          <input type="radio" name="on-time-order" checked={value === option} onChange={() => onChange(option)} />
+          {t(labelKey)}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /** How much of the ranking is on screen, with the rest one click away. */
 export function RowsShown({ shown, total, onShowAll }: { shown: number; total: number; onShowAll?: () => void }) {
   const { t } = useTranslation();
