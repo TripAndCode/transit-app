@@ -4,10 +4,10 @@ Consumed by api/routers/reports.py for the /api/{agency_id}/reports/{type}
 endpoint's text body. Each ``_fmt_*`` function matches one query_type from
 ``pipeline.reports.compute_*``; :data:`FORMATTERS` is the dispatch table.
 
-DOW columns arriving from compute_dow_ranking are ISODOW ints
-(1=Mon..7=Sun, per migration 0011). They render via
-``pipeline.query.labels.dow_label`` which itself honours the locale;
-rollup labels ('平日', '週末') get translated for ``en`` callers.
+A DOW column renders via ``pipeline.query.labels.dow_label``, which honours
+the locale: an ISODOW int (1=Mon..7=Sun) becomes a day name, and the day-type
+label compute_dow_ranking puts on its rows ('平日', '土日祝') is translated
+for ``en`` callers.
 
 Strings live in :data:`_LOCALES` keyed on ``(template, locale)`` so a new
 language only needs to add a column rather than rewriting handler code.
@@ -38,22 +38,22 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route} 5分超 {count}回、平均{avg}分（{samples}件）",
     ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} samples)",
-    ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
-    ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
+    ("dow_header_weekend", "ja"): "【{label}土日祝遅延ランキング】",
+    ("dow_header_weekend", "en"): "[{label}Weekend/holiday delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_row", "ja"): "{rank}位: 路線{route} {dow_label}：平均{avg}分（{samples}件）",
     ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} samples)",
-    ("compare_header", "ja"): "【平日・土日 遅延差ランキング】",
-    ("compare_header", "en"): "[Weekday vs weekend delay-delta ranking]",
-    ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日{weekend}分（差：{delta}分、{direction}）",
+    ("compare_header", "ja"): "【平日・土日祝 遅延差ランキング】",
+    ("compare_header", "en"): "[Weekday vs weekend/holiday delay-delta ranking]",
+    ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差：{delta}分、{direction}）",
     ("compare_row", "en"): (
-        "#{rank} route {route} weekday {weekday} min / weekend {weekend} min (Δ {delta} min, {direction})"
+        "#{rank} route {route} weekday {weekday} min / weekend/holiday {weekend} min (Δ {delta} min, {direction})"
     ),
-    ("dir_weekend_gt", "ja"): "土日>平日",
-    ("dir_weekend_gt", "en"): "weekend>weekday",
-    ("dir_weekday_gt", "ja"): "平日>土日",
-    ("dir_weekday_gt", "en"): "weekday>weekend",
+    ("dir_weekend_gt", "ja"): "土日祝>平日",
+    ("dir_weekend_gt", "en"): "weekend/holiday>weekday",
+    ("dir_weekday_gt", "ja"): "平日>土日祝",
+    ("dir_weekday_gt", "en"): "weekday>weekend/holiday",
     ("dir_equal", "ja"): "同程度",
     ("dir_equal", "en"): "similar",
     ("service_suffix", "ja"): "{service}の",
@@ -260,12 +260,13 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
 
 
 def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
-    """Render a DOW-filtered delay ranking.
+    """Render a day-type delay ranking.
 
-    Each row is ``(route_code, service, dow, avg_min, samples)``. ``dow``
-    is an ISODOW int (1..7) or a rollup label string; ``dow_label`` handles
-    both shapes and honours the requested locale. ``intent["dow_group"]`` is
-    ``"weekday"`` or ``"weekend"``, the two groups compute_dow_ranking takes.
+    Each row is ``(route_code, service, dow, avg_min, samples)``. ``dow`` is
+    the row's day-type label (平日 / 土日祝) or an ISODOW int (1..7);
+    ``dow_label`` handles both shapes and honours the requested locale.
+    ``intent["dow_group"]`` is ``"weekday"`` or ``"weekend"``, the two groups
+    compute_dow_ranking takes.
     """
     header_key = "dow_header_weekend" if intent["dow_group"] == "weekend" else "dow_header_weekday"
     label = _service_prefix(intent, locale)
@@ -285,7 +286,7 @@ def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
 
 
 def _fmt_compare_ranking(rows: list, intent: dict, locale: str) -> str:
-    """Render the weekday-vs-weekend delta ranking."""
+    """Render the 平日-vs-土日祝 delta ranking."""
     del intent  # no intent-derived flags today
     lines = []
     for i, r in enumerate(rows, 1):

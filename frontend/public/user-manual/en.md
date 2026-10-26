@@ -54,7 +54,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Routes** | Which routes run late or on time, and how one route looks stop by stop |
 | **Time** | When delay happens: by day, by hour and by day of the week |
 | **Why** | Where the time goes: waiting at stops or running between them |
-| **Compare** | Weekdays against weekends route by route, and agencies against each other |
+| **Compare** | Weekdays against weekends and holidays route by route, and agencies against each other |
 | **Live** | The trips running now |
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Ask** | Ready-made questions, answered as tables and charts |
@@ -84,7 +84,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ## 3. The scope sentence: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends), and the period summary, council report and delay record (for reference) in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays), and the period summary, council report and delay record (for reference) in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
 
@@ -140,7 +140,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends) share one layout, as do the council report and the delay record (for reference) in **Reports**.
+**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays) share one layout, as do the council report and the delay record (for reference) in **Reports**.
 
 ![Routes screen](./05-routes-ranking.en.png)
 
@@ -163,7 +163,7 @@ Click the small ⓘ next to the “Reports” heading above the list. A popup, �
 - Rankings find the routes that are chronically late or consistently on time.
 - The trend shows whether things are improving or worsening; a rising line means delays are growing.
 - The time-band heatmap shows the peak times of the day, such as commuter peaks against midday.
-- Routes on weekdays and on weekends and holidays give each route’s average delay for that group of days; compare the two to see which routes run later on weekends.
+- Routes on weekdays and on weekends and holidays give each route’s average delay, with days split by the timetable the agency ran that day, so public holidays count as weekends and holidays; compare the two to see which routes run later on weekends and holidays.
 - CSV export hands the data to Excel or other tools.
 
 Click anywhere else, or press Escape, to close it.
@@ -233,7 +233,7 @@ A trend needs more than one day. For a one-day period, only the heatmap is shown
 
 ### 6-2. Routes on weekdays, and on weekends and holidays
 
-Each route’s average delay on that group of days (“Avg (min)”, with “Samples”). Compare the two to see which routes run later on weekends. These reports choose their own days, so a days or timetable condition in the scope sentence shows as not used.
+Each route’s average delay (“Avg (min)”, with “Samples”) on the days the agency ran its weekday timetable, or its weekend or holiday timetable. Each day goes by the timetable the agency ran that day, so a public holiday on a weekday, or a weekday the timetable runs as a holiday (such as Obon), counts as a weekend or holiday. Compare the two to see which routes run later on weekends and holidays. These reports choose their own days, so a days or timetable condition in the scope sentence shows as not used.
 
 ### 6-3. Route forecast
 
@@ -247,7 +247,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 **Dwell/running time** splits each route’s delay into the time spent waiting at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each.
 
-- Splitting delay needs arrival times. When an agency’s feed reports departures only, the report says “Splitting delay needs arrival times” and offers **See when delay happens** (the Time screen) and **Compare weekdays and weekends** (the comparison in section 8-1).
+- Splitting delay needs arrival times. When an agency’s feed reports departures only, the report says “Splitting delay needs arrival times” and offers **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1).
 - The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
 - Under the report, “Rain vs. dry average delay” compares days with and without rain where a weather station is set up for the agency, and “Headway quality” covers the high-frequency routes.
 
@@ -255,11 +255,11 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 8. Compare — side by side
 
-Two buttons at the top switch between **Weekdays and weekends** and **Agencies**.
+Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
 
-### 8-1. Weekdays and weekends
+### 8-1. Weekdays and weekends/holidays
 
-**Weekday and weekend gap** puts each route’s average delay on weekdays and on weekends and holidays side by side (“Weekday (min)”, “Weekend/Holiday (min)”), with the gap (“Diff (min)”) and which side is higher (“Direction”: “Weekend > Weekday” or “Weekday > Weekend”). Routes with the largest gap come first.
+**Weekday and weekend/holiday gap** puts each route’s average delay on weekdays and on weekends and holidays side by side (“Weekday (min)”, “Weekend/Holiday (min)”), with the gap (“Diff (min)”) and which side is higher (“Direction”: “Weekend/Holiday > Weekday” or “Weekday > Weekend/Holiday”). Routes with the largest gap come first. Days are split the same way as in the reports of section 6-2, so public holidays count as weekends and holidays.
 
 ### 8-2. Agencies
 
@@ -334,7 +334,7 @@ Ask answers common questions about delay with a table or chart, so you do not ha
 
 - The bar at the top shows the period and routes your questions will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
 - Under “You can ask things like”, a card runs at once: “5 most delayed routes” or “5 least on-time routes”.
-- Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
+- Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
 - After the first answer, open **Start another analysis** at the bottom to see every question. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes question.
 
 ### 11-2. Reading the answer

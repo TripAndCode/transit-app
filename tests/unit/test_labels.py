@@ -25,14 +25,14 @@ def test_dow_label_unknown_int_falls_back_to_str():
     ("value", "en"),
     [
         ("平日", "Weekday"),
-        ("週末", "Weekend"),
         ("土曜", "Saturday"),
         ("日祝", "Sunday/Holiday"),
         ("土日祝", "Weekend/Holiday"),
     ],
 )
-def test_day_group_label_names_rollups_and_service_values(value, en):
-    """One table names both the DOW rollups and the service filter's values."""
+def test_day_group_label_names_the_service_filter_values(value, en):
+    """One table names the service filter's values, which the dow reports label
+    their rows with too."""
     assert day_group_label(value, lang="en") == en
     assert day_group_label(value, lang="ja") == value
     assert dow_label(value, lang="en") == en

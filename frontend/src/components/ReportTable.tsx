@@ -72,9 +72,9 @@ const RANKING_COLS: Schema[] = [
   { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
 ];
 
-// dow_weekend + dow_weekday share columns; the API splits the rows by DOW
-// group. The group itself (row index 2) is the report's own title, so it is
-// not repeated as a column.
+// dow_weekend + dow_weekday share columns; the API splits the rows by the
+// agency's day type. The day type itself (row index 2) is the report's own
+// title, so it is not repeated as a column.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
@@ -112,7 +112,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   compare_ranking: [
     ROUTE_COL,
     { index: 1, labelKey: "common.service_value.平日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
-    { index: 2, labelKey: "common.service_value.土日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: Sat/Sun split label
+    { index: 2, labelKey: "common.service_value.土日祝", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
     { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
     {
       index: 4,

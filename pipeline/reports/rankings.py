@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, build_updates_filter_ch
+from api.range import RangeCtx, ServiceType, build_updates_filter_ch, resolve_service_dates, selected_service_dates
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import (
@@ -581,29 +582,24 @@ async def compute_dow_ranking(
     limit: int = 100,
     ch=None,
 ) -> list[tuple]:
-    """Worst-delay routes restricted to weekday or weekend observations.
+    """Worst-delay routes over the agency's 平日 or 土日祝 days.
 
-    Drops the user's ``service`` filter on purpose — pairing 'weekend' DOW
-    with the 平日 filter selects almost no dates, since the weekday
-    timetable rarely runs on a weekend — so each row's service slot is None.
-    ``routes`` is preserved so a user filtering to specific routes keeps that
-    filter.
+    ``dow_group`` ``'weekday'`` keeps the dates the agency's calendar runs as
+    平日, ``'weekend'`` every other date: a public holiday on a weekday, or a
+    weekday run on the holiday timetable, counts as 土日祝 (:func:`_day_type_ctx`).
+    That day type replaces the user's ``dow`` and ``service`` filters, which
+    could only narrow it to a different question, so each row's service slot
+    is None and its day-type slot names the side. ``routes`` and
+    ``time_band`` are kept.
     """
-    overridden = RangeCtx(
-        from_date=ctx.from_date,
-        to_date=ctx.to_date,
-        dow=dow_group,  # type: ignore[arg-type]
-        time_band=ctx.time_band,
-        service="all",
-        routes=ctx.routes,
-    )
-    label = "週末" if dow_group == "weekend" else "平日"
+    if ctx.time_band != "all" and ch is None:
+        raise RuntimeError("compute_dow_ranking's time_band-filtered live fallback requires a ClickHouse client")
+    label = _DAY_TYPE_SIDES[dow_group]
+    overridden = await _day_type_ctx(agency_id, ctx, conn, label)
     if ctx.time_band != "all":
-        if ch is None:
-            raise RuntimeError("compute_dow_ranking's time_band-filtered live fallback requires a ClickHouse client")
-        return await _dow_ranking_live(agency_id, overridden, conn, ch, label, limit)
+        return await _dow_ranking_live(agency_id, overridden, ch, label, limit)
 
-    # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
+    # agg_daily_trend filtered to the day type's dates, sample-weighted.
     where, params, n = _agg_filter(overridden, next_param=2)
     sql = (
         f"SELECT route_code, '{label}' AS dow,\n"
@@ -623,11 +619,34 @@ async def compute_dow_ranking(
         f"LIMIT ${n}"
     )
     rows = await conn.fetch(sql, agency_id, *params, limit)
-    service = _service_label(overridden)
-    return [(r["route_code"], service, r["dow"], r["avg_min"], r["samples"]) for r in rows]
+    return [(r["route_code"], None, r["dow"], r["avg_min"], r["samples"]) for r in rows]
 
 
-async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, label: str, limit: int) -> list[tuple]:
+# The service filter value naming each side of the weekday/weekend split.
+_DAY_TYPE_SIDES: dict[str, ServiceType] = {"weekday": "平日", "weekend": "土日祝"}
+
+
+async def _day_type_ctx(agency_id: int, ctx: RangeCtx, conn, service: ServiceType) -> RangeCtx:
+    """``ctx``'s window, routes and time band over the dates ``service`` selects.
+
+    The dates come from the agency's own calendar (:func:`api.range.resolve_service_dates`),
+    so 土日祝 covers the public holidays and the other days the agency runs
+    its weekend or holiday timetable, and 平日 leaves them out.
+    """
+    return await resolve_service_dates(
+        RangeCtx(
+            from_date=ctx.from_date,
+            to_date=ctx.to_date,
+            time_band=ctx.time_band,
+            service=service,
+            routes=ctx.routes,
+        ),
+        conn,
+        agency_id,
+    )
+
+
+async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, ch, label: str, limit: int) -> list[tuple]:
     """Live raw-scan dow-ranking — fallback for time_band-filtered queries."""
     cte_sql, ch_params = _dedup_cte_ch(overridden)
     result = await ch.query(
@@ -643,10 +662,8 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
         parameters={"agency_id": agency_id, "dr_limit": limit, **ch_params},
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
-    service = _service_label(overridden)
     return [
-        (route_code, service, dow, _round2(avg_min), samples)
-        for route_code, dow, avg_min, samples in result.result_rows
+        (route_code, None, dow, _round2(avg_min), samples) for route_code, dow, avg_min, samples in result.result_rows
     ]
 
 
@@ -659,21 +676,23 @@ async def compute_compare_ranking(
     limit: int | None = 100,
     ch=None,
 ) -> list[tuple]:
-    """Per-route weekday-vs-weekend delay difference, sorted by absolute delta.
+    """Per-route 平日-vs-土日祝 delay difference, sorted by absolute delta.
 
-    Drops the user's ``service`` filter (same reason as compute_dow_ranking)
-    but preserves ``routes`` so route-restricted comparisons work. ``limit=None``
-    returns every compared route, for a caller that reports the total.
+    The two sides are :func:`compute_dow_ranking`'s two day types, which
+    replace the user's ``dow`` and ``service`` filters the same way, so each
+    side's mean is the one that report gives the route. ``routes`` is kept so
+    route-restricted comparisons work. ``limit=None`` returns every compared
+    route, for a caller that reports the total.
     """
+    if ctx.time_band != "all" and ch is None:
+        raise RuntimeError("compute_compare_ranking's time_band-filtered live fallback requires a ClickHouse client")
+    weekday_dates, weekend_dates = await _day_type_dates(agency_id, ctx, conn)
     if ctx.time_band != "all":
-        if ch is None:
-            raise RuntimeError(
-                "compute_compare_ranking's time_band-filtered live fallback requires a ClickHouse client"
-            )
-        return await _compare_ranking_live(agency_id, ctx, ch, limit)
+        return await _compare_ranking_live(agency_id, ctx, ch, weekday_dates, weekend_dates, limit)
 
-    # Both DOW sides from one agg_daily_trend pass (dow split via FILTER), summed
-    # across service/date per route. dow='all' so _agg_filter emits no DOW clause.
+    # Both sides from one agg_daily_trend pass (split by date via FILTER), summed
+    # across service/date per route. dow and service stay 'all' so _agg_filter
+    # emits neither clause.
     agg_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
@@ -683,8 +702,10 @@ async def compute_compare_ranking(
         routes=ctx.routes,
     )
     where, params, n = _agg_filter(agg_ctx, next_param=2)
-    wd = "EXTRACT(ISODOW FROM date) BETWEEN 1 AND 5"
-    we = "EXTRACT(ISODOW FROM date) IN (6, 7)"
+    wd = f"date = ANY(${n}::date[])"
+    we = f"date = ANY(${n + 1}::date[])"
+    params.extend([weekday_dates, weekend_dates])
+    n += 2
     # sum_delay_sec is nullable (unlike samples); each side's numerator AND
     # denominator (including the wd_n/we_n minimum-sample gate below) are
     # additionally FILTERed to sum_delay_sec IS NOT NULL so a row with
@@ -721,8 +742,19 @@ async def compute_compare_ranking(
     return [tuple(r) for r in rows]
 
 
-async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tuple[float, int, float, int]]:
+async def _day_type_dates(agency_id: int, ctx: RangeCtx, conn) -> tuple[list[date], list[date]]:
+    """The dates of ``ctx``'s window the agency runs as 平日, and the rest (土日祝)."""
+    weekday = selected_service_dates(await _day_type_ctx(agency_id, ctx, conn, "平日"))
+    weekend = selected_service_dates(await _day_type_ctx(agency_id, ctx, conn, "土日祝"))
+    return weekday or [], weekend or []
+
+
+async def _route_wd_we_avg_ch(
+    agency_id: int, ctx: RangeCtx, ch, weekday_dates: list[date], weekend_dates: list[date]
+) -> dict[str, tuple[float, int, float, int]]:
     """Per-route (wd_avg_min, wd_n, we_avg_min, we_n) from ClickHouse `updates`,
+    the sides being the service dates in ``weekday_dates`` and in
+    ``weekend_dates`` (:func:`_day_type_dates`),
     computed with ONE query via conditional aggregates instead of two separate
     queries (weekday ctx + weekend ctx) plus a Python-side mean/count/HAVING
     reduction over every raw deduped row. The aggregation (and the >10-sample
@@ -747,30 +779,32 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
     combined_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
-        dow="all",  # both sides needed in one pass; bucketed via toDayOfWeek below
+        dow="all",  # both sides needed in one pass; split by service date below
         time_band=ctx.time_band,
         service="all",
         routes=ctx.routes,
     )
     where_frag, params = build_updates_filter_ch(combined_ctx)
+    service_date = service_date_ch("u.captured_at")
     result = await ch.query(
         f"""
         SELECT route_code,
-               avgIf(dep_delay, dow BETWEEN 1 AND 5) AS wd_avg, countIf(dow BETWEEN 1 AND 5) AS wd_n,
-               avgIf(dep_delay, dow IN (6, 7))       AS we_avg, countIf(dow IN (6, 7))       AS we_n
+               avgIf(dep_delay, has({{cmp_wd:Array(Date)}}, sd)) AS wd_avg,
+               countIf(has({{cmp_wd:Array(Date)}}, sd))          AS wd_n,
+               avgIf(dep_delay, has({{cmp_we:Array(Date)}}, sd)) AS we_avg,
+               countIf(has({{cmp_we:Array(Date)}}, sd))          AS we_n
         FROM (
             SELECT u.route_code AS route_code,
                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                   toDayOfWeek({service_date_ch("u.captured_at")}) AS dow
+                   {service_date} AS sd
             FROM updates AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where_frag}
-            GROUP BY u.route_code, u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence,
-                     toDayOfWeek({service_date_ch("u.captured_at")})
+            GROUP BY u.route_code, u.trip_id, {service_date}, u.stop_sequence
         )
         GROUP BY route_code
         HAVING wd_n > 10 AND we_n > 10
         """,
-        parameters={"agency_id": agency_id, **params},
+        parameters={"agency_id": agency_id, "cmp_wd": weekday_dates, "cmp_we": weekend_dates, **params},
     )
     return {
         route_code: (wd_avg / 60.0, wd_n, we_avg / 60.0, we_n)
@@ -778,9 +812,11 @@ async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tu
     }
 
 
-async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int | None) -> list[tuple]:
-    """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
-    stats = await _route_wd_we_avg_ch(agency_id, ctx, ch)
+async def _compare_ranking_live(
+    agency_id: int, ctx: RangeCtx, ch, weekday_dates: list[date], weekend_dates: list[date], limit: int | None
+) -> list[tuple]:
+    """Live raw-scan 平日-vs-土日祝 compare — fallback for time_band queries."""
+    stats = await _route_wd_we_avg_ch(agency_id, ctx, ch, weekday_dates, weekend_dates)
 
     out: list[tuple] = []
     for route_code, (wd_mean, _wd_n, we_mean, _we_n) in stats.items():

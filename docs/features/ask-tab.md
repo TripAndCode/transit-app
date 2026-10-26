@@ -45,7 +45,7 @@ What the user sees/does:
   immediately on click, and route-requiring "pills" ("Explore all stops by
   pattern" / `stop_patterns`, "Which stops have larger delays?" /
   `stop_hotspots`, "Route delay trend" / `route_trend`, "Weekday vs
-  Weekend" / `weekday_vs_weekend`, "Route overview" / `route_overview`)
+  Weekend/Holiday" / `weekday_vs_weekend`, "Route overview" / `route_overview`)
   that open an inline parameter picker
   (`frontend/src/components/ParamStrip.tsx`) before running.
 - **Bottom dock** — `frontend/src/components/QuestionDock.tsx`: persistent

@@ -766,9 +766,9 @@ describe("AnalysisTab Why without arrival times", () => {
     expect(new URLSearchParams(router.state.location.search).get("from")).toBe("2026-09-01");
   });
 
-  it("points to the weekday and weekend comparison too", async () => {
+  it("points to the weekday and weekend/holiday comparison too", async () => {
     const { router } = showUnavailableDwellRun();
-    await userEvent.click(screen.getByRole("button", { name: "Compare weekdays and weekends" }));
+    await userEvent.click(screen.getByRole("button", { name: "Compare weekdays with weekends and holidays" }));
     expect(router.state.location.pathname).toBe("/agencies/1/compare");
     expect(new URLSearchParams(router.state.location.search).get("report")).toBe("compare_ranking");
   });

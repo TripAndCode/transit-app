@@ -33,7 +33,7 @@
     "station_figure_unusual": "{{n}} unusually late today"
   },
   "compare": {
-    "mode_periods": "Weekdays and weekends",
+    "mode_periods": "Weekdays and weekends/holidays",
     "mode_agencies": "Agencies",
     "bars": {
       "period_label": "Period",
@@ -844,7 +844,7 @@
       "on_time_pct": "On-time %",
       "late5_count": "Over 5 min late",
       "heijitsu_min": "Weekday (min)",
-      "kyujitsu_min": "Weekend (min)",
+      "kyujitsu_min": "Weekend/Holiday (min)",
       "abs_delta": "Δ (abs)",
       "signed_delta": "Δ (signed)",
       "stop_sequence": "Stop #",
@@ -990,8 +990,8 @@
         "placeholder": "Select a route"
       },
       "weekday_vs_weekend": {
-        "title": "Weekday vs Weekend",
-        "summary": "{{route}}: weekday vs weekend comparison",
+        "title": "Weekday vs Weekend/Holiday",
+        "summary": "{{route}}: weekday vs weekend/holiday comparison",
         "placeholder": "Select a route"
       },
       "route_overview": {
@@ -1019,7 +1019,7 @@
       "on_time": "On-time rate",
       "worst_5min": "Delays over 5 min",
       "trend": "Trend",
-      "compare_ranking": "Weekday and weekend gap",
+      "compare_ranking": "Weekday and weekend/holiday gap",
       "dow_weekday": "Routes on weekdays",
       "dow_weekend": "Routes on weekends and holidays",
       "dwell_run": "Dwell/running time",
@@ -1054,8 +1054,8 @@
       "best": "Highest on-time rate first"
     },
     "direction": {
-      "weekend_higher": "Weekend > Weekday",
-      "weekday_higher": "Weekday > Weekend"
+      "weekend_higher": "Weekend/Holiday > Weekday",
+      "weekday_higher": "Weekday > Weekend/Holiday"
     },
     "hint": {
       "title": "How to read these reports",
@@ -1066,7 +1066,7 @@
       "heatmap_strong": "Time-band heatmap",
       "heatmap_body": ": peak times during the day. Compare commuter peaks against midday.",
       "dow_strong": "Routes on weekdays / on weekends and holidays",
-      "dow_body": ": each route's average delay on that group of days. Compare the two to see which routes run later on weekends.",
+      "dow_body": ": each route's average delay, with days split by the timetable the agency ran that day; public holidays count as weekends/holidays. Compare the two to see which routes run later on weekends and holidays.",
       "csv": "CSV export lets you hand data off to Excel or BI tools."
     },
     "empty": {
@@ -1152,7 +1152,7 @@
       },
       "needs_arrivals": "Splitting delay needs arrival times",
       "see_when": "See when delay happens",
-      "compare_day_types": "Compare weekdays and weekends"
+      "compare_day_types": "Compare weekdays with weekends and holidays"
     },
     "headway_quality": {
       "title": "Headway quality",
@@ -1224,9 +1224,9 @@
       "on_time": "Share of departures inside the on-time threshold, by route, lowest first.",
       "worst_5min": "Routes with the most departures more than five minutes late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
-      "compare_ranking": "Each route's weekday or weekend delay, worst first for the period you pick, with the other period as a dashed outline.",
-      "dow_weekday": "Each route's average delay on weekdays.",
-      "dow_weekend": "Each route's average delay on weekends and holidays.",
+      "compare_ranking": "Each route's weekday or weekend/holiday delay, worst first for the period you pick, with the other period as a dashed outline. Each day is a weekday or a weekend/holiday by the timetable the agency ran that day.",
+      "dow_weekday": "Each route's average delay on the days the agency ran its weekday timetable. A public holiday, or any other day it ran a weekend or holiday timetable, counts as a weekend/holiday.",
+      "dow_weekend": "Each route's average delay on the days the agency ran its weekend or holiday timetable: weekends, plus public holidays and any other weekday it ran that timetable.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",
       "route_forecast": "When routes tend to run late, by day of week and time of day.",
       "council_summary": "A period summary written for a council or board.",
@@ -1876,7 +1876,7 @@
     "nav_routes_sublabel": "Which routes, at which hours",
     "nav_time_sublabel": "When delay happens across the network",
     "nav_why_sublabel": "What the data can and can't explain",
-    "nav_compare_sublabel": "Weekdays against weekends, and agencies against each other",
+    "nav_compare_sublabel": "Weekdays against weekends and holidays, and agencies against each other",
     "nav_reports_sublabel": "Documents to hand to someone",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
     "group": {

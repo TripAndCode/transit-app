@@ -90,25 +90,25 @@ def test_fmt_worst_5min_says_over_in_english_too():
 
 def test_fmt_compare_ranking_signs_direction():
     """Sign of the delta determines the Japanese direction label."""
-    # signed > 0 → 土日>平日
+    # signed > 0 → 土日祝>平日
     pos_rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
-    assert "土日>平日" in format_result("compare_ranking", pos_rows, {})
-    # signed < 0 → 平日>土日
+    assert "（差：5.6分、土日祝>平日）" in format_result("compare_ranking", pos_rows, {})
+    # signed < 0 → 平日>土日祝
     neg_rows = [("56041", 4.1, 0.8, 3.3, -3.3)]
-    assert "平日>土日" in format_result("compare_ranking", neg_rows, {})
+    assert "（差：3.3分、平日>土日祝）" in format_result("compare_ranking", neg_rows, {})
 
 
-def test_fmt_compare_ranking_labels_the_calendar_weekend_split_not_holidays():
-    """The two sides split on the calendar day of week (Mon-Fri vs Sat-Sun), so
-    a weekday public holiday sits on the weekday side. The text must not say
-    holidays belong to the weekend side."""
+def test_fmt_compare_ranking_names_the_day_types_it_splits():
+    """The two sides are the agency's day types, so a weekday public holiday
+    sits on the 土日祝 side, and the text says so."""
     rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
     ja = format_result("compare_ranking", rows, {})
     en = format_result("compare_ranking", rows, {}, locale="en")
-    assert "土日祝" not in ja
-    assert "平日・土日" in ja and "土日8.2分" in ja
-    assert "holiday" not in en.lower()
-    assert "Weekday vs weekend" in en
+    assert ja == "【平日・土日祝 遅延差ランキング】\n1位: 路線19042 平日2.6分 / 土日祝8.2分（差：5.6分、土日祝>平日）"
+    assert en == (
+        "[Weekday vs weekend/holiday delay-delta ranking]\n"
+        "#1 route 19042 weekday 2.6 min / weekend/holiday 8.2 min (Δ 5.6 min, weekend/holiday>weekday)"
+    )
 
 
 def test_fmt_ranking_no_service_uses_p50_p90_labels():
@@ -136,6 +136,16 @@ def test_fmt_dow_ranking_weekday_header():
     rows = [("16101", "平日", "平日", 8.8, 114)]
     result = format_result("dow_ranking", rows, {"dow_group": "weekday"})
     assert "【平日遅延ランキング】" in result
+
+
+def test_fmt_dow_ranking_weekend_names_the_weekend_and_holiday_day_type():
+    """The weekend report counts the days the agency's calendar runs as 土日祝,
+    public holidays included, so neither language calls it the weekend alone."""
+    rows = [("16101", None, "土日祝", 8.8, 114)]
+    ja = format_result("dow_ranking", rows, {"dow_group": "weekend"})
+    en = format_result("dow_ranking", rows, {"dow_group": "weekend"}, locale="en")
+    assert ja == "【土日祝遅延ランキング】\n1位: 路線16101 土日祝：平均8.8分（114件）"
+    assert en == "[Weekend/holiday delay ranking]\n#1 route 16101 Weekend/Holiday: mean 8.8 min (114 samples)"
 
 
 def test_fmt_ranking_en_locale_uses_english_strings():

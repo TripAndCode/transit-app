@@ -1,6 +1,7 @@
 """Tests for the v2 reports endpoints (live queries, no snapshots table)."""
 
 import os
+from datetime import date
 
 import httpx
 import pytest
@@ -513,7 +514,7 @@ async def test_reports_dow_weekend_reads_agg(reports_client, ch_client):
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     r = next(x for x in rows if x[0] == "R_WE")
-    assert r[2] == "週末"  # dow label
+    assert r[2] == "土日祝"  # day-type label
     assert float(r[3]) == 5.0  # 300s = 5.0 min
 
 
@@ -621,7 +622,7 @@ async def test_dow_ranking_pools_exact_sum_not_rounded_avg_min(reports_client, c
     across agg_daily_trend rows, not re-weight each day's own already-rounded
     avg_min.
 
-    Two weekdays for the same route/service: day 1 (6 obs, raw-seconds sum
+    Two weekdays (no public holiday) for the same route/service: day 1 (6 obs, raw-seconds sum
     248 -> analyze() rounds that day's own avg_min to 0.69 min) and day 2 (14
     obs, raw-seconds sum 1400 -> rounds to 1.67 min). Pooling the exact sums
     gives (248+1400)/20/60 = 1.37333... -> rounds to 1.37; re-weighting the
@@ -630,10 +631,10 @@ async def test_dow_ranking_pools_exact_sum_not_rounded_avg_min(reports_client, c
     (and wrong) answer that exists purely from the intermediate rounding.
     """
     client, agency_id, pool = reports_client
-    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-04", [41, 41, 41, 41, 42, 42])
-    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-05", [100] * 14)
+    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-11", [41, 41, 41, 41, 42, 42])
+    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-12", [100] * 14)
     _run_analyze(agency_id, ch_client)
-    resp = await client.get(f"/api/{agency_id}/reports/dow_weekday?from=2026-05-01&to=2026-05-07")
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekday?from=2026-05-11&to=2026-05-15")
     rows = resp.json()["rows"]
     row = next(r for r in rows if r[0] == "R_POOL")
     assert float(row[3]) == 1.37  # avg_min column -- NOT the buggy re-weighted 1.38
@@ -761,7 +762,100 @@ async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     assert resp.status_code == 200
     r = next((x for x in resp.json()["rows"] if x[0] == "R_NULL"), None)
     assert r is not None, "NULL-service route dropped from dow report"
-    assert r[1] is None  # dow reports drop the service filter
+    assert r[1] is None  # the report's own day type replaces the service filter
+
+
+def _dow_row(body, route_code):
+    """``route_code``'s row in a dow report, without the route code."""
+    return [[r[1], r[2], float(r[3]), r[4]] for r in body["rows"] if r[0] == route_code]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_dow_reports_count_a_weekday_public_holiday_as_a_weekend_day(
+    reports_client, ch_client, ch_async_client, path
+):
+    """2026-05-06 is a Wednesday and a public holiday (振替休日). With no
+    calendar loaded the agency's day types fall back to the weekday rule, which
+    files it under 日祝: the 土日祝 report counts it, the 平日 report does not."""
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "R_HOL", "平日", "2026-05-06", "08:00", [600] * 15)
+    await _seed_route_at(pool, agency_id, "R_HOL", "平日", "2026-05-07", "08:00", [120] * 15)
+    await _seed_route_at(pool, agency_id, "R_HOL", "土日祝", "2026-05-09", "08:00", [300] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+    window = f"from=2026-05-04&to=2026-05-10{band}"
+
+    weekday = (await client.get(f"/api/{agency_id}/reports/dow_weekday?{window}")).json()
+    weekend = (await client.get(f"/api/{agency_id}/reports/dow_weekend?{window}")).json()
+
+    assert _dow_row(weekday, "R_HOL") == [[None, "平日", 2.0, 15]]
+    assert _dow_row(weekend, "R_HOL") == [[None, "土日祝", 7.5, 30]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_compare_ranking_splits_days_as_the_dow_reports_do(reports_client, ch_client, ch_async_client, path):
+    """The compare ranking's two sides are the dow reports' two day types: the
+    weekday holiday 2026-05-06 sits on its 土日祝 side, and each side's mean is
+    the one the matching dow report gives."""
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "R_HOL", "平日", "2026-05-06", "08:00", [600] * 15)
+    await _seed_route_at(pool, agency_id, "R_HOL", "平日", "2026-05-07", "08:00", [120] * 15)
+    await _seed_route_at(pool, agency_id, "R_HOL", "土日祝", "2026-05-09", "08:00", [300] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+    window = f"from=2026-05-04&to=2026-05-10{band}"
+
+    compared = (await client.get(f"/api/{agency_id}/reports/compare_ranking?{window}")).json()
+    weekday = (await client.get(f"/api/{agency_id}/reports/dow_weekday?{window}")).json()
+    weekend = (await client.get(f"/api/{agency_id}/reports/dow_weekend?{window}")).json()
+
+    row = next(r for r in compared["rows"] if r[0] == "R_HOL")
+    assert [float(v) for v in row[1:]] == [2.0, 7.5, 5.5, 5.5]
+    assert float(row[1]) == _dow_row(weekday, "R_HOL")[0][2]
+    assert float(row[2]) == _dow_row(weekend, "R_HOL")[0][2]
+
+
+@pytest.mark.asyncio
+async def test_dow_reports_follow_the_calendar_on_a_weekday_run_on_the_weekend_timetable(reports_client, ch_client):
+    """A weekday the agency's calendar runs on its weekend timetable, the way a
+    feed runs Obon, is a 土日祝 day although it is no public holiday; a
+    Saturday it runs on the weekday timetable is a 平日 day."""
+    client, agency_id, pool = reports_client
+    for service_id, days in (("WD", (True,) * 5 + (False,) * 2), ("WE", (False,) * 5 + (True,) * 2)):
+        await pool.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 10)",
+            agency_id,
+            service_id,
+            *days,
+            date(2026, 5, 1),
+            date(2026, 5, 31),
+        )
+    # Thursday 05-14 runs the weekend timetable, Saturday 05-16 the weekday one.
+    for service_id, day, exception_type in (
+        ("WD", "20260514", 2),
+        ("WE", "20260514", 1),
+        ("WE", "20260516", 2),
+        ("WD", "20260516", 1),
+    ):
+        await pool.execute(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1, $2, $3, $4)",
+            agency_id,
+            service_id,
+            day,
+            exception_type,
+        )
+    await _seed_route(pool, agency_id, "R_CAL", "平日", "2026-05-13", [120] * 15)
+    await _seed_route(pool, agency_id, "R_CAL", "平日", "2026-05-14", [600] * 15)
+    await _seed_route(pool, agency_id, "R_CAL", "土日祝", "2026-05-16", [300] * 15)
+    _run_analyze(agency_id, ch_client)
+    window = "from=2026-05-11&to=2026-05-17"
+
+    weekday = (await client.get(f"/api/{agency_id}/reports/dow_weekday?{window}")).json()
+    weekend = (await client.get(f"/api/{agency_id}/reports/dow_weekend?{window}")).json()
+
+    assert _dow_row(weekday, "R_CAL") == [[None, "平日", 3.5, 30]]
+    assert _dow_row(weekend, "R_CAL") == [[None, "土日祝", 10.0, 15]]
 
 
 async def _seed_route_at(pool, agency_id, route_code, service_type, day, sched, delays):
@@ -1079,7 +1173,7 @@ async def test_ranking_csv_service_column_holds_the_active_filter(reports_client
         ("on_time", "ja", "【平日の定時率の低い順】"),
         ("on_time", "en", "[Weekday: On-time rate, lowest first]"),
         ("worst_5min", "ja", "【平日の5分超遅延ランキング】"),
-        # compute_dow_ranking drops the service filter, so its header names none.
+        # compute_dow_ranking replaces the service filter with its own day type, so its header names none.
         ("dow_weekday", "ja", "【平日遅延ランキング】"),
     ],
 )
