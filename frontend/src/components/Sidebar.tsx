@@ -226,7 +226,7 @@ export function Sidebar() {
           )}
           <RailTooltip collapsed={collapsedFlag} label={t("nav.model")}>
             <PendingNavLink
-              to="/model"
+              to={agencyId ? `/model?from=${agencyId}` : "/model"}
               aria-label={collapsedFlag ? t("nav.model") : undefined}
               onClick={() => onNavigate?.()}
               style={railLinkStyle(collapsedFlag)}

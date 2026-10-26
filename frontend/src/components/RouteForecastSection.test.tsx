@@ -302,11 +302,11 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
   });
 
-  it("links the ML mark to the model evaluation page", () => {
+  it("links the ML mark to the model evaluation page, carrying the agency it was opened from", () => {
     const ml = heatmap();
     ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
     renderSection(overview(), "100", ml);
-    expect(screen.getByTestId("fc-ml-chip")).toHaveAttribute("href", "/model");
+    expect(screen.getByTestId("fc-ml-chip")).toHaveAttribute("href", "/model?from=1");
   });
 
   it("shows no ML mark on a baseline-only route or agency landing", () => {

@@ -15,6 +15,7 @@ describe("Japanese line breaking", () => {
     ["global.css", "h1, h2, h3"],
     ["overview.css", ".ov-hero-story"],
     ["../components/CopilotPanel.css", ".copilot-panel p"],
+    ["../pages/ModelPage.css", ".model-page"],
   ])("%s %s breaks between phrases", (file, selector) => {
     expect(rule(file, selector)).toMatch(/word-break:\s*auto-phrase/);
   });
