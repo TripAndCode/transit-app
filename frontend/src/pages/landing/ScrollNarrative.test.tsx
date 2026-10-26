@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
@@ -31,9 +31,11 @@ describe("ScrollNarrative", () => {
     expect(screen.getByText("Highest average departure delays")).toBeTruthy();
   });
 
-  it("tells a phone visitor each chart scrolls sideways", () => {
+  it("tells a phone visitor which charts scroll sideways, and not the trend chart that fits its column", () => {
     renderNarrative();
-    expect(screen.getAllByText("Scroll sideways to see the whole chart.")).toHaveLength(3);
+    expect(screen.getAllByText("Scroll sideways to see the whole chart.")).toHaveLength(2);
+    const trend = screen.getByRole("img", { name: "Daily average delay chart" }).closest("section")!;
+    expect(within(trend).queryByText("Scroll sideways to see the whole chart.")).toBeNull();
   });
 
   it("renders one of the real fixture stop names inside the route section", () => {
@@ -72,7 +74,14 @@ describe("landing reveal CSS", () => {
     "",
   );
 
-  /** Body of the first rule whose selector text starts at `selector`. */
+  it("leaves a desktop column wide enough for the stop chart's floor", () => {
+    // The card's inner width is the column, less its side padding and the
+    // card's padding and border.
+    const column = Number.parseFloat(decl(ruleBody(css, ".landing-narrative {"), "max-width") ?? "");
+    const inner = column - 2 * 24 - 2 * 20 - 2 * 1;
+    const floor = Number.parseFloat(decl(ruleBody(css, ".landing-narrative-section__figure .focus-chart {"), "min-width") ?? "");
+    expect(inner).toBeGreaterThanOrEqual(floor);
+  });
 
   it("keeps the stop chart at a readable size at every width, scrolling sideways instead", () => {
     const minWidth = Number.parseFloat(decl(ruleBody(css, ".landing-narrative-section__figure .focus-chart {"), "min-width") ?? "");

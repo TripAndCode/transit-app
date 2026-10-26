@@ -7,7 +7,18 @@ import { useRevealOnScroll } from "./useRevealOnScroll";
 import { PREVIEW_ASK_EVIDENCE, PREVIEW_DAILY_TREND, PREVIEW_ROUTE_STOPS, PREVIEW_ROUTE_STOPS_PREVIOUS } from "./previewData";
 import "./ScrollNarrative.css";
 
-function NarrativeSection({ titleKey, bodyKey, children }: { titleKey: string; bodyKey: string; children: ReactNode }) {
+function NarrativeSection({
+  titleKey,
+  bodyKey,
+  scrolls = true,
+  children,
+}: {
+  titleKey: string;
+  bodyKey: string;
+  /** Whether the figure keeps a fixed floor and scrolls sideways on a phone. */
+  scrolls?: boolean;
+  children: ReactNode;
+}) {
   const { t } = useTranslation();
   const [ref, revealed] = useRevealOnScroll<HTMLElement>();
   return (
@@ -20,7 +31,7 @@ function NarrativeSection({ titleKey, bodyKey, children }: { titleKey: string; b
         <p>{t(bodyKey)}</p>
       </div>
       <div className="landing-narrative-section__figure">{children}</div>
-      <p className="landing-narrative-section__hint">{t("landing.narrative.scroll_hint")}</p>
+      {scrolls && <p className="landing-narrative-section__hint">{t("landing.narrative.scroll_hint")}</p>}
     </section>
   );
 }
@@ -41,7 +52,7 @@ function RouteDelaySection() {
 
 function DayTrendSection() {
   return (
-    <NarrativeSection titleKey="landing.narrative.trend.title" bodyKey="landing.narrative.trend.body">
+    <NarrativeSection titleKey="landing.narrative.trend.title" bodyKey="landing.narrative.trend.body" scrolls={false}>
       {/* Illustrative, like the Ask embed: a drag here would rewrite the
           marketing page's from/to for a selection that changes nothing. */}
       <DailyChart days={PREVIEW_DAILY_TREND} brushable={false} />
