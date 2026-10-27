@@ -17,6 +17,7 @@ def _assert_declares_scope(body: dict) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/{a}/reports/route_table",
         "/api/{a}/reports/ranking",
         "/api/{a}/reports/on_time",
         "/api/{a}/reports/trend",

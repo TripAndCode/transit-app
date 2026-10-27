@@ -107,11 +107,15 @@ def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     (unlike this codebase's exact-sum pooling elsewhere, which matters
     because it compounds across many rows).
     """
-    out: list[tuple] = []
-    for r in rows:
-        pct, samples = float(r[2]), int(r[4])
-        out.append((*r, pct_is_uncertain(_successes(pct, samples), samples)))
-    return out
+    return [(*r, on_time_pct_low_confidence(r[2], r[4])) for r in rows]
+
+
+def on_time_pct_low_confidence(pct: float | Decimal, samples: int) -> bool:
+    """Whether an on-time percentage's 95% Wilson interval is too wide to
+    trust it, with ``successes`` back-derived from the rounded percentage as
+    :func:`annotate_on_time_pct_confidence` describes."""
+    samples = int(samples)
+    return pct_is_uncertain(_successes(float(pct), samples), samples)
 
 
 def on_time_pct_margin_pp(pct: float | Decimal, samples: int) -> float:

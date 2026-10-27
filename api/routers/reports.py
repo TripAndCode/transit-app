@@ -37,9 +37,11 @@ from pipeline.query.formatter import (
 )
 from pipeline.reports import (
     DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
+    DEFAULT_ROUTE_TABLE_SORT,
     MIN_GROUP_SAMPLES,
     ON_TIME_PRESETS,
     RANKING_MIN_SAMPLES,
+    ROUTE_TABLE_SORTS,
     DefinitionMeta,
     compute_compare_ranking,
     compute_council_summary,
@@ -52,6 +54,7 @@ from pipeline.reports import (
     compute_performance_standards,
     compute_rain_delay,
     compute_ranking,
+    compute_route_table,
     compute_trend_series,
     compute_worst_5min,
     delay_certificate_observed,
@@ -59,6 +62,7 @@ from pipeline.reports import (
     observation_disclaimer,
     resolve_definition_meta,
     simulation_disclaimer,
+    sort_route_table,
 )
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
@@ -70,17 +74,19 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
     RETIRED,
     ZERO_DELAY,
+    left_out_counts,
     left_out_route_codes,
     listed_count,
     route_list,
     rows_to_fetch,
 )
-from pipeline.stats import annotate_on_time_pct_confidence, on_time_pct_margin_pp
+from pipeline.stats import annotate_on_time_pct_confidence, on_time_pct_low_confidence, on_time_pct_margin_pp
 from pipeline.weather import attribution as weather_attribution
 
 _log = logging.getLogger(__name__)
@@ -213,6 +219,7 @@ async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
 
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
+    "route_table",
     "ranking",
     "ranking_best",
     "on_time",
@@ -227,19 +234,34 @@ _REPORT_TYPES = (
 )
 
 _RANKING_TYPES = frozenset({"ranking", "ranking_best"})
+# The reports that leave out routes observed fewer than RANKING_MIN_SAMPLES
+# times unless include_sparse asks for them.
+_FLOORED_TYPES = _RANKING_TYPES | {"route_table"}
 # The reports that list one row per route, route_code first.
 _ROUTE_LIST_TYPES = frozenset(
-    {"ranking", "ranking_best", "on_time", "worst_5min", "compare_ranking", "dow_weekday", "dow_weekend"}
+    {
+        "route_table",
+        "ranking",
+        "ranking_best",
+        "on_time",
+        "worst_5min",
+        "compare_ranking",
+        "dow_weekday",
+        "dow_weekend",
+    }
 )
-_EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
-_LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
-# The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
-# own over-5-min threshold, so the scope never moves it.
-_SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
+_ORDERED_TYPES = frozenset({"on_time", "route_table"})
+_EARLY_TOLERANCE_TYPES = frozenset({"on_time", "route_table", "council_summary"})
+_LATE_TOLERANCE_TYPES = frozenset({"on_time", "route_table", "worst_5min", "council_summary"})
+# The scope's `late` is the on-time tolerance. worst_5min's late cutoff, and
+# route_table's over-5-min share, keep their own over-5-min threshold, so the
+# scope never moves them.
+_SCOPE_LATE_TYPES = frozenset({"on_time", "route_table", "council_summary"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
 # reports fix dow/service themselves; dwell_run cannot split by time band.
 _REPORT_HONOURS: dict[str, tuple[str, ...]] = {
+    "route_table": ALL_SIX,
     "ranking": ALL_SIX,
     "ranking_best": ALL_SIX,
     "on_time": ALL_SIX,
@@ -318,9 +340,10 @@ class ReportResponse(BaseModel):
     # is the scope of its on-time figures, which follow the whole filter.
     delivered_scope_applied: dict[str, bool] | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
-    # the list (ranking, ranking_best, on_time, compare_ranking and
-    # delay_certificate; None elsewhere), and, for ranking/ranking_best only,
-    # the observation count below which a route's average is too thin to trust.
+    # the list (route_table, ranking, ranking_best, on_time, compare_ranking
+    # and delay_certificate; None elsewhere), and, for route_table, ranking and
+    # ranking_best only, the observation count below which a route's figures
+    # are too thin to trust.
     rows_total: int | None = None
     reliable_min_samples: int | None = None
     # delay_certificate only (None elsewhere): whether the scope holds any
@@ -330,11 +353,14 @@ class ReportResponse(BaseModel):
     # Route lists only (None elsewhere): how many of the list's own rows are
     # retired route codes (pipeline.route_catalog.retired_route_codes), left
     # out by default and kept on include_retired. The same in every mode.
+    # route_table counts them over every route it ranks, so the count stays
+    # the same whatever its sort or limit.
     retired_rows: int | None = None
     # Route lists only (None elsewhere): how many of the list's own rows are
     # routes whose feed reports no delay at all
     # (pipeline.route_catalog.zero_delay_route_codes), left out by default and
-    # kept on include_zero_delay. The same in every mode.
+    # kept on include_zero_delay. The same in every mode, and counted as
+    # retired_rows is.
     zero_delay_rows: int | None = None
 
 
@@ -857,6 +883,16 @@ _LOW_CONFIDENCE_CSV_MARK = "誤差大"
 # Column headers used when emitting CSV. Japanese labels for operator-facing
 # downloads. Must match the row tuple shape produced by each compute_*.
 _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
+    "route_table": [
+        "系統コード",
+        "平均遅延(分)",
+        "定時率(%)",
+        "5分超の割合(%)",
+        "5分超回数",
+        "観測数",
+        "誤差大",
+        "誤差(±ポイント)",
+    ],
     "ranking": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
     "ranking_best": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
     "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "誤差大", "誤差(±ポイント)"],
@@ -922,7 +958,7 @@ def _csv_response(
         for d in rows:
             offenders = "; ".join(o.get("route_code", "") for o in (d.get("top_offenders") or []))
             w.writerow([d.get("date"), d.get("avg_min"), d.get("avg_min_smoothed"), d.get("samples"), offenders])
-    elif report_type == "on_time":
+    elif report_type in ("on_time", "route_table"):
         for r in rows:
             *lead, low_confidence, margin_pp = r
             w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp])
@@ -999,7 +1035,7 @@ async def get_report(
     ),
     include_sparse: bool = Query(
         default=False,
-        description="ranking/ranking_best only: also rank routes observed fewer than "
+        description="route_table/ranking/ranking_best only: also rank routes observed fewer than "
         "reliable_min_samples times in the period.",
     ),
     include_retired: bool = Query(
@@ -1015,8 +1051,14 @@ async def get_report(
     order: str | None = Query(
         default=None,
         pattern="^(worst|best)$",
-        description="on_time only: 'worst' (the default) lists the lowest on-time rate first, "
-        "the routes that need attention; 'best' the highest first.",
+        description="on_time and route_table only: 'worst' (the default) lists the routes that need "
+        "attention first (on_time: the lowest on-time rate); 'best' the other end first.",
+    ),
+    sort: str | None = Query(
+        default=None,
+        pattern=f"^({'|'.join(ROUTE_TABLE_SORTS)})$",
+        description="route_table only: the figure the table is sorted by, the average delay "
+        f"('{DEFAULT_ROUTE_TABLE_SORT}') unless named.",
     ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
@@ -1055,14 +1097,16 @@ async def get_report(
         )
     if threshold_sec is not None and report_type != "delay_certificate":
         raise HTTPException(status_code=400, detail="threshold_sec only applies to the delay_certificate report")
-    if include_sparse and report_type not in _RANKING_TYPES:
+    if include_sparse and report_type not in _FLOORED_TYPES:
         raise HTTPException(status_code=400, detail="include_sparse only applies to the ranking reports")
     if include_retired and report_type not in _ROUTE_LIST_TYPES:
         raise HTTPException(status_code=400, detail="include_retired only applies to the route lists")
     if include_zero_delay and report_type not in _ROUTE_LIST_TYPES:
         raise HTTPException(status_code=400, detail="include_zero_delay only applies to the route lists")
-    if order is not None and report_type != "on_time":
-        raise HTTPException(status_code=400, detail="order only applies to the on_time report")
+    if order is not None and report_type not in _ORDERED_TYPES:
+        raise HTTPException(status_code=400, detail="order only applies to the on_time and route_table reports")
+    if sort is not None and report_type != "route_table":
+        raise HTTPException(status_code=400, detail="sort only applies to the route_table report")
 
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
@@ -1090,7 +1134,27 @@ async def get_report(
     def listed_total(route_rows: list) -> int:
         return listed_count(route_rows, left_out, kept)
 
-    if report_type in _RANKING_TYPES:
+    if report_type == "route_table":
+        table_sort = sort or DEFAULT_ROUTE_TABLE_SORT
+        table_order: RouteTableOrder = "best" if order == "best" else "worst"
+        table = sort_route_table(
+            await compute_route_table(
+                agency_id,
+                ctx,
+                conn,
+                ch=ch,
+                min_samples=MIN_GROUP_SAMPLES if include_sparse else RANKING_MIN_SAMPLES,
+                early_tolerance_sec=early_tolerance_sec,
+                late_tolerance_sec=late_tolerance_sec,
+            ),
+            table_sort,
+            table_order,
+        )
+        rows_total = listed_total(table)
+        rows = [(*r, on_time_pct_low_confidence(r[2], r[5]), on_time_pct_margin_pp(r[2], r[5])) for r in listed(table)]
+        left_out_rows.update(left_out_counts(table, left_out))
+        intent = {"query_type": "route_table", "sort": table_sort, "order": table_order, "service": _service_label(ctx)}
+    elif report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
         ranked = await compute_ranking(
             agency_id,
@@ -1275,7 +1339,7 @@ async def get_report(
         definition=definition,
         scope_applied=report_scope_applied(report_type),
         rows_total=rows_total,
-        reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _RANKING_TYPES else None,
+        reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _FLOORED_TYPES else None,
         retired_rows=left_out_rows.get(RETIRED),
         zero_delay_rows=left_out_rows.get(ZERO_DELAY),
     )

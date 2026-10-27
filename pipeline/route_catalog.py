@@ -251,6 +251,13 @@ def route_list(
     return [r for r in prefix if r[0] not in dropped], counts
 
 
+def left_out_counts(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> dict[str, int]:
+    """How many of ``rows`` each reason leaves out, over every row rather than
+    the prefix :func:`route_list` counts, so the counts stay the same however
+    a list is sorted or cut."""
+    return {reason: sum(1 for r in rows if r[0] in codes) for reason, codes in left_out.items()}
+
+
 def listed_count(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]], kept: Collection[str]) -> int:
     """How many of ``rows`` a list keeps, ignoring its length."""
     dropped = _dropped(left_out, kept)

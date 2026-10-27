@@ -120,12 +120,13 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
     Rows of every date and raw service id of a route merge into one (see
     :func:`_service_label`). The histograms are summed element-wise (unnest
     WITH ORDINALITY → regroup → array_agg) so p50/p90 can be interpolated from
-    the merged buckets in Python.
+    the merged buckets in Python. The exact over-5-minute count comes along,
+    for a caller that estimates only the on-time count from the histogram.
     """
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "WITH ranged AS (\n"
-        "    SELECT route_code, samples, sum_delay_sec, hist\n"
+        "    SELECT route_code, samples, sum_delay_sec, late5_count, hist\n"
         "    FROM agg_route_daily_dist\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "),\n"
@@ -140,10 +141,11 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
         "),\n"
         "scalars AS (\n"
         "    SELECT route_code,\n"
-        "           SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec\n"
+        "           SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec,\n"
+        "           SUM(late5_count) AS late5_count\n"
         "    FROM ranged GROUP BY route_code\n"
         ")\n"
-        "SELECT s.route_code, s.samples, s.sum_delay_sec, h.hist\n"
+        "SELECT s.route_code, s.samples, s.sum_delay_sec, s.late5_count, h.hist\n"
         "FROM scalars s JOIN hists h USING (route_code)"
     )
     return await conn.fetch(sql, agency_id, *params)

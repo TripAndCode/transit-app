@@ -87,13 +87,14 @@ async def reports_client(reports_app):
 
 @pytest.mark.asyncio
 async def test_reports_list_returns_static_metadata(reports_client):
-    """The list endpoint returns the canonical 11 report types regardless of data."""
+    """The list endpoint returns the canonical 12 report types regardless of data."""
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports")
     assert resp.status_code == 200
     data = resp.json()
     types = {r["report_type"] for r in data}
     assert types == {
+        "route_table",
         "ranking",
         "ranking_best",
         "on_time",

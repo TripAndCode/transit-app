@@ -3,6 +3,7 @@
 - filters:  shared SQL fragment builders (dedup CTE, ctx filters)
 - rankings: the seven report-tab compute_* functions
 - overview: the 概況 magazine payload + its helpers
+- route_table: the Routes screen's one sortable table
 
 Public API is re-exported here so ``from pipeline.reports import compute_X``
 (used by api/routers and pipeline/query) keeps working unchanged.
@@ -36,13 +37,21 @@ from pipeline.reports.rankings import (
     compute_trend_series,
     compute_worst_5min,
 )
+from pipeline.reports.route_table import (
+    DEFAULT_ROUTE_TABLE_SORT,
+    ROUTE_TABLE_SORTS,
+    compute_route_table,
+    sort_route_table,
+)
 from pipeline.reports.weather import compute_rain_delay, observation_disclaimer
 
 __all__ = [
     "DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC",
+    "DEFAULT_ROUTE_TABLE_SORT",
     "MIN_GROUP_SAMPLES",
     "ON_TIME_PRESETS",
     "RANKING_MIN_SAMPLES",
+    "ROUTE_TABLE_SORTS",
     "DefinitionMeta",
     "compute_compare_ranking",
     "compute_council_summary",
@@ -57,6 +66,7 @@ __all__ = [
     "compute_performance_standards",
     "compute_rain_delay",
     "compute_ranking",
+    "compute_route_table",
     "compute_trend_series",
     "compute_worst_5min",
     "delay_certificate_observed",
@@ -65,4 +75,5 @@ __all__ = [
     "observation_disclaimer",
     "resolve_definition_meta",
     "simulation_disclaimer",
+    "sort_route_table",
 ]

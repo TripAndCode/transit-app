@@ -8,7 +8,7 @@ import pytest
 from api.range import MAX_RANGE_DAYS, RangeCtx
 from pipeline import route_catalog
 from pipeline.histogram import bucketize
-from pipeline.route_catalog import RETIRED, ZERO_DELAY, listed_count, route_list, rows_to_fetch
+from pipeline.route_catalog import RETIRED, ZERO_DELAY, left_out_counts, listed_count, route_list, rows_to_fetch
 
 # Ranked order as a report returns it; only the first element, the route code, matters.
 ROWS = [("C1", 1), ("R1", 2), ("Z1", 3), ("C2", 4), ("Z2", 5), ("C3", 6)]
@@ -164,3 +164,8 @@ async def test_a_pooled_list_judges_retirement_on_every_code_and_zeros_over_a_bo
 
 async def test_a_pooled_list_of_an_agency_without_analysed_days_leaves_out_nothing():
     assert await route_catalog.pooled_left_out_codes(_SpanConn(None, None), 7, ["C1"]) == {}
+
+
+def test_left_out_counts_cover_every_ranked_row_not_only_a_listed_prefix():
+    assert left_out_counts(ROWS, LEFT_OUT) == {RETIRED: 1, ZERO_DELAY: 2}
+    assert left_out_counts(ROWS[:2], LEFT_OUT) == {RETIRED: 1, ZERO_DELAY: 0}
