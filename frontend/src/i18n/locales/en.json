@@ -106,7 +106,9 @@
         "central": "Central Sta.",
         "honmachi": "Honmachi",
         "higashidai": "Higashidai",
-        "minatomachi": "Minatomachi"
+        "minatomachi": "Minatomachi",
+        "toshokan": "Library",
+        "kitamachi": "Kitamachi"
       },
       "queue_title": "Trips to check",
       "kpi": {
@@ -151,7 +153,7 @@
         "title": "Ask, get evidence",
         "body": "The same evidence view Ask shows for a real answer — not a screenshot. Select a stop below to see it."
       },
-      "scroll_hint": "Scroll sideways to see the whole chart."
+      "sample_caption": "Sample data · fictional {{route}}"
     }
   },
   "tour": {

@@ -10,21 +10,33 @@ import { useDrawOn } from "../charts/ChartEnter";
 import { fitLabel, svgTextMeasurer } from "../charts/labelFit";
 import { niceAxis } from "../charts/niceAxis";
 
+/** The drawing's size when no width is given; the page then scales it to
+ *  its box (focusedAnalysis.css keeps that box wide enough for the labels). */
 const VIEW_WIDTH = 780;
+const VIEW_HEIGHT = 335;
+/** Where the plot starts (past the value labels) and how far it stops short
+ *  of the right edge. */
+const PLOT_LEFT = 52;
+const PLOT_RIGHT = 28;
 const LABEL_SIZE = 14;
 /** Clear space kept between two neighbouring stop names, and between a name
  *  and the chart's edge. */
 const LABEL_GAP = 8;
+/** The closest two stop names may sit, centre to centre, in a drawing given
+ *  its width: about four CJK characters and the gap. */
+const MIN_LABEL_ROOM = 64;
+/** How many stop names the full-width drawing aims for. */
+const LABEL_TARGET = 7;
 
 /** Each shown stop name in the room between it and its neighbours: halfway
  *  to the next shown stop on either side, out to the chart's edge for the
  *  first and last. A name wider than its room ends in an ellipsis, and one
  *  near an edge slides inward rather than past it. Without a measurer every
  *  name is drawn whole at its stop. */
-function stopLabels(names: string[], xs: number[], shown: number[], measure: ((text: string) => number) | null) {
+function stopLabels(names: string[], xs: number[], shown: number[], viewWidth: number, measure: ((text: string) => number) | null) {
   return shown.map((i, k) => {
     const left = k === 0 ? LABEL_GAP / 2 : (xs[shown[k - 1]] + xs[i]) / 2 + LABEL_GAP / 2;
-    const right = k === shown.length - 1 ? VIEW_WIDTH - LABEL_GAP / 2 : (xs[i] + xs[shown[k + 1]]) / 2 - LABEL_GAP / 2;
+    const right = k === shown.length - 1 ? viewWidth - LABEL_GAP / 2 : (xs[i] + xs[shown[k + 1]]) / 2 - LABEL_GAP / 2;
     if (!measure) return { index: i, text: names[i], x: xs[i] };
     const text = fitLabel(names[i], right - left, measure);
     const half = measure(text) / 2;
@@ -48,10 +60,13 @@ export function DelayBandLegend() {
 
 /** `highlight` names a segment by its two stops' sequences, drawn as a
  *  wide band under the line. A stop with no departure observed reads as
- *  missing, except the last, from which nothing departs. */
-export function StopChart({ stops, previous, selected, onSelect, highlight = null }: {
+ *  missing, except the last, from which nothing departs. Given a `width` in
+ *  pixels the chart draws at exactly that size, one viewBox unit per pixel,
+ *  so a narrow column gets a narrower plot with fewer stop names rather than
+ *  a shrunken one; without it the full-width drawing scales to its box. */
+export function StopChart({ stops, previous, selected, onSelect, highlight = null, width }: {
   stops: RouteShapeStop[]; previous: RouteShapeStop[]; selected: number; onSelect: (sequence: number) => void;
-  highlight?: { from: number; to: number } | null;
+  highlight?: { from: number; to: number } | null; width?: number;
 }) {
   const { t } = useTranslation("design");
   // Only the current-period line draws on. The dashed "previous period" line
@@ -64,11 +79,15 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
   const low = Math.min(0, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const axis = niceAxis(low, high, 6);
-  const x = (i: number) => 52 + i / Math.max(1, stops.length - 1) * 700;
+  const viewWidth = width ?? VIEW_WIDTH;
+  const plotWidth = viewWidth - PLOT_LEFT - PLOT_RIGHT;
+  const x = (i: number) => PLOT_LEFT + i / Math.max(1, stops.length - 1) * plotWidth;
+  const target = width == null ? LABEL_TARGET : Math.max(2, Math.min(LABEL_TARGET, Math.floor(plotWidth / MIN_LABEL_ROOM)));
   const labels = stopLabels(
     stops.map((s) => s.stop_name),
     stops.map((_, i) => x(i)),
-    stops.flatMap((_, i) => (showsLabel(i, stops.length) ? [i] : [])),
+    stops.flatMap((_, i) => (showsLabel(i, stops.length, target) ? [i] : [])),
+    viewWidth,
     svgTextMeasurer(LABEL_SIZE),
   );
   const y = (n: number) => 280 - (n - axis.low) / (axis.high - axis.low) * 240;
@@ -79,8 +98,9 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
   const [bandFrom, bandTo] = band;
   const bandShown = band.length === 2 && bandFrom >= 0 && bandTo >= 0
     && stops[bandFrom].avg_min != null && stops[bandTo].avg_min != null;
-  return <svg className="focus-chart" viewBox="0 0 780 335" role="group" aria-label={t("stopDelay")}>
-    <ChartAxis ticks={axis.ticks} y={y} />
+  return <svg className="focus-chart" viewBox={`0 0 ${viewWidth} ${VIEW_HEIGHT}`} role="group" aria-label={t("stopDelay")}
+    style={width == null ? undefined : { width, height: VIEW_HEIGHT, minWidth: 0 }}>
+    <ChartAxis ticks={axis.ticks} y={y} right={viewWidth - PLOT_RIGHT} />
     {bandShown && <line data-testid="stop-chart-highlight" x1={x(bandFrom)} y1={y(stops[bandFrom].avg_min!)} x2={x(bandTo)} y2={y(stops[bandTo].avg_min!)}
       stroke="var(--accent)" strokeOpacity={0.22} strokeWidth={14} strokeLinecap="round" />}
     <path d={path(stops.map((s) => matchedPrevious(s, previous)))} fill="none" stroke="var(--text-secondary)" strokeWidth={2} strokeDasharray="5 5" />

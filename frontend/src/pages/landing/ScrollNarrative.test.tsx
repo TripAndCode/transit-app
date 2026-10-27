@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { ScrollNarrative } from "./ScrollNarrative";
+import { PREVIEW_DAILY_TREND, sampleAskEvidence, sampleRouteStops } from "./previewData";
 import { ruleBody, decl } from "../../test/cssRules";
 
 void i18n.changeLanguage("en");
@@ -21,6 +22,8 @@ function renderNarrative() {
 }
 
 describe("ScrollNarrative", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("mounts the real StopChart, DailyChart, and StopEvidenceChart, each with fixture data", () => {
     renderNarrative();
     // StopChart: role="group" SVG with the design-namespace label.
@@ -31,16 +34,60 @@ describe("ScrollNarrative", () => {
     expect(screen.getByText("Highest average departure delays")).toBeTruthy();
   });
 
-  it("tells a phone visitor which charts scroll sideways, and not the trend chart that fits its column", () => {
+  it("shows each stop with the same figure in the stop chart and the Ask evidence", () => {
     renderNarrative();
-    expect(screen.getAllByText("Scroll sideways to see the whole chart.")).toHaveLength(2);
-    const trend = screen.getByRole("img", { name: "Daily average delay chart" }).closest("section")!;
-    expect(within(trend).queryByText("Scroll sideways to see the whole chart.")).toBeNull();
+    const chart = screen.getByRole("group", { name: "Delay by stop" });
+    const onChart = new Map(
+      within(chart)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")!.match(/^(.+): ([\d.]+) min$/)!)
+        .map(([, name, minutes]) => [name, Number(minutes)]),
+    );
+    const evidence = within(screen.getByRole("group", { name: "Select a bar to inspect its observations" })).getAllByRole("button");
+    expect(evidence.length).toBeGreaterThan(0);
+    for (const bar of evidence) {
+      const [, name, minutes] = bar.getAttribute("aria-label")!.match(/^(.+), sequence \d+: ([\d.]+) minutes/)!;
+      expect(onChart.get(name), name).toBe(Number(minutes));
+    }
   });
 
-  it("renders one of the real fixture stop names inside the route section", () => {
+  it("returns the sample route's worst stops for Ask, ranked, as the real hotspot answer does", () => {
+    const evidence = sampleAskEvidence((key) => key);
+    const { current } = sampleRouteStops((key) => key);
+    expect(evidence.length).toBeLessThan(current.length);
+    const worst = [...current].sort((a, b) => (b.avg_min ?? 0) - (a.avg_min ?? 0)).slice(0, evidence.length);
+    expect(evidence.map((p) => [p.name, p.minutes])).toEqual(worst.map((s) => [s.stop_name, s.avg_min]));
+  });
+
+  it("averages, across the sample route, what its daily trend shows for the same two weeks", () => {
+    const { current, previous } = sampleRouteStops((key) => key);
+    const mean = (rows: { m: number; n: number }[]) => rows.reduce((s, r) => s + r.m * r.n, 0) / rows.reduce((s, r) => s + r.n, 0);
+    const days = PREVIEW_DAILY_TREND.map((d) => ({ m: d.avg_min, n: d.samples }));
+    expect(Math.abs(mean(current.map((s) => ({ m: s.avg_min!, n: s.samples }))) - mean(days.slice(7)))).toBeLessThan(0.1);
+    expect(Math.abs(mean(previous.map((s) => ({ m: s.avg_min!, n: s.samples }))) - mean(days.slice(0, 7)))).toBeLessThan(0.1);
+  });
+
+  it("names the sample stops in the reader's language, the hero's names, in both stop charts", async () => {
+    const { container } = renderNarrative();
+    // The stop chart's labels and the evidence bars' names.
+    const names = () => [...container.querySelectorAll("text[text-anchor='middle'], .stop-evidence-name")].map((n) => n.textContent);
+    expect(names().filter((n) => n === "Honmachi")).toHaveLength(2);
+    try {
+      await i18n.changeLanguage("ja");
+      await waitFor(() => expect(names().filter((n) => n === "本町")).toHaveLength(2));
+      expect(names()).toContain("北町");
+      expect(names().filter((n) => /[A-Za-z]/.test(n ?? ""))).toEqual([]);
+      expect(screen.getAllByText("サンプルデータ · 架空の12系統")).toHaveLength(3);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("fits the stop chart to a narrow column instead of scrolling it, and asks for no sideways scroll", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 316 } as DOMRect);
     renderNarrative();
-    expect(screen.getAllByText("Riverside Sta.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("group", { name: "Delay by stop" }).getAttribute("viewBox")).toBe("0 0 316 335");
+    expect(screen.queryByText("Scroll sideways to see the whole chart.")).toBeNull();
   });
 
   it("gives every section the reveal wrapper, already revealed without IntersectionObserver support", () => {
@@ -83,12 +130,14 @@ describe("landing reveal CSS", () => {
     expect(inner).toBeGreaterThanOrEqual(floor);
   });
 
-  it("keeps the stop chart at a readable size at every width, scrolling sideways instead", () => {
+  it("keeps the stop chart readable before it is measured, at its full-width floor", () => {
     const minWidth = Number.parseFloat(decl(ruleBody(css, ".landing-narrative-section__figure .focus-chart {"), "min-width") ?? "");
     expect(minWidth).toBeGreaterThanOrEqual(700);
-    const phone = ruleBody(css, "@media (max-width: 640px)");
-    expect(decl(ruleBody(phone, ".landing-narrative-section__hint"), "display")).toBe("block");
-    expect(decl(ruleBody(css, ".landing-narrative-section__hint {"), "display")).toBe("none");
+  });
+
+  it("lets the evidence bars share a narrow figure rather than overflow it", () => {
+    expect(decl(ruleBody(css, ".landing-narrative-section__figure .stop-evidence-column {"), "min-width")).toBe("0");
+    expect(css).not.toMatch(/landing-narrative-section__hint/);
   });
 
   it("never parks a narrative section at opacity: 0 -- the offset is the whole animation", () => {

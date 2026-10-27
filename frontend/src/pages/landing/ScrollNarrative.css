@@ -32,6 +32,7 @@
 }
 
 .landing-narrative-section__figure {
+  margin: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--card-radius);
@@ -39,21 +40,25 @@
   padding: 20px;
   overflow-x: auto;
 }
-/* The stop chart keeps its drawn size at every width and scrolls sideways:
-   scaled to the figure, its labels shrink past reading. */
-.landing-narrative-section__figure .focus-chart { min-width: 700px; height: 300px; }
-
-.landing-narrative-section__hint {
-  display: none;
-  margin: -12px 0 0;
+.landing-narrative-section__sample {
+  margin: 0 0 12px;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+/* The stop chart draws at its measured width; until it is measured it keeps
+   its full-width drawing at a size whose labels stay readable. */
+.landing-narrative-section__figure .focus-chart { min-width: 700px; height: 300px; }
+/* The sample answer's few bars share the figure's width at any size, so the
+   chart never scrolls sideways; a long name wraps under its own bar. */
+.landing-narrative-section__figure .stop-evidence-column { min-width: 0; }
 
-/* A phone gets a tighter figure and a hint that the chart scrolls. */
+/* A phone gets a tighter figure, and the bars closer together with the
+   room under them given to the stop names, so a one-word name stays whole. */
 @media (max-width: 640px) {
   .landing-narrative-section__figure { padding: 12px; }
-  .landing-narrative-section__hint { display: block; }
+  .landing-narrative-section__figure .stop-evidence-bars { gap: 4px; }
+  .landing-narrative-section__figure .stop-evidence-column { padding: 4px 1px; }
+  .landing-narrative-section__figure .stop-evidence-name { font-size: var(--text-xs); }
 }
 
 /* Base state: at rest, in place. A reduced-motion viewer, an environment

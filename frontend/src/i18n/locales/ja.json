@@ -106,7 +106,9 @@
         "central": "中央駅",
         "honmachi": "本町",
         "higashidai": "東台",
-        "minatomachi": "港町"
+        "minatomachi": "港町",
+        "toshokan": "図書館前",
+        "kitamachi": "北町"
       },
       "queue_title": "確認したい便",
       "kpi": {
@@ -151,7 +153,7 @@
         "title": "質問して、根拠を見る",
         "body": "質問機能が実際の回答で表示するのと同じ根拠ビューです — スクリーンショットではありません。下の停留所を選んで試せます。"
       },
-      "scroll_hint": "横にスクロールすると、グラフ全体を見られます。"
+      "sample_caption": "サンプルデータ · 架空の{{route}}"
     }
   },
   "tour": {
