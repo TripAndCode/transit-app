@@ -124,11 +124,18 @@ _ML_HORIZON_DAYS = 7
 # publish, and within a day's 24 hours -- a run starting after midnight of its
 # service day keeps an hour of 24 or more, which no band covers and the
 # baseline leaves out too. Built from the constants above, never from input.
+#
+# Only the latest publish counts. The ingest upserts the slots a publish
+# forecasts and leaves the rest, so a slot, route or agency that an earlier
+# publish covered and the latest one does not still holds the earlier model's
+# row; serving it would mix a superseded model into the current forecast.
+# Every row of one publish carries that publish's generated_at.
 _ML_FRESH_ROWS = (
     "service_date > now()::date "
     f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
     f"AND origin_date >= now()::date - {_ML_FRESHNESS_DAYS} "
-    "AND hour < 24"
+    "AND hour < 24 "
+    "AND generated_at = (SELECT MAX(generated_at) FROM agg_route_forecast_ml)"
 )
 
 
