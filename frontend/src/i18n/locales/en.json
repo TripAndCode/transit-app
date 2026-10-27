@@ -109,7 +109,7 @@
       "queue_title": "Trips to check",
       "kpi": {
         "observed": "Observed",
-        "delayed": "5+\u00a0min late",
+        "delayed": "5+ min late",
         "on_time": "On-time rate"
       },
       "legend": {
@@ -302,15 +302,16 @@
   "overview": {
     "hero_unit_min": " min",
     "section_concentration": "Delay concentration",
-    "concentration_legend_one": "Top {{count}} route carries {{pct}}% of the delay among the routes counted.",
-    "concentration_legend_other": "Top {{count}} routes carry {{pct}}% of the delay among the routes counted.",
+    "concentration_legend_one": "Top {{count}} route carries {{pct}}% of the delay of the {{total}} routes observed in {{range}}.",
+    "concentration_legend_other": "Top {{count}} routes carry {{pct}}% of the delay of the {{total}} routes observed in {{range}}.",
     "concentration_rest_one": "Remaining {{count}} route: {{rest}}%",
     "concentration_rest_other": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
     "peak_hour_callout": "Peak {{range}} ({{avg}} min average)",
     "section_service_split": "By service day",
     "hero_row": {
-      "avg_delay_label": "Average delay · {{range}}",
+      "avg_delay_label_one": "Average delay, last day ({{range}})",
+      "avg_delay_label_other": "Average delay, last {{count}} days ({{range}})",
       "baseline_hint_title": "About the comparison",
       "baseline_hint_body": "Compares the average delay over {{range}} with the same number of days just before them.",
       "avg_delay_no_baseline": "No comparison data",
@@ -321,8 +322,7 @@
       "fact_late_routes": "Averaging {{min}} min or more late",
       "fact_late_routes_of_one": "/ {{count}} route",
       "fact_late_routes_of_other": "/ {{count}} routes",
-      "fact_late_routes_unit_one": "route",
-      "fact_late_routes_unit_other": "routes",
+      "fact_late_routes_period": "Observed {{min}}+ times, {{range}}",
       "sparkline_baseline": "{{range}} average {{value}} min",
       "feed_status_live": "Reporting live",
       "feed_status_quiet": "Feed quiet for {{duration}}",
@@ -330,15 +330,29 @@
       "feed_status_last": "Last report {{time}}"
     },
     "story": {
-      "state_behind": "Worse than the period before, +{{delta}} min",
-      "state_ahead": "Better than the period before",
-      "state_flat": "About the same as the period before",
-      "behind": "Delays are {{delta}} min longer than in the {{days}}-day period before.",
-      "ahead": "Delays are {{delta}} min shorter than in the {{days}}-day period before.",
-      "flat": "Delay is about the same as in the {{days}}-day period before."
+      "state_behind_one": "+{{delta}} min on the day before",
+      "state_behind_other": "+{{delta}} min on the {{count}} days before",
+      "state_ahead_one": "−{{delta}} min on the day before",
+      "state_ahead_other": "−{{delta}} min on the {{count}} days before",
+      "state_flat_one": "About the same as the day before",
+      "state_flat_other": "About the same as the {{count}} days before",
+      "behind_one": "The last day averaged {{current}} min, {{change}} longer than the day before ({{previous}} min).",
+      "behind_other": "The last {{count}} days averaged {{current}} min, {{change}} longer than the {{count}} days before ({{previous}} min).",
+      "ahead_one": "The last day averaged {{current}} min, {{change}} shorter than the day before ({{previous}} min).",
+      "ahead_other": "The last {{count}} days averaged {{current}} min, {{change}} shorter than the {{count}} days before ({{previous}} min).",
+      "flat_one": "The last day averaged {{current}} min, about the same as the day before ({{previous}} min).",
+      "flat_other": "The last {{count}} days averaged {{current}} min, about the same as the {{count}} days before ({{previous}} min).",
+      "change_pct": "{{delta}} min ({{pct}}%)",
+      "change": "{{delta}} min",
+      "latest_day_1": "The latest day, {{date}}, averaged {{avg}} min: the slowest of the {{days}} days observed in {{range}}.",
+      "latest_day_2": "The latest day, {{date}}, averaged {{avg}} min: the second slowest of the {{days}} days observed in {{range}}.",
+      "latest_day_3": "The latest day, {{date}}, averaged {{avg}} min: the third slowest of the {{days}} days observed in {{range}}."
     },
     "routes_to_check": {
-      "title": "Routes to check · {{range}}",
+      "title_one": "Routes to check (last day, {{range}})",
+      "title_other": "Routes to check (last {{count}} days, {{range}})",
+      "scope_one": "Covers the {{count}} route observed {{min}} or more times.",
+      "scope_other": "Covers the {{count}} routes observed {{min}} or more times.",
       "empty": "No routes need attention",
       "band_severe_one": "{{count}} route averaging {{min}} min or more late",
       "band_severe_other": "{{count}} routes averaging {{min}} min or more late",
@@ -351,7 +365,12 @@
       "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
       "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late",
       "band_mild_truncated_one": "{{count}} route averaging {{min}}–{{max}} min late (top {{shown}} shown)",
-      "band_mild_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)"
+      "band_mild_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)",
+      "change_week": "{{delta}} min vs last week",
+      "change_days_one": "{{delta}} min vs the day before",
+      "change_days_other": "{{delta}} min vs the {{count}} days before",
+      "see_all_one": "See the {{count}} route →",
+      "see_all_other": "See all {{count}} routes →"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route counted.",

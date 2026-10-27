@@ -1,17 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useRoutes, useTodayRouteSummary } from "../api/hooks";
+import { useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, RouteSummaryResponse } from "../api/types";
+import type {
+  OverviewConcentration,
+  OverviewHeadline,
+  OverviewPeakHour,
+  OverviewServiceSplitDay,
+  RouteSummaryResponse,
+} from "../api/types";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
-import { storyVerdict, topRoutesShare } from "./overview/storySentence";
+import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
-import { EM_DASH, fixedTenth, formatHourRange, formatReportTime } from "../utils/format";
+import { EM_DASH, fixedTenth, formatDate, formatHourRange, formatReportTime } from "../utils/format";
 
 /** A hero fact row, named for the card that explains it. */
 export type HeroFact = "peak_hour" | "concentration" | "late_routes";
@@ -23,6 +29,10 @@ type Props = {
   severeCount: number;
   /** That bound, in minutes. */
   severeThresholdMin: number;
+  /** The routes that count is out of: those observed at least `minSamples`
+   *  times in the headline's window. */
+  routeCount: number;
+  minSamples: number;
   agencyId: number;
   sparklinePoints: number[];
   /** The window's sample-weighted mean, from the API: the sparkline's
@@ -35,6 +45,9 @@ type Props = {
   periodRange: string;
   peakHour: OverviewPeakHour | null;
   concentration: OverviewConcentration;
+  /** The period's days with data, oldest first: where the headline's last
+   *  day stands among them. */
+  daily: OverviewServiceSplitDay[];
   /** Opens the card behind a fact row. Each row exists only while that card
    *  has something to show. */
   onOpenFact: (fact: HeroFact) => void;
@@ -90,6 +103,8 @@ export function OverviewHeroRow({
   headline,
   severeCount,
   severeThresholdMin,
+  routeCount,
+  minSamples,
   agencyId,
   sparklinePoints,
   periodAvgMin,
@@ -97,13 +112,10 @@ export function OverviewHeroRow({
   periodRange,
   peakHour,
   concentration,
+  daily,
   onOpenFact,
 }: Props) {
   const { t } = useTranslation();
-  const { data: routes } = useRoutes(agencyId);
-  // Unknown, not zero, until the route list arrives: "3 / 0 routes" would
-  // be a false claim.
-  const totalRoutes = routes ? routes.filter((r) => r.route_code != null).length : null;
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
@@ -150,6 +162,7 @@ export function OverviewHeroRow({
   // "flat" fallback claim the period is "about the same" (a specific claim
   // this case cannot back).
   const verdict = hasBaseline ? storyVerdict(headline, t) : null;
+  const latestDay = latestDayStanding(daily, headline.window_to);
   const share = topRoutesShare(concentration);
 
   return (
@@ -161,6 +174,16 @@ export function OverviewHeroRow({
           title={t("overview.hero_row.baseline_hint_title")}
           body={t("overview.hero_row.baseline_hint_body", { range })}
         />
+        {latestDay && (
+          <p className="ov-hero-note">
+            {t(`overview.story.latest_day_${latestDay.rank}`, {
+              date: formatDate(latestDay.date, { year: false, weekday: true }),
+              avg: fixedTenth(latestDay.avgMin),
+              days: latestDay.days,
+              range: periodRange,
+            })}
+          </p>
+        )}
       </div>
       <div className="ov-hero">
         {/* Both charts live in the figure column, which clips them: the fact
@@ -177,7 +200,7 @@ export function OverviewHeroRow({
           />
           {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
           <div className="ov-hero-label">
-            {t("overview.hero_row.avg_delay_label", { range })}
+            {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}
           </div>
           <div className="ov-kpi-value num">
             {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
@@ -225,17 +248,18 @@ export function OverviewHeroRow({
             {/* The hero's only warm value, and only while a route is over the
                 bound: it is the finding that asks for action. Gated on the
                 real count, not the counting-up display, which starts from 0. */}
+            {/* Out of the routes the list ranks, not the timetable's: the
+                count and its total are one population, and the period line
+                says which. */}
             <FactRow
               label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
-              period={range}
+              period={t("overview.hero_row.fact_late_routes_period", { range, min: minSamples })}
               onClick={() => onOpenFact("late_routes")}
               attention={severeCount > 0}
             >
               {severeCountDisplay}
               <span className="ov-hero-fact-unit">
-                {totalRoutes != null
-                  ? t("overview.hero_row.fact_late_routes_of", { count: totalRoutes })
-                  : t("overview.hero_row.fact_late_routes_unit", { count: severeCount })}
+                {t("overview.hero_row.fact_late_routes_of", { count: routeCount })}
               </span>
             </FactRow>
           </ul>

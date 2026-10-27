@@ -162,7 +162,7 @@ function daily(n: number, start = 1): OverviewServiceSplitDay[] {
     const day = start + i;
     const dow = new Date(Date.UTC(2026, 8, day)).getUTCDay();
     const day_type = dow === 6 ? "saturday" : dow === 0 ? "sunday_holiday" : "weekday";
-    return { date: `2026-09-${String(day).padStart(2, "0")}`, day_type, avg_min: 2 };
+    return { date: `2026-09-${String(day).padStart(2, "0")}`, day_type, avg_min: 2, samples: 1000 };
   });
 }
 
@@ -173,8 +173,8 @@ describe("ServiceSplit modal chart", () => {
         variant="modal"
         service_split={[entry("weekday", [3.0, 18, 5000]), entry("weekend_holiday", [2.5, 8, 2000])]}
         daily={[
-          { date: "2026-09-04", day_type: "weekday", avg_min: 3.0 },
-          { date: "2026-09-05", day_type: "weekend_holiday", avg_min: 2.0 },
+          { date: "2026-09-04", day_type: "weekday", avg_min: 3.0, samples: 1000 },
+          { date: "2026-09-05", day_type: "weekend_holiday", avg_min: 2.0, samples: 1000 },
         ]}
       />,
     );
@@ -202,8 +202,8 @@ describe("ServiceSplit modal chart", () => {
         variant="modal"
         service_split={TYPICAL}
         daily={[
-          { date: "2026-09-05", day_type: "saturday", avg_min: 2.0 },
-          { date: "2026-09-06", day_type: "sunday_holiday", avg_min: 1.1 },
+          { date: "2026-09-05", day_type: "saturday", avg_min: 2.0, samples: 1000 },
+          { date: "2026-09-06", day_type: "sunday_holiday", avg_min: 1.1, samples: 1000 },
         ]}
       />,
     );
@@ -238,9 +238,9 @@ describe("ServiceSplit modal chart with early-running days", () => {
 
   it("keeps negative means inside the plot, with the axis reaching below zero", () => {
     const { top, bottom, markYs, ticks } = plotted([
-      { date: "2026-09-04", day_type: "weekday", avg_min: 2.0 },
-      { date: "2026-09-05", day_type: "saturday", avg_min: -1.0 },
-      { date: "2026-09-06", day_type: "sunday_holiday", avg_min: -3.0 },
+      { date: "2026-09-04", day_type: "weekday", avg_min: 2.0, samples: 1000 },
+      { date: "2026-09-05", day_type: "saturday", avg_min: -1.0, samples: 1000 },
+      { date: "2026-09-06", day_type: "sunday_holiday", avg_min: -3.0, samples: 1000 },
     ]);
     expect(markYs.length).toBe(3);
     for (const y of markYs) {
@@ -253,8 +253,8 @@ describe("ServiceSplit modal chart with early-running days", () => {
 
   it("does not invert the axis when every mean is negative", () => {
     const { top, bottom, markYs, ticks } = plotted([
-      { date: "2026-09-04", day_type: "weekday", avg_min: -2.0 },
-      { date: "2026-09-05", day_type: "saturday", avg_min: -4.0 },
+      { date: "2026-09-04", day_type: "weekday", avg_min: -2.0, samples: 1000 },
+      { date: "2026-09-05", day_type: "saturday", avg_min: -4.0, samples: 1000 },
     ]);
     for (const y of markYs) {
       expect(y).toBeGreaterThanOrEqual(top - 0.05);
@@ -265,8 +265,8 @@ describe("ServiceSplit modal chart with early-running days", () => {
 
   it("leaves the zero-based axis alone when nothing is negative", () => {
     const { ticks } = plotted([
-      { date: "2026-09-04", day_type: "weekday", avg_min: 2.0 },
-      { date: "2026-09-05", day_type: "saturday", avg_min: 4.0 },
+      { date: "2026-09-04", day_type: "weekday", avg_min: 2.0, samples: 1000 },
+      { date: "2026-09-05", day_type: "saturday", avg_min: 4.0, samples: 1000 },
     ]);
     expect(ticks).toEqual(["0.0", "2.0", "4.0"]);
   });

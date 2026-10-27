@@ -31,21 +31,34 @@ function listedBands(rs: OverviewTopDelayedRoute[]): OverviewBandCounts {
   };
 }
 
-function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs)) {
+type ListOptions = { routeCount?: number; windowFrom?: string; search?: string };
+
+function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs), options: ListOptions = {}) {
+  const { routeCount = rs.length, windowFrom = "2026-09-24", search = "?from=2026-09-01&to=2026-09-30" } = options;
   return (
-    <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
+    <MemoryRouter initialEntries={[`/agencies/1/pulse${search}`]}>
       <Routes>
         <Route
           path="/agencies/:agencyId/pulse"
-          element={<RoutesToCheckList routes={rs} bandCounts={bandCounts} range="Sep 24 – Sep 30" />}
+          element={
+            <RoutesToCheckList
+              routes={rs}
+              bandCounts={bandCounts}
+              routeCount={routeCount}
+              minSamples={100}
+              windowFrom={windowFrom}
+              windowTo="2026-09-30"
+              range="Sep 24 – Sep 30"
+            />
+          }
         />
       </Routes>
     </MemoryRouter>
   );
 }
 
-function renderList(rs: OverviewTopDelayedRoute[], bandCounts?: OverviewBandCounts) {
-  return renderWithProviders(list(rs, bandCounts));
+function renderList(rs: OverviewTopDelayedRoute[], bandCounts?: OverviewBandCounts, options?: ListOptions) {
+  return renderWithProviders(list(rs, bandCounts, options));
 }
 
 describe("RoutesToCheckList", () => {
@@ -56,7 +69,7 @@ describe("RoutesToCheckList", () => {
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
     // The list counts the headline's window, not the whole period.
-    expect(screen.getByText("Routes to check · Sep 24 – Sep 30")).toBeInTheDocument();
+    expect(screen.getByText("Routes to check (last 7 days, Sep 24 – Sep 30)")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);
   });
@@ -202,5 +215,55 @@ describe("RoutesToCheckList", () => {
     renderList([{ route_code: "A", route_short_name: null, avg_min: 0.5 }]);
     expect(screen.getByText("No routes need attention")).toBeInTheDocument();
     expect(document.querySelector(".ov-check-row")).not.toBeInTheDocument();
+  });
+
+  it("says which routes it ranks: those observed often enough in its days", () => {
+    renderList(routes(), undefined, { routeCount: 163 });
+    expect(screen.getByText("Covers the 163 routes observed 100 or more times.")).toBeInTheDocument();
+  });
+
+  it("gives each row its change from the week before, signed, and none where there is nothing to compare", () => {
+    renderList([
+      { ...route("UP", 8.84), delta_min: 1.81 },
+      { ...route("DOWN", 8.1), delta_min: -0.36 },
+      { ...route("SAME", 6.0), delta_min: 0.02 },
+      { ...route("NEW", 5.5), delta_min: null },
+    ]);
+    const changes = screen.getAllByRole("link").map((row) => row.querySelector(".ov-check-change")?.textContent ?? null);
+    expect(changes).toEqual([
+      "+1.8 min vs last week",
+      "\u22120.4 min vs last week",
+      "0.0 min vs last week",
+      null,
+    ]);
+  });
+
+  it("compares a shorter window with the same number of days before it", () => {
+    renderList([{ ...route("UP", 8.84), delta_min: 1.81 }], undefined, { windowFrom: "2026-09-28" });
+    expect(screen.getByText("+1.8 min vs the 3 days before")).toBeInTheDocument();
+    expect(screen.getByText("Routes to check (last 3 days, Sep 24 – Sep 30)")).toBeInTheDocument();
+  });
+
+  it("links to every route it ranks, as the Routes ranking over its own days", () => {
+    renderList(routes(), undefined, {
+      routeCount: 163,
+      search: "?from=2026-09-01&to=2026-09-30&dow=weekday&sparse=1&sort=avg_min",
+    });
+    const more = screen.getByRole("link", { name: "See all 163 routes →" });
+    const url = new URL(more.getAttribute("href")!, "http://x");
+    expect(url.pathname).toBe("/agencies/1/routes");
+    expect(url.searchParams.get("report")).toBe("ranking");
+    expect(url.searchParams.get("from")).toBe("2026-09-24");
+    expect(url.searchParams.get("to")).toBe("2026-09-30");
+    // The rest of the scope holds, while the ranking's own coverage and
+    // order fall back to its defaults: the list's floor, worst first.
+    expect(url.searchParams.get("dow")).toBe("weekday");
+    expect(url.searchParams.has("sparse")).toBe(false);
+    expect(url.searchParams.has("sort")).toBe(false);
+  });
+
+  it("offers no link when it already lists every route it ranks", () => {
+    renderList(routes(), undefined, { routeCount: 3 });
+    expect(screen.queryByRole("link", { name: /See all/ })).toBeNull();
   });
 });

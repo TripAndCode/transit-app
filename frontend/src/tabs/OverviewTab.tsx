@@ -51,6 +51,11 @@ function headlineRange(summary: OverviewSummary): string {
   return formatDateRange(summary.headline.window_from, summary.headline.window_to, { year: false });
 }
 
+/** The period the period-wide figures count, as text. */
+function periodRange(summary: OverviewSummary): string {
+  return formatDateRange(summary.period_from, summary.period_to, { year: false });
+}
+
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
@@ -178,19 +183,26 @@ export function OverviewTab() {
               headline={data.headline}
               severeCount={data.top_delayed.band_counts.severe.count}
               severeThresholdMin={data.top_delayed.band_counts.severe.threshold_min}
+              routeCount={data.top_delayed.route_count}
+              minSamples={data.top_delayed.min_samples}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               periodAvgMin={data.period_avg_min ?? null}
               headlineRange={headlineRange(data)}
-              periodRange={formatDateRange(data.period_from, data.period_to, { year: false })}
+              periodRange={periodRange(data)}
               peakHour={data.peak_hour}
               concentration={data.concentration}
+              daily={data.service_split_daily ?? []}
               onOpenFact={openFact}
             />
             <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
               <RoutesToCheckList
                 routes={data.top_delayed.routes}
                 bandCounts={data.top_delayed.band_counts}
+                routeCount={data.top_delayed.route_count}
+                minSamples={data.top_delayed.min_samples}
+                windowFrom={data.headline.window_from}
+                windowTo={data.headline.window_to}
                 range={headlineRange(data)}
               />
             </div>
@@ -205,6 +217,7 @@ export function OverviewTab() {
                     node: (
                       <ConcentrationBar
                         concentration={data.concentration}
+                        periodRange={periodRange(data)}
                         movers={data.movers}
                         onClick={() => setOpen("concentration")}
                       />
@@ -254,6 +267,7 @@ export function OverviewTab() {
         {data && open === "concentration" && (
           <ConcentrationBar
             concentration={data.concentration}
+            periodRange={periodRange(data)}
             movers={data.movers}
             limit={20}
             variant="modal"
