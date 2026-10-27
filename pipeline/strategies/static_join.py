@@ -25,8 +25,9 @@ Verifying a feed is an operational act, not a code change: run
 An empty/overnight capture (no stop_time_updates at all) confirms nothing
 and is refused rather than recorded, and a recorded verdict carries an
 expiry so trust in a feed that later changes shape lapses on its own.
-``pipeline.rt_coverage_reprobe`` renews each verdict daily, in service
-hours, before that expiry arrives.
+``pipeline.rt_coverage_reprobe`` checks the registry daily, in service
+hours, and re-probes an agency whose verdict is missing, refuted or near
+its expiry.
 """
 
 import logging

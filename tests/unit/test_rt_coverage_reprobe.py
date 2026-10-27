@@ -17,6 +17,7 @@ from pipeline import rt_coverage_reprobe as reprobe
 from pipeline import runs as pipeline_runs
 from pipeline.rt_coverage_reprobe import (
     MIN_SAMPLE,
+    REFUTED_RECHECK_AFTER,
     RENEW_WITHIN,
     Candidate,
     RecordedField,
@@ -25,15 +26,24 @@ from pipeline.rt_coverage_reprobe import (
     needs_reprobe,
     select_due,
 )
-from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
+from pipeline.strategies._pb import is_feed_message
+from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, field_coverage
+from tests.fixtures.gtfs_rt import header_only_feed, stop_time_update, trip_update, trip_update_feed
 
 JST = timezone(timedelta(hours=9))
 # 11:00 JST: inside every agency's window, and far from both of its edges.
 NOON_ISH = datetime(2026, 10, 27, 11, 0, tzinfo=JST)
+YESTERDAY = NOON_ISH - timedelta(days=1)
 
 
-def _fields(*, confirmed: bool = True, expires_at: datetime | None = None, only=RT_COVERAGE_FIELDS):
-    return tuple(RecordedField(name, confirmed, expires_at) for name in only)
+def _fields(
+    *,
+    confirmed: bool = True,
+    expires_at: datetime | None = None,
+    probed_at: datetime = YESTERDAY,
+    only=RT_COVERAGE_FIELDS,
+):
+    return tuple(RecordedField(name, confirmed, expires_at, probed_at) for name in only)
 
 
 def _candidate(agency_id: int = 8, *, fields=None, tz: str = "Asia/Tokyo") -> Candidate:
@@ -70,7 +80,7 @@ def test_a_verdict_inside_the_renewal_margin_is_due():
 
 def test_one_expiring_field_makes_the_agency_due():
     fields = _fields(expires_at=NOON_ISH + timedelta(days=90), only=RT_COVERAGE_FIELDS[1:])
-    fields += (RecordedField(RT_COVERAGE_FIELDS[0], True, NOON_ISH - timedelta(minutes=1)),)
+    fields += (RecordedField(RT_COVERAGE_FIELDS[0], True, NOON_ISH - timedelta(minutes=1), YESTERDAY),)
     assert needs_reprobe(fields, NOON_ISH)
 
 
@@ -80,12 +90,39 @@ def test_a_refuted_verdict_is_rechecked_before_it_expires():
     assert needs_reprobe(_fields(confirmed=False, expires_at=NOON_ISH + timedelta(days=90)), NOON_ISH)
 
 
+def test_a_refutation_probed_today_waits_for_tomorrow():
+    """Recording a refutation again does not clear it, so without this a
+    deployment poking every hour would re-fetch the feed on every poke."""
+    fields = _fields(confirmed=False, expires_at=NOON_ISH + timedelta(days=90), probed_at=NOON_ISH - timedelta(hours=1))
+    assert not needs_reprobe(fields, NOON_ISH)
+
+
+def test_a_daily_trigger_that_runs_a_little_early_still_rechecks_a_refutation():
+    """Yesterday's run finished minutes later in its slot than today's
+    starts, so a full day has not quite passed."""
+    probed = NOON_ISH - timedelta(days=1) + timedelta(minutes=5)
+    assert NOON_ISH - probed > REFUTED_RECHECK_AFTER
+    assert needs_reprobe(_fields(confirmed=False, probed_at=probed), NOON_ISH)
+
+
+def test_one_refuted_field_probed_long_ago_makes_the_agency_due():
+    fields = _fields(expires_at=NOON_ISH + timedelta(days=90), only=RT_COVERAGE_FIELDS[1:])
+    fields += (RecordedField(RT_COVERAGE_FIELDS[0], False, NOON_ISH + timedelta(days=90), YESTERDAY),)
+    assert needs_reprobe(fields, NOON_ISH)
+
+
+def test_a_fresh_refutation_still_renews_when_its_expiry_is_near():
+    fields = _fields(confirmed=False, expires_at=NOON_ISH + timedelta(days=1), probed_at=NOON_ISH - timedelta(hours=1))
+    assert needs_reprobe(fields, NOON_ISH)
+
+
 def test_a_non_expiring_confirmed_verdict_is_never_due():
     assert not needs_reprobe(_fields(expires_at=None), NOON_ISH)
 
 
-def test_a_non_expiring_refuted_verdict_is_due():
+def test_a_non_expiring_refuted_verdict_is_due_once_a_day():
     assert needs_reprobe(_fields(confirmed=False, expires_at=None), NOON_ISH)
+    assert not needs_reprobe(_fields(confirmed=False, expires_at=None, probed_at=NOON_ISH), NOON_ISH)
 
 
 # ── time of day ────────────────────────────────────────────────────────────
@@ -131,14 +168,17 @@ def test_rows_group_into_one_candidate_per_agency():
     url17 = "https://feeds.example.jp/realtime/17/trip_updates.bin"
     exp = NOON_ISH + timedelta(days=3)
     rows = [
-        (8, url8, "Asia/Tokyo", "stop_id", True, exp),
-        (8, url8, "Asia/Tokyo", "arr_delay", False, None),
+        (8, url8, "Asia/Tokyo", "stop_id", True, exp, YESTERDAY),
+        (8, url8, "Asia/Tokyo", "arr_delay", False, None, YESTERDAY),
         # The LEFT JOIN's row for an agency with no verdict at all.
-        (17, url17, "Asia/Tokyo", None, None, None),
+        (17, url17, "Asia/Tokyo", None, None, None, None),
     ]
     assert group_candidates(rows) == [
         Candidate(
-            8, url8, "Asia/Tokyo", (RecordedField("stop_id", True, exp), RecordedField("arr_delay", False, None))
+            8,
+            url8,
+            "Asia/Tokyo",
+            (RecordedField("stop_id", True, exp, YESTERDAY), RecordedField("arr_delay", False, None, YESTERDAY)),
         ),
         Candidate(17, url17, "Asia/Tokyo", ()),
     ]
@@ -189,6 +229,7 @@ def run_env(monkeypatch):
     monkeypatch.setattr(reprobe, "_record", _record)
     monkeypatch.setattr(reprobe, "load_candidates", lambda _conn: candidates)
     monkeypatch.setattr(reprobe, "field_coverage", lambda raw: _cov(int(raw)))
+    monkeypatch.setattr(reprobe, "is_feed_message", lambda _raw: True)
     return runs, recorded, candidates
 
 
@@ -299,9 +340,62 @@ def test_a_run_row_that_cannot_be_written_does_not_cost_the_verdict(monkeypatch)
     monkeypatch.setattr(reprobe, "_record", _record)
     monkeypatch.setattr(reprobe, "load_candidates", lambda _conn: [_candidate(9, fields=())])
     monkeypatch.setattr(reprobe, "field_coverage", lambda raw: _cov(int(raw)))
+    monkeypatch.setattr(reprobe, "is_feed_message", lambda _raw: True)
     monkeypatch.setattr(pipeline_runs, "start_run", lambda *_a, **_k: None)
 
     outcome = reprobe.reprobe_due_agencies(object(), "postgresql://x", now=NOON_ISH, fetch=lambda _url: b"300")
 
     assert recorded == [9]
     assert outcome.recorded == [9]
+
+
+# ── a body that is not a feed, against one that says little ───────────────
+
+
+@pytest.fixture
+def real_decode(run_env, monkeypatch):
+    """run_env, but measuring the fetched bytes with the real decoder."""
+    monkeypatch.setattr(reprobe, "field_coverage", field_coverage)
+    monkeypatch.setattr(reprobe, "is_feed_message", is_feed_message)
+    return run_env
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"<!DOCTYPE html><html><body>Service temporarily unavailable</body></html>",
+        b"",
+        b"\xff\xfe\x00garbage\x01",
+    ],
+    ids=["html error page", "empty body", "garbage"],
+)
+def test_a_body_that_is_not_a_feed_fails_the_agency(real_decode, body):
+    """These parse leniently to zero updates, which is what a quiet feed
+    also gives. They are a broken feed, not a quiet one."""
+    runs, recorded, candidates = real_decode
+    candidates.append(_candidate(9, fields=()))
+
+    outcome = reprobe.reprobe_due_agencies(object(), "postgresql://x", now=NOON_ISH, fetch=lambda _url: body)
+
+    assert recorded == []
+    assert runs.closed == [("probe", 9, "error", None)]
+    assert outcome.failed == [9]
+    assert outcome.skipped == []
+
+
+@pytest.mark.parametrize("updates", [0, 5])
+def test_a_real_feed_with_too_few_updates_is_skipped(real_decode, updates):
+    runs, recorded, candidates = real_decode
+    candidates.append(_candidate(9, fields=()))
+    body = header_only_feed(1_793_050_938)
+    if updates:
+        body += trip_update_feed(
+            trip_update("t1", *(stop_time_update(seq, departure_delay=0, stop_id=f"s{seq}") for seq in range(updates)))
+        )
+
+    outcome = reprobe.reprobe_due_agencies(object(), "postgresql://x", now=NOON_ISH, fetch=lambda _url: body)
+
+    assert recorded == []
+    assert runs.closed == [("probe", 9, "skipped", updates)]
+    assert outcome.skipped == [9]
+    assert outcome.failed == []

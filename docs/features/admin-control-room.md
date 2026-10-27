@@ -126,7 +126,9 @@ through `record_field_coverage_probe` with the same thresholds:
 - the daily renewal in `pipeline/rt_coverage_reprobe.py`.
 
 The renewal probes every active `static_join` agency whose verdict is
-missing, partial, refuted, expired, or within 14 days of expiring. It runs as
+missing, partial, expired, or within 14 days of expiring, or refuted by a
+probe at least 20 hours old, so a refutation is rechecked once a day however
+often the trigger fires. It runs as
 the last pass of an unscoped `POST /internal/cron/ingest` sweep (after the
 lock is released, like the weather pass) and as `gtfs_pipeline.py
 reprobe_rt_coverage` (`make reprobe-rt-coverage`). It only probes inside each
@@ -140,8 +142,10 @@ trigger in service hours. Late morning suits every agency's feed.
 Each agency it probes gets a `probe` row in `pipeline_runs`, drawn as its own
 lane on the board. The row closes `ok` when a verdict was written, `skipped`
 when the poll was too thin or the agency's feed changed mid-probe, and `error`
-when the feed could not be fetched or decoded. The rows count is the poll's
-stop_time_updates. One agency's failure never stops the next agency or the
+when the feed could not be fetched or answered with something that is not a
+GTFS-RT feed (an error page, an empty or truncated body; `is_feed_message` in
+`pipeline/strategies/_pb.py` tells one from a feed with nothing running). The
+rows count is the poll's stop_time_updates. One agency's failure never stops the next agency or the
 sweep.
 
 ## Users bulk/drawer

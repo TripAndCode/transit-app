@@ -19,7 +19,7 @@ from pipeline import rt_coverage_reprobe as reprobe
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, field_coverage
 from tests.conftest import _database_url
 from tests.fixtures.clock import freeze_now
-from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
+from tests.fixtures.gtfs_rt import header_only_feed, stop_time_update, trip_update, trip_update_feed
 
 JST = timezone(timedelta(hours=9))
 # Inside every agency's service window, whatever the wall clock says.
@@ -45,14 +45,21 @@ def agency(pg_conn) -> int:
     return aid
 
 
-def _seed_verdict(pg_conn, aid: int, *, confirmed: bool, expires_at: datetime | None) -> None:
+def _seed_verdict(
+    pg_conn,
+    aid: int,
+    *,
+    confirmed: bool,
+    expires_at: datetime | None,
+    probed_at: datetime = MORNING - timedelta(days=200),
+) -> None:
     with pg_conn.cursor() as cur:
         for name in RT_COVERAGE_FIELDS:
             cur.execute(
                 "INSERT INTO rt_field_coverage_probes "
                 "(agency_id, field_name, confirmed, coverage, sample_size, source_feed, probed_at, expires_at) "
-                "VALUES (%s, %s, %s, 1.0, 40, %s, now() - interval '200 days', %s)",
-                (aid, name, confirmed, FEED_URL, expires_at),
+                "VALUES (%s, %s, %s, 1.0, 40, %s, %s, %s)",
+                (aid, name, confirmed, FEED_URL, probed_at, expires_at),
             )
     pg_conn.commit()
 
@@ -138,7 +145,7 @@ def test_an_agency_that_cannot_use_a_verdict_is_never_probed(pg_conn, strategy, 
 def test_a_thin_poll_writes_no_verdict(pg_conn, agency):
     """Five updates, two with arrivals: 0.4 would pass arr_delay's band here,
     and a quiet minute later 0.5 would refute it. Neither is evidence."""
-    thin = trip_update_feed(
+    thin = header_only_feed(1_793_050_938) + trip_update_feed(
         trip_update(
             "t1",
             *(
@@ -153,6 +160,35 @@ def test_a_thin_poll_writes_no_verdict(pg_conn, agency):
     assert outcome.skipped == [agency]
     assert _verdict(pg_conn, agency) == {}
     assert _runs(pg_conn) == [("probe", agency, "skipped", 5, False, True)]
+
+
+def test_a_body_that_is_not_a_feed_is_an_error_not_a_quiet_feed(pg_conn, agency):
+    """An error page decodes leniently to zero updates, the same as a feed
+    with nothing running. It fails the agency instead of being skipped."""
+    _seed_verdict(pg_conn, agency, confirmed=True, expires_at=MORNING - timedelta(days=1))
+    before = _verdict(pg_conn, agency)
+
+    outcome = _run(pg_conn, fetch=lambda _url: b"<!DOCTYPE html><html><body>502 Bad Gateway</body></html>")
+
+    assert outcome.failed == [agency]
+    assert outcome.skipped == []
+    assert _verdict(pg_conn, agency) == before
+    assert _runs(pg_conn) == [("probe", agency, "error", None, True, True)]
+
+
+def test_a_refutation_is_refetched_once_a_day_not_on_every_poke(pg_conn, agency):
+    _seed_verdict(
+        pg_conn,
+        agency,
+        confirmed=False,
+        expires_at=MORNING + timedelta(days=90),
+        probed_at=MORNING - timedelta(hours=1),
+    )
+    assert _run(pg_conn, fetch=_no_fetch) == reprobe.ReprobeOutcome()
+    assert _runs(pg_conn) == []
+
+    assert _run(pg_conn, now=MORNING + timedelta(days=1)).recorded == [agency]
+    assert all(row[0] for row in _verdict(pg_conn, agency).values())
 
 
 def test_a_failed_fetch_keeps_the_old_verdict_and_records_the_error(pg_conn, agency):

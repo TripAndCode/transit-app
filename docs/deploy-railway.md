@@ -400,7 +400,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > morning, e.g. 10:00 JST: `0 1 * * *` (UTC). A deployment that already
 > pokes through the day needs nothing more. The renewal can also run on its
 > own schedule as `python gtfs_pipeline.py reprobe_rt_coverage`, which exits
-> 1 when an agency's feed could not be fetched.
+> 1 when an agency's feed could not be fetched or was not a GTFS-RT feed.
 >
 > **Without collector streaming.** This same endpoint is then the only way RT
 > data reaches `updates_live`, so poke it on a shorter interval. Each poke

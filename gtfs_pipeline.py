@@ -915,8 +915,9 @@ def cmd_reprobe_rt_coverage(args):
     refuted or about to lapse, during its service hours.
 
     A poll too thin to count is not a failure: the next run tries again. An
-    agency whose feed could not be fetched or decoded fails the command, so
-    a scheduler that pages on a nonzero exit hears about it."""
+    agency whose feed could not be fetched, or answered with something that
+    is not a GTFS-RT feed, fails the command, so a scheduler that pages on a
+    nonzero exit hears about it."""
     from pipeline import rt_coverage_reprobe
 
     conn = _get_conn()

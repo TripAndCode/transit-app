@@ -5,8 +5,9 @@ Every reader of an RT-optional field gates on a live verdict in
 expired verdict reads exactly like a missing one, so an agency whose verdict
 lapses loses every report built on those fields. This job keeps verdicts
 current: it probes each active agency whose ingest strategy can carry the
-fields and whose verdict is missing, partial, refuted, expired or within
-``RENEW_WITHIN`` of expiring. The decode, the thresholds and the write are
+fields and whose verdict is missing, partial, expired or within
+``RENEW_WITHIN`` of expiring, or refuted by a probe at least
+``REFUTED_RECHECK_AFTER`` ago. The decode, the thresholds and the write are
 the ones ``scripts/probe_rt_field_coverage.py`` and the admin drawer's probe
 button use (``field_coverage``, ``record_field_coverage_probe``), so all
 three paths reach the same verdict from the same poll.
@@ -29,8 +30,9 @@ otherwise look at the report before recording it:
 Bookkeeping follows ``pipeline.runs``: one ``probe`` row per agency actually
 probed (``ok`` when a verdict was written, ``skipped`` when the poll was too
 thin or the agency's feed was repointed mid-probe, ``error`` when the fetch
-or decode failed), and none at all when nothing is due or the window is
-closed, so a poke that has nothing to do draws nothing on the board. One
+failed or the response was not a GTFS-RT feed), and none at all when nothing
+is due or the window is closed, so a poke that has nothing to do draws
+nothing on the board. One
 agency's failure never stops the next one, and nothing here raises to the
 caller for a single agency's sake.
 """
@@ -45,6 +47,7 @@ from typing import Callable, Iterable, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pipeline import runs as pipeline_runs
+from pipeline.strategies._pb import is_feed_message
 from pipeline.strategies.static_join import (
     RT_COVERAGE_FIELDS,
     RT_INGEST_STRATEGIES,
@@ -59,6 +62,13 @@ _log = logging.getLogger(__name__)
 #: that an agency whose polls are only sometimes big enough to count gets
 #: many daily attempts before its verdict lapses.
 RENEW_WITHIN = timedelta(days=14)
+
+#: How long a refutation stands before it is probed again. Recording a
+#: refutation does not clear it, so without this an agency whose feed lacks
+#: a field would be re-fetched on every poke of a deployment that pokes all
+#: day. Just under a day, so a once-a-day trigger whose start drifts by a few
+#: minutes still rechecks it every day.
+REFUTED_RECHECK_AFTER = timedelta(hours=20)
 
 #: Local hours [start, end) in which a feed is busy enough to probe.
 SERVICE_WINDOW_HOURS = (7, 20)
@@ -78,6 +88,11 @@ class RecordedField:
     field_name: str
     confirmed: bool
     expires_at: datetime | None
+    probed_at: datetime
+
+
+class NotAFeed(ValueError):
+    """The feed URL answered with bytes that are not a GTFS-RT FeedMessage."""
 
 
 @dataclass(frozen=True)
@@ -102,18 +117,21 @@ class ReprobeOutcome:
 def needs_reprobe(fields: Iterable[RecordedField], now: datetime, renew_within: timedelta = RENEW_WITHIN) -> bool:
     """Whether an agency's recorded verdict is due for a fresh probe.
 
-    Due when any field in ``RT_COVERAGE_FIELDS`` has no row, is refuted, or
-    expires within *renew_within* of *now*. A refutation is rechecked before
-    it expires because it keeps the agency's reports blank for as long as it
-    stands. A confirmed row with no expiry is pinned by something more
-    durable than one poll and is never due.
+    Due when any field in ``RT_COVERAGE_FIELDS`` has no row, expires within
+    *renew_within* of *now*, or is refuted by a probe at least
+    ``REFUTED_RECHECK_AFTER`` old. A refutation is rechecked daily rather
+    than at its expiry because it keeps the agency's reports blank for as
+    long as it stands. A confirmed row with no expiry is pinned by something
+    more durable than one poll and is never due.
     """
     by_name = {f.field_name: f for f in fields}
     for name in RT_COVERAGE_FIELDS:
         row = by_name.get(name)
-        if row is None or not row.confirmed:
+        if row is None:
             return True
         if row.expires_at is not None and row.expires_at <= now + renew_within:
+            return True
+        if not row.confirmed and row.probed_at <= now - REFUTED_RECHECK_AFTER:
             return True
     return False
 
@@ -141,16 +159,16 @@ def group_candidates(rows: Iterable[Sequence]) -> list[Candidate]:
     single row whose probe columns are NULL."""
     heads: dict[int, tuple[str, str]] = {}
     fields: dict[int, list[RecordedField]] = {}
-    for agency_id, feed_url, tz_name, field_name, confirmed, expires_at in rows:
+    for agency_id, feed_url, tz_name, field_name, confirmed, expires_at, probed_at in rows:
         heads.setdefault(agency_id, (feed_url, tz_name))
         recorded = fields.setdefault(agency_id, [])
         if field_name is not None:
-            recorded.append(RecordedField(field_name, confirmed, expires_at))
+            recorded.append(RecordedField(field_name, confirmed, expires_at, probed_at))
     return [Candidate(aid, url, tz, tuple(fields[aid])) for aid, (url, tz) in heads.items()]
 
 
 _CANDIDATES_SQL = """
-    SELECT a.agency_id, a.feed_url, a.timezone, p.field_name, p.confirmed, p.expires_at
+    SELECT a.agency_id, a.feed_url, a.timezone, p.field_name, p.confirmed, p.expires_at, p.probed_at
     FROM agencies a
     LEFT JOIN rt_field_coverage_probes p ON p.agency_id = a.agency_id
     WHERE a.deleted_at IS NULL
@@ -175,6 +193,16 @@ def fetch_feed(url: str) -> bytes:
     operator-supplied URL uses."""
     with safe_urlopen(url, timeout=FETCH_TIMEOUT_SEC) as resp:
         return resp.read()
+
+
+def _measure(raw: bytes) -> dict:
+    """``field_coverage`` of a poll that is a GTFS-RT feed, raising
+    ``NotAFeed`` for one that is not: an error page or a truncated body
+    decodes leniently to zero updates, which would otherwise pass for a
+    quiet feed and be skipped instead of failing."""
+    if not is_feed_message(raw):
+        raise NotAFeed(f"the feed answered with {len(raw)} bytes that are not a GTFS-RT FeedMessage")
+    return field_coverage(raw)
 
 
 # Locks the agency row for the length of the write: a concurrent change of
@@ -219,7 +247,7 @@ def reprobe_due_agencies(
         aid = cand.agency_id
         try:
             with pipeline_runs.record_run(conn, "probe", agency_id=aid) as run:
-                cov = field_coverage(fetch(cand.feed_url))
+                cov = _measure(fetch(cand.feed_url))
                 run.rows = cov["stop_time_updates"]
                 if run.rows < MIN_SAMPLE:
                     _log.info("coverage re-probe: agency %s sent %s stop_time_updates; not recorded", aid, run.rows)
