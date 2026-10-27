@@ -1,10 +1,11 @@
 """Each service day's planned trips are saved while its timetable is loaded.
 
-The capture writes the days up to today that the loaded timetable covers and
-that have no saved count yet. A timetable reload captures first, for the days
-before the incoming timetable starts, so those keep the outgoing counts after
-it is replaced, and analyze captures on every run. Neither lets a failed
-capture stop it.
+The capture writes the days before today that the loaded timetable covers and
+that have no saved count yet; the day in progress is read from the loaded
+timetable until it is over. A timetable reload captures first, for the days
+before the incoming timetable starts, today included when that is later, so
+those keep the outgoing counts after it is replaced. Analyze captures on every
+run. Neither lets a failed capture stop it.
 
 April 2026 starts on a Wednesday: the 6th and 13th are Mondays, the 11th a
 Saturday.
@@ -84,7 +85,7 @@ def _timetable_zip(tmp_path, name: str, start: str, end: str, trips: int) -> str
     return str(path)
 
 
-def test_capture_saves_each_covered_day_up_to_today(pg_conn, agency_id):
+def test_capture_saves_each_covered_day_before_today(pg_conn, agency_id):
     _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
     _trips(pg_conn, agency_id, "WD", 3)
     _addition(pg_conn, agency_id, "EX", "20260402")
@@ -95,9 +96,10 @@ def test_capture_saves_each_covered_day_up_to_today(pg_conn, agency_id):
     pg_conn.commit()
 
     weekend = {date(2026, 4, 11), date(2026, 4, 12)}
-    expected = {date(2026, 4, 2): 2} | {d: 0 if d in weekend else 3 for d in _days(date(2026, 4, 6), date(2026, 4, 15))}
+    expected = {date(2026, 4, 2): 2} | {d: 0 if d in weekend else 3 for d in _days(date(2026, 4, 6), date(2026, 4, 14))}
     # The weekend is covered with nothing running: saved as 0, not left out,
-    # so a reload cannot turn it into a day no plan covers.
+    # so a reload cannot turn it into a day no plan covers. Today, the 15th,
+    # is still the loaded timetable's to plan.
     assert _saved(pg_conn, agency_id) == expected
     assert inserted == len(expected)
 
@@ -122,7 +124,7 @@ def test_capture_never_overwrites_a_saved_day(pg_conn, agency_id):
             (agency_id,),
         )
         assert cur.fetchone() == (99, date(2026, 4, 14))
-    assert _saved(pg_conn, agency_id)[date(2026, 4, 15)] == 3
+    assert _saved(pg_conn, agency_id)[date(2026, 4, 13)] == 3
     assert capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15)) == 0
 
 
@@ -144,7 +146,7 @@ def test_another_agencys_timetable_is_not_captured(pg_conn, agency_id):
     [
         # The incoming timetable starts on the day it is loaded: that day is its own.
         (date(2026, 4, 15), date(2026, 4, 14)),
-        # It starts tomorrow: today stays with the outgoing timetable.
+        # It starts tomorrow: the reload saves today with the outgoing plan.
         (date(2026, 4, 16), date(2026, 4, 15)),
         # It reaches back before today: the days it covers are its own.
         (date(2026, 4, 12), date(2026, 4, 11)),
@@ -155,18 +157,18 @@ def test_a_reload_saves_the_outgoing_days_before_the_incoming_timetable_starts(
 ):
     """Timetable A plans 3 trips a day through April and is captured on the
     10th. On the 15th timetable B, planning 5 a day, replaces it. The reload
-    saves A's days up to the one before B starts, and the next capture saves
+    saves A's days up to the one before B starts, and a later capture saves
     B's days from there."""
     freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 10)))
     load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
     capture_planned_trips(pg_conn, agency_id)
-    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 10))}
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 9))}
 
     freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
     load_static(_timetable_zip(tmp_path, "b", incoming_start.strftime("%Y%m%d"), "20261014", 5), agency_id, pg_conn)
     assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
 
-    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 16))
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 17))
     expected = {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
     expected |= {d: 5 for d in _days(outgoing_through + timedelta(days=1), date(2026, 4, 16))}
     assert _saved(pg_conn, agency_id) == expected
@@ -244,14 +246,35 @@ def test_a_failed_capture_does_not_stop_the_reload(pg_conn, agency_id, tmp_path,
         assert cur.fetchone()[0] == 5
 
 
-def test_analyze_captures_the_loaded_timetable(pg_conn, agency_id, ch_client, monkeypatch):
+def test_analyze_saves_the_loaded_timetable_up_to_yesterday(pg_conn, agency_id, ch_client, monkeypatch):
     _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
     _trips(pg_conn, agency_id, "ALL", 3)
     freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
 
     analyze(agency_id, pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
 
-    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 15))}
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 14))}
+
+
+def test_a_same_day_reload_after_the_morning_analyze_leaves_today_to_the_incoming_plan(
+    pg_conn, agency_id, ch_client, tmp_path, monkeypatch
+):
+    """The morning's analyze leaves the 15th unsaved, so a reload that day
+    with a timetable taking effect that day plans it, and the next day's
+    analyze saves the incoming count."""
+    freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
+    load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
+    analyze(agency_id, pg_conn, ch_client)
+    load_static(_timetable_zip(tmp_path, "b", "20260415", "20261014", 5), agency_id, pg_conn)
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 14))}
+
+    freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 16)))
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 14))} | {
+        date(2026, 4, 15): 5
+    }
 
 
 def test_a_failed_capture_does_not_stop_analyze(pg_conn, agency_id, ch_client, monkeypatch, caplog):
@@ -268,11 +291,10 @@ def test_a_failed_capture_does_not_stop_analyze(pg_conn, agency_id, ch_client, m
         assert cur.fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("today", [date(2026, 3, 31), date(2026, 4, 1)])
-def test_a_timetable_that_starts_after_today_saves_nothing_before_it(pg_conn, agency_id, today):
+@pytest.mark.parametrize("today", [date(2026, 3, 31), date(2026, 4, 1), date(2026, 4, 2)])
+def test_a_timetable_that_starts_today_or_later_saves_nothing_yet(pg_conn, agency_id, today):
     _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
     _trips(pg_conn, agency_id, "ALL", 3)
 
     capture_planned_trips(pg_conn, agency_id, today=today)
-    pg_conn.commit()
-    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), today)}
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), today - timedelta(days=1))}

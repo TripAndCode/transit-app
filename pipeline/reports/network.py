@@ -75,7 +75,13 @@ _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
-    """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first."""
+    """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first.
+
+    The planned and delivered figures are one column of the board, not the
+    board: a failure reading them, such as a schema behind its migrations,
+    leaves every agency without a plan, as the freshness probe's degrade
+    leaves it not stale, rather than failing the delay figures too.
+    """
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
     )
@@ -115,10 +121,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # planned_trips reads the saved and loaded plans; executed_trips and
     # service_delivered_pct also read the precomputed non-executed aggregate
     # (agg_service_delivered_daily). No ClickHouse scan on this request path;
-    # see compute_service_delivered_by_agency. These figures are a column of
-    # the board, not the board: a failure reading them (a schema behind its
-    # migrations, say) leaves every agency without a plan, like the freshness
-    # probe's degrade above, rather than failing the delay figures too.
+    # see compute_service_delivered_by_agency.
     try:
         delivered = await compute_service_delivered_by_agency(
             conn, [a["agency_id"] for a in agencies], from_date, to_date

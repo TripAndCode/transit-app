@@ -152,11 +152,12 @@ FastAPI + React SPA  <-------------------------------------------------+
   those tables needs `make ch-bootstrap` before the next `analyze`.
 - Each day's planned trips are saved into `planned_trips_daily` while the
   timetable that plans the day is loaded: every `analyze` run saves each day
-  up to today the loaded timetable covers that has no saved count yet, and
+  before today the loaded timetable covers that has no saved count yet, and
   `load_static` first saves the outgoing timetable's days before the incoming
-  one starts. The service-delivered rate reads a saved day before the loaded
-  timetable, so a reload no longer drops past days from it. Nothing
-  reconstructs the days before the first save.
+  one starts, today included when that is later. The day in progress is read
+  from the loaded timetable until then. The service-delivered rate reads a
+  saved day before the loaded timetable, so a reload no longer drops past days
+  from it. Nothing reconstructs the days before the first save.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 

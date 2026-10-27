@@ -956,10 +956,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     undetectable afterwards; the lock is what keeps every read in one run
     seeing one set of rows.
 
-    First it saves the planned trips of the days the loaded timetable covers
-    up to today (`pipeline.planned_trips`), committed on its own rather than
-    with the run's transaction, which spans the whole rebuild. A failed
-    capture is logged and the run goes on.
+    First it saves the planned trips of the days before today that the
+    loaded timetable covers (`pipeline.planned_trips`), committed on its own
+    rather than with the run's transaction, which spans the whole rebuild.
+    Today is left to the loaded timetable until it is over. A failed capture
+    is logged and the run goes on.
     """
     capture_planned_trips(conn, agency_id)
     with agency_ingest_lock(conn, agency_id):

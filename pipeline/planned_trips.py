@@ -13,12 +13,15 @@ and a reload (:mod:`pipeline.static_loader`) replaces an agency's calendar, so
 every day before the new calendar starts loses its plan when the new one
 lands. ``planned_trips_daily`` keeps each day's count as the loaded timetable
 planned it when it was captured, and the first count saved for a day stands.
-:func:`capture_planned_trips` runs on every analyze run, and before a reload
-replaces anything. A reload saves the outgoing timetable only for the days
-before the incoming one starts, so a timetable that takes effect on the day
-it is loaded plans that day itself; the next capture saves it from there.
-Days before the first capture are not reconstructed: the reload that replaced
-their timetable erased them.
+
+:func:`capture_planned_trips` runs on every analyze run, which saves the days
+before today: the day in progress is read from the loaded timetable until it is
+over, because a reload later that day may bring the plan it runs on. A reload
+captures before it replaces anything, saving the outgoing timetable for the
+days before the incoming one starts, today included when that is after today.
+So a timetable that takes effect on the day it is loaded plans that day
+itself, and the next day's analyze saves it. Days before the first capture are
+not reconstructed: the reload that replaced their timetable erased them.
 """
 
 from __future__ import annotations
@@ -122,16 +125,16 @@ _CAPTURE_SQL = (
 
 
 def capture_planned_trips(conn, agency_id: int, *, today: date | None = None, before: date | None = None) -> int | None:
-    """Save the planned trips of each day up to ``today``, and before
-    ``before`` when given, that the loaded timetable covers and
-    ``planned_trips_daily`` does not hold yet, then commit. Returns how many
-    days it saved, or None when the capture failed.
+    """Save the planned trips of each day before ``before``, and no later than
+    ``today``, that the loaded timetable covers and ``planned_trips_daily``
+    does not hold yet, then commit. Returns how many days it saved, or None
+    when the capture failed.
 
     ``today`` defaults to the service day in progress
-    (:func:`pipeline.service_day.service_date_of`); a later day's plan can
-    still change before it runs, so it is never saved ahead. ``before`` is a
-    reload's cutoff: the first day the incoming timetable covers, which that
-    timetable plans instead.
+    (:func:`pipeline.service_day.service_date_of`), and a later day is never
+    saved ahead. ``before`` defaults to ``today``, leaving the day in progress
+    to the loaded timetable until it is over. A reload passes the first day
+    the incoming timetable covers, which that timetable plans instead.
 
     The commit is immediate, and takes along whatever the caller had open:
     left uncommitted behind a long load or rebuild, the new rows would make a
@@ -142,7 +145,7 @@ def capture_planned_trips(conn, agency_id: int, *, today: date | None = None, be
     which has no transaction to hold a savepoint.
     """
     day = today or service_date_of(datetime.now(timezone.utc))
-    last = min(day, before - timedelta(days=1)) if before else day
+    last = min(day, (before or day) - timedelta(days=1))
     params = {"agency_id": agency_id, "from_date": day - timedelta(days=CAPTURE_LOOKBACK_DAYS - 1), "to_date": last}
     try:
         with conn.cursor() as cur:

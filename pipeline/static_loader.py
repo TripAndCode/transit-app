@@ -19,10 +19,10 @@ flags from what is now in place, reading GTFS-JP ``routes_jp.txt`` when the
 zip has it (``pipeline.route_terminals``).
 
 Before replacing anything, a load saves and commits the outgoing timetable's
-planned trips for the days it covers up to today and before the incoming
-timetable starts (``pipeline.planned_trips``), so a reload never takes away the
-plan of a day that has run, and a day the incoming timetable covers keeps the
-incoming plan.
+planned trips for the days it covers before the incoming timetable starts, up
+to today (``pipeline.planned_trips``), so a reload never takes away the plan of
+a day that has run, and a day the incoming timetable covers keeps the incoming
+plan.
 """
 
 import csv
@@ -54,6 +54,11 @@ _STATIC_FILE_MAP = [
     ("shapes.txt", "static_shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]),
     ("calendar.txt", "static_calendar", ["service_id", *WEEKDAY_COLUMNS, "start_date", "end_date"]),
 ]
+
+# Read before the per-file loop, which reuses their rows: the incoming
+# timetable's first day sets the planned-trip capture's cutoff, and the capture
+# runs before any table is replaced.
+_CALENDAR_FILES = ("calendar.txt", "calendar_dates.txt")
 
 _DB_COLS = {
     "static_stop_times": ["agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
@@ -129,10 +134,11 @@ def _calendar_rows(raw_rows: list[list]) -> list[list]:
 def _first_covered_day(calendar_rows: list[list], calendar_dates_rows: list[list]) -> date | None:
     """The first day a timetable covers, under the rule ``pipeline.planned_trips``
     counts coverage by: a ``calendar.txt`` service's start date, or a date a
-    ``calendar_dates.txt`` row names. A ``calendar_dates.txt`` date that is not
-    eight ASCII digits naming a real day matches no day there, so it covers
-    nothing here either."""
-    days = [row[-2] for row in calendar_rows]
+    ``calendar_dates.txt`` row names. Rows that cover no day there cover none
+    here either: a service whose range ends before it starts, and a
+    ``calendar_dates.txt`` date that is not eight ASCII digits naming a real
+    day."""
+    days = [start for *_, start, end in calendar_rows if start <= end]
     for _service_id, raw, _exception_type in calendar_dates_rows:
         if raw and re.fullmatch(r"[0-9]{8}", raw):
             try:
@@ -199,13 +205,15 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
         names_in_zip = set(zf.namelist())
-        calendar_rows = _calendar_rows(read_static_rows(zf, "calendar.txt")) if "calendar.txt" in names_in_zip else []
-        calendar_dates_rows = read_static_rows(zf, "calendar_dates.txt") if "calendar_dates.txt" in names_in_zip else []
+        read_first = {name: read_static_rows(zf, name) for name in _CALENDAR_FILES if name in names_in_zip}
+        calendar_rows = _calendar_rows(read_first.get("calendar.txt", []))
+        incoming_from = _first_covered_day(calendar_rows, read_first.get("calendar_dates.txt", []))
         # Before any table is replaced, trips.txt's included: the outgoing
-        # timetable's plan is its calendar and its trips together. The days
-        # from the incoming timetable's first are left to it, and the capture
-        # commits now so a concurrent analyze's capture never waits on this load.
-        capture_planned_trips(conn, agency_id, before=_first_covered_day(calendar_rows, calendar_dates_rows))
+        # timetable's plan is its calendar and its trips together. Committed
+        # now, so a concurrent analyze's capture never waits on this load. An
+        # incoming timetable covering no day leaves the outgoing one every day
+        # up to today.
+        capture_planned_trips(conn, agency_id, before=incoming_from or date.max)
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
@@ -215,7 +223,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
 
-            raw_rows = read_static_rows(zf, filename)
+            raw_rows = read_first[filename] if filename in read_first else read_static_rows(zf, filename)
 
             if table == "static_stops":
                 for row in raw_rows:
