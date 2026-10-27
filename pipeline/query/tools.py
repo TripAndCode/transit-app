@@ -435,6 +435,10 @@ _LEFT_OUT_NOTE = (
 )
 
 
+# The metrics top_n ranks by.
+_TOP_N_METRICS = ("avg_delay", "on_time_rate", "worst_5min")
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -475,7 +479,7 @@ TOOLS: list[dict] = [
                 "properties": {
                     "metric": {
                         "type": "string",
-                        "enum": ["avg_delay", "on_time_rate", "worst_5min"],
+                        "enum": list(_TOP_N_METRICS),
                     },
                     "n": {
                         "type": "integer",
@@ -1090,6 +1094,8 @@ def _without_service_slot(rows: list[tuple]) -> list[list]:
 
 async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     metric = args.get("metric", "avg_delay")
+    if metric not in _TOP_N_METRICS:
+        return ToolResult(kind="empty", summary=_summary("unknown_metric", lang=locale, metric=metric))
     # Card chips send "k" (the gold eval's canonical form); LLM direct calls
     # use "n" (the TOOLS JSON schema). Accept both, with "k" taking precedence
     # so the user's slider value is always honoured.
@@ -1121,12 +1127,10 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         rows = annotate_on_time_pct_confidence(rows)
         cols = ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
-    elif metric == "worst_5min":
+    else:
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch)
         cols = ["route_code", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
-    else:
-        return ToolResult(kind="empty", summary=_summary("unknown_metric", lang=locale, metric=metric))
 
     rows, _ = route_list(rows, n, left_out, ())
     if not rows:

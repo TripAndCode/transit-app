@@ -153,13 +153,15 @@ async def left_out_route_codes(conn, agency_id: int, ctx: RangeCtx) -> dict[str,
 
 
 async def left_out_unless_named(conn, agency_id: int, ctx: RangeCtx) -> dict[str, frozenset[str]]:
-    """:func:`left_out_route_codes`, less the codes ``ctx``'s routes filter names.
+    """:func:`left_out_route_codes` for a list that offers no toggle to keep a
+    reason, and so lists a route asked for by name as it always was.
 
-    For a list that offers no toggle to keep a reason: a route asked for by
-    name is listed as it always was.
+    A routes filter narrows such a list to the routes it names, none of which
+    is left out, so the set is empty and nothing is read.
     """
-    named = frozenset(ctx.routes)
-    return {reason: codes - named for reason, codes in (await left_out_route_codes(conn, agency_id, ctx)).items()}
+    if ctx.routes:
+        return {}
+    return await left_out_route_codes(conn, agency_id, ctx)
 
 
 def rows_to_fetch(n: int, left_out: Mapping[str, frozenset[str]]) -> int:

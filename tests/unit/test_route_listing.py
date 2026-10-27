@@ -93,16 +93,23 @@ def test_nothing_left_out_fetches_n_rows():
     assert rows_to_fetch(5, {}) == 5
 
 
-async def test_a_route_the_scope_names_is_never_left_out(monkeypatch):
-    """A list with no toggle to bring a code back still answers about a route
-    the routes filter asks for by name."""
+async def test_a_list_narrowed_to_named_routes_reads_and_leaves_out_nothing(monkeypatch):
+    """A routes filter narrows a list to the routes it names, and a route asked
+    for by name is listed as it always was, so none of its rows is left out
+    and there is nothing to read."""
 
+    async def unread(*_args):
+        raise AssertionError("the left-out set was read for a list narrowed to named routes")
+
+    monkeypatch.setattr(route_catalog, "left_out_route_codes", unread)
+    ctx = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23), routes=("OLD", "C1"))
+    assert await route_catalog.left_out_unless_named(None, 7, ctx) == {}
+
+
+async def test_a_list_over_every_route_leaves_out_the_whole_set(monkeypatch):
     async def left_out(conn, agency_id, ctx):
-        return {RETIRED: frozenset({"OLD", "GONE"}), ZERO_DELAY: frozenset({"ECHO", "QUIET"})}
+        return LEFT_OUT
 
     monkeypatch.setattr(route_catalog, "left_out_route_codes", left_out)
-    ctx = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23), routes=("OLD", "ECHO", "C1"))
-    assert await route_catalog.left_out_unless_named(None, 7, ctx) == {
-        RETIRED: frozenset({"GONE"}),
-        ZERO_DELAY: frozenset({"QUIET"}),
-    }
+    ctx = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23))
+    assert await route_catalog.left_out_unless_named(None, 7, ctx) == LEFT_OUT

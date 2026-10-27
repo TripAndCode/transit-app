@@ -11,6 +11,8 @@ the route.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Query, Request
@@ -18,7 +20,7 @@ from pydantic import BaseModel
 
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
-from api.range import RangeCtx, get_range_ctx
+from api.range import MAX_RANGE_DAYS, RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
@@ -70,14 +72,20 @@ def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
 
 async def _all_time_left_out(conn: asyncpg.Connection, agency_id: int) -> dict[str, frozenset[str]]:
     """The codes a route list leaves out (:mod:`pipeline.route_catalog`),
-    judged over the agency's whole analysed span, as ``agg_route_hour_dow``
-    pools every analysed day."""
+    judged over the agency's analysed days, as ``agg_route_hour_dow`` pools
+    every one of them.
+
+    The judgement reads each day it spans, and the analysed history only
+    grows, so it reaches back no further than :data:`api.range.MAX_RANGE_DAYS`
+    from the last one: the widest window any route list may be asked about.
+    """
     span = await conn.fetchrow(
         "SELECT min(date) AS first, max(date) AS last FROM agg_route_daily WHERE agency_id = $1", agency_id
     )
-    if span["first"] is None:
+    if span["last"] is None:
         return {}
-    return await left_out_route_codes(conn, agency_id, RangeCtx(from_date=span["first"], to_date=span["last"]))
+    first = max(span["first"], span["last"] - timedelta(days=MAX_RANGE_DAYS - 1))
+    return await left_out_route_codes(conn, agency_id, RangeCtx(from_date=first, to_date=span["last"]))
 
 
 class Headline(BaseModel):

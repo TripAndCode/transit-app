@@ -122,3 +122,14 @@ async def test_the_weekday_weekend_comparison_leaves_them_out(fetched):
 async def test_the_comparison_of_a_named_route_answers_about_it(fetched):
     result = await tools._tool_compare_segments({"dimension": "dow", "route": "ECHO"}, _CTX, _NoCalendarConn(), 7, "en")
     assert result.rows[0][0] == "ECHO"
+
+
+async def test_an_unknown_metric_is_refused_before_anything_is_read(monkeypatch):
+    async def unread(*_args):
+        raise AssertionError("the left-out set was read for a metric no ranking has")
+
+    monkeypatch.setattr(route_catalog, "left_out_route_codes", unread)
+    for locale, summary in (("ja", "未知の metric: fare"), ("en", "Unknown metric: fare")):
+        result = await tools._tool_top_n({"metric": "fare"}, _CTX, None, 7, locale)
+        assert result.kind == "empty"
+        assert result.summary == summary
