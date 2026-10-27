@@ -24,7 +24,7 @@ The screenshots use real data from Aomori City Bus (青森市バス) for 20 Augu
 
 ## 1. Choosing an agency
 
-When you open the app, it first asks which agency (bus or rail operator) you want to look at.
+When you open the app, it first asks which agency (bus operator) you want to look at.
 
 ![Agency selection screen](./01-agency-select.en.png)
 
