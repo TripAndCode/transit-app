@@ -149,12 +149,15 @@ error page or an empty or truncated body counts as not a feed
 nothing running). One agency's failure never stops the next agency or the
 sweep.
 
-An agency whose latest `probe` row started less than 20 hours ago is not
-probed again, whatever that row's status, so a thin or broken feed is retried
-once a day however often the trigger fires, and so is a refutation. A
-database still without migration 0082 has no `probe` rows, so nothing is
-held back there; the run rows themselves are lost until it is migrated, and
-the verdicts are still written.
+A refutation is rechecked once a day however often the trigger fires. Any
+other attempt that wrote nothing (a thin poll, a broken feed) is retried after
+a gap: an agency whose latest `probe` row started less than 3 hours ago is
+passed over, whatever that row's status. A trigger that fires all day
+therefore retries a struggling feed a few times across the service window,
+and a feed too thin at 07:00 is tried again later the same day. A once-a-day
+trigger never meets the gap. A database still without migration 0082 has no
+`probe` rows, so there is no gap there; the run rows themselves are lost
+until it is migrated, and the verdicts are still written.
 
 ## Users bulk/drawer
 

@@ -202,20 +202,33 @@ def _seed_attempt(pg_conn, aid: int, *, status: str, ago: timedelta) -> None:
 
 
 @pytest.mark.parametrize("status", ["skipped", "error"])
-def test_an_attempt_that_wrote_nothing_is_not_retried_within_the_day(pg_conn, agency, status):
+def test_an_attempt_that_wrote_nothing_is_not_retried_inside_the_retry_gap(pg_conn, agency, status):
     """A thin or broken feed leaves the registry as it was, so without the
-    cooldown a deployment poking all day would hit it on every poke."""
+    gap a deployment poking all day would hit it on every poke."""
     _seed_attempt(pg_conn, agency, status=status, ago=timedelta(hours=1))
 
     assert _run(pg_conn, fetch=_no_fetch) == reprobe.ReprobeOutcome()
     assert [r[:3] for r in _runs(pg_conn)] == [("probe", agency, status)]
 
 
-def test_an_attempt_from_yesterday_is_retried(pg_conn, agency):
-    _seed_attempt(pg_conn, agency, status="skipped", ago=timedelta(hours=21))
+def test_an_attempt_past_the_retry_gap_is_retried(pg_conn, agency):
+    _seed_attempt(pg_conn, agency, status="skipped", ago=reprobe.RETRY_AFTER + timedelta(minutes=1))
 
     assert _run(pg_conn).recorded == [agency]
     assert [r[:3] for r in _runs(pg_conn)] == [("probe", agency, "skipped"), ("probe", agency, "ok")]
+
+
+def test_a_near_expiry_renewal_whose_first_attempt_was_thin_is_retried_the_same_day(pg_conn, agency):
+    """The renewal window exists to give a sometimes-thin feed several tries
+    before its verdict lapses; those tries have to land the same day."""
+    _seed_verdict(pg_conn, agency, confirmed=True, expires_at=MORNING + timedelta(days=3))
+    _seed_attempt(pg_conn, agency, status="skipped", ago=timedelta(hours=1))
+    assert _run(pg_conn, fetch=_no_fetch) == reprobe.ReprobeOutcome()
+
+    later = MORNING + reprobe.RETRY_AFTER
+    assert later.date() == MORNING.date()
+    assert _run(pg_conn, now=later).recorded == [agency]
+    assert all(row[3] for row in _verdict(pg_conn, agency).values())
 
 
 def test_another_agencys_attempt_does_not_hold_this_one_back(pg_conn, agency):

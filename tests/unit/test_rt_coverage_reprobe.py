@@ -20,6 +20,7 @@ from pipeline.rt_coverage_reprobe import (
     MIN_SAMPLE,
     RECHECK_AFTER,
     RENEW_WITHIN,
+    RETRY_AFTER,
     Candidate,
     RecordedField,
     group_candidates,
@@ -162,7 +163,7 @@ def test_nothing_is_selected_overnight():
     assert select_due(candidates, datetime(2026, 10, 27, 0, 5, tzinfo=JST)) == []
 
 
-# ── how soon an attempt that wrote nothing is retried ──────────────────────
+# ── the retry gap after an attempt that wrote nothing ──────────────────────
 
 
 def _attempted(agency_id: int, ago: timedelta | None) -> Candidate:
@@ -171,26 +172,89 @@ def _attempted(agency_id: int, ago: timedelta | None) -> Candidate:
     return replace(_candidate(agency_id, fields=()), last_attempt=None if ago is None else NOON_ISH - ago)
 
 
-def test_an_attempt_an_hour_ago_is_not_retried_yet():
+def test_an_attempt_inside_the_retry_gap_is_not_retried_yet():
     """A thin, failed or not-a-feed poll writes nothing to the registry, so
     the verdict alone would keep the agency due on every poke."""
     assert select_due([_attempted(54, timedelta(hours=1))], NOON_ISH) == []
 
 
-def test_an_attempt_from_yesterday_is_retried():
-    assert [c.agency_id for c in select_due([_attempted(54, timedelta(hours=21))], NOON_ISH)] == [54]
+def test_an_attempt_past_the_retry_gap_is_retried():
+    assert [c.agency_id for c in select_due([_attempted(54, RETRY_AFTER + timedelta(minutes=1))], NOON_ISH)] == [54]
 
 
 def test_an_agency_never_attempted_is_due_as_before():
     """Also what every agency looks like where `pipeline_runs` predates the
-    `probe` kind: no probe rows, so no cooldown."""
+    `probe` kind: no probe rows, so no retry gap."""
     assert [c.agency_id for c in select_due([_attempted(54, None)], NOON_ISH)] == [54]
 
 
-def test_the_cooldown_matches_the_refutation_recheck():
-    assert not recently_attempted(NOON_ISH - RECHECK_AFTER - timedelta(seconds=1), NOON_ISH)
-    assert recently_attempted(NOON_ISH - RECHECK_AFTER + timedelta(seconds=1), NOON_ISH)
+def test_the_retry_gap_boundary():
+    assert not recently_attempted(NOON_ISH - RETRY_AFTER - timedelta(seconds=1), NOON_ISH)
+    assert recently_attempted(NOON_ISH - RETRY_AFTER + timedelta(seconds=1), NOON_ISH)
     assert not recently_attempted(None, NOON_ISH)
+
+
+def test_the_retry_gap_is_shorter_than_the_refutation_recheck():
+    """A gap of most of a day would push each retry to the next window open,
+    the thinnest hour, and an agency thin only early would never get a
+    verdict."""
+    start, end = reprobe.SERVICE_WINDOW_HOURS
+    assert RETRY_AFTER < RECHECK_AFTER
+    assert RETRY_AFTER < timedelta(hours=end - start) / 2
+
+
+def _hourly_pokes(candidate: Candidate, *, days: int, updates_at) -> list[tuple[datetime, bool]]:
+    """Drive select_due the way a deployment poking every hour does, over
+    *days* JST days from 2026-10-27, and return each attempt as (when,
+    recorded). ``updates_at(now)`` is how many stop_time_updates the feed
+    sends then; an attempt records a confirmed verdict when it reaches
+    MIN_SAMPLE and writes nothing otherwise, as reprobe_due_agencies does."""
+    attempts: list[tuple[datetime, bool]] = []
+    for hour in range(24 * days):
+        now = datetime(2026, 10, 27, tzinfo=JST) + timedelta(hours=hour)
+        if not select_due([candidate], now):
+            continue
+        recorded = updates_at(now) >= MIN_SAMPLE
+        attempts.append((now, recorded))
+        fields = _fields(expires_at=now + timedelta(days=180), probed_at=now) if recorded else candidate.fields
+        candidate = replace(candidate, fields=fields, last_attempt=now)
+    return attempts
+
+
+def test_hourly_pokes_retry_a_feed_thin_at_the_window_open_later_the_same_day():
+    """Thin from the window's open until 10:00, busy after: the first poke
+    in the window finds too little, and a later one the same day records the
+    verdict instead of every retry landing on the next 07:00."""
+    attempts = _hourly_pokes(
+        _candidate(54, fields=()),
+        days=2,
+        updates_at=lambda now: 3 if now.astimezone(JST).hour < 10 else 40,
+    )
+
+    assert attempts[0] == (datetime(2026, 10, 27, 7, 0, tzinfo=JST), False)
+    recorded = [when for when, ok in attempts if ok]
+    assert recorded == [datetime(2026, 10, 27, 7, 0, tzinfo=JST) + RETRY_AFTER]
+    assert len(attempts) == 2
+
+
+def test_hourly_pokes_try_a_feed_that_stays_thin_only_a_few_times_a_day():
+    attempts = _hourly_pokes(_candidate(54, fields=()), days=2, updates_at=lambda _now: 3)
+
+    per_day: dict[int, list[int]] = {}
+    for when, _ok in attempts:
+        local = when.astimezone(JST)
+        per_day.setdefault(local.day, []).append(local.hour)
+    assert per_day == {27: [7, 10, 13, 16, 19], 28: [7, 10, 13, 16, 19]}
+
+
+def test_a_near_expiry_renewal_whose_first_attempt_was_thin_is_retried_the_same_day():
+    first = datetime(2026, 10, 27, 7, 0, tzinfo=JST)
+    renewing = replace(
+        _candidate(8, fields=_fields(expires_at=first + timedelta(days=3))),
+        last_attempt=first,
+    )
+    assert select_due([renewing], first + RETRY_AFTER - timedelta(minutes=1)) == []
+    assert select_due([renewing], first + RETRY_AFTER) == [renewing]
 
 
 # ── grouping the registry read ─────────────────────────────────────────────

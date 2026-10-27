@@ -40,9 +40,11 @@ canonical list of how a probe row closes:
 
 Neither ``skipped`` nor ``error`` writes to the registry, so the verdict
 alone would keep the agency due on every poke. An agency whose latest probe
-row started less than ``RECHECK_AFTER`` ago is therefore left for the next
-day, whatever that row's status. Where ``pipeline_runs`` predates the
-``probe`` kind no such row exists and nothing is held back. One agency's
+row started less than ``RETRY_AFTER`` ago is therefore passed over, whatever
+that row's status: a deployment that pokes all day retries a struggling feed
+a few times across the service window instead of on every poke, and a
+once-a-day trigger never meets the gap. Where ``pipeline_runs`` predates the
+``probe`` kind no such row exists and there is no gap. One agency's
 failure never stops the next one, and nothing here raises to the caller for
 a single agency's sake.
 """
@@ -73,12 +75,19 @@ _log = logging.getLogger(__name__)
 #: many daily attempts before its verdict lapses.
 RENEW_WITHIN = timedelta(days=14)
 
-#: How long after a probe the same agency is probed again while it stays due:
-#: a refutation (recording one again does not clear it), or an attempt that
-#: wrote nothing. Without it a deployment that pokes all day would re-fetch
-#: such a feed on every poke. Just under a day, so a once-a-day trigger whose
-#: start drifts by a few minutes still retries it every day.
+#: How long a refutation stands before it is probed again. Recording one
+#: again does not clear it, so without this a deployment that pokes all day
+#: would re-fetch the feed on every poke. Just under a day, so a once-a-day
+#: trigger whose start drifts by a few minutes still rechecks it every day.
 RECHECK_AFTER = timedelta(hours=20)
+
+#: The least time between two attempts at the same agency, whatever the
+#: first one found. Short against the service window, so a feed too thin at
+#: the window's open is retried later the same day; a gap of most of a day
+#: would push every retry back to the next open, the thinnest hour, and an
+#: agency thin only early in the day would never get a verdict. Long enough
+#: that hourly pokes try a struggling feed only a few times a day.
+RETRY_AFTER = timedelta(hours=3)
 
 #: Local hours [start, end) in which a feed is busy enough to probe.
 SERVICE_WINDOW_HOURS = (7, 20)
@@ -162,13 +171,13 @@ def in_service_window(now: datetime, tz_name: str) -> bool:
 
 def recently_attempted(last_attempt: datetime | None, now: datetime) -> bool:
     """Whether the agency's latest probe run started less than
-    ``RECHECK_AFTER`` before *now*, whatever it found."""
-    return last_attempt is not None and last_attempt > now - RECHECK_AFTER
+    ``RETRY_AFTER`` before *now*, whatever it found."""
+    return last_attempt is not None and last_attempt > now - RETRY_AFTER
 
 
 def select_due(candidates: Iterable[Candidate], now: datetime) -> list[Candidate]:
     """The candidates to probe now: a due verdict, inside the window, not
-    attempted in the last ``RECHECK_AFTER``."""
+    attempted in the last ``RETRY_AFTER``."""
     return [
         c
         for c in candidates
