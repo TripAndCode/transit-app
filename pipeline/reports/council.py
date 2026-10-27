@@ -192,8 +192,9 @@ async def compute_council_summary(
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
     "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
-    are the days the loaded timetable covers, the only ones the planned and
-    executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
+    are the days a timetable plans (see
+    :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
+    the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
     the first three cover less of the agency than the planned/executed/delivered
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together

@@ -138,11 +138,11 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     const card = (name: string) => screen.getByText(name).closest(".network-row");
-    expect(card("Hiroden")).toHaveTextContent("Service delivered % 96.7% (timetable covers 16/30 days)");
-    expect(card("HiroBus")).not.toHaveTextContent("timetable covers");
-    expect(card("Aomori")).not.toHaveTextContent("timetable covers");
+    expect(card("Hiroden")).toHaveTextContent("Service delivered % 96.7% (16/30 days a timetable plans)");
+    expect(card("HiroBus")).not.toHaveTextContent("a timetable plans");
+    expect(card("Aomori")).not.toHaveTextContent("a timetable plans");
     expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
-      /count only the days the loaded timetable covers/,
+      /count only the days a timetable plans/,
     );
   });
 
@@ -156,9 +156,9 @@ describe("NetworkTab", () => {
     } as never);
     await i18n.changeLanguage("ja");
     renderTab();
-    expect(screen.getByText("Hiroden").closest(".network-row")).toHaveTextContent("運行率 96.7%（時刻表のある16/30日分）");
+    expect(screen.getByText("Hiroden").closest(".network-row")).toHaveTextContent("運行率 96.7%（時刻表に計画がある16/30日分）");
     expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
-      "読み込み済みの時刻表がある日だけを数えています",
+      "時刻表に計画がある日だけを数えています",
     );
   });
 
@@ -174,7 +174,7 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.queryByText(/timetable covers/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/a timetable plans/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("network-plan-coverage-footnote")).not.toBeInTheDocument();
   });
 

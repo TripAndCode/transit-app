@@ -1,0 +1,216 @@
+"""Planned trips per service day: as the loaded timetable plans them, and as saved.
+
+A service runs on a date under the GTFS rule :mod:`pipeline.day_types` also
+applies: its ``static_calendar`` (``calendar.txt``) range covers the date with
+that weekday's flag set and no ``static_calendar_dates`` removal
+(``exception_type = 2``) names the date, or a ``static_calendar_dates``
+addition (``exception_type = 1``) names it. A service both cases put on the
+same date runs once. Each running (service, date) plans the number of
+``static_trips`` rows under that service.
+
+The loaded timetable covers only the days its calendar says anything about,
+and a reload (:mod:`pipeline.static_loader`) replaces an agency's calendar, so
+every day before the new calendar starts loses its plan when the new one
+lands. ``planned_trips_daily`` keeps each day's count as the loaded timetable
+planned it when it was captured, and the first count saved for a day stands.
+
+:func:`capture_planned_trips` runs on every analyze run and saves the days
+before today. The day in progress is read from the loaded timetable until it
+is over, so it follows the latest timetable loaded that day: a reload later in
+the day may bring the plan it runs on. :func:`capture_before_reload` runs
+before a reload replaces anything and saves the outgoing timetable's days
+before the incoming one starts, today and the days after it included, since
+nothing else will plan them once the outgoing calendar is gone. A timetable
+that takes effect on the day it is loaded therefore plans that day itself, and
+the next day's analyze saves it. Days before the first capture are not
+reconstructed: the reload that replaced their timetable erased them.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable, Iterable
+from datetime import date, datetime, timedelta, timezone
+
+from api.range import MAX_RANGE_DAYS
+from pipeline.service_day import service_date_of
+
+logger = logging.getLogger(__name__)
+
+#: How far a capture reaches: back from today, the longest report window, and
+#: ahead of it, for a reload, as far again. Each capture recomputes its whole
+#: window and inserts only the days with no row yet; a day further back is
+#: saved only if an earlier capture reached it.
+CAPTURE_LOOKBACK_DAYS = MAX_RANGE_DAYS
+
+
+def plan_ctes(agency_ids: str, from_date: str, to_date: str) -> str:
+    """The CTEs that end in ``timetable_plan(agency_id, day, planned)``: one row
+    per day of ``[from_date, to_date]`` the loaded timetable covers, with the
+    trips it plans that day, 0 on a covered day nothing runs.
+
+    The arguments are SQL expressions, so the asyncpg read and the psycopg2
+    capture share one counting rule under their own placeholder styles:
+    ``agency_ids`` an ``int[]``, the other two ``date`` values.
+
+    A day is covered when it falls inside a ``calendar.txt`` service's range
+    or a ``calendar_dates.txt`` row names it. ``static_calendar_dates.date`` is
+    the feed's raw YYYYMMDD text and may hold a malformed row, which a DATE
+    cast would fail on for every agency. The fixed-width text compares in
+    calendar order, so BETWEEN bounds it, and matching it to the generated
+    series' text drops a malformed row the lexicographic bounds would let
+    through. Trips are counted once per service and multiplied by its running
+    days, never joined row-per-trip-per-day.
+    """
+    return f"""
+    days AS (
+        SELECT day, to_char(day, 'YYYYMMDD') AS ymd, EXTRACT(ISODOW FROM day)::int AS isodow
+        FROM (SELECT {from_date} + i AS day FROM generate_series(0, {to_date} - {from_date}) AS i) AS d
+    ),
+    trip_counts AS (
+        SELECT agency_id, service_id, COUNT(*) AS trips
+        FROM static_trips
+        WHERE agency_id = ANY({agency_ids})
+        GROUP BY agency_id, service_id
+    ),
+    running AS (
+        SELECT c.agency_id, c.service_id, days.day
+        FROM static_calendar c
+        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
+        WHERE c.agency_id = ANY({agency_ids})
+          AND (ARRAY[c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday])[days.isodow]
+          AND NOT EXISTS (
+              SELECT 1
+              FROM static_calendar_dates x
+              WHERE x.agency_id = c.agency_id
+                AND x.service_id = c.service_id
+                AND x.date = days.ymd
+                AND x.exception_type = 2
+          )
+        UNION
+        SELECT cd.agency_id, cd.service_id, days.day
+        FROM static_calendar_dates cd
+        JOIN days ON days.ymd = cd.date
+        WHERE cd.agency_id = ANY({agency_ids})
+          AND cd.exception_type = 1
+          AND cd.date BETWEEN to_char({from_date}, 'YYYYMMDD') AND to_char({to_date}, 'YYYYMMDD')
+    ),
+    covered AS (
+        SELECT c.agency_id, days.day
+        FROM static_calendar c
+        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
+        WHERE c.agency_id = ANY({agency_ids})
+        UNION
+        SELECT cd.agency_id, days.day
+        FROM static_calendar_dates cd
+        JOIN days ON days.ymd = cd.date
+        WHERE cd.agency_id = ANY({agency_ids})
+          AND cd.date BETWEEN to_char({from_date}, 'YYYYMMDD') AND to_char({to_date}, 'YYYYMMDD')
+    ),
+    timetable_plan AS (
+        SELECT cv.agency_id, cv.day, COALESCE(SUM(t.trips), 0)::int AS planned
+        FROM covered cv
+        LEFT JOIN running r ON r.agency_id = cv.agency_id AND r.day = cv.day
+        LEFT JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
+        GROUP BY cv.agency_id, cv.day
+    )"""
+
+
+_CAPTURE_SQL = (
+    "WITH"
+    + plan_ctes("ARRAY[%(agency_id)s]::int[]", "%(from_date)s::date", "%(to_date)s::date")
+    + """
+    INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips)
+    SELECT agency_id, day, planned FROM timetable_plan
+    ON CONFLICT (agency_id, service_date) DO NOTHING
+    """
+)
+
+
+def capture_planned_trips(conn, agency_id: int, *, today: date | None = None) -> int | None:
+    """Save the planned trips of each day before ``today`` that the loaded
+    timetable covers and ``planned_trips_daily`` does not hold yet, then
+    commit. Returns how many days it saved, or None when the capture failed.
+
+    ``today`` defaults to the service day in progress
+    (:func:`pipeline.service_day.service_date_of`), which is left to the loaded
+    timetable until it is over. See :func:`_capture` for the commit and the
+    failure contract.
+    """
+    day = today or _service_today()
+    return _capture(conn, agency_id, day, lambda: day - timedelta(days=1))
+
+
+def capture_before_reload(
+    conn, agency_id: int, incoming: Iterable[tuple[date, date]], *, today: date | None = None
+) -> int | None:
+    """Save the outgoing timetable's planned trips for the days before the
+    incoming timetable's first, as :func:`capture_planned_trips` does, before a
+    reload replaces the outgoing timetable.
+
+    ``incoming`` is the day ranges the incoming timetable covers, both ends
+    inclusive: each ``calendar.txt`` service's range, and each day a
+    ``calendar_dates.txt`` row names as a range of one day. Days after today
+    are saved too, up to ``CAPTURE_LOOKBACK_DAYS`` ahead: they would run on the
+    outgoing timetable and no other would plan them.
+    """
+    day = today or _service_today()
+    return _capture(conn, agency_id, day, lambda: _reload_through(day, list(incoming)))
+
+
+def _service_today() -> date:
+    return service_date_of(datetime.now(timezone.utc))
+
+
+def _reload_through(day: date, incoming: list[tuple[date, date]]) -> date:
+    """The last day a reload on ``day`` saves from the outgoing timetable: the
+    day before the incoming timetable's first, by the coverage rule
+    :func:`plan_ctes` applies within a capture's reach.
+
+    A range that ends before it starts covers nothing, and a range that ends
+    before the capture window covers nothing a capture could save; a range
+    starting before the window covers the window from its start. With no
+    range in reach, the outgoing timetable keeps the days up to ``day``.
+    """
+    window_start = day - timedelta(days=CAPTURE_LOOKBACK_DAYS - 1)
+    firsts = [max(first, window_start) for first, last in incoming if window_start <= last and first <= last]
+    if not firsts:
+        return day
+    return min(min(firsts) - timedelta(days=1), day + timedelta(days=CAPTURE_LOOKBACK_DAYS))
+
+
+def _capture(conn, agency_id: int, day: date, through: Callable[[], date]) -> int | None:
+    """Save the days of the capture window ending on ``through()`` that have no
+    row yet, then commit.
+
+    The commit is immediate, and takes along whatever the caller had open:
+    left uncommitted behind a long load or rebuild, the new rows would make a
+    concurrent capture of the same days wait for it. Everything, the date
+    arithmetic on a feed's dates included, runs inside one guard, and the
+    insert inside a savepoint, so a failure is logged and rolled back to it,
+    costing the capture and nothing else; the next capture saves whatever days
+    are still loaded. Never raises. The caller's connection must not be in
+    autocommit, which has no transaction to hold a savepoint.
+    """
+    try:
+        last = through()
+        params = {
+            "agency_id": agency_id,
+            "from_date": day - timedelta(days=CAPTURE_LOOKBACK_DAYS - 1),
+            "to_date": last,
+        }
+        with conn.cursor() as cur:
+            cur.execute("SAVEPOINT capture_planned_trips")
+            try:
+                cur.execute(_CAPTURE_SQL, params)
+            except Exception:
+                cur.execute("ROLLBACK TO SAVEPOINT capture_planned_trips")
+                raise
+            saved = cur.rowcount
+            cur.execute("RELEASE SAVEPOINT capture_planned_trips")
+        conn.commit()
+    except Exception:
+        logger.warning("planned_trips_daily: could not save planned trips for agency %s", agency_id, exc_info=True)
+        return None
+    logger.info(f"  planned_trips_daily: {saved} day(s) saved through {last}")
+    return saved

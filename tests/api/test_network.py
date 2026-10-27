@@ -505,9 +505,9 @@ async def test_network_summary_endpoint(net_client, ch_client):
 
 
 async def test_network_summary_says_how_many_of_the_window_days_the_timetable_covers(net_client):
-    """The board's rates count only the days the loaded timetable covers, so
-    each row carries that count beside the window's length: a reader can then
-    tell an agency whose rate spans 1 of 7 days from one whose rate spans all 7."""
+    """The board's rates count only the days a timetable plans, so each row
+    carries that count beside the window's length: a reader can then tell an
+    agency whose rate spans 1 of 7 days from one whose rate spans all 7."""
     client, pool, a, b, _cc = net_client
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260403")
     await _set_ingest_strategy(pool, a, "static_join")
@@ -517,6 +517,27 @@ async def test_network_summary_says_how_many_of_the_window_days_the_timetable_co
     by = {x["agency_id"]: x for x in r.json()["agencies"]}
     assert (by[a]["planned_trips"], by[a]["covered_days"], by[a]["window_days"]) == (2, 1, 7)
     assert (by[b]["planned_trips"], by[b]["covered_days"], by[b]["window_days"]) == (0, 0, 7)
+
+
+async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_fail(net_client, monkeypatch):
+    """The planned figures failing in Postgres, as they do on a schema behind
+    its migrations, leave every agency without a plan; the delay and feed
+    figures from the other tables still answer."""
+    from pipeline.reports import service_delivered
+
+    client, pool, a, b, _cc = net_client
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260403")
+    monkeypatch.setattr(service_delivered, "_SERVICE_SQL", "SELECT * FROM planned_trips_not_migrated")
+
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    by = {x["agency_id"]: x for x in r.json()["agencies"]}
+    assert (by[a]["avg_delay_min"], by[a]["clamp_pct"]) == (10.0, 0.5)
+    for aid in (a, b):
+        delivered = {k: by[aid][k] for k in ("planned_trips", "executed_trips", "service_delivered_pct")}
+        assert delivered == {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None}
+        assert (by[aid]["covered_days"], by[aid]["window_days"], by[aid]["vehicle_km_delivered_pct"]) == (0, 7, None)
 
 
 async def test_network_summary_includes_definition_metadata(net_client):

@@ -84,18 +84,19 @@ def test_footnotes_say_the_delivered_figures_are_agency_wide_under_a_narrower_fi
     [
         (
             "ja",
-            "計画本数・運行本数・運行実績率は、読み込み済みの時刻表がある16日分（期間30日中）だけを数えています。",
+            "計画本数・運行本数・運行実績率は、時刻表に計画がある16日分（期間30日中）だけを数えています。",
         ),
         (
             "en",
             "Planned and executed trips and the service-delivered rate count only the 16 of the period's "
-            "30 days the loaded timetable covers.",
+            "30 days a timetable plans.",
         ),
     ],
 )
 def test_footnotes_say_how_much_of_the_period_the_timetable_covers(locale, note):
-    """A timetable loaded mid-period plans only the days it covers, so the
-    planned figures say which; a fully covered period says nothing."""
+    """Only the days a timetable plans are counted: the days the loaded one
+    covers and the days saved while theirs was loaded. The footnote says how
+    many; a fully covered period says nothing."""
 
     def footnotes(**coverage):
         return format_council_summary_footnotes(_DEFINITION, _payload(planned_trips=57887, **coverage), locale)

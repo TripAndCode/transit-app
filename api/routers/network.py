@@ -38,8 +38,9 @@ class NetworkAgencyRow(BaseModel):
     planned_trips: int
     executed_trips: int | None
     service_delivered_pct: float | None
-    # How many of the range's window_days the loaded timetable covers; the
-    # three fields above count only those days.
+    # How many of the range's window_days a timetable plans, by a saved
+    # count or the loaded timetable; the three fields above count only those
+    # days.
     covered_days: int
     window_days: int
     # pipeline.reports.ridership: has_ridership_weights is False (and

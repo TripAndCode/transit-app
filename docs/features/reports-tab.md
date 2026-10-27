@@ -41,6 +41,13 @@ saved-analysis bookmarks — plus a link out to Time for deeper reports.
   `doc=certificate` param and the API keep the old name so links and saved
   views keep working. `tests/frontend/i18n_glossary.test.mjs` holds the copy
   to that name.
+- The council document's planned trips, executed trips and service-delivered
+  rate count only the days a timetable plans: a day's count saved in
+  `planned_trips_daily` while its timetable was loaded, or else the loaded
+  timetable's plan for it (`pipeline/planned_trips.py`). When those days fall
+  short of the period, a footnote says how many were counted. Days from before
+  the first save stay uncounted: the reload that replaced their timetable had
+  already erased their plan.
 
 What the user sees/does:
 

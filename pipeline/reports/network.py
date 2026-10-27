@@ -14,9 +14,12 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 see that module for the executed/planned definition and why the latter two
 read `None` ("not available") for an agency whose feed doesn't populate
 `schedule_relationship_trip`. ``covered_days`` of ``window_days`` is how many
-of the range's days the loaded timetable covers; all three count only those,
-so a row whose ``covered_days`` falls short is comparable to its neighbours
-only with that note beside it.
+of the range's days a timetable plans (a day's saved count, or the loaded
+timetable's); all three count only those, so a row whose ``covered_days``
+falls short is comparable to its neighbours only with that note beside it.
+When those figures cannot be read at all, every agency reads as one with no
+plan (0 planned trips and covered days, ``None`` rates) and the rest of the
+board stands.
 
 ``has_ridership_weights``/``weighted_on_time_pct`` come from
 `pipeline.reports.ridership.compute_ridership_weighted_on_time_by_agency` —
@@ -72,7 +75,13 @@ _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
-    """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first."""
+    """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first.
+
+    The planned and delivered figures are one column of the board, not the
+    board: a failure reading them, such as a schema behind its migrations,
+    leaves every agency without a plan, as the freshness probe's degrade
+    leaves it not stale, rather than failing the delay figures too.
+    """
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
     )
@@ -109,11 +118,24 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
     }
 
-    # planned_trips reads the loaded static schedule; executed_trips and
+    # planned_trips reads the saved and loaded plans; executed_trips and
     # service_delivered_pct also read the precomputed non-executed aggregate
     # (agg_service_delivered_daily). No ClickHouse scan on this request path;
     # see compute_service_delivered_by_agency.
-    delivered = await compute_service_delivered_by_agency(conn, [a["agency_id"] for a in agencies], from_date, to_date)
+    try:
+        delivered = await compute_service_delivered_by_agency(
+            conn, [a["agency_id"] for a in agencies], from_date, to_date
+        )
+    except Exception:
+        _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
+        no_plan = {
+            "planned_trips": 0,
+            "executed_trips": None,
+            "service_delivered_pct": None,
+            "covered_days": 0,
+            "window_days": (to_date - from_date).days + 1,
+        }
+        delivered = {a["agency_id"]: no_plan for a in agencies}
 
     # static_version_id/planned_trip_count/planned_vehicle_km/
     # vehicle_km_delivered_pct: see pipeline.reports.supply — reuses

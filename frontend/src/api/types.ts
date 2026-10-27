@@ -991,8 +991,9 @@ export type NetworkAgencyRow = {
   planned_trips: number;
   executed_trips: number | null;
   service_delivered_pct: number | null;
-  /** How many of the window's `window_days` days the loaded timetable
-   *  covers. planned_trips and the delivered rates count only those days. */
+  /** How many of the window's `window_days` days a timetable plans, by a
+   *  saved count or the loaded timetable. planned_trips and the delivered
+   *  rates count only those days. */
   covered_days: number;
   window_days: number;
   /** False whenever this agency has no manually-configured ridership weights
