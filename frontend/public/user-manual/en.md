@@ -24,13 +24,15 @@ The screenshots use real data from Aomori City Bus (青森市バス) for 20 Augu
 
 ## 1. Choosing an agency
 
-When you open the app, it first asks which agency (bus or rail operator) you want to look at.
+When you open the app, it first asks which agency (bus operator) you want to look at.
 
 ![Agency selection screen](./01-agency-select.en.png)
 
-- Each card shows the agency’s name and how far its data reaches (“Data through …”). An agency whose data has not started arriving reads “No data collected yet”. Agencies with data are listed first.
-- When there are many agencies, a “Search agencies” box appears above the cards.
-- The language switch in the top-right corner changes the display language.
+- Agencies are grouped by prefecture, the prefecture with the most agencies first. The number beside each heading is how many agencies it holds.
+- How far the data reaches is shown once, above the cards (“Data through …”). An agency whose updates stopped several days before the others reads “No updates after …”. An agency whose data has not started arriving reads “No data collected yet”.
+- Within a prefecture, agencies with data come first in name order, followed by those whose updates stopped and those with no data.
+- When there are many agencies, a “Search by agency name” box appears above the cards.
+- The language switch in the top-right corner changes the display language. The links at the bottom open Help, About this app and Sign in.
 
 Click a card to open that agency’s **Pulse** screen (section 4). The app remembers your choice: the next time you open it, it goes straight to that agency’s Pulse. When only one agency is set up, this screen is skipped.
 

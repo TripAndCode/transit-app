@@ -5,7 +5,7 @@ import { screen, within } from "@testing-library/react";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { DataSourceCredits } from "./DataSourceCredits";
-import { DATA_SOURCES, type DataSource } from "./dataSources";
+import { dataSourceOf, type DataSource } from "./dataSources";
 
 const AOMORI_STATIC = "https://ckan.odpt.org/dataset/aomori_city_all_lines";
 const AOMORI_REALTIME = "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines";
@@ -84,38 +84,46 @@ describe("DataSourceCredits", () => {
   });
 
   // A licence asks for (CC BY) or invites (CC0) a credit, so an agency seeded
-  // from a host that no rendered credit covers would show figures with no
+  // from a feed that no rendered credit covers would show figures with no
   // credit for them.
-  it.each(["en", "ja"] as const)("renders a credit covering the host of every seeded agency feed (%s)", async (locale) => {
+  it.each(["en", "ja"] as const)("renders a credit covering every seeded agency feed (%s)", async (locale) => {
     await i18n.changeLanguage(locale);
     renderWithProviders(<DataSourceCredits />);
     const rendered = [...creditParagraphs().section.querySelectorAll("p")];
 
-    for (const host of seededFeedHosts()) {
-      const source = sourceCovering(host);
+    for (const url of seededFeedUrls()) {
+      const source = sourceCovering(url);
       const credit = rendered.find((p) => p.textContent === i18n.t(source.creditKey).replace(/<\/?[a-z]+>/g, ""));
-      expect(credit, `${host}: no rendered ${source.creditKey}`).toBeDefined();
+      expect(credit, `${url}: no rendered ${source.creditKey}`).toBeDefined();
       const hrefs = [...(credit?.querySelectorAll("a") ?? [])].map((a) => a.getAttribute("href"));
-      expect(hrefs.sort(), host).toEqual(Object.values(source.links(locale)).sort());
+      expect(hrefs.sort(), url).toEqual(Object.values(source.links(locale)).sort());
     }
+  });
+
+  // ODPT's key-less mirror serves operators nationwide, so the host alone
+  // credits nobody: a feed there is covered only through its dataset's path.
+  it("credits no source for another operator's dataset on ODPT's mirror", () => {
+    expect(dataSourceOf("https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_SomeOtherCity_AllLines_trip_update")).toBeNull();
+    expect(dataSourceOf("https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_AomoriCity_AllLines_trip_update")?.creditKey).toBe(
+      "credits.aomori",
+    );
   });
 });
 
-function seededFeedHosts(): Set<string> {
-  const hosts = new Set([
-    ...tableHosts(readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8"), ",", "agencies.csv"),
+function seededFeedUrls(): Set<string> {
+  return new Set([
+    ...tableUrls(readFileSync(resolve(__dirname, "../../../agencies.csv"), "utf8"), ",", "agencies.csv"),
     // The collector reads its own table; its header is the last commented line.
-    ...tableHosts(
+    ...tableUrls(
       readFileSync(resolve(__dirname, "../../../oracle_cloud/v3/etc/agencies.tsv.example"), "utf8").replace(/^# (?=id\t)/m, ""),
       "\t",
       "agencies.tsv.example",
     ),
   ]);
-  return hosts;
 }
 
-/** The feed and static hosts of a delimited agency table, columns found by header name. */
-function tableHosts(text: string, delimiter: string, name: string): string[] {
+/** The feed and static URLs of a delimited agency table, columns found by header name. */
+function tableUrls(text: string, delimiter: string, name: string): string[] {
   const [header, ...rows] = text
     .split("\n")
     .filter((line) => line.trim() && !line.startsWith("#"));
@@ -124,16 +132,16 @@ function tableHosts(text: string, delimiter: string, name: string): string[] {
   const staticFeed = columns.indexOf("static_url");
   expect(feed, `${name} has a feed_url column`).toBeGreaterThanOrEqual(0);
   expect(staticFeed, `${name} has a static_url column`).toBeGreaterThanOrEqual(0);
-  const hosts = rows.flatMap((row) => {
+  const urls = rows.flatMap((row) => {
     const cells = row.split(delimiter);
-    return [cells[feed], cells[staticFeed]].filter(Boolean).map((url) => new URL(url).hostname);
+    return [cells[feed], cells[staticFeed]].filter(Boolean);
   });
-  expect(hosts.length, `${name} lists feeds`).toBeGreaterThan(0);
-  return hosts;
+  expect(urls.length, `${name} lists feeds`).toBeGreaterThan(0);
+  return urls;
 }
 
-function sourceCovering(host: string): DataSource {
-  const source = DATA_SOURCES.find((s) => s.feedHosts.includes(host));
-  if (!source) throw new Error(`no credited data source covers ${host}`);
+function sourceCovering(url: string): DataSource {
+  const source = dataSourceOf(url);
+  if (!source) throw new Error(`no credited data source covers ${url}`);
   return source;
 }

@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useId, useState, type CSSProperties } from "react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Check } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Z_INDEX } from "../styles/zIndex";
 import { useAgencies } from "../api/hooks";
+import { useConfig } from "../api/config";
+import { useSession } from "../api/auth";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import { IndexLoadingPlaceholder } from "./RoutePlaceholders";
 import { ErrorBanner } from "./ErrorBanner";
@@ -11,6 +13,7 @@ import type { Agency } from "../api/types";
 import { formatDate } from "../utils/format";
 import { LanguageToggle } from "./LanguageToggle";
 import { searchKey } from "../utils/searchText";
+import { groupAgencies, hasStopped, newestDataDate } from "./agencyDirectory";
 
 // Selection→navigate delay: must stay >= --transition (global.css) so the
 // dim/highlight finishes before the route changes. Not derived from the CSS
@@ -21,22 +24,30 @@ const SELECT_TRANSITION_MS = 250;
 // Past this many cards, finding one by eye is slower than typing its name.
 const SEARCH_MIN_AGENCIES = 9;
 
-/** Agencies with data first, each group in the API's order. */
-function byDataFirst(agencies: Agency[]): Agency[] {
-  return [...agencies.filter((a) => a.latest_data_date), ...agencies.filter((a) => !a.latest_data_date)];
+/** A day as a short label, "Oct 14", with its year only when asked for.
+ *  Non-breaking spaces hold it together, so a narrow card wraps before the
+ *  date rather than inside it. */
+function shortDay(iso: string, { year }: { year: boolean }): string {
+  return formatDate(iso, { year }).replaceAll(" ", "\u00a0");
 }
+
+// Vertical padding gives a finger the height the small text alone lacks.
+const FOOTER_LINK: CSSProperties = { display: "inline-block", padding: "6px 0", color: "var(--text-secondary)" };
 
 /** Owns the "/" landing decision for a visitor RequireAuth has let through:
  *  while agencies load, show the existing placeholder;
  *  once loaded, instantly redirect (via the declarative <Navigate> element —
  *  this runs at render time, so calling useNavigate() imperatively here
  *  instead would violate render purity) for the single-agency or
- *  remembered-choice case; only render the picker overlay when there's a
+ *  remembered-choice case; only render the agency picker page when there's a
  *  real choice to make. */
 export function OnboardingGate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: agencies, isLoading, isError, error, refetch } = useAgencies();
+  const { data: config } = useConfig();
+  const { data: session } = useSession();
+  const headingId = useId();
   // Hooks must run unconditionally on every render (Rules of Hooks) — declared
   // here, above the early returns below, rather than next to select() where
   // it's used.
@@ -88,48 +99,74 @@ export function OnboardingGate() {
 
   const searchable = agencies.length >= SEARCH_MIN_AGENCIES;
   const needle = searchKey(query);
-  const shown = byDataFirst(agencies).filter(
-    (a) => !searchable || searchKey(a.agency_name).includes(needle),
-  );
+  const shown = agencies.filter((a) => !searchable || searchKey(a.agency_name).includes(needle));
+  const newest = newestDataDate(agencies);
+  const groups = groupAgencies(shown, newest);
+  // A lone group of agencies with no known prefecture has nothing to be told apart from.
+  const headed = groups.some((g) => g.prefectureKey != null);
+  // Only a visitor known to be signed out, on a deployment that lets them in
+  // that way, is told login is unneeded or offered one.
+  const signedOut = session === null;
+  const guestWelcome = signedOut && config != null && !config.login_required;
+  const canLogIn = signedOut && config?.auth_enabled === true;
 
-  // The list can outgrow a phone screen. `margin: auto` centres the content
-  // while it fits and falls back to top-aligned once it doesn't; flex
-  // `align-items: center` would instead push the overflow above the top edge,
-  // out of scroll reach. The extra top padding keeps the heading clear of the
-  // language toggle once the content is top-aligned.
+  // The layer is the page's scroll container, and the column inside it is
+  // anchored at the top and centred only horizontally: the heading opens the
+  // page at any screen height, and a list longer than the screen continues
+  // below the fold, reached by scrolling.
   return (
     <div
+      data-testid="agency-directory"
       style={{
         position: "fixed",
         inset: 0,
         background: "var(--bg-page)",
-        display: "flex",
         overflowY: "auto",
-        padding: "64px 40px 40px",
         zIndex: Z_INDEX.modal,
       }}
     >
-      <div style={{ position: "absolute", top: 16, right: 16 }}>
-        <LanguageToggle />
-      </div>
-      <div style={{ width: "100%", maxWidth: 640, margin: "auto", textAlign: "center" }}>
-        <div style={{ marginBottom: 36 }}>
-          <h1
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 760,
+          margin: "0 auto",
+          padding: "16px clamp(16px, 4vw, 32px) 40px",
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 700,
-              fontSize: 22,
-              margin: 0,
-              letterSpacing: "0.01em",
-              color: "var(--text-primary)",
+              fontSize: "var(--text-sm)",
+              color: "var(--text-secondary)",
             }}
           >
             {t("header.app_title")}
-          </h1>
-          <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 6 }}>
-            {t("onboarding.subtitle")}
-          </div>
+          </span>
+          <LanguageToggle />
         </div>
+        <h1
+          style={{
+            fontFamily: "var(--font-display)",
+            fontWeight: 700,
+            fontSize: "var(--text-xl)",
+            margin: "clamp(24px, 5vw, 40px) 0 8px",
+            letterSpacing: "0.01em",
+            color: "var(--text-primary)",
+          }}
+        >
+          {t("onboarding.title")}
+        </h1>
+        <p style={{ margin: 0, fontSize: "var(--text-base)", lineHeight: 1.6, color: "var(--text-secondary)" }}>
+          {guestWelcome ? (
+            // The second sentence wraps as a whole, never inside a word.
+            <Trans t={t} i18nKey="onboarding.intro_guest" components={{ unit: <span style={{ display: "inline-block" }} /> }} />
+          ) : (
+            t("onboarding.intro")
+          )}
+        </p>
         {searchable && (
           <input
             type="search"
@@ -137,77 +174,166 @@ export function OnboardingGate() {
             placeholder={t("onboarding.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            style={{ width: "100%", marginBottom: 16 }}
+            style={{ width: "100%", marginTop: 24 }}
           />
         )}
+        {newest && (
+          <p style={{ margin: "12px 0 0", fontSize: "var(--text-sm)", color: "var(--text-tertiary)" }}>
+            {/* The newest day any agency has is the latest data there is, so
+                its year goes without saying. */}
+            {t("onboarding.data_through", { date: shortDay(newest, { year: false }) })}
+          </p>
+        )}
         {shown.length === 0 && (
-          <p role="status" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+          <p role="status" style={{ margin: "24px 0 0", color: "var(--text-tertiary)", fontSize: "var(--text-sm)" }}>
             {t("onboarding.no_matches")}
           </p>
         )}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {shown.map((a) => {
-            const isSelected = selectedId === a.agency_id;
-            const isDimmed = selectedId != null && !isSelected;
-            return (
-              <button
-                key={a.agency_id}
-                type="button"
-                onClick={() => select(a)}
-                disabled={selectedId != null}
+        {groups.map((group, i) => (
+          <section
+            key={group.prefectureKey ?? "other"}
+            aria-labelledby={headed ? `${headingId}-${i}` : undefined}
+            style={{ marginTop: headed ? 28 : 20 }}
+          >
+            {headed && (
+              <h2
+                id={`${headingId}-${i}`}
                 style={{
-                  position: "relative",
-                  background: isSelected ? "var(--accent-soft)" : "var(--bg-surface)",
-                  border: `1px solid ${isSelected ? "var(--accent)" : "var(--border-subtle)"}`,
-                  borderRadius: "var(--radius)",
-                  padding: "20px 18px",
-                  textAlign: "left",
-                  cursor: selectedId != null ? "default" : "pointer",
-                  color: "var(--text-primary)",
-                  font: "inherit",
-                  opacity: isDimmed ? 0.25 : 1,
-                  transition: "background var(--transition), border-color var(--transition), opacity var(--transition)",
+                  margin: "0 0 10px",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
                 }}
               >
-                {isSelected && (
-                  <span
-                    data-testid="agency-check-badge"
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute",
-                      top: 10,
-                      right: 10,
-                      width: 20,
-                      height: 20,
-                      borderRadius: "50%",
-                      background: "var(--accent)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Check size={12} strokeWidth={3} color="var(--on-accent)" />
-                  </span>
-                )}
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>
-                <div style={{ fontSize: 12, marginTop: 4, color: "var(--text-tertiary)" }}>
-                  {/* Non-breaking spaces hold the date together: a narrow card
-                      wraps before it, never between "Sep 10," and its year. */}
-                  {a.latest_data_date
-                    ? t("onboarding.data_through", { date: formatDate(a.latest_data_date).replaceAll(" ", "\u00a0") })
-                    : t("onboarding.no_data_yet")}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                {group.prefectureKey ? t(group.prefectureKey) : t("onboarding.other_prefecture")}{" "}
+                <span style={{ fontWeight: 400, color: "var(--text-tertiary)" }}>
+                  {t("onboarding.group_count", { count: group.agencies.length })}
+                </span>
+              </h2>
+            )}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {group.agencies.map((a) => (
+                <AgencyCard
+                  key={a.agency_id}
+                  agency={a}
+                  newest={newest}
+                  selectedId={selectedId}
+                  onSelect={() => select(a)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
+        <nav
+          aria-label={t("onboarding.links")}
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "4px 10px",
+            marginTop: 40,
+            paddingTop: 16,
+            borderTop: "1px solid var(--border-soft)",
+            fontSize: "var(--text-sm)",
+          }}
+        >
+          <Link to="/help" style={FOOTER_LINK}>
+            {t("nav.help")}
+          </Link>
+          <span aria-hidden="true" style={{ color: "var(--text-tertiary)" }}>
+            ·
+          </span>
+          <Link to="/welcome" style={FOOTER_LINK}>
+            {t("nav.about")}
+          </Link>
+          {canLogIn && (
+            <>
+              <span aria-hidden="true" style={{ color: "var(--text-tertiary)" }}>
+                ·
+              </span>
+              <Link to="/login" style={FOOTER_LINK}>
+                {t("common.login")}
+              </Link>
+            </>
+          )}
+        </nav>
       </div>
     </div>
+  );
+}
+
+function AgencyCard({
+  agency,
+  newest,
+  selectedId,
+  onSelect,
+}: {
+  agency: Agency;
+  newest: string | null;
+  selectedId: number | null;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  const isSelected = selectedId === agency.agency_id;
+  const isDimmed = selectedId != null && !isSelected;
+  const latest = agency.latest_data_date;
+  const stopped = latest != null && newest != null && hasStopped(latest, newest);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={selectedId != null}
+      style={{
+        position: "relative",
+        background: isSelected ? "var(--accent-soft)" : "var(--bg-surface)",
+        border: `1px solid ${isSelected ? "var(--accent)" : "var(--border-subtle)"}`,
+        borderRadius: "var(--radius)",
+        padding: "14px 16px",
+        textAlign: "left",
+        cursor: selectedId != null ? "default" : "pointer",
+        color: "var(--text-primary)",
+        font: "inherit",
+        opacity: isDimmed ? 0.25 : 1,
+        transition: "background var(--transition), border-color var(--transition), opacity var(--transition)",
+      }}
+    >
+      {isSelected && (
+        <span
+          data-testid="agency-check-badge"
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: "var(--accent)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Check size={12} strokeWidth={3} color="var(--on-accent)" />
+        </span>
+      )}
+      <div style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>{agency.agency_name}</div>
+      {stopped && (
+        <div style={{ fontSize: "var(--text-xs)", marginTop: 4, color: "var(--color-warning-text)" }}>
+          {t("onboarding.stopped", { date: shortDay(latest, { year: latest.slice(0, 4) !== newest.slice(0, 4) }) })}
+        </div>
+      )}
+      {latest == null && (
+        <div style={{ fontSize: "var(--text-xs)", marginTop: 4, color: "var(--text-tertiary)" }}>
+          {t("onboarding.no_data_yet")}
+        </div>
+      )}
+    </button>
   );
 }

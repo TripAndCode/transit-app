@@ -54,12 +54,23 @@
     "handle": "Resize the sheet"
   },
   "onboarding": {
-    "subtitle": "Select your transit agency",
+    "title": "Choose an agency",
+    "intro": "Look up bus delays from real operating data.",
+    "intro_guest": "Look up bus delays from real operating data. <unit>No sign-in needed.</unit>",
     "no_agencies": "No agencies are configured yet.",
     "data_through": "Data through {{date}}",
+    "stopped": "No updates after {{date}}",
     "no_data_yet": "No data collected yet",
-    "search": "Search agencies",
-    "no_matches": "No agency matches. Try another name."
+    "search": "Search by agency name",
+    "no_matches": "No agency matches. Try another name.",
+    "group_count_one": "{{count}} agency",
+    "group_count_other": "{{count}} agencies",
+    "other_prefecture": "Other",
+    "links": "More"
+  },
+  "prefectures": {
+    "aomori": "Aomori",
+    "hiroshima": "Hiroshima"
   },
   "landing": {
     "hero": {
