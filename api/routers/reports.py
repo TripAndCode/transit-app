@@ -1098,7 +1098,9 @@ async def get_report(
     if threshold_sec is not None and report_type != "delay_certificate":
         raise HTTPException(status_code=400, detail="threshold_sec only applies to the delay_certificate report")
     if include_sparse and report_type not in _FLOORED_TYPES:
-        raise HTTPException(status_code=400, detail="include_sparse only applies to the ranking reports")
+        raise HTTPException(
+            status_code=400, detail="include_sparse only applies to the ranking and route_table reports"
+        )
     if include_retired and report_type not in _ROUTE_LIST_TYPES:
         raise HTTPException(status_code=400, detail="include_retired only applies to the route lists")
     if include_zero_delay and report_type not in _ROUTE_LIST_TYPES:

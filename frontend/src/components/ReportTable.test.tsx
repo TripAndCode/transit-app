@@ -201,6 +201,7 @@ describe("ReportTable route column", () => {
     renderTable([tableRow("1471981638", 5.2)]);
     expect(screen.getByText("70-3")).toHaveClass("route-label__plate");
     expect(screen.getByText("あさひが丘線")).toHaveClass("route-label__line");
+    expect(screen.getByText("70-3").closest("td")).toHaveClass("report-route-cell--compact");
     expect(screen.queryByText("広島バスセンター → あさひが丘下")).toBeNull();
     expect(screen.getByText("70-3").closest(".route-label")).toHaveAttribute(
       "title",

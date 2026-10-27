@@ -176,6 +176,10 @@ function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Ma
   return m;
 }
 
+// The share of the table a compact route column takes: the room where a
+// route runs has before its ellipsis, beside figures that never wrap.
+const COMPACT_ROUTE_SHARE = "45%";
+
 // The route column stays in view while a table wider than its panel
 // scrolls sideways. It needs an opaque background for rows to pass under:
 // the page's, since the table sits directly on it.
@@ -307,6 +311,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                   textAlign: c.align ?? "left",
                   whiteSpace: "nowrap",
                   ...(c === basis ? { color: "var(--text-primary)" } : null),
+                  ...(c.route === "compact" ? { width: COMPACT_ROUTE_SHARE } : null),
                   ...(c === schema[0] && c.route ? STICKY_HEAD : null),
                 }}
               >
@@ -328,13 +333,14 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                   return (
                     <td
                       key={c.labelKey}
+                      className={c.route === "compact" ? "report-route-cell--compact" : undefined}
                       // A full label names the line and where it goes; below
                       // this width it breaks onto a third line. A compact
-                      // label is the plate and the line name alone.
+                      // label holds one line.
                       style={{
                         ...td(),
                         ...(c === schema[0] ? STICKY_CELL : null),
-                        minWidth: c.route === "compact" ? "12em" : "16em",
+                        ...(c.route === "compact" ? { minWidth: "15em", width: COMPACT_ROUTE_SHARE } : { minWidth: "16em" }),
                         fontWeight: 500,
                         wordBreak: "keep-all",
                       }}

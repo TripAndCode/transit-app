@@ -179,13 +179,14 @@ export function reportDestination(reportType: string): Destination | null {
 }
 
 /** A report's screen, opened as the report asks. The params that picked a
- *  report or the Routes table's ordering go, so the new report's own take
- *  their place rather than mixing with a previous screen's. */
+ *  report or the Routes table's sort go, so the new report's own take their
+ *  place. An `order` stays: a former on-time link's `order=best` still means
+ *  the same end of the same list. */
 export function reportHref(agencyId: number | string, reportType: string, search = ""): string {
   if (!isReportType(reportType)) return destHref(agencyId, "pulse", search);
   const home = REPORT_HOME[reportType];
   const params = new URLSearchParams(search);
-  for (const key of ["report", "sort", "order"]) params.delete(key);
+  for (const key of ["report", "sort"]) params.delete(key);
   return destHref(agencyId, home.dest, params.toString(), home.extra);
 }
 

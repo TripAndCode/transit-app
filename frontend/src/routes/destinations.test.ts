@@ -68,8 +68,10 @@ describe("destinations", () => {
     expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?report=dwell_run");
     expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?sort=on_time");
     expect(reportHref(9, "ranking_best", "?from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg&order=best");
-    // A previous ordering of the Routes table never carries into a report's own.
-    expect(reportHref(9, "ranking", "?report=on_time&sort=late5_share&order=best")).toBe("/agencies/9/routes?sort=avg");
+    // A previous report or sort gives way to the report's own; a former
+    // on-time link's order still picks the same end.
+    expect(reportHref(9, "ranking", "?report=on_time&sort=late5_share")).toBe("/agencies/9/routes?sort=avg");
+    expect(reportHref(9, "on_time", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?order=best&from=2026-09-01&sort=on_time");
     expect(reportHref(9, "worst_5min")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods&report=compare_ranking");
     expect(reportHref(9, "council_summary", "?report=trend&from=2026-09-01")).toBe(
