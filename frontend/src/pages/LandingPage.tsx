@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
+import { useConfig } from "../api/config";
 import { DataSourceCredits } from "../components/DataSourceCredits";
 import { LegalLinks } from "../components/LegalLinks";
 import { LiveMapHero } from "./landing/LiveMapHero";
@@ -11,15 +12,21 @@ import "./LandingPage.css";
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (AGENTS.md's "keep UI calm" rule governs the working
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). It stays
- *  reachable after sign-in, so its one CTA is sign-in for a visitor and the
- *  dashboard for a signed-in user. The hero (animated live-map scene +
- *  headline + that CTA) is the entry point; below it, `ScrollNarrative` mounts three real, working
- *  chart components (fed by static fixtures, not live data) telling the
- *  product's story, rather than the retired `DashboardPreview` mocked
- *  sidebar shell. */
+ *  reachable after sign-in and from the app's "about" link, so its one CTA
+ *  is the way in this visitor actually has: the dashboard for a signed-in
+ *  user or, on a deployment that serves signed-out visitors, for a guest;
+ *  sign-in otherwise. The hero (animated live-map scene + headline + that
+ *  CTA) is the entry point; below it, `ScrollNarrative` mounts three real,
+ *  working chart components (fed by static fixtures, not live data) telling
+ *  the product's story. */
 export function LandingPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
+  const { data: config } = useConfig();
+  // Only a configuration known to let signed-out visitors in sends a guest
+  // to "/": while it is unknown, or when sign-in is required, "/" would only
+  // bounce them back here.
+  const guest = !session && config != null && !config.login_required;
   return (
     <div className="landing-shell">
       <section className="landing-hero">
@@ -40,9 +47,26 @@ export function LandingPage() {
             <span className="landing-hero__title-line">{t("landing.hero.title_where")}</span>
           </h1>
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
-          <Link to={session ? "/" : "/login"} className="landing-hero__cta">
-            {session ? t("landing.hero.open_dashboard") : t("common.login")}
-          </Link>
+          {session ? (
+            <Link to="/" className="landing-hero__cta">
+              {t("landing.hero.open_dashboard")}
+            </Link>
+          ) : guest ? (
+            <>
+              <Link to="/" className="landing-hero__cta">
+                {t("landing.hero.view_dashboard")}
+              </Link>
+              {config.auth_enabled && (
+                <p className="landing-hero__note">
+                  <Trans t={t} i18nKey="landing.hero.login_note" components={{ login: <Link to="/login" /> }} />
+                </p>
+              )}
+            </>
+          ) : (
+            <Link to="/login" className="landing-hero__cta">
+              {t("common.login")}
+            </Link>
+          )}
         </div>
       </section>
       <ScrollNarrative />

@@ -76,8 +76,10 @@
     "hero": {
       "title_now": "今すぐ何が起きているか。",
       "title_where": "どこで起きているか。",
-      "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
-      "open_dashboard": "ダッシュボードを開く"
+      "subtitle": "いまどの便が何分遅れているか、どの路線・時間帯で遅れやすいかを確認できます。",
+      "open_dashboard": "ダッシュボードを開く",
+      "view_dashboard": "ダッシュボードを見る（ログイン不要）",
+      "login_note": "<login>ログイン</login>すると表示条件の保存と質問の履歴が使えます"
     },
     "hero_map": {
       "screens": {
@@ -426,7 +428,7 @@
   },
   "header": {
     "app_title": "遅延ダッシュボード",
-    "app_tagline": "リアルタイム × 時刻表",
+    "app_tagline": "広島・青森のバス",
     "settings_aria": "設定",
     "agency_picker_empty": "事業者が登録されていません",
     "agency_picker_placeholder": "事業者を選択",

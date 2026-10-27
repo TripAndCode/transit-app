@@ -76,8 +76,10 @@
     "hero": {
       "title_now": "What's happening right now —",
       "title_where": "and where it's happening.",
-      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
-      "open_dashboard": "Open the dashboard"
+      "subtitle": "See which trips are running late right now and by how much, and which routes and times of day tend to run late.",
+      "open_dashboard": "Open the dashboard",
+      "view_dashboard": "View the dashboard (no sign-in needed)",
+      "login_note": "<login>Sign in</login> to save your view settings and keep your question history."
     },
     "hero_map": {
       "screens": {
@@ -426,7 +428,7 @@
   },
   "header": {
     "app_title": "Delay Dashboard",
-    "app_tagline": "Real-time × Timetable",
+    "app_tagline": "Buses in Hiroshima and Aomori",
     "settings_aria": "Settings",
     "agency_picker_empty": "No agencies registered",
     "agency_picker_placeholder": "Select agency",
