@@ -4,9 +4,6 @@
 .heat-surface__seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 999px; overflow: hidden; background: var(--bg-surface); }
 .heat-surface__seg button { border: 0; background: transparent; padding: 5px 10px; font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 .heat-surface__seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
-.heat-surface__legend { display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-secondary); }
-.heat-surface__ramp { display: inline-grid; grid-auto-flow: column; gap: 2px; }
-.heat-surface__ramp i { width: 16px; height: 8px; border-radius: 2px; display: block; }
 .heat-surface__worst { margin: 0 0 10px; color: var(--text-secondary); font-size: var(--text-sm); }
 .heat-surface { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; }
 /* Rows exist for the grid's accessibility tree only; the cells lay out on

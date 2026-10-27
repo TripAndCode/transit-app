@@ -1,18 +1,18 @@
 import { useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ForecastOverviewGridCell, ForecastOverviewWorst, TrendPayload } from "../../api/types";
-import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
+import { delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
 import { bandLabel } from "../../api/timeBands";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
 import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
+import { DelayScaleLegend } from "./DelayScaleLegend";
 import "./HeatSurface.css";
 
 const DIM_RULES = heatSurfaceDimRules();
 const PROFILES: readonly Profile[] = ["hourly", "banded"];
-const RAMP = ["--d0", "--d1", "--d2", "--d3", "--d4"] as const;
 
 function cellOf(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>(".heat-surface__cell") : null;
@@ -180,15 +180,7 @@ export function HeatSurface({
             </button>
           ))}
         </div>
-        <div className="heat-surface__legend" aria-hidden="true">
-          <span>{t("reports.heat_surface.legend_low")}</span>
-          <span className="heat-surface__ramp">
-            {RAMP.map((v) => (
-              <i key={v} style={{ background: `var(${v})` }} />
-            ))}
-          </span>
-          <span>{t("reports.heat_surface.legend_high", { min: DELAY_THRESHOLDS.severe })}</span>
-        </div>
+        <DelayScaleLegend noData />
       </div>
       {worst && (
         <p className="heat-surface__worst">

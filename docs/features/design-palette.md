@@ -35,9 +35,13 @@ pair.
 < 2.5, < 3.5, < 5 and ≥ 5 minutes. Each step has a dark counterpart, and
 `--none` fills a cell with no observations. `tokens.test.ts` asserts the
 five light values and that every step and `--none` exists in both themes.
-`delayRampVar()` in `tokens.ts` maps a delay onto these tokens for the heat
-surface, the period brush, the day-pulse gradient and the scope and rail
-swatches. Other charts, tables and the map color delay through the
+`DELAY_RAMP_STEPS` in `tokens.ts` holds the five cuts, `delayRampVar()` maps
+a delay onto them, and `delayScaleSteps()` (`DelayScaleLegend.tsx`) labels
+them for every legend, so a label cannot drift from the colour it explains.
+They shade the Time page's heat surface and hourly heatmap, the forecast's
+band grids, day × hour grid and bars, the period brush, the day-pulse
+gradient and the scope and rail swatches, with no outline over a heavy
+cell. Other charts, tables and the map color delay through the
 `--delay-*` ramp (`DELAY_RAMP` / `delayColor()` in `tokens.ts`), until each
 is redesigned onto them.
 

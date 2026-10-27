@@ -163,29 +163,6 @@ export function delayTextColor(minutes: number): string {
   return DELAY_RAMP_TEXT[delayBand(minutes)];
 }
 
-// A dense grid of cells encodes one quantity, so it gets one hue that runs
-// light to dark: switching hue at each severity cutoff turns a continuous
-// magnitude into four unordered categories and makes a 2.9-minute cell look
-// unrelated to a 3.1-minute one. The severe cutoff still matters, but it is
-// drawn as an outline annotation on top of the ramp, not as its colour. The domain
-// runs slightly past `DELAY_THRESHOLDS.severe` so a severe cell reads as
-// "near the top of the scale" instead of every value from 5 minutes upwards
-// saturating to the same ink. The floor is non-zero so a cell holding data is
-// always distinguishable from one holding none.
-export const HEAT_RAMP = {
-  maxMin: 5.5,
-  minOpacity: 0.08,
-  maxOpacity: 1,
-} as const;
-
-/** Where `minutes` sits on the single-hue heat ramp, as an opacity. Rounded
- *  so the value written into the DOM is stable and comparable. */
-export function heatOpacity(minutes: number): number {
-  const t = Math.min(1, Math.max(0, minutes / HEAT_RAMP.maxMin));
-  const opacity = HEAT_RAMP.minOpacity + t * (HEAT_RAMP.maxOpacity - HEAT_RAMP.minOpacity);
-  return Math.round(opacity * 1000) / 1000;
-}
-
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
  *  to a real hex via `severeColorResolved()` instead of the literal
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use
@@ -217,43 +194,21 @@ export function severityStepColors(): readonly [
   ];
 }
 
-// Continuous calm ramp: t=0 → sage, t=1 → orange, stopping short of the absolute
-// ramp's alarm red on purpose.
-const CALM_STOPS = [DELAY_RAMP.ok, DELAY_RAMP.mild, DELAY_RAMP.moderate] as const;
+/** The v2 delay ramp's steps (`--d0`…`--d4` in global.css): each holds the
+ *  mean delays from the previous step's `below` up to, not including, its
+ *  own. Every heat grid and band grid of delay magnitude shades by these
+ *  steps, and every legend for them labels these same cuts, so a colour
+ *  means the same minutes wherever it appears. Magnitude, never alarm: rust
+ *  is kept for five minutes or more, and nothing reaches the alarm red. */
+export const DELAY_RAMP_STEPS: readonly { color: string; below: number }[] = [
+  { color: "var(--d0)", below: 1.5 },
+  { color: "var(--d1)", below: 2.5 },
+  { color: "var(--d2)", below: 3.5 },
+  { color: "var(--d3)", below: DELAY_THRESHOLDS.severe },
+  { color: "var(--d4)", below: Infinity },
+];
 
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function rampColor(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  const seg = clamped * (CALM_STOPS.length - 1);
-  const i = Math.min(Math.floor(seg), CALM_STOPS.length - 2);
-  const f = seg - i;
-  const a = hexToRgb(CALM_STOPS[i]);
-  const b = hexToRgb(CALM_STOPS[i + 1]);
-  const mix = a.map((av, k) => Math.round(av + (b[k] - av) * f));
-  return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
-}
-
-/** A delay in minutes on the calm continuous ramp: no delay (or early running)
- *  is sage and the severe threshold or more is orange, never red. The scale is
- *  fixed in minutes rather than stretched over a view's own spread, so the
- *  same delay is the same colour in every view: a view whose values all run
- *  late never paints its smallest one as on time, and a calm view never paints
- *  its largest as severe. */
-export function calmDelayColor(minutes: number): string {
-  return rampColor(minutes / DELAY_THRESHOLDS.severe);
-}
-
-/** The v2 delay ramp (`--d0`…`--d4` in global.css) for a mean delay in
- *  minutes: magnitude, never alarm, with rust reserved for five minutes or
- *  more. */
+/** The ramp step for a mean delay in minutes. */
 export function delayRampVar(minutes: number): string {
-  if (minutes < 1.5) return "var(--d0)";
-  if (minutes < 2.5) return "var(--d1)";
-  if (minutes < 3.5) return "var(--d2)";
-  if (minutes < 5) return "var(--d3)";
-  return "var(--d4)";
+  return (DELAY_RAMP_STEPS.find((step) => minutes < step.below) ?? DELAY_RAMP_STEPS[DELAY_RAMP_STEPS.length - 1]).color;
 }

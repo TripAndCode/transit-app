@@ -196,7 +196,6 @@
     "lowSamples": "データ不足 ({{count}}件)",
     "no_data": "この路線の計測記録がまだありません。",
     "axis_min": "分",
-    "legend_unit": "遅延（分）",
     "click_hint": "カードをクリックすると拡大します。",
     "heatmap_caption": "この路線がいつ遅れやすいか — 濃いほど遅延が大きい。",
     "heatmap_aria": "曜日・時間帯ごとの予想遅延",
@@ -1120,17 +1119,12 @@
       "empty": "時間帯別データがありません。",
       "title": "時間帯ヒートマップ",
       "subtitle": "縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み",
-      "legend_aria": "凡例を表示",
-      "delay_label": "遅延:",
-      "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "hour_filter_aria": "{{hour}}時で絞り込む",
       "date_filter_aria": "{{date}}で絞り込む",
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}} ・ {{count}}件",
-      "cell_empty_aria": "{{date}} {{hour}}時 ・ データなし",
-      "ramp_max": "{{min}}分以上",
-      "severe_outline": "枠線 = {{min}}分以上"
+      "cell_empty_aria": "{{date}} {{hour}}時 ・ データなし"
     },
     "dow_band": {
       "empty": "この期間のデータがありません。",
@@ -1143,8 +1137,6 @@
       "profile_label": "プロファイル",
       "profile_hourly": "時刻別",
       "profile_banded": "時間帯別",
-      "legend_low": "定時",
-      "legend_high": "{{min}}分以上",
       "readout_hint": "セルに触れると、同じ時刻の列と同じ曜日の行だけが残ります。",
       "readout": "{{day}}曜 {{hour}}:00 — 平均 {{min}}",
       "readout_empty": "{{day}}曜 {{hour}}:00 — データなし"
@@ -2028,11 +2020,6 @@
       "curve_label": "許容幅ごとの定時率",
       "whole_day": "この数値は時間帯の条件を含みません",
       "no_data": "データなし",
-      "legend_d0": "1.5分未満",
-      "legend_d1": "1.5〜2.5分",
-      "legend_d2": "2.5〜3.5分",
-      "legend_d3": "3.5〜5分",
-      "legend_d4": "5分以上",
       "whole_day_place": "この数値は時間帯・停留所・方向の条件を含みません",
       "readout": "{{n}}分までの遅れなら定時{{pct}}%",
       "weekday_colour": "色は曜日ごとの平均遅延",
@@ -2120,5 +2107,12 @@
     "night": "夜",
     "hours": "{{from}}〜{{to}}時",
     "named": "{{name}} {{hours}}"
+  },
+  "delay_scale": {
+    "title": "平均の遅れ",
+    "below": "{{to}}分未満",
+    "between": "{{from}}〜{{to}}分",
+    "at_least": "{{from}}分以上",
+    "no_data": "データなし"
   }
 }

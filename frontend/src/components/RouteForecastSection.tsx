@@ -25,12 +25,13 @@ import { distinctRouteTexts } from "../api/routeDisplayName";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { BandGrid, Legend, type TipAnchor } from "./charts/DowBandGrid";
+import { BandGrid, EMPTY_CELL_FILL, type TipAnchor } from "./charts/DowBandGrid";
+import { DelayScaleLegend } from "./charts/DelayScaleLegend";
 import { Card } from "./ui/Card";
 import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
 import { useRovingCells } from "../hooks/useRovingCells";
-import { calmDelayColor, delayColor } from "../styles/tokens";
+import { delayRampVar } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { forecastDelayText } from "../utils/delayPhrase";
@@ -122,7 +123,7 @@ function RankedRoutes({
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: calmDelayColor(r.expected_avg_min), borderRadius: 3 }} />
+            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: delayRampVar(r.expected_avg_min), borderRadius: 3 }} />
           </span>
           {/* Always render this grid cell, even when InlineSparkline itself
               returns null (fewer than 2 points) — otherwise CSS grid
@@ -237,8 +238,7 @@ function HeatmapGrid({
                           ? {
                               height: cellH,
                               borderRadius: 2,
-                              background:
-                                "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                              background: EMPTY_CELL_FILL,
                               outline: highlighted ? "2px solid var(--accent)" : "none",
                               outlineOffset: 1,
                             }
@@ -246,7 +246,7 @@ function HeatmapGrid({
                               position: "relative",
                               height: cellH,
                               borderRadius: 2,
-                              background: delayColor(value),
+                              background: delayRampVar(value),
                               opacity: cell.low_confidence ? 0.5 : 1,
                               outline: highlighted ? "2px solid var(--accent)" : "none",
                               outlineOffset: 1,
@@ -337,7 +337,7 @@ function MarginBars({
                 aria-label={text}
                 tabIndex={activeSlot === String(i) ? 0 : -1}
                 onFocus={() => onCellFocus(i)}
-                style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
+                style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayRampVar(v), borderRadius: "3px 3px 0 0" }}
               />
             </Tooltip>
           );
@@ -407,14 +407,25 @@ function SectionCard({ title, sublabel, testid, onOpen, children }: {
   );
 }
 
-/** Filter to cells with a value, plus the min/max of those values (max floored at 1, min at 0 when empty). */
-function populatedRange<T extends { expected_avg_min: number | null }>(
-  cells: T[],
-): { populated: T[]; min: number; max: number } {
-  const populated = cells.filter((c) => c.expected_avg_min != null);
-  const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
-  const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
-  return { populated, min, max };
+/** The cells that hold a value. */
+function populatedCells<T extends { expected_avg_min: number | null }>(cells: T[]): T[] {
+  return cells.filter((c) => c.expected_avg_min != null);
+}
+
+/** The shared delay legend, with the hatched fill the forecast gives a
+ *  day and time without measurements. */
+function ForecastLegend() {
+  const { t } = useTranslation();
+  return (
+    <div style={{ marginTop: 12 }}>
+      <DelayScaleLegend>
+        <span className="delay-scale-legend__item">
+          <i aria-hidden="true" style={{ background: EMPTY_CELL_FILL }} />
+          {t("delay_scale.no_data")}
+        </span>
+      </DelayScaleLegend>
+    </div>
+  );
 }
 
 /**
@@ -511,7 +522,6 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           routesCaption={t("forecast.overview_routes_caption")}
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
-          legendUnit={t("forecast.legend_unit")}
           worstPhrase={(w, day) => t("forecast.overview_worst_phrase", { day, band: bandLabel(w.band), avg: forecastDelayText(t, w.expected_avg_min, w.source) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
@@ -605,7 +615,6 @@ function AgencyLanding({
   routesCaption,
   noData,
   lowConfNote,
-  legendUnit,
   worstPhrase,
   onPick,
   onTip,
@@ -622,7 +631,6 @@ function AgencyLanding({
   routesCaption: string;
   noData: string;
   lowConfNote: string;
-  legendUnit: string;
   /** `day` names the window's weekday, dated when the model forecast it. */
   worstPhrase: (w: ForecastOverviewWorst, day: string) => string;
   onPick: (code: string) => void;
@@ -635,7 +643,7 @@ function AgencyLanding({
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
   if (!data) return null;
 
-  const { populated, min, max } = populatedRange(data.grid);
+  const populated = populatedCells(data.grid);
   if (populated.length === 0 && data.routes.length === 0) {
     return <p style={{ color: "var(--text-secondary)" }}>{noData}</p>;
   }
@@ -656,8 +664,8 @@ function AgencyLanding({
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid ariaLabel={gridTitle} grid={data.grid} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
-        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={calmDelayColor} />}
+        <BandGrid ariaLabel={gridTitle} grid={data.grid} dayLabel={forecastDay} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <ForecastLegend />}
       </SectionCard>
 
       {data.disclaimer && (
@@ -708,7 +716,7 @@ function RouteDetail({
   const { data, isPending, error, refetch } = useForecastHeatmap(aid, route);
   const cells = data?.cells ?? [];
 
-  const { populated, min, max } = populatedRange(cells);
+  const populated = populatedCells(cells);
   const totalN = populated.reduce((a, c) => a + c.samples, 0);
   // An ML cell's `samples` is its hour's past observations, not measurements
   // behind the forecast, so the count is labelled for what it is. The route
@@ -723,7 +731,7 @@ function RouteDetail({
   // cell the user sees below it — not a single spiky hour. Its legend spans the
   // band grid's own range.
   const bandGrid = collapseToBands(cells);
-  const { populated: bandPop, min: bandMin, max: bandMax } = populatedRange(bandGrid);
+  const bandPop = populatedCells(bandGrid);
   const forecastDay = datedDayLabel(t, dayLabel, data?.forecast_days ?? []);
   const worstBand = bandPop
     .filter((c) => !c.low_confidence)
@@ -786,8 +794,8 @@ function RouteDetail({
       )}
 
       <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
-        {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={calmDelayColor} />}
+        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} dayLabel={forecastDay} onTip={onTip} onLeave={onLeave} />
+        {bandPop.length > 0 && <ForecastLegend />}
       </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
@@ -810,7 +818,7 @@ function RouteDetail({
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
           <HeatmapGrid cells={cells} big dayLabel={forecastDay} dated={forecastDays.size > 0} ariaLabel={t("forecast.heatmap_aria")} />
-          {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
+          {populated.length > 0 && <ForecastLegend />}
         </div>
       )}
 

@@ -2,6 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "
 import { useTranslation } from "react-i18next";
 import type { ScopeSummary } from "../../api/types";
 import { delayRampVar } from "../../styles/tokens";
+import { delayScaleSteps } from "../charts/delayScale";
 import { fixedTenth, formatDate } from "../../utils/format";
 import { calendarDays, dayIndexAt, rangeFrom } from "./brushMath";
 
@@ -12,13 +13,6 @@ const GAP_H = 4;
 /** Bars saturate here so one bad day does not flatten the rest. */
 const CAP_MIN = 8;
 const PAGE_DAYS = 7;
-const RAMP_LEGEND = [
-  ["var(--d0)", "legend_d0"],
-  ["var(--d1)", "legend_d1"],
-  ["var(--d2)", "legend_d2"],
-  ["var(--d3)", "legend_d3"],
-  ["var(--d4)", "legend_d4"],
-] as const;
 
 type Edge = "start" | "end";
 type Drag = { origin: number; anchor: number; edge: Edge | null; moved: boolean };
@@ -246,10 +240,10 @@ export function PeriodBrush({
         <span>{md(calendar[n - 1])}</span>
       </div>
       <div className="scope-legend">
-        {RAMP_LEGEND.map(([fill, key]) => (
-          <span key={key}>
-            <i style={{ background: fill }} aria-hidden="true" />
-            {t(`scope.control.${key}`)}
+        {delayScaleSteps(t).map((step) => (
+          <span key={step.color}>
+            <i style={{ background: step.color }} aria-hidden="true" />
+            {step.label}
           </span>
         ))}
         <span>

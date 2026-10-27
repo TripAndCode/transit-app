@@ -1,37 +1,21 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useRovingCells } from "../../hooks/useRovingCells";
-import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
+import { delayRampVar } from "../../styles/tokens";
 import type { ForecastOverviewGridCell } from "../../api/types";
 import { BAND_ORDER, bandHoursText, bandLabel, bandName } from "../../api/timeBands";
 import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
-import { fixedTenth, formatMinutes } from "../../utils/format";
+import { formatMinutes } from "../../utils/format";
 import "./DowBandGrid.css";
-
-const RAMP_STOPS = 5;
 
 /** Where a tooltip is anchored: a pointer position, or the cell's own edge for a
  *  keyboard focus, which has no pointer. */
 export type TipAnchor = { clientX: number; clientY: number };
 
-/** Anchored min→max colour ramp legend (shown inline, not only in the modal).
- * `colorFor` defaults to the absolute ramp; pass the grid's own ramp when it uses
- * another, so the legend reflects the encoding actually shown. */
-export function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(min)}</span>
-      <span style={{ display: "inline-flex", gap: 2 }}>
-        {Array.from({ length: RAMP_STOPS }, (_, i) => (
-          <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: colorFor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
-        ))}
-      </span>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(max)}</span>
-      <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>{unit}</span>
-    </div>
-  );
-}
+/** A day and time without measurements, hatched so it never reads as a calm cell. */
+export const EMPTY_CELL_FILL =
+  "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)";
 
 /** 7-day × time-band grid, one column per band of `BAND_ORDER`. Dense by
  * construction — used for the agency overview and the per-route detail (route
@@ -39,13 +23,12 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
  * name over its hours; a phone column is too narrow for a name, so there it
  * shows the hours alone, and every cell still names its band in full.
  *
- * A cell at or beyond the severe threshold is outlined rather than
- * recoloured, so the outline survives whatever ramp `colorFor` applies. */
+ * Cells are shaded by the shared delay steps (`delayRampVar`), with no
+ * outline over the heavy ones; `DelayScaleLegend` labels the steps. */
 export function BandGrid({
   ariaLabel,
   grid,
   dayLabel,
-  colorFor,
   onTip,
   onLeave,
 }: {
@@ -53,7 +36,6 @@ export function BandGrid({
   ariaLabel: string;
   grid: ForecastOverviewGridCell[];
   dayLabel: (dow: number) => string;
-  colorFor: (v: number) => string;
   onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
@@ -143,12 +125,6 @@ export function BandGrid({
                   onLeave();
                 },
               };
-              // inset, not `border`/`outline`: a border would resize the cell
-              // and break the grid's alignment with its unmarked neighbours.
-              const severeOutline =
-                v != null && v >= DELAY_THRESHOLDS.severe
-                  ? { boxShadow: "inset 0 0 0 1px var(--delay-severe)" }
-                  : null;
               if (v == null) {
                 return (
                   <div
@@ -161,7 +137,7 @@ export function BandGrid({
                     style={{
                       height: 30,
                       borderRadius: 3,
-                      background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                      background: EMPTY_CELL_FILL,
                       ...highlight,
                       ...staggerStyle,
                     }}
@@ -176,7 +152,7 @@ export function BandGrid({
                   className={cellClass}
                   onMouseEnter={showTip}
                   onMouseMove={showTip}
-                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...highlight, ...staggerStyle }}
+                  style={{ height: 30, borderRadius: 3, background: delayRampVar(v), ...highlight, ...staggerStyle }}
                 />
               );
             })}

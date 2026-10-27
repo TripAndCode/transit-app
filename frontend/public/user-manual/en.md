@@ -245,7 +245,9 @@ Time holds **Trend**, **Routes on weekdays**, **Routes on weekends and holidays*
 
 - **Day × hour surface**: the days of the week against the hours of the day. Darker cells mean more delay, an inset ring marks a cell over the moderate or severe threshold, and a faint cell rests on few observations. “By hour” shows each hour; “By band” averages the same period by time band. Pointing at a cell keeps only its hour column and weekday row, and the other charts pick out the same weekday. The sentence above the grid names the day and time band that ran latest over the period.
 - The daily chart: the average delay day by day, with a dashed 7-day average and a “Schedule change” mark where a new timetable took effect. A rising line means delays are growing. Drag across the chart to narrow the period (“Drag across the chart to narrow the period”); “Reset period” undoes it.
-- **Time-band heatmap**: hours 0–23 down the side, dates along the bottom. Darker means more delay, and an outline marks the most severe cells. Click a cell to narrow the screen to that day and time band.
+- **Time-band heatmap**: hours 0–23 down the side, dates along the bottom. Darker means more delay. Click a cell to narrow the screen to that day and time band.
+
+The shading has five steps, “under 1.5 min”, “1.5–2.5 min”, “2.5–3.5 min”, “3.5–5 min” and “5 min or more”, shown in each chart’s legend; the same minutes are the same colour on every screen. The time bands are the same as the scope sentence’s time-of-day choices: late night 0–5h, morning 5–9h, late morning 9–12h, midday 12–14h, afternoon 14–17h, evening 17–20h and night 20–24h.
 
 A trend needs more than one day. For a one-day period, only the heatmap is shown, with a suggestion to pick a longer period.
 

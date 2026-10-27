@@ -10,7 +10,6 @@ import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
 import { HeatSurface } from "./HeatSurface";
 import { BAND_ORDER } from "../../api/timeBands";
 import { type ForecastOverviewGridCell, type TrendDay } from "../../api/types";
-import { DELAY_THRESHOLDS } from "../../styles/tokens";
 
 // Each chart is wrapped so its own function body counts its renders. React's
 // <Profiler> cannot stand in for this: a re-render a consumer picks up through
@@ -204,26 +203,6 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
     expect(container.querySelector("[data-testid='daily-dot'][data-index='0']")!.classList).toContain("focus-dim-opacity");
     expect(heatCell(container, MON, 8).classList).toContain("focus-dim-fill");
     expect(surfaceCell(container, 1).classList).toContain("focus-dim-opacity");
-  });
-
-  it("dims a severe outline together with its heat cell", () => {
-    const { container } = renderWithProviders(
-      <MemoryRouter>
-        <TrendFocusProvider>
-          <DailyChart days={DAYS} />
-          <HourlyHeatmap
-            cells={[
-              { date: MON, hour: 8, avg_min: 2, samples: 100 },
-              { date: TUE, hour: 8, avg_min: DELAY_THRESHOLDS.severe + 1, samples: 100 },
-            ]}
-          />
-        </TrendFocusProvider>
-      </MemoryRouter>,
-    );
-    fireEvent.mouseEnter(container.querySelector("[data-testid='daily-day'][data-index='0']")!);
-    const outline = container.querySelector("[data-testid='heat-severe-outline']")!;
-    expect(outline.classList).toContain("focus-dim-stroke");
-    expect(dimmedByCss(container, outline)).toBe(true);
   });
 
   it("leaves a chart rendered outside the provider inert", () => {

@@ -761,11 +761,10 @@ summary::-webkit-details-marker { display: none; }
 /* The channels a crossfiltered mark dims through, one per mark kind so the
    dim never shares a channel with a data-driven opacity or an entrance fade:
    daily bars/dots and heat-surface cells ride `opacity` (min with their
-   resting value), heat cells `fill-opacity` (their `opacity` is the heat ramp
-   and its entrance fade), and a heat cell's severe outline `stroke-opacity`. */
+   resting value), and heat cells `fill-opacity` (their `opacity` is their
+   entrance fade). */
 .focus-dim-opacity { opacity: min(var(--mark-opacity), var(--focus-dim)); }
 .focus-dim-fill { fill-opacity: var(--focus-dim); }
-.focus-dim-stroke { stroke-opacity: min(0.9, var(--focus-dim)); }
 
 /* ---------- Shared entrance animations ----------
    These live here rather than in a tab stylesheet so every route can use

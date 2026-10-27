@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { BandGrid, Legend } from "./DowBandGrid";
+import { BandGrid } from "./DowBandGrid";
 import { BAND_ORDER } from "../../api/timeBands";
 import { type ForecastOverviewGridCell } from "../../api/types";
-import { DELAY_THRESHOLDS } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []): ForecastOverviewGridCell[] {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -31,7 +31,6 @@ describe("BandGrid keyboard and screen-reader access", () => {
         ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "forenoon", v: 6.8 }])}
         dayLabel={(d) => `Day${d}`}
-        colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
@@ -54,7 +53,6 @@ describe("BandGrid keyboard and screen-reader access", () => {
         ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "forenoon", v: 6.8 }])}
         dayLabel={(d) => `Day${d}`}
-        colorFor={() => "#000"}
         onTip={onTip}
         onLeave={onLeave}
       />,
@@ -95,7 +93,7 @@ describe("BandGrid keyboard and screen-reader access", () => {
 
 describe("BandGrid", () => {
   it("heads each column with the time-band filter's own band, named over its hours", () => {
-    render(<BandGrid ariaLabel="Grid" grid={fullGrid([])} dayLabel={String} colorFor={() => "#000"} onTip={vi.fn()} onLeave={vi.fn()} />);
+    render(<BandGrid ariaLabel="Grid" grid={fullGrid([])} dayLabel={String} onTip={vi.fn()} onLeave={vi.fn()} />);
     const heads = screen.getAllByRole("columnheader");
     expect(heads.map((h) => h.getAttribute("aria-label"))).toEqual([
       "Late night 0–5h",
@@ -117,7 +115,6 @@ describe("BandGrid", () => {
         ariaLabel="Grid"
         grid={fullGrid([])}
         dayLabel={() => "Wed"}
-        colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
@@ -133,7 +130,6 @@ describe("BandGrid", () => {
         ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "forenoon", v: 6.8 }])}
         dayLabel={(d) => String(d)}
-        colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
@@ -147,13 +143,12 @@ describe("BandGrid", () => {
         ariaLabel="Grid"
         grid={fullGrid([{ dow: 2, band: "evening", v: 9.0, n: 5 }])}
         dayLabel={(d) => String(d)}
-        colorFor={() => "#abc"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
     );
     const cells = screen.getAllByTestId("ov-band-cell");
-    const populated = cells.find((c) => (c as HTMLElement).style.background === "rgb(170, 187, 204)");
+    const populated = cells.find((c) => (c as HTMLElement).style.background === delayRampVar(9.0));
     expect(populated).toBeTruthy();
     // The target opacity a low-confidence cell fades in *to* is carried as a
     // CSS custom property (--cell-opacity), consumed by the .chart-cell-enter
@@ -170,7 +165,6 @@ describe("BandGrid", () => {
     });
     const props = {
       dayLabel: (d: number) => String(d),
-      colorFor: () => "#000",
       onTip: vi.fn(),
       onLeave: vi.fn(),
     };
@@ -190,7 +184,6 @@ describe("BandGrid", () => {
         ariaLabel="Grid"
         grid={fullGrid([{ dow: 1, band: "forenoon", v: 6.8 }])}
         dayLabel={(d) => String(d)}
-        colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
@@ -201,18 +194,8 @@ describe("BandGrid", () => {
   });
 });
 
-describe("Legend", () => {
-  it("renders 5 gradient swatches with min/max/unit labels", () => {
-    const { container } = render(<Legend min={1.2} max={3.3} unit="min" colorFor={() => "#123"} />);
-    expect(screen.getByText("1.2")).toBeTruthy();
-    expect(screen.getByText("3.3")).toBeTruthy();
-    expect(screen.getByText("min")).toBeTruthy();
-    expect(container.querySelectorAll("span[style*='width: 14px']")).toHaveLength(5);
-  });
-});
-
-describe("BandGrid severity outline", () => {
-  it("outlines a cell at or above the severe threshold instead of recolouring it", () => {
+describe("BandGrid shading", () => {
+  it("shades each band by the shared delay steps, with no outline over a heavy one", () => {
     render(
       <BandGrid
         ariaLabel="Grid"
@@ -221,14 +204,14 @@ describe("BandGrid severity outline", () => {
           { dow: 2, band: "forenoon", v: 1.0 },
         ])}
         dayLabel={(d) => String(d)}
-        colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
       />,
     );
-    const outlined = screen
-      .getAllByTestId("ov-band-cell")
-      .filter((c) => (c as HTMLElement).style.boxShadow.includes("--delay-severe"));
-    expect(outlined).toHaveLength(1);
+    const cells = screen.getAllByTestId("ov-band-cell") as HTMLElement[];
+    const backgrounds = cells.map((c) => c.style.background);
+    expect(backgrounds).toContain(delayRampVar(DELAY_THRESHOLDS.severe + 1));
+    expect(backgrounds).toContain(delayRampVar(1.0));
+    expect(cells.some((c) => c.style.boxShadow.includes("--delay-severe"))).toBe(false);
   });
 });

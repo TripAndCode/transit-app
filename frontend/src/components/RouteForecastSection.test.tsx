@@ -6,7 +6,7 @@ import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
 import { BAND_ORDER } from "../api/timeBands";
 import { type ForecastDay, type ForecastOverview } from "../api/types";
-import { calmDelayColor } from "../styles/tokens";
+import { delayRampVar } from "../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []) {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -296,9 +296,9 @@ describe("RouteForecastSection", () => {
     );
     const fill = (row: HTMLElement) => (row.children[1].firstElementChild as HTMLElement).style.background;
     const [worse, better] = screen.getAllByTestId("ranked-route");
-    expect(fill(better)).toBe(calmDelayColor(7.3));
+    expect(fill(better)).toBe(delayRampVar(7.3));
     expect(fill(better)).toBe(fill(worse));
-    expect(fill(better)).not.toBe(calmDelayColor(0));
+    expect(fill(better)).not.toBe(delayRampVar(0));
   });
 
   it("dates a chosen route's full day × hour rows and its by-day bars where its forecast covers them", () => {
