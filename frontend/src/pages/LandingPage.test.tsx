@@ -88,6 +88,14 @@ describe("LandingPage", () => {
     expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
   });
 
+  it("offers sign-in, not the guest entry, while the session is still loading", () => {
+    mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
+    renderLanding();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
+    expect(screen.queryByText(/to save your view settings/)).toBeNull();
+  });
+
   it("promises no sign-in-free entry before the configuration says so", () => {
     mockUseConfig.mockReturnValue({ data: undefined });
     renderLanding();

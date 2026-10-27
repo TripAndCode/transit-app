@@ -15,8 +15,8 @@ type Polyline = {
   at: (u: number) => Point2;
 };
 
-type VehicleMode = "bus" | "train" | "tram";
-export type RouteKey = "rapid" | "local" | "tram3" | "bus12" | "bus7" | "bus3";
+type VehicleMode = "bus" | "train";
+export type RouteKey = "rapid" | "local" | "bus5" | "bus12" | "bus7" | "bus3";
 export type StopKey = "konan" | "shiyakusho" | "central" | "honmachi" | "higashidai" | "minatomachi";
 
 /** A trip dot: sits at its latest reported stop and jumps to `nextU` when
@@ -76,7 +76,7 @@ function smooth(control: readonly Point2[], stepsPerSpan = 12): Point2[] {
   return out;
 }
 
-const tramTrack: Point2[] = Array.from({ length: 28 }, (_, i) => {
+const coastRoute: Point2[] = Array.from({ length: 28 }, (_, i) => {
   const x = -27 + i * 2;
   return [x, coastZ(x) + 3];
 });
@@ -84,7 +84,7 @@ const tramTrack: Point2[] = Array.from({ length: 28 }, (_, i) => {
 export const ROUTES: readonly { key: RouteKey; mode: VehicleMode; path: Polyline }[] = [
   { key: "rapid", mode: "train", path: polyline(smooth([[-40, 22], [-16, 18], [-4, 14], [6, 12], [18, 16], [40, 26]])) },
   { key: "local", mode: "train", path: polyline(smooth([[-1, 50], [-3, 30], [-4, 14], [-1, 5], [7, 1]])) },
-  { key: "tram3", mode: "tram", path: polyline(tramTrack) },
+  { key: "bus5", mode: "bus", path: polyline(coastRoute) },
   { key: "bus12", mode: "bus", path: polyline([[-22, 3], [-12, 7], [-4, 14], [4, 24], [10, 38]]) },
   { key: "bus7", mode: "bus", path: polyline([[22, 2], [14, 8], [6, 12], [0, 22], [-12, 30], [-24, 34]]) },
   { key: "bus3", mode: "bus", path: polyline([[-28, 28], [-14, 26], [-3, 30], [12, 28], [28, 33]]) },
@@ -135,7 +135,7 @@ export const KPI = { observed: 1284, delayedFivePlus: 37, onTimePct: 91 } as con
 export const QUEUE_ROWS: readonly { route: RouteKey; stop: StopKey; delay: number }[] = [
   { route: "bus12", stop: "honmachi", delay: SELECTED_TRIP.delay },
   { route: "bus7", stop: "higashidai", delay: 4 },
-  { route: "tram3", stop: "minatomachi", delay: 3 },
+  { route: "bus5", stop: "minatomachi", delay: 3 },
 ];
 
 export const OVERVIEW = {
@@ -147,7 +147,7 @@ export const OVERVIEW = {
   routesToCheck: [
     { route: "bus12", delay: 6.6 },
     { route: "bus7", delay: 4.6 },
-    { route: "tram3", delay: 3.3 },
+    { route: "bus5", delay: 3.3 },
     { route: "rapid", delay: 1.9 },
   ],
 } as const satisfies {

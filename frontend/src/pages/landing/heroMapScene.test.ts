@@ -31,8 +31,8 @@ describe("polyline", () => {
 });
 
 describe("sample scene", () => {
-  it("runs all three modes", () => {
-    expect(new Set(ROUTES.map((r) => r.mode))).toEqual(new Set(["bus", "train", "tram"]));
+  it("runs no tram, since no feed the app reads carries one", () => {
+    expect(new Set(ROUTES.map((r) => r.mode))).toEqual(new Set(["bus", "train"]));
   });
 
   it("keeps every trip on land and moves each one forward on refresh", () => {

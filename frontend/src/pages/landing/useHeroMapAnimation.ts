@@ -51,13 +51,19 @@ const MAX_PIXEL_RATIO = 2;
 const MAX_STEP_MS = 100;
 
 /** Where the scene stands: playing, paused by the visitor, finished after
- *  its one pass, or a still frame that never moves (reduced motion). */
+ *  its one pass, or still (reduced motion, or no 2D canvas to draw on). */
 export type HeroPlayback = "playing" | "paused" | "ended" | "still";
 
 type Controls = { pause: () => void; resume: () => void; replay: () => void };
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Whether the scene will move at all: motion allowed, and a 2D canvas to
+ *  draw it on (jsdom and canvas-less browsers have none). */
+function scenePlays(): boolean {
+  return !prefersReducedMotion() && document.createElement("canvas").getContext("2d") != null;
 }
 
 /** Plays the hero's sequence once on a caller-owned canvas and stops on its
@@ -71,7 +77,7 @@ export function useHeroMapAnimation(
   canvasRef: RefObject<HTMLCanvasElement | null>,
   labels: HeroLabels,
 ): { playback: HeroPlayback; toggle: () => void } {
-  const [playback, setPlayback] = useState<HeroPlayback>(() => (prefersReducedMotion() ? "still" : "playing"));
+  const [playback, setPlayback] = useState<HeroPlayback>(() => (scenePlays() ? "playing" : "still"));
   // The running loop's controls, set by the effect that owns the loop.
   const controls = useRef<Controls | null>(null);
 

@@ -7,7 +7,7 @@ import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
 import { showsLabel } from "./axisLabels";
 import { useDrawOn } from "../charts/ChartEnter";
-import { fitLabel, svgTextMeasurer } from "../charts/labelFit";
+import { fitLabel, useSvgTextMeasurer } from "../charts/labelFit";
 import { niceAxis } from "../charts/niceAxis";
 
 /** The drawing's size when no width is given; the page then scales it to
@@ -76,6 +76,7 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
   // like a plain solid line forever after.
   const lineRef = useRef<SVGPathElement | null>(null);
   useDrawOn(lineRef, stops.length > 0);
+  const measure = useSvgTextMeasurer(LABEL_SIZE);
   const low = Math.min(0, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const axis = niceAxis(low, high, 6);
@@ -88,7 +89,7 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
     stops.map((_, i) => x(i)),
     stops.flatMap((_, i) => (showsLabel(i, stops.length, target) ? [i] : [])),
     viewWidth,
-    svgTextMeasurer(LABEL_SIZE),
+    measure,
   );
   const y = (n: number) => 280 - (n - axis.low) / (axis.high - axis.low) * 240;
   function path(values: (number | null)[]) {

@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 const ELLIPSIS = "…";
 
 /** `text` whole when `measure` says it fits `budget`; otherwise its longest
@@ -17,16 +19,57 @@ export function fitLabel(text: string, budget: number, measure: (text: string) =
   return chars.slice(0, fits).join("") + ELLIPSIS;
 }
 
-/** A width function for SVG text at `fontSize` in the page's body font, in
- *  the units the size is given in, so a viewBox-unit size measures in
- *  viewBox units whatever the chart is scaled to. Null where nothing can
- *  measure text (no OffscreenCanvas, as in jsdom); the caller then draws
- *  labels whole. */
-export function svgTextMeasurer(fontSize: number): ((text: string) => number) | null {
+type Measure = (text: string) => number;
+
+/** One measurer per font size and font state, so a chart measured in a
+ *  fallback font measures again once the web fonts have loaded. */
+const measurers = new Map<string, Measure>();
+
+function measurer(fontSize: number, fontsLoaded: boolean): Measure | null {
   if (typeof OffscreenCanvas === "undefined") return null;
+  const key = `${fontSize}/${fontsLoaded}`;
+  const cached = measurers.get(key);
+  if (cached) return cached;
   const ctx = new OffscreenCanvas(1, 1).getContext("2d");
   if (!ctx) return null;
-  const family = getComputedStyle(document.body).fontFamily || "sans-serif";
-  ctx.font = `${fontSize}px ${family}`;
-  return (text) => ctx.measureText(text).width;
+  ctx.font = `${fontSize}px ${getComputedStyle(document.body).fontFamily || "sans-serif"}`;
+  const measure: Measure = (text) => ctx.measureText(text).width;
+  measurers.set(key, measure);
+  return measure;
+}
+
+/** Whether the page's web fonts have finished loading: read on first use,
+ *  then flipped once by `document.fonts.ready` for every subscriber. A page
+ *  without a FontFaceSet (jsdom) counts as loaded. */
+let fontsLoaded: boolean | null = null;
+const fontListeners = new Set<() => void>();
+
+function fontsLoadedNow(): boolean {
+  if (fontsLoaded === null) {
+    const fonts = typeof document === "undefined" ? undefined : document.fonts;
+    fontsLoaded = !fonts || fonts.status === "loaded";
+    if (!fontsLoaded) {
+      void fonts!.ready.then(() => {
+        fontsLoaded = true;
+        for (const listener of fontListeners) listener();
+      });
+    }
+  }
+  return fontsLoaded;
+}
+
+function subscribeFonts(listener: () => void): () => void {
+  fontListeners.add(listener);
+  return () => fontListeners.delete(listener);
+}
+
+/** A width function for SVG text at `fontSize` in the page's body font, in
+ *  the units the size is given in, so a viewBox-unit size measures in
+ *  viewBox units whatever the chart is scaled to. A new one comes once the
+ *  web fonts load, re-rendering the caller. Null where nothing can measure
+ *  text (no OffscreenCanvas, as in jsdom); the caller then draws labels
+ *  whole. */
+export function useSvgTextMeasurer(fontSize: number): Measure | null {
+  const loaded = useSyncExternalStore(subscribeFonts, fontsLoadedNow, () => true);
+  return measurer(fontSize, loaded);
 }

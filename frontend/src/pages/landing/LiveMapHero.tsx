@@ -25,7 +25,7 @@ export function LiveMapHero() {
     routes: {
       rapid: t("landing.hero_map.routes.rapid"),
       local: t("landing.hero_map.routes.local"),
-      tram3: t("landing.hero_map.routes.tram3"),
+      bus5: t("landing.hero_map.routes.bus5"),
       bus12: t("landing.hero_map.routes.bus12"),
       bus7: t("landing.hero_map.routes.bus7"),
       bus3: t("landing.hero_map.routes.bus3"),

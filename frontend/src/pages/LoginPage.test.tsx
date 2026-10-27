@@ -144,6 +144,8 @@ describe("LoginPage", () => {
     mockConfig = { auth_enabled: true, local_admin_enabled: false, login_required: false };
     renderLogin("/login?next=/agencies/8/pulse");
     expect(screen.getByRole("link", { name: /Use without signing in/ })).toHaveAttribute("href", "/agencies/8/pulse");
+    const css = readFileSync(resolve(process.cwd(), "src/pages/LoginPage.css"), "utf8");
+    expect(decl(ruleBody(css, ".login-card__guest a {"), "text-decoration")).toBe("underline");
   });
 
   it("offers no way past sign-in when the deployment requires it", () => {

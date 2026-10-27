@@ -23,10 +23,10 @@ export function LandingPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const { data: config } = useConfig();
-  // Only a configuration known to let signed-out visitors in sends a guest
-  // to "/": while it is unknown, or when sign-in is required, "/" would only
-  // bounce them back here.
-  const guest = !session && config != null && !config.login_required;
+  // Only a visitor known to be signed out, on a configuration known to let
+  // signed-out visitors in, is sent to "/" as a guest: while either is
+  // unknown, or when sign-in is required, the CTA stays sign-in.
+  const guest = session === null && config != null && !config.login_required;
   return (
     <div className="landing-shell">
       <section className="landing-hero">

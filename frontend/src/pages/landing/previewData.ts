@@ -1,12 +1,9 @@
-// Static, deterministic fixtures for the landing page's scroll narrative
-// (`ScrollNarrative.tsx`). None of this is fetched -- the narrative renders
-// before sign-in, with no agency/session context to query real aggregates
-// for, so every figure here is illustrative example data feeding the real
-// chart components, not a snapshot of anything real.
-//
-// All three charts show one sample route: route 12 of the hero's fictional
-// city, toward 北町, so a stop carries the same figure and the same name in
-// every chart. Names are locale keys under `landing.hero_map.stops`.
+// Illustrative fixtures for the landing page's scroll narrative, never
+// fetched: it renders before sign-in, with no agency to query.
+
+// One sample route, route 12 of the hero's fictional city toward 北町, so a
+// stop carries the same figure and name in the stop chart and in the Ask
+// evidence. Names are locale keys under `landing.hero_map.stops`.
 
 import type { RouteShapeStop, TrendDay } from "../../api/types";
 import type { StopEvidence } from "../../tabs/ask/stopEvidence";

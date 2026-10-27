@@ -53,7 +53,7 @@ const PALETTE: HeroPalette = {
 const LABELS: HeroLabels = {
   screens: { live: "tag-live", period: "tag-period" },
   captions: { 0: "cap-live", 1: "cap-trip", 2: "cap-play", 3: "cap-overview" },
-  routes: { rapid: "Rapid", local: "Local", tram3: "Tram 3", bus12: "Route 12", bus7: "Route 7", bus3: "Route 3" },
+  routes: { rapid: "Rapid", local: "Local", bus5: "Route 5", bus12: "Route 12", bus7: "Route 7", bus3: "Route 3" },
   stops: { konan: "Konan", shiyakusho: "City Hall", central: "Central", honmachi: "Honmachi", higashidai: "Higashidai", minatomachi: "Minato" },
   queueTitle: "queue-title",
   kpi: { observed: "kpi-observed", delayedFivePlus: "kpi-delayed", onTime: "kpi-ontime" },

@@ -28,6 +28,8 @@ describe("LiveMapHero", () => {
     const { container, unmount } = renderHero();
     const canvas = container.querySelector("canvas");
     expect(canvas).toHaveAttribute("aria-hidden", "true");
+    // Nothing will move, so nothing offers to pause it.
+    expect(screen.queryByRole("button")).toBeNull();
     expect(() => unmount()).not.toThrow();
   });
 
