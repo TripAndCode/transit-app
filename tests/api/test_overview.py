@@ -1592,11 +1592,13 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     """
     # Seed agg_daily_trend rows for headline / movers / concentration /
     # service_split / sparkline (fast-path callers).
+    # 120 observations clear the routes-to-check floor, and the baseline row's
+    # 10 the movers' one, so both lists, and the list's change, have a route.
     for i in range(4):
         d = date(2026, 5, 18) + timedelta(days=i)
-        await _seed_agg_daily(aconn, aagency_id, d, "R_PP", "平日", 2.0 + i * 0.5, 5)
+        await _seed_agg_daily(aconn, aagency_id, d, "R_PP", "平日", 2.0 + i * 0.5, 30)
     # One baseline-week row so delta is non-None.
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 11), "R_PP", "平日", 1.5, 5)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 11), "R_PP", "平日", 1.5, 10)
 
     # Seed agg_hour_daily for the peak_hour profile (fast path).
     await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 4.0, 5)
@@ -1623,6 +1625,8 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     assert pool_out["headline"] == seq_out["headline"]
     assert pool_out["movers"] == seq_out["movers"]
     assert pool_out["concentration"] == seq_out["concentration"]
+    # The pool path hands the list its window before as well.
+    assert pool_out["top_delayed"]["routes"][0]["delta_min"] is not None
     assert pool_out["top_delayed"] == seq_out["top_delayed"]
     assert pool_out["peak_hour"] == seq_out["peak_hour"]
     assert pool_out["peak_hour_weekday"] == seq_out["peak_hour_weekday"]
@@ -1947,6 +1951,30 @@ async def _seed_update(aconn, agency_id, when, route_code, dep_delay, *, sched="
         seq,
         dep_delay,
     )
+
+
+@pytest.mark.asyncio
+async def test_slow_path_top_delayed_leaves_out_a_thinly_observed_route(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
+):
+    """The grain-derived list applies the same floor as the aggregate path."""
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
+    when = datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc)
+    for seq, dep in enumerate([120, 120, 120], start=1):
+        await _seed_update(aconn, aagency_id, when, "R_SEEN", dep, seq=seq)
+    for seq, dep in enumerate([600, 600], start=1):
+        await _seed_update(aconn, aagency_id, when, "R_THIN", dep, seq=seq)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
+    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["R_SEEN"]
+    assert out["top_delayed"]["route_count"] == 1
+    assert out["top_delayed"]["min_samples"] == 3
 
 
 @pytest.mark.asyncio

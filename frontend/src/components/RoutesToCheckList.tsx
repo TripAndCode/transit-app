@@ -38,7 +38,7 @@ function signedMinutes(delta: number): string {
 }
 
 /** The Routes ranking over the list's own days, at its default floor and
- *  order, so it opens on the same routes ranked the same way. */
+ *  order, so it lists the same routes, worst first. */
 function rankingHref(agencyId: number, search: string, from: string, to: string): string {
   const params = new URLSearchParams(search);
   params.set("from", from);
