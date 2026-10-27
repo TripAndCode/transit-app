@@ -1128,8 +1128,11 @@
     },
     "dow_band": {
       "empty": "No data for this period.",
-      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest ({{avg}})",
-      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest ({{avg}})"
+      "worst_hour_one": "Over the past day, the latest hour was {{day}} {{hour}}:00 ({{avg}}).",
+      "worst_hour_other": "Over the past {{count}} days, the latest hour was {{day}} {{hour}}:00 ({{avg}}).",
+      "worst_band": "By time band, {{day}} {{band}} ran latest ({{avg}}).",
+      "worst_band_only_one": "Over the past day, by time band, {{day}} {{band}} ran latest ({{avg}}).",
+      "worst_band_only_other": "Over the past {{count}} days, by time band, {{day}} {{band}} ran latest ({{avg}})."
     },
     "heat_surface": {
       "title": "Day × hour surface",

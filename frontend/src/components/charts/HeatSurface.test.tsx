@@ -7,6 +7,7 @@ import { HeatSurface } from "./HeatSurface";
 import { TrendFocusProvider } from "./TrendFocusContext";
 import { useTrendFocus } from "./trendFocus";
 import type { ForecastOverviewGridCell } from "../../api/types";
+import i18n from "../../i18n";
 
 // The component's own function body counts its renders (see crossfilter.test.tsx
 // for why a <Profiler> cannot stand in for this).
@@ -150,9 +151,36 @@ describe("HeatSurface", () => {
     screen.getByRole("grid").focus();
     expect(document.activeElement).toBe(cellAt(3, 5));
   });
-  it("names the worst weekday band over the range", () => {
-    renderWithProviders(<HeatSurface hourly={hourly} grid={grid} worst={{ dow: 1, band: "morning", expected_avg_min: 2, samples: 10, source: "baseline" }} rangeDays={14} />);
-    expect(screen.getByText(/Over the past 14 days, Mon .* runs latest \(avg 2\.0 min late\)/)).toBeTruthy();
+  it("names the single latest hour first, then the band it pools into with that band's hours", () => {
+    const busy = [
+      { date: "2026-10-09", hour: 18, avg_min: 8.5, samples: 400 },
+      { date: "2026-10-09", hour: 17, avg_min: 5.0, samples: 400 },
+      { date: "2026-10-05", hour: 8, avg_min: 3.0, samples: 400 },
+    ];
+    renderWithProviders(
+      <HeatSurface hourly={busy} grid={grid} worst={{ dow: 5, band: "evening", expected_avg_min: 6.2, samples: 1200, source: "baseline" }} rangeDays={30} />,
+    );
+    const headline = screen.getByTestId("heat-surface-worst");
+    expect(headline).toHaveTextContent("Over the past 30 days, the latest hour was Fri 18:00 (avg 8.5 min late).");
+    expect(headline).toHaveTextContent("By time band, Fri Evening 17–20h ran latest (avg 6.2 min late).");
+  });
+  it("names the band alone when no single hour has enough observations to name", () => {
+    renderWithProviders(<HeatSurface hourly={hourly} grid={grid} worst={{ dow: 1, band: "morning", expected_avg_min: 2, samples: 40, source: "baseline" }} rangeDays={14} />);
+    expect(screen.getByTestId("heat-surface-worst")).toHaveTextContent("Over the past 14 days, by time band, Mon Morning 5–9h ran latest (avg 2.0 min late).");
+  });
+  it("names the hour in Japanese as 金曜18時台 and the band with its hours", async () => {
+    const busy = [{ date: "2026-10-09", hour: 18, avg_min: 8.5, samples: 400 }];
+    await i18n.changeLanguage("ja");
+    try {
+      renderWithProviders(
+        <HeatSurface hourly={busy} grid={grid} worst={{ dow: 5, band: "evening", expected_avg_min: 6.2, samples: 1200, source: "baseline" }} rangeDays={30} />,
+      );
+      const headline = screen.getByTestId("heat-surface-worst");
+      expect(headline).toHaveTextContent("過去30日間で最も遅れたのは金曜18時台（平均8.5分の遅れ）。"); // i18n-ignore: asserting the ja copy
+      expect(headline).toHaveTextContent("時間帯でまとめると金曜の夕 17〜20時（平均6.2分の遅れ）。"); // i18n-ignore: asserting the ja copy
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 });
 

@@ -4,13 +4,18 @@
 .heat-surface__seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 999px; overflow: hidden; background: var(--bg-surface); }
 .heat-surface__seg button { border: 0; background: transparent; padding: 5px 10px; font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 .heat-surface__seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
-.heat-surface__worst { margin: 0 0 10px; color: var(--text-secondary); font-size: var(--text-sm); }
+.heat-surface__worst { margin: 0 0 10px; color: var(--text-secondary); font-size: var(--text-sm); word-break: auto-phrase; }
+.heat-surface__worst-hour { display: block; color: var(--text-primary); }
+.heat-surface__worst-band { display: block; }
 .heat-surface { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; }
 /* Rows exist for the grid's accessibility tree only; the cells lay out on
    .heat-surface's own 25 columns. */
 .heat-surface__row { display: contents; }
 .heat-surface__lab { font-size: var(--text-xs); color: var(--text-tertiary); display: flex; align-items: center; }
-.heat-surface__hl { font-size: var(--text-xs); color: var(--text-tertiary); text-align: center; }
+/* nowrap: on a phone a column is narrower than "10", and a wrapping label
+   stacks its digits into "1/0". The odd hours are hidden there, so a whole
+   label has two columns of room. */
+.heat-surface__hl { font-size: var(--text-xs); color: var(--text-tertiary); text-align: center; white-space: nowrap; }
 /* --c and --heat-ring are set per cell. Colour and inset depth morph on the
    data-change token; the dim is feedback and rides --dur-1. Nothing here
    changes a size: the ring is an inset shadow, hover is an outline. */

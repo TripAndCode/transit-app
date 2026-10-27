@@ -82,6 +82,20 @@ export function bandThin(grid: readonly BandCell[], observed: Surface): Thin {
   return thin;
 }
 
+/** The weekday and hour with the highest pooled delay, passing over a cell
+ *  too few observations back, the same rule that keeps a thin band out of
+ *  the band headline. A tie goes to the earlier weekday and hour. */
+export function worstHour(profile: { surface: Surface; thin: Thin }): { dow: number; hour: number; avg_min: number } | null {
+  let worst: { dow: number; hour: number; avg_min: number } | null = null;
+  profile.surface.forEach((row, d) =>
+    row.forEach((v, h) => {
+      if (v == null || profile.thin[d][h]) return;
+      if (worst == null || v > worst.avg_min) worst = { dow: d + 1, hour: h, avg_min: v };
+    }),
+  );
+  return worst;
+}
+
 export function surfaceHasData(surface: Surface): boolean {
   return surface.some((row) => row.some((v) => v != null));
 }

@@ -1128,8 +1128,11 @@
     },
     "dow_band": {
       "empty": "この期間のデータがありません。",
-      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）",
-      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）"
+      "worst_hour_one": "過去{{count}}日間で最も遅れたのは{{day}}曜{{hour}}時台（{{avg}}）。",
+      "worst_hour_other": "過去{{count}}日間で最も遅れたのは{{day}}曜{{hour}}時台（{{avg}}）。",
+      "worst_band": "時間帯でまとめると{{day}}曜の{{band}}（{{avg}}）。",
+      "worst_band_only_one": "過去{{count}}日間を時間帯でまとめると、最も遅れたのは{{day}}曜の{{band}}（{{avg}}）。",
+      "worst_band_only_other": "過去{{count}}日間を時間帯でまとめると、最も遅れたのは{{day}}曜の{{band}}（{{avg}}）。"
     },
     "heat_surface": {
       "title": "曜日 × 時刻の面",

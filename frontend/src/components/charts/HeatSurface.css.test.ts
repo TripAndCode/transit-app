@@ -16,6 +16,11 @@ describe("HeatSurface.css", () => {
     expect(decl(ruleBody(css, ".heat-surface__cell:hover,"), "outline")).toBe("2px solid var(--accent)");
     expect(css).not.toMatch(/translateY|--el-2/);
   });
+  it("never stacks an hour label's digits, and leaves every other one room on a phone", () => {
+    expect(decl(ruleBody(css, ".heat-surface__hl {"), "white-space")).toBe("nowrap");
+    const phone = ruleBody(css, "@media (max-width: 640px) {");
+    expect(decl(ruleBody(phone, ".heat-surface__hl:nth-child(odd) {"), "visibility")).toBe("hidden");
+  });
   it("no transition anywhere names a layout property", () => {
     for (const m of css.matchAll(/transition:([^;]+);/g)) expect(m[1]).not.toMatch(/\b(width|height|top|left|padding|margin)\b/);
   });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DOWS, HOURS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedProfile, observedSurface, ringFor, surfaceHasData } from "./heatSurfaceModel";
+import { DOWS, HOURS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedProfile, observedSurface, ringFor, surfaceHasData, worstHour } from "./heatSurfaceModel";
+import { LOW_CONFIDENCE_SAMPLES } from "../../api/types";
 
 describe("observedSurface", () => {
   it("pools cells of the same weekday and hour, weighted by samples", () => {
@@ -101,3 +102,26 @@ describe("heatSurfaceDimRules", () => {
     expect(s.every((row) => row.length === 24 && row.every((v) => v === null))).toBe(true);
   });
 });
+
+describe("worstHour", () => {
+  it("names the weekday and hour with the highest pooled delay", () => {
+    const cells = [
+      { date: "2026-10-09", hour: 18, avg_min: 8.5, samples: 400 }, // Fri
+      { date: "2026-10-09", hour: 17, avg_min: 6.0, samples: 400 },
+      { date: "2026-10-05", hour: 8, avg_min: 7.0, samples: 400 }, // Mon
+    ];
+    expect(worstHour(observedProfile(cells))).toEqual({ dow: 5, hour: 18, avg_min: 8.5 });
+  });
+  it("passes over an hour too few observations back, as the band headline does", () => {
+    const cells = [
+      { date: "2026-10-09", hour: 3, avg_min: 40, samples: LOW_CONFIDENCE_SAMPLES - 1 },
+      { date: "2026-10-09", hour: 18, avg_min: 8.5, samples: 400 },
+    ];
+    expect(worstHour(observedProfile(cells))).toEqual({ dow: 5, hour: 18, avg_min: 8.5 });
+  });
+  it("has nothing to name when every hour is thin or empty", () => {
+    expect(worstHour(observedProfile([{ date: "2026-10-09", hour: 3, avg_min: 4, samples: 2 }]))).toBeNull();
+    expect(worstHour(observedProfile([]))).toBeNull();
+  });
+});
+
