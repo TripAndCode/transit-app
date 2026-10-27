@@ -302,8 +302,8 @@
   "overview": {
     "hero_unit_min": "分",
     "section_concentration": "遅延の集中度",
-    "concentration_legend_one": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
-    "concentration_legend_other": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
+    "concentration_legend_one": "上位{{count}}路線が、集計した路線の遅延の {{pct}}% を占めています。",
+    "concentration_legend_other": "上位{{count}}路線が、集計した路線の遅延の {{pct}}% を占めています。",
     "concentration_rest_one": "残り {{count}} 路線で {{rest}}%",
     "concentration_rest_other": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
@@ -354,9 +354,9 @@
       "band_mild_truncated_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線（上位{{shown}}路線を表示）"
     },
     "concentration": {
-      "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
+      "single_route": "{{name}} が全体の 100% を占めています (集計した路線は1路線のみ)。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
-      "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占めています。"
+      "lorenz_caption": "上位 20% の路線が、集計した路線の遅延の {{pct}}% を占めています。"
     },
     "service_split": {
       "type": {
@@ -388,7 +388,7 @@
       "service_split": "サービス日別の推移"
     },
     "empty": "この期間の観測データがありません。期間を広げてください。",
-    "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
+    "concentration_explainer": "集計した各路線の遅延合計が、その総和に占める割合です。時刻表にない運行終了の系統コードと、遅れが常に0と報告される系統は集計しません。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を、曜日で平日（月〜金）と土日に分けて表示します。祝日も曜日どおりに数えます。通勤ピークと週末の傾向を比較できます。",
     "service_split_explainer": "日種別（平日・土曜・日祝、または平日・土日祝）ごとの平均遅延です。日種別は事業者の時刻表がその日に走らせたダイヤで決まります。日数か観測数が少ない日種別は「データ不足」とし、比較から外します。下の日別推移から、差が恒常的か一時的かを確認できます。",
     "never_collected": "{{agency}}のデータはまだ収集していません。",

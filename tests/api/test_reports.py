@@ -9,6 +9,7 @@ from httpx import ASGITransport
 
 from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
 from tests.conftest import _test_pool, confirm_rt_field_coverage
+from tests.fixtures.observed_route import seed_observed_route
 
 
 async def _trust_dwell_run(pool, *agency_ids):
@@ -2667,40 +2668,6 @@ async def test_the_service_filter_reads_the_agencys_timetable_days(reports_clien
         assert await ranked("土日祝", **extra) == [("RW", 7.5, 50)]
 
 
-async def _seed_observed(pool, agency_id, route_code, first, last, delay=400):
-    """A route seen every day from ``first`` to ``last``, in the daily tables
-    the retired check and each route list read."""
-    from datetime import date as _date
-    from datetime import timedelta as _td
-
-    from tests.fixtures.route_dist import seed_route_dist_day
-
-    day = _date.fromisoformat(first)
-    while day <= _date.fromisoformat(last):
-        await pool.execute(
-            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
-            "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
-            "VALUES ($1, $2, $3, '', $4, $4, 1, 25, NOW(), $5)",
-            agency_id,
-            day,
-            route_code,
-            delay,
-            delay * 25,
-        )
-        await pool.execute(
-            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
-            "sum_delay_sec, sum_late_sec) VALUES ($1, $2, $3, '', $4, 25, $5, $5)",
-            agency_id,
-            day,
-            route_code,
-            delay / 60,
-            delay * 25,
-        )
-        # Over five minutes late, so the late-departure list has it too.
-        await seed_route_dist_day(pool, agency_id, route_code, day, [delay] * 25)
-        day += _td(days=1)
-
-
 @pytest.mark.asyncio
 async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
     """A code the current timetable lacks, last seen weeks before the data
@@ -2708,8 +2675,8 @@ async def test_route_lists_leave_out_retired_codes_unless_asked(reports_client):
     rows it is, and keep it on request."""
     client, agency_id, pool = reports_client
     await pool.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, '100')", agency_id)
-    await _seed_observed(pool, agency_id, "100", "2026-09-24", "2026-10-23")
-    await _seed_observed(pool, agency_id, "OLD", "2026-09-24", "2026-09-30")
+    await seed_observed_route(pool, agency_id, "100", "2026-09-24", "2026-10-23")
+    await seed_observed_route(pool, agency_id, "OLD", "2026-09-24", "2026-09-30")
     window = "from=2026-09-24&to=2026-10-23"
 
     for report in ("ranking", "ranking_best", "on_time", "worst_5min", "dow_weekday"):
@@ -2750,10 +2717,10 @@ async def test_keeping_retired_codes_adds_only_them(reports_client):
         "INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C1'), ($1, 'C2')",
         agency_id,
     )
-    await _seed_observed(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=900)
-    await _seed_observed(pool, agency_id, "OLD_A", "2026-09-24", "2026-09-30", delay=600)
-    await _seed_observed(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=500)
-    await _seed_observed(pool, agency_id, "OLD_B", "2026-09-24", "2026-09-30", delay=100)
+    await seed_observed_route(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=900)
+    await seed_observed_route(pool, agency_id, "OLD_A", "2026-09-24", "2026-09-30", delay=600)
+    await seed_observed_route(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=500)
+    await seed_observed_route(pool, agency_id, "OLD_B", "2026-09-24", "2026-09-30", delay=100)
     window = "from=2026-09-24&to=2026-10-23&include_sparse=1"
 
     # Worst first: C1, OLD_A, C2, OLD_B. One current route is C1; nothing
@@ -2814,9 +2781,9 @@ async def test_route_lists_leave_out_zero_delay_routes_unless_asked(reports_clie
     about punctuality: the lists leave it out rather than rank it first, say
     how many of their rows it is, and keep it on request."""
     client, agency_id, pool = reports_client
-    await _seed_observed(pool, agency_id, "LATE", "2026-09-24", "2026-10-23", delay=400)
-    await _seed_observed(pool, agency_id, "PUNCTUAL", "2026-09-24", "2026-10-23", delay=30)
-    await _seed_observed(pool, agency_id, "ECHO", "2026-09-24", "2026-10-23", delay=0)
+    await seed_observed_route(pool, agency_id, "LATE", "2026-09-24", "2026-10-23", delay=400)
+    await seed_observed_route(pool, agency_id, "PUNCTUAL", "2026-09-24", "2026-10-23", delay=30)
+    await seed_observed_route(pool, agency_id, "ECHO", "2026-09-24", "2026-10-23", delay=0)
     window = "from=2026-09-24&to=2026-10-23"
 
     for report in ("ranking", "ranking_best", "on_time", "dow_weekday"):
@@ -2858,11 +2825,11 @@ async def test_each_kept_reason_adds_only_its_own_routes(reports_client):
         "INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C1'), ($1, 'C2'), ($1, 'ZERO')",
         agency_id,
     )
-    await _seed_observed(pool, agency_id, "ZERO", "2026-09-24", "2026-10-23", delay=0)
-    await _seed_observed(pool, agency_id, "BOTH", "2026-09-24", "2026-09-30", delay=0)
-    await _seed_observed(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=100)
-    await _seed_observed(pool, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=200)
-    await _seed_observed(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=300)
+    await seed_observed_route(pool, agency_id, "ZERO", "2026-09-24", "2026-10-23", delay=0)
+    await seed_observed_route(pool, agency_id, "BOTH", "2026-09-24", "2026-09-30", delay=0)
+    await seed_observed_route(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=100)
+    await seed_observed_route(pool, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=200)
+    await seed_observed_route(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=300)
     window = "from=2026-09-24&to=2026-10-23&include_sparse=1&limit=2"
 
     # Best first: BOTH and ZERO tie at 0 and break on the code, then C1, OLD, C2.

@@ -110,7 +110,22 @@ describe("ConcentrationBar", () => {
     const { container } = renderBar(
       <ConcentrationBar concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }} />,
     );
-    expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent("70-3 あさひが丘線 accounts for 100%");
+    expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent(
+      "70-3 あさひが丘線 accounts for 100% — only 1 route counted.",
+    );
     expect(container).not.toHaveTextContent("1471981638");
+  });
+
+  it("states every share as one of the delay among the routes it counts", () => {
+    const { container } = renderBar(<ConcentrationBar concentration={concentration} limit={20} variant="modal" />);
+    expect(container.querySelector(".ov-conc-headline")).toHaveTextContent(
+      "Top 2 routes carry 50% of the delay among the routes counted.",
+    );
+    expect(container.querySelector(".ov-lorenz-caption")?.textContent).toMatch(
+      /^Top 20% of routes carry \d+% of the delay among the routes counted\.$/,
+    );
+    expect(container.querySelector(".ov-modal-explainer")).toHaveTextContent(
+      "Route codes the current timetable no longer runs, and routes whose feed always reports zero delay, are not counted.",
+    );
   });
 });

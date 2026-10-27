@@ -68,6 +68,7 @@ def stages(monkeypatch):
         "_daily_sparkline": ([], None),
     }
     monkeypatch.setattr(ov, "_latest_data_date", _stage(date(2026, 5, 24)))
+    monkeypatch.setattr(ov, "left_out_unless_named", _stage({}))
     for name, value in gathered.items():
         monkeypatch.setattr(ov, name, _stage(value, name, started))
     return started
@@ -80,7 +81,8 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
     # No request connection: the pool path takes every connection it uses.
     payload = await ov.compute_overview_summary(7, ctx, None, pool=pool)
 
-    # The latest-date read ahead of the fan-out takes one, and every stage its own.
+    # The latest-date and left-out reads ahead of the fan-out share one, and
+    # every stage takes its own.
     assert pool.acquires == 11
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"

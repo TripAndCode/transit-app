@@ -16,8 +16,12 @@ describe("English pluralization", () => {
   });
 
   it("overview.concentration_legend uses the singular noun for count=1", () => {
-    expect(i18n.t("overview.concentration_legend", { count: 1, pct: 40 })).toBe("Top 1 route carries 40% of the delay.");
-    expect(i18n.t("overview.concentration_legend", { count: 2, pct: 40 })).toBe("Top 2 routes carry 40% of the delay.");
+    expect(i18n.t("overview.concentration_legend", { count: 1, pct: 40 })).toBe(
+      "Top 1 route carries 40% of the delay among the routes counted.",
+    );
+    expect(i18n.t("overview.concentration_legend", { count: 2, pct: 40 })).toBe(
+      "Top 2 routes carry 40% of the delay among the routes counted.",
+    );
   });
 
   it("overview.concentration_rest uses the singular noun for count=1", () => {

@@ -2,6 +2,11 @@
 
 Returns the full magazine payload in a single round-trip. Nothing in it is
 worded on the server, so it is the same in every language.
+
+Every route list here leaves out the codes :mod:`pipeline.route_catalog`
+names, retired codes and routes whose feed reports no delay, from what it
+lists and from every count or share beside it, unless the routes filter names
+the route.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
+from pipeline.route_catalog import pooled_left_out_codes, route_list, rows_to_fetch
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
@@ -26,10 +32,12 @@ _BREAKDOWN_SCOPE = scope_applied()
 
 # Minimum observations behind a route's peak-hour figure before it is shown.
 _PEAK_HOUR_MIN_SAMPLES = 3
+# How many routes the breakdown lists.
+_PEAK_HOUR_ROUTES = 20
 
 
 def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
-    """Top-20 routes by pooled average delay for one hour of ``agg_route_hour_dow``.
+    """Routes ranked by pooled average delay for one hour of ``agg_route_hour_dow``, worst first.
 
     One row per route: its rows for every raw service id it matched (the
     table's ``service_type``, a GTFS ``service_id``) pool together, as do its
@@ -41,10 +49,11 @@ def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
     well-evidenced once pooled, and dropping its rows first would both hide it
     and bias the average that remains.
 
-    ``by_dow`` selects the parameter shape: ``$1`` agency, ``$2`` hour, and
-    ``$3`` day-of-week only when scoping to one DOW.
+    ``by_dow`` selects the parameter shape: ``$1`` agency, ``$2`` hour, then
+    ``$3`` day-of-week only when scoping to one DOW, and last the row limit.
     """
     dow_clause = "AND dow = $3 " if by_dow else ""
+    limit = "$4" if by_dow else "$3"
     return f"""
         SELECT route_code,
                (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
@@ -55,8 +64,16 @@ def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
         GROUP BY route_code
         HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
         ORDER BY avg_min DESC NULLS LAST, route_code
-        LIMIT 20
+        LIMIT {limit}
     """
+
+
+async def _all_time_left_out(conn: asyncpg.Connection, agency_id: int) -> dict[str, frozenset[str]]:
+    """The codes the breakdown leaves out: of every code ``agg_route_hour_dow``
+    pools for the agency, those :func:`pipeline.route_catalog.pooled_left_out_codes`
+    names."""
+    rows = await conn.fetch("SELECT DISTINCT route_code FROM agg_route_hour_dow WHERE agency_id = $1", agency_id)
+    return await pooled_left_out_codes(conn, agency_id, [r["route_code"] for r in rows])
 
 
 class Headline(BaseModel):
@@ -99,7 +116,7 @@ class Movers(BaseModel):
 
 
 class ConcentrationTopRoute(BaseModel):
-    """One route's share of total agency delay."""
+    """One route's share of the delay of every route the card may list."""
 
     route_code: str
     route_short_name: str | None
@@ -107,7 +124,8 @@ class ConcentrationTopRoute(BaseModel):
 
 
 class Concentration(BaseModel):
-    """Top-20 routes plus aggregate "rest" share and rest route count.
+    """Top-20 routes plus aggregate "rest" share and rest route count, of the
+    routes the card may list.
 
     Card variant on the frontend uses the first 5; modal variant draws
     a Pareto bar list across all 20 plus a Lorenz-curve overlay.
@@ -144,8 +162,8 @@ class RouteBandCounts(BaseModel):
 class TopDelayed(BaseModel):
     """Top-5 routes by absolute avg delay, plus a count of routes averaging at
     least ``delayed_threshold_min`` late and one per routes-to-check band, all
-    over the same window the headline covers. The counts cover every route,
-    not only the five listed."""
+    over the same window the headline covers. The counts cover every route the
+    list may show, not only the five listed."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
@@ -238,13 +256,18 @@ async def peak_hour_breakdown(
     for the requested hour; either way the average is pooled from the summed
     delay and sample columns. A route whose pooled observations for the hour
     number fewer than ``_PEAK_HOUR_MIN_SAMPLES`` is excluded to suppress noise
-    from rarely observed routes. Returns at most 20 routes worst-first, ties
-    by route_code.
+    from rarely observed routes, as is every code a route list leaves out
+    (:func:`_all_time_left_out`). Returns at most ``_PEAK_HOUR_ROUTES`` routes
+    worst-first, ties by route_code.
     """
+    left_out = await _all_time_left_out(conn, agency_id)
     params: list[object] = [agency_id, hour]
     if dow is not None:
         params.append(dow)
-    rows = await conn.fetch(_peak_hour_breakdown_sql(by_dow=dow is not None), *params)
+    params.append(rows_to_fetch(_PEAK_HOUR_ROUTES, left_out))
+    rows, _ = route_list(
+        await conn.fetch(_peak_hour_breakdown_sql(by_dow=dow is not None), *params), _PEAK_HOUR_ROUTES, left_out, ()
+    )
     return PeakHourBreakdown(
         hour=hour,
         dow=dow,
