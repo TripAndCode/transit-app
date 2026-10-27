@@ -216,12 +216,15 @@ Sorted by **On-time rate**, the table is followed by “Headway quality”, whic
 Clicking a route’s name — in a report, in **Routes to check now** on Pulse, or in the Live trip list — opens that route’s page.
 
 - At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”.
+- Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
 - The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
-- **Delay by stop** shows the mean departure delay at each stop. Tick “Compare with one week earlier” to add the same weekdays one week before.
+- **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.
+- A sentence names the segment where delay grows most, and the next largest, and the chart marks the largest. A segment’s increase is the mean change for the same trips observed at both of its stops. The segment from the first stop is left out, since most feeds report a first departure as on time.
+- Tick “Compare with the previous period” to add the same number of days just before the selected ones (for Sep 24 – Oct 23, Aug 25 – Sep 23).
 - Four tabs: “Along the route” (the delay stop by stop), “Trips over time” (each trip on the most recent day the route ran), “Map” and “Stop table”. Pick a stop under “Selected stop” to see its figures.
 - **Download CSV** downloads the stop figures. **Save analysis** keeps these conditions in this browser, to reopen from **Reports → Saved analyses** (section 10-2).
 
-The figures are means along the route’s representative path. They show where delay builds up; they do not by themselves establish its cause.
+The figures are means along the chosen path. They show where delay builds up; they do not by themselves establish its cause.
 
 ---
 

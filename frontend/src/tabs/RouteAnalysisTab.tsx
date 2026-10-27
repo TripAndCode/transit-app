@@ -226,6 +226,7 @@ export function RouteAnalysisTab() {
           <div>
             {activeTab === "trend" && <div className="focus-tab-panel" role="tabpanel" id={panelId("trend")} aria-labelledby={tabId("trend")}>
               <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>― {t("selected")}</span>{compare && <span>┄ {t("previous", { days: windowDays(ctx.from, ctx.to) })}</span>}{rise && <span><span aria-hidden="true" className="route-rise__swatch" /> {t("riseHighlight")}</span>}<span>○ {t("missing")}</span><DelayBandLegend /></div>
+              <p className="focus-muted focus-chart-hint">{t("chartScrollHint", { count: stops.length })}</p>
               <div className="focus-chart-scroll"><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} highlight={rise ? { from: rise.from.stop_sequence, to: rise.to.stop_sequence } : null} /></div>
               <p className="focus-muted">{t("selected")} {formatDateRange(ctx.from, ctx.to)}{compare && ` · ${t("previous", { days: windowDays(ctx.from, ctx.to) })} ${formatDateRange(prevCtx.from, prevCtx.to)}`}</p>
             </div>}
