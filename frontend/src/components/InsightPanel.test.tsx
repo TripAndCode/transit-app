@@ -255,4 +255,43 @@ describe("InsightPanel", () => {
     expect(router.state.location.pathname).toBe("/agencies/1/routes/R1");
     expect(spy).toHaveBeenLastCalledWith(1, []);
   });
+
+  it("names its route with the app's own label, so routes sharing a number are told apart", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    const route = (route_id: string, long: string, from: string, to: string) => ({
+      route_id,
+      route_code: route_id,
+      route_short_name: "4-1",
+      route_long_name: long,
+      trip_headsigns: [],
+      origin_name: from,
+      via_name: null,
+      destination_name: to,
+      is_loop: false,
+      bidirectional: false,
+    });
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [route("857343081", "Itsukaichi South Exit", "Itsukaichi Sta.", "Yuki Lodge"), route("101622323", "Line 4", "Kencho-mae", "Niho Depot")],
+      isLoading: false,
+    } as never);
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: {
+        report_type: "trend",
+        route_code: "857343081",
+        reason_text: "Average delay on Fri 10/23 was much worse than over the 7 days before (avg 27.9 min).",
+        severity: "notable",
+        from_date: "2026-10-23",
+        to_date: "2026-10-23",
+      },
+      isPending: false,
+      error: null,
+    } as never);
+    renderPanel();
+    const label = screen.getByTestId("insight-route");
+    expect(label).toHaveTextContent("4-1");
+    expect(label).toHaveTextContent("Itsukaichi South Exit");
+    expect(label).toHaveTextContent("Yuki Lodge");
+    expect(label).not.toHaveTextContent("Line 4");
+    expect(screen.getByText(/Fri 10\/23 was much worse/)).toBeInTheDocument();
+  });
 });

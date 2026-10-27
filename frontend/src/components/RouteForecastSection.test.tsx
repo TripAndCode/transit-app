@@ -142,6 +142,17 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("fc-detail-fullgrid")).toBeInTheDocument();
   });
 
+  it("never stacks an hour label's digits, on the full grid or on the by-hour bars", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByRole("button", { name: "Show day × hour detail" }));
+    const grid = screen.getByTestId("fc-detail-fullgrid");
+    const gridAxis = within(grid).getAllByText(/^(0|6|12|18)$/);
+    expect(gridAxis).toHaveLength(4);
+    for (const label of gridAxis) expect(label).toHaveStyle({ whiteSpace: "nowrap" });
+    const barAxis = within(screen.getByTestId("fc-card-hr")).getAllByText(/^(0|6|12|18)$/);
+    for (const label of barAxis) expect(label).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();

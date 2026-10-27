@@ -97,7 +97,11 @@ What the user sees/does:
 - **Insight Panel** (right column) —
   `frontend/src/components/InsightPanel.tsx`: a single proactive suggestion
   ("this route's trend just shifted", "on-time rate dropped", etc.) whose
-  button opens that route's dossier; a suggestion once opened is not offered
+  button opens that route's dossier. The card names the route with
+  `RouteLabel`, so routes that share a number read apart, above the server's
+  `reason_text`, which names the day or days the rule judged (the agency's
+  last analyzed day, which lags the clock) and not the route. A suggestion
+  once opened is not offered
   again this session (persisted to `sessionStorage`, keyed by agency). The
   panel collapses to a narrow rail, and is switched off entirely only through
   localStorage `transit.insightPanelEnabled`; defaults on in dev builds

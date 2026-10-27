@@ -9,6 +9,8 @@ import { delayColor } from "../styles/tokens";
 import { routeHref } from "../routes/destinations";
 import { isoDaysBefore } from "../api/scope";
 import { Skeleton } from "./Skeleton";
+import { RouteLabel } from "./RouteLabel";
+import { useRouteNames } from "../api/useRouteNames";
 import { readStorage, withStorage, writeStorage } from "../utils/safeStorage";
 
 /** Days of history a suggestion's route page opens on. */
@@ -97,6 +99,10 @@ export function InsightPanel({ className }: { className?: string } = {}) {
   // suggestion, so polling it every refetchInterval would just be wasted
   // backend load for a rail the user has explicitly hidden.
   const suggestion = useSuggestion(enabled && !collapsed ? id : null, seen);
+  // The card names its route with the app's own label rather than the
+  // reason text: a short number such as "4-1" can belong to several of an
+  // agency's routes, and the label says where this one runs.
+  const names = useRouteNames(enabled && !collapsed ? id : null);
 
   if (!enabled) return null;
 
@@ -166,6 +172,9 @@ export function InsightPanel({ className }: { className?: string } = {}) {
           )}
           {!suggestion.error && suggestion.data && (
             <div>
+              <div data-testid="insight-route" style={{ fontSize: 13, marginBottom: 6 }}>
+                <RouteLabel code={suggestion.data.route_code} names={names} />
+              </div>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 8 }}>
                 <span
                   aria-hidden="true"

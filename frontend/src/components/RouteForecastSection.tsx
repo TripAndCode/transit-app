@@ -287,7 +287,9 @@ function HeatmapGrid({
         <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }} aria-hidden="true">
           <span />
           {Array.from({ length: HOURS }, (_, h) => (
-            <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
+            // nowrap: an hour column is narrower than "12" on a phone; the
+            // label overflows into its empty neighbours rather than stacking.
+            <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center", whiteSpace: "nowrap" }}>
               {h % 6 === 0 ? h : ""}
             </span>
           ))}
