@@ -19,10 +19,10 @@ flags from what is now in place, reading GTFS-JP ``routes_jp.txt`` when the
 zip has it (``pipeline.route_terminals``).
 
 Before replacing anything, a load saves and commits the outgoing timetable's
-planned trips for the days it covers before the incoming timetable starts, up
-to today (``pipeline.planned_trips``), so a reload never takes away the plan of
-a day that has run, and a day the incoming timetable covers keeps the incoming
-plan.
+planned trips for the days it covers before the incoming timetable starts
+(``pipeline.planned_trips``), so a reload never takes away the plan of a day
+that has run or will run on the outgoing timetable, and an uncaptured day the
+incoming timetable covers takes the incoming plan.
 """
 
 import csv
@@ -36,7 +36,7 @@ from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
-from pipeline.planned_trips import capture_planned_trips
+from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
 from pipeline.stop_clusters import rebuild_stop_clusters
 
@@ -55,9 +55,9 @@ _STATIC_FILE_MAP = [
     ("calendar.txt", "static_calendar", ["service_id", *WEEKDAY_COLUMNS, "start_date", "end_date"]),
 ]
 
-# Read before the per-file loop, which reuses their rows: the incoming
-# timetable's first day sets the planned-trip capture's cutoff, and the capture
-# runs before any table is replaced.
+# Read before the per-file loop, which reuses their rows: the days the incoming
+# timetable covers set the planned-trip capture's cutoff, and the capture runs
+# before any table is replaced.
 _CALENDAR_FILES = ("calendar.txt", "calendar_dates.txt")
 
 _DB_COLS = {
@@ -131,21 +131,22 @@ def _calendar_rows(raw_rows: list[list]) -> list[list]:
     return rows
 
 
-def _first_covered_day(calendar_rows: list[list], calendar_dates_rows: list[list]) -> date | None:
-    """The first day a timetable covers, under the rule ``pipeline.planned_trips``
-    counts coverage by: a ``calendar.txt`` service's start date, or a date a
-    ``calendar_dates.txt`` row names. Rows that cover no day there cover none
-    here either: a service whose range ends before it starts, and a
+def _covered_ranges(calendar_rows: list[list], calendar_dates_rows: list[list]) -> list[tuple[date, date]]:
+    """The day ranges a timetable covers, both ends inclusive, under the rule
+    ``pipeline.planned_trips`` counts coverage by: each ``calendar.txt``
+    service's range, and each day a ``calendar_dates.txt`` row names. A
     ``calendar_dates.txt`` date that is not eight ASCII digits naming a real
-    day."""
-    days = [start for *_, start, end in calendar_rows if start <= end]
+    day matches no day there, so it covers none here either. Which ranges
+    reach a capture is ``pipeline.planned_trips``'s to judge."""
+    ranges = [(start, end) for *_, start, end in calendar_rows]
     for _service_id, raw, _exception_type in calendar_dates_rows:
         if raw and re.fullmatch(r"[0-9]{8}", raw):
             try:
-                days.append(datetime.strptime(raw, "%Y%m%d").date())
+                day = datetime.strptime(raw, "%Y%m%d").date()
             except ValueError:
                 continue
-    return min(days, default=None)
+            ranges.append((day, day))
+    return ranges
 
 
 def _count_calendar_trips(cur, agency_id: int) -> None:
@@ -207,13 +208,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
         names_in_zip = set(zf.namelist())
         read_first = {name: read_static_rows(zf, name) for name in _CALENDAR_FILES if name in names_in_zip}
         calendar_rows = _calendar_rows(read_first.get("calendar.txt", []))
-        incoming_from = _first_covered_day(calendar_rows, read_first.get("calendar_dates.txt", []))
         # Before any table is replaced, trips.txt's included: the outgoing
         # timetable's plan is its calendar and its trips together. Committed
-        # now, so a concurrent analyze's capture never waits on this load. An
-        # incoming timetable covering no day leaves the outgoing one every day
-        # up to today.
-        capture_planned_trips(conn, agency_id, before=incoming_from or date.max)
+        # now, so a concurrent analyze's capture never waits on this load.
+        incoming = _covered_ranges(calendar_rows, read_first.get("calendar_dates.txt", []))
+        capture_before_reload(conn, agency_id, incoming)
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")

@@ -3,9 +3,9 @@
 The capture writes the days before today that the loaded timetable covers and
 that have no saved count yet; the day in progress is read from the loaded
 timetable until it is over. A timetable reload captures first, for the days
-before the incoming timetable starts, today included when that is later, so
-those keep the outgoing counts after it is replaced. Analyze captures on every
-run. Neither lets a failed capture stop it.
+before the incoming timetable starts, today and later days included, so those
+keep the outgoing counts after it is replaced. Analyze captures on every run.
+Neither lets a failed capture stop it.
 
 April 2026 starts on a Wednesday: the 6th and 13th are Mondays, the 11th a
 Saturday.
@@ -150,6 +150,8 @@ def test_another_agencys_timetable_is_not_captured(pg_conn, agency_id):
         (date(2026, 4, 16), date(2026, 4, 15)),
         # It reaches back before today: the days it covers are its own.
         (date(2026, 4, 12), date(2026, 4, 11)),
+        # It starts three days on: the two days between still run on the outgoing one.
+        (date(2026, 4, 18), date(2026, 4, 17)),
     ],
 )
 def test_a_reload_saves_the_outgoing_days_before_the_incoming_timetable_starts(
@@ -168,9 +170,9 @@ def test_a_reload_saves_the_outgoing_days_before_the_incoming_timetable_starts(
     load_static(_timetable_zip(tmp_path, "b", incoming_start.strftime("%Y%m%d"), "20261014", 5), agency_id, pg_conn)
     assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
 
-    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 17))
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 19))
     expected = {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
-    expected |= {d: 5 for d in _days(outgoing_through + timedelta(days=1), date(2026, 4, 16))}
+    expected |= {d: 5 for d in _days(outgoing_through + timedelta(days=1), date(2026, 4, 18))}
     assert _saved(pg_conn, agency_id) == expected
 
 
@@ -185,6 +187,22 @@ def test_a_reload_cuts_over_on_the_incoming_feeds_first_calendar_dates_day(pg_co
 
     load_static(incoming, agency_id, pg_conn)
     assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 12))}
+
+
+def test_a_year_one_date_in_the_incoming_feed_neither_breaks_the_load_nor_moves_the_cutoff(
+    pg_conn, agency_id, tmp_path, monkeypatch
+):
+    freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
+    load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
+    incoming = _timetable_zip(tmp_path, "b", "20260420", "20261014", 5)
+    with zipfile.ZipFile(incoming, "a") as zf:
+        zf.writestr("calendar_dates.txt", "service_id,date,exception_type\nALL,00010101,1\n")
+
+    load_static(incoming, agency_id, pg_conn)
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 19))}
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT start_date FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(date(2026, 4, 20),)]
 
 
 def test_the_reload_commits_its_capture_before_replacing_the_timetable(pg_conn, agency_id, tmp_path, monkeypatch):
@@ -218,7 +236,7 @@ def test_the_reload_commits_its_capture_before_replacing_the_timetable(pg_conn, 
     pg_conn.rollback()
 
     assert seen == {
-        "saved": {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 15))},
+        "saved": {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 19))},
         "calendar": [(date(2026, 4, 1),)],
     }
     assert _saved(pg_conn, agency_id) == seen["saved"]
