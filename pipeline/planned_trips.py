@@ -24,15 +24,16 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from api.range import MAX_RANGE_DAYS
 from pipeline.service_day import service_date_of
 
 logger = logging.getLogger(__name__)
 
-#: How far back a capture looks for days it has not saved yet. Every run after
-#: the first saves only the days since the one before, so this bounds the first
-#: capture of an agency, and the catch-up after a long gap, to the longest
-#: report window (``api.range.MAX_RANGE_DAYS``) ending today.
-CAPTURE_LOOKBACK_DAYS = 365
+#: How far back a capture looks for days it has not saved yet: the longest
+#: report window, ending today. Every capture after the first finds only the
+#: days since the one before, so this bounds only an agency's first capture
+#: and the catch-up after a long gap.
+CAPTURE_LOOKBACK_DAYS = MAX_RANGE_DAYS
 
 
 def plan_ctes(agency_ids: str, from_date: str, to_date: str) -> str:
