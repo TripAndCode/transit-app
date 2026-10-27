@@ -40,7 +40,13 @@ describe("SVG text floor", () => {
     const floor = Number(rule.match(/min-width:\s*(\d+)px/)![1]);
     const boxHeight = Number(rule.match(/(?:^|;)\s*height:\s*(\d+)px/)![1]);
     for (const f of ["components/analysis/StopChart.tsx", "components/analysis/PeriodChart.tsx"]) {
-      const [, vbW, vbH] = src(f).match(/viewBox="0 0 (\d+) (\d+)"/)!.map(Number);
+      // A literal viewBox, or the full-width size its constants name.
+      const code = src(f);
+      const literal = code.match(/viewBox="0 0 (\d+) (\d+)"/);
+      const constant = (name: string) => Number(code.match(new RegExp(`const ${name} = (\\d+);`))?.[1]);
+      const [vbW, vbH] = literal ? [Number(literal[1]), Number(literal[2])] : [constant("VIEW_WIDTH"), constant("VIEW_HEIGHT")];
+      expect(vbW, f).toBeGreaterThan(0);
+      expect(vbH, f).toBeGreaterThan(0);
       // At the floor the chart draws at the smaller of its width and height scales.
       const scale = Math.min(floor / vbW, boxHeight / vbH);
       for (const g of [f, "components/analysis/ChartAxis.tsx"]) {

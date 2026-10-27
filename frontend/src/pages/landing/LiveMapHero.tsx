@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Pause, Play, RotateCcw } from "lucide-react";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 import type { HeroLabels } from "./heroCanvas";
 import { OVERVIEW } from "./heroMapScene";
@@ -11,7 +12,9 @@ import { fixedTenth } from "../../utils/format";
  *  stops and the day-playback hours from the map into that panel. Every
  *  element is a real screen of the app; the figures are illustrative
  *  samples, which the canvas itself says. Decorative (`aria-hidden`) — the
- *  headline beside it carries the page's meaning. */
+ *  headline beside it carries the page's meaning. It plays once, with a
+ *  control to pause it and, once it has ended, to play it again; the
+ *  control sits outside the hidden canvas. */
 export function LiveMapHero() {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -22,7 +25,7 @@ export function LiveMapHero() {
     routes: {
       rapid: t("landing.hero_map.routes.rapid"),
       local: t("landing.hero_map.routes.local"),
-      tram3: t("landing.hero_map.routes.tram3"),
+      bus5: t("landing.hero_map.routes.bus5"),
       bus12: t("landing.hero_map.routes.bus12"),
       bus7: t("landing.hero_map.routes.bus7"),
       bus3: t("landing.hero_map.routes.bus3"),
@@ -63,7 +66,23 @@ export function LiveMapHero() {
     clock: (hour) => t("landing.hero_map.clock", { hour: String(hour).padStart(2, "0") }),
     minuteUnit: t("landing.hero_map.minute_unit"),
   };
-  useHeroMapAnimation(canvasRef, labels);
+  const { playback, toggle } = useHeroMapAnimation(canvasRef, labels);
 
-  return <canvas ref={canvasRef} className="landing-hero__canvas" aria-hidden="true" />;
+  return (
+    <>
+      <canvas ref={canvasRef} className="landing-hero__canvas" aria-hidden="true" />
+      {playback !== "still" && (
+        <button type="button" className="landing-hero__playback" onClick={toggle}>
+          {playback === "playing" ? (
+            <Pause size={14} aria-hidden="true" />
+          ) : playback === "paused" ? (
+            <Play size={14} aria-hidden="true" />
+          ) : (
+            <RotateCcw size={14} aria-hidden="true" />
+          )}
+          {t(`landing.hero_map.playback_control.${playback}`)}
+        </button>
+      )}
+    </>
+  );
 }

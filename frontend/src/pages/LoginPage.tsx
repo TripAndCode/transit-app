@@ -138,7 +138,7 @@ export function LoginPage() {
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
-        <h1 className="login-card__h1">{t("account.login.welcome_back")}</h1>
+        <h1 className="login-card__h1">{t("common.login")}</h1>
         <p className="login-card__sub">
           {config?.local_admin_enabled && !config.auth_enabled
             ? t("account.login.username_prompt")
@@ -162,7 +162,7 @@ export function LoginPage() {
           <div className="login-card__buttons">
             <button
               type="button"
-              className="login-card__btn login-card__btn--google"
+              className="login-card__btn login-card__btn--provider"
               aria-label={t("account.login.google_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("google")}
@@ -172,7 +172,7 @@ export function LoginPage() {
             </button>
             <button
               type="button"
-              className="login-card__btn login-card__btn--github"
+              className="login-card__btn login-card__btn--provider"
               aria-label={t("account.login.github_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("github")}
@@ -222,6 +222,17 @@ export function LoginPage() {
               <span>{t("account.login.local_submit")}</span>
             </button>
           </form>
+        )}
+
+        {/* Only a deployment that serves signed-out visitors offers the way
+            past sign-in; `next` is already a same-origin path. */}
+        {config != null && !config.login_required && (
+          <p className="login-card__guest">
+            <Link to={next}>
+              {t("account.login.guest_link")}
+              <span aria-hidden="true"> →</span>
+            </Link>
+          </p>
         )}
 
         {/* One sentence per language, so each locale keeps its own word order

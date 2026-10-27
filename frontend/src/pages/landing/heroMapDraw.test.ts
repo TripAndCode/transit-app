@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import type { HeroLabels, HeroPalette } from "./heroCanvas";
 import { drawHeroFrame } from "./heroMapDraw";
-import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
+import { DURATION, REPLAY_START, frameAt } from "./heroMapTimeline";
 import { WIDE_LAYOUT_MIN_WIDTH, layoutFor } from "./heroPanelDraw";
 import { KPI } from "./heroMapScene";
 import { fixedTenth } from "../../utils/format";
@@ -53,7 +53,7 @@ const PALETTE: HeroPalette = {
 const LABELS: HeroLabels = {
   screens: { live: "tag-live", period: "tag-period" },
   captions: { 0: "cap-live", 1: "cap-trip", 2: "cap-play", 3: "cap-overview" },
-  routes: { rapid: "Rapid", local: "Local", tram3: "Tram 3", bus12: "Route 12", bus7: "Route 7", bus3: "Route 3" },
+  routes: { rapid: "Rapid", local: "Local", bus5: "Route 5", bus12: "Route 12", bus7: "Route 7", bus3: "Route 3" },
   stops: { konan: "Konan", shiyakusho: "City Hall", central: "Central", honmachi: "Honmachi", higashidai: "Higashidai", minatomachi: "Minato" },
   queueTitle: "queue-title",
   kpi: { observed: "kpi-observed", delayedFivePlus: "kpi-delayed", onTime: "kpi-ontime" },
@@ -116,11 +116,11 @@ describe("drawHeroFrame", () => {
   });
 
   it("always says the figures are samples", () => {
-    for (const t of [0, LOOP_START, 8, 12, 15]) expect(textsAt(t)).toContain("sample-notice");
+    for (const t of [0, REPLAY_START, 8, 12, 15]) expect(textsAt(t)).toContain("sample-notice");
   });
 
   it("shows the live queue with the map's legend and disclosure", () => {
-    const texts = textsAt(LOOP_START);
+    const texts = textsAt(REPLAY_START);
     expect(texts).toEqual(expect.arrayContaining(["tag-live", "queue-title", "kpi-observed", "kpi-delayed", "kpi-ontime", "not-gps", "cap-live"]));
     expect(texts).toContain("Route 12　Honmachi");
   });
@@ -140,7 +140,7 @@ describe("drawHeroFrame", () => {
   });
 
   it("drops the panel and its morphs when the headline spans a narrow canvas", () => {
-    for (const t of [LOOP_START, 7.3, 10.4, 15.2]) {
+    for (const t of [REPLAY_START, 7.3, 10.4, 15.2]) {
       const texts = textsAt(t, 390, 700);
       expect(texts).not.toContain("queue-title");
       expect(texts).not.toContain("trip-chart");
@@ -150,9 +150,9 @@ describe("drawHeroFrame", () => {
 
   it("drops the numbered screen captions on a narrow canvas, which has no panel for them to name", () => {
     const captions = ["cap-live", "cap-trip", "cap-play", "cap-overview"];
-    const wide = [LOOP_START, 7.3, 10.4, 15.2].flatMap((t) => textsAt(t));
+    const wide = [REPLAY_START, 7.3, 10.4, 15.2].flatMap((t) => textsAt(t));
     expect(captions.some((c) => wide.includes(c))).toBe(true);
-    for (const t of [LOOP_START, 7.3, 10.4, 15.2]) {
+    for (const t of [REPLAY_START, 7.3, 10.4, 15.2]) {
       const texts = textsAt(t, 390, 700);
       for (const c of captions) expect(texts).not.toContain(c);
     }

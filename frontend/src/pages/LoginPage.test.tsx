@@ -11,7 +11,7 @@ import { ApiError } from "../api/client";
 import { decl, ruleBody } from "../test/cssRules";
 
 const mockApiPost = vi.fn();
-let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean } | undefined;
+let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean; login_required?: boolean } | undefined;
 let mockConfigIsError = false;
 const mockConfigRefetch = vi.fn();
 
@@ -122,9 +122,45 @@ describe("LoginPage", () => {
     expect(screen.queryByText("Sign in with your username")).toBeNull();
   });
 
-  it("keeps the account choice wording while there are accounts to choose", () => {
+  it("names the accounts to sign in with while there are accounts to choose", () => {
     renderLogin();
-    expect(screen.getByText("Choose an account to sign in")).toBeInTheDocument();
+    expect(screen.getByText("Use your Google or GitHub account")).toBeInTheDocument();
+  });
+
+  it("greets every visitor with the action, not a welcome back a first-time visitor never had", async () => {
+    renderLogin();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sign in");
+    expect(screen.queryByText("Welcome back")).toBeNull();
+    try {
+      await i18n.changeLanguage("ja");
+      await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("ログイン"));
+      expect(screen.getByText("Google または GitHub のアカウントで続けます")).toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("lets a guest leave for the page they came for when the deployment needs no sign-in", () => {
+    mockConfig = { auth_enabled: true, local_admin_enabled: false, login_required: false };
+    renderLogin("/login?next=/agencies/8/pulse");
+    expect(screen.getByRole("link", { name: /Use without signing in/ })).toHaveAttribute("href", "/agencies/8/pulse");
+    const css = readFileSync(resolve(process.cwd(), "src/pages/LoginPage.css"), "utf8");
+    expect(decl(ruleBody(css, ".login-card__guest a {"), "text-decoration")).toBe("underline");
+  });
+
+  it("offers no way past sign-in when the deployment requires it", () => {
+    mockConfig = { auth_enabled: true, local_admin_enabled: false, login_required: true };
+    renderLogin();
+    expect(screen.queryByRole("link", { name: /Use without signing in/ })).toBeNull();
+  });
+
+  it("gives Google and GitHub the same button weight", () => {
+    renderLogin();
+    const google = screen.getByRole("button", { name: "Sign in with Google" });
+    const github = screen.getByRole("button", { name: "Sign in with GitHub" });
+    expect(github.className).toBe(google.className);
+    const css = readFileSync(resolve(process.cwd(), "src/pages/LoginPage.css"), "utf8");
+    expect(css).not.toMatch(/login-card__btn--(google|github)/);
   });
 
   it("leaves a gap between the subtitle and a username form that follows it", () => {

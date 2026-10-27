@@ -1,9 +1,9 @@
-import { useEffect, useEffectEvent, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { DELAY_RAMP } from "../../styles/tokens";
 import type { HeroLabels, HeroPalette } from "./heroCanvas";
 import { drawHeroFrame } from "./heroMapDraw";
 import { isHexColor, luminance, mixHex } from "./heroMapMath";
-import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
+import { DURATION, REPLAY_START, frameAt } from "./heroMapTimeline";
 
 /** Map-only tints with no theme token (water, parks, roads, railways),
  *  chosen per theme so the basemap reads like the app's own tiles. */
@@ -50,23 +50,42 @@ const MAX_PIXEL_RATIO = 2;
  *  tab resumes where it paused instead of skipping ahead through the script. */
 const MAX_STEP_MS = 100;
 
-/** Seconds into the script for `elapsed` seconds of play: the first pass
- *  runs from 0, every later pass resumes at LOOP_START (after the fly-in). */
-export function scriptTime(elapsed: number): number {
-  if (elapsed < DURATION) return elapsed;
-  return LOOP_START + ((elapsed - DURATION) % (DURATION - LOOP_START));
+/** Where the scene stands: playing, paused by the visitor, finished after
+ *  its one pass, or still (reduced motion, or no 2D canvas to draw on). */
+export type HeroPlayback = "playing" | "paused" | "ended" | "still";
+
+type Controls = { pause: () => void; resume: () => void; replay: () => void };
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Plays the hero's sequence on a caller-owned canvas. The clock only
+/** Whether the scene will move at all: motion allowed, and a 2D canvas to
+ *  draw it on (jsdom and canvas-less browsers have none). */
+function scenePlays(): boolean {
+  return !prefersReducedMotion() && document.createElement("canvas").getContext("2d") != null;
+}
+
+/** Plays the hero's sequence once on a caller-owned canvas and stops on its
+ *  last frame, the settled live-operations view; `toggle` pauses and resumes
+ *  it, and replays it from REPLAY_START once it has ended. The clock only
  *  advances while the canvas is on screen and the tab is visible, so a
  *  visitor who scrolls away and back does not miss it. Under reduced motion
- *  it draws the settled live-operations frame once and never schedules a
- *  frame. */
-export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | null>, labels: HeroLabels): void {
+ *  it draws that settled frame once, never schedules a frame and offers no
+ *  playback. */
+export function useHeroMapAnimation(
+  canvasRef: RefObject<HTMLCanvasElement | null>,
+  labels: HeroLabels,
+): { playback: HeroPlayback; toggle: () => void } {
+  const [playback, setPlayback] = useState<HeroPlayback>(() => (scenePlays() ? "playing" : "still"));
+  // The running loop's controls, set by the effect that owns the loop.
+  const controls = useRef<Controls | null>(null);
+
   // Reads the latest labels without restarting the loop when the language changes.
   const render = useEffectEvent((ctx: CanvasRenderingContext2D, width: number, height: number, t: number, palette: HeroPalette) => {
     drawHeroFrame(ctx, width, height, frameAt(t), palette, labels);
   });
+  const ended = useEffectEvent(() => setPlayback("ended"));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -78,11 +97,18 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
     const el: HTMLCanvasElement = canvas;
 
     const palette = resolvePalette(el);
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = prefersReducedMotion();
 
     let width = 0;
     let height = 0;
-    let elapsedMs = 0;
+    let t = reducedMotion ? REPLAY_START : 0;
+    // The first pass starts as soon as the effect has set up, so its first
+    // frame is the first paint.
+    let running = !reducedMotion;
+    let rafId = 0;
+    let last = 0;
+
+    const draw = () => render(ctx, width, height, t, palette);
 
     function resize() {
       const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
@@ -91,7 +117,8 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
       el.width = Math.max(1, Math.round(width * dpr));
       el.height = Math.max(1, Math.round(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (reducedMotion) render(ctx, width, height, LOOP_START, palette);
+      // A running loop repaints on its next frame; a still one repaints now.
+      if (!running) draw();
     }
     resize();
     window.addEventListener("resize", resize);
@@ -106,22 +133,60 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
           });
     observer?.observe(el);
 
-    let rafId = 0;
-    let last = performance.now();
     function frame(now: number) {
-      rafId = requestAnimationFrame(frame);
       const step = Math.min(now - last, MAX_STEP_MS);
       last = now;
-      if (document.hidden || !onScreen) return;
-      elapsedMs += step;
-      render(ctx, width, height, scriptTime(elapsedMs / 1000), palette);
+      if (!document.hidden && onScreen) {
+        t = Math.min(DURATION, t + step / 1000);
+        draw();
+      }
+      if (t >= DURATION) {
+        running = false;
+        ended();
+        return;
+      }
+      rafId = requestAnimationFrame(frame);
     }
-    rafId = requestAnimationFrame(frame);
+    function start() {
+      running = true;
+      last = performance.now();
+      rafId = requestAnimationFrame(frame);
+    }
+    function stop() {
+      running = false;
+      cancelAnimationFrame(rafId);
+    }
+    controls.current = {
+      pause: stop,
+      resume: start,
+      replay: () => {
+        t = REPLAY_START;
+        draw();
+        start();
+      },
+    };
+    start();
 
     return () => {
-      cancelAnimationFrame(rafId);
+      stop();
+      controls.current = null;
       observer?.disconnect();
       window.removeEventListener("resize", resize);
     };
   }, [canvasRef]);
+
+  function toggle() {
+    if (playback === "playing") {
+      controls.current?.pause();
+      setPlayback("paused");
+    } else if (playback === "paused") {
+      controls.current?.resume();
+      setPlayback("playing");
+    } else if (playback === "ended") {
+      controls.current?.replay();
+      setPlayback("playing");
+    }
+  }
+
+  return { playback, toggle };
 }

@@ -2,8 +2,25 @@
 
 Public landing page, rendered outside `<App />` and outside `RequireAuth`
 (`frontend/src/main.tsx`) so a signed-out visitor can reach it. Its hero
-has one CTA: "Sign in" (`/login`) for a signed-out visitor, "Open the
-dashboard" (`/`) for a signed-in one. Signed-in users still reach the page.
+has one CTA, the way in this visitor has:
+
+- **Signed in:** "Open the dashboard" (`/`).
+- **Signed out, and `GET /api/config` says `login_required` is off:** "View
+  the dashboard (no sign-in needed)" (`/`), with a note that signing in saves
+  view settings and keeps the question history. The note's "Sign in" links
+  to `/login`, and the note is left out when no provider is configured.
+- **Signed out otherwise** (sign-in required, or the config not loaded yet):
+  "Sign in" (`/login`). `/` would only bounce such a visitor back here.
+
+Signed-in users still reach the page.
+
+## The hero plays once
+
+The animated map (`LiveMapHero`) plays its script once and stops on its last
+frame, the settled live-operations view. A control in the hero's corner
+pauses it while it plays and replays it from `REPLAY_START`
+(`heroMapTimeline.ts`) once it has ended. Under `prefers-reduced-motion` the
+settled frame is drawn once and no control is shown.
 
 ## Ways back to it
 
@@ -42,6 +59,13 @@ is static example data from `frontend/src/pages/landing/previewData.ts`, so
 the page shows the product without exposing any real data to a signed-out
 visitor.
 
+All three show one sample route, route 12 of the hero's fictional city, with
+the hero's stop names (`landing.hero_map.stops.*`) in the reader's language:
+a stop carries the same figure in the stop chart and in the Ask evidence,
+which lists the route's worst few stops ranked, as the real hotspot answer
+does. Each chart fits its figure at any width: the stop chart is drawn at the
+figure's measured width (`StopChart`'s `width`), so nothing scrolls sideways.
+
 ## Key files
 
 | File | Role |
@@ -61,8 +85,12 @@ Hero strings live under `landing.hero.*`
 (the headline's two lines, rendered as separate spans so it never breaks
 mid-phrase), `subtitle`, and `open_dashboard` (the signed-in CTA). The
 sign-in CTA reuses `common.login`; the rail link is `nav.about`. Text drawn
-on the hero canvas lives under `landing.hero_map.*`; the narrative's
-heading/body pairs under `landing.narrative.{route,trend,ask}.{title,body}`.
+on the hero canvas lives under `landing.hero_map.*`, its playback control
+under `landing.hero_map.playback_control.*`; the narrative's heading/body
+pairs under `landing.narrative.{route,trend,ask}.{title,body}`, and its
+sample caption under `landing.narrative.sample_caption`. The guest CTA and
+its note are `landing.hero.view_dashboard` and `landing.hero.login_note`;
+the tagline above the headline is `header.app_tagline`.
 
 ## How to verify manually
 
@@ -71,7 +99,8 @@ heading/body pairs under `landing.narrative.{route,trend,ask}.{title,body}`.
 2. Open a deep link such as `/agencies/1/routes?routes=12&sort=on_time` —
    expect `/login?next=…`; sign in and expect to land on that exact URL.
 3. Sign in, then choose "About this app" in the rail — expect `/welcome`
-   with "Open the dashboard" in place of "Sign in".
+   with "Open the dashboard" in place of "Sign in". With `login_required`
+   off and signed out, expect "View the dashboard (no sign-in needed)".
 4. Sign out from the account page — expect `/welcome`.
 5. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
    `frontend/src/pages/AccountPage.test.tsx`,

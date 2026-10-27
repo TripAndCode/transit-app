@@ -167,7 +167,7 @@ function drawPlaybackStops(ctx: Ctx, project: Projector, palette: HeroPalette, f
   const mean = HOURLY_MEANS[hourIndex];
   ctx.save();
   ctx.globalAlpha *= a;
-  for (const [routeKey, stopCount, weight] of [["bus12", 7, 1], ["tram3", 8, 0.7], ["bus7", 7, 1]] as const) {
+  for (const [routeKey, stopCount, weight] of [["bus12", 7, 1], ["bus5", 8, 0.7], ["bus7", 7, 1]] as const) {
     const path = ROUTES.find((r) => r.key === routeKey)!.path;
     for (let i = 0; i < stopCount; i++) {
       const u = i / (stopCount - 1);
