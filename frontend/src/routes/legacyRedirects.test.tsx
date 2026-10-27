@@ -145,6 +145,11 @@ describe("legacy redirects", () => {
     expect(Object.fromEntries(loc.params)).toEqual({ order: "best", sort: "on_time" });
   });
 
+  it("drops an order left over beside a list that had none, so the ranking opens worst first", () => {
+    const loc = go(LENS, <RedirectAnalysisLens />, "/agencies/9/analysis/ranking?order=best", "agencies/:agencyId/routes");
+    expect(Object.fromEntries(loc.params)).toEqual({ sort: "avg" });
+  });
+
   it("sends reports/:reportType to its Reports document", () => {
     const loc = go(
       "agencies/:agencyId/reports/:reportType",

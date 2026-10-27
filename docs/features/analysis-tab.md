@@ -125,10 +125,17 @@ per route over the scope:
   - `worst_5min` → `late5_count`.
 
   `routeTableView` in `frontend/src/routes/destinations.ts` resolves this;
-  `report` wins over `sort`, and an explicit `order` wins over either.
+  `report` wins over `sort`. `order` turns the view around only beside a
+  table sort or the on-time list, the one former list with an order to
+  choose; beside the others it is a leftover from that list and is
+  ignored.
   Changing the sort, the order or a toggle writes `sort`/`order` and drops
   `report`. `reportHref` sends those four report types (the command palette's
   report items) to the table the same way.
+- **Labels follow the rows.** The response names its own `sort` and
+  `order`. While another sort loads, the table keeps showing the previous
+  rows, and its sort marks and bar stay on the column those rows are sorted
+  by.
 - **One population for every sort.** Routes observed fewer than
   `RANKING_MIN_SAMPLES` times are left out unless `sparse=1`
   (`include_sparse`), whatever the sort. Retired route codes and

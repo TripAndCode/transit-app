@@ -362,6 +362,11 @@ class ReportResponse(BaseModel):
     # kept on include_zero_delay. The same in every mode, and counted as
     # retired_rows is.
     zero_delay_rows: int | None = None
+    # route_table only (None elsewhere): the sort and order its rows are in,
+    # so a screen still showing this response while another sort loads can
+    # label the rows it holds rather than the ones it asked for.
+    sort: str | None = None
+    order: str | None = None
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -872,12 +877,12 @@ async def forecast_overview(
     }
 
 
-# Marker for an "on_time" row's `low_confidence` flag in the CSV export,
-# mirroring the caveat mark frontend/src/components/ReportTable.tsx's
-# fmtConfidence and frontend/src/tabs/ask/RichResult.tsx render for the same
-# signal (a short mark when true, blank when false) rather than the raw
-# Python bool's str() form. The flag measures the percentage's interval, not
-# its observation count, and the mark says so.
+# Marker for an "on_time" or "route_table" row's `low_confidence` flag in the
+# CSV export: the caveat mark ReportTable.tsx's on-time column and
+# frontend/src/tabs/ask/RichResult.tsx show for the same signal (a short mark
+# when true, blank when false), never the raw Python bool's str() form. The
+# flag measures the percentage's interval, not its observation count, and the
+# mark says so.
 _LOW_CONFIDENCE_CSV_MARK = "誤差大"
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing
@@ -1089,11 +1094,13 @@ async def get_report(
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
     if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
-            status_code=400, detail="early_tolerance_sec only applies to the on_time/council_summary reports"
+            status_code=400,
+            detail="early_tolerance_sec only applies to the on_time/route_table/council_summary reports",
         )
     if late_tolerance_sec is not None and report_type not in _LATE_TOLERANCE_TYPES:
         raise HTTPException(
-            status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min/council_summary reports"
+            status_code=400,
+            detail="late_tolerance_sec only applies to the on_time/route_table/worst_5min/council_summary reports",
         )
     if threshold_sec is not None and report_type != "delay_certificate":
         raise HTTPException(status_code=400, detail="threshold_sec only applies to the delay_certificate report")
@@ -1125,6 +1132,8 @@ async def get_report(
     kept = {reason for reason, keep in ((RETIRED, include_retired), (ZERO_DELAY, include_zero_delay)) if keep}
     n_fetch = rows_to_fetch(n, left_out)
     left_out_rows = dict.fromkeys(left_out, 0)
+    table_sort: str | None = None
+    table_order: RouteTableOrder | None = None
 
     def listed(route_rows: list) -> list:
         """pipeline.route_catalog.route_list over this request, recording each
@@ -1138,7 +1147,7 @@ async def get_report(
 
     if report_type == "route_table":
         table_sort = sort or DEFAULT_ROUTE_TABLE_SORT
-        table_order: RouteTableOrder = "best" if order == "best" else "worst"
+        table_order = "best" if order == "best" else "worst"
         table = sort_route_table(
             await compute_route_table(
                 agency_id,
@@ -1344,4 +1353,6 @@ async def get_report(
         reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _FLOORED_TYPES else None,
         retired_rows=left_out_rows.get(RETIRED),
         zero_delay_rows=left_out_rows.get(ZERO_DELAY),
+        sort=table_sort if report_type == "route_table" else None,
+        order=table_order if report_type == "route_table" else None,
     )

@@ -15,7 +15,7 @@ fixed; only the on-time rate follows a requested tolerance.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any, Literal
 
 from api.range import RangeCtx
@@ -30,6 +30,7 @@ from pipeline.reports.filters import _dedup_cte_ch, _round2
 from pipeline.reports.rankings import (
     MIN_GROUP_SAMPLES,
     _avg_min,
+    _pct1,
     _read_dist_scalars,
     _read_dist_with_hist,
     _round1,
@@ -48,13 +49,6 @@ DEFAULT_ROUTE_TABLE_SORT = "avg"
 
 RouteTableOrder = Literal["worst", "best"]
 
-_TENTH = Decimal("0.1")
-
-
-def _pct(count: float | int, samples: int) -> Decimal:
-    """A share in percent to one decimal, half-up, from an exact count."""
-    return (Decimal(str(count)) * 100 / samples).quantize(_TENTH, rounding=ROUND_HALF_UP)
-
 
 @perf.timed("reports.route_table")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
@@ -69,7 +63,7 @@ async def compute_route_table(
 ) -> list[tuple]:
     """Every route observed at least ``min_samples`` times in ``ctx``, as
     ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples)``,
-    in route-code order.
+    in no particular order: :func:`sort_route_table` orders them.
 
     The default on-time rule and the over-5-minute count read the exact
     columns analyze() bakes into agg_route_daily_dist. A requested on-time
@@ -97,14 +91,13 @@ async def compute_route_table(
                 continue
             on_time = count_in_range(r["hist"], low_sec, high_sec)
             out.append(_row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, on_time))
-    out.sort(key=lambda t: t[0])
     return out
 
 
 def _row(route_code: str, avg_min: Decimal, r: Any, on_time_count: float | int) -> tuple:
     samples = r["samples"]
     late5 = r["late5_count"]
-    return (route_code, avg_min, _pct(on_time_count, samples), _pct(late5, samples), late5, samples)
+    return (route_code, avg_min, _pct1(on_time_count, samples), _pct1(late5, samples), late5, samples)
 
 
 async def _route_table_live(
@@ -141,8 +134,7 @@ async def _route_table_live(
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code\n"
-        "HAVING count(*) >= {rt_min:UInt32}\n"
-        "ORDER BY route_code",
+        "HAVING count(*) >= {rt_min:UInt32}",
         parameters=params,
     )
     return [
@@ -150,7 +142,7 @@ async def _route_table_live(
             route_code,
             _round2(avg_min),
             _round1(on_time_count * 100.0 / samples),
-            _pct(late5_count, samples),
+            _pct1(late5_count, samples),
             late5_count,
             samples,
         )
@@ -161,7 +153,7 @@ async def _route_table_live(
 def sort_route_table(rows: Sequence[tuple], sort: str, order: RouteTableOrder) -> list[tuple]:
     """``rows`` by ``sort``'s figure, the routes needing attention first, or
     last for ``order='best'``. Ties break on the route code ascending either
-    way, since the rows arrive in no order a reader could rely on."""
+    way: the rows arrive in whatever order their GROUP BY gave them."""
     index, worst_descending = ROUTE_TABLE_SORTS[sort]
     out = sorted(rows, key=lambda t: t[0])
     out.sort(key=lambda t: t[index], reverse=worst_descending == (order == "worst"))

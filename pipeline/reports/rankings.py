@@ -71,6 +71,13 @@ def _round1(x: float) -> Decimal:
     return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
+def _pct1(count: float, samples: int) -> Decimal:
+    """``count`` as a percentage of ``samples``, 1 dp, half-up. Computed in
+    Decimal from the count itself, so an exact count rounds exactly; the same
+    rule as :func:`_round1`."""
+    return (Decimal(str(count)) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
 def _weighted_avg_min(days: list[dict]) -> float | None:
     """Sample-weighted mean delay across trend buckets — the pooled mean (approximate).
 
@@ -328,7 +335,7 @@ async def compute_on_time(
             samples = r["samples"]
             if samples <= 20:
                 continue
-            on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+            on_time_pct = _pct1(r["on_time_count"], samples)
             out.append(
                 (
                     r["route_code"],
@@ -361,7 +368,7 @@ async def compute_on_time(
         if samples <= 20:
             continue
         on_time_est = count_in_range(r["hist"], low_sec, high_sec)
-        on_time_pct = (Decimal(str(on_time_est)) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        on_time_pct = _pct1(on_time_est, samples)
         out.append(
             (
                 r["route_code"],

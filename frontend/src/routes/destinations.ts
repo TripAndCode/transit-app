@@ -34,6 +34,11 @@ const ROUTE_REPORT_VIEWS: Record<(typeof ROUTES_REPORT_TYPES)[number], RouteTabl
   worst_5min: { sort: "late5_count", order: "worst" },
 };
 
+// The one former route list with an order of its own to choose. Every other
+// list's order was fixed, so an `order` left over beside one of them, from a
+// visit to the on-time list, says nothing about it.
+const ORDERED_ROUTE_REPORT = "on_time";
+
 function routeReportView(value: string | null): RouteTableView | null {
   return value != null && Object.hasOwn(ROUTE_REPORT_VIEWS, value)
     ? ROUTE_REPORT_VIEWS[value as keyof typeof ROUTE_REPORT_VIEWS]
@@ -47,18 +52,21 @@ function isRouteTableSort(value: string | null): value is RouteTableSort {
 /** The sort and order a Routes URL asks the table for. A `report` naming one
  *  of the route lists, or a `sort` naming one, opens the table the way that
  *  list was ordered, so a link from before the table keeps its meaning;
- *  `report` wins over `sort`, as it did when it picked the list. An explicit
- *  `order` wins over the one a list implies. */
+ *  `report` wins over `sort`, as it did when it picked the list. `order`
+ *  turns the view around only where it was chosen for it: beside a table
+ *  sort, or beside the on-time list, the one list that had the choice. */
 export function routeTableView(search: string | URLSearchParams): RouteTableView {
   const params = new URLSearchParams(search);
+  const report = params.get("report");
   const sortParam = params.get("sort");
-  const view = routeReportView(params.get("report")) ??
-    (isRouteTableSort(sortParam) ? { sort: sortParam, order: "worst" as const } : routeReportView(sortParam)) ?? {
-      sort: ROUTE_TABLE_SORTS[0],
-      order: "worst" as const,
-    };
+  const fromReport = routeReportView(report);
+  const [view, ordered] = fromReport
+    ? [fromReport, report === ORDERED_ROUTE_REPORT]
+    : isRouteTableSort(sortParam)
+      ? [{ sort: sortParam, order: "worst" as const }, true]
+      : [routeReportView(sortParam) ?? { sort: ROUTE_TABLE_SORTS[0], order: "worst" as const }, false];
   const order = params.get("order");
-  return order === "best" || order === "worst" ? { ...view, order } : view;
+  return ordered && (order === "best" || order === "worst") ? { ...view, order } : view;
 }
 
 /** The report a screen hosting `reportTypes` opens: the requested one when
@@ -179,14 +187,15 @@ export function reportDestination(reportType: string): Destination | null {
 }
 
 /** A report's screen, opened as the report asks. The params that picked a
- *  report or the Routes table's sort go, so the new report's own take their
- *  place. An `order` stays: a former on-time link's `order=best` still means
- *  the same end of the same list. */
+ *  report or the Routes table's sort and order go, so the new report's own
+ *  take their place. The on-time list keeps an `order`: a former on-time
+ *  link's `order=best` still means the same end of the same list. */
 export function reportHref(agencyId: number | string, reportType: string, search = ""): string {
   if (!isReportType(reportType)) return destHref(agencyId, "pulse", search);
   const home = REPORT_HOME[reportType];
   const params = new URLSearchParams(search);
   for (const key of ["report", "sort"]) params.delete(key);
+  if (reportType !== ORDERED_ROUTE_REPORT) params.delete("order");
   return destHref(agencyId, home.dest, params.toString(), home.extra);
 }
 

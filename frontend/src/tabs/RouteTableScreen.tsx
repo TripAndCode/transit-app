@@ -77,6 +77,9 @@ export function RouteTableScreen() {
   };
   const report = useReport(id, "route_table", ctx, options);
   const data = report.data?.report_type === "route_table" ? report.data : undefined;
+  // The table's sort marks follow the rows on screen: while another sort
+  // loads, the rows held are still in the order they arrived in.
+  const shown: RouteTableView = data?.sort ? { sort: data.sort, order: data.order ?? "worst" } : view;
 
   /** Writes the table's params. The current sort and order go into `sort`
    *  and `order` first, in place of a former list's `report`, so changing one
@@ -168,8 +171,8 @@ export function RouteTableScreen() {
                   reportType="route_table"
                   rows={data.rows}
                   minSamples={data.reliable_min_samples}
-                  sortBy={view.sort}
-                  sortDirection={sortDirection(view)}
+                  sortBy={shown.sort}
+                  sortDirection={sortDirection(shown)}
                 />
                 {data.rows_total != null && data.rows_total > data.rows.length && (
                   <RowsShown

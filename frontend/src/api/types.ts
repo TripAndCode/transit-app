@@ -1,3 +1,4 @@
+import type { RouteTableOrder, RouteTableSort } from "../routes/destinations";
 import type { DowFilter, TimeBand } from "./scope";
 
 export type Agency = {
@@ -454,6 +455,10 @@ type ReportEnvelope<T extends ReportType, Row> = {
    *  always reports zero delay, left out by default and kept on request;
    *  the same in every mode. */
   zero_delay_rows?: number | null;
+  /** route_table only: the sort and order its rows are in, which a screen
+   *  still showing this response while another sort loads labels them by. */
+  sort?: RouteTableSort | null;
+  order?: RouteTableOrder | null;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is

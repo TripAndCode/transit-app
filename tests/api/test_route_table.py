@@ -11,11 +11,11 @@ import pytest
 from api.middleware.ratelimit import limiter
 from tests.api.test_reports import (  # noqa: F401 -- reports_app/reports_client are fixtures
     _load_for_path,
-    _seed_observed,
     _seed_route_at,
     reports_app,
     reports_client,
 )
+from tests.fixtures.observed_route import seed_observed_route
 
 DAY = "2026-05-14"
 
@@ -103,13 +103,19 @@ async def test_every_sort_ranks_the_same_routes_worst_first_and_best_on_request(
         worst = (await client.get(_url(agency_id, band, f"&sort={sort}"))).json()
         assert [r[0] for r in worst["rows"]] == worst_first, sort
         assert worst["rows_total"] == 4, sort
+        # The response names the order its rows are in.
+        assert (worst["sort"], worst["order"]) == (sort, "worst")
         best = (await client.get(_url(agency_id, band, f"&sort={sort}&order=best&limit=2"))).json()
         assert [r[0] for r in best["rows"]] == worst_first[::-1][:2], sort
         assert best["rows_total"] == 4, sort
+        assert (best["sort"], best["order"]) == (sort, "best")
 
     # The average leads when no sort is named.
     default = (await client.get(_url(agency_id, band))).json()
     assert [r[0] for r in default["rows"]] == _WORST_FIRST["avg"]
+    assert (default["sort"], default["order"]) == ("avg", "worst")
+    other = (await client.get(f"/api/{agency_id}/reports/on_time?from={DAY}&to={DAY}{band}")).json()
+    assert (other["sort"], other["order"]) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -155,11 +161,11 @@ async def test_left_out_codes_are_counted_over_every_ranked_route(reports_client
         "INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C1'), ($1, 'C2'), ($1, 'ZERO')",
         agency_id,
     )
-    await _seed_observed(pool, agency_id, "ZERO", "2026-09-24", "2026-10-23", delay=0)
-    await _seed_observed(pool, agency_id, "BOTH", "2026-09-24", "2026-09-30", delay=0)
-    await _seed_observed(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=100)
-    await _seed_observed(pool, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=200)
-    await _seed_observed(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=300)
+    await seed_observed_route(pool, agency_id, "ZERO", "2026-09-24", "2026-10-23", delay=0)
+    await seed_observed_route(pool, agency_id, "BOTH", "2026-09-24", "2026-09-30", delay=0)
+    await seed_observed_route(pool, agency_id, "C1", "2026-09-24", "2026-10-23", delay=100)
+    await seed_observed_route(pool, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=200)
+    await seed_observed_route(pool, agency_id, "C2", "2026-09-24", "2026-10-23", delay=300)
     window = "from=2026-09-24&to=2026-10-23"
 
     async def table(query):

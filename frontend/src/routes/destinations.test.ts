@@ -72,6 +72,9 @@ describe("destinations", () => {
     // on-time link's order still picks the same end.
     expect(reportHref(9, "ranking", "?report=on_time&sort=late5_share")).toBe("/agencies/9/routes?sort=avg");
     expect(reportHref(9, "on_time", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?order=best&from=2026-09-01&sort=on_time");
+    // Beside any other list, an order is a leftover from the on-time list.
+    expect(reportHref(9, "ranking", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg");
+    expect(reportHref(9, "worst_5min", "?order=best")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "worst_5min")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods&report=compare_ranking");
     expect(reportHref(9, "council_summary", "?report=trend&from=2026-09-01")).toBe(
@@ -126,10 +129,19 @@ describe("the view a screen opens", () => {
     ["report=worst_5min", "late5_count", "worst"],
     ["sort=worst_5min", "late5_count", "worst"],
     ["sort=ranking_best", "avg", "best"],
-    // `report` picked the list over `sort`, and an explicit order wins.
+    // `report` picked the list over `sort`.
     ["report=on_time&sort=avg", "on_time", "worst"],
-    ["report=ranking_best&order=worst", "avg", "worst"],
     ["report=trend&sort=banana&order=sideways", "avg", "worst"],
+    // An order turns around only the on-time list, the one list that had
+    // the choice; beside any other it is a leftover from a visit to that one.
+    ["report=on_time&order=best", "on_time", "best"],
+    ["report=ranking&order=best", "avg", "worst"],
+    ["report=worst_5min&order=best", "late5_count", "worst"],
+    ["report=ranking_best&order=worst", "avg", "best"],
+    ["sort=worst_5min&order=best", "late5_count", "worst"],
+    ["order=best", "avg", "worst"],
+    // Beside a table sort it was chosen for the table.
+    ["sort=late5_count&order=best", "late5_count", "best"],
   ] as const)("opens the Routes table for ?%s sorted by %s, %s first", (search, sort, order) => {
     expect(routeTableView(search)).toEqual({ sort, order });
   });

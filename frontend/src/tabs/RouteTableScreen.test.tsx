@@ -31,6 +31,8 @@ function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse 
     ctx: { from: "2026-09-24", to: "2026-10-23", dow: "all", time_band: "all", service: "all", routes: [] },
     definition: DEFINITION,
     scope_applied: {},
+    sort: "avg",
+    order: "worst",
     rows_total: 174,
     reliable_min_samples: 100,
     retired_rows: 12,
@@ -77,18 +79,19 @@ describe("RouteTableScreen", () => {
   });
 
   it.each([
-    ["?report=on_time", "On-time rate", "Worst first", "ascending"],
-    ["?report=ranking_best", "Average delay", "Best first", "ascending"],
-    ["?report=worst_5min", "Impact (count)", "Worst first", "descending"],
-    ["?sort=on_time&order=best", "On-time rate", "Best first", "descending"],
-  ])("opens a link from before the table, %s, sorted the way its list was", (search, sort, order, direction) => {
-    setup(`/agencies/1/routes${search}`);
-    expect(pressed(sort)).toBe("true");
-    expect(pressed(order)).toBe("true");
-    expect(screen.getByRole("columnheader", { name: { "On-time rate": "On-time %", "Average delay": "Avg (min)", "Impact (count)": "Over 5 min (count)" }[sort] })).toHaveAttribute(
-      "aria-sort",
-      direction,
-    );
+    ["?report=on_time", "on_time", "worst", "On-time rate", "Worst first", "ascending"],
+    ["?report=ranking_best", "avg", "best", "Average delay", "Best first", "ascending"],
+    ["?report=worst_5min", "late5_count", "worst", "Impact (count)", "Worst first", "descending"],
+    ["?sort=on_time&order=best", "on_time", "best", "On-time rate", "Best first", "descending"],
+    // An order left over from the on-time list never turns another list around.
+    ["?report=ranking&order=best", "avg", "worst", "Average delay", "Worst first", "descending"],
+  ])("opens a link from before the table, %s, sorted the way its list was", (search, sort, order, sortLabel, orderLabel, direction) => {
+    const { options } = setup(`/agencies/1/routes${search}`, tableResponse({ sort, order }));
+    expect(options()).toMatchObject({ sort, order: order === "best" ? "best" : undefined });
+    expect(pressed(sortLabel)).toBe("true");
+    expect(pressed(orderLabel)).toBe("true");
+    const header = { "On-time rate": "On-time %", "Average delay": "Avg (min)", "Impact (count)": "Over 5 min (count)" }[sortLabel];
+    expect(screen.getByRole("columnheader", { name: header })).toHaveAttribute("aria-sort", direction);
   });
 
   it("re-sorts in the URL, keeping the order and replacing a former list's report", async () => {
@@ -172,6 +175,13 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes", tableResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByText("No matching data")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Include routes observed fewer than 100 times" })).toBeInTheDocument();
+  });
+
+  it("marks the rows it holds by the sort they arrived in while another sort loads", () => {
+    setup("/agencies/1/routes?sort=late5_share", tableResponse(), { isFetching: true, isPlaceholderData: true });
+    expect(pressed("Share over 5 min")).toBe("true");
+    expect(screen.getByRole("columnheader", { name: "Avg (min)" })).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByRole("columnheader", { name: "Share over 5 min" })).not.toHaveAttribute("aria-sort");
   });
 
   it("holds the rows it is replacing while a new sort loads, quieted", () => {
