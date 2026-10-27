@@ -7,7 +7,30 @@ import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
 import { showsLabel } from "./axisLabels";
 import { useDrawOn } from "../charts/ChartEnter";
+import { fitLabel, svgTextMeasurer } from "../charts/labelFit";
 import { niceAxis } from "../charts/niceAxis";
+
+const VIEW_WIDTH = 780;
+const LABEL_SIZE = 14;
+/** Clear space kept between two neighbouring stop names, and between a name
+ *  and the chart's edge. */
+const LABEL_GAP = 8;
+
+/** Each shown stop name in the room between it and its neighbours: halfway
+ *  to the next shown stop on either side, out to the chart's edge for the
+ *  first and last. A name wider than its room ends in an ellipsis, and one
+ *  near an edge slides inward rather than past it. Without a measurer every
+ *  name is drawn whole at its stop. */
+function stopLabels(names: string[], xs: number[], shown: number[], measure: ((text: string) => number) | null) {
+  return shown.map((i, k) => {
+    const left = k === 0 ? LABEL_GAP / 2 : (xs[shown[k - 1]] + xs[i]) / 2 + LABEL_GAP / 2;
+    const right = k === shown.length - 1 ? VIEW_WIDTH - LABEL_GAP / 2 : (xs[i] + xs[shown[k + 1]]) / 2 - LABEL_GAP / 2;
+    if (!measure) return { index: i, text: names[i], x: xs[i] };
+    const text = fitLabel(names[i], right - left, measure);
+    const half = measure(text) / 2;
+    return { index: i, text, x: Math.min(Math.max(xs[i], left + half), right - half) };
+  });
+}
 
 /** What the stop dots' colours mean, read from the bands `delayColor`
  *  paints, so the key cannot drift from the dots. */
@@ -42,6 +65,12 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const axis = niceAxis(low, high, 6);
   const x = (i: number) => 52 + i / Math.max(1, stops.length - 1) * 700;
+  const labels = stopLabels(
+    stops.map((s) => s.stop_name),
+    stops.map((_, i) => x(i)),
+    stops.flatMap((_, i) => (showsLabel(i, stops.length) ? [i] : [])),
+    svgTextMeasurer(LABEL_SIZE),
+  );
   const y = (n: number) => 280 - (n - axis.low) / (axis.high - axis.low) * 240;
   function path(values: (number | null)[]) {
     return values.map((v, i) => v == null ? "" : `${i === 0 || values[i - 1] == null ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
@@ -64,8 +93,8 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
         onClick={() => onSelect(s.stop_sequence)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.stop_sequence); } }}>
         <title>{s.stop_name}</title>
       </circle>
-      {showsLabel(i, stops.length) &&
-        <text x={x(i)} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={14}>{s.stop_name.slice(0, 7)}</text>}
     </g>)}
+    {labels.map((label) =>
+      <text key={label.index} x={label.x} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={LABEL_SIZE}>{label.text}</text>)}
   </svg>;
 }
