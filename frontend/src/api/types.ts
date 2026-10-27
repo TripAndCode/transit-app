@@ -951,6 +951,9 @@ export type OverviewTopDelayedRoute = {
   route_code: string;
   route_short_name: string | null;
   avg_min: number;
+  /** Change (minutes) from the same-length window before; null when the
+   *  route was too thinly observed there to compare. */
+  delta_min?: number | null;
 };
 
 type OverviewBandCount = {
@@ -973,6 +976,10 @@ type OverviewTopDelayed = {
   /** The average delay (minutes) at or above which a route was counted. */
   delayed_threshold_min: number;
   band_counts: OverviewBandCounts;
+  /** The routes every count is out of: those observed at least
+   *  `min_samples` times in the headline's window. */
+  route_count: number;
+  min_samples: number;
 };
 
 export type OverviewPeakHour = {
@@ -1003,6 +1010,8 @@ export type OverviewServiceSplitDay = {
   date: string;
   day_type: OverviewDayType;
   avg_min: number;
+  /** Observations behind the day's mean. */
+  samples: number;
 };
 
 export type OverviewSummary = {

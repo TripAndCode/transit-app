@@ -16,11 +16,12 @@ describe("English pluralization", () => {
   });
 
   it("overview.concentration_legend uses the singular noun for count=1", () => {
-    expect(i18n.t("overview.concentration_legend", { count: 1, pct: 40 })).toBe(
-      "Top 1 route carries 40% of the delay among the routes counted.",
+    const of = { pct: 40, total: 9, range: "Sep 24 – Oct 23" };
+    expect(i18n.t("overview.concentration_legend", { count: 1, ...of })).toBe(
+      "Top 1 route carries 40% of the delay of the 9 routes observed in Sep 24 – Oct 23.",
     );
-    expect(i18n.t("overview.concentration_legend", { count: 2, pct: 40 })).toBe(
-      "Top 2 routes carry 40% of the delay among the routes counted.",
+    expect(i18n.t("overview.concentration_legend", { count: 2, ...of })).toBe(
+      "Top 2 routes carry 40% of the delay of the 9 routes observed in Sep 24 – Oct 23.",
     );
   });
 

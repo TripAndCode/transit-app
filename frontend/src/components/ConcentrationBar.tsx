@@ -11,6 +11,8 @@ import { fixedTenth } from "../utils/format";
 
 type Props = {
   concentration: OverviewConcentration;
+  /** The period the shares are of, as text. */
+  periodRange: string;
   movers?: OverviewMovers;
   /** How many top routes to render. Card variant: 5 (default).
    *  Modal variant: 20 (matches backend top-N). */
@@ -27,6 +29,7 @@ const RANK_OPACITY = [1, 0.8, 0.6, 0.45, 0.35];
 
 export function ConcentrationBar({
   concentration,
+  periodRange,
   movers,
   limit = CONCENTRATION_TOP_N,
   variant = "card",
@@ -42,14 +45,15 @@ export function ConcentrationBar({
   // percent would otherwise draw as dots. The figure beside each bar keeps
   // the absolute share.
   const maxShare = Math.max(0, ...visibleRoutes.map((r) => r.share_pct));
-  // When the slice doesn't cover all top routes, fold the unsliced
-  // remainder into rest_share_pct + rest_route_count for an honest
-  // "the remaining N routes carry M%" line.
-  const slicedTail = concentration.top_routes.slice(limit);
-  const slicedTailShare = slicedTail.reduce((s, r) => s + r.share_pct, 0);
-  const restCount =
-    (concentration.rest_route_count ?? 0) + slicedTail.length;
-  const restSharePct = concentration.rest_share_pct + slicedTailShare;
+  // Every route the shares are of: the top routes the API lists and the
+  // rest it only counts.
+  const totalRoutes = concentration.top_routes.length + (concentration.rest_route_count ?? 0);
+  // The rest is whatever the headline's share leaves, at the headline's
+  // precision, so the two printed figures add up to 100: summing the
+  // per-route shares, each rounded on its own, can miss by a few tenths.
+  const topPct = Math.round(totalTop);
+  const restCount = totalRoutes - visibleRoutes.length;
+  const restPct = 100 - topPct;
 
   const clickable = !!onClick;
   const wrapperClass =
@@ -124,7 +128,9 @@ export function ConcentrationBar({
       <p className="ov-conc-headline">
         {t("overview.concentration_legend", {
           count: visibleRoutes.length,
-          pct: totalTop.toFixed(0),
+          pct: topPct,
+          total: totalRoutes,
+          range: periodRange,
         })}
       </p>
 
@@ -149,11 +155,11 @@ export function ConcentrationBar({
           </div>
         );
       })}
-      {restSharePct > 0 && restCount > 0 && (
+      {restPct > 0 && restCount > 0 && (
         <p className="ov-pareto-rest">
           {t("overview.concentration_rest", {
             count: restCount,
-            rest: fixedTenth(restSharePct),
+            rest: restPct,
           })}
         </p>
       )}
@@ -162,6 +168,8 @@ export function ConcentrationBar({
           topRoutes={concentration.top_routes}
           restSharePct={concentration.rest_share_pct}
           restRouteCount={concentration.rest_route_count ?? 0}
+          totalRoutes={totalRoutes}
+          periodRange={periodRange}
         />
       )}
     </div>
@@ -248,10 +256,14 @@ function LorenzCurve({
   topRoutes,
   restSharePct,
   restRouteCount,
+  totalRoutes,
+  periodRange,
 }: {
   topRoutes: OverviewConcentration["top_routes"];
   restSharePct: number;
   restRouteCount: number;
+  totalRoutes: number;
+  periodRange: string;
 }) {
   const { t } = useTranslation();
   const { path, ticks20, share20Pct } = buildLorenzCurve(topRoutes, restSharePct, restRouteCount);
@@ -342,6 +354,8 @@ function LorenzCurve({
       <p className="ov-lorenz-caption">
         {t("overview.concentration.lorenz_caption", {
           pct: share20Pct.toFixed(0),
+          total: totalRoutes,
+          range: periodRange,
         })}
       </p>
     </div>

@@ -6,20 +6,47 @@ import { useAgencyId } from "../api/useAgencyId";
 import { useCountUp } from "../hooks/useCountUp";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useRouteNames } from "../api/useRouteNames";
-import { routeHref } from "../routes/destinations";
-import { formatMinutes } from "../utils/format";
+import { reportHref, routeHref } from "../routes/destinations";
+import { fixedTenth, formatMinutes } from "../utils/format";
+import { windowDays } from "./overview/storySentence";
 import { RouteLabel } from "./RouteLabel";
 import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
-  /** Each band's routes over every route, not only the listed ones: the list
-   *  is the worst few, so whichever band it runs out in is truncated. */
+  /** Each band's routes among every route the list ranks (`routeCount`), not
+   *  only the listed ones: the list is the worst few, so whichever band it
+   *  runs out in is truncated. */
   bandCounts: OverviewBandCounts;
-  /** The days the list counts: the headline's window, not the whole period. */
+  /** The routes the list ranks: those observed at least `minSamples` times
+   *  in its window. */
+  routeCount: number;
+  minSamples: number;
+  /** The days the list counts, as ISO dates: the headline's window, not the
+   *  whole period. */
+  windowFrom: string;
+  windowTo: string;
+  /** Those days as text. */
   range: string;
 };
+
+/** A change in minutes with its sign; zero has none. */
+function signedMinutes(delta: number): string {
+  const tenth = fixedTenth(Math.abs(delta));
+  if (tenth === fixedTenth(0)) return tenth;
+  return `${delta > 0 ? "+" : "\u2212"}${tenth}`;
+}
+
+/** The Routes table over the list's own days at its default floor, sorted
+ *  by average delay worst first, so it lists the same routes. */
+function routeTableHref(agencyId: number, search: string, from: string, to: string): string {
+  const params = new URLSearchParams(search);
+  params.set("from", from);
+  params.set("to", to);
+  params.delete("sparse");
+  return reportHref(agencyId, "ranking", params.toString());
+}
 
 /** A row's figure: printed as it is on first paint, travelling from the
  *  previous value when the data changes while the list stays mounted (a
@@ -30,13 +57,19 @@ function CheckValue({ value }: { value: number }) {
   return <span className="ov-check-value num">{formatMinutes(shown)}</span>;
 }
 
-export function RoutesToCheckList({ routes, bandCounts, range }: Props) {
+export function RoutesToCheckList({ routes, bandCounts, routeCount, minSamples, windowFrom, windowTo, range }: Props) {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
   const { search } = useLocation();
   const names = useRouteNames(agencyId);
 
   const groups = groupBySeverityBand(routes);
+  const days = windowDays(windowFrom, windowTo);
+  // A week's window is compared with the week before it.
+  const changeLabel = (delta: number) =>
+    days === 7
+      ? t("overview.routes_to_check.change_week", { delta: signedMinutes(delta) })
+      : t("overview.routes_to_check.change_days", { count: days, delta: signedMinutes(delta) });
   const maxMin = routes.length > 0 ? Math.max(...routes.map((r) => r.avg_min)) : 0;
 
   // What can move a row: its rank, and the band headers above it, which
@@ -48,7 +81,12 @@ export function RoutesToCheckList({ routes, bandCounts, range }: Props) {
 
   return (
     <div ref={listRef}>
-      <p className="ov-check-section-hd">{t("overview.routes_to_check.title", { range })}</p>
+      <p className="ov-check-section-hd">{t("overview.routes_to_check.title", { count: days, range })}</p>
+      {routeCount > 0 && (
+        <p className="ov-check-scope">
+          {t("overview.routes_to_check.scope", { count: routeCount, min: minSamples })}
+        </p>
+      )}
       {/* groups.length, not routes.length: the backend's worst-N list has no
           minimum-delay floor, so a healthy agency's routes can all land in
           the excluded "ok" band, leaving groups empty even when routes isn't —
@@ -90,11 +128,19 @@ export function RoutesToCheckList({ routes, bandCounts, range }: Props) {
                   }
                 />
               </span>
-              <CheckValue value={r.avg_min} />
+              <span className="ov-check-figures">
+                <CheckValue value={r.avg_min} />
+                {r.delta_min != null && <span className="ov-check-change num">{changeLabel(r.delta_min)}</span>}
+              </span>
               <span className="ov-check-arrow" aria-hidden="true">›</span>
             </Link>
           )),
         ])
+      )}
+      {agencyId != null && routeCount > routes.length && (
+        <Link className="ov-check-more" to={routeTableHref(agencyId, search, windowFrom, windowTo)}>
+          {t("overview.routes_to_check.see_all", { count: routeCount })}
+        </Link>
       )}
     </div>
   );

@@ -195,6 +195,40 @@
   font-size: 13px;
   color: var(--text-tertiary);
 }
+/* Which routes the list ranks, under its heading. */
+.ov-check-scope {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: -4px 0 12px;
+}
+/* The average and, under it, its change from the window before: stacked so
+   the change costs the route name little width. A fixed width keeps every
+   row's bar the same length; a longer change wraps rather than shift it. */
+.ov-check-figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 2px;
+  width: 92px;
+  text-align: right;
+}
+/* Neutral whichever way it moved: the figure beside it is the finding. */
+.ov-check-change {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.ov-check-more {
+  display: inline-block;
+  margin: 6px 0 20px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+.ov-check-more:hover {
+  text-decoration: underline;
+}
 
 /* ---------- Peak hour ---------- */
 .ov-peak-svg-wrap {
@@ -464,6 +498,9 @@
 @media (max-width: 640px) {
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
+  /* The route's name needs the width more than the bar does. */
+  .ov-check-row { gap: 8px; padding: 10px 12px; }
+  .ov-check-track { width: 48px; }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
   .ov-modal {
     width: 100%;
@@ -571,6 +608,7 @@
   text-transform: uppercase;
   color: var(--text-tertiary);
   margin-bottom: 10px;
+  word-break: auto-phrase;
 }
 .ov-kpi-value {
   position: relative;
@@ -615,6 +653,16 @@
   margin: 0;
   word-break: auto-phrase;
   text-wrap: balance;
+}
+/* The latest day's standing: an aside on a line of its own under the
+   verdict, in the meta tone. */
+.ov-hero-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: auto-phrase;
 }
 /* Today's feed, under the period's figure: a quiet meta line. Positioned
    for the same reason .ov-hero-label is. */
@@ -668,6 +716,7 @@
   display: block;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  word-break: auto-phrase;
 }
 .ov-hero-fact-value {
   font-size: var(--text-xl);

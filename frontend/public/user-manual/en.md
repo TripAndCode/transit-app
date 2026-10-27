@@ -127,11 +127,12 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 
 ![Pulse](./02-pulse.en.png)
 
-- The sentence at the top compares the period with the same number of days just before it. The tag in front of it says “About the same as the period before”, “Worse than the period before, +… min” or “Better than the period before”; the ⓘ icon explains the comparison.
-- “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values.
+- The sentence at the top gives the average delay over the latest days (usually 7), the average over the same number of days just before them, and the change between the two in minutes and percent. The tag in front of it says “+… min on the … days before”, “−… min on the … days before” or “About the same as the … days before”. It says “about the same” only for a change under 0.1 min or under 5% of the earlier average. The ⓘ icon explains the comparison.
+- A sentence about the latest day appears when the period’s last day is among the three slowest days observed in the period, with its average and its place. A day observed less than half as often as a usual day of its type (one collected only in part) is not ranked.
+- “Average delay, last … days (…)”: the average delay in minutes, drawn over a small line of the daily values.
 - The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
-- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of all routes: the same number as the “… averaging … min or more late” heading of **Routes to check now** below, when that heading appears). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check now**.
-- **Routes to check now**: the most delayed routes, grouped by how late they ran on average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Click a route to open its page (section 5-6). “No routes need attention” means none qualifies.
+- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of the routes observed 100 or more times over the latest days: the same number as the “… averaging … min or more late” heading of **Routes to check** below, when that heading appears). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check**.
+- **Routes to check**: of the routes observed 100 or more times over the latest days, the most delayed, grouped by how late they ran on average. A route observed fewer times is left out, since a handful of trips can swing its average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Each row’s “vs last week” is its change from the same number of days before (missing for a route observed too little then). Click a route to open its page (section 5-6), or “See all … routes” to open the **Routes** table (section 5-3) over the same days, sorted by average delay, worst first. “No routes need attention” means none qualifies.
 - **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how the day types compare: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. A day’s type is the timetable the agency’s schedule ran that day. A day type with too few days or observations shows “Not enough data” and is left out of the comparison. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.
@@ -213,7 +214,7 @@ Sorted by **On-time rate**, the table is followed by “Headway quality”, whic
 
 ### 5-6. A route’s own page
 
-Clicking a route’s name — in a report, in **Routes to check now** on Pulse, or in the Live trip list — opens that route’s page.
+Clicking a route’s name — in a report, in **Routes to check** on Pulse, or in the Live trip list — opens that route’s page.
 
 - At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”.
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.

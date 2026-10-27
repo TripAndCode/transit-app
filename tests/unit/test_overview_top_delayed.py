@@ -1,27 +1,51 @@
 """`_top_delayed_routes`'s counts state the thresholds they counted against,
 and the list and its counts leave out the codes a route list leaves out.
 
-A fake connection answers the two reads, so no database is involved.
+A fake connection answers the reads, so no database is involved.
 """
 
 from datetime import date
 
 from api.range import RangeCtx
-from pipeline.reports.overview import DELAYED_ROUTE_MIN, ROUTE_BAND_MIN, _top_delayed_routes
+from pipeline.reports.overview import (
+    DELAYED_ROUTE_MIN,
+    MOVER_MIN_SAMPLES,
+    ROUTE_BAND_MIN,
+    TOP_DELAYED_MIN_SAMPLES,
+    _top_delayed_routes,
+)
+from pipeline.reports.rankings import RANKING_MIN_SAMPLES
 from pipeline.route_catalog import RETIRED, ZERO_DELAY
+
+_CTX = RangeCtx(date(2026, 9, 23), date(2026, 9, 29))
+_BASE = RangeCtx(date(2026, 9, 16), date(2026, 9, 22))
+
+
+def _row(code: str, avg: float, samples: int = TOP_DELAYED_MIN_SAMPLES) -> dict:
+    return {"route_code": code, "avg_min": avg, "samples": samples}
 
 
 class _Conn:
-    def __init__(self, rows):
-        self.rows = rows
+    """Answers each window's per-route read by the window's first day, the
+    query's first date parameter."""
+
+    def __init__(self, rows, base_rows=()):
+        self.by_window = {
+            _CTX.from_date.isoformat(): [_with_samples(r) for r in rows],
+            _BASE.from_date.isoformat(): list(base_rows),
+        }
+
+        self.calls: list[tuple] = []
 
     async def fetch(self, sql, *args):
         if "static_routes" in sql:
             return []
-        return self.rows
+        self.calls.append(args)
+        return self.by_window[str(args[1])]
 
 
-_CTX = RangeCtx(date(2026, 9, 23), date(2026, 9, 29))
+def _with_samples(row: dict) -> dict:
+    return {"samples": TOP_DELAYED_MIN_SAMPLES, **row}
 
 
 async def test_the_count_comes_with_the_threshold_it_used():
@@ -50,6 +74,8 @@ async def test_no_routes_still_states_the_thresholds():
         "delayed_count": 0,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
         "band_counts": _bands(0, 0, 0),
+        "route_count": 0,
+        "min_samples": TOP_DELAYED_MIN_SAMPLES,
     }
 
 
@@ -111,3 +137,74 @@ async def test_left_out_routes_ranked_among_them_leave_the_list_full():
     rows = [{"route_code": "OLD", "avg_min": 9.0}] + [{"route_code": str(i), "avg_min": 8.0 - i} for i in range(7)]
     out = await _top_delayed_routes(1, _CTX, _Conn(rows), left_out=_LEFT_OUT)
     assert [r["route_code"] for r in out["routes"]] == ["0", "1", "2", "3", "4"]
+
+
+def test_the_floor_is_the_routes_rankings():
+    # The list's link opens the Routes table over the same days, which keeps
+    # routes observed RANKING_MIN_SAMPLES times or more by default.
+    assert TOP_DELAYED_MIN_SAMPLES == RANKING_MIN_SAMPLES
+
+
+def test_a_listed_route_clears_the_change_floor_in_its_own_window():
+    # A listed route's change is gated on MOVER_MIN_SAMPLES in the window
+    # before only: the list's floor covers the current window.
+    assert TOP_DELAYED_MIN_SAMPLES >= MOVER_MIN_SAMPLES
+
+
+async def test_a_thinly_observed_route_is_neither_listed_nor_counted():
+    """A route observed fewer times than the floor would top the list on a
+    handful of trips, so it is left out of the list, every count and the
+    number of routes the counts are out of."""
+    rows = [
+        _row("THIN", 12.0, TOP_DELAYED_MIN_SAMPLES - 1),
+        _row("1", 6.0),
+        _row("2", 2.0),
+        _row("3", 0.5),
+    ]
+    out = await _top_delayed_routes(1, _CTX, _Conn(rows), left_out={})
+    assert [r["route_code"] for r in out["routes"]] == ["1", "2", "3"]
+    assert out["band_counts"] == _bands(1, 0, 1)
+    assert out["delayed_count"] == 2
+    assert out["route_count"] == 3
+    assert out["min_samples"] == TOP_DELAYED_MIN_SAMPLES
+
+
+async def test_the_route_count_is_of_every_route_ranked_not_only_the_listed_ones():
+    rows = [_row(str(i), 9.0 - i * 0.5) for i in range(18)]
+    out = await _top_delayed_routes(1, _CTX, _Conn(rows), left_out=_LEFT_OUT)
+    assert len(out["routes"]) == 5
+    assert out["route_count"] == 18
+
+
+async def test_the_route_count_leaves_out_what_the_list_leaves_out():
+    rows = [_row("OLD", 9.0), _row("1", 6.0), _row("ECHO", 0.0)]
+    out = await _top_delayed_routes(1, _CTX, _Conn(rows), left_out=_LEFT_OUT)
+    assert out["route_count"] == 1
+
+
+async def test_each_listed_route_carries_its_change_from_the_window_before():
+    """The change is the movers' statistic: the current average less the
+    previous window's, each window's average unrounded."""
+    rows = [_row("UP", 6.004), _row("DOWN", 4.0)]
+    base = [
+        {"route_code": "UP", "avg_min": 4.0, "samples": MOVER_MIN_SAMPLES},
+        {"route_code": "DOWN", "avg_min": 5.506, "samples": 500},
+    ]
+    conn = _Conn(rows, base)
+    out = await _top_delayed_routes(1, _CTX, conn, left_out={}, base_ctx=_BASE)
+    assert {r["route_code"]: r["delta_min"] for r in out["routes"]} == {"UP": 2.0, "DOWN": -1.51}
+    # The window before is read for the listed routes alone.
+    base_reads = [args for args in conn.calls if str(args[1]) == _BASE.from_date.isoformat()]
+    assert len(base_reads) == 1 and ["UP", "DOWN"] in base_reads[0]
+
+
+async def test_a_route_thin_or_absent_in_the_window_before_has_no_change():
+    rows = [_row("NEW", 6.0), _row("THIN", 5.0)]
+    base = [{"route_code": "THIN", "avg_min": 1.0, "samples": MOVER_MIN_SAMPLES - 1}]
+    out = await _top_delayed_routes(1, _CTX, _Conn(rows, base), left_out={}, base_ctx=_BASE)
+    assert [r["delta_min"] for r in out["routes"]] == [None, None]
+
+
+async def test_no_window_before_means_no_change():
+    out = await _top_delayed_routes(1, _CTX, _Conn([_row("1", 6.0)]), left_out={})
+    assert out["routes"][0]["delta_min"] is None

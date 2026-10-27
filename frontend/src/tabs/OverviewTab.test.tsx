@@ -20,7 +20,7 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, band_counts: bandCounts(0, 0, 0) },
+    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, band_counts: bandCounts(0, 0, 0), route_count: 0, min_samples: 100 },
     peak_hour: null,
     service_split: [
       { day_type: "weekday", avg_min: null, days: 0, samples: 0, insufficient: true },
@@ -107,10 +107,12 @@ describe("OverviewTab", () => {
           delayed_count: 1,
           delayed_threshold_min: 2,
           band_counts: bandCounts(1, 0, 0),
+          route_count: 1,
+          min_samples: 100,
         },
       }),
     );
-    expect(screen.getByText(/^Routes to check · /)).toBeInTheDocument();
+    expect(screen.getByText(/^Routes to check \(last /)).toBeInTheDocument();
     // Asserted on the map container MapLibre itself creates, not on a class
     // name this screen once used: `.ov-map-strip` exists in no stylesheet and
     // no component, so asserting its absence could never fail and guarded
@@ -193,7 +195,7 @@ describe("OverviewTab", () => {
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
         // delayed_count counts a different, lower threshold; the hero must not read it.
-        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands },
+        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands, route_count: routes.length, min_samples: 100 },
       });
     const lateRow = () => screen.getByRole("button", { name: /Averaging 5 min or more late/ });
 
@@ -219,6 +221,13 @@ describe("OverviewTab", () => {
       expect(lateRow()).toHaveClass("ov-hero-fact--attn");
     });
 
+    it("counts out of the same routes the list says it ranks", () => {
+      const facts = withFacts();
+      renderOverview({ ...facts, top_delayed: { ...facts.top_delayed, route_count: 163 } });
+      expect(lateRow()).toHaveTextContent("/ 163 routes");
+      expect(screen.getByText("Covers the 163 routes observed 100 or more times.")).toBeInTheDocument();
+    });
+
     it("agrees with that header past the five routes the list holds", () => {
       const worst = [delayed("R1", 9.1), delayed("R2", 8.4), delayed("R3", 7.7), delayed("R4", 6.2), delayed("R5", 5.3)];
       renderOverview(withFacts(worst, bandCounts(12, 3, 0)));
@@ -241,7 +250,7 @@ describe("OverviewTab", () => {
       try {
         renderOverview(withFacts());
         await userEvent.click(lateRow());
-        const list = screen.getByText(/^Routes to check · /).closest(".ov-routes-anchor");
+        const list = screen.getByText(/^Routes to check \(last /).closest(".ov-routes-anchor");
         expect(list).not.toBeNull();
         expect(scrollIntoView.mock.contexts).toEqual([list]);
         expect(document.activeElement).toBe(list);

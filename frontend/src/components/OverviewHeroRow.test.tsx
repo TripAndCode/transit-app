@@ -5,8 +5,8 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow, type HeroFact } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
-import { formatDateRange } from "../utils/format";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, OverviewServiceSplitDay } from "../api/types";
+import { formatDate, formatDateRange } from "../utils/format";
 
 function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
   return {
@@ -28,17 +28,7 @@ const concentration: OverviewConcentration = {
 };
 const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
 
-function mockHooks(routeCount: number, feedAgeHours: number | null) {
-  vi.spyOn(hooks, "useRoutes").mockReturnValue({
-    data: Array.from({ length: routeCount }, (_, i) => ({
-      route_id: String(i),
-      route_code: `R${i}`,
-      route_short_name: null,
-      route_long_name: null,
-      trip_headsigns: [],
-    })),
-    isPending: false,
-  } as never);
+function mockFeed(feedAgeHours: number | null) {
   const capturedAt =
     feedAgeHours == null ? null : new Date(Date.now() - feedAgeHours * 3600_000).toISOString();
   vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
@@ -50,7 +40,6 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
 // The feed's latest report at an exact instant, for a test that pins the
 // clock rather than offsetting from the real one.
 function mockFeedSummary(capturedAt: string | null) {
-  mockHooks(38, null);
   vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
     data: { latest_captured_at: capturedAt, date: null, routes: [], raw_samples: 0, clamp_count: 0 },
     isPending: false,
@@ -64,6 +53,8 @@ function renderHero(overrides: {
   periodAvgMin?: number | null;
   peakHour?: OverviewPeakHour | null;
   concentration?: OverviewConcentration;
+  routeCount?: number;
+  daily?: OverviewServiceSplitDay[];
   onOpenFact?: (fact: HeroFact) => void;
 } = {}) {
   return renderWithProviders(
@@ -71,6 +62,8 @@ function renderHero(overrides: {
       headline={overrides.headline ?? headline()}
       severeCount={overrides.severeCount ?? 3}
       severeThresholdMin={5}
+      routeCount={overrides.routeCount ?? 38}
+      minSamples={100}
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       periodAvgMin={overrides.periodAvgMin === undefined ? 2.7 : overrides.periodAvgMin}
@@ -78,6 +71,7 @@ function renderHero(overrides: {
       periodRange={formatDateRange("2026-05-11", "2026-06-09", { year: false })}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
+      daily={overrides.daily ?? []}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
     />,
   );
@@ -93,46 +87,82 @@ describe("OverviewHeroRow", () => {
     vi.restoreAllMocks();
   });
 
-  it("labels the primary figure with the dates it averages", () => {
-    mockHooks(38, 0.1);
+  it("labels the primary figure with how many days it averages, and which", () => {
+    mockFeed(0.1);
     renderHero();
-    expect(screen.getByText(`Average delay · ${formatDateRange("2026-06-03", "2026-06-09", { year: false })}`)).toBeInTheDocument();
-    expect(screen.getByText(/3\.3/)).toBeInTheDocument();
+    const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
+    expect(screen.getByText(`Average delay, last 7 days (${week})`)).toBeInTheDocument();
+    expect(document.querySelector(".ov-kpi-value")).toHaveTextContent(/^3\.3/);
   });
 
-  it("states a worse period as a chip with its delta, then one short sentence", () => {
-    mockHooks(38, 0.1);
-    renderHero({ headline: headline({ delta_min: 0.9 }) });
-    expect(screen.getByText("Worse than the period before, +0.9 min")).toBeInTheDocument();
-    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
+  it("states a longer window as a chip with its change, then both averages and the change in a sentence", () => {
+    mockFeed(0.1);
+    renderHero({ headline: headline({ avg_min: 3.23, baseline_avg_min: 2.91, delta_min: 0.32, delta_pct: 11 }) });
+    expect(screen.getByText("+0.3 min on the 7 days before")).toBeInTheDocument();
+    expect(
+      screen.getByText("The last 7 days averaged 3.2 min, 0.3 min (11%) longer than the 7 days before (2.9 min)."),
+    ).toBeInTheDocument();
   });
 
-  it("states a better period as a chip without repeating the delta", () => {
-    mockHooks(38, 0.1);
-    renderHero({ headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }) });
-    expect(screen.getByText("Better than the period before")).toBeInTheDocument();
-    expect(screen.getByText("Delays are 1.2 min shorter than in the 7-day period before.")).toBeInTheDocument();
+  it("states a shorter window the same way", () => {
+    mockFeed(0.1);
+    renderHero({ headline: headline({ avg_min: 2.6, baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -31.6 }) });
+    expect(screen.getByText("\u22121.2 min on the 7 days before")).toBeInTheDocument();
+    expect(
+      screen.getByText("The last 7 days averaged 2.6 min, 1.2 min (32%) shorter than the 7 days before (3.8 min)."),
+    ).toBeInTheDocument();
   });
 
-  it("states a period within the noise threshold as about the same", () => {
-    mockHooks(38, 0.1);
-    renderHero({ headline: headline({ delta_min: 0.2 }) });
-    expect(screen.getByText("About the same as the period before")).toBeInTheDocument();
-    expect(screen.getByText("Delay is about the same as in the 7-day period before.")).toBeInTheDocument();
+  it("calls a window about the same only within the bounds, still with both averages", () => {
+    mockFeed(0.1);
+    renderHero({ headline: headline({ avg_min: 2.52, baseline_avg_min: 2.46, delta_min: 0.06, delta_pct: 2.4 }) });
+    expect(screen.getByText("About the same as the 7 days before")).toBeInTheDocument();
+    expect(
+      screen.getByText("The last 7 days averaged 2.5 min, about the same as the 7 days before (2.5 min)."),
+    ).toBeInTheDocument();
   });
 
-  // The findings have rows of their own, so the sentence carries the verdict
-  // alone and the eye lands on one claim before the numbers.
+  it("notes the latest day when it is among the period's slowest, by its date and the days observed", () => {
+    mockFeed(0.1);
+    // 2026-06-09, the headline's last day, is the second slowest of eight.
+    const daily: OverviewServiceSplitDay[] = Array.from({ length: 8 }, (_, i) => ({
+      date: `2026-06-0${i + 2}`,
+      day_type: "weekday",
+      avg_min: i === 7 ? 5.02 : i === 0 ? 5.32 : 3,
+      samples: 1000,
+    }));
+    const { container } = renderHero({ daily });
+    const date = formatDate("2026-06-09", { year: false, weekday: true });
+    const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
+    expect(container.querySelector(".ov-hero-note")).toHaveTextContent(
+      `The latest day, ${date}, averaged 5.0 min: the second slowest of the 8 days observed in ${period}.`,
+    );
+  });
+
+  it("adds no note when the latest day is not among the slowest", () => {
+    mockFeed(0.1);
+    const daily: OverviewServiceSplitDay[] = Array.from({ length: 8 }, (_, i) => ({
+      date: `2026-06-0${i + 2}`,
+      day_type: "weekday",
+      avg_min: i === 7 ? 2 : 3,
+      samples: 1000,
+    }));
+    const { container } = renderHero({ daily });
+    expect(container.querySelector(".ov-hero-note")).toBeNull();
+  });
+
+  // The findings have rows of their own, so the sentence carries only the
+  // comparison: the two windows' averages and the change between them.
   it("keeps the peak hour and the concentration share out of the sentence", () => {
-    mockHooks(38, 0.1);
-    const { container } = renderHero({ headline: headline({ delta_min: 0.9 }) });
+    mockFeed(0.1);
+    const { container } = renderHero({ headline: headline({ avg_min: 3.7, delta_min: 0.9, delta_pct: 32.1 }) });
     expect(container.querySelector(".ov-hero-story")?.textContent).toBe(
-      "Delays are 0.9 min longer than in the 7-day period before.",
+      "The last 7 days averaged 3.7 min, 0.9 min (32%) longer than the 7 days before (2.8 min).",
     );
   });
 
   it("shows 'no comparison data' and no chip when baseline_avg_min is null", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const { container } = renderHero({
       headline: headline({ baseline_avg_min: null, delta_min: null, delta_pct: null }),
     });
@@ -141,7 +171,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("dates each fact by the days it counts", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero();
     // The heaviest hour and the delay share count the whole period; the
     // late-route count, like the headline, counts the headline's window.
@@ -149,11 +179,13 @@ describe("OverviewHeroRow", () => {
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
     expect(screen.getByRole("button", { name: /Heaviest hour/ })).toHaveTextContent(period);
     expect(screen.getByRole("button", { name: /Share of delay/ })).toHaveTextContent(period);
-    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent(week);
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent(
+      `Observed 100+ times, ${week}`,
+    );
   });
 
   it("lists the heaviest hour as a fact row that opens the peak-hour card", async () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });
     const row = screen.getByRole("button", { name: /Heaviest hour/ });
@@ -163,7 +195,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("lists the top route's share of delay as a fact row that opens the concentration card", async () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });
     const row = screen.getByRole("button", { name: /Share of delay in the top route/ });
@@ -176,7 +208,7 @@ describe("OverviewHeroRow", () => {
   // only have a single observed route. Both halves of the plural go through
   // i18next here, where the fake `t` in storySentence.test.ts cannot see them.
   it("pluralises the concentration label on the number of top routes", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({
       concentration: {
         top_routes: [
@@ -192,7 +224,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("lists the count of routes over the severe threshold, out of the total, with that threshold", async () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });
     const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
@@ -202,7 +234,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("gives the late-route count, and only it, the warm tone while any route is late", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const { container } = renderHero();
     const warm = container.querySelectorAll(".ov-hero-fact--attn");
     expect(warm).toHaveLength(1);
@@ -210,31 +242,30 @@ describe("OverviewHeroRow", () => {
   });
 
   it("keeps the late-route count neutral when no route is in the top band", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const { container } = renderHero({ severeCount: 0 });
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("0/ 38 routes");
     expect(container.querySelector(".ov-hero-fact--attn")).toBeNull();
   });
 
   // The routes-to-check list holds five routes; the count is the server's,
-  // over every route.
+  // over every route the list ranks, not only the listed ones.
   it("prints a count past the five routes the list holds", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ severeCount: 12 });
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");
   });
 
-  it("drops the total, not the count, while the route list is unknown", () => {
-    mockHooks(38, 0.1);
-    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: undefined, isPending: true } as never);
-    renderHero();
-    const row = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
-    expect(row).toHaveTextContent("3routes");
-    expect(row).not.toHaveTextContent("/");
+  // Out of the routes the list ranks, not the timetable's: the count and its
+  // total are one population.
+  it("counts out of the routes ranked in the window, whatever the timetable holds", () => {
+    mockFeed(0.1);
+    renderHero({ severeCount: 33, routeCount: 163 });
+    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("33/ 163 routes");
   });
 
   it("omits the heaviest-hour row without an hourly profile, keeping the others", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ peakHour: null });
     expect(screen.queryByRole("button", { name: /Heaviest hour/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Share of delay/ })).toBeInTheDocument();
@@ -242,7 +273,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("omits the concentration row without top routes, keeping the others", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ concentration: emptyConcentration });
     expect(screen.queryByRole("button", { name: /Share of delay/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Heaviest hour/ })).toBeInTheDocument();
@@ -250,20 +281,20 @@ describe("OverviewHeroRow", () => {
   });
 
   it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
-    mockHooks(38, 2);
+    mockFeed(2);
     renderHero();
     expect(screen.getByText("Feed quiet for 2 h")).toBeInTheDocument();
     expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
   it("renders an inline info hint next to the verdict", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero();
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
 
   it("counts a long-quiet feed in days", () => {
-    mockHooks(38, 30 * 24);
+    mockFeed(30 * 24);
     renderHero();
     expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
     // A quiet feed keeps the dot but not the live green.
@@ -271,14 +302,14 @@ describe("OverviewHeroRow", () => {
   });
 
   it("says the feed is reporting live while its newest report is minutes old", () => {
-    mockHooks(38, 0.05);
+    mockFeed(0.05);
     renderHero();
     expect(screen.getByText("Reporting live")).toBeInTheDocument();
     expect(screen.queryByText(/Feed quiet/)).toBeNull();
   });
 
   it("claims nothing about reports when the feed status could not be read", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, error: new Error("500") } as never);
     renderHero();
     expect(screen.queryByText("No reports yet")).toBeNull();
@@ -286,7 +317,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("claims nothing about a report whose time can't be read", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: { latest_captured_at: "not-a-time", date: null, routes: [], raw_samples: 0, clamp_count: 0 },
     } as never);
@@ -296,31 +327,31 @@ describe("OverviewHeroRow", () => {
   });
 
   it("says so before any report has arrived", () => {
-    mockHooks(38, null);
+    mockFeed(null);
     renderHero();
     expect(screen.getByText("No reports yet")).toBeInTheDocument();
   });
 
   it("renders a full-bleed trend sparkline when there are at least 2 points", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero();
     expect(screen.getByRole("img", { hidden: true })).toBeInTheDocument();
   });
 
   it("renders no sparkline when there are fewer than 2 points", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ sparklinePoints: [3.3] });
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
 
   it("prints the hero figure in the text colour, whatever its size", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const { container } = renderHero({ headline: headline({ avg_min: 7.4 }) });
     expect((container.querySelector(".ov-kpi-value") as HTMLElement).style.color).toBe("");
   });
 
   it("sets the hero delay value and every fact value in the numeral face", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     const { container } = renderHero();
     const value = container.querySelector(".ov-kpi-value");
     expect(value).not.toBeNull();
@@ -331,7 +362,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("anchors the sparkline on the period's sample-weighted mean, labelled in words", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     // The line is the API's period_avg_min, not a mean of the points: [1, 5]
     // would average to 3.0. The weighting itself is the backend's, tested in
     // tests/api/test_overview.py.
@@ -344,7 +375,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("drops the reference line when the sparkline has too few points to draw", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     for (const sparklinePoints of [[], [4]]) {
       const { container, unmount } = renderHero({ sparklinePoints, periodAvgMin: 4 });
       expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
@@ -354,7 +385,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("draws the day-pulse ribbon inside the figure column, never behind the facts", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
     expect(document.querySelector(".ov-hero-figure > .ov-pulse-ribbon")).not.toBeNull();
     // The figure's text follows both charts in DOM order, so it paints over them.
@@ -366,7 +397,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("draws no ribbon without an hourly profile", () => {
-    mockHooks(38, 0.1);
+    mockFeed(0.1);
     renderHero({ peakHour: null });
     expect(document.querySelector(".ov-pulse-ribbon")).toBeNull();
   });
@@ -391,7 +422,7 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByText("No reports yet")).toBeInTheDocument();
     expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
     cleanup();
-    mockHooks(38, null);
+    mockFeed(null);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, isPending: true } as never);
     renderHero();
     expect(document.querySelector(".ov-fresh-dot")).toBeNull();
@@ -411,7 +442,7 @@ describe("OverviewHeroRow", () => {
   });
 
   it("keeps the feed status under the figure", () => {
-    mockHooks(38, 0.05);
+    mockFeed(0.05);
     const { container } = renderHero();
     expect(container.querySelector(".ov-hero-figure .ov-hero-feed")).toHaveTextContent(/Reporting live/);
   });

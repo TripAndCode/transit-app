@@ -16,6 +16,8 @@ const concentration: OverviewConcentration = {
   rest_route_count: 4,
 };
 
+const PERIOD = "Sep 24 – Oct 23";
+
 function renderBar(ui: ReactElement) {
   return renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
@@ -50,6 +52,7 @@ describe("ConcentrationBar", () => {
   it("draws the largest share at full width and the rest in proportion to it", () => {
     const { container } = renderBar(
       <ConcentrationBar
+        periodRange={PERIOD}
         concentration={{
           top_routes: [
             { route_code: "A", route_short_name: null, share_pct: 3.9 },
@@ -66,7 +69,7 @@ describe("ConcentrationBar", () => {
   });
 
   it("hands each fill its rank opacity as a custom property, so the stylesheet's hover rule can still change it", () => {
-    const { container } = renderBar(<ConcentrationBar concentration={concentration} />);
+    const { container } = renderBar(<ConcentrationBar periodRange={PERIOD} concentration={concentration} />);
     const fills = [...container.querySelectorAll<HTMLElement>(".ov-pareto-fill")];
     expect(fills).toHaveLength(2);
     // An inline `opacity` outranks every class rule, which would leave the
@@ -79,6 +82,7 @@ describe("ConcentrationBar", () => {
     mockRoutes();
     const { container } = renderBar(
       <ConcentrationBar
+        periodRange={PERIOD}
         concentration={{
           top_routes: [
             { route_code: "360868713", route_short_name: "3", share_pct: 6.2 },
@@ -99,7 +103,7 @@ describe("ConcentrationBar", () => {
 
   it("names a route by the payload's short name until the static routes load", () => {
     const { container } = renderBar(
-      <ConcentrationBar concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 4 }, ...concentration.top_routes], rest_share_pct: 46 }} />,
+      <ConcentrationBar periodRange={PERIOD} concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 4 }, ...concentration.top_routes], rest_share_pct: 46 }} />,
     );
     expect(container.querySelector(".ov-pareto-label .route-label__plate")).toHaveTextContent("70-3");
     expect(container).not.toHaveTextContent("1471981638");
@@ -108,7 +112,7 @@ describe("ConcentrationBar", () => {
   it("names the one observed route by its label in the spotlight sentence", () => {
     mockRoutes();
     const { container } = renderBar(
-      <ConcentrationBar concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }} />,
+      <ConcentrationBar periodRange={PERIOD} concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }} />,
     );
     expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent(
       "70-3 あさひが丘線 accounts for 100% — only 1 route counted.",
@@ -116,16 +120,35 @@ describe("ConcentrationBar", () => {
     expect(container).not.toHaveTextContent("1471981638");
   });
 
-  it("states every share as one of the delay among the routes it counts", () => {
-    const { container } = renderBar(<ConcentrationBar concentration={concentration} limit={20} variant="modal" />);
+  it("states every share as one of the delay of the routes it counts, and says how many and when", () => {
+    const { container } = renderBar(<ConcentrationBar periodRange={PERIOD} concentration={concentration} limit={20} variant="modal" />);
+    // Two listed routes and four more the API only counts.
     expect(container.querySelector(".ov-conc-headline")).toHaveTextContent(
-      "Top 2 routes carry 50% of the delay among the routes counted.",
+      "Top 2 routes carry 50% of the delay of the 6 routes observed in Sep 24 – Oct 23.",
     );
     expect(container.querySelector(".ov-lorenz-caption")?.textContent).toMatch(
-      /^Top 20% of routes carry \d+% of the delay among the routes counted\.$/,
+      /^Top 20% of the 6 routes observed in Sep 24 – Oct 23 carry \d+% of their delay\.$/,
     );
     expect(container.querySelector(".ov-modal-explainer")).toHaveTextContent(
       "Route codes the current timetable no longer runs, and routes whose feed always reports zero delay, are not counted.",
     );
+  });
+
+  it("leaves the rest as what the headline's share leaves, so the two add up to 100", () => {
+    // Five shown shares, each rounded on its own, sum to 19.8 (headline 20%);
+    // the API's rest after its top 20 plus the 15 unshown would print 80.3%.
+    const shares = [5.0, 4.1, 4.0, 3.5, 3.2, ...Array.from({ length: 15 }, () => 2.0)];
+    const { container } = renderBar(
+      <ConcentrationBar
+        periodRange={PERIOD}
+        concentration={{
+          top_routes: shares.map((share_pct, i) => ({ route_code: `R${i}`, route_short_name: null, share_pct })),
+          rest_share_pct: 50.3,
+          rest_route_count: 154,
+        }}
+      />,
+    );
+    expect(container.querySelector(".ov-conc-headline")).toHaveTextContent(/carry 20% of the delay of the 174 routes/);
+    expect(container.querySelector(".ov-pareto-rest")).toHaveTextContent("Remaining 169 routes: 80%");
   });
 });
