@@ -74,7 +74,9 @@ export function RouteAnalysisTab() {
   const prevCtx = { ...ctx, ...previousWindow(ctx.from, ctx.to) };
   // A picked variant is known before the current window answers, so the two
   // scans run side by side; only the server's own pick has to wait for it.
-  const previousShape = variantParam || query.data?.shape_id || null;
+  // Once the current window answers, its shape wins: the server ignores a
+  // picked shape that isn't the route's, and the two windows must agree.
+  const previousShape = query.data?.shape_id ?? (variantParam || null);
   const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
   const names = useRouteNames(id);
   // Two plain string keys rather than one JSON-shaped one, so a shared link
