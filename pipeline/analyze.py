@@ -957,13 +957,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     seeing one set of rows.
 
     First it saves the planned trips of the days the loaded timetable covers
-    up to today (`pipeline.planned_trips`), committed on its own: inside the
-    run's transaction, which spans the whole rebuild, the new rows would stay
-    uncommitted and hold up a timetable reload saving the same days. A failed
+    up to today (`pipeline.planned_trips`), committed on its own rather than
+    with the run's transaction, which spans the whole rebuild. A failed
     capture is logged and the run goes on.
     """
     capture_planned_trips(conn, agency_id)
-    conn.commit()
     with agency_ingest_lock(conn, agency_id):
         _analyze_locked(agency_id, conn, ch_client)
 

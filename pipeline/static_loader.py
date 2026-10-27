@@ -18,15 +18,18 @@ Every load then recomputes each route's terminal names and loop/both-ways
 flags from what is now in place, reading GTFS-JP ``routes_jp.txt`` when the
 zip has it (``pipeline.route_terminals``).
 
-Before replacing anything, a load saves the outgoing timetable's planned trips
-for the days up to today it covers (``pipeline.planned_trips``), in the same
-transaction, so a reload never takes away the plan of a day that has run.
+Before replacing anything, a load saves and commits the outgoing timetable's
+planned trips for the days it covers up to today and before the incoming
+timetable starts (``pipeline.planned_trips``), so a reload never takes away the
+plan of a day that has run, and a day the incoming timetable covers keeps the
+incoming plan.
 """
 
 import csv
 import io
 import logging
 import pathlib
+import re
 import zipfile
 from collections import defaultdict
 from datetime import date, datetime
@@ -123,6 +126,22 @@ def _calendar_rows(raw_rows: list[list]) -> list[list]:
     return rows
 
 
+def _first_covered_day(calendar_rows: list[list], calendar_dates_rows: list[list]) -> date | None:
+    """The first day a timetable covers, under the rule ``pipeline.planned_trips``
+    counts coverage by: a ``calendar.txt`` service's start date, or a date a
+    ``calendar_dates.txt`` row names. A ``calendar_dates.txt`` date that is not
+    eight ASCII digits naming a real day matches no day there, so it covers
+    nothing here either."""
+    days = [row[-2] for row in calendar_rows]
+    for _service_id, raw, _exception_type in calendar_dates_rows:
+        if raw and re.fullmatch(r"[0-9]{8}", raw):
+            try:
+                days.append(datetime.strptime(raw, "%Y%m%d").date())
+            except ValueError:
+                continue
+    return min(days, default=None)
+
+
 def _count_calendar_trips(cur, agency_id: int) -> None:
     """Store each calendar service's trip count, the weight of its vote for a
     date's timetable class (``pipeline.day_types``), so reports read it
@@ -145,13 +164,16 @@ def load_static(path: str, agency_id: int, conn) -> None:
             When a directory is given, the most recently named
             ``*static*.zip`` inside it is picked.
         agency_id: The agency id rows are scoped to.
-        conn: A psycopg2 connection. load_static commits the load as one
+        conn: A psycopg2 connection. load_static first commits the
+            outgoing timetable's planned trips, then commits the load as one
             transaction, then runs ANALYZE and commits again, before
             returning; any uncommitted work the caller already had open on
-            ``conn`` is committed with the load, so it cannot be rolled
-            back alongside it. It never rolls back: if it raises, the
-            caller rolls back before reusing ``conn``, and a failure before
-            the first commit leaves none of the load in place.
+            ``conn`` is committed with the first of these, so it cannot be
+            rolled back alongside the load. It never rolls back: if it
+            raises, the caller rolls back before reusing ``conn``, and a
+            failure before the load's commit leaves none of the load in
+            place. The saved planned trips stay, and stay right: the
+            timetable they came from is still the one loaded.
 
     Raises:
         FileNotFoundError: If ``path`` does not resolve to a zip file
@@ -176,10 +198,14 @@ def load_static(path: str, agency_id: int, conn) -> None:
     static_version_id = p.stem
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
-        # Before any table is replaced, trips.txt's included: the outgoing
-        # timetable's plan is its calendar and its trips together.
-        capture_planned_trips(conn, agency_id)
         names_in_zip = set(zf.namelist())
+        calendar_rows = _calendar_rows(read_static_rows(zf, "calendar.txt")) if "calendar.txt" in names_in_zip else []
+        calendar_dates_rows = read_static_rows(zf, "calendar_dates.txt") if "calendar_dates.txt" in names_in_zip else []
+        # Before any table is replaced, trips.txt's included: the outgoing
+        # timetable's plan is its calendar and its trips together. The days
+        # from the incoming timetable's first are left to it, and the capture
+        # commits now so a concurrent analyze's capture never waits on this load.
+        capture_planned_trips(conn, agency_id, before=_first_covered_day(calendar_rows, calendar_dates_rows))
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
@@ -256,7 +282,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         row[-1] = int(direction) if direction in {"0", "1"} else None
                     pg_rows = [[agency_id, *row, static_version_id] for row in raw_rows]
                 elif table == "static_calendar":
-                    pg_rows = [[agency_id, *row] for row in _calendar_rows(raw_rows)]
+                    pg_rows = [[agency_id, *row] for row in calendar_rows]
                 else:
                     pg_rows = [[agency_id, *row] for row in raw_rows]
                 # RETURNING lets us count how many rows actually landed vs were deduped

@@ -11,12 +11,14 @@ same date runs once. Each running (service, date) plans the number of
 The loaded timetable covers only the days its calendar says anything about,
 and a reload (:mod:`pipeline.static_loader`) replaces an agency's calendar, so
 every day before the new calendar starts loses its plan when the new one
-lands. ``planned_trips_daily`` keeps each day's count as the timetable loaded
-at the time planned it. :func:`capture_planned_trips` writes it before a
-reload replaces anything and on every analyze run, so each day is saved while
-its timetable is loaded, and the first count saved for a day stands. Days
-before the first capture are not reconstructed: the reload that replaced their
-timetable erased them.
+lands. ``planned_trips_daily`` keeps each day's count as the loaded timetable
+planned it when it was captured, and the first count saved for a day stands.
+:func:`capture_planned_trips` runs on every analyze run, and before a reload
+replaces anything. A reload saves the outgoing timetable only for the days
+before the incoming one starts, so a timetable that takes effect on the day
+it is loaded plans that day itself; the next capture saves it from there.
+Days before the first capture are not reconstructed: the reload that replaced
+their timetable erased them.
 """
 
 from __future__ import annotations
@@ -29,10 +31,10 @@ from pipeline.service_day import service_date_of
 
 logger = logging.getLogger(__name__)
 
-#: How far back a capture looks for days it has not saved yet: the longest
-#: report window, ending today. Every capture after the first finds only the
-#: days since the one before, so this bounds only an agency's first capture
-#: and the catch-up after a long gap.
+#: The days a capture plans and offers to save: the longest report window,
+#: ending today. Each capture recomputes the whole window and inserts only the
+#: days with no row yet; a day further back is saved only if an earlier
+#: capture reached it.
 CAPTURE_LOOKBACK_DAYS = MAX_RANGE_DAYS
 
 
@@ -119,24 +121,29 @@ _CAPTURE_SQL = (
 )
 
 
-def capture_planned_trips(conn, agency_id: int, *, today: date | None = None) -> int | None:
-    """Save the planned trips of each day up to ``today`` that the loaded
-    timetable covers and ``planned_trips_daily`` does not hold yet. Returns how
-    many days it saved, or None when the capture failed.
+def capture_planned_trips(conn, agency_id: int, *, today: date | None = None, before: date | None = None) -> int | None:
+    """Save the planned trips of each day up to ``today``, and before
+    ``before`` when given, that the loaded timetable covers and
+    ``planned_trips_daily`` does not hold yet, then commit. Returns how many
+    days it saved, or None when the capture failed.
 
     ``today`` defaults to the service day in progress
     (:func:`pipeline.service_day.service_date_of`); a later day's plan can
-    still change before it runs, so it is never saved ahead.
+    still change before it runs, so it is never saved ahead. ``before`` is a
+    reload's cutoff: the first day the incoming timetable covers, which that
+    timetable plans instead.
 
-    Runs inside a savepoint on the caller's transaction and never commits:
-    a reload saves the old timetable's days in the same transaction that
-    replaces it. A failure is logged and rolled back to the savepoint, so it
-    costs the capture and nothing else; the next capture saves whatever days
-    are still loaded. The caller's connection must not be in autocommit, which
-    has no transaction to hold a savepoint.
+    The commit is immediate, and takes along whatever the caller had open:
+    left uncommitted behind a long load or rebuild, the new rows would make a
+    concurrent capture of the same days wait for it. The insert runs inside a
+    savepoint, so a failure is logged and rolled back to it, costing the
+    capture and nothing else; the next capture saves whatever days are still
+    loaded. Never raises. The caller's connection must not be in autocommit,
+    which has no transaction to hold a savepoint.
     """
     day = today or service_date_of(datetime.now(timezone.utc))
-    params = {"agency_id": agency_id, "from_date": day - timedelta(days=CAPTURE_LOOKBACK_DAYS - 1), "to_date": day}
+    last = min(day, before - timedelta(days=1)) if before else day
+    params = {"agency_id": agency_id, "from_date": day - timedelta(days=CAPTURE_LOOKBACK_DAYS - 1), "to_date": last}
     try:
         with conn.cursor() as cur:
             cur.execute("SAVEPOINT capture_planned_trips")
@@ -147,8 +154,9 @@ def capture_planned_trips(conn, agency_id: int, *, today: date | None = None) ->
                 raise
             saved = cur.rowcount
             cur.execute("RELEASE SAVEPOINT capture_planned_trips")
+        conn.commit()
     except Exception:
         logger.warning("planned_trips_daily: could not save planned trips for agency %s", agency_id, exc_info=True)
         return None
-    logger.info(f"  planned_trips_daily: {saved} day(s) saved through {day}")
+    logger.info(f"  planned_trips_daily: {saved} day(s) saved through {last}")
     return saved

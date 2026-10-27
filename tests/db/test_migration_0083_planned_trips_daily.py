@@ -51,7 +51,7 @@ def test_rolling_back_drops_the_table_and_migrating_up_restores_it(apply_schema)
     database is thrown away between runs."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
-        migrate.migrate_down("0081", conn, force_destructive=True)
+        migrate.migrate_down("0082", conn, force_destructive=True)
         assert not _table_exists(conn)
 
         migrate.migrate_up(conn)

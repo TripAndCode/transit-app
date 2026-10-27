@@ -35,11 +35,12 @@ from pipeline.planned_trips import plan_ctes
 from pipeline.strategies.static_join import rt_field_coverage_confirmed_agencies
 
 # A day has a plan when planned_trips_daily saved one for it or the loaded
-# timetable covers it, and the saved count wins: it is what the timetable in
-# force on the day planned, where a later reload may plan the day differently
-# or not at all. Only those days count, on both sides of the ratio. A reload
-# replaces the agency's calendar, so a window can reach back to days no plan
-# covers, and missed trips count only on the days the plan counted.
+# timetable covers it, and the saved count wins. A capture records what the
+# timetable loaded at the time planned, and a reload saves only the days before
+# the incoming timetable starts, so a saved day keeps the plan a later reload
+# would replace or drop. Only those days count, on both sides of the ratio:
+# a reload replaces the agency's calendar, so a window can reach back to days
+# no plan covers, and missed trips count only on the days the plan counted.
 # agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
 # missed trips are there whatever timetable is loaded now. It has a row only
 # for a day with a missed trip, so an agency with none reads 0, not "not

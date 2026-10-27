@@ -38,9 +38,11 @@ What the user sees/does:
   service-delivered % (executed trips ÷
   planned trips from the static GTFS schedule — reads "—" rather than a
   misleading 100% for an agency whose feed doesn't report cancellations;
-  when the loaded timetable covers only some of the window's days, the rate
-  carries "timetable covers N/M days" and a footnote under the list says both
-  delivered rates count only those days),
+  when a timetable plans only some of the window's days, by a count saved
+  for the day or the loaded timetable, the rate carries "N/M days a timetable
+  plans" and a footnote under the list says both delivered rates count only
+  those days; when the planned figures cannot be read at all, every agency's
+  rate reads "—" and the delay figures still show),
   a delay bar on a fixed 0–6 minute axis shared by every card
   (`DELAY_AXIS_MAX_MIN`, marked at 5 minutes) and colored by `delayColor()`,
   sample count, and two optional flags: an amber (`--error-fg`) dot when

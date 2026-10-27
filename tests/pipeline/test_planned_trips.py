@@ -1,9 +1,10 @@
 """Each service day's planned trips are saved while its timetable is loaded.
 
 The capture writes the days up to today that the loaded timetable covers and
-that have no saved count yet. A timetable reload captures first, so the days
-the old timetable planned keep its counts after the new one replaces it, and
-analyze captures on every run. Neither lets a failed capture stop it.
+that have no saved count yet. A timetable reload captures first, for the days
+before the incoming timetable starts, so those keep the outgoing counts after
+it is replaced, and analyze captures on every run. Neither lets a failed
+capture stop it.
 
 April 2026 starts on a Wednesday: the 6th and 13th are Mondays, the 11th a
 Saturday.
@@ -138,26 +139,90 @@ def test_another_agencys_timetable_is_not_captured(pg_conn, agency_id):
     assert _saved(pg_conn, agency_id) == {}
 
 
-def test_a_reload_captures_the_old_timetable_before_replacing_it(pg_conn, agency_id, tmp_path, monkeypatch):
-    """Timetable A plans 3 trips a day through April. It is captured on the
-    10th; on the 15th timetable B, planning 5 a day from the 15th, replaces it.
-    The reload saves A's 11th to 15th before B's calendar lands, and every day
-    A planned keeps A's count after."""
+@pytest.mark.parametrize(
+    ("incoming_start", "outgoing_through"),
+    [
+        # The incoming timetable starts on the day it is loaded: that day is its own.
+        (date(2026, 4, 15), date(2026, 4, 14)),
+        # It starts tomorrow: today stays with the outgoing timetable.
+        (date(2026, 4, 16), date(2026, 4, 15)),
+        # It reaches back before today: the days it covers are its own.
+        (date(2026, 4, 12), date(2026, 4, 11)),
+    ],
+)
+def test_a_reload_saves_the_outgoing_days_before_the_incoming_timetable_starts(
+    pg_conn, agency_id, tmp_path, monkeypatch, incoming_start, outgoing_through
+):
+    """Timetable A plans 3 trips a day through April and is captured on the
+    10th. On the 15th timetable B, planning 5 a day, replaces it. The reload
+    saves A's days up to the one before B starts, and the next capture saves
+    B's days from there."""
     freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 10)))
     load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
     capture_planned_trips(pg_conn, agency_id)
-    pg_conn.commit()
     assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 10))}
 
     freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
-    load_static(_timetable_zip(tmp_path, "b", "20260415", "20261014", 5), agency_id, pg_conn)
-    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 15))}
+    load_static(_timetable_zip(tmp_path, "b", incoming_start.strftime("%Y%m%d"), "20261014", 5), agency_id, pg_conn)
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
 
-    # From here on the days are B's.
     capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 16))
-    pg_conn.commit()
-    assert _saved(pg_conn, agency_id)[date(2026, 4, 16)] == 5
-    assert _saved(pg_conn, agency_id)[date(2026, 4, 15)] == 3
+    expected = {d: 3 for d in _days(date(2026, 4, 1), outgoing_through)}
+    expected |= {d: 5 for d in _days(outgoing_through + timedelta(days=1), date(2026, 4, 16))}
+    assert _saved(pg_conn, agency_id) == expected
+
+
+def test_a_reload_cuts_over_on_the_incoming_feeds_first_calendar_dates_day(pg_conn, agency_id, tmp_path, monkeypatch):
+    """A calendar_dates.txt day before the incoming calendar starts is the
+    incoming timetable's first day; a malformed date there covers nothing."""
+    freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
+    load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
+    incoming = _timetable_zip(tmp_path, "b", "20260420", "20261014", 5)
+    with zipfile.ZipFile(incoming, "a") as zf:
+        zf.writestr("calendar_dates.txt", "service_id,date,exception_type\nALL,20260413,1\nALL,2026041,1\n")
+
+    load_static(incoming, agency_id, pg_conn)
+    assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 12))}
+
+
+def test_the_reload_commits_its_capture_before_replacing_the_timetable(pg_conn, agency_id, tmp_path, monkeypatch):
+    """While the load is still open, another connection already sees the saved
+    days and still sees the outgoing calendar. A load that then fails keeps
+    them, which stays right: the outgoing timetable is still the one loaded."""
+    import os
+
+    import psycopg2
+
+    from pipeline import static_loader
+
+    freeze_now(monkeypatch, planned_trips, jst_midday(date(2026, 4, 15)))
+    load_static(_timetable_zip(tmp_path, "a", "20260401", "20260430", 3), agency_id, pg_conn)
+    seen = {}
+
+    def _fail_mid_load(*_args, **_kwargs):
+        other = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            seen["saved"] = _saved(other, agency_id)
+            with other.cursor() as cur:
+                cur.execute("SELECT start_date FROM static_calendar WHERE agency_id = %s", (agency_id,))
+                seen["calendar"] = cur.fetchall()
+        finally:
+            other.close()
+        raise RuntimeError("load failed")
+
+    monkeypatch.setattr(static_loader, "load_route_terminals", _fail_mid_load)
+    with pytest.raises(RuntimeError):
+        load_static(_timetable_zip(tmp_path, "b", "20260420", "20261014", 5), agency_id, pg_conn)
+    pg_conn.rollback()
+
+    assert seen == {
+        "saved": {d: 3 for d in _days(date(2026, 4, 1), date(2026, 4, 15))},
+        "calendar": [(date(2026, 4, 1),)],
+    }
+    assert _saved(pg_conn, agency_id) == seen["saved"]
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT start_date FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(date(2026, 4, 1),)]
 
 
 def test_a_failed_capture_does_not_stop_the_reload(pg_conn, agency_id, tmp_path, monkeypatch, caplog):

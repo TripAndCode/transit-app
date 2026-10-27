@@ -34,9 +34,9 @@ function byDelayDescending(a: NetworkAgencyRow, b: NetworkAgencyRow): number {
   return b.avg_delay_min - a.avg_delay_min;
 }
 
-/** A delivered rate counts only the days the loaded timetable covers, so a
- *  timetable covering part of the window gives a rate over fewer days than
- *  its neighbours'. A rate the feed cannot measure has nothing to qualify. */
+/** A delivered rate counts only the days a timetable plans, so a plan for
+ *  part of the window gives a rate over fewer days than its neighbours'. A
+ *  rate the feed cannot measure has nothing to qualify. */
 function isPartlyTimetabled(a: NetworkAgencyRow): boolean {
   return a.service_delivered_pct != null && a.covered_days < a.window_days;
 }
