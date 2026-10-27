@@ -10,6 +10,10 @@ export type DataSource = {
   creditKey: "credits.aomori" | "credits.hiroshima";
   /** Hosts that agencies' GTFS and GTFS-RT feeds are fetched from under this credit. */
   feedHosts: readonly string[];
+  /** The prefecture every agency this source publishes runs in, which the
+   *  agency picker groups by. The feeds carry no location of their own, so a
+   *  source whose agencies span prefectures cannot name one here. */
+  prefectureKey: "prefectures.aomori" | "prefectures.hiroshima";
   links: (locale: Locale) => Record<string, string>;
 };
 
@@ -23,6 +27,7 @@ export const DATA_SOURCES: readonly DataSource[] = [
   {
     creditKey: "credits.aomori",
     feedHosts: ["aomoricitybus.com", "api-public.odpt.org"],
+    prefectureKey: "prefectures.aomori",
     links: (locale) => ({
       static: "https://ckan.odpt.org/dataset/aomori_city_all_lines",
       realtime: "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines",
@@ -35,6 +40,7 @@ export const DATA_SOURCES: readonly DataSource[] = [
   {
     creditKey: "credits.hiroshima",
     feedHosts: ["ajt-mobusta-gtfs.mcapps.jp"],
+    prefectureKey: "prefectures.hiroshima",
     links: (locale) => ({
       site: "https://www.bus-kyo.or.jp/",
       license: `https://creativecommons.org/publicdomain/zero/1.0/deed.${locale}`,

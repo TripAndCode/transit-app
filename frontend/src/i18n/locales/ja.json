@@ -54,12 +54,23 @@
     "handle": "シートの高さを変える"
   },
   "onboarding": {
-    "subtitle": "あなたの事業者を選んでください",
+    "title": "事業者を選ぶ",
+    "intro": "バスの遅れを、実際の運行データで調べられます。",
+    "intro_guest": "バスの遅れを、実際の運行データで調べられます。<unit>ログインは不要です。</unit>",
     "no_agencies": "事業者がまだ登録されていません。",
-    "data_through": "{{date}}までのデータ",
+    "data_through": "データ：{{date}}まで",
+    "stopped": "{{date}}を最後に更新なし",
     "no_data_yet": "まだデータを収集していません",
-    "search": "事業者を検索",
-    "no_matches": "一致する事業者がありません。別の名前で検索してください。"
+    "search": "事業者名で探す",
+    "no_matches": "一致する事業者がありません。別の名前で検索してください。",
+    "group_count_one": "{{count}}事業者",
+    "group_count_other": "{{count}}事業者",
+    "other_prefecture": "その他",
+    "links": "案内"
+  },
+  "prefectures": {
+    "aomori": "青森県",
+    "hiroshima": "広島県"
   },
   "landing": {
     "hero": {

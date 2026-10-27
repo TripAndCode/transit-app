@@ -4,11 +4,26 @@ import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OnboardingGate } from "./OnboardingGate";
 import * as hooks from "../api/hooks";
+import * as config from "../api/config";
+import * as auth from "../api/auth";
 import type { Agency } from "../api/types";
-import { formatDate } from "../utils/format";
+
+const HIROSHIMA_FEED = "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin";
+const AOMORI_FEED = "https://aomoricitybus.com/TripUpdate.pb";
 
 function agency(over: Partial<Agency>): Agency {
   return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
+}
+
+/** A signed-out guest on a deployment with sign-in available but not
+ *  required, unless `visitor` says otherwise; `session: undefined` is a
+ *  session still loading. */
+function mockVisitor(visitor: { auth_enabled?: boolean; login_required?: boolean; session?: object | null } = {}) {
+  const { auth_enabled = true, login_required = false } = visitor;
+  vi.spyOn(config, "useConfig").mockReturnValue({
+    data: { auth_enabled, local_admin_enabled: false, login_required },
+  } as never);
+  vi.spyOn(auth, "useSession").mockReturnValue({ data: "session" in visitor ? visitor.session : null } as never);
 }
 
 function LandingProbe() {
@@ -44,6 +59,7 @@ function mockAgencies(
 describe("OnboardingGate", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockVisitor();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -142,36 +158,107 @@ describe("OnboardingGate", () => {
     expect(screen.queryByText("landed:welcome")).toBeNull();
   });
 
-  it("says which agencies have data, and through when", () => {
+  it("names the newest data day once, above the cards, instead of on each card", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Collected", latest_data_date: "2026-10-03" }),
-      agency({ agency_id: 2, agency_name: "Never collected" }),
+      agency({ agency_id: 1, agency_name: "First", latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 2, agency_name: "Second", latest_data_date: "2026-10-22" }),
+      agency({ agency_id: 3, agency_name: "Never collected" }),
     ]);
     renderGate();
-    const collected = screen.getByRole("button", { name: /^Collected/ });
-    expect(collected).toHaveTextContent(`Data through ${formatDate("2026-10-03")}`);
+    expect(screen.getAllByText(/Data through/)).toHaveLength(1);
+    expect(screen.getByText(/Data through/)).toHaveTextContent("Data through Oct 23");
+    expect(screen.getByRole("button", { name: /^First/ })).not.toHaveTextContent(/Data through|No updates/);
     expect(screen.getByRole("button", { name: /^Never collected/ })).toHaveTextContent("No data collected yet");
   });
 
-  it("keeps the date in one piece, so a narrow card wraps before it and never inside it", () => {
+  it("notes only the agency whose data stopped well behind the others", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Collected", latest_data_date: "2026-09-10" }),
-      agency({ agency_id: 2, agency_name: "Never collected" }),
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
+      agency({ agency_id: 2, agency_name: "Current", latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 3, agency_name: "A day late", latest_data_date: "2026-10-22" }),
     ]);
     renderGate();
-    const caption = screen.getByRole("button", { name: /^Collected/ }).lastElementChild;
-    expect(caption?.textContent).toBe("Data through Sep\u00a010,\u00a02026");
+    expect(screen.getByRole("button", { name: /^Stopped/ })).toHaveTextContent("No updates after Oct 14");
+    expect(screen.getByRole("button", { name: /^Current/ })).not.toHaveTextContent("No updates");
+    expect(screen.getByRole("button", { name: /^A day late/ })).not.toHaveTextContent("No updates");
   });
 
-  it("lists the agencies with data first", () => {
+  it("keeps the stopped note when a search leaves only that agency", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
+      ...Array.from({ length: 8 }, (_, i) =>
+        agency({ agency_id: i + 2, agency_name: `Agency ${i + 2}`, latest_data_date: "2026-10-23" }),
+      ),
+    ]);
+    renderGate();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "stopped" } });
+    expect(screen.getByRole("button", { name: /^Stopped/ })).toHaveTextContent("No updates after Oct 14");
+  });
+
+  it("groups the agencies by prefecture, with how many each holds", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Aomori City Bus", feed_url: AOMORI_FEED, latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
+    ]);
+    renderGate();
+    const groups = screen.getAllByRole("heading", { level: 2 });
+    expect(groups.map((h) => h.textContent)).toEqual(["Hiroshima 2 agencies", "Aomori 1 agency"]);
+    const hiroshima = groups[0].closest("section") as HTMLElement;
+    expect(within(hiroshima).getAllByRole("button").map((b) => b.textContent)).toEqual(["Hiroden", "Hiroshima Bus"]);
+  });
+
+  it("lists an agency from an unknown source under Other", () => {
+    mockAgencies([
+      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED }),
+      agency({ agency_id: 70, agency_name: "Newcomer", feed_url: "https://example.com/rt.pb" }),
+    ]);
+    renderGate();
+    const other = screen.getByRole("heading", { level: 2, name: /^Other/ }).closest("section") as HTMLElement;
+    expect(within(other).getByRole("button", { name: /^Newcomer/ })).toBeInTheDocument();
+  });
+
+  it("lists the agencies with data first, then by name", () => {
     mockAgencies([
       agency({ agency_id: 1, agency_name: "Empty one" }),
-      agency({ agency_id: 2, agency_name: "Full one", latest_data_date: "2026-10-03" }),
-      agency({ agency_id: 3, agency_name: "Empty two" }),
+      agency({ agency_id: 2, agency_name: "Full two", latest_data_date: "2026-10-03" }),
+      agency({ agency_id: 3, agency_name: "Full one", latest_data_date: "2026-10-03" }),
     ]);
     renderGate();
     const names = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((n) => /one|two/.test(n));
-    expect(names[0]).toMatch(/^Full one/);
+    expect(names).toEqual(["Full one", "Full two", "Empty oneNo data collected yet"]);
+  });
+
+  it("explains the app, and offers help, about and login to a signed-out guest", () => {
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Choose an agency");
+    expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
+    expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    expect(screen.getByRole("link", { name: "About this app" })).toHaveAttribute("href", "/welcome");
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+  });
+
+  it.each([
+    ["a signed-in user", { session: { user_id: 1 } }],
+    ["a deployment without sign-in", { auth_enabled: false }],
+  ])("offers no login link to %s", (_, visitor) => {
+    mockVisitor(visitor);
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a signed-in user", { session: { user_id: 1 } }],
+    ["a deployment that requires login", { login_required: true, session: { user_id: 1 } }],
+    ["a session still loading", { session: undefined }],
+  ])("does not say login is unneeded to %s", (_, visitor) => {
+    mockVisitor(visitor);
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.queryByText(/No sign-in needed/)).toBeNull();
   });
 
   it("offers a search once the list is long, and none for a short one", () => {
@@ -194,16 +281,18 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
-  // jsdom has no layout, so this pins the overlay's inline styles rather than
-  // its rendered position.
-  it("scrolls the overlay and centres its content with auto margins, not flex alignment", () => {
+  // jsdom has no layout, so this pins the page's inline styles rather than
+  // its rendered position: the page scrolls as a whole, and its content
+  // starts at the top instead of being centred, which would push a long
+  // list's head above the scroll origin.
+  it("scrolls as one page whose content starts at the top", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
-    const content = screen.getByRole("heading", { level: 1 }).parentElement!.parentElement!;
-    const overlay = content.parentElement!;
-    expect(overlay.style.overflowY).toBe("auto");
-    expect(overlay.style.alignItems).toBe("");
-    expect(content.style.margin).toBe("auto");
+    const page = screen.getByTestId("agency-directory");
+    expect(page).toContainElement(screen.getByRole("heading", { level: 1 }));
+    expect(page.style.overflowY).toBe("auto");
+    expect(page.style.alignItems).toBe("");
+    expect(page.style.justifyContent).toBe("");
   });
 
   it("lets a visitor switch language before choosing", () => {
