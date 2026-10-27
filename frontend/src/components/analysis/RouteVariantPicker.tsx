@@ -10,7 +10,7 @@ function share(pct: number): string {
 }
 
 /** Which of a route's stopping patterns the page shows. Each GTFS shape is
- *  one: feeds other than Aomori's leave direction_id empty, and Aomori runs
+ *  one. GTFS direction_id is optional and often empty, and a feed may run
  *  each direction under its own route code, so the variant is what tells a
  *  route's directions apart. Nothing to pick for a route with one. */
 export function RouteVariantPicker({ variants, shown, onPick }: {

@@ -94,6 +94,8 @@ it("keeps pattern and period in exported observations and saved analysis", async
   // Pattern: a per-row column. Period: consolidated into one `buildCsv`
   // metadata line (`scopeToQueryString`) instead of repeated on every row.
   expect(rows[1]).toEqual(expect.arrayContaining(["101", "Station A", 2, 5]));
+  // The path the stops belong to, which the page lets the reader pick.
+  expect(rows[0]).toContain("shape_id");
   const queryRow = rows.find((r) => r[0] === "query");
   expect(queryRow?.[1]).toContain("from=2026-09-07");
   expect(queryRow?.[1]).toContain("to=2026-09-12");

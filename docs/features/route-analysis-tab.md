@@ -57,8 +57,9 @@ What the user sees/does:
   the route's observed variants (GTFS shapes) with their share of the
   route's observations, and an "other direction" button for the most
   observed variant between the same end stops the other way. The variant,
-  not `direction_id`, tells directions apart: most feeds leave
-  `direction_id` empty. Hidden for a route with one variant.
+  not `direction_id`, tells directions apart: `direction_id` is optional and
+  often empty, and a feed may run each direction under its own route code.
+  Hidden for a route with one variant.
 - **Where delay grows** — the two largest `segments` increases in a
   sentence above the chart; the largest is marked on the chart.
 - **Header actions** — a CSV download button (disabled while loading, on

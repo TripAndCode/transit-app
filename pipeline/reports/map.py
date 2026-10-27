@@ -167,10 +167,9 @@ def _segment_increases(dedup_rows, sequences: list[int], shown: set[int]) -> lis
     Pairing one trip's own readings, rather than subtracting two stops'
     means, keeps a trip seen at only one of the stops out of the increase.
     ``sequences`` is the variant's whole stop list in order. The segment
-    leaving its first stop is not measured: most feeds report every
-    departure from a trip's first stop as exactly on time, before they track
-    the vehicle, so the step from there is the feed starting to report, not
-    delay growing. A segment needs ``MIN_GROUP_SAMPLES`` paired trip-days,
+    leaving its first stop is not measured: most feeds report almost every
+    departure from a trip's first stop as exactly on time, so the step from
+    there measures the feed's reporting, not delay growing. A segment needs ``MIN_GROUP_SAMPLES`` paired trip-days,
     and both its stops in ``shown``, the stops the response lists.
     """
     runs: dict[tuple, dict[int, int]] = defaultdict(dict)

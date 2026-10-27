@@ -148,6 +148,7 @@ export function RouteAnalysisTab() {
   const missingText = (s: { stop_sequence: number }) => t(s.stop_sequence === lastSequence ? "terminus" : "missing");
   const stopColumns: CsvColumn<RouteShapeStop>[] = [
     { header: "route_code", value: () => route },
+    { header: "shape_id", value: () => query.data?.shape_id ?? null },
     { header: "stop_sequence", value: (s) => s.stop_sequence },
     { header: "stop_id", value: (s) => s.stop_id },
     { header: "stop_name", value: (s) => s.stop_name },
