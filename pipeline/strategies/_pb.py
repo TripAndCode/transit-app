@@ -71,6 +71,68 @@ def _fields(data):
     return f
 
 
+def _strict_fields(data: bytes) -> dict[int, list[Any]] | None:
+    """``_fields``, except that a message which does not parse to its very
+    end -- an unknown wire type, a field number of 0, a length or a varint
+    running past the data -- returns None instead of whatever came before
+    the fault."""
+    pos, end = 0, len(data)
+    f: dict[int, list[Any]] = {}
+    try:
+        while pos < end:
+            tw, pos = _read_varint(data, pos)
+            fn, wt = tw >> 3, tw & 7
+            if fn == 0:
+                return None
+            if wt == 0:
+                v, pos = _read_varint(data, pos)
+            elif wt == 2:
+                length, pos = _read_varint(data, pos)
+                if pos + length > end:
+                    return None
+                v, pos = data[pos : pos + length], pos + length
+            elif wt == 1 and pos + 8 <= end:
+                v, pos = struct.unpack_from("<Q", data, pos)[0], pos + 8
+            elif wt == 5 and pos + 4 <= end:
+                v, pos = struct.unpack_from("<I", data, pos)[0], pos + 4
+            else:
+                return None
+            f.setdefault(fn, []).append(v)
+    except IndexError:
+        return None
+    return f
+
+
+def is_feed_message(pb_bytes: bytes) -> bool:
+    """Whether *pb_bytes* is a GTFS-RT FeedMessage, however little it holds.
+
+    ``_fields`` is lenient so an ingest keeps what it can of a damaged poll,
+    which means an HTML error page, a JSON body or a truncated download
+    decodes to the same empty parse as a feed with nothing running. A
+    FeedMessage always carries its FeedHeader (field 1), and the header its
+    gtfs_realtime_version (field 1, a string), so bytes that lack either, or
+    that do not parse to their end, are not a feed. Entities (field 2) must
+    at least be length-delimited.
+    """
+    top = _strict_fields(pb_bytes)
+    if top is None or not top.get(1):
+        return False
+    if not all(isinstance(e, bytes) for e in top.get(2, [])):
+        return False
+    for header_bytes in top[1]:
+        header = _strict_fields(header_bytes) if isinstance(header_bytes, bytes) else None
+        if header is None:
+            return False
+        version = header.get(1, [None])[0]
+        if not isinstance(version, bytes):
+            return False
+        try:
+            version.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    return True
+
+
 def _dec(b):
     """Decode bytes to str, passing through non-bytes values unchanged."""
     return b.decode("utf-8") if isinstance(b, bytes) else b

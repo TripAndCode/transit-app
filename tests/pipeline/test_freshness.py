@@ -307,6 +307,7 @@ def test_cron_path_logs_fresh(pg_conn, agency_id, monkeypatch, caplog):
     _seed_two_days(pg_conn, agency_id)
     monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn, ch_client: None)
     monkeypatch.setattr(pipeline.clickhouse, "get_client", lambda: _FakeChClient())
+    monkeypatch.setattr(internal, "_run_rt_coverage_reprobe", lambda _db_url: None)
 
     with caplog.at_level(logging.INFO, logger="api.routers.internal"):
         internal._run_ingest_and_analyze()
@@ -354,6 +355,7 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
     pg_conn.commit()
     monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn, ch_client: None)
     monkeypatch.setattr(pipeline.clickhouse, "get_client", lambda: _FakeChClient())
+    monkeypatch.setattr(internal, "_run_rt_coverage_reprobe", lambda _db_url: None)
 
     with caplog.at_level(logging.INFO, logger="api.routers.internal"):
         internal._run_ingest_and_analyze()

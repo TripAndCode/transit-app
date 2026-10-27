@@ -5,9 +5,11 @@ fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``)
 promotes every closed JST day from ``updates_live`` into ``updates``
 (:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
 deployment must poke it at least once a day after JST midnight;
-``updates_live``'s TTL drops a day that is never promoted. Every endpoint is
-gated by :envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header —
-anything without the matching header gets 401.
+``updates_live``'s TTL drops a day that is never promoted. A poke that lands
+in service hours also renews lapsing RT field-coverage verdicts
+(:mod:`pipeline.rt_coverage_reprobe`), so a deployment needs one daytime poke
+as well. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
+``X-Cron-Secret`` header — anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
 the cron caller gets a fast 202 and doesn't block on the multi-minute
@@ -420,10 +422,10 @@ def _ingest_and_analyze_sweep(
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
-        # a session holds when it ends. This is also what makes the weather
-        # and ml_forecast passes below safe to run afterwards: neither ever
-        # observes the lock as held, so neither can be blamed for one poke's
-        # "already in flight" skip of another.
+        # a session holds when it ends. This is also what makes every pass
+        # below -- weather, ml_forecast and the RT coverage re-probe -- safe
+        # to run afterwards: none ever observes the lock as held, so none can
+        # be blamed for one poke's "already in flight" skip of another.
 
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
@@ -462,6 +464,9 @@ def _ingest_and_analyze_sweep(
     # asked to skip the weather fetch hasn't said anything about the ML store.
     if kind == "ingest" and requested_agency_ids is None:
         _run_ml_forecast_ingest(db_url)
+        # Fleet-wide like the two passes above, and it fetches the agencies'
+        # own feeds rather than a third party's, so run_weather has no say.
+        _run_rt_coverage_reprobe(db_url)
     if failed:
         return SweepOutcome("error", "failed: " + ", ".join(failed))
     return SweepOutcome("ok")
@@ -645,6 +650,34 @@ def _run_weather_ingest(db_url: str) -> None:
         _log.exception("cron: weather ingest failed")
     finally:
         weather_conn.close()
+
+
+def _run_rt_coverage_reprobe(db_url: str) -> None:
+    """Renew each lapsing RT field-coverage verdict
+    (:mod:`pipeline.rt_coverage_reprobe`).
+
+    On its own connection, after the ingest+analyze lock is released, for
+    the same reason as `_run_weather_ingest`: it waits on outside feeds, and
+    a slow one must not keep the lock taken. The job does nothing outside
+    each agency's service window or when no verdict is due, so the pokes
+    that land overnight cost one registry read. A failure is logged and
+    never reaches the sweep's outcome.
+    """
+    import psycopg2  # local import: keeps the import-graph cheap on cold starts
+
+    from pipeline.rt_coverage_reprobe import reprobe_due_agencies
+
+    try:
+        conn = psycopg2.connect(db_url)
+    except Exception:
+        _log.exception("cron: coverage re-probe failed to connect")
+        return
+    try:
+        reprobe_due_agencies(conn, db_url)
+    except Exception:
+        _log.exception("cron: coverage re-probe failed")
+    finally:
+        conn.close()
 
 
 @router.post("/ingest", status_code=202)

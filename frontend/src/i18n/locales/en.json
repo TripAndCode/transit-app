@@ -1734,6 +1734,7 @@
         "promote": "Promote",
         "analyze": "Analyze",
         "weather": "Weather",
+        "probe": "RT field probe",
         "static": "Static",
         "update": "Update"
       },

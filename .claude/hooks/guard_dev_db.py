@@ -107,6 +107,7 @@ DESTRUCTIVE_TARGETS = {
     "prune-personal-data": {"pg"},
     "prune-pipeline-runs": {"pg"},
     "prune-query-log": {"pg"},
+    "reprobe-rt-coverage": {"pg"},
     "seed-agencies": {"pg"},
 }
 DESTRUCTIVE_SUBCOMMANDS = {
@@ -125,6 +126,7 @@ DESTRUCTIVE_SUBCOMMANDS = {
     "prune-pipeline-runs": {"pg"},
     "prune_query_log": {"pg"},
     "refresh-static": {"pg"},
+    "reprobe_rt_coverage": {"pg"},
     "restamp_archive": {"pg", "ch"},
     "seed_agencies": {"pg"},
 }
