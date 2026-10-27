@@ -435,7 +435,7 @@ _LEFT_OUT_NOTE = (
 )
 
 
-# The metrics top_n ranks by.
+# The top_n schema's metric enum and _tool_top_n's guard both read this one tuple.
 _TOP_N_METRICS = ("avg_delay", "on_time_rate", "worst_5min")
 
 

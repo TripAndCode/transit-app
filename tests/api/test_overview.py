@@ -1792,6 +1792,24 @@ async def test_peak_hour_breakdown_leaves_out_retired_and_zero_delay_routes(clie
     assert [x["route_code"] for x in r.json()["routes"]] == current
 
 
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_leaves_out_a_code_retired_over_a_year_ago(client, aconn, aagency_id):
+    """The breakdown's aggregate keeps a code's rows however long ago it was
+    last seen, so retirement is judged on every code it holds, not only on
+    the codes seen within the bounded window the zero-delay judgement reads."""
+    from tests.fixtures.observed_route import seed_observed_route
+
+    await aconn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C00')", aagency_id)
+    await seed_observed_route(aconn, aagency_id, "C00", "2026-10-01", "2026-10-23", delay=300)
+    await seed_observed_route(aconn, aagency_id, "LONG_AGO", "2025-06-01", "2025-06-07", delay=900)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "LONG_AGO", "平日", 1, 8, 9.0, 50)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "C00", "平日", 1, 8, 8.0, 50)
+
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8})
+    assert r.status_code == 200
+    assert [x["route_code"] for x in r.json()["routes"]] == ["C00"]
+
+
 async def _seed_left_out_routes(aconn, agency_id):
     """C1 and C2 in the timetable and reporting delays every day; OLD, gone
     from the timetable, last seen weeks before the data ends; ECHO reporting

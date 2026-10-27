@@ -6,12 +6,11 @@ concentration card or the movers, and each payload reads one left-out set.
 Fake connections answer the reads, so no database is involved.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 
-from api.range import MAX_RANGE_DAYS, RangeCtx
-from api.routers import overview as overview_router
+from api.range import RangeCtx
 from pipeline.reports import overview as ov
 from pipeline.route_catalog import RETIRED, ZERO_DELAY
 
@@ -126,39 +125,3 @@ async def test_every_route_list_reads_the_payloads_one_left_out_set(monkeypatch,
     await ov.compute_overview_summary(1, _CTX, None, pool=pool)
     assert asked == [_CTX]
     assert received == {"_movers": _LEFT_OUT, "_concentration": _LEFT_OUT, "_top_delayed_routes": _LEFT_OUT}
-
-
-class _SpanConn:
-    def __init__(self, first, last):
-        self.span = {"first": first, "last": last}
-
-    async def fetchrow(self, sql, *args):
-        return self.span
-
-
-@pytest.mark.parametrize(
-    ("first", "judged_from"),
-    [
-        (date(2026, 7, 12), date(2026, 7, 12)),
-        (date(2023, 1, 1), date(2026, 10, 23) - timedelta(days=MAX_RANGE_DAYS - 1)),
-    ],
-    ids=["whole span", "clipped to the widest window"],
-)
-async def test_the_breakdown_judges_codes_over_at_most_the_widest_window(monkeypatch, first, judged_from):
-    """The analysed history only grows, so the breakdown's left-out set is
-    judged over at most the widest window a route list may be asked about,
-    ending on the agency's last analysed day."""
-    asked: list[RangeCtx] = []
-
-    async def left_out(conn, agency_id, ctx):
-        asked.append(ctx)
-        return _LEFT_OUT
-
-    monkeypatch.setattr(overview_router, "left_out_route_codes", left_out)
-    got = await overview_router._all_time_left_out(_SpanConn(first, date(2026, 10, 23)), 1)
-    assert got == _LEFT_OUT
-    assert [(c.from_date, c.to_date) for c in asked] == [(judged_from, date(2026, 10, 23))]
-
-
-async def test_the_breakdown_of_an_agency_without_analysed_days_leaves_out_nothing():
-    assert await overview_router._all_time_left_out(_SpanConn(None, None), 1) == {}

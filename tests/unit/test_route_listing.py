@@ -1,11 +1,11 @@
 """How a route list leaves codes out by reason and keeps them on request."""
 
 import itertools
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
-from api.range import RangeCtx
+from api.range import MAX_RANGE_DAYS, RangeCtx
 from pipeline import route_catalog
 from pipeline.histogram import bucketize
 from pipeline.route_catalog import RETIRED, ZERO_DELAY, listed_count, route_list, rows_to_fetch
@@ -113,3 +113,54 @@ async def test_a_list_over_every_route_leaves_out_the_whole_set(monkeypatch):
     monkeypatch.setattr(route_catalog, "left_out_route_codes", left_out)
     ctx = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23))
     assert await route_catalog.left_out_unless_named(None, 7, ctx) == LEFT_OUT
+
+
+class _SpanConn:
+    """Answers the agency's analysed span, the one read the pooled judgement makes itself."""
+
+    def __init__(self, first, last):
+        self.span = {"first": first, "last": last}
+
+    async def fetchrow(self, sql, *args):
+        return self.span
+
+
+LAST_DAY = date(2026, 10, 23)
+
+
+@pytest.mark.parametrize(
+    ("first", "zero_delay_from"),
+    [
+        (date(2026, 7, 12), date(2026, 7, 12)),
+        (date(2023, 1, 1), LAST_DAY - timedelta(days=MAX_RANGE_DAYS - 1)),
+    ],
+    ids=["whole span", "clipped to the widest window"],
+)
+async def test_a_pooled_list_judges_retirement_on_every_code_and_zeros_over_a_bounded_window(
+    monkeypatch, first, zero_delay_from
+):
+    """An aggregate that pools every analysed day has no date to window, so
+    each of its codes is judged retired on the agency's last days alone,
+    however long ago it was last seen. The zero-delay judgement reads every
+    day it spans, so it reaches back at most the widest window a route list
+    may be asked about."""
+    asked: dict[str, object] = {}
+
+    async def retired_among(conn, agency_id, codes, last_day):
+        asked["retired"] = (codes, last_day)
+        return frozenset({"OLD", "BOTH"})
+
+    async def zero_delay(conn, agency_id, ctx):
+        asked["zero_delay"] = (ctx.from_date, ctx.to_date)
+        return frozenset({"ECHO", "BOTH"})
+
+    monkeypatch.setattr(route_catalog, "retired_among", retired_among)
+    monkeypatch.setattr(route_catalog, "zero_delay_route_codes", zero_delay)
+    codes = ["C1", "OLD", "ECHO", "BOTH"]
+    got = await route_catalog.pooled_left_out_codes(_SpanConn(first, LAST_DAY), 7, codes)
+    assert got == {RETIRED: frozenset({"OLD", "BOTH"}), ZERO_DELAY: frozenset({"ECHO"})}
+    assert asked == {"retired": (frozenset(codes), LAST_DAY), "zero_delay": (zero_delay_from, LAST_DAY)}
+
+
+async def test_a_pooled_list_of_an_agency_without_analysed_days_leaves_out_nothing():
+    assert await route_catalog.pooled_left_out_codes(_SpanConn(None, None), 7, ["C1"]) == {}

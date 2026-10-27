@@ -356,7 +356,7 @@
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route counted.",
       "lorenz_label": "Lorenz curve — cumulative share of delay",
-      "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
+      "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay among the routes counted."
     },
     "service_split": {
       "type": {

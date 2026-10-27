@@ -11,7 +11,9 @@ punctuality, yet it would top every punctuality list.
 :func:`zero_delay_route_codes` names those codes.
 
 :func:`route_list` leaves both out of a list unless asked and says how many
-it left, so a route list can offer each back. A list that offers nothing back
+it left, so a route list can offer each back. A list over an aggregate that
+pools every analysed day, and so has no window, asks
+:func:`pooled_left_out_codes` which of its codes to leave out. A list that offers nothing back
 leaves out :func:`left_out_unless_named`'s codes, so a route its scope names
 is still listed.
 """
@@ -19,10 +21,10 @@ is still listed.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
-from api.range import RangeCtx
+from api.range import MAX_RANGE_DAYS, RangeCtx
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import bucketize
 
@@ -73,21 +75,45 @@ async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozenset[
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def _retired_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     rows = await conn.fetch(
-        "WITH seen AS ("
-        "  SELECT route_code, max(date) AS last_seen FROM agg_route_daily"
-        "  WHERE agency_id = $1 AND date >= $2 AND date <= $3"
-        "  GROUP BY route_code"
+        "SELECT route_code, max(date) AS last_seen FROM agg_route_daily "
+        "WHERE agency_id = $1 AND date >= $2 AND date <= $3 GROUP BY route_code",
+        agency_id,
+        from_date,
+        to_date,
+    )
+    if not rows:
+        return frozenset()
+    return await retired_among(
+        conn, agency_id, frozenset(r["route_code"] for r in rows), max(r["last_seen"] for r in rows)
+    )
+
+
+@async_lru_cache(maxsize=64, ttl_seconds=300)
+async def retired_among(conn, agency_id: int, codes: frozenset[str], last_day: date) -> frozenset[str]:
+    """The ``codes``, each observed at some point, that the current timetable
+    lacks and that went unobserved over the :data:`RECENT_DAYS` through
+    ``last_day``, the agency's last observed day.
+
+    The one retirement rule: :func:`retired_route_codes` asks it of the codes
+    a window holds, and :func:`pooled_left_out_codes` of the codes an
+    aggregate with no date holds. An agency with no timetable loaded retires
+    nothing, since there is nothing to compare against.
+    """
+    rows = await conn.fetch(
+        "WITH recent AS ("
+        "  SELECT DISTINCT route_code FROM agg_route_daily"
+        "  WHERE agency_id = $1 AND date > $3::date - $4::int AND date <= $3"
         "), timetable AS ("
         f"  SELECT DISTINCT {route_code_sql('route_id')} AS route_code"
         "  FROM static_routes WHERE agency_id = $1"
         ") "
-        "SELECT s.route_code FROM seen s "
+        "SELECT c.route_code FROM unnest($2::text[]) AS c(route_code) "
         "WHERE EXISTS (SELECT 1 FROM timetable) "
-        "  AND s.route_code NOT IN (SELECT route_code FROM timetable) "
-        "  AND s.last_seen <= (SELECT max(last_seen) FROM seen) - $4::int",
+        "  AND c.route_code NOT IN (SELECT route_code FROM timetable) "
+        "  AND c.route_code NOT IN (SELECT route_code FROM recent)",
         agency_id,
-        from_date,
-        to_date,
+        sorted(codes),
+        last_day,
         RECENT_DAYS,
     )
     return frozenset(r["route_code"] for r in rows)
@@ -97,6 +123,7 @@ def invalidate_retired_routes() -> None:
     """Forget every cached retired set, after a load replaced an agency's
     timetable, so the next route list judges codes against the new one."""
     _retired_between.cache_clear()  # type: ignore[attr-defined]
+    retired_among.cache_clear()  # type: ignore[attr-defined]
 
 
 async def zero_delay_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozenset[str]:
@@ -142,13 +169,38 @@ async def _zero_delay_between(conn, agency_id: int, from_date: date, to_date: da
 
 
 async def left_out_route_codes(conn, agency_id: int, ctx: RangeCtx) -> dict[str, frozenset[str]]:
-    """The codes a route list over ``ctx`` leaves out by default, by reason.
-
-    Each code has one reason, retired first, so a list counts it once and one
-    toggle brings it back.
-    """
+    """The codes a route list over ``ctx`` leaves out by default, by reason
+    (:func:`_by_reason`)."""
     retired = await retired_route_codes(conn, agency_id, ctx)
-    zero_delay = await zero_delay_route_codes(conn, agency_id, ctx)
+    return _by_reason(retired, await zero_delay_route_codes(conn, agency_id, ctx))
+
+
+async def pooled_left_out_codes(conn, agency_id: int, codes: Collection[str]) -> dict[str, frozenset[str]]:
+    """Which of ``codes``, the codes an aggregate pooling every analysed day
+    holds, a route list over it leaves out, by reason.
+
+    Such an aggregate keeps a code's rows however long ago it was last seen,
+    so each of its codes is judged retired on the agency's last days alone
+    (:func:`retired_among`). The zero-delay judgement reads every day it
+    spans, and the analysed history only grows, so it reaches back at most
+    :data:`api.range.MAX_RANGE_DAYS` from the agency's last analysed day: the
+    widest window any route list may be asked about.
+    """
+    span = await conn.fetchrow(
+        "SELECT min(date) AS first, max(date) AS last FROM agg_route_daily WHERE agency_id = $1", agency_id
+    )
+    if span["last"] is None:
+        return {}
+    last = span["last"]
+    pooled = frozenset(codes)
+    retired = await retired_among(conn, agency_id, pooled, last)
+    window = RangeCtx(from_date=max(span["first"], last - timedelta(days=MAX_RANGE_DAYS - 1)), to_date=last)
+    return _by_reason(retired, await zero_delay_route_codes(conn, agency_id, window) & pooled)
+
+
+def _by_reason(retired: frozenset[str], zero_delay: frozenset[str]) -> dict[str, frozenset[str]]:
+    """Each code under one reason, retired first, so a list counts it once and
+    one toggle brings it back."""
     return {RETIRED: retired, ZERO_DELAY: zero_delay - retired}
 
 

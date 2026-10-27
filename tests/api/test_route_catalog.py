@@ -195,3 +195,59 @@ async def test_a_retired_zero_delay_code_is_left_out_as_retired(aconn, aagency_i
         RETIRED: {"OLD_ECHO"},
         ZERO_DELAY: {"ECHO"},
     }
+
+
+LAST_DAY = date(2026, 10, 23)
+
+
+@pytest.mark.asyncio
+async def test_a_code_retired_however_long_ago_is_retired_among_the_codes_asked_about(aconn, aagency_id):
+    """``retired_among`` judges each code it is given on the agency's last
+    days alone, so a code last seen years before still reads as retired, a
+    current code does not, and an uncatalogued code still running is kept."""
+    from pipeline.route_catalog import retired_among
+
+    await _timetable(aconn, aagency_id, "100")
+    await _observe(aconn, aagency_id, "100", date(2026, 10, 1), LAST_DAY)
+    await _observe(aconn, aagency_id, "LONG_AGO", date(2024, 3, 1), date(2024, 3, 7))
+    await _observe(aconn, aagency_id, "RUNNING", date(2026, 10, 17), LAST_DAY)
+    codes = frozenset({"100", "LONG_AGO", "RUNNING"})
+    assert await retired_among(aconn, aagency_id, codes, LAST_DAY) == {"LONG_AGO"}
+
+
+@pytest.mark.asyncio
+async def test_retired_among_matches_the_window_rule_at_its_edge(aconn, aagency_id):
+    """A code last seen exactly RECENT_DAYS before the last day is retired,
+    one seen a day later is not, the same edge retired_route_codes draws."""
+    from pipeline.route_catalog import RECENT_DAYS, retired_among
+
+    await _timetable(aconn, aagency_id, "100")
+    await _observe(aconn, aagency_id, "100", date(2026, 10, 1), LAST_DAY)
+    edge = LAST_DAY - timedelta(days=RECENT_DAYS)
+    await _observe(aconn, aagency_id, "EDGE", date(2026, 10, 1), edge)
+    await _observe(aconn, aagency_id, "INSIDE", date(2026, 10, 1), edge + timedelta(days=1))
+    assert await retired_among(aconn, aagency_id, frozenset({"100", "EDGE", "INSIDE"}), LAST_DAY) == {"EDGE"}
+    window = RangeCtx(from_date=date(2026, 10, 1), to_date=LAST_DAY)
+    assert await retired_route_codes(aconn, aagency_id, window) == {"EDGE"}
+
+
+@pytest.mark.asyncio
+async def test_retired_among_retires_nothing_without_a_timetable(aconn, aagency_id):
+    from pipeline.route_catalog import retired_among
+
+    await _observe(aconn, aagency_id, "A", date(2026, 10, 1), LAST_DAY)
+    await _observe(aconn, aagency_id, "B", date(2024, 3, 1), date(2024, 3, 7))
+    assert await retired_among(aconn, aagency_id, frozenset({"A", "B"}), LAST_DAY) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_timetable_reload_clears_the_cached_codes_asked_about(aconn, aagency_id):
+    from pipeline.route_catalog import invalidate_retired_routes, retired_among
+
+    await _timetable(aconn, aagency_id, "100")
+    await _observe(aconn, aagency_id, "100", date(2026, 10, 1), LAST_DAY)
+    await _observe(aconn, aagency_id, "OLD", date(2024, 3, 1), date(2024, 3, 7))
+    assert await retired_among(aconn, aagency_id, frozenset({"100", "OLD"}), LAST_DAY) == {"OLD"}
+    await _timetable(aconn, aagency_id, "OLD")
+    invalidate_retired_routes()
+    assert await retired_among(aconn, aagency_id, frozenset({"100", "OLD"}), LAST_DAY) == set()
