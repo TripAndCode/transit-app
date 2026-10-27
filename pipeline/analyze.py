@@ -43,6 +43,9 @@ Aggregation tables produced:
 - agg_meta             — last analyze() time per agency (forensic), plus the static-schedule
   fingerprint that decides whether the next run may rebuild only the dates that changed
 
+Each run also saves the day's planned trips into planned_trips_daily (`analyze`
+below), which is history no run rebuilds, not an aggregate.
+
 None of the builders below gate a group out at insert time by its sample
 count, however thin. Every row carries its own `samples` column instead, so a
 low-sample row still exists for a reader to weight, pool across a coarser
@@ -91,6 +94,7 @@ from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, 
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, dominant_service_ctes, reconstruct_headways
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.locks import agency_ingest_lock
+from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
@@ -951,7 +955,15 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     rebuilding. pipeline/locks.py's docstring owns why that skew is
     undetectable afterwards; the lock is what keeps every read in one run
     seeing one set of rows.
+
+    First it saves the planned trips of the days the loaded timetable covers
+    up to today (`pipeline.planned_trips`), committed on its own: inside the
+    run's transaction, which spans the whole rebuild, the new rows would stay
+    uncommitted and hold up a timetable reload saving the same days. A failed
+    capture is logged and the run goes on.
     """
+    capture_planned_trips(conn, agency_id)
+    conn.commit()
     with agency_ingest_lock(conn, agency_id):
         _analyze_locked(agency_id, conn, ch_client)
 

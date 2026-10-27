@@ -2,14 +2,10 @@
 GTFS schedule.
 
 ``planned_trips`` is the number of (service day, trip_id) instances the
-static schedule says should run over the range. A service runs on a date
-under the GTFS rule :mod:`pipeline.day_types` also applies: its
-``static_calendar`` (``calendar.txt``) range covers the date with that
-weekday's flag set and no ``static_calendar_dates`` removal
-(``exception_type = 2``) names the date, or a ``static_calendar_dates``
-addition (``exception_type = 1``) names it. A service both cases put on the
-same date runs once. Each running (service, date) contributes the number of
-``static_trips`` rows under that service.
+schedule says should run over the range, counted per day by
+:mod:`pipeline.planned_trips`: a day's count saved in ``planned_trips_daily``
+while its timetable was loaded, or else the count the loaded timetable plans
+for it.
 
 ``executed_trips`` is ``planned_trips`` minus the trip-days GTFS-RT reports
 as not executed — identified via ``schedule_relationship_trip = CANCELED``
@@ -35,90 +31,55 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from pipeline.planned_trips import plan_ctes
 from pipeline.strategies.static_join import rt_field_coverage_confirmed_agencies
 
-# static_calendar_dates.date is the feed's raw YYYYMMDD text and may hold a
-# malformed row, which a DATE cast would fail on for every agency. The
-# fixed-width text compares in calendar order, so BETWEEN bounds it, and
-# matching it to the generated series' text drops a malformed row the
-# lexicographic bounds would let through. Trips are counted once per service
-# and multiplied by its running days, never joined row-per-trip-per-day.
-#
-# `covered` is the days the loaded timetable says anything about: inside a
-# calendar.txt service's range, or named by a calendar_dates.txt row. A reload
-# replaces the agency's calendar, so a window reaching back before the load has
-# days no plan covers, and missed trips count only on covered days, the ones the
-# plan counted. agg_service_delivered_daily has a row only for a day with a
-# missed trip, so an agency with none reads 0, not "not available".
-_SERVICE_SQL = """
-    WITH days AS (
-        SELECT day, to_char(day, 'YYYYMMDD') AS ymd, EXTRACT(ISODOW FROM day)::int AS isodow
-        FROM (SELECT $2::date + i AS day FROM generate_series(0, $3::date - $2::date) AS i) AS d
+# A day has a plan when planned_trips_daily saved one for it or the loaded
+# timetable covers it, and the saved count wins: it is what the timetable in
+# force on the day planned, where a later reload may plan the day differently
+# or not at all. Only those days count, on both sides of the ratio. A reload
+# replaces the agency's calendar, so a window can reach back to days no plan
+# covers, and missed trips count only on the days the plan counted.
+# agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
+# missed trips are there whatever timetable is loaded now. It has a row only
+# for a day with a missed trip, so an agency with none reads 0, not "not
+# available".
+_SERVICE_SQL = (
+    "WITH"
+    + plan_ctes("$1::int[]", "$2::date", "$3::date")
+    + """,
+    saved AS (
+        SELECT agency_id, service_date AS day, planned_trips AS planned
+        FROM planned_trips_daily
+        WHERE agency_id = ANY($1::int[]) AND service_date BETWEEN $2::date AND $3::date
     ),
-    trip_counts AS (
-        SELECT agency_id, service_id, COUNT(*) AS trips
-        FROM static_trips
-        WHERE agency_id = ANY($1::int[])
-        GROUP BY agency_id, service_id
+    planned_days AS (
+        SELECT agency_id, day, planned FROM saved
+        UNION ALL
+        SELECT tp.agency_id, tp.day, tp.planned
+        FROM timetable_plan tp
+        WHERE NOT EXISTS (SELECT 1 FROM saved s WHERE s.agency_id = tp.agency_id AND s.day = tp.day)
     ),
-    running AS (
-        SELECT c.agency_id, c.service_id, days.ymd
-        FROM static_calendar c
-        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
-        WHERE c.agency_id = ANY($1::int[])
-          AND (ARRAY[c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday])[days.isodow]
-          AND NOT EXISTS (
-              SELECT 1
-              FROM static_calendar_dates x
-              WHERE x.agency_id = c.agency_id
-                AND x.service_id = c.service_id
-                AND x.date = days.ymd
-                AND x.exception_type = 2
-          )
-        UNION
-        SELECT cd.agency_id, cd.service_id, days.ymd
-        FROM static_calendar_dates cd
-        JOIN days ON days.ymd = cd.date
-        WHERE cd.agency_id = ANY($1::int[])
-          AND cd.exception_type = 1
-          AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
-    ),
-    covered AS (
-        SELECT c.agency_id, days.day
-        FROM static_calendar c
-        JOIN days ON days.day BETWEEN c.start_date AND c.end_date
-        WHERE c.agency_id = ANY($1::int[])
-        UNION
-        SELECT cd.agency_id, days.day
-        FROM static_calendar_dates cd
-        JOIN days ON days.ymd = cd.date
-        WHERE cd.agency_id = ANY($1::int[])
-          AND cd.date BETWEEN to_char($2::date, 'YYYYMMDD') AND to_char($3::date, 'YYYYMMDD')
-    ),
-    planned AS (
-        SELECT r.agency_id, SUM(t.trips) AS planned
-        FROM running r
-        JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
-        GROUP BY r.agency_id
-    ),
-    coverage AS (
-        SELECT agency_id, COUNT(*) AS covered_days FROM covered GROUP BY agency_id
+    plan AS (
+        SELECT agency_id, SUM(planned) AS planned, COUNT(*) AS covered_days
+        FROM planned_days
+        GROUP BY agency_id
     ),
     missed AS (
         SELECT s.agency_id, SUM(s.non_executed_trips) AS non_executed
         FROM agg_service_delivered_daily s
-        JOIN covered c ON c.agency_id = s.agency_id AND c.day = s.date
+        JOIN planned_days p ON p.agency_id = s.agency_id AND p.day = s.date
         GROUP BY s.agency_id
     )
     SELECT a.agency_id,
            COALESCE(p.planned, 0) AS planned,
-           COALESCE(cv.covered_days, 0) AS covered_days,
+           COALESCE(p.covered_days, 0) AS covered_days,
            COALESCE(m.non_executed, 0) AS non_executed
     FROM unnest($1::int[]) AS a(agency_id)
-    LEFT JOIN planned p USING (agency_id)
-    LEFT JOIN coverage cv USING (agency_id)
+    LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
 """
+)
 
 
 async def compute_service_delivered_by_agency(
@@ -127,14 +88,15 @@ async def compute_service_delivered_by_agency(
     """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct",
     "covered_days", "window_days"}`` over ``[from_date, to_date]``.
 
-    ``covered_days`` counts the window's days the loaded timetable covers;
-    both sides of the ratio count only those days.
+    ``covered_days`` counts the window's days with a plan, saved in
+    ``planned_trips_daily`` or covered by the loaded timetable; both sides of
+    the ratio count only those days.
 
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     whenever the ratio isn't computable for this agency/range (see module
     docstring) — never silently 0 canceled / 100% delivered. One query reads
-    the loaded static schedule and a precomputed aggregate in Postgres — no
+    the saved and loaded plans and a precomputed aggregate in Postgres — no
     ClickHouse access on this read path.
     """
     if not agency_ids:

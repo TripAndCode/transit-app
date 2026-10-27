@@ -17,6 +17,10 @@ same-named-platform grouping) from the new rows in the same transaction.
 Every load then recomputes each route's terminal names and loop/both-ways
 flags from what is now in place, reading GTFS-JP ``routes_jp.txt`` when the
 zip has it (``pipeline.route_terminals``).
+
+Before replacing anything, a load saves the outgoing timetable's planned trips
+for the days up to today it covers (``pipeline.planned_trips``), in the same
+transaction, so a reload never takes away the plan of a day that has run.
 """
 
 import csv
@@ -29,6 +33,7 @@ from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
+from pipeline.planned_trips import capture_planned_trips
 from pipeline.route_terminals import load_route_terminals
 from pipeline.stop_clusters import rebuild_stop_clusters
 
@@ -171,6 +176,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
     static_version_id = p.stem
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
+        # Before any table is replaced, trips.txt's included: the outgoing
+        # timetable's plan is its calendar and its trips together.
+        capture_planned_trips(conn, agency_id)
         names_in_zip = set(zf.namelist())
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:

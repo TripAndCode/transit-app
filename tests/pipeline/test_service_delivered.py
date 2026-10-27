@@ -192,3 +192,62 @@ async def test_a_window_inside_the_timetable_is_fully_covered(aconn):
     result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 19)))[a]
     # Weekends carry no trips but are still covered by the timetable.
     assert result["covered_days"] == result["window_days"] == 14
+
+
+async def _saved(aconn, agency_id: int, day: date, planned: int) -> None:
+    await aconn.execute(
+        "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES ($1, $2, $3)",
+        agency_id,
+        day,
+        planned,
+    )
+
+
+async def test_a_saved_day_counts_where_the_loaded_timetable_no_longer_covers_it(aconn):
+    """A reload replaced the timetable on the 13th, after the days before it
+    were saved. Those days plan from their saved counts, count toward the
+    covered days, and have their non-executed trips subtracted."""
+    from tests.conftest import confirm_rt_field_coverage
+
+    a = await _agency(aconn, "a")
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", a)
+    await confirm_rt_field_coverage(aconn, a)
+    await _weekly(aconn, a, "ALL", "1111111", date(2026, 4, 13), date(2026, 6, 30))
+    await _trips(aconn, a, "ALL", 10)
+    for offset in range(7):
+        await _saved(aconn, a, date(2026, 4, 6 + offset), 8)
+    for day, missed in ((date(2026, 4, 8), 4), (date(2026, 4, 15), 2)):
+        await aconn.execute(
+            "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES ($1, $2, $3)",
+            a,
+            day,
+            missed,
+        )
+
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 19)))[a]
+    assert result["planned_trips"] == 7 * 8 + 7 * 10
+    assert result["executed_trips"] == 7 * 8 + 7 * 10 - 4 - 2
+    assert result["covered_days"] == result["window_days"] == 14
+
+
+async def test_a_saved_day_wins_over_the_loaded_timetable(aconn):
+    a = await _agency(aconn, "a")
+    await _weekly(aconn, a, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
+    await _trips(aconn, a, "ALL", 10)
+    await _saved(aconn, a, date(2026, 4, 7), 4)
+
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 8)))[a]
+    assert result["planned_trips"] == 10 + 4 + 10
+    assert result["covered_days"] == 3
+
+
+async def test_saved_days_outside_the_window_or_of_another_agency_do_not_count(aconn):
+    a = await _agency(aconn, "a")
+    b = await _agency(aconn, "b")
+    await _saved(aconn, a, date(2026, 4, 5), 8)
+    await _saved(aconn, a, date(2026, 4, 6), 8)
+    await _saved(aconn, b, date(2026, 4, 7), 9)
+
+    result = await compute_service_delivered_by_agency(aconn, [a, b], date(2026, 4, 6), date(2026, 4, 6))
+    assert (result[a]["planned_trips"], result[a]["covered_days"]) == (8, 1)
+    assert (result[b]["planned_trips"], result[b]["covered_days"]) == (0, 0)

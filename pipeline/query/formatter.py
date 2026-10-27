@@ -88,11 +88,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_headline_delivered_agency_wide", "ja"): "、運行実績率 {delivered}%（事業者全体）",
     ("council_headline_delivered_agency_wide", "en"): ", service-delivered rate {delivered}% (whole agency)",
     ("council_planned_coverage_caveat", "ja"): (
-        "計画本数・運行本数・運行実績率は、読み込み済みの時刻表がある{covered}日分（期間{window}日中）だけを数えています。"
+        "計画本数・運行本数・運行実績率は、時刻表に計画がある{covered}日分（期間{window}日中）だけを数えています。"
     ),
     ("council_planned_coverage_caveat", "en"): (
         "Planned and executed trips and the service-delivered rate count only the {covered} of the period's "
-        "{window} days the loaded timetable covers."
+        "{window} days a timetable plans."
     ),
     ("council_agency_wide_caveat", "ja"): (
         "計画本数・運行本数・運行実績率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
