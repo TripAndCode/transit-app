@@ -191,6 +191,47 @@ def test_a_refutation_is_refetched_once_a_day_not_on_every_poke(pg_conn, agency)
     assert all(row[0] for row in _verdict(pg_conn, agency).values())
 
 
+def _seed_attempt(pg_conn, aid: int, *, status: str, ago: timedelta) -> None:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO pipeline_runs (kind, agency_id, started_at, finished_at, status) "
+            "VALUES ('probe', %s, %s, %s, %s)",
+            (aid, MORNING - ago, MORNING - ago + timedelta(seconds=2), status),
+        )
+    pg_conn.commit()
+
+
+@pytest.mark.parametrize("status", ["skipped", "error"])
+def test_an_attempt_that_wrote_nothing_is_not_retried_within_the_day(pg_conn, agency, status):
+    """A thin or broken feed leaves the registry as it was, so without the
+    cooldown a deployment poking all day would hit it on every poke."""
+    _seed_attempt(pg_conn, agency, status=status, ago=timedelta(hours=1))
+
+    assert _run(pg_conn, fetch=_no_fetch) == reprobe.ReprobeOutcome()
+    assert [r[:3] for r in _runs(pg_conn)] == [("probe", agency, status)]
+
+
+def test_an_attempt_from_yesterday_is_retried(pg_conn, agency):
+    _seed_attempt(pg_conn, agency, status="skipped", ago=timedelta(hours=21))
+
+    assert _run(pg_conn).recorded == [agency]
+    assert [r[:3] for r in _runs(pg_conn)] == [("probe", agency, "skipped"), ("probe", agency, "ok")]
+
+
+def test_another_agencys_attempt_does_not_hold_this_one_back(pg_conn, agency):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES ('広島交通', 'https://feeds.example.jp/realtime/10/trip_updates.bin', 'static_join') "
+            "RETURNING agency_id"
+        )
+        other = cur.fetchone()[0]
+    pg_conn.commit()
+    _seed_attempt(pg_conn, other, status="error", ago=timedelta(hours=1))
+
+    assert _run(pg_conn).recorded == [agency]
+
+
 def test_a_failed_fetch_keeps_the_old_verdict_and_records_the_error(pg_conn, agency):
     _seed_verdict(pg_conn, agency, confirmed=False, expires_at=MORNING + timedelta(days=90))
     before = _verdict(pg_conn, agency)

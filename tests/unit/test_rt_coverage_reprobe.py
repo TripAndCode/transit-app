@@ -9,6 +9,7 @@ in `rt_field_coverage_probes` and `pipeline_runs`) is covered by
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,13 +18,14 @@ from pipeline import rt_coverage_reprobe as reprobe
 from pipeline import runs as pipeline_runs
 from pipeline.rt_coverage_reprobe import (
     MIN_SAMPLE,
-    REFUTED_RECHECK_AFTER,
+    RECHECK_AFTER,
     RENEW_WITHIN,
     Candidate,
     RecordedField,
     group_candidates,
     in_service_window,
     needs_reprobe,
+    recently_attempted,
     select_due,
 )
 from pipeline.strategies._pb import is_feed_message
@@ -101,7 +103,7 @@ def test_a_daily_trigger_that_runs_a_little_early_still_rechecks_a_refutation():
     """Yesterday's run finished minutes later in its slot than today's
     starts, so a full day has not quite passed."""
     probed = NOON_ISH - timedelta(days=1) + timedelta(minutes=5)
-    assert NOON_ISH - probed > REFUTED_RECHECK_AFTER
+    assert NOON_ISH - probed > RECHECK_AFTER
     assert needs_reprobe(_fields(confirmed=False, probed_at=probed), NOON_ISH)
 
 
@@ -160,6 +162,37 @@ def test_nothing_is_selected_overnight():
     assert select_due(candidates, datetime(2026, 10, 27, 0, 5, tzinfo=JST)) == []
 
 
+# ── how soon an attempt that wrote nothing is retried ──────────────────────
+
+
+def _attempted(agency_id: int, ago: timedelta | None) -> Candidate:
+    """A never-probed agency, so it stays due until a verdict is written,
+    whose latest probe run started *ago* (None: it has none)."""
+    return replace(_candidate(agency_id, fields=()), last_attempt=None if ago is None else NOON_ISH - ago)
+
+
+def test_an_attempt_an_hour_ago_is_not_retried_yet():
+    """A thin, failed or not-a-feed poll writes nothing to the registry, so
+    the verdict alone would keep the agency due on every poke."""
+    assert select_due([_attempted(54, timedelta(hours=1))], NOON_ISH) == []
+
+
+def test_an_attempt_from_yesterday_is_retried():
+    assert [c.agency_id for c in select_due([_attempted(54, timedelta(hours=21))], NOON_ISH)] == [54]
+
+
+def test_an_agency_never_attempted_is_due_as_before():
+    """Also what every agency looks like where `pipeline_runs` predates the
+    `probe` kind: no probe rows, so no cooldown."""
+    assert [c.agency_id for c in select_due([_attempted(54, None)], NOON_ISH)] == [54]
+
+
+def test_the_cooldown_matches_the_refutation_recheck():
+    assert not recently_attempted(NOON_ISH - RECHECK_AFTER - timedelta(seconds=1), NOON_ISH)
+    assert recently_attempted(NOON_ISH - RECHECK_AFTER + timedelta(seconds=1), NOON_ISH)
+    assert not recently_attempted(None, NOON_ISH)
+
+
 # ── grouping the registry read ─────────────────────────────────────────────
 
 
@@ -168,10 +201,10 @@ def test_rows_group_into_one_candidate_per_agency():
     url17 = "https://feeds.example.jp/realtime/17/trip_updates.bin"
     exp = NOON_ISH + timedelta(days=3)
     rows = [
-        (8, url8, "Asia/Tokyo", "stop_id", True, exp, YESTERDAY),
-        (8, url8, "Asia/Tokyo", "arr_delay", False, None, YESTERDAY),
-        # The LEFT JOIN's row for an agency with no verdict at all.
-        (17, url17, "Asia/Tokyo", None, None, None, None),
+        (8, url8, "Asia/Tokyo", "stop_id", True, exp, YESTERDAY, YESTERDAY),
+        (8, url8, "Asia/Tokyo", "arr_delay", False, None, YESTERDAY, YESTERDAY),
+        # The LEFT JOIN's row for an agency with no verdict and no probe run.
+        (17, url17, "Asia/Tokyo", None, None, None, None, None),
     ]
     assert group_candidates(rows) == [
         Candidate(
@@ -179,8 +212,9 @@ def test_rows_group_into_one_candidate_per_agency():
             url8,
             "Asia/Tokyo",
             (RecordedField("stop_id", True, exp, YESTERDAY), RecordedField("arr_delay", False, None, YESTERDAY)),
+            YESTERDAY,
         ),
-        Candidate(17, url17, "Asia/Tokyo", ()),
+        Candidate(17, url17, "Asia/Tokyo", (), None),
     ]
 
 

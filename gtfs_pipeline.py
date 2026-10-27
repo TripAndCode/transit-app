@@ -914,10 +914,10 @@ def cmd_reprobe_rt_coverage(args):
     """Re-probe every agency whose RT field-coverage verdict is missing,
     refuted or about to lapse, during its service hours.
 
-    A poll too thin to count is not a failure: the next run tries again. An
-    agency whose feed could not be fetched, or answered with something that
-    is not a GTFS-RT feed, fails the command, so a scheduler that pages on a
-    nonzero exit hears about it."""
+    A poll too thin to count is not a failure: the next day's run tries
+    again. An agency whose probe closes ``error`` (the cases are listed in
+    ``pipeline.rt_coverage_reprobe``'s module docstring) fails the command,
+    so a scheduler that pages on a nonzero exit hears about it."""
     from pipeline import rt_coverage_reprobe
 
     conn = _get_conn()

@@ -7,7 +7,7 @@ lapses loses every report built on those fields. This job keeps verdicts
 current: it probes each active agency whose ingest strategy can carry the
 fields and whose verdict is missing, partial, expired or within
 ``RENEW_WITHIN`` of expiring, or refuted by a probe at least
-``REFUTED_RECHECK_AFTER`` ago. The decode, the thresholds and the write are
+``RECHECK_AFTER`` ago. The decode, the thresholds and the write are
 the ones ``scripts/probe_rt_field_coverage.py`` and the admin drawer's probe
 button use (``field_coverage``, ``record_field_coverage_probe``), so all
 three paths reach the same verdict from the same poll.
@@ -28,13 +28,23 @@ otherwise look at the report before recording it:
   sees the sample size before deciding to keep the verdict.
 
 Bookkeeping follows ``pipeline.runs``: one ``probe`` row per agency actually
-probed (``ok`` when a verdict was written, ``skipped`` when the poll was too
-thin or the agency's feed was repointed mid-probe, ``error`` when the fetch
-failed or the response was not a GTFS-RT feed), and none at all when nothing
-is due or the window is closed, so a poke that has nothing to do draws
-nothing on the board. One
-agency's failure never stops the next one, and nothing here raises to the
-caller for a single agency's sake.
+probed, and none at all when nothing is due or the window is closed, so a
+poke that has nothing to do draws nothing on the board. This is the
+canonical list of how a probe row closes:
+
+- ``ok``: a verdict was written;
+- ``skipped``: the poll was too thin to count, or the agency's feed was
+  repointed mid-probe;
+- ``error``: the feed could not be fetched, was not a GTFS-RT feed, or the
+  verdict could not be written. The command-line entry point exits 1.
+
+Neither ``skipped`` nor ``error`` writes to the registry, so the verdict
+alone would keep the agency due on every poke. An agency whose latest probe
+row started less than ``RECHECK_AFTER`` ago is therefore left for the next
+day, whatever that row's status. Where ``pipeline_runs`` predates the
+``probe`` kind no such row exists and nothing is held back. One agency's
+failure never stops the next one, and nothing here raises to the caller for
+a single agency's sake.
 """
 
 from __future__ import annotations
@@ -63,12 +73,12 @@ _log = logging.getLogger(__name__)
 #: many daily attempts before its verdict lapses.
 RENEW_WITHIN = timedelta(days=14)
 
-#: How long a refutation stands before it is probed again. Recording a
-#: refutation does not clear it, so without this an agency whose feed lacks
-#: a field would be re-fetched on every poke of a deployment that pokes all
-#: day. Just under a day, so a once-a-day trigger whose start drifts by a few
-#: minutes still rechecks it every day.
-REFUTED_RECHECK_AFTER = timedelta(hours=20)
+#: How long after a probe the same agency is probed again while it stays due:
+#: a refutation (recording one again does not clear it), or an attempt that
+#: wrote nothing. Without it a deployment that pokes all day would re-fetch
+#: such a feed on every poke. Just under a day, so a once-a-day trigger whose
+#: start drifts by a few minutes still retries it every day.
+RECHECK_AFTER = timedelta(hours=20)
 
 #: Local hours [start, end) in which a feed is busy enough to probe.
 SERVICE_WINDOW_HOURS = (7, 20)
@@ -97,12 +107,14 @@ class NotAFeed(ValueError):
 
 @dataclass(frozen=True)
 class Candidate:
-    """An agency that can carry the RT-optional fields, with its current verdict."""
+    """An agency that can carry the RT-optional fields, with its current
+    verdict and when its latest ``probe`` run started (None: it has none)."""
 
     agency_id: int
     feed_url: str
     timezone: str
     fields: tuple[RecordedField, ...]
+    last_attempt: datetime | None = None
 
 
 @dataclass
@@ -119,7 +131,7 @@ def needs_reprobe(fields: Iterable[RecordedField], now: datetime, renew_within: 
 
     Due when any field in ``RT_COVERAGE_FIELDS`` has no row, expires within
     *renew_within* of *now*, or is refuted by a probe at least
-    ``REFUTED_RECHECK_AFTER`` old. A refutation is rechecked daily rather
+    ``RECHECK_AFTER`` old. A refutation is rechecked daily rather
     than at its expiry because it keeps the agency's reports blank for as
     long as it stands. A confirmed row with no expiry is pinned by something
     more durable than one poll and is never due.
@@ -131,7 +143,7 @@ def needs_reprobe(fields: Iterable[RecordedField], now: datetime, renew_within: 
             return True
         if row.expires_at is not None and row.expires_at <= now + renew_within:
             return True
-        if not row.confirmed and row.probed_at <= now - REFUTED_RECHECK_AFTER:
+        if not row.confirmed and row.probed_at <= now - RECHECK_AFTER:
             return True
     return False
 
@@ -148,27 +160,44 @@ def in_service_window(now: datetime, tz_name: str) -> bool:
     return start <= local.hour < end
 
 
+def recently_attempted(last_attempt: datetime | None, now: datetime) -> bool:
+    """Whether the agency's latest probe run started less than
+    ``RECHECK_AFTER`` before *now*, whatever it found."""
+    return last_attempt is not None and last_attempt > now - RECHECK_AFTER
+
+
 def select_due(candidates: Iterable[Candidate], now: datetime) -> list[Candidate]:
-    """The candidates to probe now: a due verdict, inside the window."""
-    return [c for c in candidates if needs_reprobe(c.fields, now) and in_service_window(now, c.timezone)]
+    """The candidates to probe now: a due verdict, inside the window, not
+    attempted in the last ``RECHECK_AFTER``."""
+    return [
+        c
+        for c in candidates
+        if needs_reprobe(c.fields, now)
+        and in_service_window(now, c.timezone)
+        and not recently_attempted(c.last_attempt, now)
+    ]
 
 
 def group_candidates(rows: Iterable[Sequence]) -> list[Candidate]:
     """Fold ``_CANDIDATES_SQL`` rows into one candidate per agency, in row
     order. An agency with no verdict comes back from the LEFT JOIN as a
     single row whose probe columns are NULL."""
-    heads: dict[int, tuple[str, str]] = {}
+    heads: dict[int, tuple[str, str, datetime | None]] = {}
     fields: dict[int, list[RecordedField]] = {}
-    for agency_id, feed_url, tz_name, field_name, confirmed, expires_at, probed_at in rows:
-        heads.setdefault(agency_id, (feed_url, tz_name))
+    for agency_id, feed_url, tz_name, field_name, confirmed, expires_at, probed_at, last_attempt in rows:
+        heads.setdefault(agency_id, (feed_url, tz_name, last_attempt))
         recorded = fields.setdefault(agency_id, [])
         if field_name is not None:
             recorded.append(RecordedField(field_name, confirmed, expires_at, probed_at))
-    return [Candidate(aid, url, tz, tuple(fields[aid])) for aid, (url, tz) in heads.items()]
+    return [Candidate(aid, url, tz, tuple(fields[aid]), last) for aid, (url, tz, last) in heads.items()]
 
 
+# The latest probe run per agency rides along in the same round trip, read
+# through the partial index migration 0082 adds for exactly this lookup.
 _CANDIDATES_SQL = """
-    SELECT a.agency_id, a.feed_url, a.timezone, p.field_name, p.confirmed, p.expires_at, p.probed_at
+    SELECT a.agency_id, a.feed_url, a.timezone, p.field_name, p.confirmed, p.expires_at, p.probed_at,
+           (SELECT max(r.started_at) FROM pipeline_runs r
+            WHERE r.kind = 'probe' AND r.agency_id = a.agency_id) AS last_attempt
     FROM agencies a
     LEFT JOIN rt_field_coverage_probes p ON p.agency_id = a.agency_id
     WHERE a.deleted_at IS NULL
@@ -179,7 +208,8 @@ _CANDIDATES_SQL = """
 
 def load_candidates(conn) -> list[Candidate]:
     """Every active agency whose ingest strategy can carry the RT-optional
-    fields, with whatever verdict the registry holds for it."""
+    fields, with whatever verdict the registry holds for it and when it was
+    last attempted."""
     with conn.cursor() as cur:
         cur.execute(_CANDIDATES_SQL, (list(RT_INGEST_STRATEGIES),))
         rows = cur.fetchall()

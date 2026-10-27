@@ -127,26 +127,34 @@ through `record_field_coverage_probe` with the same thresholds:
 
 The renewal probes every active `static_join` agency whose verdict is
 missing, partial, expired, or within 14 days of expiring, or refuted by a
-probe at least 20 hours old, so a refutation is rechecked once a day however
-often the trigger fires. It runs as
-the last pass of an unscoped `POST /internal/cron/ingest` sweep (after the
-lock is released, like the weather pass) and as `gtfs_pipeline.py
-reprobe_rt_coverage` (`make reprobe-rt-coverage`). It only probes inside each
-agency's local service window (07:00–20:00), and it records nothing from a
-poll with fewer than 20 stop_time_updates: a poll that small often carries
-arrivals on half its updates, which would read as refuting `arr_delay`. A
-verdict it writes is trusted for 180 days. When nothing is due or the window
-is closed it does nothing and writes no run row, so a deployment needs one
-trigger in service hours. Late morning suits every agency's feed.
+probe at least 20 hours old. It runs as the last pass of an unscoped `POST
+/internal/cron/ingest` sweep (after the lock is released, like the weather
+pass) and as `gtfs_pipeline.py reprobe_rt_coverage` (`make
+reprobe-rt-coverage`). It only probes inside each agency's local service
+window (07:00–20:00), and it records nothing from a poll with fewer than 20
+stop_time_updates: a poll that small often carries arrivals on half its
+updates, which would read as refuting `arr_delay`. A verdict it writes is
+trusted for 180 days. When nothing is due or the window is closed it does
+nothing and writes no run row, so a deployment needs one trigger in service
+hours. Late morning suits every agency's feed.
 
 Each agency it probes gets a `probe` row in `pipeline_runs`, drawn as its own
-lane on the board. The row closes `ok` when a verdict was written, `skipped`
-when the poll was too thin or the agency's feed changed mid-probe, and `error`
-when the feed could not be fetched or answered with something that is not a
-GTFS-RT feed (an error page, an empty or truncated body; `is_feed_message` in
-`pipeline/strategies/_pb.py` tells one from a feed with nothing running). The
-rows count is the poll's stop_time_updates. One agency's failure never stops the next agency or the
+lane on the board; its rows count is the poll's stop_time_updates. The module
+docstring of `pipeline/rt_coverage_reprobe.py` is the canonical list of how
+that row closes: `ok` when a verdict was written; `skipped` when the poll was
+too thin or the feed was repointed mid-probe; `error` when the feed could not
+be fetched, was not a GTFS-RT feed, or the verdict could not be written. An
+error page or an empty or truncated body counts as not a feed
+(`is_feed_message` in `pipeline/strategies/_pb.py` tells one from a feed with
+nothing running). One agency's failure never stops the next agency or the
 sweep.
+
+An agency whose latest `probe` row started less than 20 hours ago is not
+probed again, whatever that row's status, so a thin or broken feed is retried
+once a day however often the trigger fires, and so is a refutation. A
+database still without migration 0082 has no `probe` rows, so nothing is
+held back there; the run rows themselves are lost until it is migrated, and
+the verdicts are still written.
 
 ## Users bulk/drawer
 

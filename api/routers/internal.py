@@ -422,10 +422,10 @@ def _ingest_and_analyze_sweep(
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
-        # a session holds when it ends. This is also what makes the weather
-        # and ml_forecast passes below safe to run afterwards: neither ever
-        # observes the lock as held, so neither can be blamed for one poke's
-        # "already in flight" skip of another.
+        # a session holds when it ends. This is also what makes every pass
+        # below -- weather, ml_forecast and the RT coverage re-probe -- safe
+        # to run afterwards: none ever observes the lock as held, so none can
+        # be blamed for one poke's "already in flight" skip of another.
 
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
