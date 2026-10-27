@@ -164,3 +164,11 @@ def test_wilson_interval_matches_hand_derivation_for_10pct():
     low, high = wilson_interval(10, 100)
     assert low == pytest.approx(expected_low)
     assert high == pytest.approx(expected_high)
+
+
+@pytest.mark.parametrize(("pct", "samples"), [(80.0, 25), (90.0, 300), (59.8, 189), (100.0, 112), (50.0, 0)])
+def test_the_low_confidence_flag_is_the_one_the_annotation_appends(pct, samples):
+    from pipeline.stats import on_time_pct_low_confidence
+
+    [annotated] = annotate_on_time_pct_confidence([("R", None, pct, 0.5, samples)])
+    assert on_time_pct_low_confidence(pct, samples) is annotated[5]

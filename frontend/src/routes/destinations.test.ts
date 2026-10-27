@@ -17,6 +17,7 @@ import {
   routeHref,
   routesHref,
   reportsView,
+  routeTableView,
   screenParams,
 } from "./destinations";
 
@@ -65,7 +66,16 @@ describe("destinations", () => {
   it("sends each report type to the screen that hosts it", () => {
     expect(reportHref(9, "trend", "?routes=5")).toBe("/agencies/9/time?routes=5&report=trend");
     expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?report=dwell_run");
-    expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?report=on_time");
+    expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?sort=on_time");
+    expect(reportHref(9, "ranking_best", "?from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg&order=best");
+    // A previous report or sort gives way to the report's own; a former
+    // on-time link's order still picks the same end.
+    expect(reportHref(9, "ranking", "?report=on_time&sort=late5_share")).toBe("/agencies/9/routes?sort=avg");
+    expect(reportHref(9, "on_time", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?order=best&from=2026-09-01&sort=on_time");
+    // Beside any other list, an order is a leftover from the on-time list.
+    expect(reportHref(9, "ranking", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg");
+    expect(reportHref(9, "worst_5min", "?order=best")).toBe("/agencies/9/routes?sort=late5_count");
+    expect(reportHref(9, "worst_5min")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods&report=compare_ranking");
     expect(reportHref(9, "council_summary", "?report=trend&from=2026-09-01")).toBe(
       "/agencies/9/reports?from=2026-09-01&doc=council",
@@ -98,14 +108,42 @@ describe("destinations", () => {
 
 describe("the view a screen opens", () => {
   it("opens the requested report only where the screen hosts it", () => {
-    expect(pickReport("on_time", ROUTES_REPORT_TYPES)).toBe("on_time");
-    expect(pickReport("trend", ROUTES_REPORT_TYPES)).toBe("ranking");
+    expect(pickReport("route_forecast", TIME_REPORT_TYPES)).toBe("route_forecast");
+    expect(pickReport("on_time", TIME_REPORT_TYPES)).toBe("trend");
   });
 
   it("falls back to a hosted default, else to the first report", () => {
-    expect(pickReport(null, ROUTES_REPORT_TYPES, "worst_5min")).toBe("worst_5min");
-    expect(pickReport(null, ROUTES_REPORT_TYPES, "trend")).toBe("ranking");
+    expect(pickReport(null, TIME_REPORT_TYPES, "dow_weekend")).toBe("dow_weekend");
+    expect(pickReport(null, TIME_REPORT_TYPES, "ranking")).toBe("trend");
     expect(pickReport(null, [])).toBeNull();
+  });
+
+  it.each([
+    ["", "avg", "worst"],
+    ["sort=late5_share", "late5_share", "worst"],
+    ["sort=on_time&order=best", "on_time", "best"],
+    // The route lists the table replaced open it sorted the way they were.
+    ["report=ranking", "avg", "worst"],
+    ["report=ranking_best", "avg", "best"],
+    ["report=on_time&order=best", "on_time", "best"],
+    ["report=worst_5min", "late5_count", "worst"],
+    ["sort=worst_5min", "late5_count", "worst"],
+    ["sort=ranking_best", "avg", "best"],
+    // `report` picked the list over `sort`.
+    ["report=on_time&sort=avg", "on_time", "worst"],
+    ["report=trend&sort=banana&order=sideways", "avg", "worst"],
+    // An order turns around only the on-time list, the one list that had
+    // the choice; beside any other it is a leftover from a visit to that one.
+    ["report=on_time&order=best", "on_time", "best"],
+    ["report=ranking&order=best", "avg", "worst"],
+    ["report=worst_5min&order=best", "late5_count", "worst"],
+    ["report=ranking_best&order=worst", "avg", "best"],
+    ["sort=worst_5min&order=best", "late5_count", "worst"],
+    ["order=best", "avg", "worst"],
+    // Beside a table sort it was chosen for the table.
+    ["sort=late5_count&order=best", "late5_count", "best"],
+  ] as const)("opens the Routes table for ?%s sorted by %s, %s first", (search, sort, order) => {
+    expect(routeTableView(search)).toEqual({ sort, order });
   });
 
   it("compares agencies only for by=agencies", () => {

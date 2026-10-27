@@ -24,6 +24,7 @@ import httpx
 
 TARGETS = [
     ("overview", "/api/{agency}/overview/summary"),
+    ("report.route_table", "/api/{agency}/reports/route_table"),
     ("report.ranking", "/api/{agency}/reports/ranking"),
     ("report.ranking_best", "/api/{agency}/reports/ranking_best"),
     ("report.on_time", "/api/{agency}/reports/on_time"),

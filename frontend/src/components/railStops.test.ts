@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DESTINATIONS, ROUTES_REPORT_TYPES, TIME_REPORT_TYPES } from "../routes/destinations";
+import { DESTINATIONS, ROUTE_TABLE_SORTS, TIME_REPORT_TYPES } from "../routes/destinations";
 import { RAIL_STOPS, currentStop, railPlace } from "./railStops";
 
 describe("RAIL_STOPS", () => {
@@ -8,8 +8,8 @@ describe("RAIL_STOPS", () => {
     expect(withStops).toEqual(["routes", "time", "compare", "reports"]);
   });
 
-  it("opens each report of Routes and Time by its `report` param, in the screen's own order", () => {
-    expect(RAIL_STOPS.routes?.map((stop) => stop.extra)).toEqual(ROUTES_REPORT_TYPES.map((report) => ({ report })));
+  it("opens each sort of the Routes table by `sort`, and each report of Time by `report`, in the screen's own order", () => {
+    expect(RAIL_STOPS.routes?.map((stop) => stop.extra)).toEqual(ROUTE_TABLE_SORTS.map((sort) => ({ sort })));
     expect(RAIL_STOPS.time?.map((stop) => stop.extra)).toEqual(TIME_REPORT_TYPES.map((report) => ({ report })));
   });
 
@@ -22,9 +22,10 @@ describe("RAIL_STOPS", () => {
 describe("currentStop", () => {
   it.each([
     ["routes", "report=on_time", "on_time"],
-    ["routes", "sort=worst_5min", "worst_5min"],
-    ["routes", "report=trend", "ranking"],
-    ["routes", "", "ranking"],
+    ["routes", "sort=late5_share", "late5_share"],
+    ["routes", "sort=worst_5min", "late5_count"],
+    ["routes", "report=trend", "avg"],
+    ["routes", "", "avg"],
     ["time", "report=route_forecast", "route_forecast"],
     ["time", "", "trend"],
     ["compare", "by=agencies", "agencies"],

@@ -142,9 +142,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays) share one layout, as do the council report and the delay record (for reference) in **Reports**.
-
-![Routes screen](./05-routes-ranking.en.png)
+**Time**, **Why** and **Compare** (weekdays and weekends/holidays) share one layout, as do the council report and the delay record (for reference) in **Reports**. **Routes** holds every route in one table instead (5-3).
 
 | Area | Where | What it holds |
 |---|---|---|
@@ -170,40 +168,48 @@ Click the small ⓘ next to the “Reports” heading above the list. A popup, �
 
 Click anywhere else, or press Escape, to close it.
 
-### 5-3. The reports on Routes
+### 5-3. The table on Routes
 
-| Report | What it shows |
-|---|---|
-| **Delay ranking** | Which routes run latest, worst first |
-| **Lowest average delay** | Routes with the lowest average delay, best first |
-| **On-time rate** | Share of departures inside the on-time threshold, by route, lowest first |
-| **Delays over 5 min** | Routes with the most departures more than five minutes late |
+**Routes** lists the routes observed in the period in one table. Each row is one route, over all of its observations in the period. A line above the table names the period it counts (“30 days (…)”). **Pulse** counts a shorter, more recent period, so the same route can show different figures there.
 
-If you are not sure where to start, open **Delay ranking** to see which routes are worst, then the **Trend** on **Time** to see when.
+![Routes screen](./05-routes-ranking.en.png)
 
-### 5-4. Reading Delay ranking
+The columns:
 
-Each row is one route, over all of its observations in the period. The columns:
-
-- **Route**: click a name to open that route’s page (5-6).
+- **Route**: click a name to open that route’s page (5-6). Where several routes share a name, where each runs is shown beside it.
 - **Avg (min)**: the average delay.
-- **Median (min)**: the middle value, a typical delay that a few extreme days cannot pull up.
-- **p90 (min)**: 90% of departures were no later than this; it shows how bad a bad day gets.
+- **On-time %**: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “wide margin” mark means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points.
+- **Share over 5 min** and **Over 5 min (count)**: the departures that left more than five minutes late, as a share and as a count.
 - **Samples**: the number of observations behind the row. Fewer samples mean less certainty.
 
-**Delay ranking** and **Lowest average delay** leave out routes observed fewer than 100 times in the period, so a route seen on only a handful of trips cannot top them. Tick “Include routes observed fewer than 100 times” to rank those routes too; their samples carry a “few data” badge. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest.
+**Sort by** picks the figure the table is sorted by:
 
-The route lists also leave out route codes the current timetable no longer runs, and routes whose feed always reports zero delay (a feed that repeats the timetable instead of reporting delay says nothing about punctuality). When a list leaves any out, a tick box above the table says how many, and ticking it brings them back.
+| Sort | Order |
+|---|---|
+| **Average delay** | Highest average delay first |
+| **On-time rate** | Lowest on-time rate first |
+| **Share over 5 min** | Highest share over 5 min first |
+| **Impact (count)** | Most departures over 5 min first; busy routes rise to the top |
 
-**Download CSV** at the top right of the report downloads the table.
+**Best first** starts from the other end. The sorted column’s figures are bold, and only that column carries a bar. The same four sorts sit under **Routes** in the sidebar.
 
-### 5-5. On-time rate and delays over 5 min
+If you are not sure where to start, sort by **Average delay** to see which routes are worst, then open the **Trend** on **Time** to see when.
+
+### 5-4. Which routes the table lists
+
+Routes observed fewer than 100 times in the period are left out, whatever the sort, so a route seen on only a handful of trips cannot top the table. Tick “Include routes observed fewer than 100 times” to list those routes too; their samples carry a “few data” badge.
+
+The table also leaves out route codes the current timetable no longer runs, and routes whose feed always reports zero delay (a feed that repeats the timetable instead of reporting delay says nothing about punctuality). When it leaves any out, “Left out by default:” above the table shows a tick box per reason with how many, and ticking one brings them back. The counts stay the same whatever the sort or the number of rows shown.
+
+The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”) and what “over 5 min” counts.
+
+**Download CSV** downloads the rows the table shows, in the table’s order.
+
+### 5-5. Sorted by on-time rate
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-**On-time rate** lists routes with their “On-time %”: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A line above the table says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”). The list starts from the lowest rate; under **Order**, “Highest on-time rate first” turns it around. When more routes qualify than the table shows, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. A “wide margin” mark in the **Margin** column means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points. Under the table, “Headway quality” covers the routes scheduled every 12 minutes or more often, and “Minimum performance standard” appears when the agency has set targets for its routes.
-
-**Delays over 5 min** counts, route by route, the departures that left more than five minutes late (“Over 5 min late”).
+Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often, and by “Minimum performance standard” when the agency has set targets for its routes.
 
 ### 5-6. A route’s own page
 

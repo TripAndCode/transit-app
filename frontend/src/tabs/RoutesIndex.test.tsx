@@ -5,16 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import { RoutesIndex } from "./RoutesIndex";
 
-vi.mock("../routes/lazyTabs", () => ({
-  loadAnalysisTab: () =>
-    Promise.resolve({
-      default: ({ reportTypes, defaultReport }: { reportTypes: readonly string[]; defaultReport?: string }) => (
-        <div>
-          analysis-tab:{reportTypes.join(",")} default:{defaultReport ?? "none"}
-        </div>
-      ),
-    }),
-}));
+vi.mock("./RouteTableScreen", () => ({ RouteTableScreen: () => <div>route-table</div> }));
 
 function open(path: string) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
@@ -38,25 +29,21 @@ function open(path: string) {
 describe("RoutesIndex", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("hosts the route ranking reports", async () => {
+  it("hosts the one route table", async () => {
     open("/agencies/9/routes");
-    expect(await screen.findByText("analysis-tab:ranking,ranking_best,on_time,worst_5min default:none")).toBeInTheDocument();
+    expect(await screen.findByText("route-table")).toBeInTheDocument();
   });
 
   it("titles the screen with one level-1 heading", async () => {
     open("/agencies/9/routes");
-    await screen.findByText(/^analysis-tab/);
+    await screen.findByText("route-table");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: "Routes" })).toBeInTheDocument();
   });
 
-  it("opens the report its sort names", async () => {
-    open("/agencies/9/routes?sort=on_time");
-    expect(await screen.findByText(/default:on_time/)).toBeInTheDocument();
-  });
-
-  it("leaves opening a route to the ranking's rows and the palette, with no separate picker", async () => {
+  it("leaves opening a route to the table's rows and the palette, with no separate picker", async () => {
     open("/agencies/9/routes");
-    await screen.findByText(/^analysis-tab/);
+    await screen.findByText("route-table");
     expect(screen.queryByRole("combobox", { name: "Open a route" })).not.toBeInTheDocument();
   });
 });

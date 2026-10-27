@@ -170,15 +170,8 @@ def capture(base: str, locale: str) -> None:
         page.wait_for_timeout(500)
         shot(page, "05-routes-ranking", locale)
 
-        # 06: the report-list hint popover.
-        page.get_by_label(L["hint"]).first.click()
-        page.wait_for_timeout(400)
-        shot(page, "06-reports-hint", locale)
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
-
-        # 08: the on-time-rate report.
-        page.get_by_text(L["on_time"], exact=True).first.click()
+        # 08: the Routes table sorted by on-time rate.
+        page.get_by_role("button", name=L["on_time"], exact=True).click()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(500)
         shot(page, "08-routes-ontime", locale)
@@ -187,6 +180,14 @@ def capture(base: str, locale: str) -> None:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(500)
         shot(page, "07-time-trend", locale)
+
+        # 06: the report-list hint popover, beside the list a report screen
+        # opens with.
+        page.get_by_label(L["hint"]).first.click()
+        page.wait_for_timeout(400)
+        shot(page, "06-reports-hint", locale)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
 
         page.goto(f"{agency}/why")
         page.wait_for_load_state("networkidle")

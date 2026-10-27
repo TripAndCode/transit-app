@@ -38,6 +38,30 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route} 5分超 {count}回、平均{avg}分（{samples}件）",
     ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} samples)",
+    ("route_table_header", "ja"): "【{label}系統一覧：{basis}】",
+    ("route_table_header", "en"): "[{label}Routes, {basis}]",
+    ("route_table_by_avg_worst", "ja"): "平均遅延の大きい順",
+    ("route_table_by_avg_worst", "en"): "highest average delay first",
+    ("route_table_by_avg_best", "ja"): "平均遅延の小さい順",
+    ("route_table_by_avg_best", "en"): "lowest average delay first",
+    ("route_table_by_on_time_worst", "ja"): "定時率の低い順",
+    ("route_table_by_on_time_worst", "en"): "lowest on-time rate first",
+    ("route_table_by_on_time_best", "ja"): "定時率の高い順",
+    ("route_table_by_on_time_best", "en"): "highest on-time rate first",
+    ("route_table_by_late5_share_worst", "ja"): "5分超の割合が高い順",
+    ("route_table_by_late5_share_worst", "en"): "highest share over 5 min first",
+    ("route_table_by_late5_share_best", "ja"): "5分超の割合が低い順",
+    ("route_table_by_late5_share_best", "en"): "lowest share over 5 min first",
+    ("route_table_by_late5_count_worst", "ja"): "5分超の件数が多い順",
+    ("route_table_by_late5_count_worst", "en"): "most departures over 5 min first",
+    ("route_table_by_late5_count_best", "ja"): "5分超の件数が少ない順",
+    ("route_table_by_late5_count_best", "en"): "fewest departures over 5 min first",
+    ("route_table_row", "ja"): (
+        "{rank}位: 路線{route} 平均{avg}分、定時率{pct}%、5分超{share}%（{count}件）、観測{samples}件"
+    ),
+    ("route_table_row", "en"): (
+        "#{rank} route {route} mean {avg} min, on-time {pct}%, over 5 min {share}% ({count}), {samples} samples"
+    ),
     ("dow_header_weekend", "ja"): "【{label}土日祝遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend/holiday delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
@@ -259,6 +283,32 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
     return _t("worst5_header", locale, label=label) + "\n" + "\n".join(lines)
 
 
+def _fmt_route_table(rows: list, intent: dict, locale: str) -> str:
+    """Render the Routes table in its sorted order, the header naming the sort.
+
+    Row: ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, ...)``.
+    ``intent`` carries ``sort`` (a ``ROUTE_TABLE_SORTS`` key) and ``order``
+    (``"worst"`` or ``"best"``).
+    """
+    basis = _t(f"route_table_by_{intent['sort']}_{intent['order']}", locale)
+    lines = [
+        _t(
+            "route_table_row",
+            locale,
+            rank=i,
+            route=r[0],
+            avg=_r(r[1]),
+            pct=_r(r[2]),
+            share=_r(r[3]),
+            count=r[4],
+            samples=r[5],
+        )
+        for i, r in enumerate(rows, 1)
+    ]
+    header = _t("route_table_header", locale, label=_service_prefix(intent, locale), basis=basis)
+    return header + "\n" + "\n".join(lines)
+
+
 def _fmt_dow_ranking(rows: list, intent: dict, locale: str) -> str:
     """Render a day-type delay ranking.
 
@@ -316,6 +366,7 @@ FORMATTERS = {
     "ranking": _fmt_ranking,
     "on_time": _fmt_on_time,
     "worst_5min": _fmt_worst_5min,
+    "route_table": _fmt_route_table,
     "compare_ranking": _fmt_compare_ranking,
     "dow_ranking": _fmt_dow_ranking,
 }

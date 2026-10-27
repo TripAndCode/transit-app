@@ -89,12 +89,11 @@ def resolve_definition_meta(
     can never show a tolerance different from the one actually used to
     compute the rows next to it.
     """
-    if report_type in ("on_time", "council_summary"):
-        # council_summary (the monthly/annual report template) reuses the
-        # exact same on-time tolerance semantics as on_time -- it pools
-        # the same underlying window into one whole-agency figure instead of
-        # a per-route breakdown, so the two share this branch rather than a
-        # second, independently-typed copy of the same resolution rule.
+    if report_type in ("on_time", "route_table", "council_summary"):
+        # One resolution rule for every on-time figure: council_summary pools
+        # on_time's window into one whole-agency figure, and route_table's
+        # on-time column is on_time's own. route_table's over-5-min share
+        # keeps its fixed cutoff, which this metadata does not describe.
         is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
         resolved_late = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
         return DefinitionMeta(

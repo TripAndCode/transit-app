@@ -87,13 +87,14 @@ async def reports_client(reports_app):
 
 @pytest.mark.asyncio
 async def test_reports_list_returns_static_metadata(reports_client):
-    """The list endpoint returns the canonical 11 report types regardless of data."""
+    """The list endpoint returns the canonical 12 report types regardless of data."""
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports")
     assert resp.status_code == 200
     data = resp.json()
     types = {r["report_type"] for r in data}
     assert types == {
+        "route_table",
         "ranking",
         "ranking_best",
         "on_time",
@@ -439,9 +440,9 @@ async def test_on_time_appends_pct_low_confidence_flag(reports_client, ch_client
 @pytest.mark.asyncio
 async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, ch_client):
     """format=csv for the on_time report must render the trailing
-    `low_confidence` flag as the same human-readable marker used by
-    frontend/src/components/ReportTable.tsx's fmtConfidence and
-    frontend/src/tabs/ask/RichResult.tsx (a short mark when true, blank
+    `low_confidence` flag as the same human-readable marker
+    frontend/src/components/ReportTable.tsx's on-time column and
+    frontend/src/tabs/ask/RichResult.tsx show (a short mark when true, blank
     when false), not csv.writer's literalized "True"/"False" string form
     of the raw Python bool."""
     import csv

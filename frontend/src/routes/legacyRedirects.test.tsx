@@ -130,6 +130,26 @@ describe("legacy redirects", () => {
     expect(loc.params.get("routes")).toBe("50");
   });
 
+  it.each([
+    ["ranking", { sort: "avg" }],
+    ["ranking_best", { sort: "avg", order: "best" }],
+    ["worst_5min", { sort: "late5_count" }],
+  ])("sends an analysis/%s bookmark to the Routes table sorted as that list was", (report, expected) => {
+    const loc = go(LENS, <RedirectAnalysisLens />, `/agencies/9/analysis/${report}?routes=50`, "agencies/:agencyId/routes");
+    expect(loc.pathname).toBe("/agencies/9/routes");
+    expect(Object.fromEntries(loc.params)).toEqual({ routes: "50", ...expected });
+  });
+
+  it("keeps an on-time bookmark's order, so it opens on the same end of the list", () => {
+    const loc = go(LENS, <RedirectAnalysisLens />, "/agencies/9/analysis/on_time?order=best", "agencies/:agencyId/routes");
+    expect(Object.fromEntries(loc.params)).toEqual({ order: "best", sort: "on_time" });
+  });
+
+  it("drops an order left over beside a list that had none, so the ranking opens worst first", () => {
+    const loc = go(LENS, <RedirectAnalysisLens />, "/agencies/9/analysis/ranking?order=best", "agencies/:agencyId/routes");
+    expect(Object.fromEntries(loc.params)).toEqual({ sort: "avg" });
+  });
+
   it("sends reports/:reportType to its Reports document", () => {
     const loc = go(
       "agencies/:agencyId/reports/:reportType",

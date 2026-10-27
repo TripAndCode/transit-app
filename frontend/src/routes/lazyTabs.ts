@@ -46,8 +46,8 @@ export const loadCompareTab: TabLoader = () =>
  */
 export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unknown>> = {
   pulse: loadOverviewTab,
+  routes: loadRoutesIndex,
   // A thin destination only hosts a report screen, which is a chunk of its own.
-  routes: () => Promise.all([loadRoutesIndex(), loadAnalysisTab()]),
   time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
   why: () => Promise.all([loadWhyTab(), loadAnalysisTab()]),
   // Compare hosts either board: the agencies one renders NetworkTab.

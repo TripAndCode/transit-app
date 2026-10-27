@@ -1052,14 +1052,12 @@
     "col": {
       "service": "Service",
       "avg": "Avg",
-      "median": "Median",
-      "p90": "p90",
       "samples": "Samples",
       "on_time_pct": "On-time %",
-      "over_5min_count": "Over 5 min late",
+      "over_5min_count": "Over 5 min (count)",
+      "over_5min_share": "Share over 5 min",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Margin",
       "agency_name": "Agency",
       "date": "Date",
       "scheduled_time": "Scheduled",
@@ -1070,11 +1068,6 @@
     "confidence_low_mark": "few data",
     "wide_margin_mark": "wide margin",
     "wide_margin_tip": "Margin of error ±{{margin}} points (95% interval)",
-    "on_time_order": {
-      "label": "Order",
-      "worst": "Lowest on-time rate first",
-      "best": "Highest on-time rate first"
-    },
     "direction": {
       "weekend_higher": "Weekend/Holiday > Weekday",
       "weekday_higher": "Weekday > Weekend/Holiday"
@@ -1267,6 +1260,7 @@
       "include_retired_other": "Include {{count}} route codes the current timetable no longer runs",
       "include_zero_delay_one": "Include {{count}} route whose feed always reports zero delay",
       "include_zero_delay_other": "Include {{count}} routes whose feeds always report zero delay",
+      "left_out_lead": "Left out by default:",
       "rows_shown": "Showing {{shown}} of {{total}}",
       "show_all": "Show all"
     },
@@ -1303,6 +1297,24 @@
       "disclaimer": "This record is a reference document this service made from the real-time data that {{operator}} publishes. It is not a delay certificate issued by the operator.",
       "all_late": "All late departures in the period"
     }
+  },
+  "routeTable": {
+    "title": "Delays by route",
+    "window_one": "{{count}} day ({{range}})",
+    "window_other": "{{count}} days ({{range}})",
+    "sort": {
+      "label": "Sort by",
+      "avg": "Average delay",
+      "on_time": "On-time rate",
+      "late5_share": "Share over 5 min",
+      "late5_count": "Impact (count)"
+    },
+    "order": {
+      "label": "Order",
+      "worst": "Worst first",
+      "best": "Best first"
+    },
+    "late5_note": "Over 5 min = departures more than 5 minutes late: the share of the route's observations, and how many."
   },
   "insight_panel": {
     "title": "Worth a look",

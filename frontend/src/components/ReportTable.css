@@ -66,4 +66,21 @@
    whole transition. The link is its cell's only content, so its lines break
    as before and the chevron stays after the last word. */
 .report-route-link--travelling { display: inline-block; max-width: 100%; }
-.report-route-link__chevron { color: var(--text-tertiary); }
+.report-route-link__chevron { flex: none; color: var(--text-tertiary); }
+
+/* A compact route cell keeps its row to one line: the plate, the line name
+   (which still wraps rather than taking an ellipsis, since Japanese has no
+   spaces to cut it at) and, for routes that share a name, where it runs,
+   filling the rest of the cell and cut short with an ellipsis. The label's
+   tooltip holds all of it. contain: inline-size keeps where it runs out of
+   the column's width, so the column is the share ReportTable gives it
+   rather than wide enough to widen the table past its figures. */
+.report-route-cell--compact .report-route-link { display: flex; align-items: baseline; min-width: 0; }
+.report-route-cell--compact .route-label { display: flex; flex: 1 1 auto; align-items: baseline; gap: 0.35em; min-width: 0; }
+.report-route-cell--compact .route-label__plate { flex: none; }
+.report-route-cell--compact .route-label__line { flex: 0 1 auto; min-width: 0; }
+.report-route-cell--compact .route-label__aside { flex: 1 1 0; min-width: 3em; contain: inline-size; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The Routes table's sorted column: its figures carry the weight the rest of
+   the row does not. */
+.report-cell--basis { color: var(--text-primary); font-weight: 600; }

@@ -1052,14 +1052,12 @@
     "col": {
       "service": "種別",
       "avg": "平均",
-      "median": "中央値",
-      "p90": "p90",
       "samples": "観測数",
       "on_time_pct": "定時率",
       "over_5min_count": "5分超回数",
+      "over_5min_share": "5分超の割合",
       "diff": "差",
       "direction": "向き",
-      "confidence": "誤差",
       "agency_name": "事業者名",
       "date": "日付",
       "scheduled_time": "定刻",
@@ -1070,11 +1068,6 @@
     "confidence_low_mark": "データ少",
     "wide_margin_mark": "誤差大",
     "wide_margin_tip": "定時率の誤差 ±{{margin}}ポイント（95%信頼区間）",
-    "on_time_order": {
-      "label": "並び順",
-      "worst": "定時率の低い順",
-      "best": "定時率の高い順"
-    },
     "direction": {
       "weekend_higher": "土日祝>平日",
       "weekday_higher": "平日>土日祝"
@@ -1267,6 +1260,7 @@
       "include_retired_other": "時刻表にない運行終了の系統コード{{count}}件も含める",
       "include_zero_delay_one": "遅れが常に0と報告される系統{{count}}件も含める",
       "include_zero_delay_other": "遅れが常に0と報告される系統{{count}}件も含める",
+      "left_out_lead": "既定で除いている系統：",
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
     },
@@ -1303,6 +1297,24 @@
       "disclaimer": "この記録は、{{operator}}が公開しているリアルタイムデータをもとに本サービスが作成した参考資料です。事業者が発行する遅延証明書ではありません。",
       "all_late": "期間内のすべての遅延便"
     }
+  },
+  "routeTable": {
+    "title": "系統別の遅れ",
+    "window_one": "{{count}}日間（{{range}}）の集計",
+    "window_other": "{{count}}日間（{{range}}）の集計",
+    "sort": {
+      "label": "並べ替え",
+      "avg": "平均遅延",
+      "on_time": "定時率",
+      "late5_share": "5分超の割合",
+      "late5_count": "影響（件数）"
+    },
+    "order": {
+      "label": "並び順",
+      "worst": "悪い順",
+      "best": "良い順"
+    },
+    "late5_note": "5分超 = 5分を超えて遅れた出発。割合はその系統の観測に占める割合、回数はその数です。"
   },
   "insight_panel": {
     "title": "注目ポイント",
