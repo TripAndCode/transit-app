@@ -4,11 +4,13 @@ import {
   COMPARE_MODES,
   DESTINATIONS,
   REPORTS_VIEWS,
-  ROUTES_REPORT_TYPES,
+  ROUTE_TABLE_SORTS,
+  ROUTE_TABLE_SORT_LABELS,
   TIME_REPORT_TYPES,
   compareMode,
   pickReport,
   reportsView,
+  routeTableView,
   type Destination,
 } from "../routes/destinations";
 import { screenOf } from "../api/screenScope";
@@ -29,19 +31,19 @@ function reportStops(types: readonly string[]): RailStop[] {
 /** The stops each destination opens under itself on the rail, in the order
  *  its own screen lists them. A screen with a single view has none. */
 export const RAIL_STOPS: Partial<Record<Destination, readonly RailStop[]>> = {
-  routes: reportStops(ROUTES_REPORT_TYPES),
+  routes: ROUTE_TABLE_SORTS.map((sort) => ({ id: sort, label: (t) => t(ROUTE_TABLE_SORT_LABELS[sort]), extra: { sort } })),
   time: reportStops(TIME_REPORT_TYPES),
   compare: COMPARE_MODES.map(({ mode, labelKey }) => ({ id: mode, label: (t) => t(labelKey), extra: { by: mode } })),
   reports: REPORTS_VIEWS.map(({ view, labelKey, extra }) => ({ id: view, label: (t) => t(labelKey), extra })),
 };
 
 /** The stop a destination's own page shows, by the rule its screen picks
- *  with: Routes falls back to `sort`, as RoutesIndex does. */
+ *  with: Routes shows the table's sort. */
 export function currentStop(dest: Destination, search: string): string | null {
   const params = new URLSearchParams(search);
   switch (dest) {
     case "routes":
-      return pickReport(params.get("report"), ROUTES_REPORT_TYPES, params.get("sort"));
+      return routeTableView(params).sort;
     case "time":
       return pickReport(params.get("report"), TIME_REPORT_TYPES);
     case "compare":

@@ -393,7 +393,7 @@ describe("Sidebar", () => {
     it("opens the current station's stops below it, and no other station's", () => {
       renderSidebar("/agencies/8/routes");
       const stops = screen.getByRole("group", { name: "Routes views" });
-      expect(stopNames(stops)).toEqual(["Delay ranking", "Lowest average delay", "On-time rate", "Delays over 5 min"]);
+      expect(stopNames(stops)).toEqual(["Average delay", "On-time rate", "Share over 5 min", "Impact (count)"]);
       expect(screen.queryByRole("group", { name: "Time views" })).toBeNull();
     });
 
@@ -404,7 +404,8 @@ describe("Sidebar", () => {
 
     it.each([
       ["/agencies/8/routes?report=on_time", "Routes views", "On-time rate"],
-      ["/agencies/8/routes?sort=worst_5min", "Routes views", "Delays over 5 min"],
+      ["/agencies/8/routes?sort=late5_share", "Routes views", "Share over 5 min"],
+      ["/agencies/8/routes?sort=worst_5min", "Routes views", "Impact (count)"],
       ["/agencies/8/time", "Time views", "Trend"],
       ["/agencies/8/compare?by=agencies", "Compare views", "Agencies"],
       ["/agencies/8/reports?doc=saved", "Reports views", "Saved analyses"],

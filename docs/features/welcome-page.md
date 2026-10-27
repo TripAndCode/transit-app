@@ -68,7 +68,7 @@ heading/body pairs under `landing.narrative.{route,trend,ask}.{title,body}`.
 
 1. With SSO configured and `login_required` on, sign out and open `/` —
    expect `/welcome` with a single "Sign in" button.
-2. Open a deep link such as `/agencies/1/routes?routes=12&report=ranking` —
+2. Open a deep link such as `/agencies/1/routes?routes=12&sort=on_time` —
    expect `/login?next=…`; sign in and expect to land on that exact URL.
 3. Sign in, then choose "About this app" in the rail — expect `/welcome`
    with "Open the dashboard" in place of "Sign in".

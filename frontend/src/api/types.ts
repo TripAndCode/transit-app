@@ -184,6 +184,7 @@ type ResponseCtx = {
  *  `route_forecast` alongside these, but that one is served by /forecast and
  *  is deliberately not a member here. */
 export type ReportType =
+  | "route_table"
   | "ranking"
   | "ranking_best"
   | "on_time"
@@ -313,6 +314,21 @@ type OnTimeRow = [
   margin_pp: number,
 ];
 
+/** `route_table` -- the Routes screen's table, one row per route sorted by
+ *  the request's `sort`. `late5_pct` and `late5_count` are the departures
+ *  over five minutes late; the trailing pair is the on-time rate's caveat,
+ *  as on `on_time` rows. */
+type RouteTableRow = [
+  route_code: string,
+  avg_min: DecimalCell,
+  on_time_pct: DecimalCell,
+  late5_pct: DecimalCell,
+  late5_count: number,
+  samples: number,
+  low_confidence: boolean,
+  margin_pp: number,
+];
+
 /** `worst_5min` -- routes ranked by count of severely-late observations. */
 type Worst5MinRow = [
   route_code: string,
@@ -420,16 +436,19 @@ type ReportEnvelope<T extends ReportType, Row> = {
   ctx?: ResponseCtx;
   definition: DefinitionMeta;
   /** How many groups (delay_certificate: trips) qualified before `limit` cut
-   *  the list (ranking, ranking_best, compare_ranking and delay_certificate),
-   *  and, for ranking/ranking_best only, the observation count below which a
-   *  group's average is too thin to trust. */
+   *  the list (route_table, ranking, ranking_best, on_time, compare_ranking
+   *  and delay_certificate), and, for route_table, ranking and ranking_best
+   *  only, the observation count below which a group's figures are too thin
+   *  to trust. */
   rows_total?: number | null;
   reliable_min_samples?: number | null;
   /** delay_certificate: whether the scope holds any observed departure, so an
    *  empty list can tell "no data" from "nothing left late". */
   observed?: boolean | null;
   /** Route lists: how many of the list's own rows are retired route codes,
-   *  left out by default and kept on request; the same in every mode. */
+   *  left out by default and kept on request; the same in every mode.
+   *  route_table counts them over every route it ranks, whatever its sort
+   *  or limit. */
   retired_rows?: number | null;
   /** Route lists: how many of the list's own rows are routes whose feed
    *  always reports zero delay, left out by default and kept on request;
@@ -441,6 +460,7 @@ type ReportEnvelope<T extends ReportType, Row> = {
  *  derived from what api/routers/reports.py actually returns for it, so a
  *  consumer narrows on `report_type` instead of casting `rows` blind. */
 export type ReportResponse =
+  | ReportEnvelope<"route_table", RouteTableRow>
   | ReportEnvelope<"ranking" | "ranking_best", RankingRow>
   | ReportEnvelope<"on_time", OnTimeRow>
   | ReportEnvelope<"worst_5min", Worst5MinRow>

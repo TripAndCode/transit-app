@@ -32,6 +32,37 @@ const LEFT_OUT_LABELS = {
 
 type LeftOutReason = keyof typeof LEFT_OUT_LABELS;
 
+/** The routes a list leaves out by default, on one line: what they are and
+ *  how many, each reason with its own toggle to bring them back. Nothing
+ *  when the list leaves none out. */
+export function LeftOutLine({
+  counts,
+  kept,
+  onChange,
+}: {
+  counts: Partial<Record<LeftOutReason, number | null>>;
+  kept: Record<LeftOutReason, boolean>;
+  onChange: (reason: LeftOutReason, checked: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const reasons = (Object.keys(LEFT_OUT_LABELS) as LeftOutReason[]).filter((reason) => (counts[reason] ?? 0) > 0);
+  if (reasons.length === 0) return null;
+  return (
+    <div className="ranking-left-out">
+      <span>{t("reports.ranking_coverage.left_out_lead")}</span>
+      {reasons.map((reason) => (
+        <LeftOutToggle
+          key={reason}
+          reason={reason}
+          checked={kept[reason]}
+          count={counts[reason] ?? 0}
+          onChange={(on) => onChange(reason, on)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function LeftOutToggle({
   reason,
   checked,
@@ -49,33 +80,6 @@ export function LeftOutToggle({
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
       {t(LEFT_OUT_LABELS[reason], { count })}
     </label>
-  );
-}
-
-const ON_TIME_ORDERS = [
-  ["worst", "reports.on_time_order.worst"],
-  ["best", "reports.on_time_order.best"],
-] as const;
-
-/** Which end of the on-time list comes first. The lowest rates lead by
- *  default: the list is where a route that needs attention is found. */
-export function OnTimeOrderToggle({
-  value,
-  onChange,
-}: {
-  value: "worst" | "best";
-  onChange: (value: "worst" | "best") => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div role="radiogroup" aria-label={t("reports.on_time_order.label")} className="ranking-order">
-      {ON_TIME_ORDERS.map(([option, labelKey]) => (
-        <label key={option} className="ranking-sparse-toggle">
-          <input type="radio" name="on-time-order" checked={value === option} onChange={() => onChange(option)} />
-          {t(labelKey)}
-        </label>
-      ))}
-    </div>
   );
 }
 

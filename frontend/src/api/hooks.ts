@@ -14,6 +14,7 @@ import { requestLanguage } from "./requestLanguage";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
 import { scopeSummaryQuery } from "./scopeSummaryQuery";
+import type { RouteTableSort } from "../routes/destinations";
 import type {
   Agency,
   MlEvaluations,
@@ -153,12 +154,15 @@ export function useScopeSummary(
  *  without ever fetching itself, so a screen can show a report's metadata
  *  without paying for a report that only an opened section asks for. */
 export type ReportOptions = {
+  /** The Routes table: the figure it is sorted by. */
+  sort?: RouteTableSort;
   includeSparse?: boolean;
   /** Route lists: keep route codes the current timetable no longer runs. */
   includeRetired?: boolean;
   /** Route lists: keep routes whose feed always reports zero delay. */
   includeZeroDelay?: boolean;
-  /** The on-time list: highest rate first instead of the API's lowest first. */
+  /** The on-time list and the Routes table: the best end first instead of
+   *  the API's default, the routes that need attention. */
   order?: "best";
   limit?: number;
   thresholdSec?: number;
@@ -171,6 +175,7 @@ export const REPORT_ROWS_MAX = 500;
 
 export function reportQueryString(ctx: Scope, options: ReportOptions = {}): string {
   const parts = [scopeToQueryString(ctx)];
+  if (options.sort) parts.push(`sort=${options.sort}`);
   if (options.includeSparse) parts.push("include_sparse=1");
   if (options.includeRetired) parts.push("include_retired=1");
   if (options.includeZeroDelay) parts.push("include_zero_delay=1");
@@ -192,6 +197,7 @@ export function useReport(
       agencyId,
       reportType,
       ...scopeKey(ctx),
+      options.sort ?? null,
       !!options.includeSparse,
       !!options.includeRetired,
       !!options.includeZeroDelay,

@@ -534,13 +534,6 @@ describe("AnalysisTab evidence panels", () => {
     expect(screen.queryByText("standards-panel")).toBeNull();
   });
 
-  it("puts the headway and targets panels beside on-time, without rain", () => {
-    show("/agencies/1/analysis/rider", "on_time", []);
-    expect(screen.getByText("headway-panel")).toBeInTheDocument();
-    expect(screen.getByText("standards-panel")).toBeInTheDocument();
-    expect(screen.queryByText("weather-panel")).toBeNull();
-  });
-
   it("draws compare_ranking as morphing bars rather than a table", () => {
     show("/agencies/1/analysis/rider", "compare_ranking", [["3", 3.4, 2.7, 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7]]);
     expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(2);
@@ -548,27 +541,23 @@ describe("AnalysisTab evidence panels", () => {
   });
 });
 
-describe("AnalysisTab ranking coverage", () => {
+describe("AnalysisTab route list coverage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  const TOGGLE = { name: "Include routes observed fewer than 100 times" };
-
-  function rankingResponse(overrides: Record<string, unknown> = {}): ReportResponse {
+  function dowResponse(overrides: Record<string, unknown> = {}): ReportResponse {
     return {
-      ...reportResponse("ranking"),
+      ...reportResponse("dow_weekday"),
       rows: [
-        ["39061", "平日", 5.2, 3.1, 8.4, 120], // i18n-ignore: GTFS service name
-        ["39062", "平日", 4.0, 3.0, 6.0, 110], // i18n-ignore: GTFS service name
+        ["39061", null, "平日", 5.2, 120], // i18n-ignore: GTFS service name
+        ["39062", null, "平日", 4.0, 110], // i18n-ignore: GTFS service name
       ],
-      rows_total: 5,
-      reliable_min_samples: 100,
       ...overrides,
     } as ReportResponse;
   }
 
-  function setup(path: string, response: ReportResponse, reportTypes: readonly string[] = ["ranking", "on_time"]) {
+  function setup(path: string, response: ReportResponse, reportTypes: readonly string[] = ["dow_weekday"]) {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
       data: reportTypes.map((type) => reportMeta(type as ReportType)),
@@ -583,22 +572,8 @@ describe("AnalysisTab ranking coverage", () => {
     return { useReport, router };
   }
 
-  it("ranks only well-observed routes until asked to include the rest", async () => {
-    const { useReport, router } = setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
-    const toggle = screen.getByRole("checkbox", TOGGLE);
-    expect(toggle).not.toBeChecked();
-    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeSparse: false });
-    await userEvent.click(toggle);
-    expect(new URLSearchParams(router.state.location.search).get("sparse")).toBe("1");
-    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeSparse: true });
-    expect(screen.getByRole("checkbox", TOGGLE)).toBeChecked();
-  });
-
   it("says how many retired route codes a list left out, and keeps them on request", async () => {
-    const { useReport, router } = setup(
-      "/agencies/1/analysis/rider?report=on_time",
-      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_rows: 2 }),
-    );
+    const { useReport, router } = setup("/agencies/1/analysis/when?report=dow_weekday", dowResponse({ retired_rows: 2 }));
     const toggle = screen.getByRole("checkbox", { name: "Include 2 route codes the current timetable no longer runs" });
     expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeRetired: false });
     await userEvent.click(toggle);
@@ -607,12 +582,12 @@ describe("AnalysisTab ranking coverage", () => {
   });
 
   it("offers no retired-route toggle when a list left none out", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_rows: 0 }));
+    setup("/agencies/1/analysis/when?report=dow_weekday", dowResponse({ retired_rows: 0 }));
     expect(screen.queryByRole("checkbox", { name: /no longer runs/ })).not.toBeInTheDocument();
   });
 
   it("exports the retired route codes when the table shows them", () => {
-    setup("/agencies/1/analysis/rider?report=ranking&retired=1", rankingResponse({ retired_rows: 1 }));
+    setup("/agencies/1/analysis/when?report=dow_weekday&retired=1", dowResponse({ retired_rows: 1 }));
     // One code reads in the singular, and the count holds while they are kept.
     expect(screen.getByRole("checkbox", { name: "Include 1 route code the current timetable no longer runs" })).toBeChecked();
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_retired=1(&|$)/);
@@ -620,8 +595,8 @@ describe("AnalysisTab ranking coverage", () => {
 
   it("says how many zero-delay routes a list left out, and keeps them on request", async () => {
     const { useReport, router } = setup(
-      "/agencies/1/analysis/rider?report=on_time",
-      rankingResponse({ report_type: "on_time", reliable_min_samples: null, retired_rows: 0, zero_delay_rows: 2 }),
+      "/agencies/1/analysis/when?report=dow_weekday",
+      dowResponse({ retired_rows: 0, zero_delay_rows: 2 }),
     );
     const toggle = screen.getByRole("checkbox", { name: "Include 2 routes whose feeds always report zero delay" });
     expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeZeroDelay: false });
@@ -630,48 +605,17 @@ describe("AnalysisTab ranking coverage", () => {
     expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeZeroDelay: true, includeRetired: false });
   });
 
-  it("offers no zero-delay toggle when a list left none out", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ retired_rows: 1, zero_delay_rows: 0 }));
-    expect(screen.queryByRole("checkbox", { name: /zero delay/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /no longer runs/ })).toBeInTheDocument();
-  });
-
-  it("exports the zero-delay routes when the table shows them", () => {
-    setup("/agencies/1/analysis/rider?report=ranking&zero_delay=1", rankingResponse({ zero_delay_rows: 1 }));
-    // One route reads in the singular, and the count holds while they are kept.
-    expect(screen.getByRole("checkbox", { name: "Include 1 route whose feed always reports zero delay" })).toBeChecked();
-    const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
-    expect(href).toMatch(/[?&]include_zero_delay=1(&|$)/);
-    expect(href).not.toContain("include_retired");
-  });
-
-  it("keeps the toggle in reach when no route clears the floor", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows: [], rows_total: 0 }));
-    expect(screen.getByRole("checkbox", TOGGLE)).toBeInTheDocument();
-    expect(screen.getByText("No matching data")).toBeInTheDocument();
-  });
-
-  it("says how much of the ranking is shown, and shows the rest on request", async () => {
-    const { useReport } = setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
-    expect(screen.getByText("Showing 2 of 5")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
-    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ limit: 500 });
-    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
-  });
-
-  it("states no count when every ranked row is on screen", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows_total: 2 }));
-    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
-  });
-
   it("names its export Download CSV, as every other export is named", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    setup("/agencies/1/analysis/when?report=dow_weekday", dowResponse());
     expect(screen.getByRole("link", { name: "Download CSV" })).toBeInTheDocument();
   });
 
-  it("exports the rows the table shows", () => {
-    setup("/agencies/1/analysis/rider?report=ranking&sparse=1", rankingResponse());
-    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
+  it("offers no sort, order or observation floor: those belong to the Routes table", () => {
+    const { useReport } = setup("/agencies/1/analysis/when?report=dow_weekday&sparse=1&order=best", dowResponse());
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /observed fewer than/ })).not.toBeInTheDocument();
+    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ includeRetired: false, includeZeroDelay: false });
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "").not.toMatch(/include_sparse|order=/);
   });
 
   it("says when the compare list stops short of every compared route, with no longer list to offer", () => {
@@ -702,64 +646,6 @@ describe("AnalysisTab ranking coverage", () => {
     const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
     expect(href).toMatch(/[?&]limit=500(&|$)/);
     expect(href).not.toContain("include_sparse");
-  });
-
-  function onTimeResponse(overrides: Record<string, unknown> = {}): ReportResponse {
-    return {
-      ...reportResponse("on_time"),
-      rows: [
-        ["70-3", "平日", 11.3, 6.2, 400, false, 3.2], // i18n-ignore: GTFS service name
-        ["42", "平日", 12.3, 5.1, 380, false, 3.4], // i18n-ignore: GTFS service name
-      ],
-      rows_total: 175,
-      retired_rows: 0,
-      ...overrides,
-    } as ReportResponse;
-  }
-
-  it("opens the on-time list on its least punctual routes, and turns it around on request", async () => {
-    const { useReport, router } = setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
-    expect(screen.getByRole("radio", { name: "Lowest on-time rate first" })).toBeChecked();
-    expect(useReport.mock.calls.at(-1)?.[3]?.order).toBeUndefined();
-    await userEvent.click(screen.getByRole("radio", { name: "Highest on-time rate first" }));
-    expect(new URLSearchParams(router.state.location.search).get("order")).toBe("best");
-    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ order: "best" });
-    expect(screen.getByRole("radio", { name: "Highest on-time rate first" })).toBeChecked();
-    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]order=best(&|$)/);
-  });
-
-  it("says how much of the on-time list is shown, and shows the rest on request", async () => {
-    const { useReport } = setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
-    expect(screen.getByText("Showing 2 of 175")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
-    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ limit: 500 });
-    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
-  });
-
-  it("states what counts as on time in view, from the definition the rows were computed under", () => {
-    setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse());
-    const line = screen.getByText("On time = no more than 1 min late (early departures count as on time).");
-    expect(line.closest("details")).toBeNull();
-  });
-
-  it("states the early bound when the rows were computed with one", () => {
-    const definition = { ...DEFINITION, preset: "custom", early_tolerance_sec: 30, late_tolerance_sec: 120 };
-    setup("/agencies/1/analysis/rider?report=on_time", onTimeResponse({ definition }));
-    const line = screen.getByText("On time = no more than 2 min late and no more than 30 s early.");
-    expect(line.closest("details")).toBeNull();
-  });
-
-  it("offers no order choice on a list it does not apply to", () => {
-    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
-    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
-    expect(screen.queryByText(/^On time =/)).not.toBeInTheDocument();
-  });
-
-  it("asks a report without a ranking floor for nothing extra", () => {
-    const { useReport } = setup("/agencies/1/analysis/rider?report=on_time&sparse=1", reportResponse("on_time"));
-    expect(screen.queryByRole("checkbox", TOGGLE)).not.toBeInTheDocument();
-    expect(useReport.mock.calls.at(-1)?.[3]?.includeSparse).toBeFalsy();
-    expect(screen.queryByRole("link", { name: /CSV/ })?.getAttribute("href") ?? "").not.toContain("include_sparse");
   });
 });
 

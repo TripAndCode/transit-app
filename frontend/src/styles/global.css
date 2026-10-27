@@ -527,8 +527,7 @@ table {
    outside a table — hero values, stat tiles, HTML chart labels, counters — so a
    value that counts up or updates in place keeps its width instead of
    jittering. A table's numeric cells get tabular figures from
-   tableStyles' td({ align: "right" }) instead, except ReportTable's bar
-   cells, which carry .num like the card headline they mirror. */
+   tableStyles' td({ align: "right" }) instead, in the table's own face. */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;

@@ -28,10 +28,9 @@ import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
-import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber, formatDateRange } from "../utils/format";
-import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionMetaBlock";
+import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
@@ -46,21 +45,13 @@ import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock"
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
 import { destHref, pickReport, reportHref } from "../routes/destinations";
-import { LeftOutToggle, OnTimeOrderToggle, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
+import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
+import { CsvLink } from "../components/analysis/CsvLink";
 
-const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
-// The reports that list one row per route, which leave retired route codes
-// and zero-delay routes out unless asked (api/routers/reports.py's
-// _ROUTE_LIST_TYPES).
-const ROUTE_LIST_TYPES = new Set([
-  "ranking",
-  "ranking_best",
-  "on_time",
-  "worst_5min",
-  "compare_ranking",
-  "dow_weekday",
-  "dow_weekend",
-]);
+// The route lists these screens host, which leave retired route codes and
+// zero-delay routes out unless asked (api/routers/reports.py's
+// _ROUTE_LIST_TYPES). The Routes screen's own table is RouteTableScreen.
+const ROUTE_LIST_TYPES = new Set(["compare_ranking", "dow_weekday", "dow_weekend"]);
 
 /** Whether a report has rows to export: the trend is a chart, and a dwell
  *  and running-time split this feed or filter can't make has none. */
@@ -80,26 +71,14 @@ const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
 /** Which of the routes a route list leaves out by default it keeps. */
 type KeptRoutes = Required<Pick<ReportOptions, "includeRetired" | "includeZeroDelay">>;
 
-/** A route list's options. Every route list can keep the routes it leaves
- *  out by default; only the rankings take `include_sparse`, and only the
- *  on-time list an order, which the API refuses elsewhere. The rankings and
- *  the on-time list count every route they rank, so "show all" asks them for
- *  the API's maximum length. The compare report is drawn re-ranked by one
- *  period's delay, so it always asks for that length: the default length
+/** A route list's options: every route list can keep the routes it leaves
+ *  out by default. The compare report is drawn re-ranked by one period's
+ *  delay, so it always asks for the API's maximum length: the default length
  *  keeps only the widest gaps, which would drop a route that is slow in both
  *  periods. */
-function rankingOptions(
-  reportType: string | null | undefined,
-  includeSparse: boolean,
-  allRowsFor: string | null,
-  kept: KeptRoutes,
-  onTimeOrder: "worst" | "best",
-): ReportOptions | undefined {
+function rankingOptions(reportType: string | null | undefined, kept: KeptRoutes): ReportOptions | undefined {
   if (reportType == null || !ROUTE_LIST_TYPES.has(reportType)) return undefined;
   if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX, ...kept };
-  const limit = allRowsFor === reportType ? REPORT_ROWS_MAX : undefined;
-  if (RANKING_TYPES.has(reportType)) return { includeSparse, ...kept, limit };
-  if (reportType === "on_time") return { ...kept, limit, order: onTimeOrder === "best" ? "best" : undefined };
   return { ...kept };
 }
 
@@ -134,23 +113,10 @@ export function AnalysisTab({
       return next;
     });
   }
-  const includeSparse = searchParams.get("sparse") === "1";
   const kept: KeptRoutes = {
     includeRetired: searchParams.get("retired") === "1",
     includeZeroDelay: searchParams.get("zero_delay") === "1",
   };
-  const onTimeOrder = searchParams.get("order") === "best" ? "best" : "worst";
-  function setOnTimeOrder(order: "worst" | "best") {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (order === "best") next.set("order", "best");
-      else next.delete("order");
-      return next;
-    });
-  }
-  // "Show all" belongs to the ranking it was asked on; another report opens
-  // at the default length.
-  const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
   const list = useReports(id);
   // The certificate, like route_forecast, owns its section and its queries.
   const isCertificate = reportType === "delay_certificate";
@@ -159,7 +125,7 @@ export function AnalysisTab({
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
     ctx,
-    rankingOptions(reportType, includeSparse, allRowsFor, kept, onTimeOrder),
+    rankingOptions(reportType, kept),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
@@ -183,7 +149,7 @@ export function AnalysisTab({
           : undefined;
 
   function csvHref(type: string): string {
-    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor, kept, onTimeOrder))}&format=csv`);
+    return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);
   }
 
   // `route_forecast` is served by its own endpoint, so the reports list never
@@ -263,15 +229,6 @@ export function AnalysisTab({
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
             </div>
             <ReportMeta data={detail.data} />
-            {detail.data.report_type === "on_time" && (
-              <>
-                {detail.data.definition && <OnTimeDefinition definition={detail.data.definition} />}
-                <OnTimeOrderToggle value={onTimeOrder} onChange={setOnTimeOrder} />
-              </>
-            )}
-            {detail.data.reliable_min_samples != null && (
-              <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={(on) => setFlag("sparse", on)} />
-            )}
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
               <LeftOutToggle
                 reason="retired"
@@ -303,20 +260,7 @@ export function AnalysisTab({
                 )}
               </>
             ) : detail.data.rows.length > 0 ? (
-              <>
-                <ReportTable
-                  reportType={detail.data.report_type}
-                  rows={detail.data.rows}
-                  minSamples={detail.data.reliable_min_samples}
-                />
-                {detail.data.rows_total != null && detail.data.rows_total > detail.data.rows.length && (
-                  <RowsShown
-                    shown={detail.data.rows.length}
-                    total={detail.data.rows_total}
-                    onShowAll={allRowsFor === reportType ? undefined : () => setAllRowsFor(reportType)}
-                  />
-                )}
-              </>
+              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}
@@ -332,21 +276,12 @@ export function AnalysisTab({
               />
             )}
             {/* Evidence panels, rendered alongside (never instead of) the
-                report above: dwell vs run pairs with rain and long gaps;
-                on-time pairs with headway quality and the agency's
-                performance targets. The targets panel renders nothing
-                when no standards are configured; the rain panel says so when
-                no weather station is mapped. */}
+                report above: dwell vs run pairs with rain and long gaps. The
+                rain panel says so when no weather station is mapped. */}
             {detail.data.report_type === "dwell_run" && id != null && (
               <>
                 <WeatherDelayPanel aid={id} ctx={ctx} />
                 <HeadwayQualityPanel aid={id} ctx={ctx} />
-              </>
-            )}
-            {detail.data.report_type === "on_time" && id != null && (
-              <>
-                <HeadwayQualityPanel aid={id} ctx={ctx} />
-                <PerformanceStandardPanel aid={id} ctx={ctx} />
               </>
             )}
             {/* The API's raw rows help someone checking the pipeline, not
@@ -426,28 +361,6 @@ function CertificateSection({ aid, csvHref }: { aid: number; csvHref: string }) 
         )}
       </details>
     </div>
-  );
-}
-
-function CsvLink({ href }: { href: string }) {
-  const { t } = useTranslation();
-  return (
-    <a
-      href={href}
-      download
-      style={{
-        fontSize: 12,
-        padding: "4px 12px",
-        background: "transparent",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 4,
-        color: "var(--text-secondary)",
-        textDecoration: "none",
-      }}
-    >
-      <span aria-hidden="true">⬇ </span>
-      {t("reports.download_csv")}
-    </a>
   );
 }
 

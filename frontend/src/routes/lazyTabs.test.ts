@@ -6,6 +6,7 @@ import { DESTINATIONS } from "./destinations";
 import type { Destination } from "./destinations";
 
 vi.mock("../tabs/RoutesIndex", () => ({ RoutesIndex: () => null }));
+vi.mock("../tabs/TimeTab", () => ({ TimeTab: () => null }));
 vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null }));
 vi.mock("../tabs/SavedExportTab", () => ({ SavedExportTab: () => null }));
 vi.mock("../tabs/ReportsHomeTab", () => ({ ReportsHomeTab: () => null }));
@@ -48,10 +49,15 @@ describe("ROUTE_CHUNK_LOADERS", () => {
   });
 
   it("warms the report screen a thin destination hosts along with it", async () => {
-    const { RoutesIndex } = await import("../tabs/RoutesIndex");
+    const { TimeTab } = await import("../tabs/TimeTab");
     const { AnalysisTab } = await import("../tabs/AnalysisTab");
-    const loaded = await ROUTE_CHUNK_LOADERS.routes();
-    expect(loaded).toEqual([{ default: RoutesIndex }, { default: AnalysisTab }]);
+    const loaded = await ROUTE_CHUNK_LOADERS.time();
+    expect(loaded).toEqual([{ default: TimeTab }, { default: AnalysisTab }]);
+  });
+
+  it("warms the Routes table, which is the Routes screen's own chunk", async () => {
+    const { RoutesIndex } = await import("../tabs/RoutesIndex");
+    expect(await ROUTE_CHUNK_LOADERS.routes()).toEqual({ default: RoutesIndex });
   });
 
   it("warms the default Reports view along with the Reports host", async () => {

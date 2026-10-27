@@ -7,16 +7,9 @@ with a proactive "Insight Panel" suggesting what to look at next.
 
 ## How a user reaches it
 
-- Hosted by four of the rail's destinations. Each passes AnalysisTab the
+- Hosted by three of the rail's destinations. Each passes AnalysisTab the
   report types it hosts (the per-screen lists in
   `frontend/src/routes/destinations.ts`):
-  - Routes (`/agencies/:agencyId/routes`, `frontend/src/tabs/RoutesIndex.tsx`)
-    — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
-    `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`.
-    Each ranking row's route name links to that route's dossier (`RouteCell`
-    in `frontend/src/components/ReportTable.tsx`), and
-    `?sort=<report type>` picks which report opens when no `report` param is
-    set;
   - Time (`/agencies/:agencyId/time`, `frontend/src/tabs/TimeTab.tsx`) —
     `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
   - Why (`/agencies/:agencyId/why`, `frontend/src/tabs/WhyTab.tsx`) —
@@ -29,10 +22,16 @@ with a proactive "Insight Panel" suggesting what to look at next.
   Reports hosts it too, for the export-style types `council_summary` and
   `delay_certificate` (`/agencies/:agencyId/reports?doc=council` or
   `?doc=certificate`, see `docs/features/reports-tab.md`).
+- Routes (`/agencies/:agencyId/routes`, `frontend/src/tabs/RoutesIndex.tsx`)
+  is not an AnalysisTab screen: `frontend/src/tabs/RouteTableScreen.tsx`
+  lists every route in one table, the `route_table` report, sorted by the
+  figure the reader picks. See "The Routes table" below.
 - Redirects keep the query string: `/agencies/:agencyId/analysis/:reportType`
   and `/agencies/:agencyId/reports/:reportType` send a report-type segment to
-  the screen hosting it (with `report=<type>` on Routes, Time, Why or Compare,
-  and `doc=council` / `doc=certificate` on Reports). The named `analysis/`
+  the screen hosting it (with `report=<type>` on Time, Why or Compare, the
+  Routes table sorted as that list was ordered for `ranking`, `ranking_best`,
+  `on_time` and `worst_5min`, and `doc=council` / `doc=certificate` on
+  Reports). The named `analysis/`
   segments go to their screens: `when` to Time, `why` to Why, `rider` to
   `routes?sort=on_time`, `compare` to `compare?by=periods` (`by=agencies`
   when `mode=agencies`), `overview` and `predict` to Pulse, and `where` as
@@ -41,7 +40,7 @@ with a proactive "Insight Panel" suggesting what to look at next.
   `/agencies/:agencyId/forecast` goes to `time?report=route_forecast`
   (`frontend/src/routes/legacyRedirects.tsx`, through `reportHref` in
   `destinations.ts`).
-- Reach it from the Routes, Time, Why and Compare rail entries, the command
+- Reach it from the Time, Why and Compare rail entries, the command
   palette's report items (through `reportHref`, which opens the screen
   hosting the type), or the Reports period summary's "Detailed reports →"
   link (`time?report=trend`).
@@ -103,6 +102,51 @@ What the user sees/does:
   `frontend/src/hooks/useMediaQuery.ts`) the three columns stack vertically
   instead of side-by-side — this tab otherwise stays desktop-oriented by
   design (see the comment in `frontend/src/tabs/analysisTab.css`).
+
+## The Routes table
+
+`RouteTableScreen` asks `GET /api/{agency_id}/reports/route_table` for one row
+per route over the scope:
+
+- **Columns.** Average delay, on-time rate, the share and the count of
+  departures over five minutes late, and observations. The on-time cell
+  carries the 「誤差大」 badge when its 95% interval is wider than ±5
+  points.
+- **Sort.** `sort` picks the figure: `avg`, `on_time`, `late5_share` or
+  `late5_count`. The routes that need attention come first; `order=best`
+  turns the order around. The sorted column alone carries the bar and the
+  weight, its header carries `aria-sort`, and on a phone it heads each card.
+  The rail's Routes stops are the four sorts.
+- **Former list links.** A `report` (or a `sort`) naming one of the route
+  lists the table replaced opens it sorted the way that list was:
+  - `ranking` → `avg`;
+  - `ranking_best` → `avg` with `order=best`;
+  - `on_time` → `on_time`;
+  - `worst_5min` → `late5_count`.
+
+  `routeTableView` in `frontend/src/routes/destinations.ts` resolves this;
+  `report` wins over `sort`, and an explicit `order` wins over either.
+  Changing the sort, the order or a toggle writes `sort`/`order` and drops
+  `report`. `reportHref` sends those four report types (the command palette's
+  report items) to the table the same way.
+- **One population for every sort.** Routes observed fewer than
+  `RANKING_MIN_SAMPLES` times are left out unless `sparse=1`
+  (`include_sparse`), whatever the sort. Retired route codes and
+  zero-delay routes are left out unless `retired=1`/`zero_delay=1`.
+- **The counts.** `retired_rows`/`zero_delay_rows` are counted over every
+  route the table ranks, not the shown prefix, so they stay the same across
+  sorts and lengths. The line above the table says how many each reason
+  leaves out. `rows_total` is the count the table ranks under the current
+  toggles. The table shows 50 rows, and 「すべて表示」 asks for the API's
+  maximum.
+- **Context.** The heading names the window (「30日間（…）の集計」), so its
+  figures are not mistaken for the Pulse screen's shorter window. Under the
+  table sit the on-time definition and what 「5分超」 counts.
+  `HeadwayQualityPanel` and `PerformanceStandardPanel` follow the on-time
+  sort.
+- **Colour.** A delay bar's colour and length come from the figure the cell
+  prints, rounded to a tenth, so two rows printing the same figure share a
+  colour. The severe-delay dot other delay tables draw is left off.
 
 ## Scope
 
@@ -167,10 +211,11 @@ response honoured that field.
   Per-report sets are `_REPORT_HONOURS` in `api/routers/reports.py`, and the
   panel endpoints' sets sit beside those; overview, network and map declare
   theirs in their own routers.
-- **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
-  and `council_summary`. Elsewhere they are ignored and reported as `false`,
-  including `worst_5min`, whose over-5-min threshold stays its own
-  `late_tolerance_sec`. The scope summary reports `early` as `true`, since
+- **`late`/`early`.** They are the on-time tolerance, applied by `on_time`,
+  `route_table`'s on-time column and `council_summary`. Elsewhere they are
+  ignored and reported as `false`, including `worst_5min`, whose over-5-min
+  threshold stays its own `late_tolerance_sec`. `route_table`'s over-5-min
+  share and count keep that fixed threshold too. The scope summary reports `early` as `true`, since
   it bounds that endpoint's tolerance curve.
 - **Split figures.** `council_summary` also answers `delivered_scope_applied`
   (null on every other report): its planned/executed/service-delivered figures
@@ -266,7 +311,7 @@ the scope as one sentence above their content
 |---|---|---|
 | `useScopeSummary(agencyId, scope, enabled)` | `GET /api/{agency_id}/scope/summary` (`api/routers/scope_summary.py: scope_summary`) | `pipeline/reports/scope_summary.py: compute_scope_summary()` — four reads of `agg_route_daily_dist` (span, daily, per-weekday, per-route) plus one merged histogram for the tolerance curve; no ClickHouse. |
 | `useReports(agencyId)` | `GET /api/{agency_id}/reports` (`api/routers/reports.py: list_reports`) | Static metadata only — the fixed `_REPORT_TYPES` tuple, no DB read. |
-| `useReport(agencyId, reportType, ctx, options)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (`compute_hourly_heatmap` also under a `routes` filter, since `agg_hour_daily` pools every route) (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time rate over the scope's filter into one row beside the whole agency's service-delivered rate for the dates, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. Every per-route report is one row per route over all of its observations, never split by the observations' raw `service_type` (a feed's own `service_id`). In the tuple rows of `ranking`/`ranking_best`/`on_time`/`worst_5min`, the second element names the active service filter, null without one; `dow_weekday`/`dow_weekend` replace the `dow` and `service` filters with their own day type (the agency's 平日 dates, or every other date as 土日祝, from `api.range.resolve_service_dates`, so a public holiday on a weekday is a 土日祝 day), so theirs is always null; `compare_ranking` splits days the same way, so each of its two sides matches the corresponding dow report, and it and `hourly_heatmap` carry no service slot. `ranking`/`ranking_best` leave out routes observed fewer than `RANKING_MIN_SAMPLES` times unless `include_sparse=1` (the screen's `sparse=1` toggle) and return `rows_total` and `reliable_min_samples`, so the screen can say how many rows qualified and badge the thin ones. The route lists (`ranking`, `ranking_best`, `on_time`, `worst_5min`, `compare_ranking`, `dow_weekday`, `dow_weekend`) leave out retired route codes (`pipeline/route_catalog.py: retired_route_codes`) unless `include_retired=1` (the screen's `retired=1`), and routes whose every observation reads exactly 0 seconds of delay, a feed echoing the timetable rather than reporting delay (`zero_delay_route_codes`, judged over at least `ZERO_DELAY_DAYS` through the agency's last day in the window and at least `ZERO_DELAY_MIN_SAMPLES` observations), unless `include_zero_delay=1` (the screen's `zero_delay=1`). A code that is both counts as retired. Every combination lists the same other routes, and `retired_rows`/`zero_delay_rows` say how many of each rank among them (`pipeline/route_catalog.py: route_list`); kept ones come on top of `limit`. `on_time` rates every route and returns `rows_total` counted the same way, so the screen's 「すべて表示」 reaches every route; it lists the lowest on-time rate first unless `order=best` (the screen's `order=best`, a 400 on any other report), and each row's 7th element, `margin_pp`, is the rate's 95% Wilson half-width in points, rounded up to 0.1, which the 「誤差大」 badge and the CSV's `誤差(±ポイント)` column show. `compare_ranking` returns `rows_total` too, so the compare bars can say when the API's longest list still stops short of every compared route. `delay_certificate` returns `rows_total` as well, counted in the same scan, and its summary text and CSV footnotes say when `limit` left only the earliest trips listed. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
+| `useReport(agencyId, reportType, ctx, options)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (`compute_hourly_heatmap` also under a `routes` filter, since `agg_hour_daily` pools every route) (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `route_table` reads `pipeline/reports/route_table.py`'s `compute_route_table` the same way: the exact scalar columns of `agg_route_daily_dist` by default, its merged histogram for a requested on-time tolerance, and a live ClickHouse scan under a `time_band`. It takes `sort`/`order` (a 400 on any other report but `on_time`'s `order`) and `include_sparse`, and returns `rows_total` and `reliable_min_samples`. `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time rate over the scope's filter into one row beside the whole agency's service-delivered rate for the dates, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. Every per-route report is one row per route over all of its observations, never split by the observations' raw `service_type` (a feed's own `service_id`). In the tuple rows of `ranking`/`ranking_best`/`on_time`/`worst_5min`, the second element names the active service filter, null without one; `dow_weekday`/`dow_weekend` replace the `dow` and `service` filters with their own day type (the agency's 平日 dates, or every other date as 土日祝, from `api.range.resolve_service_dates`, so a public holiday on a weekday is a 土日祝 day), so theirs is always null; `compare_ranking` splits days the same way, so each of its two sides matches the corresponding dow report, and it and `hourly_heatmap` carry no service slot. `ranking`/`ranking_best` leave out routes observed fewer than `RANKING_MIN_SAMPLES` times unless `include_sparse=1` and return `rows_total` and `reliable_min_samples`, so the screen can say how many rows qualified and badge the thin ones. The route lists (`route_table`, `ranking`, `ranking_best`, `on_time`, `worst_5min`, `compare_ranking`, `dow_weekday`, `dow_weekend`) leave out retired route codes (`pipeline/route_catalog.py: retired_route_codes`) unless `include_retired=1` (the screen's `retired=1`), and routes whose every observation reads exactly 0 seconds of delay, a feed echoing the timetable rather than reporting delay (`zero_delay_route_codes`, judged over at least `ZERO_DELAY_DAYS` through the agency's last day in the window and at least `ZERO_DELAY_MIN_SAMPLES` observations), unless `include_zero_delay=1` (the screen's `zero_delay=1`). A code that is both counts as retired. Every combination lists the same other routes, and `retired_rows`/`zero_delay_rows` say how many of each rank among them (`pipeline/route_catalog.py: route_list`); `route_table` counts them over every route it ranks (`left_out_counts`). Kept ones come on top of `limit`. `on_time` rates every route and returns `rows_total` counted the same way, so a caller can reach every route; it lists the lowest on-time rate first unless `order=best` (a 400 on any report but this and `route_table`), and each row's 7th element, `margin_pp`, is the rate's 95% Wilson half-width in points, rounded up to 0.1, which the 「誤差大」 badge and the CSV's `誤差(±ポイント)` column show. `compare_ranking` returns `rows_total` too, so the compare bars can say when the API's longest list still stops short of every compared route. `delay_certificate` returns `rows_total` as well, counted in the same scan, and its summary text and CSV footnotes say when `limit` left only the earliest trips listed. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
 | `useSuggestion(agencyId, exclude)` (drives `InsightPanel`) | `GET /api/{agency_id}/reports/suggest` (`api/routers/reports.py: get_suggestion`) | `pipeline/reports/suggest.py: compute_suggestion()` — a rule-based pick (anomaly over a 1-day window, or trend-shift/on-time over a 7-day window); polled every 5 minutes. |
 | `useForecastOverview(agencyId)` / `useForecastHeatmap(agencyId, route)` (both drive `RouteForecastSection`) | `GET /api/{agency_id}/forecast/overview` / `GET /api/{agency_id}/forecast/heatmap?route=...` (`api/routers/reports.py`) | Both re-pool `agg_route_hour_dow` on read (a seasonal-naive baseline, explicitly **not** a prediction — both responses carry a `disclaimer` string). With the `ml_forecast` flag on (off by default), fresh `agg_route_forecast_ml` rows replace the matching cells, marked `source: "ml"`, and the disclaimer then says some cells are a forecast model's estimate. An ML value is the model's point forecast, not an average, so `forecast/overview`'s `worst` carries its band's `source` too, and the section words an ML-sourced worst window as an expected delay and names the route figure in its detail "expected" rather than an average. `forecast/overview`'s route list additionally joins the last 7 analyzed days from `agg_route_daily` for each route's sparkline (best-effort — a failure there degrades to no sparklines rather than a 500). Both responses name their dates: `forecast_days` lists the service date each ML weekday row forecasts, and `history_from`/`history_to` bound the analyzed days the past averages pool. `agg_route_hour_dow` keeps no date, so the overview reads them from `agg_hour_daily`, which keeps the same rows (those with a scheduled time), and the heatmap from its route's `agg_route_daily` days, an outer bound. The overview's `recent_from`/`recent_to` are the sparklines' window over `agg_route_daily`, read by the sparkline query itself, so they are null whenever the sparklines are. Like the sparklines, a failed span read degrades to null dates rather than a 500, and the heatmap skips its route span for a route with no pooled rows. The section states those dates above the grid, dates each forecast row, and sets the route list apart under its own past-measurements heading. Its grids, legends and route bars use `calmDelayColor`, which is anchored on minutes, so a delay keeps its colour whatever else the view holds. |
 
@@ -277,6 +322,7 @@ the scope as one sentence above their content
 | File | Role |
 |---|---|
 | `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DwellRunBlock` composition |
+| `frontend/src/tabs/RouteTableScreen.tsx` | The Routes screen's one sortable table (`route_table`) |
 | `frontend/src/components/ReportTable.tsx` | Generic report-row table renderer |
 | `frontend/src/components/charts/DailyChart.tsx` | Trend report's daily line chart |
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
@@ -287,7 +333,7 @@ the scope as one sentence above their content
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |
-| `frontend/src/routes/destinations.ts` | The per-screen report-type lists and `reportHref`, the report-type → screen map every report link goes through |
+| `frontend/src/routes/destinations.ts` | The per-screen report-type lists, `reportHref` (the report-type → screen map every report link goes through), and the Routes table's sorts and `routeTableView` |
 | `frontend/src/routes/legacyRedirects.tsx` | `analysis/<segment>`, `reports/:reportType` and `forecast` redirects to the screen hosting the report |
 | `frontend/src/api/hooks.ts` | `useReports`, `useReport`, `useSuggestion`, `useForecastOverview`, `useForecastHeatmap` |
 
@@ -297,6 +343,7 @@ the scope as one sentence above their content
 |---|---|
 | `api/routers/reports.py` | `/reports` (list), `/reports/{report_type}` (compute + CSV), `/reports/suggest`, `/forecast/heatmap`, `/forecast/overview` |
 | `pipeline/reports/rankings.py` | The seven report-tab `compute_*` functions |
+| `pipeline/reports/route_table.py` | `compute_route_table`/`sort_route_table` — the Routes table, figure for figure as the per-figure reports compute it |
 | `pipeline/reports/dwell_run.py` | `compute_dwell_run_decomposition` — the `dwell_run` report's read side |
 | `pipeline/reports/council.py` | `compute_council_summary`/`compute_delay_certificate` — the `council_summary`/`delay_certificate` reports' read side |
 | `pipeline/reports/definition.py` | `DefinitionMeta`/`resolve_definition_meta`/`format_definition_csv_line`/`format_definition_footnotes` — the shared on-time/late definition metadata every report/comparison view surfaces |
@@ -341,11 +388,12 @@ the scope as one sentence above their content
 2. Click "Time" in the rail -> URL `/agencies/:agencyId/time`; expect its
    first report (`trend`) to be selected.
 3. Click each report-type button in the left column, and repeat on the
-   Routes, Why and Compare rail entries - expect the URL's `report` param to
+   Why and Compare rail entries - expect the URL's `report` param to
    update and the body to show either a table (with a working CSV download
    link) or, for `trend`, the daily chart + hourly heatmap + day x hour surface.
-   Open `/agencies/:agencyId/routes?sort=on_time` - expect `on_time` to be
-   selected.
+   Open `/agencies/:agencyId/routes?report=on_time` - expect the Routes table
+   sorted by on-time rate, lowest first; pick another sort and expect `sort`
+   to replace `report` in the URL.
 4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select
    exactly one route in the scope sentence - expect the view to switch to the
    per-route detail (band-collapsed grid, worst-window sentence).
