@@ -312,8 +312,8 @@ async def test_suspend_kills_sessions(admin_client, aconn):
     assert r.status_code == 200
     n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id=$1", uid_target)
     assert n == 0
-    # subsequent request from target gets 401
-    r2 = await admin_client.get("/api/me", cookies={"sid": sid_target})
+    # subsequent request from target no longer authenticates
+    r2 = await admin_client.get("/api/me/sessions", cookies={"sid": sid_target})
     assert r2.status_code == 401
 
 
@@ -386,7 +386,7 @@ async def test_bulk_patch_suspend_kills_sessions_for_every_target(admin_client, 
     n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id = ANY($1::int[])", [uid_a, uid_b])
     assert n == 0
     for sid in (sid_a, sid_b):
-        r2 = await admin_client.get("/api/me", cookies={"sid": sid})
+        r2 = await admin_client.get("/api/me/sessions", cookies={"sid": sid})
         assert r2.status_code == 401
 
 
