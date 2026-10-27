@@ -72,7 +72,14 @@ from pipeline.reports.forecast import (
 )
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
-from pipeline.route_catalog import RETIRED, ZERO_DELAY, left_out_route_codes, listed_count, route_list
+from pipeline.route_catalog import (
+    RETIRED,
+    ZERO_DELAY,
+    left_out_route_codes,
+    listed_count,
+    route_list,
+    rows_to_fetch,
+)
 from pipeline.stats import annotate_on_time_pct_confidence, on_time_pct_margin_pp
 from pipeline.weather import attribution as weather_attribution
 
@@ -1070,9 +1077,7 @@ async def get_report(
     if report_type in _ROUTE_LIST_TYPES:
         left_out = await left_out_route_codes(conn, agency_id, ctx)
     kept = {reason for reason, keep in ((RETIRED, include_retired), (ZERO_DELAY, include_zero_delay)) if keep}
-    # A limited list asks for enough extra rows that dropping every left-out
-    # code still leaves `n` listed routes when there are that many.
-    n_fetch = n + sum(len(codes) for codes in left_out.values())
+    n_fetch = rows_to_fetch(n, left_out)
     left_out_rows = dict.fromkeys(left_out, 0)
 
     def listed(route_rows: list) -> list:

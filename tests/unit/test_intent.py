@@ -221,7 +221,11 @@ async def test_explicit_all_services_survives_canonicalization_and_dispatches_th
         seen.append(ctx.service)
         return []
 
+    async def nothing_left_out(*_args):
+        return {}
+
     monkeypatch.setattr(tools, "compute_ranking", fake_ranking)
+    monkeypatch.setattr(tools, "left_out_unless_named", nothing_left_out)
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 30), service="平日")
     raw = {"metric": "avg_delay", "service_type": "all"}
 

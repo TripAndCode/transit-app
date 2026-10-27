@@ -790,3 +790,64 @@ async def test_dispatch_missing_route_arg_en_locale(aconn, aagency_id):
     result = await dispatch("segment_hotspots", {}, ctx, aconn, aagency_id, locale="en")
     assert result.kind == "empty"
     assert result.summary == "The route argument is required."
+
+
+async def _seed_left_out_routes(conn, agency_id):
+    """C1 and C2 in the timetable and reporting delays; OLD, gone from the
+    timetable, last seen a week before the data ends; ECHO reporting every
+    departure exactly on time.
+
+    Each left-out route would lead some ranking: ECHO every best-first one,
+    and OLD, the latest and with the most departures over five minutes late,
+    every worst-first one.
+    """
+    from tests.fixtures.observed_route import seed_observed_route
+
+    for code in ("C1", "C2", "ECHO"):
+        await conn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, $2)", agency_id, code)
+    await seed_observed_route(conn, agency_id, "C1", "2026-10-10", "2026-10-23", delay=400)
+    await seed_observed_route(conn, agency_id, "C2", "2026-09-24", "2026-10-15", delay=30)
+    await seed_observed_route(conn, agency_id, "C2", "2026-10-16", "2026-10-23", delay=90)
+    await seed_observed_route(conn, agency_id, "OLD", "2026-09-24", "2026-10-16", delay=900)
+    await seed_observed_route(conn, agency_id, "ECHO", "2026-09-24", "2026-10-23", delay=0)
+
+
+_LEFT_OUT_CTX = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "args", "first"),
+    [
+        ("top_n", {"metric": "avg_delay", "best_first": True, "n": 1}, "C2"),
+        ("top_n", {"metric": "avg_delay", "n": 1}, "C1"),
+        ("top_n", {"metric": "on_time_rate", "n": 1}, "C2"),
+        ("top_n", {"metric": "worst_5min", "n": 1}, "C1"),
+        ("on_time_rate", {"n": 1}, "C2"),
+    ],
+)
+async def test_rankings_leave_out_retired_and_zero_delay_routes(aconn, aagency_id, tool, args, first):
+    """The best-ranked route is the most punctual route that reports delays,
+    not the one whose feed reads every departure on time, and the worst is
+    not a renumbered route's old code."""
+    await _seed_left_out_routes(aconn, aagency_id)
+    result = await dispatch(tool, args, _LEFT_OUT_CTX, aconn, aagency_id, locale="en")
+    assert [r[0] for r in result.rows] == [first]
+    assert "top 1 route" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_a_ranking_lists_a_left_out_route_the_routes_filter_names(aconn, aagency_id):
+    await _seed_left_out_routes(aconn, aagency_id)
+    named = RangeCtx(from_date=_LEFT_OUT_CTX.from_date, to_date=_LEFT_OUT_CTX.to_date, routes=("ECHO", "C1"))
+    result = await dispatch("top_n", {"metric": "avg_delay", "best_first": True}, named, aconn, aagency_id)
+    assert [r[0] for r in result.rows] == ["ECHO", "C1"]
+
+
+@pytest.mark.asyncio
+async def test_the_weekday_weekend_comparison_answers_a_named_left_out_route(aconn, aagency_id):
+    await _seed_left_out_routes(aconn, aagency_id)
+    ranked = await dispatch("compare_segments", {"dimension": "dow"}, _LEFT_OUT_CTX, aconn, aagency_id)
+    assert {r[0] for r in ranked.rows} == {"C1", "C2"}
+    named = await dispatch("compare_segments", {"dimension": "dow", "route": "ECHO"}, _LEFT_OUT_CTX, aconn, aagency_id)
+    assert [r[0] for r in named.rows] == ["ECHO"]

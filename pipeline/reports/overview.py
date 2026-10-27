@@ -53,7 +53,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from api.range import (
     RangeCtx,
@@ -68,6 +68,7 @@ from pipeline.cache import async_lru_cache
 from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
 from pipeline.reports.rankings import _round1
+from pipeline.route_catalog import left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
 
@@ -98,6 +99,16 @@ _CALENDAR_LOOKBACK_DAYS = max(_GRAIN_LOOKBACK_DAYS, 7 * _MOVER_HISTORY_WEEKS - 1
 def _calendar_from(ctx: RangeCtx) -> date:
     """The first day of the span the overview resolves its day types over."""
     return ctx.from_date - timedelta(days=_CALENDAR_LOOKBACK_DAYS)
+
+
+def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> list:
+    """The ranked ``rows`` (route code first) a route list may show, in order:
+    every row :func:`pipeline.route_catalog.route_list` keeps, however long.
+
+    The overview's lists offer no toggle to keep a left-out code, so they leave
+    each one out of what they list and of every count and share beside it.
+    """
+    return route_list(rows, len(rows), left_out, ())[0]
 
 
 # How many pooled connections one overview request may hold at once on its
@@ -664,8 +675,17 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
     return count
 
 
-async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
-    """Top-20 routes by total positive delay contribution + rest share.
+async def _concentration(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    grain: _Grain | None = None,
+    *,
+    left_out: Mapping[str, frozenset[str]],
+) -> dict:
+    """Top-20 routes by total positive delay contribution + rest share, both
+    over the routes :func:`_listable` keeps.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``'s
     ``sum_late_sec`` — the exact per-row ``SUM(GREATEST(dep_delay, 0))`` — and
@@ -688,7 +708,7 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
-        rows = await conn.fetch(
+        fetched = await conn.fetch(
             "SELECT route_code,\n"
             # sum_late_sec is nullable (not backfilled — see migration 0029):
             # a row analyze() hasn't rewritten since that migration contributes
@@ -702,6 +722,7 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
             agency_id,
             *params,
         )
+        rows = [(r["route_code"], float(r["total_late_min"] or 0.0)) for r in fetched]
     else:
         # Grouping by route_code means every emitted group has >= 1 sample (no
         # empty-input case), and the summed lateness is never NULL for a
@@ -710,27 +731,24 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         # the ClickHouse `ORDER BY total_late_min DESC` this replaces left tied
         # rows in an arbitrary, run-to-run-unstable order.
         by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=6)
-        rows = [
-            {"route_code": code, "total_late_min": late / 60.0}
-            for code, (_n, late) in sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))
-        ]
+        rows = [(code, late / 60.0) for code, (_n, late) in sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))]
+    rows = _listable(rows, left_out)
     if not rows:
         return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
-    grand_total = sum(float(r["total_late_min"] or 0.0) for r in rows)
+    grand_total = sum(late for _code, late in rows)
     if grand_total == 0:
         return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
     top_n = rows[:20]
-    codes = [r["route_code"] for r in top_n]
-    names = await _route_short_names(agency_id, codes, conn)
-    top_n_sum = sum(float(r["total_late_min"] or 0.0) for r in top_n)
+    names = await _route_short_names(agency_id, [code for code, _late in top_n], conn)
+    top_n_sum = sum(late for _code, late in top_n)
     return {
         "top_routes": [
             {
-                "route_code": r["route_code"],
-                "route_short_name": names.get(r["route_code"]),
-                "share_pct": round((float(r["total_late_min"] or 0.0) / grand_total) * 100.0, 1),
+                "route_code": code,
+                "route_short_name": names.get(code),
+                "share_pct": round((late / grand_total) * 100.0, 1),
             }
-            for r in top_n
+            for code, late in top_n
         ],
         "rest_share_pct": round(((grand_total - top_n_sum) / grand_total) * 100.0, 1),
         "rest_route_count": max(len(rows) - len(top_n), 0),
@@ -769,12 +787,19 @@ def _route_band_counts(avgs: list[float]) -> dict[str, dict[str, float | int]]:
 
 
 async def _top_delayed_routes(
-    agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
+    agency_id: int,
+    cur_ctx: RangeCtx,
+    conn,
+    limit: int = 5,
+    ch=None,
+    grain: _Grain | None = None,
+    *,
+    left_out: Mapping[str, frozenset[str]],
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
     now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN`` and one per
-    ``ROUTE_BAND_MIN`` band, each over every route rather than the ``limit``
-    listed: the list is truncated, the counts are not.
+    ``ROUTE_BAND_MIN`` band, each over every route :func:`_listable` keeps
+    rather than the ``limit`` listed: the list is truncated, the counts are not.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -794,7 +819,7 @@ async def _top_delayed_routes(
     if cur_ctx.time_band == "all":
         where, params, _ = _agg_filter(cur_ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
-        rows = await conn.fetch(
+        fetched = await conn.fetch(
             "SELECT route_code,\n"
             # sum_delay_sec is nullable (unlike samples); FILTER both sides to
             # the same row population — see _route_weekly_history's identical
@@ -813,16 +838,18 @@ async def _top_delayed_routes(
             agency_id,
             *params,
         )
+        rows = [(r["route_code"], r["avg_min"]) for r in fetched]
     else:
         # Grouping by route_code -> every group has >= 1 sample, no
         # empty-input case; the average is never NULL for a non-empty group.
         # Ties broken by route_code, as in _concentration().
         by_route = _grain_sum_by(_grain_window(_require_grain(grain), cur_ctx), key_index=1)
         rows = [
-            {"route_code": code, "avg_min": (total / n) / 60.0}
+            (code, (total / n) / 60.0)
             for code, (n, total) in sorted(by_route.items(), key=lambda kv: (-(kv[1][1] / kv[1][0]), kv[0]))
         ]
 
+    rows = _listable(rows, left_out)
     if not rows:
         return {
             "routes": [],
@@ -831,19 +858,18 @@ async def _top_delayed_routes(
             "band_counts": _route_band_counts([]),
         }
 
-    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
-    band_counts = _route_band_counts([r["avg_min"] for r in rows if r["avg_min"] is not None])
+    delayed_count = sum(1 for _code, avg in rows if avg is not None and avg >= DELAYED_ROUTE_MIN)
+    band_counts = _route_band_counts([avg for _code, avg in rows if avg is not None])
     top_n = rows[:limit]
-    codes = [r["route_code"] for r in top_n]
-    names = await _route_short_names(agency_id, codes, conn)
+    names = await _route_short_names(agency_id, [code for code, _avg in top_n], conn)
     return {
         "routes": [
             {
-                "route_code": r["route_code"],
-                "route_short_name": names.get(r["route_code"]),
-                "avg_min": float(_round2(r["avg_min"])),
+                "route_code": code,
+                "route_short_name": names.get(code),
+                "avg_min": float(_round2(avg)),
             }
-            for r in top_n
+            for code, avg in top_n
         ],
         "delayed_count": delayed_count,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
@@ -978,9 +1004,17 @@ def _service_split_daily(day_types: DayTypes, totals: list[tuple[date, int, int]
 
 
 async def _movers(
-    agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+    agency_id: int,
+    cur_ctx: RangeCtx,
+    base_ctx: RangeCtx,
+    conn,
+    ch=None,
+    grain: _Grain | None = None,
+    *,
+    left_out: Mapping[str, frozenset[str]],
 ) -> dict:
-    """Top-10 worsened + top-10 improved routes by signed delta_min.
+    """Top-10 worsened + top-10 improved routes by signed delta_min, among
+    the routes :func:`_listable` keeps.
 
     Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
     ``compute_overview_summary`` as same-width current/baseline windows,
@@ -1027,6 +1061,7 @@ async def _movers(
     # so the same request against the same data could return different movers
     # after an app restart.
     deltas.sort(key=lambda x: (x[3], x[0]))
+    deltas = _listable(deltas, left_out)
     # Partition by sign so "worse" only contains routes with positive
     # delta_min and "better" only routes with negative delta_min. With
     # a top-10 limit per list, sign-partitioning is the right way to
@@ -1260,12 +1295,17 @@ async def compute_overview_summary(
                     )
                     peaks_unavailable = True
 
+    # The route lists leave out one set of codes, judged over the period:
+    # the 7-day windows two of them rank over are too short to tell a retired
+    # code from a quiet one.
     async with perf.timed_block("overview.latest_date"):
         if pool is None:
             latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
+            left_out = await left_out_unless_named(conn, agency_id, ctx)
         else:
             async with pool.acquire() as c:
                 latest = await _latest_data_date(agency_id, ctx, c, ch=ch, grain=grain)
+                left_out = await left_out_unless_named(c, agency_id, ctx)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
@@ -1319,11 +1359,11 @@ async def compute_overview_summary(
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
         async with perf.timed_block("overview.movers"):
-            movers = await _movers(agency_id, cur_ctx, base_ctx, conn, ch=ch, grain=grain)
+            movers = await _movers(agency_id, cur_ctx, base_ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.concentration"):
-            concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain)
+            concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.top_delayed"):
-            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain)
+            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.peaks"):
             peak, peak_weekday, peak_weekend = (
                 (None, None, None)
@@ -1357,10 +1397,11 @@ async def compute_overview_summary(
         # the grain can't cover its span).
         fanout = asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)
 
-        async def _own_conn(fn, *args):
-            """Under the fan-out bound, acquire a connection and call ``fn(*args, conn, ch=ch, grain=grain)``."""
+        async def _own_conn(fn, *args, **kwargs):
+            """Under the fan-out bound, acquire a connection and call
+            ``fn(*args, conn, ch=ch, grain=grain, **kwargs)``."""
             async with fanout, pool.acquire() as c:
-                return await fn(*args, c, ch=ch, grain=grain)
+                return await fn(*args, c, ch=ch, grain=grain, **kwargs)
 
         async def _peak_dow(group: str) -> dict | None:
             """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
@@ -1389,9 +1430,9 @@ async def compute_overview_summary(
             _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _own_conn(_headline_stats, agency_id, base_ctx),
-            _own_conn(_movers, agency_id, cur_ctx, base_ctx),
-            _own_conn(_concentration, agency_id, ctx),
-            _own_conn(_top_delayed_routes, agency_id, cur_ctx),
+            _own_conn(_movers, agency_id, cur_ctx, base_ctx, left_out=left_out),
+            _own_conn(_concentration, agency_id, ctx, left_out=left_out),
+            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )

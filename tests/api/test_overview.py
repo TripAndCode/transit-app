@@ -1767,6 +1767,75 @@ async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(cli
     assert not any(c.startswith("R_NULL") for c in codes)
 
 
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_leaves_out_retired_and_zero_delay_routes(client, aconn, aagency_id):
+    """The breakdown pools every analysed day, so it judges the codes a route
+    list leaves out over the agency's whole analysed span: a renumbered route's
+    old code and a route whose feed reports no delay are not listed, and the
+    twenty it lists are still twenty."""
+    from tests.fixtures.observed_route import seed_observed_route
+
+    current = [f"C{i:02d}" for i in range(20)]
+    for code in [*current, "ECHO"]:
+        await aconn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, $2)", aagency_id, code)
+    await seed_observed_route(aconn, aagency_id, "C00", "2026-06-01", "2026-10-23", delay=300)
+    await seed_observed_route(aconn, aagency_id, "OLD", "2026-06-01", "2026-06-30", delay=900)
+    await seed_observed_route(aconn, aagency_id, "ECHO", "2026-10-01", "2026-10-23", delay=0)
+
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "OLD", "平日", 1, 8, 9.0, 50)
+    for i, code in enumerate(current):
+        await _seed_agg_route_hour_dow(aconn, aagency_id, code, "平日", 1, 8, 8.0 - i * 0.1, 50)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "ECHO", "平日", 1, 8, 0.0, 50)
+
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8})
+    assert r.status_code == 200
+    assert [x["route_code"] for x in r.json()["routes"]] == current
+
+
+async def _seed_left_out_routes(aconn, agency_id):
+    """C1 and C2 in the timetable and reporting delays every day; OLD, gone
+    from the timetable, last seen weeks before the data ends; ECHO reporting
+    every departure exactly on time."""
+    from tests.fixtures.observed_route import seed_observed_route
+
+    for code in ("C1", "C2", "ECHO"):
+        await aconn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, $2)", agency_id, code)
+    await seed_observed_route(aconn, agency_id, "C1", "2026-09-24", "2026-10-23", delay=300)
+    await seed_observed_route(aconn, agency_id, "C2", "2026-09-24", "2026-10-23", delay=100)
+    await seed_observed_route(aconn, agency_id, "OLD", "2026-09-24", "2026-09-30", delay=900)
+    await seed_observed_route(aconn, agency_id, "ECHO", "2026-09-24", "2026-10-23", delay=0)
+
+
+@pytest.mark.asyncio
+async def test_overview_route_lists_leave_out_retired_and_zero_delay_routes(aconn, aagency_id):
+    """Neither the routes to check nor the delay concentration lists a retired
+    code or a route whose feed reports no delay, and the concentration's
+    shares are of the routes it can list."""
+    from pipeline.reports.overview import compute_overview_summary
+
+    await _seed_left_out_routes(aconn, aagency_id)
+    out = await compute_overview_summary(aagency_id, RangeCtx(date(2026, 9, 24), date(2026, 10, 23)), aconn)
+
+    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["C1", "C2"]
+    assert [(r["route_code"], r["share_pct"]) for r in out["concentration"]["top_routes"]] == [
+        ("C1", 75.0),
+        ("C2", 25.0),
+    ]
+    assert out["concentration"]["rest_route_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_overview_lists_a_left_out_route_the_routes_filter_names(aconn, aagency_id, ch_async_client):
+    from pipeline.reports.overview import compute_overview_summary
+
+    await _seed_left_out_routes(aconn, aagency_id)
+    ctx = RangeCtx(date(2026, 9, 24), date(2026, 10, 23), routes=("C1", "OLD", "ECHO"))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
+
+    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["C1", "ECHO"]
+    assert [r["route_code"] for r in out["concentration"]["top_routes"]] == ["C1", "OLD", "ECHO"]
+
+
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper derives from a single `_fetch_grain` round

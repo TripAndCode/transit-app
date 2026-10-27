@@ -1,11 +1,14 @@
 """How a route list leaves codes out by reason and keeps them on request."""
 
 import itertools
+from datetime import date
 
 import pytest
 
+from api.range import RangeCtx
+from pipeline import route_catalog
 from pipeline.histogram import bucketize
-from pipeline.route_catalog import RETIRED, ZERO_DELAY, listed_count, route_list
+from pipeline.route_catalog import RETIRED, ZERO_DELAY, listed_count, route_list, rows_to_fetch
 
 # Ranked order as a report returns it; only the first element, the route code, matters.
 ROWS = [("C1", 1), ("R1", 2), ("Z1", 3), ("C2", 4), ("Z2", 5), ("C3", 6)]
@@ -76,3 +79,30 @@ def test_zero_opens_its_histogram_bucket():
     """zero_delay_route_codes reads a route as all zeros from its bucket and its
     sum, which holds only while no early departure shares 0's bucket."""
     assert bucketize(-1) != bucketize(0)
+
+
+@pytest.mark.parametrize("n", range(1, len(ROWS) + 1))
+def test_a_fetch_of_rows_to_fetch_lists_n_routes_whatever_it_leaves_out(n):
+    """A list cut to ``rows_to_fetch`` ranked rows still lists the ``n`` routes
+    the whole ranking would, however many left-out codes rank among them."""
+    fetched = ROWS[: rows_to_fetch(n, LEFT_OUT)]
+    assert route_list(fetched, n, LEFT_OUT, frozenset())[0] == route_list(ROWS, n, LEFT_OUT, frozenset())[0]
+
+
+def test_nothing_left_out_fetches_n_rows():
+    assert rows_to_fetch(5, {}) == 5
+
+
+async def test_a_route_the_scope_names_is_never_left_out(monkeypatch):
+    """A list with no toggle to bring a code back still answers about a route
+    the routes filter asks for by name."""
+
+    async def left_out(conn, agency_id, ctx):
+        return {RETIRED: frozenset({"OLD", "GONE"}), ZERO_DELAY: frozenset({"ECHO", "QUIET"})}
+
+    monkeypatch.setattr(route_catalog, "left_out_route_codes", left_out)
+    ctx = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23), routes=("OLD", "ECHO", "C1"))
+    assert await route_catalog.left_out_unless_named(None, 7, ctx) == {
+        RETIRED: frozenset({"GONE"}),
+        ZERO_DELAY: frozenset({"QUIET"}),
+    }

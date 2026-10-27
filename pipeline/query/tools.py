@@ -60,6 +60,7 @@ from pipeline.reports import (
     compute_worst_5min,
 )
 from pipeline.reports.rankings import _weighted_avg_min
+from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -425,6 +426,14 @@ _ROUTE_PROP = {
     ),
 }
 
+# What the route rankings leave out (pipeline.route_catalog.left_out_unless_named),
+# so the model reads a route missing from one as left out, not as unranked.
+_LEFT_OUT_NOTE = (
+    "Route codes the current timetable no longer runs, and routes whose feed reports every "
+    "departure exactly on time, are left out unless the UI routes filter names them; route_stats "
+    "still answers about such a route by name."
+)
+
 
 TOOLS: list[dict] = [
     {
@@ -457,7 +466,7 @@ TOOLS: list[dict] = [
                 "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
                 "% first, always at the fixed 60-second on-time threshold), worst_5min (most "
                 "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
-                "routes with 20 or fewer samples. For an on-time ranking at another "
+                "routes with 20 or fewer samples. " + _LEFT_OUT_NOTE + " For an on-time ranking at another "
                 "threshold use on_time_rate (best_first=false lists the lowest first). Use for "
                 "'worst N', 'best N', 'most 5-minute delays'."
             ),
@@ -508,6 +517,7 @@ TOOLS: list[dict] = [
                 "type, filing each date under the timetable the agency's calendar ran that day: "
                 "平日, 土曜 and 日祝, or 平日 and 土日祝 for an agency with one timetable for "
                 "Saturday and Sunday alike (public holidays fall under 日祝 or 土日祝). "
+                "The 50-route ranking leaves out the same retired and always-on-time routes top_n does. "
                 "Use for '平日と土日祝の比較'."
             ),
             "parameters": {
@@ -557,7 +567,7 @@ TOOLS: list[dict] = [
             "description": (
                 "On-time percentage per route over the request window and UI "
                 "filters, highest first unless best_first=false (n rows, default 20); routes "
-                "with 20 or fewer samples are left out. A departure counts as on time when it "
+                "with 20 or fewer samples are left out. " + _LEFT_OUT_NOTE + " A departure counts as on time when it "
                 "is at most threshold_min minutes late (default 1 = 60 seconds); early departures "
                 "always count as on time. Set threshold_min=5 for '5分以内定時率'."
             ),
@@ -1092,9 +1102,11 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     if raw_service and raw_service in _SERVICE_TYPE_MAP:
         ctx = await resolve_service_dates(replace(ctx, service=_SERVICE_TYPE_MAP[raw_service]), conn, agency_id)
 
+    left_out = await left_out_unless_named(conn, agency_id, ctx)
+    n_fetch = rows_to_fetch(n, left_out)
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
-        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order=sort_order, limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order=sort_order, limit=n_fetch)
         cols = ["route_code", "avg_min", "p50_min", "p90_min", "samples"]
         label = _summary(
             "label_ranking_ontime" if best_first else "label_ranking_delay",
@@ -1103,19 +1115,20 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     elif metric == "on_time_rate":
         # sort_order makes best_first=False yield the worst routes (ascending).
         sort_order = "desc" if best_first else "asc"
-        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
+        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n_fetch, sort_order=sort_order)
         # Display-only annotation (pipeline/stats.py) — does not change
         # compute_on_time's own contract.
         rows = annotate_on_time_pct_confidence(rows)
         cols = ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch)
         cols = ["route_code", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
     else:
         return ToolResult(kind="empty", summary=_summary("unknown_metric", lang=locale, metric=metric))
 
+    rows, _ = route_list(rows, n, left_out, ())
     if not rows:
         return ToolResult(kind="empty", summary=_summary("no_data", lang=locale))
 
@@ -1139,7 +1152,9 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50, ch=ch)
+        left_out = await left_out_unless_named(conn, agency_id, cmp_ctx)
+        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=rows_to_fetch(50, left_out), ch=ch)
+        rows, _ = route_list(rows, 50, left_out, ())
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -1214,15 +1229,17 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     # Card chips send "k"; LLM tool calls send "n".
     n = int(args.get("k", args.get("n", 20)))
     best_first = bool(args.get("best_first", True))
+    left_out = await left_out_unless_named(conn, agency_id, ctx)
     rows = await compute_on_time(
         agency_id,
         ctx,
         conn,
         ch=ch,
         threshold_sec=threshold_sec,
-        limit=n,
+        limit=rows_to_fetch(n, left_out),
         sort_order="desc" if best_first else "asc",
     )
+    rows, _ = route_list(rows, n, left_out, ())
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
     # Display-only annotation (pipeline/stats.py) — does not change

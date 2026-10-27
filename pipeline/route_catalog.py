@@ -11,7 +11,9 @@ punctuality, yet it would top every punctuality list.
 :func:`zero_delay_route_codes` names those codes.
 
 :func:`route_list` leaves both out of a list unless asked and says how many
-it left, so a route list can offer each back.
+it left, so a route list can offer each back. A list that offers nothing back
+leaves out :func:`left_out_unless_named`'s codes, so a route its scope names
+is still listed.
 """
 
 from __future__ import annotations
@@ -148,6 +150,22 @@ async def left_out_route_codes(conn, agency_id: int, ctx: RangeCtx) -> dict[str,
     retired = await retired_route_codes(conn, agency_id, ctx)
     zero_delay = await zero_delay_route_codes(conn, agency_id, ctx)
     return {RETIRED: retired, ZERO_DELAY: zero_delay - retired}
+
+
+async def left_out_unless_named(conn, agency_id: int, ctx: RangeCtx) -> dict[str, frozenset[str]]:
+    """:func:`left_out_route_codes`, less the codes ``ctx``'s routes filter names.
+
+    For a list that offers no toggle to keep a reason: a route asked for by
+    name is listed as it always was.
+    """
+    named = frozenset(ctx.routes)
+    return {reason: codes - named for reason, codes in (await left_out_route_codes(conn, agency_id, ctx)).items()}
+
+
+def rows_to_fetch(n: int, left_out: Mapping[str, frozenset[str]]) -> int:
+    """How many ranked rows to fetch for :func:`route_list` to list ``n``
+    routes, when there are that many, past every left-out code."""
+    return n + sum(len(codes) for codes in left_out.values())
 
 
 def route_list(
