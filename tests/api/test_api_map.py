@@ -1025,7 +1025,15 @@ async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
     assert resp.status_code == 200
     body = resp.json()
     body.pop("scope_applied")
-    assert body == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
+    assert body == {
+        "route": "NOPE",
+        "shape_id": None,
+        "variants": [],
+        "segments": [],
+        "geometry": None,
+        "stops": [],
+        "unobserved_stops": [],
+    }
 
 
 async def _seed_route(
@@ -1812,6 +1820,224 @@ async def test_route_shape_returns_stops_when_no_trip_has_a_shape_id(map_app_ch,
     assert body["geometry"] is None, body
     assert len(body["stops"]) >= 2, "stats query must run even with no shape_id at all"
     assert {s["avg_min"] for s in body["stops"]} != {None}
+
+
+async def _seed_two_way_route(pool, ch_client, agency_id, day):
+    """R1 runs two variants: S1 (A→B→C→D→E) and its reverse S2 (D→C→B→A),
+    plus S3, which nothing observed. S1's 21 trips read 0/60/120/300 s at
+    stops 1-4, five of them 400 s at stop 5; T22 is seen only at stop 3,
+    late enough to move stop 3's mean but on no segment. U1 on S2 is seen at
+    its first two stops. SX belongs to another route."""
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "SELECT $1, s.id, s.name, 40.8 + s.k / 100.0, 140.7 + s.k / 100.0, "
+            "       ST_SetSRID(ST_MakePoint(140.7 + s.k / 100.0, 40.8 + s.k / 100.0), 4326) "
+            "FROM (VALUES ('SA', 'A停', 1), ('SB', 'B停', 2), ('SC', 'C停', 3), ('SD', 'D停', 4), ('SE', 'E停', 5)) "
+            "     AS s(id, name, k)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "SELECT $1, t.trip_id, t.route_id, t.shape_id FROM ("
+            "  SELECT 'T' || n AS trip_id, 'R1' AS route_id, 'S1' AS shape_id FROM generate_series(1, 22) n "
+            "  UNION ALL VALUES ('U1', 'R1', 'S2'), ('V1', 'R1', 'S3'), ('X1', 'R2', 'SX')"
+            ") AS t",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "SELECT $1, t.trip_id, t.seq, t.stop_id FROM ("
+            "  SELECT 'T' || n AS trip_id, s.seq, s.stop_id FROM generate_series(1, 22) n, "
+            "         (VALUES (1, 'SA'), (2, 'SB'), (3, 'SC'), (4, 'SD'), (5, 'SE')) AS s(seq, stop_id) "
+            "  UNION ALL VALUES ('U1', 1, 'SD'), ('U1', 2, 'SC'), ('U1', 3, 'SB'), ('U1', 4, 'SA'), "
+            "                   ('V1', 1, 'SA'), ('V1', 2, 'SC'), ('X1', 1, 'SE')"
+            ") AS t",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "SELECT $1, r.trip_id, 'R1', r.seq, r.delay, $2, 'test.pb', 'weekday', '09:00:00' FROM ("
+            "  SELECT 'T' || n AS trip_id, s.seq, s.delay FROM generate_series(1, 21) n, "
+            "         (VALUES (1, 0), (2, 60), (3, 120), (4, 300)) AS s(seq, delay) "
+            "  UNION ALL SELECT 'T' || n, 5, 400 FROM generate_series(1, 5) n "
+            "  UNION ALL VALUES ('T22', 3, 3000), ('U1', 1, 0), ('U1', 2, 30)"
+            ") AS r",
+            agency_id,
+            jst_midday(day),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+
+@pytest.mark.asyncio
+async def test_route_shape_lists_each_observed_variant_with_its_share_of_the_route(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["shape_id"] == "S1"
+    assert body["variants"] == [
+        {
+            "shape_id": "S1",
+            "first_stop_name": "A停",
+            "last_stop_name": "E停",
+            "stop_count": 5,
+            "samples": 90,
+            "share_pct": 97.8,
+        },
+        {
+            "shape_id": "S2",
+            "first_stop_name": "D停",
+            "last_stop_name": "A停",
+            "stop_count": 4,
+            "samples": 2,
+            "share_pct": 2.2,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_route_shape_measures_each_segment_on_the_trips_seen_at_both_of_its_stops(map_app_ch, ch_client):
+    """T22, seen only at stop 3, lifts stop 3's mean but no segment. The
+    segment leaving the first stop is not measured, nor is one fewer than
+    MIN_GROUP_SAMPLES trips were seen at both ends of (stop 4 to 5)."""
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
+
+    body = resp.json()
+    stop3 = next(s for s in body["stops"] if s["stop_sequence"] == 3)
+    assert stop3["avg_min"] == 4.18
+    assert body["segments"] == [
+        {"from_sequence": 2, "to_sequence": 3, "increase_min": 1.0, "pairs": 21},
+        {"from_sequence": 3, "to_sequence": 4, "increase_min": 3.0, "pairs": 21},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_route_shape_shows_the_variant_asked_for(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&shape=S2&from={day}&to={day}")
+
+    body = resp.json()
+    assert body["shape_id"] == "S2"
+    assert [(s["stop_sequence"], s["stop_name"]) for s in body["stops"]] == [(1, "D停"), (2, "C停")]
+    assert [s["stop_sequence"] for s in body["unobserved_stops"]] == [3, 4]
+    assert body["segments"] == []
+    assert [v["shape_id"] for v in body["variants"]] == ["S1", "S2"]
+
+
+@pytest.mark.asyncio
+async def test_route_shape_shows_a_variant_of_the_route_that_the_window_never_saw(map_app_ch, ch_client):
+    """A comparison window pins the variant on screen, observed there or not,
+    so its stops line up with the current window's."""
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&shape=S3&from={day}&to={day}")
+
+    body = resp.json()
+    assert body["shape_id"] == "S3"
+    assert body["stops"] == []
+    assert [s["stop_name"] for s in body["unobserved_stops"]] == ["A停", "C停"]
+
+
+@pytest.mark.asyncio
+async def test_route_shape_ignores_a_variant_of_another_route(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&shape=SX&from={day}&to={day}")
+
+    body = resp.json()
+    assert body["shape_id"] == "S1"
+    assert [s["stop_sequence"] for s in body["stops"]] == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_route_shape_lists_no_variants_for_a_window_without_observations(map_app_ch, ch_client):
+    """The empty-window fallback picks a shape to draw from older raw rows,
+    which are no share of anything in the window."""
+    app, agency_id = map_app_ch
+    day = jst_today()
+    await _seed_two_way_route(app.state.pool, ch_client, agency_id, day)
+    earlier = day - timedelta(days=60)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={earlier}&to={earlier}")
+
+    body = resp.json()
+    assert body["shape_id"] == "S1"
+    assert body["variants"] == []
+    assert body["segments"] == []
+
+
+@pytest.mark.asyncio
+async def test_route_shape_without_shapes_takes_the_first_stop_from_the_timetable(map_app_ch, ch_client):
+    """With no shape to list a variant's stops, the timetable of the observed
+    trips still names the first stop: stop 1, never observed here, so the
+    segment from stop 2 is measured."""
+    app, agency_id = map_app_ch
+    day = jst_today()
+    async with app.state.pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "SELECT $1, 'S' || k, 'Stop' || k, 40.8 + k / 100.0, 140.7 + k / 100.0, "
+            "       ST_SetSRID(ST_MakePoint(140.7 + k / 100.0, 40.8 + k / 100.0), 4326) FROM generate_series(1, 4) k",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "SELECT $1, 'T' || n, 'R1', NULL FROM generate_series(1, 21) n",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "SELECT $1, 'T' || n, k, 'S' || k FROM generate_series(1, 21) n, generate_series(1, 4) k",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "SELECT $1, 'T' || n, 'R1', s.seq, s.delay, $2, 'test.pb', 'weekday', '09:00:00' "
+            "FROM generate_series(1, 21) n, (VALUES (2, 60), (3, 120), (4, 300)) AS s(seq, delay)",
+            agency_id,
+            jst_midday(day),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1&from={day}&to={day}")
+
+    body = resp.json()
+    assert body["shape_id"] is None
+    assert body["segments"] == [
+        {"from_sequence": 2, "to_sequence": 3, "increase_min": 1.0, "pairs": 21},
+        {"from_sequence": 3, "to_sequence": 4, "increase_min": 3.0, "pairs": 21},
+    ]
 
 
 async def _seed_heatmap(pool, agency_id):

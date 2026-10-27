@@ -459,3 +459,18 @@ describe("useAppendMessage authed/anon fork", () => {
     expect(outcome?.assistant.rendered_summary).toBe("The answer");
   });
 });
+
+describe("useRouteShape", () => {
+  it("asks for one variant as a separate query", async () => {
+    mockApiGet.mockResolvedValue({ route: "R1", geometry: null, stops: [] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ a: useRouteShape(1, "R1", baseCtx()), b: useRouteShape(1, "R1", baseCtx(), "80305 0") }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("shape=");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]shape=80305\+0(&|$)/);
+  });
+});

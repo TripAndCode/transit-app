@@ -140,9 +140,36 @@ type UnobservedStop = {
   lat: number;
 };
 
+/** One stopping pattern (系統, a GTFS shape) the window observed, with its
+ *  share of the route's observations. */
+export type RouteVariant = {
+  shape_id: string;
+  first_stop_name: string;
+  last_stop_name: string;
+  stop_count: number;
+  samples: number;
+  share_pct: number;
+};
+
+/** The mean increase in departure delay between two consecutive stops, over
+ *  the trip-days observed at both. */
+export type RouteSegment = {
+  from_sequence: number;
+  to_sequence: number;
+  increase_min: number;
+  pairs: number;
+};
+
 export type RouteShapeResponse = {
   scope_applied?: ScopeApplied;
   route: string;
+  /** The variant the stops belong to; null when no trip has a shape. */
+  shape_id?: string | null;
+  /** Every variant the window observed, most observed first. */
+  variants?: RouteVariant[];
+  /** The shown variant's segments, in stop order. The one leaving the first
+   *  stop is never measured. */
+  segments?: RouteSegment[];
   /**
    * Real road geometry from GTFS shapes when loaded; null otherwise.
    * LineString when the route has one observed shape variant (系統);

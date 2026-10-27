@@ -11,13 +11,22 @@ import json
 from collections import defaultdict
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from itertools import pairwise
 from typing import Any
 
 from api.clickhouse import max_captured_at
 from api.range import RangeCtx, build_updates_filter_ch
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.query.tools import unnamed_stop_name
+from pipeline.reports.rankings import MIN_GROUP_SAMPLES
+from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import service_date_ch
+
+
+def _half_up(x: float, places: int) -> float:
+    """``x`` rounded half away from zero to ``places`` decimals, as Postgres
+    ``ROUND`` does, rather than Python's round-half-to-even."""
+    return float(Decimal(str(x)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
 
 
 async def route_exists(conn, agency_id: int, route_code: str) -> bool:
@@ -77,10 +86,13 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
     """Per-(trip, day, stop) dedup backing `compute_route_shape`'s per-stop delay stats.
 
     Same key, clamp and pure-builder rationale as `_route_shape_vote_dedup_sql`.
+    Each row carries its service day, so one trip's readings on one day can be
+    paired stop to stop.
     """
     return f"""
         SELECT u.trip_id, u.stop_sequence,
-            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
+            {service_date_ch("u.captured_at")} AS service_date
         FROM updates AS u
         WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
           AND u.dep_delay IS NOT NULL
@@ -92,13 +104,109 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
     """
 
 
-async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCtx, *, locale: str) -> dict[str, Any]:
+async def _is_route_variant(conn, agency_id: int, route: str, shape_id: str) -> bool:
+    """True if a timetable trip of ``route`` runs on ``shape_id``. A variant
+    the window never observed is still the route's own, and a comparison
+    window pins the one on screen whether it observed it or not."""
+    return (
+        await conn.fetchval(
+            "SELECT 1 FROM static_trips "
+            f"WHERE agency_id = $1 AND shape_id = $2 AND {route_code_sql('route_id')} = $3 LIMIT 1",
+            agency_id,
+            shape_id,
+            route,
+        )
+    ) is not None
+
+
+async def _variant_summaries(
+    conn, agency_id: int, shape_counts: dict[str, int], route_samples: int, locale: str
+) -> list[dict[str, Any]]:
+    """Each observed variant's end stops, stop count, observations and share
+    of the route's observations, most observed first.
+
+    The stops are the ones the variant's stop list shows: per stop_sequence,
+    the stop of its first trip by trip_id, as for ``unobserved_stops``.
+    ``route_samples`` counts every observation of the route, including trips
+    no variant claims, so the shares need not sum to 100.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT ON (t.shape_id, sst.stop_sequence) t.shape_id, sst.stop_sequence, ss.stop_name
+        FROM static_trips t
+        JOIN static_stop_times sst ON sst.agency_id = t.agency_id AND sst.trip_id = t.trip_id
+        LEFT JOIN static_stops ss ON ss.agency_id = sst.agency_id AND ss.stop_id = sst.stop_id
+        WHERE t.agency_id = $1 AND t.shape_id = ANY($2)
+        ORDER BY t.shape_id, sst.stop_sequence, t.trip_id
+        """,
+        agency_id,
+        list(shape_counts),
+    )
+    stops: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    for r in rows:
+        name = r["stop_name"] if r["stop_name"] is not None else unnamed_stop_name(r["stop_sequence"], locale)
+        stops[r["shape_id"]].append((r["stop_sequence"], name))
+    ordered = sorted(stops, key=lambda sid: (-shape_counts[sid], sid))
+    return [
+        {
+            "shape_id": sid,
+            "first_stop_name": stops[sid][0][1],
+            "last_stop_name": stops[sid][-1][1],
+            "stop_count": len(stops[sid]),
+            "samples": shape_counts[sid],
+            "share_pct": _half_up(100 * shape_counts[sid] / route_samples, 1),
+        }
+        for sid in ordered
+    ]
+
+
+def _segment_increases(dedup_rows, sequences: list[int], shown: set[int]) -> list[dict[str, Any]]:
+    """How much later, on average, a trip leaves each stop than the stop
+    before it, over the trip-days seen at both.
+
+    Pairing one trip's own readings, rather than subtracting two stops'
+    means, keeps a trip seen at only one of the stops out of the increase.
+    ``sequences`` is the variant's whole stop list in order. The segment
+    leaving its first stop is not measured: most feeds report almost every
+    departure from a trip's first stop as exactly on time, so the step from
+    there measures the feed's reporting, not delay growing. A segment needs ``MIN_GROUP_SAMPLES`` paired trip-days,
+    and both its stops in ``shown``, the stops the response lists.
+    """
+    runs: dict[tuple, dict[int, int]] = defaultdict(dict)
+    for trip_id, stop_sequence, dep_delay, service_date in dedup_rows:
+        runs[(trip_id, service_date)][stop_sequence] = dep_delay
+    segments = []
+    for start, end in pairwise(sequences[1:]):
+        if start not in shown or end not in shown:
+            continue
+        gains = [run[end] - run[start] for run in runs.values() if start in run and end in run]
+        if len(gains) >= MIN_GROUP_SAMPLES:
+            segments.append(
+                {
+                    "from_sequence": start,
+                    "to_sequence": end,
+                    "increase_min": _half_up(sum(gains) / len(gains) / 60.0, 2),
+                    "pairs": len(gains),
+                }
+            )
+    return segments
+
+
+async def compute_route_shape(
+    conn, ch, agency_id: int, route: str, ctx: RangeCtx, *, locale: str, shape: str | None = None
+) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ``ctx``.
 
     Sorted by ``stop_sequence`` so the caller can draw a polyline straight
     from the result. Stops without coordinates are dropped, so the polyline
     never includes (NaN, NaN). A stop that stops.txt gives no name is named
     in ``locale``.
+
+    The stops are one variant's: ``shape`` when it is one of the route's,
+    else the most observed. ``variants`` lists every variant the window
+    observed, with its share of the route's observations, and is empty when
+    the window observed none. ``segments`` is the variant's delay increase
+    from stop to stop (see :func:`_segment_increases`).
     """
     # Cheap existence precheck FIRST, before touching ClickHouse at all -- ahead
     # of the ctx-bounded dedup query below, not just inside the empty-window
@@ -110,9 +218,18 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # route that doesn't exist at all). See `route_exists` for why this
     # checks agg_route_daily rather than agg_route_stats.
     if not await route_exists(conn, agency_id, str(route)):
-        return {"route": route, "geometry": None, "stops": [], "unobserved_stops": []}
+        return {
+            "route": route,
+            "shape_id": None,
+            "variants": [],
+            "segments": [],
+            "geometry": None,
+            "stops": [],
+            "unobserved_stops": [],
+        }
 
-    # Most-frequent shape_id for this route, bridged via updates.trip_id
+    # The shape_id whose stops are shown: the requested one when it is the
+    # route's, else the most frequent for this route, bridged via updates.trip_id
     # (route_code is regex-extracted and is not guaranteed equal to GTFS
     # route_id across feeds, so joining on trip_id keeps geometry tied
     # to trips actually observed for this route_code). The chosen shape
@@ -176,6 +293,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
     trip_counts: dict[str, int] = dict(vote_result.result_rows)
+    window_samples = sum(trip_counts.values())
 
     # If the ctx window has zero observations for this route (e.g. it only
     # runs on days outside the selected range, or a time_band excludes every
@@ -230,9 +348,20 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
             # polyline/unobserved_stops between identical requests. Movers
             # ranking in overview.py breaks ties the same way.
             chosen_shape_id = max(shape_counts, key=lambda sid: (shape_counts[sid], sid))
+    if (
+        shape is not None
+        and shape != chosen_shape_id
+        and (shape in shape_counts or await _is_route_variant(conn, agency_id, str(route), shape))
+    ):
+        chosen_shape_id = shape
+    variants = (
+        await _variant_summaries(conn, agency_id, shape_counts, window_samples, locale)
+        if window_samples and shape_counts
+        else []
+    )
 
-    # Render every observed shape variant (系統), not just the majority one
-    # `chosen_shape_id` above still pins for stops/unobserved_stops below —
+    # Render every observed shape variant (系統), not just the one
+    # `chosen_shape_id` above pins for stops/unobserved_stops below —
     # this repo's Japanese bus operators distinguish 路線 (route_code, the
     # named line) from 系統 (a route's distinct stopping/geometry patterns,
     # e.g. a Hiroshima express bus's several variants), and collapsing to one
@@ -301,7 +430,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
 
     static_join_rows: list = []
     if dedup_rows:
-        dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
+        dedup_trip_ids = list({row[0] for row in dedup_rows})
         static_join_rows = await conn.fetch(
             "SELECT sst.trip_id, sst.stop_sequence, ss.stop_id, ss.stop_name, "
             "       ss.stop_code, ss.platform_code, ST_X(ss.geom) AS lon, ST_Y(ss.geom) AS lat "
@@ -312,13 +441,6 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
             dedup_trip_ids,
         )
     static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
-
-    # Local, not `api.routers.map._round_half_up_int`: this endpoint's
-    # `avg_min` is minutes to 2 decimal places (matches rankings.py's avg_min
-    # display contract), not whole seconds, so it needs its own half-up
-    # rounding at a different quantize scale.
-    def _round2(x) -> float:
-        return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
     def _new_seq_agg() -> dict:
         return {
@@ -332,7 +454,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         }
 
     per_seq: dict[int, dict] = defaultdict(_new_seq_agg)
-    for trip_id, stop_sequence, dep_delay in dedup_rows:
+    for trip_id, stop_sequence, dep_delay, _service_date in dedup_rows:
         a = per_seq[stop_sequence]
         a["delays"].append(dep_delay)
         info = static_by_pair.get((trip_id, stop_sequence))
@@ -360,7 +482,8 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
                 "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
                 "stop_code": max(a["stop_codes"]) if a["stop_codes"] else None,
                 "platform_code": max(a["platform_codes"]) if a["platform_codes"] else None,
-                "avg_min": _round2(sum(a["delays"]) / len(a["delays"]) / 60.0) if a["delays"] else None,
+                # Minutes to 2 dp, half-up: rankings.py's avg_min display contract.
+                "avg_min": _half_up(sum(a["delays"]) / len(a["delays"]) / 60.0, 2) if a["delays"] else None,
                 "samples": len(a["delays"]),
                 "lon": sum(a["lons"]) / len(a["lons"]) if a["lons"] else None,
                 "lat": sum(a["lats"]) / len(a["lats"]) if a["lats"] else None,
@@ -375,6 +498,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # observation gap (typical for Hiroshima-style incremental feeds
     # where early-trip sequences are rarely caught by 30s polling).
     unobserved = []
+    variant_seqs: set[int] = set()
     if chosen_shape_id is not None:
         unobs_rows = await conn.fetch(
             """
@@ -412,9 +536,23 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
             for r in unobs_rows
             if r["stop_sequence"] not in observed_seqs and r["lon"] is not None and r["lat"] is not None
         ]
+        variant_seqs = {r["stop_sequence"] for r in unobs_rows}
+    else:
+        # No variant to list the stops of: the observed trips' own timetable
+        # still names their first stop when the window never observed it.
+        variant_seqs = {r["stop_sequence"] for r in static_join_rows}
+
+    # The stops the response lists: observed ones with coordinates, and the
+    # unobserved ones of the variant.
+    shown = {seq for seq, a in per_seq.items() if a["lons"] and a["lats"]}
+    shown |= {u["stop_sequence"] for u in unobserved}
+    segments = _segment_increases(dedup_rows, sorted(variant_seqs | set(per_seq)), shown)
 
     return {
         "route": route,
+        "shape_id": chosen_shape_id,
+        "variants": variants,
+        "segments": segments,
         "geometry": geometry,
         "stops": [
             {

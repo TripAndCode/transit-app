@@ -530,6 +530,9 @@ async def live_trip_progress(
 async def route_shape(
     request: Request,
     route: str = Query(min_length=1, max_length=300),
+    shape: str | None = Query(
+        None, min_length=1, max_length=300, description="The variant (shape_id) to show; the most observed by default"
+    ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -538,8 +541,10 @@ async def route_shape(
 ) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
 
-    Returns ``{ route, geometry, stops: [{ stop_sequence, stop_name, stop_id,
-    stop_code, platform_code, lon, lat, avg_min, samples }], unobserved_stops }``.
+    Returns ``{ route, shape_id, variants, segments, geometry, stops: [{
+    stop_sequence, stop_name, stop_id, stop_code, platform_code, lon, lat,
+    avg_min, samples }], unobserved_stops }``; see
+    :func:`pipeline.reports.map.compute_route_shape` for the variant fields.
     Powers the Map tab's per-route overlay (polyline + numbered stops) when the
     user filters to a single route. A stop that stops.txt gives no name is
     named by its sequence in the request's ``Accept-Language``.
@@ -549,8 +554,8 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
-    shape = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale)
-    return {**shape, "scope_applied": _ROUTE_SHAPE_SCOPE}
+    body = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale, shape=shape)
+    return {**body, "scope_applied": _ROUTE_SHAPE_SCOPE}
 
 
 # Today's figures per route: one observation per stop event via the shared

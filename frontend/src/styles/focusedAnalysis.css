@@ -39,6 +39,9 @@
    .focus-chart-scroll instead of shrinking its text. */
 .focus-chart { width: 100%; height: 300px; min-height: 230px; min-width: 700px; }
 .focus-chart-scroll { overflow-x: auto; }
+/* Said only where the chart is wider than its column and scrolls. */
+.focus-chart-hint { display: none; margin: 0 0 4px; }
+@media (max-width: 760px) { .focus-chart-hint { display: block; } }
 /* `components/tableStyles.ts` is where table and cell styling belongs, and
    the tables on these pages read from it. `.focus-table` stays for the one
    consumer that has not moved -- the Marey diagram's narrow-viewport data
@@ -99,3 +102,23 @@
 .focus-breadcrumb a { color: var(--text-secondary); }
 .focus-subtitle { margin: 4px 0 0; }
 .focus-route-id { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* The route's standing within its agency: four figures in one row that
+   wraps to two on a phone, then the links to the route's other pages. */
+.route-summary { display: flex; flex-direction: column; gap: 8px; }
+.route-summary__figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.route-summary__figure { padding: 12px 14px; border: 1px solid var(--card-border); border-radius: var(--radius); background: var(--bg-surface); }
+.route-summary__figure dt { font-size: var(--text-sm); color: var(--text-secondary); }
+.route-summary__figure dd { margin: 4px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.route-summary__figure strong { font-size: var(--text-lg); color: var(--text-primary); }
+.route-summary .on-time-definition { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.route-summary__links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; font-size: var(--text-sm); }
+@media (max-width: 760px) { .route-summary__figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.route-variant { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin: 0 0 12px; }
+.route-variant label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
+.route-variant select { max-width: 100%; min-height: 38px; padding: 6px 9px; }
+.route-variant p { flex-basis: 100%; margin: 0; }
+/* Where delay grows most, said before the chart that marks it. */
+.route-rise { margin: 0 0 12px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius); }
+.route-rise p { margin: 0; }
+.route-rise__headline { font-weight: 600; color: var(--text-primary); }
+.route-rise__swatch { display: inline-block; width: 18px; height: 8px; border-radius: 4px; background: var(--accent); opacity: 0.3; vertical-align: middle; }

@@ -49,6 +49,8 @@ describe("destinations", () => {
     expect(routeHref(9, "50", "?report=worst_5min&sort=ranking&doc=council&by=periods&sparse=1&period=weekend&order=best&dow=weekday")).toBe(
       "/agencies/9/routes/50?dow=weekday",
     );
+    // A path (shape) belongs to the route it was picked on.
+    expect(routeHref(9, "51", "?variant=80305+9&from=2026-09-01")).toBe("/agencies/9/routes/51?from=2026-09-01");
   });
 
   it("opens one selected route's dossier, and the list for any other selection", () => {

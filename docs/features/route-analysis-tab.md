@@ -31,9 +31,10 @@ saved-analysis bookmarks — scoped to exactly one selected route.
   (`routes/<route_code>`), and Reports' routes-to-check rows and
   saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
-  compare-with-previous-week toggle (`?compare=1` search param), the
-  selected stop, which of the four sub-tabs (trend / marey / map /
-  by-stop) is active, and the Marey scrub second.
+  compare-with-the-previous-period toggle (`?compare=1` search param), the
+  path on screen (`?variant=<shape_id>`), the selected stop, which of the
+  four sub-tabs (trend / marey / map / by-stop) is active, and the Marey
+  scrub second.
 
 What the user sees/does:
 
@@ -44,15 +45,33 @@ What the user sees/does:
   filter. `RouteAnalysisTab` itself shows an
   `EmptyState` prompting the user to choose one route whenever
   `ctx.routes.length !== 1`, instead of rendering data.
+- **Summary strip** — `frontend/src/components/analysis/RouteSummaryStrip.tsx`:
+  the route's mean delay and its place among the agency's ranked routes,
+  on-time rate (with the on-time rule), share of departures over 5 minutes
+  late, and share of all lateness. Read from the agency-wide `ranking`,
+  `on_time` and `worst_5min` reports (whole lists, so the left-out rule and
+  the ranking floor are the Routes lists' own) and the overview's
+  `concentration`, which names only its top routes. Links open the route on
+  the Time (`trend`) and Why (`dwell_run`) pages.
+- **Path picker** — `frontend/src/components/analysis/RouteVariantPicker.tsx`:
+  the route's observed variants (GTFS shapes) with their share of the
+  route's observations, and an "other direction" button for the most
+  observed variant between the same end stops the other way. The variant,
+  not `direction_id`, tells directions apart: `direction_id` is optional and
+  often empty, and a feed may run each direction under its own route code.
+  Hidden for a route with one variant.
+- **Where delay grows** — the two largest `segments` increases in a
+  sentence above the chart; the largest is marked on the chart.
 - **Header actions** — a CSV download button (disabled while loading, on
   error, or while a requested comparison is still fetching) and a "Save this
   analysis" button that writes a browser-local bookmark
   (`frontend/src/components/analysis/savedAnalyses.ts`).
 - **Compare checkbox** — when checked, fetches the same route's stop shape
-  for the same weekday range shifted 7 days earlier
-  (`isoDaysBefore(ctx.from/to, 7)`) and overlays it on the chart; matching is
-  by stop id and sequence, so a stop missing from either window is a gap, not
-  an interpolated value.
+  for the window of equal length ending the day before `ctx.from`
+  (`previousWindow` in `components/analysis/routeDossier.ts`), on the variant
+  on screen, and overlays it on the chart; matching is by stop id and
+  sequence, so a stop missing from either window is a gap, not an
+  interpolated value.
 - **Four sub-tabs**: Trend (`frontend/src/components/analysis/StopChart.tsx`
   — current vs. previous-week series, selectable points), Marey
   (`frontend/src/components/charts/MareyDiagram.tsx` — a time-distance
@@ -72,15 +91,16 @@ What the user sees/does:
   diagram of nothing teaches nothing.
 - **Selected-stop aside** — a `<select>` of every stop plus the selected
   stop's mean delay and sample count.
-- A caveat line states these are per-stop means for the representative
-  observed pattern, not evidence of an individual trip's delay growth or its
-  cause.
+- A caveat line states the line is per-stop means, that a segment's increase
+  pairs the same trips at both stops, that the segment from the first stop is
+  left out, and that none of it shows a cause.
 
 ## Request path
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useRouteShape(agencyId, route, ctx)` (current window; a second call with `ctx` shifted 7 days earlier fires only when the compare checkbox is on) | `GET /api/{agency_id}/route-shape?route=...` (`api/routers/map.py: route_shape`) | `pipeline/reports/map.py: compute_route_shape()` — a cheap Postgres `agg_route_daily` existence precheck, then a live ClickHouse dedup scan of `updates` to vote the route's most-frequent `shape_id` and compute per-stop mean departure delay, joined to Postgres `static_stops`/`static_shapes` for geometry and stop labels. No precomputed-aggregate fast path exists for this endpoint — every request scans ClickHouse live. |
+| `useRouteShape(agencyId, route, ctx, shape)` (current window; a second call for the previous window on the same `shape_id` fires only when the compare checkbox is on) | `GET /api/{agency_id}/route-shape?route=...&shape=...` (`api/routers/map.py: route_shape`) | `pipeline/reports/map.py: compute_route_shape()` — a cheap Postgres `agg_route_daily` existence precheck, then a live ClickHouse dedup scan of `updates` to vote the route's most-frequent `shape_id` (or pin the requested one when it is the route's) and compute per-stop mean departure delay, joined to Postgres `static_stops`/`static_shapes` for geometry and stop labels. It also returns `variants` (each observed shape's end stops and share) and `segments` (per consecutive stop pair, the mean increase over the trip-days seen at both, leaving out the segment from the first stop). No precomputed-aggregate fast path exists for this endpoint — every request scans ClickHouse live. |
+| `useReport(agencyId, "ranking" \| "on_time" \| "worst_5min", agencyCtx, { limit: REPORT_ROWS_MAX })`, `useOverviewSummary(agencyId, agencyCtx)` | `GET /api/{agency_id}/reports/{type}`, `GET /api/{agency_id}/overview/summary` | The summary strip's figures, with the scope's `routes` emptied so each list ranks every route. |
 | `useRouteTrips(agencyId, route, { timeBand })` (current day; a second call for the same day one week earlier fires only when compare is on, once the current day's date is known) | `GET /api/{agency_id}/today/route/{route}/trips` (`api/routers/map.py: route_trips`) | Per-trip, per-stop delay for one route on one service day, feeding the Marey diagram's polylines. Read-only ClickHouse dedup query, capped at `MAX_ROUTE_TRIPS`; date defaults to the route's own latest observed day, independent of the shared filter's date range. |
 
 ## Key files
@@ -146,9 +166,10 @@ What the user sees/does:
    populate; switch between the four sub-tabs. Pick one different route in
    the filter — expect the path to move to that route; pick several —
    expect the Routes list.
-4. Toggle "Compare with one week earlier" — expect a second series on the
-   trend chart and ghost trips behind the Marey diagram, or a "no comparison
-   data" message where the prior week has none.
+4. Toggle "Compare with the previous period" — expect a second series on the
+   trend chart for the equal-length window before the selected one, and ghost
+   trips behind the Marey diagram, or a "no comparison data" message where
+   the previous window has none.
 5. Click a stop in the chart or the aside's dropdown — expect the selection
    to sync across the chart and the aside's delay/sample readout.
 6. Click "Save this analysis" — expect a saved-confirmation notice; open
