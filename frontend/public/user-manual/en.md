@@ -414,7 +414,7 @@ What the words on the screens and in this manual mean.
 
 - **Average delay**: the mean of the readings’ departure delays, in minutes. Early departures stay in the mean as negative delays.
 - **Early departure**: a reading that left before its scheduled time; its delay is negative.
-- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time. On-time % is the share of readings that were on time. With a tolerance other than 1 minute, it is estimated from delays grouped into 1-minute steps.
+- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time. On-time % is the share of readings that were on time.
 - **Over 5 min**: a reading whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the samples, and “Over 5 min (count)” is how many there were.
 - **Live’s “On-time rate” and “5+ min late”**: Live takes the latest report of each trip reporting now. Trips 5 minutes or more late are “5+ min late”, and the share of the rest is the “On-time rate”, so it is counted differently from On-time % on the other screens.
 - **p50 and p90**: the values halfway along (the median) and 90% of the way along when the values are sorted from smallest. p90 is a guide to a value exceeded about one time in ten. They are approximations, worked out from counts grouped into fixed-width steps.

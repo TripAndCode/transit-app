@@ -183,6 +183,11 @@ export function HelpPage() {
     : navIndices;
   const hasMatches = matchedIndices.length > 0;
   const activeIndex = current != null && matchedIndices.includes(current) ? current : (matchedIndices[0] ?? null);
+  const contentsNav = {
+    ariaLabel: t("help.sections_nav"),
+    items: matchedIndices.map((i) => ({ key: i, label: sections[i].title })),
+    activeKey: hasMatches ? activeIndex : null,
+  };
 
   function sectionElements(): HTMLElement[] {
     return [...(documentRef.current?.querySelectorAll<HTMLElement>("[data-section]") ?? [])];
@@ -318,11 +323,9 @@ export function HelpPage() {
                   that are on screen. */}
               {contentsOpen && (
                 <SidebarNavList
-                  ariaLabel={t("help.sections_nav")}
-                  width={240}
-                  navStyle={{ width: "100%", marginTop: 8 }}
-                  items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
-                  activeKey={hasMatches ? activeIndex : null}
+                  {...contentsNav}
+                  width="100%"
+                  navStyle={{ marginTop: 8 }}
                   onSelect={(i) => {
                     setContentsOpen(false);
                     goToSection(i);
@@ -332,11 +335,9 @@ export function HelpPage() {
             </details>
           ) : (
             <SidebarNavList
-              ariaLabel={t("help.sections_nav")}
+              {...contentsNav}
               width={240}
               navStyle={{ position: "sticky", top: 16 }}
-              items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
-              activeKey={hasMatches ? activeIndex : null}
               onSelect={goToSection}
             />
           )}

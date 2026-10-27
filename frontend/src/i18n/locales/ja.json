@@ -289,7 +289,7 @@
     },
     "exclusion_hours_one": "{{count}}時間を超えてずれた値は誤りとして除外します。",
     "exclusion_hours_other": "{{count}}時間を超えてずれた値は誤りとして除外します。",
-    "exclusion_limit": "{{limit}}以上ずれた値は誤りとして除外します。",
+    "exclusion_limit": "{{limit}}を超えてずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内（早発も定時に含む）。",
     "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
     "sentence_separator": ""
