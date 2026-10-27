@@ -1,4 +1,5 @@
-import { LOW_CONFIDENCE_SAMPLES, bandOf, type Band } from "../../api/types";
+import { LOW_CONFIDENCE_SAMPLES } from "../../api/types";
+import { bandOf, type Band } from "../../api/timeBands";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 import { isoDow } from "./trendFocus";
 
@@ -59,8 +60,8 @@ function eachBandHour(grid: readonly BandCell[], paint: (cell: BandCell, d: numb
   }
 }
 
-/** The same range averaged by time band: the band grid is five bands wide
- *  and the surface 24 hours wide, so a band's average is drawn across its
+/** The same range averaged by time band: the band grid is one column per
+ *  band and the surface 24 hours wide, so a band's average is drawn across its
  *  hours (`bandOf`) -- only those `observed` has a value for, so an hour no
  *  trip ran in stays empty in both profiles. */
 export function bandSurface(grid: readonly BandCell[], observed: Surface): Surface {

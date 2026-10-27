@@ -4,7 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
-import { BAND_ORDER, type ForecastDay, type ForecastOverview } from "../api/types";
+import { BAND_ORDER } from "../api/timeBands";
+import { type ForecastDay, type ForecastOverview } from "../api/types";
 import { calmDelayColor } from "../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []) {
@@ -28,8 +29,8 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
 
 function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
   return {
-    grid: fullGrid([{ dow: 1, band: "midday", v: 6.8, n: 250 }]),
-    worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
+    grid: fullGrid([{ dow: 1, band: "forenoon", v: 6.8, n: 250 }]),
+    worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "baseline" },
     routes: [
       { route_code: "100", route_name: "Main Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
       { route_code: "200", route_name: "Side Line", expected_avg_min: 9.9, samples: 5, low_confidence: true },
@@ -84,11 +85,11 @@ function renderSection(ov: ForecastOverview | undefined = overview(), initialRou
 }
 
 describe("RouteForecastSection", () => {
-  it("renders the agency landing with worst window, 35-cell grid, and ranked routes", () => {
+  it("renders the agency landing with worst window, a cell for every weekday and band, and ranked routes", () => {
     renderSection();
     expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
     expect(screen.getByText(/When to watch out/i)).toBeInTheDocument();
-    expect(screen.getAllByTestId("ov-band-cell").length).toBe(35);
+    expect(screen.getAllByTestId("ov-band-cell").length).toBe(7 * BAND_ORDER.length);
     const ranked = within(screen.getByTestId("fc-overview-routes"));
     expect(ranked.getByText("Main Line")).toBeInTheDocument();
     expect(ranked.getByText("Side Line")).toBeInTheDocument();
@@ -170,12 +171,12 @@ describe("RouteForecastSection", () => {
   });
 
   it("says an early-running worst window is early, not late", () => {
-    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250, source: "baseline" } }));
+    renderSection(overview({ worst: { dow: 1, band: "forenoon", expected_avg_min: -0.4, samples: 250, source: "baseline" } }));
     expect(screen.getByTestId("worst-headline")).toHaveTextContent("avg 0.4 min early");
   });
 
   it("words a worst window the ML model set as expected, not as an average", () => {
-    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "ml" } }));
+    renderSection(overview({ worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "ml" } }));
     const headline = screen.getByTestId("worst-headline");
     expect(headline).toHaveTextContent("6.8 min late expected");
     expect(headline).not.toHaveTextContent("avg");
@@ -257,7 +258,7 @@ describe("RouteForecastSection", () => {
 
   it("dates each forecast row and a forecast worst window, leaving the past-average rows as weekdays", () => {
     const mlGrid = fullGrid([
-      { dow: 1, band: "midday", v: 2.0 },
+      { dow: 1, band: "forenoon", v: 2.0 },
       { dow: 5, band: "evening", v: 5.8 },
     ]).map((c) => (c.dow === 5 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
     renderSection(
@@ -268,7 +269,7 @@ describe("RouteForecastSection", () => {
       }),
     );
     expect(screen.getByTestId("fc-period")).toHaveTextContent("Forecast for Fri, Oct 30.");
-    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Fri 10/30 Evening runs latest");
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Fri 10/30 Evening 17–20h runs latest");
     const rows = within(screen.getByTestId("fc-overview-grid")).getAllByRole("rowheader").map((h) => h.textContent);
     expect(rows).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri 10/30", "Sat", "Sun"]);
   });
@@ -277,10 +278,10 @@ describe("RouteForecastSection", () => {
     renderSection(
       overview({
         forecast_days: [{ dow: 1, service_date: "2026-10-26" }],
-        worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
+        worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "baseline" },
       }),
     );
-    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Mon Midday runs latest");
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Mon Late morning 9–12h runs latest");
     expect(screen.getByTestId("worst-headline")).not.toHaveTextContent("10/26");
   });
 

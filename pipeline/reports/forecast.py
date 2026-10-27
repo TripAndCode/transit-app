@@ -27,6 +27,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
+from api.range import TIME_BAND_RANGES
 from api.triage import LOW_CONFIDENCE_SAMPLES
 
 # Plain-language disclaimer — NO jargon (p90/percentile/baseline forbidden).
@@ -175,15 +176,22 @@ def summarize_expected_delay_heatmap(
     }
 
 
-# Ordered hour→band mapping. SINGLE SOURCE OF TRUTH for the time bands (the
-# frontend BAND_ORDER mirrors only the keys/order, for labels — keep identical).
-BANDS: list[tuple[str, range]] = [
-    ("early", range(0, 6)),
-    ("morning", range(6, 9)),
-    ("midday", range(9, 16)),
-    ("evening", range(16, 19)),
-    ("night", range(19, 24)),
-]
+def _whole_hour(clock: str) -> int:
+    hour, minute = clock.split(":")
+    if minute != "00":
+        raise ValueError(f"a time band must start and end on the hour, not at {clock}")
+    return int(hour)
+
+
+# The time-band filter's own bands (api.range.TIME_BAND_RANGES), in clock
+# order, so a band the forecast or the trend names covers exactly the hours
+# the filter of the same name selects. The cells pooled here are whole clock
+# hours, which is why every band has to start and end on the hour.
+# frontend/src/api/timeBands.ts mirrors the hours for its labels and banding.
+BANDS: list[tuple[str, range]] = sorted(
+    ((key, range(_whole_hour(start), _whole_hour(end))) for key, (start, end) in TIME_BAND_RANGES.items()),
+    key=lambda band: band[1].start,
+)
 _HOUR_BAND = {h: key for key, hrs in BANDS for h in hrs}
 
 
@@ -213,7 +221,7 @@ def hourly_cells_to_dow_band(
     locale: str = "ja",
 ) -> dict[str, Any]:
     """Range-filtered {date,hour,avg_min,samples,sum_delay_sec} rows (as
-    returned by compute_hourly_heatmap) -> a 7x5 dow x band grid + worst
+    returned by compute_hourly_heatmap) -> a 7-day x time-band grid + worst
     window, via summarize_agency_overview. No route ranking (route_rows is
     always empty here) and no disclaimer (summarize_agency_overview's
     disclaimer text is forecast-specific "seasonal-naive historical average"

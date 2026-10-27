@@ -36,11 +36,9 @@ import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/fo
 import { forecastDelayText } from "../utils/delayPhrase";
 import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
 import { datedDayLabel, forecastDayOfMonth } from "../utils/forecastDays";
+import { BAND_ORDER, bandLabel as namedBand, bandOf, type Band } from "../api/timeBands";
 import {
-  BAND_ORDER,
-  bandOf,
   LOW_CONFIDENCE_SAMPLES,
-  type Band,
   type ForecastHeatmapCell,
   type ForecastOverviewGridCell,
   type ForecastOverviewRoute,
@@ -420,7 +418,7 @@ function populatedRange<T extends { expected_avg_min: number | null }>(
 }
 
 /**
- * Collapse a per-route 7×24 heatmap into a 7×5 band grid, mirroring
+ * Collapse a per-route 7×24 heatmap into a 7-day × time-band grid, mirroring
  * pipeline/reports/forecast.py::summarize_agency_overview's own split: the
  * baseline pool is sample-weighted, the ML pool is a plain mean across
  * whatever ML cells land in the band (an ML cell's `samples` is its hour's
@@ -490,7 +488,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   }
 
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
-  const bandLabel = (b: Band) => t(`forecast.band_${b}`);
+  const bandLabel = (b: Band) => namedBand(t, b);
   const min1 = t("forecast.axis_min");
   // Feeds BandGrid's own cursor-following tip only — see CrosshairTip.
   const onTip = (anchor: TipAnchor, text: string) => setTip({ x: anchor.clientX, y: anchor.clientY, text });
@@ -505,7 +503,6 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           aid={aid}
           names={names}
           dayLabel={dayLabel}
-          bandLabel={bandLabel}
           axisMin={min1}
           worstLabel={t("forecast.overview_worst_label")}
           gridTitle={t("forecast.overview_grid_title")}
@@ -600,7 +597,6 @@ function AgencyLanding({
   aid,
   names,
   dayLabel,
-  bandLabel,
   axisMin,
   worstLabel,
   gridTitle,
@@ -618,7 +614,6 @@ function AgencyLanding({
   aid: number;
   names: ReturnType<typeof useRouteNames>;
   dayLabel: (dow: number) => string;
-  bandLabel: (b: Band) => string;
   axisMin: string;
   worstLabel: string;
   gridTitle: string;
@@ -661,7 +656,7 @@ function AgencyLanding({
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid ariaLabel={gridTitle} grid={data.grid} bandLabel={bandLabel} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid ariaLabel={gridTitle} grid={data.grid} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
         {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={calmDelayColor} />}
       </SectionCard>
 
@@ -791,7 +786,7 @@ function RouteDetail({
       )}
 
       <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} bandLabel={bandLabel} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={calmDelayColor} />}
       </SectionCard>
 

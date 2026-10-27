@@ -46,7 +46,7 @@ describe("observedProfile thin cells", () => {
 describe("bandSurface", () => {
   const observed = observedSurface([6, 8, 20, 22].map((hour) => ({ date: "2026-10-05", hour, avg_min: 1, samples: 40 })));
   it("draws a band's average across the band's hours that were observed", () => {
-    // Bands come from api/types.ts BAND_RANGES: morning is 06-09, night 19-24.
+    // Bands come from api/timeBands.ts: morning is 05-09, night 20-24.
     const s = bandSurface([{ dow: 1, band: "morning", expected_avg_min: 3 }, { dow: 1, band: "night", expected_avg_min: 1 }], observed);
     expect(s[0][6]).toBe(3);
     expect(s[0][8]).toBe(3);

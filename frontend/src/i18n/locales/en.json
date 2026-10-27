@@ -189,11 +189,6 @@
     "overview_routes_title": "Routes that ran late",
     "overview_routes_caption": "Click a route for its breakdown.",
     "overview_no_data": "No measurements yet.",
-    "band_early": "Early",
-    "band_morning": "Morning",
-    "band_midday": "Midday",
-    "band_evening": "Evening",
-    "band_night": "Night",
     "detail_worst_phrase": "Worst on {{day}} {{band}} ({{avg}})",
     "detail_show_grid": "Show day × hour detail",
     "detail_hide_grid": "Hide day × hour detail",
@@ -2114,5 +2109,16 @@
     "metric_changed": "From this week on, scored with the {{metric}} (not directly comparable with earlier weeks)",
     "metric_mean": "mean",
     "metric_q50": "median"
+  },
+  "time_bands": {
+    "late_night": "Late night",
+    "morning": "Morning",
+    "forenoon": "Late morning",
+    "noon": "Midday",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+    "night": "Night",
+    "hours": "{{from}}–{{to}}h",
+    "named": "{{name}} {{hours}}"
   }
 }

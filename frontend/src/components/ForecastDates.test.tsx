@@ -3,7 +3,8 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
 import * as hooks from "../api/hooks";
-import { BAND_ORDER, type ForecastDay, type ForecastOverview } from "../api/types";
+import { BAND_ORDER } from "../api/timeBands";
+import { type ForecastDay, type ForecastOverview } from "../api/types";
 
 /** Tue 10/27 .. Sun 11/1: the six days after a Monday. */
 const SIX_DAYS: ForecastDay[] = [2, 3, 4, 5, 6, 7].map((dow) => ({

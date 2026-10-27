@@ -71,7 +71,11 @@ What the user sees/does:
   the response's text summary. `trend` instead renders `TrendBlock` (defined inline in
   `AnalysisTab.tsx`): a day-of-week x hour heat surface with "By hour" and
   "By band" profiles
-  (`frontend/src/components/charts/HeatSurface.tsx`), a daily line chart
+  (`frontend/src/components/charts/HeatSurface.tsx`; its bands, like the
+  forecast grid's columns, are the `time_band` filter's own seven:
+  `pipeline/reports/forecast.py`'s `BANDS` is built from `api/range.py`'s
+  `TIME_BAND_RANGES`, and `frontend/src/api/timeBands.ts` mirrors the hours),
+  a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). `dwell_run`
   instead renders `DwellRunBlock` (defined inline in `AnalysisTab.tsx`): a
@@ -415,8 +419,8 @@ the scope as one sentence above their content
 
 - Frontend strings live under the `reports.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus `forecast.*` (dow/band labels shared with
-  `RouteForecastSection`). The host screens' rail labels are `nav.routes`,
+  `npm run lint:i18n`), plus `forecast.*` (dow labels shared with
+  `RouteForecastSection`) and `time_bands.*` (each band's name and hours). The host screens' rail labels are `nav.routes`,
   `nav.time`, `nav.why` and `nav.compare`.
 - Server-side CSV column headers are hardcoded Japanese in
   `api/routers/reports.py`'s `_REPORT_CSV_COLUMNS` (operator-facing

@@ -1,4 +1,5 @@
 import type { TimeBand } from "../../api/scope";
+import { bandHours } from "../../api/timeBands";
 import type { RouteTrip } from "../../api/types";
 import { delayColor } from "../../styles/tokens";
 
@@ -36,20 +37,12 @@ const HOUR_SEC = 3600;
  *  one late bus is an anecdote, not a period of the day. */
 const MIN_PEAK_OBSERVATIONS = 3;
 
-/** Mirrors `TIME_BAND_RANGES` in api/range.py, which is the canonical
- *  definition; the server filters the rows, this only positions them. */
-const BAND_WINDOWS: Record<Exclude<TimeBand, "all">, TimeWindow> = {
-  morning: { startSec: 5 * HOUR_SEC, endSec: 9 * HOUR_SEC },
-  forenoon: { startSec: 9 * HOUR_SEC, endSec: 12 * HOUR_SEC },
-  noon: { startSec: 12 * HOUR_SEC, endSec: 14 * HOUR_SEC },
-  afternoon: { startSec: 14 * HOUR_SEC, endSec: 17 * HOUR_SEC },
-  evening: { startSec: 17 * HOUR_SEC, endSec: 20 * HOUR_SEC },
-  night: { startSec: 20 * HOUR_SEC, endSec: 24 * HOUR_SEC },
-  late_night: { startSec: 0, endSec: 5 * HOUR_SEC },
-};
-
+/** The band's own hours (`bandHours`); the server filters the rows, this
+ *  only positions them. */
 export function timeWindowForBand(band: TimeBand): TimeWindow {
-  return band === "all" ? DEFAULT_MAREY_WINDOW : BAND_WINDOWS[band];
+  if (band === "all") return DEFAULT_MAREY_WINDOW;
+  const { from, to } = bandHours(band);
+  return { startSec: from * HOUR_SEC, endSec: to * HOUR_SEC };
 }
 
 /** Horizontal position of a time. Deliberately unclamped: a time outside the

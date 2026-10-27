@@ -40,11 +40,11 @@ async def overview_client(apply_schema):
         "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
         [
-            # route 100: Mon midday pooled (8*200 + 2*50)/250 = 6.8. sum_delay_sec
+            # route 100: Mon forenoon pooled (8*200 + 2*50)/250 = 6.8. sum_delay_sec
             # is an exact multiple of avg_min*60*samples here, so exact-sum
             # pooling agrees with the values above (dedicated exactness
             # coverage lives in test_forecast_heatmap.py).
-            (aid, "100", "平日", 1, 12, 8.0, 200, int(8.0 * 60 * 200)),
+            (aid, "100", "平日", 1, 11, 8.0, 200, int(8.0 * 60 * 200)),
             (aid, "100", "平日", 1, 9, 2.0, 50, int(2.0 * 60 * 50)),
             # route 200: huge but low-sample (4 < 30) -> excluded from worst, muted, sorted last
             (aid, "200", "平日", 3, 17, 40.0, 4, int(40.0 * 60 * 4)),
@@ -94,10 +94,10 @@ async def test_overview_grid_worst_and_routes(overview_client):
     r = await client.get(f"/api/{aid}/forecast/overview")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["grid"]) == 35
-    # worst = route 100 Mon midday pooled 6.8; route 200 excluded (low-conf)
+    assert len(body["grid"]) == 49
+    # worst = route 100 Mon forenoon pooled 6.8; route 200 excluded (low-conf)
     assert body["worst"]["dow"] == 1
-    assert body["worst"]["band"] == "midday"
+    assert body["worst"]["band"] == "forenoon"
     assert body["worst"]["expected_avg_min"] == pytest.approx(6.8, abs=0.05)
     assert body["worst"]["source"] == "baseline"
     by_code = {x["route_code"]: x for x in body["routes"]}
@@ -112,11 +112,11 @@ async def test_overview_grid_worst_and_routes(overview_client):
 
 async def test_overview_empty_agency(overview_client):
     client, _aid, aid_empty = overview_client
-    # a real agency with no agg rows -> 35-cell grid, null worst, empty routes
+    # a real agency with no agg rows -> 49-cell grid, null worst, empty routes
     r = await client.get(f"/api/{aid_empty}/forecast/overview")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["grid"]) == 35
+    assert len(body["grid"]) == 49
     assert body["worst"] is None
     assert body["routes"] == []
 

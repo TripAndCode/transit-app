@@ -189,11 +189,6 @@
     "overview_routes_title": "遅れやすかった路線",
     "overview_routes_caption": "系統をクリックすると内訳を表示します。",
     "overview_no_data": "計測記録がまだありません。",
-    "band_early": "早朝",
-    "band_morning": "朝",
-    "band_midday": "昼",
-    "band_evening": "夕方",
-    "band_night": "夜",
     "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
     "detail_hide_grid": "曜日×時間帯の詳細を閉じる",
@@ -2114,5 +2109,16 @@
     "metric_changed": "この週から{{metric}}で評価（それ以前の週とは直接比べられない）",
     "metric_mean": "平均",
     "metric_q50": "中央値"
+  },
+  "time_bands": {
+    "late_night": "深夜",
+    "morning": "朝",
+    "forenoon": "午前",
+    "noon": "昼",
+    "afternoon": "午後",
+    "evening": "夕",
+    "night": "夜",
+    "hours": "{{from}}〜{{to}}時",
+    "named": "{{name}} {{hours}}"
   }
 }

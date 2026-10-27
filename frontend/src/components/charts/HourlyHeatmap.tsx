@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { useScope, type TimeBand } from "../../api/scope";
+import { useScope } from "../../api/scope";
+import { bandOf } from "../../api/timeBands";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
 import { useFirstData } from "../../hooks/useFirstData";
 import { useRovingCells } from "../../hooks/useRovingCells";
@@ -21,17 +22,6 @@ type Props = { cells: HourlyCell[]; height?: number };
 /** The hour and date labels' size, which is also each hour row's minimum height. */
 const HOUR_LABEL_PX = 12;
 
-// Hour ranges that map a clicked row to a time-band filter value.
-const HOUR_TO_BAND: { hours: [number, number]; band: TimeBand }[] = [
-  { hours: [0, 4], band: "late_night" },
-  { hours: [5, 8], band: "morning" },
-  { hours: [9, 11], band: "forenoon" },
-  { hours: [12, 13], band: "noon" },
-  { hours: [14, 16], band: "afternoon" },
-  { hours: [17, 19], band: "evening" },
-  { hours: [20, 23], band: "night" },
-];
-
 // Evenly spaced sample points across the ramp domain, for the legend strip.
 // Derived from the ramp's own endpoint so retuning it moves the swatches and
 // the `ramp_max` caption beside them together.
@@ -40,13 +30,6 @@ const RAMP_STOPS = Array.from(
   { length: RAMP_STOP_COUNT },
   (_, i) => (HEAT_RAMP.maxMin * i) / (RAMP_STOP_COUNT - 1),
 );
-
-function bandFor(hour: number): TimeBand | null {
-  for (const b of HOUR_TO_BAND) {
-    if (hour >= b.hours[0] && hour <= b.hours[1]) return b.band;
-  }
-  return null;
-}
 
 /**
  * Date × hour-of-day heatmap. Rows = hours 0-23, columns = dates.
@@ -89,9 +72,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
     );
   }
 
+  // A clicked hour narrows the screen to the time band it falls in.
   function filterHour(hour: number) {
-    const b = bandFor(hour);
-    if (b) setCtx({ time_band: b });
+    setCtx({ time_band: bandOf(hour) });
   }
   function filterDay(date: string) {
     setCtx({ from: date, to: date });
@@ -194,7 +177,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             fontSize={HOUR_LABEL_PX}
             fill="var(--text-tertiary)"
             textAnchor="end"
-            style={{ cursor: bandFor(h) ? "pointer" : "default" }}
+            style={{ cursor: "pointer" }}
             role="button"
             tabIndex={0}
             aria-label={t("reports.heatmap.hour_filter_aria", { hour: h })}
@@ -265,8 +248,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 };
                 const handleCellClick = () => {
                   if (!c) return;
-                  const b = bandFor(c.hour);
-                  setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
+                  setCtx({ from: c.date, to: c.date, time_band: bandOf(c.hour) });
                 };
                 // Two independent channels, deliberately: `opacity` carries the
                 // magnitude ramp (and is what the staggered entrance fades to via

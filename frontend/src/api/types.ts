@@ -1,5 +1,6 @@
 import type { RouteTableOrder, RouteTableSort } from "../routes/destinations";
 import type { DowFilter, TimeBand } from "./scope";
+import type { Band } from "./timeBands";
 
 export type Agency = {
   agency_id: number;
@@ -833,26 +834,6 @@ export interface ForecastHeatmap {
 // uses the same threshold as the server, not a bare literal.
 export const LOW_CONFIDENCE_SAMPLES = 30;
 
-// Band keys/order mirror pipeline/reports/forecast.py::BANDS (display order).
-export const BAND_ORDER = ["early", "morning", "midday", "evening", "night"] as const;
-export type Band = (typeof BAND_ORDER)[number];
-
-// Hour→band boundaries, identical to the server BANDS ranges. Used to collapse
-// the per-route 7×24 heatmap into bands client-side (the agency grid arrives
-// pre-banded from the server).
-const BAND_RANGES: readonly [Band, number, number][] = [
-  ["early", 0, 6],
-  ["morning", 6, 9],
-  ["midday", 9, 16],
-  ["evening", 16, 19],
-  ["night", 19, 24],
-];
-
-export function bandOf(hour: number): Band {
-  const hit = BAND_RANGES.find(([, lo, hi]) => hour >= lo && hour < hi);
-  return hit ? hit[0] : "night";
-}
-
 export interface ForecastOverviewGridCell {
   dow: number; // 1=Mon .. 7=Sun (ISODOW)
   band: Band;
@@ -885,7 +866,7 @@ export interface ForecastOverviewRoute {
 
 export interface ForecastOverview {
   scope_applied?: ScopeApplied;
-  grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
+  grid: ForecastOverviewGridCell[]; // always 7 days × every band in BAND_ORDER
   worst: ForecastOverviewWorst | null;
   routes: ForecastOverviewRoute[];
   /** The dates the grid's ML cells forecast, oldest first. */

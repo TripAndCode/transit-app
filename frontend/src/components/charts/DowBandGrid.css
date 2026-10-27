@@ -1,0 +1,7 @@
+.band-grid__head { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: var(--text-xs); color: var(--text-tertiary); text-align: center; line-height: 1.25; }
+.band-grid__name { white-space: nowrap; color: var(--text-secondary); }
+.band-grid__hours { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* BP.sm: a phone column is too narrow for a band's name, which would break
+   mid-word; the hours alone still tell the columns apart, and each cell's
+   own label names its band in full. */
+@media (max-width: 640px) { .band-grid__name { display: none; } }

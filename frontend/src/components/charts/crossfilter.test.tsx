@@ -8,7 +8,8 @@ import { isoDow, type TrendFocus, type TrendFocusSource, type TrendMark } from "
 import { DailyChart } from "./DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
 import { HeatSurface } from "./HeatSurface";
-import { BAND_ORDER, type ForecastOverviewGridCell, type TrendDay } from "../../api/types";
+import { BAND_ORDER } from "../../api/timeBands";
+import { type ForecastOverviewGridCell, type TrendDay } from "../../api/types";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 
 // Each chart is wrapped so its own function body counts its renders. React's

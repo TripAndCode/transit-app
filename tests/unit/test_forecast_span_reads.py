@@ -10,6 +10,7 @@ import pytest
 
 import api.routers.reports as reports_mod
 from pipeline import flags
+from pipeline.reports.forecast import BANDS
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +39,7 @@ async def test_overview_degrades_to_null_spans_when_the_span_read_fails(caplog):
 
     assert result["history_from"] is None
     assert result["history_to"] is None
-    assert len(result["grid"]) == 35
+    assert len(result["grid"]) == 7 * len(BANDS)
     assert _logged_with_traceback(caplog)
 
 

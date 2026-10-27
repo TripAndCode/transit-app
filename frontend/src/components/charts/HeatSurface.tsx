@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ForecastOverviewGridCell, ForecastOverviewWorst, TrendPayload } from "../../api/types";
 import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
+import { bandLabel } from "../../api/timeBands";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
 import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
@@ -194,7 +195,7 @@ export function HeatSurface({
           {t("reports.dow_band.worst_phrase", {
             count: rangeDays,
             day: dayLabel(worst.dow),
-            band: t(`forecast.band_${worst.band}`),
+            band: bandLabel(t, worst.band),
             avg: avgDelayText(t, worst.expected_avg_min),
           })}
         </p>

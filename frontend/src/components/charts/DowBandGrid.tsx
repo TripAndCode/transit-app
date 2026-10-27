@@ -1,10 +1,13 @@
 import { useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { useRovingCells } from "../../hooks/useRovingCells";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
+import type { ForecastOverviewGridCell } from "../../api/types";
+import { BAND_ORDER, bandHoursText, bandLabel, bandName } from "../../api/timeBands";
 import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
 import { fixedTenth, formatMinutes } from "../../utils/format";
+import "./DowBandGrid.css";
 
 const RAMP_STOPS = 5;
 
@@ -30,15 +33,17 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
   );
 }
 
-/** 7-day × 5-band grid. Dense by construction — used for the agency overview and
- * the per-route detail (route cells collapsed to bands client-side).
+/** 7-day × time-band grid, one column per band of `BAND_ORDER`. Dense by
+ * construction — used for the agency overview and the per-route detail (route
+ * cells collapsed to bands client-side). Each column is headed by its band's
+ * name over its hours; a phone column is too narrow for a name, so there it
+ * shows the hours alone, and every cell still names its band in full.
  *
  * A cell at or beyond the severe threshold is outlined rather than
  * recoloured, so the outline survives whatever ramp `colorFor` applies. */
 export function BandGrid({
   ariaLabel,
   grid,
-  bandLabel,
   dayLabel,
   colorFor,
   onTip,
@@ -47,12 +52,12 @@ export function BandGrid({
   /** Already-translated accessible name for the grid. */
   ariaLabel: string;
   grid: ForecastOverviewGridCell[];
-  bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
   colorFor: (v: number) => string;
   onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
+  const { t } = useTranslation();
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useFirstData(grid.length > 0);
@@ -91,8 +96,9 @@ export function BandGrid({
         <div role="row" style={{ display: "contents" }}>
           <span aria-hidden="true" />
           {BAND_ORDER.map((b) => (
-            <span key={b} role="columnheader" style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
-              {bandLabel(b)}
+            <span key={b} role="columnheader" aria-label={bandLabel(t, b)} className="band-grid__head">
+              <span className="band-grid__name" aria-hidden="true">{bandName(t, b)}</span>
+              <span className="band-grid__hours" aria-hidden="true">{bandHoursText(t, b)}</span>
             </span>
           ))}
         </div>
@@ -106,7 +112,7 @@ export function BandGrid({
             {BAND_ORDER.map((b, bi) => {
               const c = byKey.get(`${dow}-${b}`);
               const v = c?.expected_avg_min ?? null;
-              const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : formatMinutes(v)}`;
+              const tipText = `${dayLabel(dow)} ${bandLabel(t, b)} · ${v == null ? "—" : formatMinutes(v)}`;
               // The dimming for a low-confidence cell (--cell-opacity) has to
               // come from a CSS custom property, not a plain inline
               // `opacity` -- an inline style always wins over the

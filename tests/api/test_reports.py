@@ -682,10 +682,10 @@ async def test_reports_trend_reads_agg(reports_client, ch_client):
     # dow_band: pooled from the same hourly cells, no routes/disclaimer keys
     dow_band = rows[0]["dow_band"]
     assert set(dow_band.keys()) == {"grid", "worst"}
-    assert len(dow_band["grid"]) == 35
-    # 2026-05-19 is a Tuesday (dow=2), hour 10 -> band "midday"
-    tue_midday = next(c for c in dow_band["grid"] if c["dow"] == 2 and c["band"] == "midday")
-    assert tue_midday["samples"] > 0
+    assert len(dow_band["grid"]) == 49
+    # 2026-05-19 is a Tuesday (dow=2), hour 10 -> band "forenoon"
+    tue_forenoon = next(c for c in dow_band["grid"] if c["dow"] == 2 and c["band"] == "forenoon")
+    assert tue_forenoon["samples"] > 0
 
 
 @pytest.mark.asyncio
