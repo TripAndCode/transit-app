@@ -30,10 +30,12 @@ import { Card } from "./ui/Card";
 import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
 import { useRovingCells } from "../hooks/useRovingCells";
-import { delayColor, relativeDelayColor } from "../styles/tokens";
+import { calmDelayColor, delayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { forecastDelayText } from "../utils/delayPhrase";
+import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
+import { datedDayLabel, forecastDayOfMonth } from "../utils/forecastDays";
 import {
   BAND_ORDER,
   bandOf,
@@ -107,9 +109,7 @@ function RankedRoutes({
   lowConfNote: string;
   onPick: (code: string) => void;
 }) {
-  const vals = routes.map((r) => r.expected_avg_min);
-  const max = Math.max(...vals, 1);
-  const min = vals.length ? Math.min(...vals) : 0;
+  const max = Math.max(...routes.map((r) => r.expected_avg_min), 1);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {routes.map((r) => (
@@ -124,7 +124,7 @@ function RankedRoutes({
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: relativeDelayColor(r.expected_avg_min, min, max), borderRadius: 3 }} />
+            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: calmDelayColor(r.expected_avg_min), borderRadius: 3 }} />
           </span>
           {/* Always render this grid cell, even when InlineSparkline itself
               returns null (fewer than 2 points) — otherwise CSS grid
@@ -143,21 +143,27 @@ function RankedRoutes({
   );
 }
 
+/** Row-label width that fits a dated weekday ("10/27(火)", "Tue 10/27") at the grid's label size. */
+const DATED_ROW_LABEL_PX = 64;
+
 function HeatmapGrid({
   cells,
   big,
   dayLabel,
+  dated,
   ariaLabel,
 }: {
   cells: ForecastHeatmapCell[];
   big: boolean;
   dayLabel: (dow: number) => string;
+  /** Some row labels carry a date, so the label column is widened to fit one. */
+  dated: boolean;
   ariaLabel: string;
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
   const byKey = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
-  const labelW = big ? 30 : 22;
+  const labelW = dated ? DATED_ROW_LABEL_PX : big ? 30 : 22;
   const cellH = big ? 26 : 13;
   const gap = big ? 3 : 2;
   const cols = `${labelW}px repeat(24, 1fr)`;
@@ -200,7 +206,7 @@ function HeatmapGrid({
             <div key={`r${dow}`} role="row" style={{ display: "contents" }}>
               <div
                 role="rowheader"
-                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}
+                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5, whiteSpace: "nowrap" }}
               >
                 {dayLabel(dow)}
               </div>
@@ -296,6 +302,7 @@ function HeatmapGrid({
 function MarginBars({
   values,
   labels,
+  axisLabels,
   testid,
   big,
   sparse,
@@ -303,6 +310,8 @@ function MarginBars({
 }: {
   values: (number | null)[];
   labels: string[];
+  /** What the axis shows under each bar, when it differs from `labels`. */
+  axisLabels?: React.ReactNode[];
   testid: string;
   big: boolean;
   sparse: boolean;
@@ -313,7 +322,7 @@ function MarginBars({
   const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, values.length);
 
   return (
-    <div ref={containerRef} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
+    <div ref={containerRef} className={big ? undefined : "fc-bars--compact"} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
       <div
         role="row"
         style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}
@@ -338,8 +347,9 @@ function MarginBars({
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: 4 }} aria-hidden="true">
         {labels.map((l, i) => (
-          <span key={i} style={{ flex: 1, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
-            {sparse ? (i % 6 === 0 ? i : "") : l}
+          // nowrap: a column narrower than "12" or "28" must not stack its digits.
+          <span key={i} style={{ flex: 1, minWidth: 0, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
+            {sparse ? (i % 6 === 0 ? i : "") : (axisLabels?.[i] ?? l)}
           </span>
         ))}
       </div>
@@ -489,6 +499,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   return (
     <div>
       <RoutePicker aid={aid} names={names} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
+      <ForecastPeriodNote aid={aid} route={focusedRoute} />
       {!focusedRoute && (
         <AgencyLanding
           aid={aid}
@@ -504,7 +515,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: forecastDelayText(t, w.expected_avg_min, w.source) })}
+          worstPhrase={(w, day) => t("forecast.overview_worst_phrase", { day, band: bandLabel(w.band), avg: forecastDelayText(t, w.expected_avg_min, w.source) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
@@ -617,11 +628,13 @@ function AgencyLanding({
   noData: string;
   lowConfNote: string;
   legendUnit: string;
-  worstPhrase: (w: ForecastOverviewWorst) => string;
+  /** `day` names the window's weekday, dated when the model forecast it. */
+  worstPhrase: (w: ForecastOverviewWorst, day: string) => string;
   onPick: (code: string) => void;
   onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, error, refetch } = useForecastOverview(aid);
   if (isPending) return <Skeleton height={240} />;
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
@@ -631,33 +644,42 @@ function AgencyLanding({
   if (populated.length === 0 && data.routes.length === 0) {
     return <p style={{ color: "var(--text-secondary)" }}>{noData}</p>;
   }
-  const colorFor = (v: number) => relativeDelayColor(v, min, max);
+  const forecastDay = datedDayLabel(t, dayLabel, data.forecast_days);
 
+  const shownRoutes = data.routes.slice(0, 8);
+  // InlineSparkline draws nothing from fewer than two days, so the note that
+  // explains the line names its window only when some shown route has one.
+  const linesDrawn = shownRoutes.some((r) => (r.recent_daily?.length ?? 0) >= 2);
   return (
     <>
       {data.grid.some((c) => c.source === "ml") && <MlForecastChip aid={aid} />}
       {data.worst && (
         <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>{worstPhrase(data.worst)}</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{worstPhrase(data.worst, (data.worst.source === "ml" ? forecastDay : dayLabel)(data.worst.dow))}</div>
         </div>
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid ariaLabel={gridTitle} grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
-        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
+        <BandGrid ariaLabel={gridTitle} grid={data.grid} bandLabel={bandLabel} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={calmDelayColor} />}
       </SectionCard>
-
-      {data.routes.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
-          </SectionCard>
-        </div>
-      )}
 
       {data.disclaimer && (
         <p style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
+      )}
+
+      {shownRoutes.length > 0 && (
+        <ForecastHistory
+          from={data.history_from}
+          to={data.history_to}
+          recentFrom={linesDrawn ? data.recent_from : null}
+          recentTo={linesDrawn ? data.recent_to : null}
+        >
+          <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
+            <RankedRoutes routes={shownRoutes} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+          </SectionCard>
+        </ForecastHistory>
       )}
     </>
   );
@@ -703,11 +725,11 @@ function RouteDetail({
 
   // Band-collapsed grid (same banding as the agency landing). The headline worst
   // is the worst *band* (excluding low-confidence) so its number matches the band
-  // cell the user sees below it — not a single spiky hour. Its colour ramp is
-  // anchored to the band grid's own range.
+  // cell the user sees below it — not a single spiky hour. Its legend spans the
+  // band grid's own range.
   const bandGrid = collapseToBands(cells);
   const { populated: bandPop, min: bandMin, max: bandMax } = populatedRange(bandGrid);
-  const bandColorFor = (v: number) => relativeDelayColor(v, bandMin, bandMax);
+  const forecastDay = datedDayLabel(t, dayLabel, data?.forecast_days ?? []);
   const worstBand = bandPop
     .filter((c) => !c.low_confidence)
     .reduce<ForecastOverviewGridCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
@@ -720,7 +742,21 @@ function RouteDetail({
     });
   const dowAvg = margin((c) => c.dow - 1, 7);
   const hourAvg = margin((c) => c.hour, 24);
-  const dowLabels = Array.from({ length: 7 }, (_, i) => dayLabel(i + 1));
+  const dowLabels = Array.from({ length: 7 }, (_, i) => forecastDay(i + 1));
+  // Each day's axis column is narrow, so a forecast day shows its day of the
+  // month under the weekday; its tooltip and name carry the whole date.
+  const forecastDays = forecastDayOfMonth(data?.forecast_days ?? []);
+  const dowAxis = Array.from({ length: 7 }, (_, i) => {
+    const day = forecastDays.get(i + 1);
+    return day ? (
+      <>
+        {dayLabel(i + 1)}
+        <span className="fc-axis-day">{day}</span>
+      </>
+    ) : (
+      dayLabel(i + 1)
+    );
+  });
   const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}:00`);
 
   const argExtreme = (vals: (number | null)[], worst: boolean) => {
@@ -750,18 +786,18 @@ function RouteDetail({
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: forecastDelayText(t, worstBand.expected_avg_min as number, worstBand.source) })}
+          {t("forecast.detail_worst_phrase", { day: (worstBand.source === "ml" ? forecastDay : dayLabel)(worstBand.dow), band: bandLabel(worstBand.band), avg: forecastDelayText(t, worstBand.expected_avg_min as number, worstBand.source) })}
         </div>
       )}
 
       <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
-        {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
+        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} bandLabel={bandLabel} dayLabel={forecastDay} colorFor={calmDelayColor} onTip={onTip} onLeave={onLeave} />
+        {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={calmDelayColor} />}
       </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
         <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
+          <MarginBars values={dowAvg} labels={dowLabels} axisLabels={dowAxis} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
         <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-hr" onOpen={() => setView("hr")}>
           <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
@@ -778,7 +814,7 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
+          <HeatmapGrid cells={cells} big dayLabel={forecastDay} dated={forecastDays.size > 0} ariaLabel={t("forecast.heatmap_aria")} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
       )}
@@ -804,7 +840,7 @@ function RouteDetail({
                     { label: t(mlBacked ? "forecast.stat_samples_history" : "forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
+                <MarginBars values={vals} labels={labels} axisLabels={view === "dow" ? dowAxis : undefined} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
               </>
             );
           })()}

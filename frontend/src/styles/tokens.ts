@@ -217,12 +217,9 @@ export function severityStepColors(): readonly [
   ];
 }
 
-// Continuous calm ramp for *relative* (within-view) severity: t=0 → sage, t=1 → orange.
-// Stops short of the absolute ramp's alarm red on purpose, so a narrow within-view
-// spread (e.g. an agency whose delays sit at 1.6–3.3 min) still reads as a legible
-// gradient without shouting. Use this when the message is "which window is worse
-// *here*"; use `delayColor` when absolute severity is the message (e.g. a chip).
-const RELATIVE_STOPS = [DELAY_RAMP.ok, DELAY_RAMP.mild, DELAY_RAMP.moderate] as const;
+// Continuous calm ramp: t=0 → sage, t=1 → orange, stopping short of the absolute
+// ramp's alarm red on purpose.
+const CALM_STOPS = [DELAY_RAMP.ok, DELAY_RAMP.mild, DELAY_RAMP.moderate] as const;
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
@@ -231,20 +228,23 @@ function hexToRgb(hex: string): [number, number, number] {
 
 function rampColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t));
-  const seg = clamped * (RELATIVE_STOPS.length - 1);
-  const i = Math.min(Math.floor(seg), RELATIVE_STOPS.length - 2);
+  const seg = clamped * (CALM_STOPS.length - 1);
+  const i = Math.min(Math.floor(seg), CALM_STOPS.length - 2);
   const f = seg - i;
-  const a = hexToRgb(RELATIVE_STOPS[i]);
-  const b = hexToRgb(RELATIVE_STOPS[i + 1]);
+  const a = hexToRgb(CALM_STOPS[i]);
+  const b = hexToRgb(CALM_STOPS[i + 1]);
   const mix = a.map((av, k) => Math.round(av + (b[k] - av) * f));
   return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
 }
 
-/** Color a value by its position within [min, max] on the calm relative ramp.
- * When the range is degenerate (all equal), returns the mid tone. */
-export function relativeDelayColor(value: number, min: number, max: number): string {
-  if (max <= min) return rampColor(0.5);
-  return rampColor((value - min) / (max - min));
+/** A delay in minutes on the calm continuous ramp: no delay (or early running)
+ *  is sage and the severe threshold or more is orange, never red. The scale is
+ *  fixed in minutes rather than stretched over a view's own spread, so the
+ *  same delay is the same colour in every view: a view whose values all run
+ *  late never paints its smallest one as on time, and a calm view never paints
+ *  its largest as severe. */
+export function calmDelayColor(minutes: number): string {
+  return rampColor(minutes / DELAY_THRESHOLDS.severe);
 }
 
 /** The v2 delay ramp (`--d0`…`--d4` in global.css) for a mean delay in

@@ -4,7 +4,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   DELAY_RAMP,
   DELAY_RAMP_TEXT,
+  DELAY_THRESHOLDS,
   accentColorResolved,
+  calmDelayColor,
   delayRampVar,
   contrastRatio,
   delayColor,
@@ -109,6 +111,37 @@ describe("DELAY_RAMP_TEXT / delayTextColor() (text-safe delay ramp)", () => {
     expect(delayTextColor(2)).toBe(DELAY_RAMP_TEXT.mild);
     expect(delayTextColor(4)).toBe(DELAY_RAMP_TEXT.moderate);
     expect(delayTextColor(15)).toBe(DELAY_RAMP_TEXT.severe);
+  });
+});
+
+/** A `#rrggbb` token as the `rgb(r, g, b)` string the continuous ramp returns. */
+function rgbCss(hex: string): string {
+  return `rgb(${rgb(hex).join(", ")})`;
+}
+
+describe("calmDelayColor() (continuous calm ramp, anchored on minutes)", () => {
+  it("runs from the ok colour at no delay to the moderate colour at the severe threshold", () => {
+    expect(calmDelayColor(0)).toBe(rgbCss(DELAY_RAMP.ok));
+    expect(calmDelayColor(DELAY_THRESHOLDS.severe / 2)).toBe(rgbCss(DELAY_RAMP.mild));
+    expect(calmDelayColor(DELAY_THRESHOLDS.severe)).toBe(rgbCss(DELAY_RAMP.moderate));
+  });
+
+  it("never reaches the severe alarm colour, however large the delay", () => {
+    expect(calmDelayColor(18)).toBe(rgbCss(DELAY_RAMP.moderate));
+  });
+
+  it("paints early running like no delay", () => {
+    expect(calmDelayColor(-2)).toBe(rgbCss(DELAY_RAMP.ok));
+  });
+
+  it("gives a delay the same colour whatever else the view holds, so a seven-minute delay is never the ok end", () => {
+    expect(calmDelayColor(7.3)).toBe(calmDelayColor(10.6));
+    expect(calmDelayColor(7.3)).not.toBe(rgbCss(DELAY_RAMP.ok));
+  });
+
+  it("keeps a small delay at the calm end, even when it is the largest in its view", () => {
+    expect(calmDelayColor(1.8)).not.toBe(rgbCss(DELAY_RAMP.moderate));
+    expect(calmDelayColor(1.8)).not.toBe(calmDelayColor(DELAY_THRESHOLDS.moderate));
   });
 });
 

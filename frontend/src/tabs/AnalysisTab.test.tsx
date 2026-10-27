@@ -127,6 +127,11 @@ describe("AnalysisTab", () => {
         grid: [],
         worst: null,
         routes: [],
+        forecast_days: [],
+        history_from: null,
+        history_to: null,
+        recent_from: null,
+        recent_to: null,
         disclaimer: "",
         scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false },
       },
@@ -144,13 +149,31 @@ describe("AnalysisTab", () => {
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
-      data: { grid: [], worst: null, routes: [], disclaimer: "", scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false } },
+      data: {
+        grid: [],
+        worst: null,
+        routes: [],
+        forecast_days: [],
+        history_from: null,
+        history_to: null,
+        recent_from: null,
+        recent_to: null,
+        disclaimer: "",
+        scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false },
+      },
       isPending: false,
       error: null,
       refetch: vi.fn(),
     } as never);
     vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({
-      data: { route: "44242", cells: [], scope_applied: { from: false, to: false, dow: false, time_band: false, routes: true } },
+      data: {
+        route: "44242",
+        cells: [],
+        forecast_days: [],
+        history_from: null,
+        history_to: null,
+        scope_applied: { from: false, to: false, dow: false, time_band: false, routes: true },
+      },
       isPending: false,
       error: null,
       refetch: vi.fn(),

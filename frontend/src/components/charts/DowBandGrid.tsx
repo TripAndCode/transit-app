@@ -13,8 +13,8 @@ const RAMP_STOPS = 5;
 export type TipAnchor = { clientX: number; clientY: number };
 
 /** Anchored min→max colour ramp legend (shown inline, not only in the modal).
- * `colorFor` defaults to the absolute ramp; pass a relative ramp to match a grid
- * that uses one, so the legend reflects the encoding actually shown. */
+ * `colorFor` defaults to the absolute ramp; pass the grid's own ramp when it uses
+ * another, so the legend reflects the encoding actually shown. */
 export function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>

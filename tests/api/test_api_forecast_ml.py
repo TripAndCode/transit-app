@@ -227,3 +227,38 @@ async def test_heatmap_flags_an_ml_cell_with_no_baseline_history_as_low_confiden
     cell = next(c for c in body["cells"] if c["dow"] == target_dow and c["hour"] == 8)
     assert cell["samples"] == 0
     assert cell["low_confidence"] is True
+
+
+async def test_overview_and_heatmap_name_the_dates_their_ml_rows_forecast(client, aconn, aagency_id, monkeypatch):
+    # Service dates one to five days out stay inside the horizon whichever
+    # side of the UTC date change the JST clock is on.
+    monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
+    flags.reset_cache()
+    later, sooner = jst_today() + timedelta(days=3), jst_today() + timedelta(days=1)
+    for day in (later, sooner):
+        await _seed_raw_ml_row(aconn, aagency_id, "R1", service_date=day, hour=8, mean_min=4.0, origin_date=jst_today())
+    await _seed_raw_ml_row(aconn, aagency_id, "R2", service_date=sooner, hour=17, mean_min=6.0, origin_date=jst_today())
+
+    overview = (await client.get(f"/api/{aagency_id}/forecast/overview")).json()
+    r1 = (await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})).json()
+    r2 = (await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R2"})).json()
+
+    def named(*days):
+        return [{"dow": d.isoweekday(), "service_date": d.isoformat()} for d in days]
+
+    assert overview["forecast_days"] == named(sooner, later)
+    assert r1["forecast_days"] == named(sooner, later)
+    # A route's own view names only the days its own forecast covers.
+    assert r2["forecast_days"] == named(sooner)
+
+
+async def test_no_date_is_named_as_forecast_while_the_flag_is_off(client, aconn, aagency_id, monkeypatch):
+    monkeypatch.setenv("ML_FORECAST_ENABLED", "false")
+    flags.reset_cache()
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())
+
+    overview = (await client.get(f"/api/{aagency_id}/forecast/overview")).json()
+    heatmap = (await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})).json()
+
+    assert overview["forecast_days"] == []
+    assert heatmap["forecast_days"] == []

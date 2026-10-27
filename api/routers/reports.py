@@ -11,7 +11,7 @@ scans ClickHouse. ``rendered_at`` reflects the moment the request was served.
 import csv
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 import asyncpg
@@ -64,7 +64,9 @@ from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONO
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
 from pipeline.reports.filters import _service_label
 from pipeline.reports.forecast import (
+    RECENT_DAYS,
     hourly_cells_to_dow_band,
+    recent_window,
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
@@ -119,7 +121,7 @@ _ML_FRESH_ROWS = (
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
     """Fresh `agg_route_forecast_ml` rows for this agency (and route, if
-    given), as plain dicts with `dow`/`hour`/`mean_min`. Returns a list of
+    given), as plain dicts with `dow`/`hour`/`mean_min`/`service_date`. Returns a list of
     rows rather than a (dow, hour)-keyed mapping: when `route_code` is
     `None` (the agency-wide overview), more than one route can share a
     (dow, hour) slot, and collapsing them into one dict entry per key would
@@ -142,7 +144,52 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
     except Exception:
         _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)
         return []
-    return [{"dow": row["service_date"].isoweekday(), "hour": row["hour"], "mean_min": row["mean_min"]} for row in rows]
+    return [
+        {
+            "dow": row["service_date"].isoweekday(),
+            "hour": row["hour"],
+            "mean_min": row["mean_min"],
+            "service_date": row["service_date"],
+        }
+        for row in rows
+    ]
+
+
+async def _fetch_span(conn: asyncpg.Connection, sql: str, *args: Any) -> tuple[date | None, date | None]:
+    """`sql`'s `first`/`last` day. Never raises: a span only labels figures,
+    so a failed read degrades to no dates rather than 500ing a response whose
+    figures are fine."""
+    try:
+        row = await conn.fetchrow(sql, *args)
+    except Exception:
+        _log.warning("_fetch_span: could not read a forecast date span -- degrading to no dates", exc_info=True)
+        return None, None
+    return row["first"], row["last"]
+
+
+async def _fetch_history_span(conn: asyncpg.Connection, agency_id: int) -> tuple[date | None, date | None]:
+    """The days the overview's past averages pool. agg_route_hour_dow keeps no
+    date; agg_hour_daily keeps the same rows it pools (those with a scheduled
+    time), so its first and last day bound them."""
+    return await _fetch_span(
+        conn, "SELECT MIN(date) AS first, MAX(date) AS last FROM agg_hour_daily WHERE agency_id = $1", agency_id
+    )
+
+
+async def _fetch_route_span(
+    conn: asyncpg.Connection, agency_id: int, route_code: str
+) -> tuple[date | None, date | None]:
+    """First and last analyzed day of one route, from agg_route_daily: no
+    dated aggregate keeps exactly the rows agg_route_hour_dow pools per route,
+    so this bounds them from the outside. route_code is not a prefix of that
+    table's key, so the read walks the agency's index range until it finds
+    the route; the caller skips it for a route with no pooled rows."""
+    return await _fetch_span(
+        conn,
+        "SELECT MIN(date) AS first, MAX(date) AS last FROM agg_route_daily WHERE agency_id = $1 AND route_code = $2",
+        agency_id,
+        route_code,
+    )
 
 
 async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
@@ -589,11 +636,25 @@ class ForecastHeatmapCell(BaseModel):
     source: Literal["ml", "baseline"]
 
 
+class ForecastDay(BaseModel):
+    """A weekday row whose cells come from the forecast model, and the
+    service date that model run forecasts for it."""
+
+    dow: int
+    service_date: date
+
+
 class ForecastHeatmapResponse(BaseModel):
-    """Payload for ``GET /forecast/heatmap`` — the full 7×24 day×hour grid."""
+    """Payload for ``GET /forecast/heatmap`` — the full 7×24 day×hour grid.
+    `forecast_days` names the dates this route's ML cells forecast, oldest
+    first; `history_from`/`history_to` bound the analyzed days of this
+    route that its past averages pool (null for a route with none)."""
 
     route: str
     cells: list[ForecastHeatmapCell]
+    forecast_days: list[ForecastDay]
+    history_from: date | None
+    history_to: date | None
     disclaimer: str
     scope_applied: dict[str, bool]
 
@@ -619,8 +680,11 @@ async def forecast_heatmap(
         route,
     )
     ml_cells = await _fetch_ml_cells(conn, agency_id, route)
+    history_from, history_to = await _fetch_route_span(conn, agency_id, route) if rows else (None, None)
     return {
         **summarize_expected_delay_heatmap(rows, route, locale, ml_cells=ml_cells),
+        "history_from": history_from,
+        "history_to": history_to,
         "scope_applied": _FORECAST_HEATMAP_SCOPE,
     }
 
@@ -655,46 +719,62 @@ class ForecastOverviewRoute(BaseModel):
     expected_avg_min: float
     samples: int
     low_confidence: bool
-    # Last 7 analyzed calendar days' average delay for this route, oldest
-    # first (from agg_route_daily — a different, seasonally-pooled source
+    # The last RECENT_DAYS analyzed calendar days' average delay for this
+    # route, oldest first (from agg_route_daily — a different, seasonally-pooled source
     # than expected_avg_min above). Empty when the route has no recent
     # agg_route_daily rows (e.g. it hasn't run in the last week).
     recent_daily: list[float] = []
 
 
 class ForecastOverviewResponse(BaseModel):
-    """Payload for ``GET /forecast/overview`` — agency-wide landing view."""
+    """Payload for ``GET /forecast/overview`` — agency-wide landing view.
+    `forecast_days` names the dates the grid's ML cells forecast, oldest
+    first. `history_from`/`history_to` bound the analyzed days the past
+    averages pool (the baseline cells and every route's figure), and
+    `recent_from`/`recent_to` the window `recent_daily` draws from. Each
+    pair is null for an agency with no analyzed day."""
 
     grid: list[ForecastOverviewGridCell]
     worst: ForecastOverviewWorst | None
     routes: list[ForecastOverviewRoute]
+    forecast_days: list[ForecastDay]
+    history_from: date | None
+    history_to: date | None
+    recent_from: date | None
+    recent_to: date | None
     disclaimer: str
     scope_applied: dict[str, bool]
 
 
-async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> list[asyncpg.Record]:
-    """Last 7 analyzed calendar days per route, from agg_route_daily (real
-    per-date rows) — a different table than route_rows in forecast_overview
-    (which pools ALL time from the seasonal agg_route_hour_dow). Powers each
-    route's sparkline. NULL MAX(date) (brand-new agency, no agg rows yet)
+async def _fetch_recent_daily_rows(
+    conn: asyncpg.Connection, agency_id: int
+) -> tuple[list[asyncpg.Record], date | None, date | None]:
+    """The last RECENT_DAYS analyzed calendar days per route, from
+    agg_route_daily (real per-date rows) — a different table than route_rows
+    in forecast_overview (which pools ALL time from the seasonal
+    agg_route_hour_dow) — with the first and last day of that window. Powers
+    each route's sparkline. NULL MAX(date) (brand-new agency, no agg rows yet)
     makes the WHERE clause's date comparisons false, so this safely returns
-    zero rows rather than erroring.
+    zero rows and no window rather than erroring.
     """
-    return await conn.fetch(
-        "WITH latest AS ("
-        "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
+    rows = await conn.fetch(
+        "WITH span AS ("
+        "  SELECT MIN(date) AS first, MAX(date) AS last FROM agg_route_daily WHERE agency_id = $1"
         ") "
         # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
         # same row population — see forecast_heatmap's identical rationale.
-        "SELECT d.date, d.route_code, "
+        "SELECT d.date, d.route_code, span.first AS span_first, span.last AS span_last, "
         "  (SUM(d.sum_delay_sec) FILTER (WHERE d.sum_delay_sec IS NOT NULL)::numeric "
         "      / NULLIF(SUM(d.samples) FILTER (WHERE d.sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
-        "FROM agg_route_daily d, latest "
-        "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
-        "GROUP BY d.date, d.route_code "
+        "FROM agg_route_daily d, span "
+        f"WHERE d.agency_id = $1 AND d.date > span.last - {RECENT_DAYS} AND d.date <= span.last "
+        "GROUP BY d.date, d.route_code, span.first, span.last "
         "ORDER BY d.route_code, d.date",
         agency_id,
     )
+    if not rows:
+        return [], None, None
+    return rows, *recent_window(rows[0]["span_first"], rows[0]["span_last"])
 
 
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
@@ -734,19 +814,27 @@ async def forecast_overview(
         agency_id,
     )
     # Purely decorative (unlike grid_rows/route_rows above), so a failure here
-    # degrades to no sparklines instead of 500ing the whole response.
+    # degrades to no sparklines, and so no sparkline window, instead of
+    # 500ing the whole response.
+    recent_from: date | None
+    recent_to: date | None
     try:
-        recent_daily_rows = await _fetch_recent_daily_rows(conn, agency_id)
+        recent_daily_rows, recent_from, recent_to = await _fetch_recent_daily_rows(conn, agency_id)
     except Exception:
         _log.warning(
             "forecast_overview: recent-daily sparkline fetch failed for agency %s — degrading to no sparklines",
             agency_id,
             exc_info=True,
         )
-        recent_daily_rows = []
+        recent_daily_rows, recent_from, recent_to = [], None, None
     ml_cells = await _fetch_ml_cells(conn, agency_id, None)
+    history_from, history_to = await _fetch_history_span(conn, agency_id)
     return {
         **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale, ml_cells=ml_cells),
+        "history_from": history_from,
+        "history_to": history_to,
+        "recent_from": recent_from,
+        "recent_to": recent_to,
         "scope_applied": _FORECAST_OVERVIEW_SCOPE,
     }
 

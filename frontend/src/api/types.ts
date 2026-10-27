@@ -757,10 +757,22 @@ export interface ForecastHeatmapCell {
   source: "ml" | "baseline";
 }
 
+/** A weekday row whose cells come from the forecast model, and the service
+ *  date that model run forecasts for it (ISO `YYYY-MM-DD`). */
+export interface ForecastDay {
+  dow: number; // 1=Mon .. 7=Sun (ISODOW)
+  service_date: string;
+}
+
 export interface ForecastHeatmap {
   scope_applied?: ScopeApplied;
   route: string;
   cells: ForecastHeatmapCell[]; // always 168 (7×24)
+  /** The dates this route's ML cells forecast, oldest first. */
+  forecast_days: ForecastDay[];
+  /** First and last analyzed day this route's past averages pool; null when it has none. */
+  history_from: string | null;
+  history_to: string | null;
   disclaimer: string;
 }
 
@@ -824,6 +836,15 @@ export interface ForecastOverview {
   grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
   worst: ForecastOverviewWorst | null;
   routes: ForecastOverviewRoute[];
+  /** The dates the grid's ML cells forecast, oldest first. */
+  forecast_days: ForecastDay[];
+  /** First and last analyzed day the past averages pool (baseline cells and
+   *  every route's figure); null when the agency has none. */
+  history_from: string | null;
+  history_to: string | null;
+  /** First and last day of the window `recent_daily` draws from. */
+  recent_from: string | null;
+  recent_to: string | null;
   disclaimer: string;
 }
 

@@ -1,5 +1,7 @@
 """API tests for GET /api/{agency_id}/forecast/heatmap."""
 
+from datetime import date
+
 import httpx
 import pytest
 from httpx import ASGITransport
@@ -46,10 +48,24 @@ async def heatmap_client(apply_schema):
             (aid, "R1", "祝日", 5, 11, 50.0, 90, None),
         ],
     )
+    # R2's wider span must not stretch R1's own window.
+    daily_rows = [
+        (aid, date(2026, 5, 1), "R1", "平日"),
+        (aid, date(2026, 5, 20), "R1", "祝日"),
+        (aid, date(2026, 4, 1), "R2", "平日"),
+        (aid, date(2026, 6, 1), "R2", "平日"),
+    ]
+    await pool.executemany(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        "trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,60,60,5,50,now(),3000)",
+        daily_rows,
+    )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, aid
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE agencies, agg_route_hour_dow CASCADE")
+        await conn.execute("TRUNCATE agencies, agg_route_hour_dow, agg_route_daily CASCADE")
     await pool.close()
 
 
@@ -101,3 +117,15 @@ async def test_heatmap_requires_route(heatmap_client):
     client, aid = heatmap_client
     r = await client.get(f"/api/{aid}/forecast/heatmap")
     assert r.status_code == 422
+
+
+async def test_heatmap_names_the_window_its_route_was_measured_over(heatmap_client):
+    client, aid = heatmap_client
+    body = (await client.get(f"/api/{aid}/forecast/heatmap", params={"route": "R1"})).json()
+    assert body["history_from"] == "2026-05-01"
+    assert body["history_to"] == "2026-05-20"
+    assert body["forecast_days"] == []
+
+    unmeasured = (await client.get(f"/api/{aid}/forecast/heatmap", params={"route": "R9"})).json()
+    assert unmeasured["history_from"] is None
+    assert unmeasured["history_to"] is None

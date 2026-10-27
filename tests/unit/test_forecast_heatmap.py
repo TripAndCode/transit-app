@@ -1,5 +1,7 @@
 """Pure unit tests for the day×hour heatmap summarizer (DB-free)."""
 
+from datetime import date
+
 from pipeline.reports.forecast import summarize_expected_delay_heatmap
 
 
@@ -40,3 +42,20 @@ def test_disclaimer_both_locales():
 
 def test_route_echoed():
     assert summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100)), "R9")["route"] == "R9"
+
+
+def test_forecast_days_name_the_service_date_each_ml_weekday_row_stands_for():
+    ml_cells = [
+        {"dow": 4, "hour": 8, "mean_min": 3.0, "service_date": date(2026, 10, 29)},
+        {"dow": 2, "hour": 8, "mean_min": 2.0, "service_date": date(2026, 10, 27)},
+        {"dow": 2, "hour": 9, "mean_min": 2.5, "service_date": date(2026, 10, 27)},
+    ]
+    out = summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100)), "R1", ml_cells=ml_cells)
+    assert out["forecast_days"] == [
+        {"dow": 2, "service_date": date(2026, 10, 27)},
+        {"dow": 4, "service_date": date(2026, 10, 29)},
+    ]
+
+
+def test_a_baseline_only_heatmap_forecasts_no_date():
+    assert summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100)), "R1")["forecast_days"] == []

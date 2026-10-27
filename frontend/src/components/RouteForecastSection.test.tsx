@@ -4,7 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
-import { BAND_ORDER, type ForecastOverview } from "../api/types";
+import { BAND_ORDER, type ForecastDay, type ForecastOverview } from "../api/types";
+import { calmDelayColor } from "../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []) {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -33,6 +34,11 @@ function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
       { route_code: "100", route_name: "Main Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
       { route_code: "200", route_name: "Side Line", expected_avg_min: 9.9, samples: 5, low_confidence: true },
     ],
+    forecast_days: [],
+    history_from: "2026-07-12",
+    history_to: "2026-10-23",
+    recent_from: "2026-10-17",
+    recent_to: "2026-10-23",
     disclaimer: "test disclaimer",
     ...partial,
   };
@@ -55,7 +61,14 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
       });
     }
   }
-  return { route: "100", cells, disclaimer: "test disclaimer" };
+  return {
+    route: "100",
+    cells,
+    forecast_days: [] as ForecastDay[],
+    history_from: "2026-07-12",
+    history_to: "2026-10-23",
+    disclaimer: "test disclaimer",
+  };
 }
 
 function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "", hm = heatmap()) {
@@ -213,9 +226,105 @@ describe("RouteForecastSection", () => {
     expect(within(named).getByText("Line 10")).toBeInTheDocument();
   });
 
-  it("says what the small line beside each route shows", () => {
+  it("says what the small line beside each route shows, and over which days", () => {
+    const routes = overview().routes.map((r, i) => (i === 0 ? { ...r, recent_daily: [2.0, 4.0] } : r));
+    renderSection(overview({ routes }));
+    expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).toHaveTextContent(
+      "The small line traces its daily average on the days with data over Oct 17 – Oct 23.",
+    );
+  });
+
+  it("leaves the small line unexplained when no shown route has two days to draw it from", () => {
+    const routes = overview().routes.map((r) => ({ ...r, recent_daily: [3.0] }));
+    renderSection(overview({ routes }));
+    expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).not.toHaveTextContent(
+      "The small line traces",
+    );
+  });
+
+  it("heads the route list as past measurements over its window, apart from the forecast and its caveat", () => {
     renderSection();
-    expect(within(screen.getByTestId("fc-overview-routes")).getByText(/daily average over its last 7 days of data/)).toBeInTheDocument();
+    const history = screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" });
+    expect(within(history).getByTestId("fc-overview-routes")).toHaveTextContent("Routes that ran late");
+    expect(within(history).queryByTestId("fc-overview-grid")).toBeNull();
+    expect(within(history).queryByText("test disclaimer")).toBeNull();
+  });
+
+  it("says the grid is a typical week when no forecast model covers it", () => {
+    renderSection();
+    expect(screen.getByTestId("fc-period")).toHaveTextContent("Not a forecast for particular dates");
+  });
+
+  it("dates each forecast row and a forecast worst window, leaving the past-average rows as weekdays", () => {
+    const mlGrid = fullGrid([
+      { dow: 1, band: "midday", v: 2.0 },
+      { dow: 5, band: "evening", v: 5.8 },
+    ]).map((c) => (c.dow === 5 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
+    renderSection(
+      overview({
+        grid: mlGrid,
+        forecast_days: [{ dow: 5, service_date: "2026-10-30" }],
+        worst: { dow: 5, band: "evening", expected_avg_min: 5.8, samples: 250, source: "ml" },
+      }),
+    );
+    expect(screen.getByTestId("fc-period")).toHaveTextContent("Forecast for Fri, Oct 30.");
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Fri 10/30 Evening runs latest");
+    const rows = within(screen.getByTestId("fc-overview-grid")).getAllByRole("rowheader").map((h) => h.textContent);
+    expect(rows).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri 10/30", "Sat", "Sun"]);
+  });
+
+  it("keeps a past-average worst window undated, even on a weekday the forecast covers", () => {
+    renderSection(
+      overview({
+        forecast_days: [{ dow: 1, service_date: "2026-10-26" }],
+        worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
+      }),
+    );
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Mon Midday runs latest");
+    expect(screen.getByTestId("worst-headline")).not.toHaveTextContent("10/26");
+  });
+
+  it("colours each route's bar by its own delay, so a route running seven minutes late is never the calm end", () => {
+    renderSection(
+      overview({
+        routes: [
+          { route_code: "100", route_name: "Main Line", expected_avg_min: 10.6, samples: 250, low_confidence: false },
+          { route_code: "300", route_name: "Third Line", expected_avg_min: 7.3, samples: 250, low_confidence: false },
+        ],
+      }),
+    );
+    const fill = (row: HTMLElement) => (row.children[1].firstElementChild as HTMLElement).style.background;
+    const [worse, better] = screen.getAllByTestId("ranked-route");
+    expect(fill(better)).toBe(calmDelayColor(7.3));
+    expect(fill(better)).toBe(fill(worse));
+    expect(fill(better)).not.toBe(calmDelayColor(0));
+  });
+
+  it("dates a chosen route's full day × hour rows and its by-day bars where its forecast covers them", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.dow === 2 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
+    ml.forecast_days = [{ dow: 2, service_date: "2026-10-27" }];
+    renderSection(overview(), "100", ml);
+
+    const dayBars = screen.getAllByTestId("dow-bar");
+    expect(dayBars[1]).toHaveAccessibleName(/^Tue 10\/27 · /);
+    expect(dayBars[0]).toHaveAccessibleName(/^Mon · /);
+    // The bar axis has a narrow column per day, so the day of the month sits under the weekday.
+    expect(within(screen.getByTestId("fc-card-dow")).getByText("27")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show day × hour detail" }));
+    const rows = within(screen.getByTestId("fc-detail-fullgrid")).getAllByRole("rowheader").map((h) => h.textContent);
+    expect(rows).toEqual(["Mon", "Tue 10/27", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  });
+
+  it("dates a chosen route's forecast rows from that route's own forecast", () => {
+    const ml = heatmap();
+    ml.cells = ml.cells.map((c) => (c.dow === 2 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
+    ml.forecast_days = [{ dow: 2, service_date: "2026-10-27" }];
+    renderSection(overview({ forecast_days: [{ dow: 5, service_date: "2026-10-30" }] }), "100", ml);
+    expect(screen.getByTestId("fc-period")).toHaveTextContent("Forecast for Tue, Oct 27.");
+    const rows = within(screen.getByTestId("fc-detail-bandgrid")).getAllByRole("rowheader").map((h) => h.textContent);
+    expect(rows).toEqual(["Mon", "Tue 10/27", "Wed", "Thu", "Fri", "Sat", "Sun"]);
   });
 
   it("picks a route from its own control, and goes back to all routes the same way", () => {
