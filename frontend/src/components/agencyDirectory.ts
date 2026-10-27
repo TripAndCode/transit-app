@@ -1,5 +1,5 @@
 import type { Agency } from "../api/types";
-import { DATA_SOURCES, type DataSource } from "./dataSources";
+import { dataSourceOf, type DataSource } from "./dataSources";
 
 /** Days an agency's data may trail the newest agency's before the picker
  *  says it stopped. Agencies analysed on either side of midnight, or one
@@ -16,13 +16,7 @@ type AgencyGroup = {
 };
 
 export function prefectureOf(agency: Agency): PrefectureKey | null {
-  let host: string;
-  try {
-    host = new URL(agency.feed_url).hostname;
-  } catch {
-    return null;
-  }
-  return DATA_SOURCES.find((source) => source.feedHosts.includes(host))?.prefectureKey ?? null;
+  return dataSourceOf(agency.feed_url)?.prefectureKey ?? null;
 }
 
 /** The latest day any agency has data for. ISO dates order as strings. */

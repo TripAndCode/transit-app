@@ -17,7 +17,19 @@ describe("prefectureOf", () => {
     expect(prefectureOf(agency(1, "Aomori City Bus", { feed_url: AOMORI_FEED }))).toBe("prefectures.aomori");
   });
 
-  it.each(["", "not a url", "https://example.com/feed.pb"])("knows no prefecture for the feed %j", (feed_url) => {
+  it("reads Aomori from ODPT's mirror of Aomori City Bus's own dataset", () => {
+    const feed_url = "https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_AomoriCity_AllLines_trip_update";
+    expect(prefectureOf(agency(1, "Aomori City Bus", { feed_url }))).toBe("prefectures.aomori");
+  });
+
+  it.each([
+    "",
+    "not a url",
+    "https://example.com/feed.pb",
+    // ODPT mirrors operators nationwide; only Aomori's dataset is Aomori.
+    "https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_SomeOtherCity_AllLines_trip_update",
+    "https://aomoricitybus.com.example.net/TripUpdate.pb",
+  ])("knows no prefecture for the feed %j", (feed_url) => {
     expect(prefectureOf(agency(2, "Unknown", { feed_url }))).toBeNull();
   });
 });

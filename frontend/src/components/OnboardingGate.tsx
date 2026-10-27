@@ -24,11 +24,11 @@ const SELECT_TRANSITION_MS = 250;
 // Past this many cards, finding one by eye is slower than typing its name.
 const SEARCH_MIN_AGENCIES = 9;
 
-/** A day without its year when it shares one with `reference`; non-breaking
- *  spaces hold "Oct 14" together, so a narrow card wraps before the date
- *  rather than inside it. */
-function shortDay(iso: string, reference: string): string {
-  return formatDate(iso, { year: iso.slice(0, 4) !== reference.slice(0, 4) }).replaceAll(" ", "\u00a0");
+/** A day as a short label, "Oct 14", with its year only when asked for.
+ *  Non-breaking spaces hold it together, so a narrow card wraps before the
+ *  date rather than inside it. */
+function shortDay(iso: string, { year }: { year: boolean }): string {
+  return formatDate(iso, { year }).replaceAll(" ", "\u00a0");
 }
 
 // Vertical padding gives a finger the height the small text alone lacks.
@@ -110,9 +110,10 @@ export function OnboardingGate() {
   const guestWelcome = signedOut && config != null && !config.login_required;
   const canLogIn = signedOut && config?.auth_enabled === true;
 
-  // The page scrolls as a whole and its content starts at the top: a long
-  // list on a short screen then runs down past the fold instead of being
-  // centred with its head pushed out of scroll reach.
+  // The layer is the page's scroll container, and the column inside it is
+  // anchored at the top and centred only horizontally: the heading opens the
+  // page at any screen height, and a list longer than the screen continues
+  // below the fold, reached by scrolling.
   return (
     <div
       data-testid="agency-directory"
@@ -178,7 +179,9 @@ export function OnboardingGate() {
         )}
         {newest && (
           <p style={{ margin: "12px 0 0", fontSize: "var(--text-sm)", color: "var(--text-tertiary)" }}>
-            {t("onboarding.data_through", { date: shortDay(newest, newest) })}
+            {/* The newest day any agency has is the latest data there is, so
+                its year goes without saying. */}
+            {t("onboarding.data_through", { date: shortDay(newest, { year: false }) })}
           </p>
         )}
         {shown.length === 0 && (
@@ -323,7 +326,7 @@ function AgencyCard({
       <div style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>{agency.agency_name}</div>
       {stopped && (
         <div style={{ fontSize: "var(--text-xs)", marginTop: 4, color: "var(--color-warning-text)" }}>
-          {t("onboarding.stopped", { date: shortDay(latest, newest) })}
+          {t("onboarding.stopped", { date: shortDay(latest, { year: latest.slice(0, 4) !== newest.slice(0, 4) }) })}
         </div>
       )}
       {latest == null && (

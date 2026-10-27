@@ -179,6 +179,9 @@ describe("OnboardingGate", () => {
     ]);
     renderGate();
     expect(screen.getByRole("button", { name: /^Stopped/ })).toHaveTextContent("No updates after Oct 14");
+    // toHaveTextContent folds a non-breaking space into a plain one; the exact
+    // text pins the one that keeps "Oct 14" on one line in a narrow card.
+    expect(screen.getByText(/^No updates after/).textContent).toBe("No updates after Oct\u00a014");
     expect(screen.getByRole("button", { name: /^Current/ })).not.toHaveTextContent("No updates");
     expect(screen.getByRole("button", { name: /^A day late/ })).not.toHaveTextContent("No updates");
   });
@@ -252,7 +255,7 @@ describe("OnboardingGate", () => {
 
   it.each([
     ["a signed-in user", { session: { user_id: 1 } }],
-    ["a deployment that requires login", { login_required: true, session: { user_id: 1 } }],
+    ["a guest on a deployment that requires login", { login_required: true, session: null }],
     ["a session still loading", { session: undefined }],
   ])("does not say login is unneeded to %s", (_, visitor) => {
     mockVisitor(visitor);
@@ -281,18 +284,20 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
-  // jsdom has no layout, so this pins the page's inline styles rather than
-  // its rendered position: the page scrolls as a whole, and its content
-  // starts at the top instead of being centred, which would push a long
-  // list's head above the scroll origin.
+  // jsdom has no layout, so this pins the inline styles that make the page:
+  // the layer is the scroll container, and the column inside it sits at the
+  // top, centred only horizontally, so the heading opens the page at any
+  // screen height and a long list continues below the fold.
   it("scrolls as one page whose content starts at the top", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
     const page = screen.getByTestId("agency-directory");
-    expect(page).toContainElement(screen.getByRole("heading", { level: 1 }));
+    const column = screen.getByRole("heading", { level: 1 }).parentElement!;
+    expect(column.parentElement).toBe(page);
     expect(page.style.overflowY).toBe("auto");
-    expect(page.style.alignItems).toBe("");
-    expect(page.style.justifyContent).toBe("");
+    expect(column.style.marginTop).toBe("0px");
+    expect(column.style.marginLeft).toBe("auto");
+    expect(column.style.marginRight).toBe("auto");
   });
 
   it("lets a visitor switch language before choosing", () => {
