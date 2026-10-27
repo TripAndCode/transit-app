@@ -17,6 +17,7 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
+    covered_days: 7, window_days: 7,
     has_ridership_weights: false, weighted_on_time_pct: null,
     static_version_id: null, planned_trip_count: null, planned_vehicle_km: null,
     vehicle_km_delivered_pct: null, ...over,
@@ -119,6 +120,62 @@ describe("NetworkTab", () => {
     expect(screen.getByText(/96\.7%/)).toBeInTheDocument();
     const aomoriCard = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard).toHaveTextContent("—");
+  });
+
+  it("says how many of the period's days a partly timetabled agency's delivered rate covers, with a footnote", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-03-02", to: "2026-03-31", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 16, window_days: 30 }),
+          row({ agency_id: 2, agency_name: "HiroBus", service_delivered_pct: 98.1, covered_days: 30, window_days: 30 }),
+          // A rate the feed cannot measure reads as a dash; a coverage note
+          // beside it would qualify nothing.
+          row({ agency_id: 3, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, covered_days: 12, window_days: 30 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Hiroden")).toHaveTextContent("Service delivered % 96.7% (timetable covers 16/30 days)");
+    expect(card("HiroBus")).not.toHaveTextContent("timetable covers");
+    expect(card("Aomori")).not.toHaveTextContent("timetable covers");
+    expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
+      /count only the days the loaded timetable covers/,
+    );
+  });
+
+  it("writes the timetable coverage note in Japanese", async () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-03-02", to: "2026-03-31", definition,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 16, window_days: 30 })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    await i18n.changeLanguage("ja");
+    renderTab();
+    expect(screen.getByText("Hiroden").closest(".network-row")).toHaveTextContent("運行率 96.7%（時刻表のある16/30日分）");
+    expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
+      "読み込み済みの時刻表がある日だけを数えています",
+    );
+  });
+
+  it("leaves the coverage footnote out when every shown rate spans the whole period", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-03-02", to: "2026-03-31", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 30, window_days: 30 }),
+          row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, covered_days: 3, window_days: 30 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.queryByText(/timetable covers/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("network-plan-coverage-footnote")).not.toBeInTheDocument();
   });
 
   it("shows vehicle-km delivered %, falls back to planned trip count, and shows a dash otherwise", () => {

@@ -991,6 +991,10 @@ export type NetworkAgencyRow = {
   planned_trips: number;
   executed_trips: number | null;
   service_delivered_pct: number | null;
+  /** How many of the window's `window_days` days the loaded timetable
+   *  covers. planned_trips and the delivered rates count only those days. */
+  covered_days: number;
+  window_days: number;
   /** False whenever this agency has no manually-configured ridership weights
    * at all -- the weighted-view toggle must key off this, not off
    * weighted_on_time_pct being null (a configured agency with zero samples
