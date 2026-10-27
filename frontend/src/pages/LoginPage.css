@@ -93,6 +93,7 @@ body:has(.login-shell),
   font-size: var(--text-sm);
   text-align: center;
   color: var(--text-secondary);
+  word-break: auto-phrase;
 }
 
 .login-card__error {
@@ -132,30 +133,16 @@ body:has(.login-shell),
 .login-card__btn[aria-disabled="true"] { pointer-events: none; opacity: 0.7; }
 .login-card__btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
-.login-card__btn--google {
+/* Every identity provider wears the same button, so none reads as the
+   recommended one. */
+.login-card__btn--provider {
   background: var(--bg-surface);
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
 }
-.login-card__btn--google:hover {
+.login-card__btn--provider:hover {
   border-color: var(--text-tertiary);
   box-shadow: var(--el-2);
-}
-
-/* Inverted from the page: the ink colour as the fill, the surface as the
-   text, so it stays the high-contrast button in either theme. */
-.login-card__btn--github {
-  background: var(--text-primary);
-  color: var(--bg-surface);
-  border: 1px solid var(--text-primary);
-}
-.login-card__btn--github:hover {
-  opacity: .92;
-  box-shadow: var(--el-2);
-}
-.login-card__btn--github:focus-visible {
-  outline-color: var(--bg-surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 55%, transparent);
 }
 
 .login-card__spinner {
@@ -230,12 +217,26 @@ body:has(.login-shell),
 }
 .login-card__btn--local:hover { opacity: 0.92; }
 
+.login-card__guest {
+  margin: 16px 0 0;
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.login-card__guest a {
+  display: inline-block;
+  padding: 6px 0;
+  color: var(--text-secondary);
+  text-underline-offset: 3px;
+}
+.login-card__guest a:hover { color: var(--text-primary); }
+
 .login-card__footer {
   margin: 20px 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
   text-align: center;
   color: var(--text-tertiary);
+  word-break: auto-phrase;
 }
 .login-card__footer a {
   color: inherit;
