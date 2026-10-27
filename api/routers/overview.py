@@ -137,11 +137,14 @@ class Concentration(BaseModel):
 
 
 class TopDelayedRoute(BaseModel):
-    """One route's absolute avg delay in the current 7-day window."""
+    """One route's absolute avg delay in the current 7-day window, and its
+    change (minutes) from the same-width window before; ``delta_min`` is None
+    when the route was too thinly observed there to compare."""
 
     route_code: str
     route_short_name: str | None
     avg_min: float
+    delta_min: float | None = None
 
 
 class RouteBandCount(BaseModel):
@@ -163,12 +166,15 @@ class TopDelayed(BaseModel):
     """Top-5 routes by absolute avg delay, plus a count of routes averaging at
     least ``delayed_threshold_min`` late and one per routes-to-check band, all
     over the same window the headline covers. The counts cover every route the
-    list may show, not only the five listed."""
+    list may show, not only the five listed: the ``route_count`` routes
+    observed at least ``min_samples`` times in the window."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
     delayed_threshold_min: float
     band_counts: RouteBandCounts
+    route_count: int
+    min_samples: int
 
 
 class PeakHour(BaseModel):
@@ -195,11 +201,13 @@ class ServiceSplitEntry(BaseModel):
 
 
 class ServiceSplitDay(BaseModel):
-    """One date's mean delay and the day type that date ran as."""
+    """One date's mean delay, the day type that date ran as, and the
+    observations the mean is over."""
 
     date: str  # ISO date
     day_type: DayType
     avg_min: float
+    samples: int
 
 
 class OverviewSummary(BaseModel):

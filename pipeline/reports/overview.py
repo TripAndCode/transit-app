@@ -67,7 +67,7 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
-from pipeline.reports.rankings import _round1
+from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
 from pipeline.route_catalog import left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
@@ -445,7 +445,7 @@ async def _per_route_avg(
             # cannot be the unfiltered total here: the slow path below sums a
             # ClickHouse row count where every row carries a dep_delay, so an
             # unfiltered fast path would answer differently for the same
-            # route; and _movers gates MIN_SAMPLES on this number, which would
+            # route; and _movers gates MOVER_MIN_SAMPLES on this number, which would
             # otherwise admit a route whose average rests on far fewer rows
             # than the floor implies.
             "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
@@ -761,6 +761,15 @@ async def _concentration(
 #: counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
 
+#: The fewest observations a route needs in the current window to be listed
+#: or counted by ``_top_delayed_routes``: the Routes ranking's default floor,
+#: so the list's "see every route" link opens on the same routes.
+TOP_DELAYED_MIN_SAMPLES = RANKING_MIN_SAMPLES
+
+#: The fewest observations in EACH of two windows behind a change between
+#: them: a mover's, and a listed route's change from the window before.
+MOVER_MIN_SAMPLES = 10
+
 #: The routes-to-check list's bands, worst first, each with its lower bound
 #: (minutes): a route belongs to the first band whose bound its average
 #: reaches, and to none below the last. The client bands the listed routes
@@ -795,11 +804,21 @@ async def _top_delayed_routes(
     grain: _Grain | None = None,
     *,
     left_out: Mapping[str, frozenset[str]],
+    base_ctx: RangeCtx | None = None,
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN`` and one per
-    ``ROUTE_BAND_MIN`` band, each over every route :func:`_listable` keeps
-    rather than the ``limit`` listed: the list is truncated, the counts are not.
+    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``, one per
+    ``ROUTE_BAND_MIN`` band, and ``route_count``, the routes all of them are
+    out of. Every count is over every route :func:`_listable` keeps that was
+    observed at least ``TOP_DELAYED_MIN_SAMPLES`` times in the window (echoed
+    as ``min_samples``), not only the ``limit`` listed: the list is truncated,
+    the counts are not.
+
+    Each listed route carries ``delta_min``, its change from ``base_ctx`` (the
+    same-width window before), by the movers' rule: the unrounded current
+    average less the unrounded previous one, and None unless the route has
+    ``MOVER_MIN_SAMPLES`` observations there. The movers list only the routes
+    that moved most, so it cannot supply a change for every listed route.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -825,7 +844,8 @@ async def _top_delayed_routes(
             # the same row population — see _route_weekly_history's identical
             # rationale.
             "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS avg_min\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS avg_min,\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
@@ -838,7 +858,7 @@ async def _top_delayed_routes(
             agency_id,
             *params,
         )
-        rows = [(r["route_code"], r["avg_min"]) for r in fetched]
+        rows = [(r["route_code"], r["avg_min"]) for r in fetched if r["samples"] >= TOP_DELAYED_MIN_SAMPLES]
     else:
         # Grouping by route_code -> every group has >= 1 sample, no
         # empty-input case; the average is never NULL for a non-empty group.
@@ -847,6 +867,7 @@ async def _top_delayed_routes(
         rows = [
             (code, (total / n) / 60.0)
             for code, (n, total) in sorted(by_route.items(), key=lambda kv: (-(kv[1][1] / kv[1][0]), kv[0]))
+            if n >= TOP_DELAYED_MIN_SAMPLES
         ]
 
     rows = _listable(rows, left_out)
@@ -856,24 +877,37 @@ async def _top_delayed_routes(
             "delayed_count": 0,
             "delayed_threshold_min": DELAYED_ROUTE_MIN,
             "band_counts": _route_band_counts([]),
+            "route_count": 0,
+            "min_samples": TOP_DELAYED_MIN_SAMPLES,
         }
 
     delayed_count = sum(1 for _code, avg in rows if avg is not None and avg >= DELAYED_ROUTE_MIN)
     band_counts = _route_band_counts([avg for _code, avg in rows if avg is not None])
     top_n = rows[:limit]
     names = await _route_short_names(agency_id, [code for code, _avg in top_n], conn)
+    previous = await _per_route_avg(agency_id, base_ctx, conn, ch=ch, grain=grain) if base_ctx is not None else {}
+
+    def _change(code: str, avg) -> float | None:
+        prv_avg, prv_n = previous.get(code, (None, 0))
+        if prv_avg is None or prv_n < MOVER_MIN_SAMPLES:
+            return None
+        return float(_round2(float(avg) - prv_avg))
+
     return {
         "routes": [
             {
                 "route_code": code,
                 "route_short_name": names.get(code),
                 "avg_min": float(_round2(avg)),
+                "delta_min": _change(code, avg),
             }
             for code, avg in top_n
         ],
         "delayed_count": delayed_count,
         "delayed_threshold_min": DELAYED_ROUTE_MIN,
         "band_counts": band_counts,
+        "route_count": len(rows),
+        "min_samples": TOP_DELAYED_MIN_SAMPLES,
     }
 
 
@@ -994,12 +1028,15 @@ def _avg_min(samples: int, sum_delay_sec: int) -> float:
 def _service_split_daily(day_types: DayTypes, totals: list[tuple[date, int, int]]) -> list[dict]:
     """Per-date avg delay, each date tagged with its day-type bucket.
 
-    Returns ``{date: ISO str, day_type, avg_min}`` rows sorted by date, one per
-    date with samples. ``day_type`` is the same bucket :func:`_service_split`
-    files the date under, so the modal's series match the card's rows.
+    Returns ``{date: ISO str, day_type, avg_min, samples}`` rows sorted by
+    date, one per date with samples. ``day_type`` is the same bucket
+    :func:`_service_split` files the date under, so the modal's series match
+    the card's rows. ``samples`` lets a reader tell a day collected only in
+    part from a whole one.
     """
     return [
-        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total)} for d, n, total in totals
+        {"date": d.isoformat(), "day_type": day_types.of(d), "avg_min": _avg_min(n, total), "samples": n}
+        for d, n, total in totals
     ]
 
 
@@ -1020,9 +1057,9 @@ async def _movers(
     ``compute_overview_summary`` as same-width current/baseline windows,
     up to 7 days, narrower only when the user's selected range itself is
     narrower). Requires
-    >= 10 samples in BOTH windows for a route to enter the ranking — a
-    route with a handful of obs can swing a huge delta_pct and would
-    otherwise dominate top-3 with low statistical confidence.
+    >= :data:`MOVER_MIN_SAMPLES` samples in BOTH windows for a route to enter
+    the ranking — a route with a handful of obs can swing a huge delta_pct
+    and would otherwise dominate top-3 with low statistical confidence.
 
     Frontend card variant slices :code:`.slice(0, 3)`; modal variant
     uses the full 10.
@@ -1036,11 +1073,10 @@ async def _movers(
     # -1.72, making a top-10 cutoff between them a coin-flip); ranking on the
     # raw value orders them by their actual deltas.
     deltas: list[tuple[str, float, float | None, float]] = []
-    MIN_SAMPLES = 10
     # A previous-window average below this floor makes delta_pct meaningless:
     # dividing by a near-zero baseline can turn a trivial absolute change into
     # a triple-digit-or-larger swing that reads as a real signal but isn't,
-    # even past the MIN_SAMPLES gate above (a small sample can still average
+    # even past the MOVER_MIN_SAMPLES gate above (a small sample can still average
     # to a near-zero delay). The floor matches the delay-severity ramp's
     # "mild" threshold (ROUTE_BAND_MIN), which already treats anything below it as background
     # noise rather than a noticeable delay.
@@ -1048,7 +1084,7 @@ async def _movers(
     for code in common:
         cur_avg, cur_n = cur[code]
         prv_avg, prv_n = prv[code]
-        if cur_n < MIN_SAMPLES or prv_n < MIN_SAMPLES:
+        if cur_n < MOVER_MIN_SAMPLES or prv_n < MOVER_MIN_SAMPLES:
             continue
         d_min = cur_avg - prv_avg
         d_pct = round((d_min / prv_avg) * 100.0, 1) if abs(prv_avg) >= MIN_PRV_AVG_FOR_PCT_MIN else None
@@ -1363,7 +1399,9 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.concentration"):
             concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.top_delayed"):
-            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out)
+            top_delayed = await _top_delayed_routes(
+                agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out, base_ctx=base_ctx
+            )
         async with perf.timed_block("overview.peaks"):
             peak, peak_weekday, peak_weekend = (
                 (None, None, None)
@@ -1432,7 +1470,7 @@ async def compute_overview_summary(
             _own_conn(_headline_stats, agency_id, base_ctx),
             _own_conn(_movers, agency_id, cur_ctx, base_ctx, left_out=left_out),
             _own_conn(_concentration, agency_id, ctx, left_out=left_out),
-            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out),
+            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out, base_ctx=base_ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )

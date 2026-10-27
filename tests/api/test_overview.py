@@ -904,11 +904,11 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
     """Ranked by raw avg_min, not by _concentration()'s total-lateness-contribution
     metric — a route with few samples but a high average outranks a route
     with more samples but a lower average."""
-    # R_HIGH: avg 8.0 min, only 2 samples. R_LOW: avg 3.0 min, 20 samples.
+    # R_HIGH: avg 8.0 min, 100 samples. R_LOW: avg 3.0 min, 1,000 samples.
     # Under _concentration()'s SUM(avg_min*samples) metric R_LOW would win
-    # (60 > 16); under a true average, R_HIGH must win.
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_HIGH", "平日", 8.0, 2)
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_LOW", "平日", 3.0, 20)
+    # (3,000 > 800); under a true average, R_HIGH must win.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_HIGH", "平日", 8.0, 100)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_LOW", "平日", 3.0, 1000)
 
     from pipeline.reports import compute_overview_summary
 
@@ -927,8 +927,8 @@ async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aa
     path; each route here is a single-day row, so its weighted average is
     just its own avg_min.
     """
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 2)
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 3)  # tied avg, diff samples
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 200)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 300)  # tied avg, diff samples
 
     from pipeline.reports import compute_overview_summary
 
@@ -942,9 +942,9 @@ async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aa
 async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, aagency_id):
     """delayed_count only counts routes at/above the 2.0-min DELAY_RAMP
     'not ok' threshold — matching frontend/src/styles/tokens.ts's boundary."""
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OK", "平日", 1.5, 10)  # under threshold
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_EDGE", "平日", 2.0, 10)  # exactly at threshold
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_BAD", "平日", 6.0, 10)  # over threshold
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OK", "平日", 1.5, 100)  # under threshold
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_EDGE", "平日", 2.0, 100)  # exactly at threshold
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_BAD", "平日", 6.0, 100)  # over threshold
 
     from pipeline.reports import compute_overview_summary
 
@@ -965,7 +965,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
     # route under every band. Each band has a route exactly on its bound.
     avgs = [7.0, 6.0, 5.0, 4.0, 3.5, 3.0, 2.0, 1.5, 1.0]
     for i, avg in enumerate(avgs):
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", avg, 10)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", avg, 100)
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
@@ -977,6 +977,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
         "mild": {"count": 2, "threshold_min": 1.5},
     }
     assert top["delayed_count"] == 7
+    assert top["route_count"] == 9
 
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
@@ -990,13 +991,19 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
             "moderate": {"count": 0, "threshold_min": 3.0},
             "mild": {"count": 0, "threshold_min": 1.5},
         },
+        "route_count": 0,
+        "min_samples": 100,
     }
 
 
 @pytest.mark.asyncio
-async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aagency_id, ch_client, ch_async_client):
+async def test_top_delayed_routes_falls_back_to_live_under_time_band(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
+):
     """Non-default time_band bypasses agg_daily_trend and reads updates
     directly (ClickHouse), the same fallback _concentration() uses."""
+    # Two live rows stand for a route: the floor is not this test's subject.
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 1)
     base = datetime.combine(date(2026, 5, 18), time(8, 0), tzinfo=timezone.utc)
     for i, dep in enumerate([300, 360]):  # 5.0, 6.0 min -> avg 5.5
         await aconn.execute(
@@ -1035,8 +1042,8 @@ async def test_top_delayed_routes_uses_cur_ctx_not_full_ctx(aconn, aagency_id):
     # ctx spans 14 days (2026-05-05..2026-05-18). Latest data is on
     # 2026-05-18, so cur_ctx anchors there and covers 2026-05-12..2026-05-18
     # (last 7 days) — 2026-05-05 is inside ctx but outside cur_ctx.
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 5), "R_OLD", "平日", 9.0, 10)
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_NEW", "平日", 4.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 5), "R_OLD", "平日", 9.0, 100)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_NEW", "平日", 4.0, 100)
 
     from pipeline.reports import compute_overview_summary
 
@@ -1047,6 +1054,47 @@ async def test_top_delayed_routes_uses_cur_ctx_not_full_ctx(aconn, aagency_id):
     # delayed_count must also exclude R_OLD (would otherwise be 2, not 1,
     # if the full ctx were used instead of cur_ctx).
     assert out["top_delayed"]["delayed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_top_delayed_routes_leave_out_a_thinly_observed_route(aconn, aagency_id):
+    """A route observed fewer times in the window than the Routes ranking's
+    floor is neither listed nor counted, and the counts say what they are out
+    of: the routes observed at least that often."""
+    from pipeline.reports import compute_overview_summary
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+
+    day = date(2026, 5, 18)
+    await _seed_agg_daily(aconn, aagency_id, day, "R_THIN", "平日", 12.0, RANKING_MIN_SAMPLES - 1)
+    await _seed_agg_daily(aconn, aagency_id, day, "R_SOLID", "平日", 6.0, RANKING_MIN_SAMPLES)
+    await _seed_agg_daily(aconn, aagency_id, day, "R_CALM", "平日", 1.0, RANKING_MIN_SAMPLES)
+
+    out = await compute_overview_summary(aagency_id, RangeCtx(day, day), aconn)
+    top = out["top_delayed"]
+    assert [r["route_code"] for r in top["routes"]] == ["R_SOLID", "R_CALM"]
+    assert top["band_counts"]["severe"]["count"] == 1
+    assert top["route_count"] == 2
+    assert top["min_samples"] == RANKING_MIN_SAMPLES
+
+
+@pytest.mark.asyncio
+async def test_a_listed_route_that_is_a_mover_carries_the_movers_change(aconn, aagency_id):
+    """The list's change from the window before is the movers' figure, so a
+    route on both says the same thing in both places; a route seen only in
+    the current window has none."""
+    from pipeline.reports import compute_overview_summary
+
+    for d in range(11, 18):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_MOVE", "平日", 2.13, 30)
+    for d in range(18, 25):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_MOVE", "平日", 5.27, 30)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_FRESH", "平日", 4.0, 30)
+
+    out = await compute_overview_summary(aagency_id, RangeCtx(date(2026, 5, 11), date(2026, 5, 24)), aconn)
+    listed = {r["route_code"]: r["delta_min"] for r in out["top_delayed"]["routes"]}
+    mover = next(m for m in out["movers"]["worse"] if m["route_code"] == "R_MOVE")
+    assert listed["R_MOVE"] == mover["delta_min"] == pytest.approx(3.14, abs=1e-9)
+    assert listed["R_FRESH"] is None
 
 
 @pytest.mark.asyncio
@@ -1164,6 +1212,12 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
         assert key in body, f"missing key {key}"
     assert body["headline"]["samples"] == 5
     assert body["headline"]["avg_min"] is not None
+    # Five observations sit under the list's floor: nothing listed, nothing
+    # counted, and the counts still say what they would be out of.
+    assert body["top_delayed"]["routes"] == []
+    assert body["top_delayed"]["route_count"] == 0
+    assert body["top_delayed"]["min_samples"] == 100
+    assert body["service_split_daily"] == [{"date": "2026-05-18", "day_type": "weekday", "avg_min": 2.0, "samples": 5}]
 
 
 @pytest.mark.asyncio
@@ -1373,10 +1427,10 @@ async def test_service_split_daily_returns_one_row_per_date_with_its_day_type(ac
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["service_split_daily"] == [
-        {"date": "2026-05-18", "day_type": "weekday", "avg_min": 1.0},
-        {"date": "2026-05-19", "day_type": "weekday", "avg_min": 4.0},
-        {"date": "2026-05-23", "day_type": "saturday", "avg_min": 4.0},
-        {"date": "2026-05-24", "day_type": "sunday_holiday", "avg_min": 2.0},
+        {"date": "2026-05-18", "day_type": "weekday", "avg_min": 1.0, "samples": 1},
+        {"date": "2026-05-19", "day_type": "weekday", "avg_min": 4.0, "samples": 2},
+        {"date": "2026-05-23", "day_type": "saturday", "avg_min": 4.0, "samples": 1},
+        {"date": "2026-05-24", "day_type": "sunday_holiday", "avg_min": 2.0, "samples": 1},
     ]
 
 
@@ -1896,7 +1950,7 @@ async def _seed_update(aconn, agency_id, when, route_code, dep_delay, *, sched="
 
 
 @pytest.mark.asyncio
-async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_client, ch_async_client):
+async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_client, ch_async_client, monkeypatch):
     """The whole slow-path payload comes from ONE ClickHouse round trip.
 
     Dataset deliberately has no movers (a single route, and no route with
@@ -1905,6 +1959,8 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
     scan — short-circuits before querying. Everything else must be served
     from the shared grain.
     """
+    # Three live rows stand for a route: the list's floor is not this test's subject.
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 1)
     for i, dep in enumerate([120, 240, 360]):
         await _seed_update(
             aconn,
@@ -1962,9 +2018,9 @@ async def test_slow_path_service_split_classifies_by_date(aconn, aagency_id, ch_
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
     assert out["service_split"] == _split(weekday=(5.0, 1, 1), saturday=(1.0, 1, 1), sunday_holiday=(3.0, 1, 2))
     assert out["service_split_daily"] == [
-        {"date": "2026-09-18", "day_type": "weekday", "avg_min": 5.0},
-        {"date": "2026-09-19", "day_type": "saturday", "avg_min": 1.0},
-        {"date": "2026-09-21", "day_type": "sunday_holiday", "avg_min": 3.0},
+        {"date": "2026-09-18", "day_type": "weekday", "avg_min": 5.0, "samples": 1},
+        {"date": "2026-09-19", "day_type": "saturday", "avg_min": 1.0, "samples": 1},
+        {"date": "2026-09-21", "day_type": "sunday_holiday", "avg_min": 3.0, "samples": 2},
     ]
 
 
@@ -2670,4 +2726,4 @@ async def test_one_day_type_resolution_serves_the_filter_and_the_split(aconn, aa
     ctx = RangeCtx(from_date=date(2026, 10, 5), to_date=date(2026, 10, 18), service="土曜")
     out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert out["service_split"] == _split(saturday=(5.0, 1, 20))
-    assert out["service_split_daily"] == [{"date": "2026-10-10", "day_type": "saturday", "avg_min": 5.0}]
+    assert out["service_split_daily"] == [{"date": "2026-10-10", "day_type": "saturday", "avg_min": 5.0, "samples": 20}]
