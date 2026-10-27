@@ -35,7 +35,8 @@ export function LandingPage() {
             DOM order (canvas, scrim, content) and keeps the headline legible
             whatever the map is doing underneath. Reordering these -- or
             moving the content above it without an explicit stacking context
-            -- lets the scene paint over the text again. */}
+            -- lets the scene paint over the text again. The scene's playback
+            control comes with the canvas and lifts itself above both. */}
         <div className="landing-hero__scrim" aria-hidden="true" />
         <div className="landing-hero__content">
           <div className="landing-hero__brand">{t("header.app_title")}</div>

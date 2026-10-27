@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { TRIPS } from "./heroMapScene";
-import { DURATION, LOOP_START, frameAt, type HeroFrame } from "./heroMapTimeline";
+import { DURATION, REPLAY_START, frameAt, type HeroFrame } from "./heroMapTimeline";
 
 const kinds = (f: HeroFrame) => f.sections.map((s) => s.kind);
 const settled = (f: HeroFrame) => f.sections.filter((s) => s.enter === 1 && s.exit === 0).map((s) => s.kind);
@@ -56,18 +56,18 @@ describe("frameAt", () => {
   });
 });
 
-describe("loop seam", () => {
-  it("settles every first-play motion before LOOP_START", () => {
-    const f = frameAt(LOOP_START);
+describe("replay seam", () => {
+  it("settles every first-play motion before REPLAY_START", () => {
+    const f = frameAt(REPLAY_START);
     expect(f.panelEnter).toBe(1);
     expect(f.refreshChip).toBe(0);
     expect(f.tripPop).toBe(1);
     expect(TRIPS.every((tp) => f.tripAppear(tp.id) === 1)).toBe(true);
   });
 
-  it("ends on the same visible state it loops back to", () => {
+  it("ends on the same visible state a replay starts from", () => {
     const end = frameAt(DURATION - 1e-6);
-    const start = frameAt(LOOP_START);
+    const start = frameAt(REPLAY_START);
     for (const key of ["zoom", "tripsAtNextStop", "tripsBlinking", "tripsAlpha", "routeReveal", "trailReveal", "refreshChip", "panelEnter"] as const) {
       expect(end[key]).toBe(start[key]);
     }
@@ -76,7 +76,7 @@ describe("loop seam", () => {
     expect(end.caption?.index).toBe(start.caption?.index);
   });
 
-  it("finishes the returning queue's counters and rows before the loop", () => {
+  it("finishes the returning queue's counters and rows before the end", () => {
     // The panel's last queue row lands 1.1 s + two half-beats into the section.
     const lastRowLands = 1.1 + 2 * (60 / 128 / 2);
     const queue = frameAt(DURATION - 1e-6).sections.find((s) => s.kind === "queue")!;

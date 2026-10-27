@@ -138,7 +138,12 @@
       "minutes": "{{minutes}}分",
       "hour_of_day": "{{hour}}時",
       "clock": "{{hour}}:00",
-      "minute_unit": "分"
+      "minute_unit": "分",
+      "playback_control": {
+        "playing": "一時停止",
+        "paused": "再生",
+        "ended": "もう一度再生"
+      }
     },
     "narrative": {
       "route": {

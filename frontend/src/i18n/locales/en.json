@@ -138,7 +138,12 @@
       "minutes": "{{minutes}} min",
       "hour_of_day": "{{hour}}:00",
       "clock": "{{hour}}:00",
-      "minute_unit": "min"
+      "minute_unit": "min",
+      "playback_control": {
+        "playing": "Pause",
+        "paused": "Play",
+        "ended": "Play again"
+      }
     },
     "narrative": {
       "route": {

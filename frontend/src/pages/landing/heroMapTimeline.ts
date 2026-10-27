@@ -1,15 +1,15 @@
 // The hero's script as a pure function of elapsed seconds: live operations →
 // the queue's top trip opened (its trail flies into the trip chart) → day
 // playback (the rail's hours fly into the hourly bars) → period overview →
-// back to the queue. First-play-only motion (fly-in, dots appearing, the
-// refresh) settles before LOOP_START, and the last frame matches the
-// LOOP_START frame, so the loop has no seam.
+// back to the queue. It plays once. First-play-only motion (fly-in, dots
+// appearing, the refresh) settles before REPLAY_START, and the last frame
+// matches the REPLAY_START frame, so a replay starts without a jump.
 
 import { expoInOut, lerp, mixCamera, segment, type Camera } from "./heroMapMath";
 
 export const DURATION = 18.75;
-/** Where every later loop resumes; must come after all first-play motion. */
-export const LOOP_START = 4.0;
+/** Where a replay starts; must come after all first-play motion. */
+export const REPLAY_START = 4.0;
 /** One beat at 128 BPM; staggers are multiples of it so entrances feel timed. */
 const BEAT = 60 / 128;
 

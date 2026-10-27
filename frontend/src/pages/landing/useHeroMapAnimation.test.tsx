@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import type { HeroLabels } from "./heroCanvas";
 import { drawHeroFrame } from "./heroMapDraw";
-import { DURATION, LOOP_START } from "./heroMapTimeline";
-import { scriptTime, useHeroMapAnimation } from "./useHeroMapAnimation";
+import { DURATION, REPLAY_START } from "./heroMapTimeline";
+import { useHeroMapAnimation } from "./useHeroMapAnimation";
 
 vi.mock("./heroMapDraw", () => ({ drawHeroFrame: vi.fn() }));
 
@@ -12,9 +12,48 @@ const LABELS = {} as HeroLabels;
 
 function Harness() {
   const ref = useRef<HTMLCanvasElement | null>(null);
-  useHeroMapAnimation(ref, LABELS);
-  return <canvas ref={ref} aria-hidden="true" />;
+  const { playback, toggle } = useHeroMapAnimation(ref, LABELS);
+  return (
+    <>
+      <canvas ref={ref} aria-hidden="true" />
+      <button type="button" onClick={toggle}>
+        {playback}
+      </button>
+    </>
+  );
 }
+
+/** A driveable requestAnimationFrame: `step` runs the pending frame `ms`
+ *  later and reports whether the loop asked for another. */
+function driveFrames() {
+  let pending: FrameRequestCallback | null = null;
+  let now = performance.now();
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+    pending = cb;
+    return 1;
+  });
+  const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {
+    pending = null;
+  });
+  return {
+    cancel,
+    step(ms = 100) {
+      const cb = pending;
+      pending = null;
+      now += ms;
+      if (cb) act(() => cb(now));
+      return pending !== null;
+    },
+    runToEnd() {
+      let frames = 0;
+      while (this.step() && frames < 10_000) frames++;
+      return frames;
+    },
+  };
+}
+
+const drawnAt = () => vi.mocked(drawHeroFrame).mock.calls.map((call) => call[3].t);
+
 
 function setReducedMotion(reduce: boolean) {
   vi.spyOn(window, "matchMedia").mockImplementation(
@@ -32,17 +71,58 @@ function setReducedMotion(reduce: boolean) {
   );
 }
 
-describe("scriptTime", () => {
-  it("plays the first pass from zero, then resumes every later pass at LOOP_START", () => {
-    expect(scriptTime(0)).toBe(0);
-    expect(scriptTime(DURATION - 0.5)).toBe(DURATION - 0.5);
-    expect(scriptTime(DURATION)).toBeCloseTo(LOOP_START);
-    expect(scriptTime(DURATION + 1)).toBeCloseTo(LOOP_START + 1);
-    expect(scriptTime(DURATION + (DURATION - LOOP_START))).toBeCloseTo(LOOP_START);
+describe("useHeroMapAnimation playback", () => {
+  beforeEach(() => {
+    vi.mocked(drawHeroFrame).mockClear();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      setTransform: () => {},
+    } as unknown as CanvasRenderingContext2D);
+    setReducedMotion(false);
   });
 
-  it("never replays the fly-in, however long the page stays open", () => {
-    for (let e = DURATION; e < DURATION * 20; e += 0.37) expect(scriptTime(e)).toBeGreaterThanOrEqual(LOOP_START);
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("plays the script once, stops on its last frame and asks for no more frames", () => {
+    const frames = driveFrames();
+    render(<Harness />);
+    expect(screen.getByRole("button")).toHaveTextContent("playing");
+    frames.runToEnd();
+    expect(drawnAt().at(-1)).toBe(DURATION);
+    expect(Math.max(...drawnAt())).toBe(DURATION);
+    expect(screen.getByRole("button")).toHaveTextContent("ended");
+    expect(frames.step()).toBe(false);
+  });
+
+  it("pauses on the frame on screen and resumes from it", () => {
+    const frames = driveFrames();
+    render(<Harness />);
+    for (let i = 0; i < 30; i++) frames.step();
+    const pausedAt = drawnAt().at(-1)!;
+    act(() => screen.getByRole("button").click());
+    expect(screen.getByRole("button")).toHaveTextContent("paused");
+    expect(frames.step()).toBe(false);
+    expect(drawnAt().at(-1)).toBe(pausedAt);
+    act(() => screen.getByRole("button").click());
+    expect(screen.getByRole("button")).toHaveTextContent("playing");
+    frames.step();
+    expect(drawnAt().at(-1)).toBeGreaterThan(pausedAt);
+    expect(drawnAt().at(-1)).toBeLessThan(pausedAt + 0.2);
+  });
+
+  it("replays from REPLAY_START, after the fly-in, once it has ended", () => {
+    const frames = driveFrames();
+    render(<Harness />);
+    frames.runToEnd();
+    vi.mocked(drawHeroFrame).mockClear();
+    act(() => screen.getByRole("button").click());
+    expect(screen.getByRole("button")).toHaveTextContent("playing");
+    expect(drawnAt()[0]).toBe(REPLAY_START);
+    frames.runToEnd();
+    expect(Math.min(...drawnAt())).toBe(REPLAY_START);
+    expect(drawnAt().at(-1)).toBe(DURATION);
+    expect(screen.getByRole("button")).toHaveTextContent("ended");
   });
 });
 
@@ -72,8 +152,9 @@ describe("useHeroMapAnimation", () => {
     const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
     render(<Harness />);
     expect(raf).not.toHaveBeenCalled();
+    expect(screen.getByRole("button")).toHaveTextContent("still");
     expect(drawHeroFrame).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(drawHeroFrame).mock.calls[0][3].t).toBe(LOOP_START);
+    expect(vi.mocked(drawHeroFrame).mock.calls[0][3].t).toBe(REPLAY_START);
   });
 
   it("does not advance the script while the tab is hidden", () => {
