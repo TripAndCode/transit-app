@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { RouteShapeStop } from "../../api/types";
 import { matchedPrevious } from "./stopSeries";
+import { missingStopKey } from "./routeDossier";
 import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
 import { showsLabel } from "./axisLabels";
@@ -49,8 +50,6 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
   const [bandFrom, bandTo] = band;
   const bandShown = band.length === 2 && bandFrom >= 0 && bandTo >= 0
     && stops[bandFrom].avg_min != null && stops[bandTo].avg_min != null;
-  const last = stops.length - 1;
-  const missingLabel = (i: number) => t(i === last ? "terminus" : "missing");
   return <svg className="focus-chart" viewBox="0 0 780 335" role="group" aria-label={t("stopDelay")}>
     <ChartAxis ticks={axis.ticks} y={y} />
     {bandShown && <line data-testid="stop-chart-highlight" x1={x(bandFrom)} y1={y(stops[bandFrom].avg_min!)} x2={x(bandTo)} y2={y(stops[bandTo].avg_min!)}
@@ -61,7 +60,7 @@ export function StopChart({ stops, previous, selected, onSelect, highlight = nul
       <circle cx={x(i)} cy={s.avg_min == null ? 280 : y(s.avg_min)} r={s.stop_sequence === selected ? 7 : 4}
         fill={s.avg_min == null ? "var(--bg-surface)" : delayColor(s.avg_min)} stroke="var(--text-secondary)"
         className="svg-focus-ring"
-        role="button" tabIndex={0} aria-label={`${s.stop_name}: ${s.avg_min == null ? missingLabel(i) : `${s.avg_min} ${t("minutes")}`}`}
+        role="button" tabIndex={0} aria-label={`${s.stop_name}: ${s.avg_min == null ? t(missingStopKey(s, stops)) : `${s.avg_min} ${t("minutes")}`}`}
         onClick={() => onSelect(s.stop_sequence)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.stop_sequence); } }}>
         <title>{s.stop_name}</title>
       </circle>

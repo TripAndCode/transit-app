@@ -27,18 +27,20 @@ export function RouteVariantPicker({ variants, shown, onPick }: {
         <select value={current.shape_id} onChange={(e) => onPick(e.target.value)}>
           {variants.map((v) => (
             <option key={v.shape_id} value={v.shape_id}>
-              {t("variantOption", {
-                from: v.first_stop_name,
-                to: v.last_stop_name,
-                stops: formatNumber(v.stop_count),
-                share: share(v.share_pct),
-              })}
+              {v.samples === 0
+                ? t("variantOptionUnobserved", { from: v.first_stop_name, to: v.last_stop_name, stops: formatNumber(v.stop_count) })
+                : t("variantOption", {
+                  from: v.first_stop_name,
+                  to: v.last_stop_name,
+                  stops: formatNumber(v.stop_count),
+                  share: share(v.share_pct),
+                })}
             </option>
           ))}
         </select>
       </label>
       {reverse && <button type="button" className="btn-ghost" onClick={() => onPick(reverse.shape_id)}>{t("reverseDirection")}</button>}
-      <p className="focus-muted">{t("variantShare", { share: share(current.share_pct) })}</p>
+      <p className="focus-muted">{current.samples === 0 ? t("variantUnobserved") : t("variantShare", { share: share(current.share_pct) })}</p>
     </div>
   );
 }

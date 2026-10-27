@@ -228,7 +228,8 @@ async def compute_route_shape(
             "unobserved_stops": [],
         }
 
-    # Most-frequent shape_id for this route, bridged via updates.trip_id
+    # The shape_id whose stops are shown: the requested one when it is the
+    # route's, else the most frequent for this route, bridged via updates.trip_id
     # (route_code is regex-extracted and is not guaranteed equal to GTFS
     # route_id across feeds, so joining on trip_id keeps geometry tied
     # to trips actually observed for this route_code). The chosen shape
@@ -359,8 +360,8 @@ async def compute_route_shape(
         else []
     )
 
-    # Render every observed shape variant (系統), not just the majority one
-    # `chosen_shape_id` above still pins for stops/unobserved_stops below —
+    # Render every observed shape variant (系統), not just the one
+    # `chosen_shape_id` above pins for stops/unobserved_stops below —
     # this repo's Japanese bus operators distinguish 路線 (route_code, the
     # named line) from 系統 (a route's distinct stopping/geometry patterns,
     # e.g. a Hiroshima express bus's several variants), and collapsing to one
@@ -536,6 +537,10 @@ async def compute_route_shape(
             if r["stop_sequence"] not in observed_seqs and r["lon"] is not None and r["lat"] is not None
         ]
         variant_seqs = {r["stop_sequence"] for r in unobs_rows}
+    else:
+        # No variant to list the stops of: the observed trips' own timetable
+        # still names their first stop when the window never observed it.
+        variant_seqs = {r["stop_sequence"] for r in static_join_rows}
 
     # The stops the response lists: observed ones with coordinates, and the
     # unobserved ones of the variant.

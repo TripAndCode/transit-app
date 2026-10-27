@@ -503,6 +503,36 @@ describe("RouteAnalysisTab where delay grows", () => {
     expect(screen.getByRole("combobox", { name: "Selected stop" })).toHaveDisplayValue("観音本町");
   });
 
+  it("keeps a picked path the window never observed in the picker, so the reader can leave it", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: {
+        ...shape(STOPS.map((s) => ({ ...s, avg_min: null, samples: 0 }))),
+        shape_id: "rare",
+        variants: VARIANTS,
+        segments: [],
+        unobserved_stops: [{ stop_sequence: 5, stop_name: "江波", lon: 132.5, lat: 34.5 }],
+      },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1&variant=rare");
+    expect(screen.getByRole("combobox", { name: "Path" })).toHaveDisplayValue("広島駅 → 江波 (5 stops, not observed in this period)");
+    expect(screen.getByText("This path was not observed in this period")).toBeInTheDocument();
+  });
+
+  it("asks for a picked path's previous window without waiting for the current one", () => {
+    mockSupportHooks();
+    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: undefined, isPending: true, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1&from=2026-09-24&to=2026-10-23&compare=1&variant=in");
+    const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");
+    expect(previousCall?.[1]).toBe("R1");
+    expect(previousCall?.[3]).toBe("in");
+  });
+
   it("compares with the previous window on the variant shown", () => {
     const useRouteShape = renderDossier("&from=2026-09-24&to=2026-10-23&compare=1");
     const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");

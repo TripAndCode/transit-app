@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RouteShapeStop, RouteVariant, ReportResponse, OverviewConcentration } from "../../api/types";
-import { initialStop, largestRises, previousWindow, reverseVariant, routeStanding } from "./routeDossier";
+import { initialStop, largestRises, missingStopKey, pickableVariants, previousWindow, reverseVariant, routeStanding } from "./routeDossier";
 
 function stop(stop_sequence: number, stop_name: string, avg_min: number | null): RouteShapeStop {
   return { stop_sequence, stop_name, lon: 132, lat: 34, avg_min, samples: avg_min == null ? 0 : 10 };
@@ -136,5 +136,34 @@ describe("routeStanding", () => {
   it("takes the average from the on-time list for a route observed too rarely to rank", () => {
     const standing = routeStanding("R", { ranking: envelope("ranking", [], 0), onTime, worst, concentration });
     expect(standing).toMatchObject({ avgMin: 3.06, rank: null, ranked: null });
+  });
+});
+
+describe("pickableVariants", () => {
+  const observed = [variant("out", "広島駅", "観音新町三丁目", 60), variant("in", "観音新町三丁目", "広島駅", 40)];
+  const stops = [stop(1, "広島駅", null), stop(2, "紙屋町", null), stop(3, "江波", null)];
+
+  it("is the observed variants when the one shown is among them", () => {
+    expect(pickableVariants(observed, "out", stops)).toEqual(observed);
+  });
+
+  it("adds a pinned variant the window never observed, named by its own stops", () => {
+    expect(pickableVariants(observed, "rare", stops).at(-1)).toEqual({
+      shape_id: "rare", first_stop_name: "広島駅", last_stop_name: "江波", stop_count: 3, samples: 0, share_pct: 0,
+    });
+  });
+
+  it("adds nothing without a variant shown or stops to name it by", () => {
+    expect(pickableVariants(observed, null, stops)).toEqual(observed);
+    expect(pickableVariants(observed, "rare", [])).toEqual(observed);
+  });
+});
+
+describe("missingStopKey", () => {
+  const stops = [stop(1, "A", 1), stop(2, "B", null), stop(3, "C", null)];
+
+  it("calls the last stop the last stop, since nothing departs it, and any other unobserved stop missing", () => {
+    expect(missingStopKey(stops[2], stops)).toBe("terminus");
+    expect(missingStopKey(stops[1], stops)).toBe("missing");
   });
 });

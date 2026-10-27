@@ -47,6 +47,29 @@ export function reverseVariant(variants: RouteVariant[], current: string | null)
   );
 }
 
+/** The variants a reader can pick from: the observed ones, plus the one on
+ *  screen when the window never observed it. A pinned variant stays the
+ *  reader's choice across a date change, so it stays in the list with no
+ *  share, named by the stops the page lists for it. */
+export function pickableVariants(observed: RouteVariant[], shown: string | null, stops: RouteShapeStop[]): RouteVariant[] {
+  if (shown == null || stops.length === 0 || observed.some((v) => v.shape_id === shown)) return observed;
+  const pinned: RouteVariant = {
+    shape_id: shown,
+    first_stop_name: stops[0].stop_name,
+    last_stop_name: stops[stops.length - 1].stop_name,
+    stop_count: stops.length,
+    samples: 0,
+    share_pct: 0,
+  };
+  return [...observed, pinned];
+}
+
+/** The word for a stop with no departure observed: the last stop is the
+ *  last stop, since nothing departs it; any other is missing. */
+export function missingStopKey(stop: RouteShapeStop, stops: RouteShapeStop[]): "terminus" | "missing" {
+  return stop.stop_sequence === stops.at(-1)?.stop_sequence ? "terminus" : "missing";
+}
+
 /** The stop the page opens on: the one with the largest delay, since most
  *  feeds read a trip's first stop as exactly on time. */
 export function initialStop(stops: RouteShapeStop[]): RouteShapeStop | undefined {

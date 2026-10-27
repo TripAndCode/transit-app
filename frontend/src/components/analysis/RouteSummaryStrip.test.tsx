@@ -14,8 +14,8 @@ const DEFINITION = {
   measurement_point: "all_stops_all_observations", dedup_rule: "latest_observation_per_stop_event",
 };
 
-function reports(byType: Record<string, unknown[]>, rowsTotal = 174) {
-  return vi.spyOn(hooks, "useReport").mockImplementation((_id, type) => ({
+function reports(byType: Record<string, unknown[]>, rowsTotal = 174, pending: string[] = []) {
+  return vi.spyOn(hooks, "useReport").mockImplementation((_id, type) => (pending.includes(type ?? "") ? { data: undefined, isPending: true } : {
     data: { report_type: type, rows: byType[type ?? ""] ?? [], rows_total: rowsTotal, definition: DEFINITION },
     isPending: false,
   }) as never);
@@ -66,11 +66,25 @@ describe("RouteSummaryStrip", () => {
     );
   });
 
-  it("says a route the lists leave out is not ranked, and one outside the overview's few is not among them", () => {
+  it("says a route observed too rarely to rank is not ranked, and one outside the overview's few is not among them", () => {
     reports({ on_time: [["R", null, "80.0", "0.5", 60, true, 9]] });
     overview([{ route_code: "A", share_pct: 9 }]);
     const strip = render();
-    expect(strip).toHaveTextContent("Mean delay0.5 minNot ranked: too few observations, or left out of the route lists");
+    expect(strip).toHaveTextContent("Mean delay0.5 minNot ranked: too few observations");
     expect(strip).toHaveTextContent("Share of all lateness—Not among the top 1 routes");
+  });
+
+  it("says a route no list names is not in the route lists", () => {
+    reports({});
+    overview([]);
+    expect(render()).toHaveTextContent("Mean delay—Not in the route lists: too few observations, or left out of them");
+  });
+
+  it("waits for the ranking before saying anything about a rank", () => {
+    reports({ on_time: [["R", null, "49.0", "3.06", 143516, false, 0.3]] }, 174, ["ranking"]);
+    overview([]);
+    const strip = render();
+    expect(strip).toHaveTextContent("Mean delay…");
+    expect(strip).not.toHaveTextContent("Not ranked");
   });
 });

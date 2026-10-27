@@ -17,7 +17,7 @@ import { DelayBandLegend, StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
-import { initialStop, largestRises, previousWindow, windowDays } from "../components/analysis/routeDossier";
+import { initialStop, largestRises, missingStopKey, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
 import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/mareyScrub";
 import { timeWindowForBand } from "../components/charts/mareyLayout";
@@ -72,7 +72,10 @@ export function RouteAnalysisTab() {
   // The equal-length window just before, which shares no day with this one,
   // on the variant this window shows so the two lines are the same stops.
   const prevCtx = { ...ctx, ...previousWindow(ctx.from, ctx.to) };
-  const previous = useRouteShape(id, compare && query.data ? route : null, prevCtx, query.data?.shape_id ?? null);
+  // A picked variant is known before the current window answers, so the two
+  // scans run side by side; only the server's own pick has to wait for it.
+  const previousShape = variantParam || query.data?.shape_id || null;
+  const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
   const names = useRouteNames(id);
   // Two plain string keys rather than one JSON-shaped one, so a shared link
   // shows a human-readable stop selection. `stopRouteParam` guards against a
@@ -144,8 +147,6 @@ export function RouteAnalysisTab() {
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? initialStop(stops);
   const [rise, nextRise] = largestRises(query.data?.segments, stops);
-  const lastSequence = stops.at(-1)?.stop_sequence;
-  const missingText = (s: { stop_sequence: number }) => t(s.stop_sequence === lastSequence ? "terminus" : "missing");
   const stopColumns: CsvColumn<RouteShapeStop>[] = [
     { header: "route_code", value: () => route },
     { header: "shape_id", value: () => query.data?.shape_id ?? null },
@@ -198,7 +199,7 @@ export function RouteAnalysisTab() {
         <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{t("mean")}</span></div>
           <label><input type="checkbox" checked={compare} onChange={(e) => setParams((old) => { const next = new URLSearchParams(old); if (e.target.checked) next.set("compare", "1"); else next.delete("compare"); return next; })} /> {t("compare")}</label>
         </div>
-        <RouteVariantPicker variants={query.data?.variants ?? []} shown={query.data?.shape_id ?? null} onPick={pickVariant} />
+        <RouteVariantPicker variants={pickableVariants(query.data?.variants ?? [], query.data?.shape_id ?? null, stops)} shown={query.data?.shape_id ?? null} onPick={pickVariant} />
         {rise && <div className="route-rise">
           <p className="route-rise__headline">{t("riseHeadline", { from: rise.from.stop_name, to: rise.to.stop_name, min: fixedTenth(rise.increaseMin) })}</p>
           {nextRise && <p className="focus-muted">{t("riseNext", { from: nextRise.from.stop_name, to: nextRise.to.stop_name, min: fixedTenth(nextRise.increaseMin) })}</p>}
@@ -243,7 +244,7 @@ export function RouteAnalysisTab() {
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
               <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min == null ? missingText(s) : fixedTenth(s.avg_min)}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
+                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min == null ? t(missingStopKey(s, stops)) : fixedTenth(s.avg_min)}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
               </tbody></table></div>
             </div>}
             <p className="focus-muted">{t("caveat")}</p>

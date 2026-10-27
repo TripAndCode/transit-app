@@ -48,12 +48,12 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
       <dl className="route-summary__figures">
         <Figure
           label={t("summaryAvg")}
-          pending={ranking.isPending && onTime.isPending}
+          pending={ranking.isPending || onTime.isPending}
           value={standing.avgMin == null ? null : t("summaryAvgValue", { value: fixedTenth(standing.avgMin) })}
           note={
-            standing.rank == null
-              ? standing.avgMin == null ? null : t("summaryUnranked")
-              : t("summaryRank", { rank: formatNumber(standing.rank), ranked: formatNumber(standing.ranked ?? 0) })
+            standing.rank != null
+              ? t("summaryRank", { rank: formatNumber(standing.rank), ranked: formatNumber(standing.ranked ?? 0) })
+              : t(standing.avgMin == null ? "summaryNotListed" : "summaryUnranked")
           }
         />
         <Figure label={t("summaryOnTime")} pending={onTime.isPending} value={pct(standing.onTimePct)} />
