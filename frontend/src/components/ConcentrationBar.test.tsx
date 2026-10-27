@@ -127,7 +127,7 @@ describe("ConcentrationBar", () => {
       "Top 2 routes carry 50% of the delay of the 6 routes observed in Sep 24 – Oct 23.",
     );
     expect(container.querySelector(".ov-lorenz-caption")?.textContent).toMatch(
-      /^Top 20% of routes carry \d+% of the delay among the routes counted\.$/,
+      /^Top 20% of the 6 routes observed in Sep 24 – Oct 23 carry \d+% of their delay\.$/,
     );
     expect(container.querySelector(".ov-modal-explainer")).toHaveTextContent(
       "Route codes the current timetable no longer runs, and routes whose feed always reports zero delay, are not counted.",

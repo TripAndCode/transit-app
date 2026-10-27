@@ -168,6 +168,8 @@ export function ConcentrationBar({
           topRoutes={concentration.top_routes}
           restSharePct={concentration.rest_share_pct}
           restRouteCount={concentration.rest_route_count ?? 0}
+          totalRoutes={totalRoutes}
+          periodRange={periodRange}
         />
       )}
     </div>
@@ -254,10 +256,14 @@ function LorenzCurve({
   topRoutes,
   restSharePct,
   restRouteCount,
+  totalRoutes,
+  periodRange,
 }: {
   topRoutes: OverviewConcentration["top_routes"];
   restSharePct: number;
   restRouteCount: number;
+  totalRoutes: number;
+  periodRange: string;
 }) {
   const { t } = useTranslation();
   const { path, ticks20, share20Pct } = buildLorenzCurve(topRoutes, restSharePct, restRouteCount);
@@ -348,6 +354,8 @@ function LorenzCurve({
       <p className="ov-lorenz-caption">
         {t("overview.concentration.lorenz_caption", {
           pct: share20Pct.toFixed(0),
+          total: totalRoutes,
+          range: periodRange,
         })}
       </p>
     </div>

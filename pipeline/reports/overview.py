@@ -445,9 +445,10 @@ async def _per_route_avg(
             # cannot be the unfiltered total here: the slow path below sums a
             # ClickHouse row count where every row carries a dep_delay, so an
             # unfiltered fast path would answer differently for the same
-            # route; and _movers gates MOVER_MIN_SAMPLES on this number, which would
-            # otherwise admit a route whose average rests on far fewer rows
-            # than the floor implies.
+            # route; and _movers and _top_delayed_routes gate
+            # MOVER_MIN_SAMPLES on this number, which would otherwise admit a
+            # route whose average rests on far fewer rows than the floor
+            # implies.
             "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
             "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
@@ -767,7 +768,9 @@ DELAYED_ROUTE_MIN = 2.0
 TOP_DELAYED_MIN_SAMPLES = RANKING_MIN_SAMPLES
 
 #: The fewest observations in EACH of two windows behind a change between
-#: them: a mover's, and a listed route's change from the window before.
+#: them: a mover's, and a listed route's change from the window before. A
+#: listed route clears it in the current window by the list's own floor,
+#: which a test holds at or above this one.
 MOVER_MIN_SAMPLES = 10
 
 #: The routes-to-check list's bands, worst first, each with its lower bound
@@ -884,8 +887,14 @@ async def _top_delayed_routes(
     delayed_count = sum(1 for _code, avg in rows if avg is not None and avg >= DELAYED_ROUTE_MIN)
     band_counts = _route_band_counts([avg for _code, avg in rows if avg is not None])
     top_n = rows[:limit]
-    names = await _route_short_names(agency_id, [code for code, _avg in top_n], conn)
-    previous = await _per_route_avg(agency_id, base_ctx, conn, ch=ch, grain=grain) if base_ctx is not None else {}
+    listed = [code for code, _avg in top_n]
+    names = await _route_short_names(agency_id, listed, conn)
+    # Narrowed to the listed routes: the window before is wanted only for them.
+    previous = (
+        await _per_route_avg(agency_id, replace(base_ctx, routes=tuple(listed)), conn, ch=ch, grain=grain)
+        if base_ctx is not None
+        else {}
+    )
 
     def _change(code: str, avg) -> float | None:
         prv_avg, prv_n = previous.get(code, (None, 0))

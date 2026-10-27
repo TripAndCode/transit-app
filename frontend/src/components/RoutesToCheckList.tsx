@@ -15,8 +15,9 @@ import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
   routes: OverviewTopDelayedRoute[];
-  /** Each band's routes over every route, not only the listed ones: the list
-   *  is the worst few, so whichever band it runs out in is truncated. */
+  /** Each band's routes among every route the list ranks (`routeCount`), not
+   *  only the listed ones: the list is the worst few, so whichever band it
+   *  runs out in is truncated. */
   bandCounts: OverviewBandCounts;
   /** The routes the list ranks: those observed at least `minSamples` times
    *  in its window. */
@@ -37,13 +38,13 @@ function signedMinutes(delta: number): string {
   return `${delta > 0 ? "+" : "\u2212"}${tenth}`;
 }
 
-/** The Routes ranking over the list's own days, at its default floor and
- *  order, so it lists the same routes, worst first. */
-function rankingHref(agencyId: number, search: string, from: string, to: string): string {
+/** The Routes table over the list's own days at its default floor, sorted
+ *  by average delay worst first, so it lists the same routes. */
+function routeTableHref(agencyId: number, search: string, from: string, to: string): string {
   const params = new URLSearchParams(search);
   params.set("from", from);
   params.set("to", to);
-  for (const key of ["sparse", "sort", "order"]) params.delete(key);
+  params.delete("sparse");
   return reportHref(agencyId, "ranking", params.toString());
 }
 
@@ -137,7 +138,7 @@ export function RoutesToCheckList({ routes, bandCounts, routeCount, minSamples, 
         ])
       )}
       {agencyId != null && routeCount > routes.length && (
-        <Link className="ov-check-more" to={rankingHref(agencyId, search, windowFrom, windowTo)}>
+        <Link className="ov-check-more" to={routeTableHref(agencyId, search, windowFrom, windowTo)}>
           {t("overview.routes_to_check.see_all", { count: routeCount })}
         </Link>
       )}

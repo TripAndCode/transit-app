@@ -375,7 +375,7 @@
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (集計した系統は1系統のみ)。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
-      "lorenz_caption": "上位 20% の系統が、集計した系統の遅延の {{pct}}% を占めています。"
+      "lorenz_caption": "{{range}}に観測した{{total}}系統のうち上位 20% が、その遅延の {{pct}}% を占めています。"
     },
     "service_split": {
       "type": {

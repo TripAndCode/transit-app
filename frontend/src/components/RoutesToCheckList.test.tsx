@@ -244,22 +244,23 @@ describe("RoutesToCheckList", () => {
     expect(screen.getByText("Routes to check (last 3 days, Sep 24 – Sep 30)")).toBeInTheDocument();
   });
 
-  it("links to every route it ranks, as the Routes ranking over its own days", () => {
+  it("links to every route it ranks, as the Routes table over its own days, worst average first", () => {
     renderList(routes(), undefined, {
       routeCount: 163,
-      search: "?from=2026-09-01&to=2026-09-30&dow=weekday&sparse=1&sort=avg_min",
+      search: "?from=2026-09-01&to=2026-09-30&dow=weekday&sparse=1&sort=on_time&order=best&report=on_time",
     });
     const more = screen.getByRole("link", { name: "See all 163 routes →" });
     const url = new URL(more.getAttribute("href")!, "http://x");
     expect(url.pathname).toBe("/agencies/1/routes");
-    expect(url.searchParams.get("report")).toBe("ranking");
     expect(url.searchParams.get("from")).toBe("2026-09-24");
     expect(url.searchParams.get("to")).toBe("2026-09-30");
-    // The rest of the scope holds, while the ranking's own coverage and
-    // order fall back to its defaults: the list's floor, worst first.
-    expect(url.searchParams.get("dow")).toBe("weekday");
+    // Sorted by average delay, worst first (the table's default order), at
+    // the table's own floor, the list's; the rest of the scope holds.
+    expect(url.searchParams.get("sort")).toBe("avg");
+    expect(url.searchParams.has("order")).toBe(false);
+    expect(url.searchParams.has("report")).toBe(false);
     expect(url.searchParams.has("sparse")).toBe(false);
-    expect(url.searchParams.has("sort")).toBe(false);
+    expect(url.searchParams.get("dow")).toBe("weekday");
   });
 
   it("offers no link when it already lists every route it ranks", () => {

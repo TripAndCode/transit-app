@@ -151,8 +151,8 @@ describe("OverviewHeroRow", () => {
     expect(container.querySelector(".ov-hero-note")).toBeNull();
   });
 
-  // The findings have rows of their own, so the sentence carries the verdict
-  // alone and the eye lands on one claim before the numbers.
+  // The findings have rows of their own, so the sentence carries only the
+  // comparison: the two windows' averages and the change between them.
   it("keeps the peak hour and the concentration share out of the sentence", () => {
     mockFeed(0.1);
     const { container } = renderHero({ headline: headline({ avg_min: 3.7, delta_min: 0.9, delta_pct: 32.1 }) });
@@ -249,7 +249,7 @@ describe("OverviewHeroRow", () => {
   });
 
   // The routes-to-check list holds five routes; the count is the server's,
-  // over every route.
+  // over every route the list ranks, not only the listed ones.
   it("prints a count past the five routes the list holds", () => {
     mockFeed(0.1);
     renderHero({ severeCount: 12 });

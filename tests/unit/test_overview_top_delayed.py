@@ -35,9 +35,12 @@ class _Conn:
             _BASE.from_date.isoformat(): list(base_rows),
         }
 
+        self.calls: list[tuple] = []
+
     async def fetch(self, sql, *args):
         if "static_routes" in sql:
             return []
+        self.calls.append(args)
         return self.by_window[str(args[1])]
 
 
@@ -137,9 +140,15 @@ async def test_left_out_routes_ranked_among_them_leave_the_list_full():
 
 
 def test_the_floor_is_the_routes_rankings():
-    # The list's link opens the Routes ranking over the same days, which
-    # keeps routes observed RANKING_MIN_SAMPLES times or more by default.
+    # The list's link opens the Routes table over the same days, which keeps
+    # routes observed RANKING_MIN_SAMPLES times or more by default.
     assert TOP_DELAYED_MIN_SAMPLES == RANKING_MIN_SAMPLES
+
+
+def test_a_listed_route_clears_the_change_floor_in_its_own_window():
+    # A listed route's change is gated on MOVER_MIN_SAMPLES in the window
+    # before only: the list's floor covers the current window.
+    assert TOP_DELAYED_MIN_SAMPLES >= MOVER_MIN_SAMPLES
 
 
 async def test_a_thinly_observed_route_is_neither_listed_nor_counted():
@@ -181,8 +190,12 @@ async def test_each_listed_route_carries_its_change_from_the_window_before():
         {"route_code": "UP", "avg_min": 4.0, "samples": MOVER_MIN_SAMPLES},
         {"route_code": "DOWN", "avg_min": 5.506, "samples": 500},
     ]
-    out = await _top_delayed_routes(1, _CTX, _Conn(rows, base), left_out={}, base_ctx=_BASE)
+    conn = _Conn(rows, base)
+    out = await _top_delayed_routes(1, _CTX, conn, left_out={}, base_ctx=_BASE)
     assert {r["route_code"]: r["delta_min"] for r in out["routes"]} == {"UP": 2.0, "DOWN": -1.51}
+    # The window before is read for the listed routes alone.
+    base_reads = [args for args in conn.calls if str(args[1]) == _BASE.from_date.isoformat()]
+    assert len(base_reads) == 1 and ["UP", "DOWN"] in base_reads[0]
 
 
 async def test_a_route_thin_or_absent_in_the_window_before_has_no_change():
