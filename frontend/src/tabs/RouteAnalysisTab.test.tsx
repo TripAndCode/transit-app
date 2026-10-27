@@ -136,8 +136,10 @@ describe("RouteAnalysisTab", () => {
     expect(title).toHaveTextContent(/^W54 沖舘・新田線 沖舘 → 新田$/);
     expect(title.querySelector(".route-label__plate")).toHaveTextContent("W54");
     expect(screen.getByText("Where does delay build up?", { exact: false })).toBeInTheDocument();
-    // Lists drop the route_id; the route's own page keeps it.
+    // Lists drop the route_id; the route's own page keeps it, below the
+    // figures rather than in the subtitle.
     expect(screen.getByText("Route ID 沖舘・新田線(R1)")).toBeInTheDocument();
+    expect(screen.getByText("Where does delay build up?")).not.toHaveTextContent("Route ID");
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumbs).getByRole("link", { name: "Routes" })).toHaveAttribute("href", expect.stringMatching(/^\/agencies\/1\/routes/));
     expect(crumbs).toHaveTextContent("W54 沖舘・新田線");
@@ -154,7 +156,8 @@ describe("RouteAnalysisTab", () => {
     renderTab("/agencies/1/route-analysis?routes=R1&from=2026-08-12&to=2026-09-10&compare=1");
     const periods = screen.getByText(/^Selected period /);
     expect(periods).toHaveTextContent("Selected period Aug 12 – Sep 10, 2026");
-    expect(periods).toHaveTextContent("Same weekdays, one week earlier Aug 5 – Sep 3, 2026");
+    // The 30 days just before, sharing no day with the selected ones.
+    expect(periods).toHaveTextContent("Previous 30 days Jul 13 – Aug 11, 2026");
     expect(periods).not.toHaveTextContent("2026-08-12");
   });
 
@@ -427,5 +430,83 @@ describe("RouteAnalysisTab Marey scrubber", () => {
     expect(await screen.findByTestId("analysis-map")).toBeInTheDocument();
     expect(mapProps.last?.positions).toHaveLength(1);
     expect(mapProps.last?.positions?.[0]).toMatchObject({ key: "T1", lon: 133, lat: 35 });
+  });
+});
+
+describe("RouteAnalysisTab where delay grows", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const STOPS = [
+    { stop_sequence: 1, stop_name: "広島駅", stop_id: "a", lon: 132.1, lat: 34.1, avg_min: 0, samples: 50 },
+    { stop_sequence: 2, stop_name: "大手町四丁目", stop_id: "b", lon: 132.2, lat: 34.2, avg_min: 2.7, samples: 50 },
+    { stop_sequence: 3, stop_name: "加古町", stop_id: "c", lon: 132.3, lat: 34.3, avg_min: 3.9, samples: 50 },
+    { stop_sequence: 4, stop_name: "観音本町", stop_id: "d", lon: 132.4, lat: 34.4, avg_min: 4.4, samples: 50 },
+  ];
+  const VARIANTS = [
+    { shape_id: "out", first_stop_name: "広島駅", last_stop_name: "観音新町三丁目", stop_count: 5, samples: 300, share_pct: 31.8 },
+    { shape_id: "in", first_stop_name: "観音新町三丁目", last_stop_name: "広島駅", stop_count: 5, samples: 250, share_pct: 25 },
+  ];
+
+  function renderDossier(search = "") {
+    mockSupportHooks();
+    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: {
+        ...shape(STOPS),
+        shape_id: "out",
+        variants: VARIANTS,
+        segments: [
+          { from_sequence: 2, to_sequence: 3, increase_min: 1.2, pairs: 50 },
+          { from_sequence: 3, to_sequence: 4, increase_min: 0.47, pairs: 50 },
+        ],
+        unobserved_stops: [{ stop_sequence: 5, stop_name: "観音新町三丁目", lon: 132.5, lat: 34.5 }],
+      },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab(`/agencies/1/route-analysis?routes=R1${search}`);
+    return useRouteShape;
+  }
+
+  it("says where delay grows most and marks it on the chart", () => {
+    renderDossier();
+    expect(screen.getByText("Delay grows most from 大手町四丁目 to 加古町 (+1.2 min)")).toBeInTheDocument();
+    expect(screen.getByText("Next largest: 加古町 to 観音本町 (+0.5 min).")).toBeInTheDocument();
+    expect(screen.getByTestId("stop-chart-highlight")).toBeInTheDocument();
+  });
+
+  it("opens on the stop with the largest delay, not the first stop at 0", () => {
+    renderDossier();
+    expect(screen.getByRole("combobox", { name: "Selected stop" })).toHaveDisplayValue("観音本町");
+  });
+
+  it("calls the last stop the last stop, not unobserved, since nothing departs it", () => {
+    renderDossier();
+    fireEvent.click(tab("Stop table"));
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Last stop (no departures)")).toBeInTheDocument();
+    expect(within(table).queryByText("No observation")).toBeNull();
+  });
+
+  it("lists the route's paths with their shares and switches to the other direction", () => {
+    const useRouteShape = renderDossier("&stop_route=R1&stop_seq=3");
+    const picker = screen.getByRole("combobox", { name: "Path" });
+    expect(picker).toHaveDisplayValue("広島駅 → 観音新町三丁目 (5 stops, 32% of observations)");
+    expect(screen.getByText("This path: 32% of the route's observations")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Selected stop" })).toHaveDisplayValue("加古町");
+    fireEvent.click(screen.getByRole("button", { name: "Other direction" }));
+    const asked = useRouteShape.mock.calls.filter((call) => call[1] === "R1").at(-1);
+    expect(asked?.[3]).toBe("in");
+    // The other path numbers its stops afresh, so the picked stop is dropped.
+    expect(screen.getByRole("combobox", { name: "Selected stop" })).toHaveDisplayValue("観音本町");
+  });
+
+  it("compares with the previous window on the variant shown", () => {
+    const useRouteShape = renderDossier("&from=2026-09-24&to=2026-10-23&compare=1");
+    const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");
+    expect(previousCall?.[2]).toMatchObject({ from: "2026-08-25", to: "2026-09-23" });
+    expect(previousCall?.[3]).toBe("out");
   });
 });

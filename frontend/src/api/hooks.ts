@@ -335,16 +335,20 @@ export function useNetworkSummary(ctx: Scope): UseQueryResult<NetworkSummary> {
   });
 }
 
+/** `shape` picks the variant (系統) to show; the server shows the most
+ *  observed one without it, or for a shape that is not the route's. */
 export function useRouteShape(
   agencyId: number | null,
   route: string | null,
   ctx: Scope,
+  shape: string | null = null,
 ): UseQueryResult<RouteShapeResponse> {
   return useLocalizedQuery({
-    queryKey: ["route_shape", agencyId, route, ...scopeKey(ctx)],
+    queryKey: ["route_shape", agencyId, route, shape, ...scopeKey(ctx)],
     queryFn: ({ signal }) => {
       const qs = new URLSearchParams(scopeToQueryString(ctx));
       qs.set("route", route!);
+      if (shape) qs.set("shape", shape);
       return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`, { signal });
     },
     enabled: agencyId != null && !!route,

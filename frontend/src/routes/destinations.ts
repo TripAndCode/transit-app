@@ -167,10 +167,10 @@ export function destHref(
  *  contradict it. The params that picked another screen's report, document
  *  or ranking coverage and order (`report`, `sort`, `doc`, `by`, `sparse`,
  *  `order`), and the compare bars' shown `period`, mean nothing on a route's
- *  page either. */
+ *  page either, nor does the path (`variant`) picked on another route's. */
 export function routeHref(agencyId: number | string, code: string, search = ""): string {
   const params = new URLSearchParams(search);
-  for (const key of ["routes", "report", "sort", "doc", "by", "sparse", "order", "period"]) params.delete(key);
+  for (const key of ["routes", "report", "sort", "doc", "by", "sparse", "order", "period", "variant"]) params.delete(key);
   return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), {})}`;
 }
 
