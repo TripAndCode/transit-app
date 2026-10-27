@@ -397,7 +397,7 @@ The evaluation is updated every Sunday. Until the first one, the page says “No
 
 ## 13. Glossary
 
-What the words on the screens and in this manual mean. Every figure is counted exactly as described here.
+What the words on the screens and in this manual mean.
 
 ### 13-1. Units of data
 
@@ -407,8 +407,8 @@ What the words on the screens and in this manual mean. Every figure is counted e
 - **Missing data**: days or hours with no readings are left out, not counted as on time.
 - **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.
 - **Timetable type**: each day is classed by the timetable the agency ran that day, as weekdays, Saturdays, or Sundays & holidays; for an agency whose Saturday and Sunday timetables are the same, as weekdays or weekends & holidays. A day the timetable cannot class is classed by its day of the week and public holidays.
-- **Service pattern**: what the agency’s timetable codes as one route. Each row of the **Routes** table is one service pattern, even though its column is headed “Route”.
-- **Route**: service patterns that share a name. Route pickers list them as one entry, with a count of its variants.
+- **Route**: what the agency’s timetable codes as one route. Each row of the **Routes** table is one route. Route pickers put routes that share a name under one entry, with a count of its variants.
+- **Service pattern**: on a route’s page, the “Route” filter picks a name that one or more routes share, and “Service pattern” picks one of those routes.
 
 ### 13-2. Delay figures
 
