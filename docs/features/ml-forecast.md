@@ -192,4 +192,6 @@ says "no forecast has been published yet" (and, for the summaries, "no evaluatio
 summary has been published yet") rather than reporting zero rows; a summary it
 skips is named in a warning. The
 heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
-and marks them as the ML model's.
+and marks them as the ML model's: each forecast cell shows its `q10`–`q90` range
+as the span about 8 runs in 10 fall in, and a cell the latest publish does not
+forecast shows its past average with a mark.

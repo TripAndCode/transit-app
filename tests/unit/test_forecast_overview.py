@@ -274,8 +274,59 @@ def test_the_worst_window_says_whether_a_forecast_model_or_past_measurements_set
         {"dow": 1, "hour": 8, "avg_min": 2.0, "samples": 200},
     ]
     assert summarize_agency_overview(rows, [])["worst"]["source"] == "baseline"
-    worst = summarize_agency_overview(rows, [], ml_cells=[{"dow": 1, "hour": 8, "mean_min": 9.0}])["worst"]
+    ml = [{"dow": 1, "hour": 8, "mean_min": 9.0, "samples": 200, "sum_delay_sec": 2.0 * 60 * 200}]
+    worst = summarize_agency_overview(rows, [], ml_cells=ml)["worst"]
     assert (worst["dow"], worst["band"], worst["expected_avg_min"], worst["source"]) == (1, "morning", 9.0, "ml")
+
+
+def test_a_forecast_hour_takes_its_route_hours_place_in_the_band_weighted_by_its_past_observations():
+    """A band pools every route-hour by its past observations, as the past
+    averages do: the forecast's figure where one exists, the past average
+    otherwise. The forecast rows no longer stand alone, so a band's figure is
+    the one its hours add up to."""
+    rows = [
+        {"dow": 5, "hour": 17, "avg_min": 3.0, "samples": 200, "sum_delay_sec": 3.0 * 60 * 200},
+        {"dow": 5, "hour": 18, "avg_min": 2.0, "samples": 100, "sum_delay_sec": 2.0 * 60 * 100},
+    ]
+    ml = [{"dow": 5, "hour": 17, "mean_min": 6.0, "samples": 200, "sum_delay_sec": 3.0 * 60 * 200}]
+    cell = next(
+        c for c in summarize_agency_overview(rows, [], ml_cells=ml)["grid"] if (c["dow"], c["band"]) == (5, "evening")
+    )
+    assert cell["source"] == "ml"
+    assert cell["expected_avg_min"] == pytest.approx((6.0 * 200 + 2.0 * 100) / 300, abs=0.05)
+    assert cell["samples"] == 300
+
+
+def test_routes_sharing_a_forecast_hour_weigh_by_their_own_past_observations():
+    rows = [{"dow": 2, "hour": 8, "avg_min": 1.0, "samples": 400, "sum_delay_sec": 1.0 * 60 * 400}]
+    ml = [
+        {"dow": 2, "hour": 8, "mean_min": 9.0, "samples": 300, "sum_delay_sec": 1.0 * 60 * 300},
+        {"dow": 2, "hour": 8, "mean_min": 5.0, "samples": 100, "sum_delay_sec": 1.0 * 60 * 100},
+    ]
+    cell = next(
+        c for c in summarize_agency_overview(rows, [], ml_cells=ml)["grid"] if (c["dow"], c["band"]) == (2, "morning")
+    )
+    assert cell["expected_avg_min"] == pytest.approx(8.0, abs=0.05)
+
+
+def test_a_forecast_row_with_no_past_observations_weighs_nothing_beside_one_that_has_them():
+    rows = [{"dow": 2, "hour": 8, "avg_min": 2.0, "samples": 100, "sum_delay_sec": 2.0 * 60 * 100}]
+    ml = [
+        {"dow": 2, "hour": 8, "mean_min": 4.0, "samples": 100, "sum_delay_sec": 2.0 * 60 * 100},
+        {"dow": 2, "hour": 7, "mean_min": 30.0, "samples": 0, "sum_delay_sec": None},
+    ]
+    cell = next(
+        c for c in summarize_agency_overview(rows, [], ml_cells=ml)["grid"] if (c["dow"], c["band"]) == (2, "morning")
+    )
+    assert cell["expected_avg_min"] == pytest.approx(4.0, abs=0.05)
+
+
+def test_a_band_with_only_unobserved_forecast_rows_shows_their_plain_mean():
+    ml = [{"dow": 3, "hour": 8, "mean_min": 9.0}, {"dow": 3, "hour": 7, "mean_min": 5.0}]
+    cell = next(
+        c for c in summarize_agency_overview([], [], ml_cells=ml)["grid"] if (c["dow"], c["band"]) == (3, "morning")
+    )
+    assert (cell["source"], cell["expected_avg_min"], cell["low_confidence"]) == ("ml", 7.0, True)
 
 
 def test_the_overview_names_each_forecast_weekday_by_its_service_date_once():

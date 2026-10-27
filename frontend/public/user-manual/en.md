@@ -257,7 +257,12 @@ Each route’s average delay (“Avg (min)”, with “Samples”) on the days t
 
 ### 6-3. Route forecast
 
-When routes tend to run late, by day of week and time of day. “Day × time of day (all routes)” shows the agency as a whole, and “Routes that run late” lists the routes. Click one, or pick it from the “Route” list, for that route’s breakdown.
+When routes tend to run late, by day of week and time of day. “Day × time of day (all routes)” shows the agency as a whole, and “Routes that ran late” lists the routes. Click one, or pick it from the “Route” list, for that route’s breakdown.
+
+- Where the machine-learning model forecasts, the dates it forecasts and “ML forecast” appear at the top; “How accurate is it?” opens the model evaluation page. A forecast figure combines the forecasts for the trips that run in that hour.
+- A route’s headline names the hour it is likely to run latest (such as “Fri 10/30 18:00”), then the time band that runs latest. When that hour is a forecast, it also gives the range about 8 trips in 10 fall in (“8 runs in 10 within 3.0–17.2 min late”). Only an hour’s forecast has a range; a band or an all-routes figure does not.
+- A band’s figure averages its hours (on the all-routes grid, each route’s hours), weighted by how often each was observed before, using the forecast where there is one and the past average otherwise.
+- On a screen with forecasts, a cell that shows a past average because the model has no forecast for it carries a small ring, shown in the legend as “No forecast: past average”.
 
 ---
 

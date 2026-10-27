@@ -107,6 +107,7 @@ describe("BandGrid", () => {
     const evening = heads[5];
     expect(evening.querySelector(".band-grid__name")).toHaveTextContent("Evening");
     expect(evening.querySelector(".band-grid__hours")).toHaveTextContent("17–20h");
+    expect(evening.querySelector(".band-grid__hours--short")).toHaveTextContent(/^17–20$/);
   });
 
   it("sizes its weekday column to the labels, so none breaks mid-word", () => {

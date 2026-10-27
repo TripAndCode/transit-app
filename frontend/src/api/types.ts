@@ -808,6 +808,9 @@ export interface ForecastHeatmapCell {
   samples: number;
   low_confidence: boolean;
   source: "ml" | "baseline";
+  /** The forecast's 10th-90th percentile range; null on a past-average cell. */
+  q10?: number | null;
+  q90?: number | null;
 }
 
 /** A weekday row whose cells come from the forecast model, and the service

@@ -109,15 +109,24 @@ async def test_overview_serves_the_ml_value_when_the_flag_is_on_and_the_row_is_f
     assert cell["expected_avg_min"] == 9.0
 
 
-async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropping_one(
+async def test_overview_weighs_routes_sharing_a_band_by_their_own_past_observations(
     client, aconn, aagency_id, monkeypatch
 ):
     # _fetch_ml_cells must not collapse several routes sharing a (dow, hour)
     # slot into one dict entry -- the agency-wide overview (unlike the
-    # single-route heatmap) can have more than one.
+    # single-route heatmap) can have more than one -- and each forecast row
+    # counts with its own route-hour's past observations, as the past
+    # averages beside it do.
     monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
     flags.reset_cache()
     target_service_date = jst_today() + timedelta(days=1)
+    target_dow = target_service_date.isoweekday()
+    await aconn.executemany(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, '平日', $3, 8, 1.0, $4, $5)",
+        [(aagency_id, "R1", target_dow, 300, 60 * 300), (aagency_id, "R2", target_dow, 100, 60 * 100)],
+    )
     await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # mean_min=9.0, hour 8
     await aconn.execute(
         f"INSERT INTO agg_route_forecast_ml ({_COLUMNS}) "
@@ -129,11 +138,11 @@ async def test_overview_averages_multiple_routes_sharing_a_band_instead_of_dropp
 
     response = await client.get(f"/api/{aagency_id}/forecast/overview")
 
-    target_dow = target_service_date.isoweekday()
     body = response.json()
     cell = next(c for c in body["grid"] if c["dow"] == target_dow and c["band"] == "morning")
     assert cell["source"] == "ml"
-    assert cell["expected_avg_min"] == 7.0  # (9.0 + 5.0) / 2, not one or the other
+    assert cell["expected_avg_min"] == 8.0  # (9.0 x 300 + 5.0 x 100) / 400, neither route alone
+    assert cell["samples"] == 400
 
 
 async def test_overview_leaves_out_a_run_past_midnight_of_its_service_day(client, aconn, aagency_id, monkeypatch):
@@ -336,3 +345,16 @@ async def test_an_agency_the_latest_publish_left_out_is_neither_served_nor_live(
     heatmap = (await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})).json()
     assert all(c["source"] == "baseline" for c in heatmap["cells"])
     assert await fetch_live_ml_agencies(aconn) == {other}
+
+
+async def test_heatmap_gives_a_forecast_cell_its_range(client, aconn, aagency_id, monkeypatch):
+    monkeypatch.setenv("ML_FORECAST_ENABLED", "true")
+    flags.reset_cache()
+    await _seed_ml_row(aconn, aagency_id, "R1", jst_today())  # q10 7.0, q90 11.0
+
+    body = (await client.get(f"/api/{aagency_id}/forecast/heatmap", params={"route": "R1"})).json()
+
+    target_dow = (jst_today() + timedelta(days=1)).isoweekday()
+    cell = next(c for c in body["cells"] if c["dow"] == target_dow and c["hour"] == 8)
+    assert (cell["q10"], cell["q90"]) == (7.0, 11.0)
+    assert all(c["q10"] is None and c["q90"] is None for c in body["cells"] if c["source"] == "baseline")

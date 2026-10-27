@@ -59,3 +59,12 @@ def test_forecast_days_name_the_service_date_each_ml_weekday_row_stands_for():
 
 def test_a_baseline_only_heatmap_forecasts_no_date():
     assert summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100)), "R1")["forecast_days"] == []
+
+
+def test_a_forecast_cell_carries_its_range_and_a_past_average_cell_none():
+    ml_cells = [{"dow": 1, "hour": 8, "mean_min": 6.4, "q10": 1.96, "q90": 11.04, "service_date": date(2026, 10, 26)}]
+    out = summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100), (1, 9, 4.0, 100)), "R1", ml_cells=ml_cells)
+    ml = next(c for c in out["cells"] if (c["dow"], c["hour"]) == (1, 8))
+    past = next(c for c in out["cells"] if (c["dow"], c["hour"]) == (1, 9))
+    assert (ml["q10"], ml["q90"]) == (2.0, 11.0)
+    assert (past["source"], past["q10"], past["q90"]) == ("baseline", None, None)

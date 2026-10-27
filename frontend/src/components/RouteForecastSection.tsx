@@ -35,6 +35,7 @@ import { delayRampVar } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, formatMinutes, formatNumber, roundTenth } from "../utils/format";
 import { forecastDelayText } from "../utils/delayPhrase";
+import { forecastRangeText } from "../utils/forecastRange";
 import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
 import { datedDayLabel, forecastDayOfMonth } from "../utils/forecastDays";
 import { BAND_ORDER, bandLabel as namedBand, bandOf, type Band } from "../api/timeBands";
@@ -150,6 +151,7 @@ function HeatmapGrid({
   big,
   dayLabel,
   dated,
+  markFallback,
   ariaLabel,
 }: {
   cells: ForecastHeatmapCell[];
@@ -157,6 +159,8 @@ function HeatmapGrid({
   dayLabel: (dow: number) => string;
   /** Some row labels carry a date, so the label column is widened to fit one. */
   dated: boolean;
+  /** The model forecasts this view, so a cell showing a past average instead is marked. */
+  markFallback: boolean;
   ariaLabel: string;
 }) {
   const { t } = useTranslation();
@@ -178,7 +182,13 @@ function HeatmapGrid({
     const cell = byKey.get(`${dow}-${hour}`);
     const value = cell?.expected_avg_min;
     const parts = [`${dayLabel(dow)} ${hour}:00`, value == null ? "—" : formatMinutes(value)];
-    if (cell?.source === "ml") parts.push(t("forecast.ml_source"));
+    if (cell?.source === "ml") {
+      parts.push(t("forecast.ml_source"));
+      const range = forecastRangeText(t, value as number, cell.q10, cell.q90);
+      if (range) parts.push(range);
+    } else if (markFallback && value != null) {
+      parts.push(t("forecast.fallback_cell"));
+    }
     if (cell?.low_confidence) parts.push(t("forecast.lowSamples", { count: cell.samples }));
     return parts.join(" · ");
   }
@@ -217,12 +227,14 @@ function HeatmapGrid({
                 const text = cellText(dow, h);
                 const highlighted = hover === key;
                 const empty = value == null || !cell;
+                const fallback = markFallback && !empty && cell.source !== "ml";
                 return (
                   <Tooltip key={key} label={text}>
                     <div
                       data-testid={empty ? undefined : "hm-cell"}
                       data-cell={index}
                       data-lowconf={cell?.low_confidence ? "" : undefined}
+                      data-fallback={fallback ? "" : undefined}
                       role="gridcell"
                       aria-label={text}
                       tabIndex={activeSlot === key ? 0 : -1}
@@ -254,6 +266,7 @@ function HeatmapGrid({
                             }
                       }
                     >
+                      {fallback && <span className="fallback-mark" aria-hidden="true" />}
                       {cell?.low_confidence && (
                         // Decoration: the warning is already part of the
                         // cell's own name, and a nested tooltip here would
@@ -415,8 +428,9 @@ function populatedCells<T extends { expected_avg_min: number | null }>(cells: T[
 }
 
 /** The shared delay legend, with the hatched fill the forecast gives a
- *  day and time without measurements. */
-function ForecastLegend() {
+ *  day and time without measurements and, in a view the model forecasts,
+ *  the mark on a cell that shows a past average instead. */
+function ForecastLegend({ fallback = false }: { fallback?: boolean }) {
   const { t } = useTranslation();
   return (
     <div style={{ marginTop: 12 }}>
@@ -425,54 +439,57 @@ function ForecastLegend() {
           <i aria-hidden="true" style={{ background: EMPTY_CELL_FILL }} />
           {t("delay_scale.no_data")}
         </span>
+        {fallback && (
+          <span className="delay-scale-legend__item">
+            <i aria-hidden="true" className="fallback-mark fallback-mark--legend" />
+            {t("forecast.fallback_note")}
+          </span>
+        )}
       </DelayScaleLegend>
     </div>
   );
 }
 
 /**
- * Collapse a per-route 7×24 heatmap into a 7-day × time-band grid, mirroring
- * pipeline/reports/forecast.py::summarize_agency_overview's own split: the
- * baseline pool is sample-weighted, the ML pool is a plain mean across
- * whatever ML cells land in the band (an ML cell's `samples` is its hour's
- * baseline count, not a weight for the forecast). `samples`/`low_confidence`
- * come from those baseline counts, pooled over every cell in the band, an ML
- * one included — see that function's docstring for why.
+ * Collapse a per-route 7×24 heatmap into a 7-day × time-band grid by the
+ * rule pipeline/reports/forecast.py::summarize_agency_overview applies to the
+ * agency grid: every hour of a band counts with the weight of its past
+ * observations (`samples`), carrying the forecast's figure where there is one
+ * and the past average otherwise, so a band's figure is the one its hours add
+ * up to. A forecast hour without past observations weighs nothing, except in
+ * a band with nothing else, which then shows the plain mean of its forecasts.
+ * A band any weighted forecast reaches is the model's (`source: "ml"`).
  */
 function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell[] {
-  const baseline = new Map<string, { sum: number; n: number }>();
-  const ml = new Map<string, number[]>();
-  const counts = new Map<string, number>();
+  type Pool = { sum: number; n: number; ml: boolean; unweighted: number[] };
+  const pools = new Map<string, Pool>();
   for (const c of cells) {
     if (c.expected_avg_min == null) continue;
     const key = `${c.dow}-${bandOf(c.hour)}`;
-    if (c.samples) counts.set(key, (counts.get(key) ?? 0) + c.samples);
-    if (c.source === "ml") {
-      const values = ml.get(key) ?? [];
-      values.push(c.expected_avg_min);
-      ml.set(key, values);
-    } else if (c.samples) {
-      const a = baseline.get(key) ?? { sum: 0, n: 0 };
-      a.sum += c.expected_avg_min * c.samples;
-      a.n += c.samples;
-      baseline.set(key, a);
+    const pool = pools.get(key) ?? { sum: 0, n: 0, ml: false, unweighted: [] };
+    if (c.samples > 0) {
+      pool.sum += c.expected_avg_min * c.samples;
+      pool.n += c.samples;
+      pool.ml ||= c.source === "ml";
+    } else if (c.source === "ml") {
+      pool.unweighted.push(c.expected_avg_min);
     }
+    pools.set(key, pool);
   }
   const grid: ForecastOverviewGridCell[] = [];
   for (let dow = 1; dow <= 7; dow++) {
     for (const band of BAND_ORDER) {
-      const key = `${dow}-${band}`;
-      const a = baseline.get(key);
-      const n = counts.get(key) ?? 0;
-      const mlValues = ml.get(key);
-      const mlMean = mlValues?.length ? mlValues.reduce((sum, v) => sum + v, 0) / mlValues.length : null;
+      const pool = pools.get(`${dow}-${band}`);
+      const n = pool?.n ?? 0;
+      const plain = !n && pool?.unweighted.length ? pool.unweighted.reduce((a, v) => a + v, 0) / pool.unweighted.length : null;
+      const ml = n ? !!pool?.ml : plain != null;
       grid.push({
         dow,
         band,
-        expected_avg_min: mlMean != null ? roundTenth(mlMean) : a?.n ? roundTenth(a.sum / a.n) : null,
+        expected_avg_min: n ? roundTenth((pool as Pool).sum / n) : plain != null ? roundTenth(plain) : null,
         samples: n,
-        low_confidence: mlMean != null ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
-        source: mlMean != null ? "ml" : "baseline",
+        low_confidence: ml ? n < LOW_CONFIDENCE_SAMPLES : n > 0 && n < LOW_CONFIDENCE_SAMPLES,
+        source: ml ? "ml" : "baseline",
       });
     }
   }
@@ -517,7 +534,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           names={names}
           dayLabel={dayLabel}
           axisMin={min1}
-          worstLabel={t("forecast.overview_worst_label")}
+          worstLabel={(source) => t(source === "ml" ? "forecast.overview_worst_label_forecast" : "forecast.overview_worst_label_past")}
           gridTitle={t("forecast.overview_grid_title")}
           gridCaption={t("forecast.overview_grid_caption")}
           routesTitle={t("forecast.overview_routes_title")}
@@ -596,11 +613,12 @@ function RoutePicker({
 function MlForecastChip({ aid }: { aid: number }) {
   const { t } = useTranslation();
   return (
-    <div style={{ marginBottom: 8 }}>
-      <Link to={`/model?from=${aid}`} className="caveat-badge" data-testid="fc-ml-chip">
-        {t("forecast.ml_source")}
+    <p className="fc-ml-note" data-testid="fc-ml-chip">
+      <span className="caveat-badge">{t("forecast.ml_source")}</span>
+      <Link to={`/model?from=${aid}`} className="fc-ml-link">
+        {t("forecast.ml_accuracy_link")}
       </Link>
-    </div>
+    </p>
   );
 }
 
@@ -626,7 +644,8 @@ function AgencyLanding({
   names: ReturnType<typeof useRouteNames>;
   dayLabel: (dow: number) => string;
   axisMin: string;
-  worstLabel: string;
+  /** What the headline's window is: the coming week's forecast or the past. */
+  worstLabel: (source: "ml" | "baseline") => string;
   gridTitle: string;
   gridCaption: string;
   routesTitle: string;
@@ -650,6 +669,7 @@ function AgencyLanding({
     return <p style={{ color: "var(--text-secondary)" }}>{noData}</p>;
   }
   const forecastDay = datedDayLabel(t, dayLabel, data.forecast_days);
+  const mlBacked = data.grid.some((c) => c.source === "ml");
 
   const shownRoutes = data.routes.slice(0, 8);
   // InlineSparkline draws nothing from fewer than two days, so the note that
@@ -657,17 +677,17 @@ function AgencyLanding({
   const linesDrawn = shownRoutes.some((r) => (r.recent_daily?.length ?? 0) >= 2);
   return (
     <>
-      {data.grid.some((c) => c.source === "ml") && <MlForecastChip aid={aid} />}
+      {mlBacked && <MlForecastChip aid={aid} />}
       {data.worst && (
         <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel(data.worst.source)}</div>
           <div style={{ fontSize: 16, fontWeight: 600 }}>{worstPhrase(data.worst, (data.worst.source === "ml" ? forecastDay : dayLabel)(data.worst.dow))}</div>
         </div>
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid ariaLabel={gridTitle} grid={data.grid} dayLabel={forecastDay} onTip={onTip} onLeave={onLeave} />
-        {populated.length > 0 && <ForecastLegend />}
+        <BandGrid ariaLabel={gridTitle} grid={data.grid} dayLabel={forecastDay} markFallback={mlBacked} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <ForecastLegend fallback={mlBacked} />}
       </SectionCard>
 
       {data.disclaimer && (
@@ -728,16 +748,19 @@ function RouteDetail({
   const mean = totalN ? populated.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / totalN : 0;
   const allNull = data != null && populated.length === 0;
 
-  // Band-collapsed grid (same banding as the agency landing). The headline worst
-  // is the worst *band* (excluding low-confidence) so its number matches the band
-  // cell the user sees below it — not a single spiky hour. Its legend spans the
-  // band grid's own range.
+  // The headline names the latest hour first, as its own cell in the full
+  // grid shows it, with that cell's range when the model forecast it; then
+  // the latest band, as its band cell shows it. Low-confidence cells and
+  // bands are passed over in both, so a thin outlier never headlines.
   const bandGrid = collapseToBands(cells);
   const bandPop = populatedCells(bandGrid);
   const forecastDay = datedDayLabel(t, dayLabel, data?.forecast_days ?? []);
-  const worstBand = bandPop
-    .filter((c) => !c.low_confidence)
-    .reduce<ForecastOverviewGridCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
+  const worstOf = <T extends { expected_avg_min: number | null; low_confidence: boolean }>(xs: T[]) =>
+    xs.filter((c) => !c.low_confidence).reduce<T | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
+  const worstBand = worstOf(bandPop);
+  const worstCell = worstOf(populated);
+  const worstRange = worstCell?.source === "ml" ? forecastRangeText(t, worstCell.expected_avg_min as number, worstCell.q10, worstCell.q90) : null;
+  const sourcedDay = (source: "ml" | "baseline" | undefined, dow: number) => (source === "ml" ? forecastDay : dayLabel)(dow);
 
   const margin = (pick: (c: ForecastHeatmapCell) => number, n: number): (number | null)[] =>
     Array.from({ length: n }, (_, i) => {
@@ -786,21 +809,33 @@ function RouteDetail({
   return (
     <>
       {mlBacked && <MlForecastChip aid={aid} />}
-      {worstBand && (
+      {(worstCell || worstBand) && (
         <div
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: (worstBand.source === "ml" ? forecastDay : dayLabel)(worstBand.dow), band: bandLabel(worstBand.band), avg: forecastDelayText(t, worstBand.expected_avg_min as number, worstBand.source) })}
+          {worstCell && (
+            <>
+              {t("forecast.detail_worst_hour", { day: sourcedDay(worstCell.source, worstCell.dow), hour: worstCell.hour, avg: forecastDelayText(t, worstCell.expected_avg_min as number, worstCell.source) })}
+              {worstRange && <span className="fc-worst-range">{worstRange}</span>}
+            </>
+          )}
+          {worstBand && (
+            <span className={worstCell ? "fc-worst-band" : undefined}>
+              {t(worstCell ? "forecast.detail_worst_band" : "forecast.detail_worst_band_only", { day: sourcedDay(worstBand.source, worstBand.dow), band: bandLabel(worstBand.band), avg: forecastDelayText(t, worstBand.expected_avg_min as number, worstBand.source) })}
+            </span>
+          )}
         </div>
       )}
 
       <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} dayLabel={forecastDay} onTip={onTip} onLeave={onLeave} />
-        {bandPop.length > 0 && <ForecastLegend />}
+        <BandGrid ariaLabel={t("forecast.route_grid_title")} grid={bandGrid} dayLabel={forecastDay} markFallback={mlBacked} onTip={onTip} onLeave={onLeave} />
+        {bandPop.length > 0 && <ForecastLegend fallback={mlBacked} />}
       </SectionCard>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+      {/* Side by side where both fit, stacked on a phone, where two would
+          squeeze the weekday and hour labels together. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginTop: 16 }}>
         <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} testid="fc-card-dow" onOpen={() => setView("dow")}>
           <MarginBars values={dowAvg} labels={dowLabels} axisLabels={dowAxis} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
@@ -819,8 +854,8 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big dayLabel={forecastDay} dated={forecastDays.size > 0} ariaLabel={t("forecast.heatmap_aria")} />
-          {populated.length > 0 && <ForecastLegend />}
+          <HeatmapGrid cells={cells} big dayLabel={forecastDay} dated={forecastDays.size > 0} markFallback={mlBacked} ariaLabel={t("forecast.heatmap_aria")} />
+          {populated.length > 0 && <ForecastLegend fallback={mlBacked} />}
         </div>
       )}
 
@@ -839,8 +874,8 @@ function RouteDetail({
               <>
                 <StatStrip
                   stats={[
-                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
-                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
+                    { label: t(view === "dow" ? "forecast.stat_worst_dow" : "forecast.stat_worst_hour"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
+                    { label: t(view === "dow" ? "forecast.stat_calmest_dow" : "forecast.stat_calmest_hour"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
                     { label: t(mlBacked ? "forecast.stat_mean_expected" : "forecast.stat_mean"), value: formatMinutes(mean) },
                     { label: t(mlBacked ? "forecast.stat_samples_history" : "forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}

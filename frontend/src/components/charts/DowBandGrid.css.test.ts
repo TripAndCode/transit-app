@@ -12,9 +12,11 @@ describe("DowBandGrid.css", () => {
     expect(decl(ruleBody(css, ".band-grid__hours {"), "white-space")).toBe("nowrap");
   });
 
-  it("drops the name, not the hours, on a phone, where a column is narrower than a name", () => {
+  it("keeps only the bare hours on a phone, where a column is narrower than a name or a unit", () => {
+    expect(decl(ruleBody(css, ".band-grid__hours--short {"), "display")).toBe("none");
     const phone = ruleBody(css, "@media (max-width: 640px) {");
     expect(decl(ruleBody(phone, ".band-grid__name {"), "display")).toBe("none");
-    expect(phone).not.toMatch(/band-grid__hours/);
+    expect(decl(ruleBody(phone, ".band-grid__hours {"), "display")).toBe("none");
+    expect(decl(ruleBody(phone, ".band-grid__hours--short {"), "display")).toBe("inline-flex");
   });
 });

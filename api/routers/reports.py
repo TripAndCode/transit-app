@@ -141,7 +141,11 @@ _ML_FRESH_ROWS = (
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
     """Fresh `agg_route_forecast_ml` rows for this agency (and route, if
-    given), as plain dicts with `dow`/`hour`/`mean_min`/`service_date`. Returns a list of
+    given), as plain dicts with `dow`/`hour`/`mean_min`/`q10`/`q90`/
+    `service_date`, plus the `samples`/`sum_delay_sec` the route's own
+    `agg_route_hour_dow` holds for that weekday and hour (pooled the way the
+    endpoints pool it; null where it holds none), which a band weights the
+    row by. Returns a list of
     rows rather than a (dow, hour)-keyed mapping: when `route_code` is
     `None` (the agency-wide overview), more than one route can share a
     (dow, hour) slot, and collapsing them into one dict entry per key would
@@ -155,8 +159,19 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
     if not await aflag("ml_forecast"):
         return []
     try:
+        # The history's columns are renamed so the shared predicate's bare
+        # column names (hour, service_date, ...) can only mean the forecast's.
         rows = await conn.fetch(
-            "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
+            "SELECT service_date, hour, mean_min, q10, q90, past.past_samples, past.past_sum_delay_sec "
+            "FROM agg_route_forecast_ml LEFT JOIN ("
+            "  SELECT route_code AS past_route, dow AS past_dow, hour AS past_hour, "
+            "    SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS past_samples, "
+            "    SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL) AS past_sum_delay_sec "
+            "  FROM agg_route_hour_dow "
+            "  WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) AND avg_min IS NOT NULL AND samples > 0 "
+            "  GROUP BY route_code, dow, hour"
+            ") past ON past.past_route = route_code AND past.past_dow = EXTRACT(ISODOW FROM service_date) "
+            "  AND past.past_hour = hour "
             f"WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) AND {_ML_FRESH_ROWS}",
             agency_id,
             route_code,
@@ -169,7 +184,11 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
             "dow": row["service_date"].isoweekday(),
             "hour": row["hour"],
             "mean_min": row["mean_min"],
+            "q10": row["q10"],
+            "q90": row["q90"],
             "service_date": row["service_date"],
+            "samples": row["past_samples"] or 0,
+            "sum_delay_sec": row["past_sum_delay_sec"],
         }
         for row in rows
     ]
@@ -679,6 +698,10 @@ class ForecastHeatmapCell(BaseModel):
     samples: int
     low_confidence: bool
     source: Literal["ml", "baseline"]
+    # The forecast's 10th-90th percentile range, each bound the mean over the
+    # slot's trips; null on a cell that shows a past average.
+    q10: float | None = None
+    q90: float | None = None
 
 
 class ForecastDay(BaseModel):
