@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Link, useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { withStorage, writeStorage } from "../utils/safeStorage";
+import { MOBILE_TABBAR_HEIGHT_PX } from "./Sidebar";
 
 const FIRST_VISIT_KEY = "help_hint_first_visit_at";
 const DISMISSED_KEY = "help_hint_dismissed";
@@ -21,6 +23,24 @@ function writeFlag(key: string, value: string): void {
   if (!writeStorage("localStorage", key, value)) blockedStorageFlags.set(key, value);
 }
 
+const dismissalListeners = new Set<() => void>();
+
+function subscribeDismissal(listener: () => void): () => void {
+  dismissalListeners.add(listener);
+  return () => dismissalListeners.delete(listener);
+}
+
+function isDismissed(): boolean {
+  return readFlag(DISMISSED_KEY) != null;
+}
+
+function dismissForGood(): void {
+  writeFlag(DISMISSED_KEY, "1");
+  for (const listener of dismissalListeners) listener();
+}
+
+const EDGE_PX = 16;
+
 /**
  * One-time, dismissable hint pointing a brand-new visitor at the User Manual
  * (`/help`). Its nav link sits in the rail's Other group (on a phone, the More
@@ -30,14 +50,27 @@ function writeFlag(key: string, value: string): void {
  * gated on anonymous/logged-in status — the Help page is equally useful to
  * both, and restricting it would add complexity with no clear benefit.
  *
+ * Opening the manual by any route (this hint, the rail, the More sheet, the
+ * palette or a typed URL) retires the hint the same way a dismissal does, and
+ * it never shows on the manual itself.
+ *
  * Rendered as a small fixed corner pill rather than a fourth top banner —
  * DataStalenessBanner/FeedHealthBanner already stack two
  * deep above the content, and this is an orientation aid, not a persistent
  * warning or conversion nudge, so it shouldn't compete for that same space.
+ * It takes the right-hand corner: the left one holds the rail's account menu
+ * and the toasts. On a phone it rides above the bottom tab bar.
  */
 export function HelpHint() {
   const { t } = useTranslation();
   const [show, setShow] = useState(false);
+  const dismissed = useSyncExternalStore(subscribeDismissal, isDismissed, () => true);
+  const onHelp = useMatch("/help") != null;
+  const phone = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+
+  useEffect(() => {
+    if (onHelp) dismissForGood();
+  }, [onHelp]);
 
   useEffect(() => {
     if (readFlag(DISMISSED_KEY)) return;
@@ -65,25 +98,20 @@ export function HelpHint() {
     };
   }, []);
 
-  if (!show) return null;
-
-  function dismiss() {
-    writeFlag(DISMISSED_KEY, "1");
-    setShow(false);
-  }
+  if (!show || dismissed || onHelp) return null;
 
   return (
     <div
       role="status"
       style={{
         position: "fixed",
-        left: 16,
-        bottom: 16,
+        right: EDGE_PX,
+        bottom: phone ? `calc(${MOBILE_TABBAR_HEIGHT_PX + EDGE_PX}px + env(safe-area-inset-bottom))` : EDGE_PX,
         zIndex: Z_INDEX.drawerBackdrop - 1,
         display: "flex",
         alignItems: "center",
         gap: 10,
-        maxWidth: "min(320px, calc(100vw - 32px))",
+        maxWidth: `min(320px, calc(100vw - ${2 * EDGE_PX}px))`,
         padding: "10px 12px",
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
@@ -96,7 +124,7 @@ export function HelpHint() {
       <span style={{ flex: 1, color: "var(--text-secondary)" }}>{t("help.hint_text")}</span>
       <Link
         to="/help"
-        onClick={dismiss}
+        onClick={dismissForGood}
         style={{
           color: "var(--accent)",
           fontWeight: 600,
@@ -109,7 +137,7 @@ export function HelpHint() {
       <button
         type="button"
         aria-label={t("help.hint_dismiss_aria")}
-        onClick={dismiss}
+        onClick={dismissForGood}
         style={{
           background: "transparent",
           border: "none",

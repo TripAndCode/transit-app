@@ -49,7 +49,7 @@ const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
  *  row of whatever the active tab renders instead of on top of it -- kept
  *  in sync by that rule's comment pointing back here, since a plain
  *  TS constant has no way to reach a separate stylesheet. */
-const MOBILE_TABBAR_HEIGHT_PX = 56;
+export const MOBILE_TABBAR_HEIGHT_PX = 56;
 
 /** Read the persisted collapse preference. No-ops to `false` (expanded) if
  *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */

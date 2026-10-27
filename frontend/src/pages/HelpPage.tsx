@@ -9,11 +9,18 @@ import { DataSourceCredits } from "../components/DataSourceCredits";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
 import { PageHeader } from "../components/ui/PageHeader";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { contentLocale } from "../i18n/contentLocale";
+import { BP } from "../styles/breakpoints";
 import { coalesceToFrame } from "../utils/frameCoalesce";
 import { searchKey } from "../utils/searchText";
 
 const MANUAL_BASE = "/user-manual";
+
+/** The two panes fold to one at the design system's `md` tier: below it the
+ *  rail or the phone screen leaves too little width for the contents column
+ *  and readable text side by side. */
+const SINGLE_COLUMN_QUERY = `(max-width: ${BP.md}px)`;
 
 /** The manual's own top-level `# Title` line is redundant with this page's
  *  own <h1> (and differently styled, since react-markdown's h1 has no CSS of
@@ -134,7 +141,10 @@ function scrollerOf(target: EventTarget | null): Element | null {
  *  unless the reader asks for reduced motion, and keeps that entry marked
  *  until the scroll ends rather than stepping through every section passed
  *  on the way. The page opens at its title; only a `#heading` in the address
- *  opens it further down. */
+ *  opens it further down.
+ *
+ *  On a narrow screen the page is one column: the contents fold under a
+ *  toggle above the text and fold away again once a section is picked. */
 export function HelpPage() {
   const { t, i18n } = useTranslation();
   const locale = contentLocale(i18n);
@@ -152,6 +162,8 @@ export function HelpPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [current, setCurrent] = useState<number | null>(null);
+  const singleColumn = useMediaQuery(SINGLE_COLUMN_QUERY);
+  const [contentsOpen, setContentsOpen] = useState(false);
   const documentRef = useRef<HTMLDivElement>(null);
   // Set while a sidebar click's scroll runs, so the sections it passes on
   // the way don't take the mark from the entry that was clicked.
@@ -279,15 +291,55 @@ export function HelpPage() {
         </div>
       )}
       {content != null && sections.length > 0 && (
-        <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
-          <SidebarNavList
-            ariaLabel={t("help.sections_nav")}
-            width={240}
-            navStyle={{ position: "sticky", top: 16 }}
-            items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
-            activeKey={hasMatches ? activeIndex : null}
-            onSelect={goToSection}
-          />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: singleColumn ? "column" : "row",
+            gap: singleColumn ? 16 : 32,
+            alignItems: singleColumn ? "stretch" : "flex-start",
+          }}
+        >
+          {singleColumn ? (
+            <details open={contentsOpen} onToggle={(e) => setContentsOpen(e.currentTarget.open)}>
+              <summary
+                style={{
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  border: "1px solid var(--card-border)",
+                  borderRadius: "var(--card-radius)",
+                  background: "var(--bg-soft)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("help.contents")}
+              </summary>
+              {/* Mounted only while open, so its marker measures entries
+                  that are on screen. */}
+              {contentsOpen && (
+                <SidebarNavList
+                  ariaLabel={t("help.sections_nav")}
+                  width={240}
+                  navStyle={{ width: "100%", marginTop: 8 }}
+                  items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
+                  activeKey={hasMatches ? activeIndex : null}
+                  onSelect={(i) => {
+                    setContentsOpen(false);
+                    goToSection(i);
+                  }}
+                />
+              )}
+            </details>
+          ) : (
+            <SidebarNavList
+              ariaLabel={t("help.sections_nav")}
+              width={240}
+              navStyle={{ position: "sticky", top: 16 }}
+              items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
+              activeKey={hasMatches ? activeIndex : null}
+              onSelect={goToSection}
+            />
+          )}
           {!hasMatches && (
             <div style={{ flex: 1, minWidth: 0, color: "var(--text-tertiary)" }}>{t("common.no_match")}</div>
           )}

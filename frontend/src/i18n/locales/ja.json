@@ -287,8 +287,8 @@
     "dedupRule": {
       "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
     },
-    "exclusion_hours_one": "{{count}}時間以上ずれた値は誤りとして除外します。",
-    "exclusion_hours_other": "{{count}}時間以上ずれた値は誤りとして除外します。",
+    "exclusion_hours_one": "{{count}}時間を超えてずれた値は誤りとして除外します。",
+    "exclusion_hours_other": "{{count}}時間を超えてずれた値は誤りとして除外します。",
     "exclusion_limit": "{{limit}}以上ずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内（早発も定時に含む）。",
     "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
@@ -531,6 +531,7 @@
   "help": {
     "title": "利用マニュアル",
     "sections_nav": "マニュアルの目次",
+    "contents": "目次",
     "search_placeholder": "マニュアル内を検索",
     "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
     "hint_cta": "ヘルプを見る",
