@@ -48,6 +48,16 @@ that expired in an open tab) refetches the session and the config
 (`frontend/src/api/authExpiry.ts`), so the guard decides again on fresh
 values.
 
+The session probe itself, `GET /api/me`, answers a signed-out caller with
+`200` and a `null` body while sign-in is not required, so an open app logs no
+refused request on every page. While sign-in is required, the login gate
+answers it with `401` before the route runs. `fetchMe`
+(`frontend/src/api/auth.ts`) reads both as signed out. Every other `/api/me/*`
+route, and `DELETE /api/me`, still refuses a signed-out caller.
+
+A signed-out visitor who opens `/me` while sign-in is not required goes to
+`/login?next=/me`, so signing in returns them to their account page.
+
 ## The scroll narrative is real charts on fixture data, not a live demo
 
 Below the hero, `frontend/src/pages/landing/ScrollNarrative.tsx` renders

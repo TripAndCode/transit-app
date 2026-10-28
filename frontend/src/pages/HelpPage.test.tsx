@@ -325,4 +325,59 @@ describe("HelpPage", () => {
       expect(screen.getByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
     });
   });
+
+  describe("on a narrow screen", () => {
+    const scrollIntoView = vi.fn();
+
+    beforeEach(() => {
+      scrollIntoView.mockClear();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      // Narrow enough to fold the two panes (BP.md and below), not a phone.
+      vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({
+            matches: query === "(max-width: 900px)",
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          }) as unknown as MediaQueryList,
+      );
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    });
+
+    it("reads as one column, with the contents folded under a toggle above the text", async () => {
+      stubManualFetch(MANUAL_WITH_TOC);
+      renderWithProviders(<HelpPage />);
+      const firstHeading = await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      const toggle = screen.getByText("Contents");
+      expect(toggle.tagName).toBe("SUMMARY");
+      expect(screen.queryByRole("navigation", { name: "Manual sections" })).toBeNull();
+      const layout = toggle.closest("details")?.parentElement;
+      expect(layout?.style.flexDirection).toBe("column");
+      expect(layout?.contains(firstHeading)).toBe(true);
+    });
+
+    it("folds the contents away again once a section is picked from them", async () => {
+      const user = userEvent.setup();
+      stubManualFetch(MANUAL_WITH_TOC);
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
+
+      await user.click(screen.getByText("Contents"));
+      const nav = await screen.findByRole("navigation", { name: "Manual sections" });
+      await user.click(within(nav).getByRole("button", { name: "Section two" }));
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("navigation", { name: "Manual sections" })).toBeNull();
+    });
+  });
 });

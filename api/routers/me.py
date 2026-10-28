@@ -10,11 +10,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from api.deps import get_conn
+from api.deps import get_conn, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.middleware.session import SESSION_COOKIE_NAME
 from api.range import jst_today
-from api.security import User, csrf_guard, require_user, token_hash
+from api.security import User, csrf_guard, current_user, require_user, token_hash
 from pipeline.account_erasure import ErasureRefused, erase_user
 from pipeline.account_export import collect_user_data
 from pipeline.admin_users import SessionPrefixError, resolve_session_prefix
@@ -49,9 +49,20 @@ class MeOut(BaseModel):
     identities: list[IdentityOut]
 
 
-@router.get("/me", response_model=MeOut)
-async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> MeOut:
-    """Return the current user's profile and linked OAuth identities."""
+@router.get("/me", response_model=MeOut | None)
+async def get_me(
+    user: User | None = Depends(current_user), conn: asyncpg.Connection = Depends(get_pooled_conn)
+) -> MeOut | None:
+    """Return the caller's profile and linked OAuth identities, or ``null`` when signed out.
+
+    Signed out is an answer to who-am-I rather than a refusal, because the SPA asks it on
+    every page. It discloses nothing, and every other ``/me`` route keeps ``require_user``.
+    While sign-in is enforced, the login gate still answers a signed-out caller with 401
+    before this route runs. The connection is borrowed per statement, so a signed-out
+    caller holds none.
+    """
+    if user is None:
+        return None
     rows = await conn.fetch(
         "SELECT provider, email_at_link FROM oauth_identities WHERE user_id=$1",
         user.user_id,

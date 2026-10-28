@@ -13,9 +13,9 @@ type SidebarNavListProps<K extends string | number = string> = {
   activeKey: K | null;
   onSelect: (key: K) => void;
   ariaLabel: string;
-  /** Sidebar column width in px. Callers differ (220 for the admin
-   *  architecture page, 240 for the help manual). */
-  width: number;
+  /** Sidebar column width: px, or a CSS length such as "100%" where the
+   *  list spans a folded one-column layout. */
+  width: CSSProperties["width"];
   /** Extra style merged onto the `<nav>` element itself, e.g. the help
    *  manual's sticky positioning -- kept as a caller concern rather than
    *  baked in, since not every sidebar wants it. */

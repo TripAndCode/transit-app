@@ -7,7 +7,7 @@ import pytest
 from httpx import ASGITransport
 
 from api.security import token_hash
-from tests.conftest import _test_pool
+from tests.conftest import TEST_ORIGIN, _test_pool
 from tests.fixtures.users import add_session, add_session_digest, seed_session
 
 
@@ -28,8 +28,26 @@ async def me_client(apply_schema):
 
 
 @pytest.mark.asyncio
-async def test_me_anonymous_401(me_client):
+async def test_me_anonymous_is_null(me_client):
+    """Signed out is a normal answer to who-am-I, not a refusal: the SPA asks it on every page."""
     resp = await me_client.get("/api/me")
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/me/sessions"),
+        ("GET", "/api/me/presets"),
+        ("GET", "/api/me/llm-key"),
+        ("GET", "/api/me/export"),
+        ("DELETE", "/api/me"),
+    ],
+)
+async def test_signed_in_only_me_routes_still_refuse_anonymous(me_client, method, path):
+    resp = await me_client.request(method, path, json={"confirm_email": "x@x"}, headers={"Origin": TEST_ORIGIN})
     assert resp.status_code == 401
 
 

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
@@ -21,9 +21,13 @@ const mockSession = {
 };
 
 let mockSessionLoading = false;
+let mockGuest = false;
 
 vi.mock("../api/auth", () => ({
-  useSession: () => (mockSessionLoading ? { data: undefined, isLoading: true } : { data: mockSession, isLoading: false }),
+  useSession: () =>
+    mockSessionLoading
+      ? { data: undefined, isLoading: true }
+      : { data: mockGuest ? null : mockSession, isLoading: false },
   useLogout: () => ({ mutate: mockMutate, ...mockLogoutState }),
 }));
 
@@ -45,6 +49,48 @@ function renderAccount() {
     </I18nextProvider>
   );
 }
+
+function LoginProbe() {
+  const { pathname, search } = useLocation();
+  return <p>{`at ${pathname}${search}`}</p>;
+}
+
+describe("AccountPage for a guest", () => {
+  beforeEach(() => {
+    mockGuest = true;
+    mockApiGet.mockClear();
+  });
+  afterEach(() => {
+    mockGuest = false;
+  });
+
+  function renderAsGuest() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/me"]}>
+            <Routes>
+              <Route path="/me" element={<AccountPage />} />
+              <Route path="/login" element={<LoginProbe />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </I18nextProvider>,
+    );
+  }
+
+  it("sends a guest to sign in with the way back to the account page", () => {
+    renderAsGuest();
+    expect(screen.getByText(`at /login?next=${encodeURIComponent("/me")}`)).toBeInTheDocument();
+  });
+
+  it("asks the API for nothing only a signed-in caller may read", () => {
+    renderAsGuest();
+    const paths = mockApiGet.mock.calls.map(([path]) => String(path));
+    expect(paths.filter((path) => path.startsWith("/api/me"))).toEqual([]);
+  });
+});
 
 describe("AccountPage data export", () => {
   it("downloads the account's data from the API's origin", () => {

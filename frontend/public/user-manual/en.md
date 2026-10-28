@@ -2,7 +2,7 @@
 
 This manual walks through the Delay Dashboard screen by screen, for anyone using it for the first time.
 
-The screenshots use real data from Aomori City Bus (青森市バス) for 20 August – 18 September 2026, seen on the afternoon of 18 September. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
+The screenshots were taken with real data from Aomori City Bus (青森市バス). Their dates and figures are from when they were taken, so the screens you open will show others. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
 
 ---
 
@@ -11,7 +11,7 @@ The screenshots use real data from Aomori City Bus (青森市バス) for 20 Augu
 1. [Choosing an agency](#1-choosing-an-agency)
 2. [Finding your way around](#2-finding-your-way-around)
 3. [The scope sentence: what a screen shows](#3-the-scope-sentence-what-a-screen-shows)
-4. [Pulse — how service is running](#4-pulse--how-service-is-running)
+4. [Pulse — the period at a glance](#4-pulse--the-period-at-a-glance)
 5. [Routes — which routes run late](#5-routes--which-routes-run-late)
 6. [Time — when delay happens](#6-time--when-delay-happens)
 7. [Why — what the data can explain](#7-why--what-the-data-can-explain)
@@ -19,6 +19,8 @@ The screenshots use real data from Aomori City Bus (青森市バス) for 20 Augu
 9. [Live — the trips running now](#9-live--the-trips-running-now)
 10. [Reports — documents to hand on](#10-reports--documents-to-hand-on)
 11. [Ask — questions with ready answers](#11-ask--questions-with-ready-answers)
+12. [Model evaluation — how the forecast model is checked](#12-model-evaluation--how-the-forecast-model-is-checked)
+13. [Glossary](#13-glossary)
 
 ---
 
@@ -61,9 +63,13 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Ask** | Ready-made questions, answered as tables and charts |
 
-Under **Other** are **Help** (this manual) and **About this app**. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
+Under **Other** are **Model evaluation** (chapter 12), **Help** (this manual) and **About this app**. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
 The account menu at the bottom of the sidebar (your name, or **Guest**) holds sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
+
+### My routes
+
+A route you check often can go into **My routes** in the sidebar: press **Pin**, to the right of the heading on the route’s page (5-6). Each pinned route shows today’s mean delay; click it to open the route’s page. You can pin up to 5 routes per agency, and pressing **Pin** again unpins a route. Pins are kept in this browser only, so they work without signing in but do not appear in another browser or on another device. My routes is not shown on a phone-sized screen.
 
 ### Searching and jumping
 
@@ -73,7 +79,7 @@ Next to it, “Analyzed through …” shows the last service day the reports in
 
 ### On a phone
 
-On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu.
+On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Model evaluation, Help and the account menu.
 
 ### Notices at the top
 
@@ -121,7 +127,7 @@ Live, Ask, a route’s page and the agency comparison have their own filters, de
 
 ---
 
-## 4. Pulse — how service is running
+## 4. Pulse — the period at a glance
 
 Pulse is the screen an agency opens on. It sums up the period in the scope sentence.
 
@@ -216,7 +222,7 @@ Sorted by **On-time rate**, the table is followed by “Headway quality”, whic
 
 Clicking a route’s name — in a report, in **Routes to check** on Pulse, or in the Live trip list — opens that route’s page.
 
-- At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”.
+- At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”. **Pin**, to the right of the heading, adds the route to **My routes** in the sidebar (chapter 2).
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
 - The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
 - **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.
@@ -257,7 +263,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ![Why, for a feed that reports departures only](./09-why.en.png)
 
-**Dwell/running time** splits each route’s delay into the time spent waiting at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each.
+**Dwell/running time** shows, for each route, the time spent waiting at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each. These are the times actually taken, not delays (chapter 13).
 
 - Splitting delay needs arrival times. When an agency’s feed reports departures only, the report says “Splitting delay needs arrival times” and offers **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1).
 - The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
@@ -372,3 +378,54 @@ When the box is not shown, free-text questions are not available to your account
 “Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you asked them.
 
 If you are not sure which report to open, picking a question on Ask is often the quickest way in.
+
+---
+
+## 12. Model evaluation — how the forecast model is checked
+
+**Model evaluation**, under **Other** in the sidebar, shows how the ML model behind the route forecast on **Time** (6-3) is checked each week; its heading is “ML forecast model evaluation”. It opens without choosing an agency, and “← Back to (agency)” at the top returns to the Pulse of the agency you were viewing.
+
+- The verdict: whether the latest evaluation was “Adopted” or “Not adopted (the previous model stays in use)”, when it was evaluated, and the model in use. When it was not adopted, “Why it was not adopted” lists the reasons.
+- “Against the usual estimate”: how much less error the model’s forecast has than the usual estimate, which is the average delay at the same weekday and hour over the past 4 weeks. It also shows whether the “Adoption bar” was reached and how the gain varied by test day.
+- “Runs inside the forecast range”: the share of actual delays that fell inside the forecast range, against its target.
+- “By agency”: how each agency was scored (“On the model”, “Partly on the model” or “On the usual estimate (too little history)”), its comparison with the usual estimate and its mean error. An agency whose route forecast uses the model is marked “In the route forecast now”.
+- “Past evaluations”: each week’s date, verdict and comparison with the usual estimate.
+
+The evaluation is updated every Sunday. Until the first one, the page says “No evaluation yet.” When ML forecasts are not in the route forecast, the page says so at the top.
+
+---
+
+## 13. Glossary
+
+What the words on the screens and in this manual mean.
+
+### 13-1. Units of data
+
+- **Feed**: the data an agency publishes. Delays are the departure delays its real-time feed (GTFS-Realtime) reports at each stop, used as they are; the Service does not work delays out from the timetable and vehicle positions. Route names, scheduled times, timetables and planned trips come from the timetable feed (GTFS).
+- **Reading** (“Samples” in the tables): one trip departing one stop counts as one reading. When the same trip and stop are reported many times, the last report is used. “Samples” counts readings, so one trip gives one reading per stop.
+- **Set aside as implausible**: a report more than 2 hours (7,200 seconds) late or early is left out as a feed fault.
+- **Missing data**: days or hours with no readings are left out, not counted as on time.
+- **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.
+- **Timetable type**: each day is classed by the timetable the agency ran that day, as weekdays, Saturdays, or Sundays & holidays; for an agency whose Saturday and Sunday timetables are the same, as weekdays or weekends & holidays. A day the timetable cannot class is classed by its day of the week and public holidays.
+- **Route**: what the agency’s timetable codes as one route. Each row of the **Routes** table is one route. Route pickers put routes that share a name under one entry, with a count of its variants.
+- **Service pattern**: on a route’s page, the “Route” filter picks a name that one or more routes share, and “Service pattern” picks one of those routes.
+
+### 13-2. Delay figures
+
+- **Average delay**: the mean of the readings’ departure delays, in minutes. Early departures stay in the mean as negative delays.
+- **Early departure**: a reading that left before its scheduled time; its delay is negative.
+- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time. On-time % is the share of readings that were on time.
+- **Over 5 min**: a reading whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the samples, and “Over 5 min (count)” is how many there were.
+- **Live’s “On-time rate” and “5+ min late”**: Live takes the latest report of each trip reporting now. Trips 5 minutes or more late are “5+ min late”, and the share of the rest is the “On-time rate”, so it is counted differently from On-time % on the other screens.
+- **p50 and p90**: the values halfway along (the median) and 90% of the way along when the values are sorted from smallest. p90 is a guide to a value exceeded about one time in ten. They are approximations, worked out from counts grouped into fixed-width steps.
+- **wide margin**: shown when the 95% confidence interval (Wilson) of the on-time % is wider than ±5 points.
+- **few data**: shown for a route with fewer than 100 samples.
+- **Dwell**: the time, in seconds, from a trip’s arrival at a stop to its departure from it. The actual arrival and departure times are the scheduled times plus the delays the feed reports, so dwell is available only from feeds that report arrival delays.
+- **Running**: the time, in seconds, from a trip’s departure from one stop to its arrival at the next. Where the stops in between have no report, it covers the whole stretch.
+
+### 13-3. Service and spacing
+
+- **Planned trips**: the number of trips the timetable planned to run over the period, counted day by day from the timetables running that day.
+- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed that does not report cancellations.
+- **Vehicle-km delivered %**: service delivered % applied to the planned vehicle-km, so the share is the same as service delivered %; a cancelled trip’s distance is taken to be an average trip’s. It shows “—” for an agency whose timetable has no route shapes (shapes.txt).
+- **Headway quality**: for routes whose planned headway (the median) is 12 minutes or less, how far the actual spacing strays. “Excess wait” is the average extra wait that the irregular spacing adds over the planned spacing.

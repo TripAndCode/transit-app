@@ -240,6 +240,8 @@ export function AccountPage() {
   const { data: sessions, isError: sessionsError } = useQuery({
     queryKey: ["mySessions"],
     queryFn: ({ signal }) => apiGet<SessionRow[]>("/api/me/sessions", { signal }),
+    // A guest is on the way to sign-in; asking would only earn a 401.
+    enabled: session != null,
   });
   const logout = useLogout();
   const qc = useQueryClient();
@@ -251,7 +253,7 @@ export function AccountPage() {
   const lastAgency = useAgencies().data?.find((a) => a.agency_id === lastAgencyId);
 
   if (isLoading) return <AccountSkeleton />;
-  if (!session) return <Navigate to="/login" replace />;
+  if (!session) return <Navigate to={`/login?next=${encodeURIComponent("/me")}`} replace />;
 
   return (
     <div style={{ maxWidth: 640, margin: "32px auto", padding: 24 }}>
