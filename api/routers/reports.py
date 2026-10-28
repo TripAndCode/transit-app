@@ -87,6 +87,7 @@ from pipeline.route_catalog import (
     rows_to_fetch,
 )
 from pipeline.stats import annotate_on_time_pct_confidence, on_time_pct_low_confidence, on_time_pct_margin_pp
+from pipeline.strategies.static_join import CoverageGapReason
 from pipeline.weather import attribution as weather_attribution
 
 _log = logging.getLogger(__name__)
@@ -448,11 +449,18 @@ class HeadwayQualityRow(BaseModel):
 class HeadwayQualityResponse(BaseModel):
     """Payload for ``GET /headway_quality`` — a second, narrower metric
     panel restricted to high-frequency routes, meant to render alongside
-    (not instead of) the ``on_time`` report for the same range."""
+    (not instead of) the ``on_time`` report for the same range.
+
+    ``unavailable_reason`` says why ``rows`` is bound to be empty (see
+    ``pipeline.reports.headway_quality.compute_headway_quality_report``),
+    and ``last_checked`` is the JST day of the feed check behind a coverage
+    reason; both are None when the rows are worth reading."""
 
     rows: list[HeadwayQualityRow]
     # High-frequency routes with data in range, none of it on a day of their class.
     routes_off_timetable: int = 0
+    unavailable_reason: Literal["no_high_frequency_routes"] | CoverageGapReason | None = None
+    last_checked: date | None = None
     ctx: ReportCtx
     scope_applied: dict[str, bool]
 
@@ -472,10 +480,11 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
-    rows, off_timetable = await compute_headway_quality_report(agency_id, ctx, conn)
+    rows, off_timetable, unavailable = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
         rows=[HeadwayQualityRow(**r) for r in rows],
         routes_off_timetable=off_timetable,
+        **unavailable,
         ctx=_report_ctx(ctx),
         scope_applied=_HEADWAY_SCOPE,
     )

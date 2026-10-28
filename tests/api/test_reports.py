@@ -1805,6 +1805,8 @@ async def test_dwell_run_not_available_for_non_static_join_agency(reports_client
     payload = resp.json()["rows"][0]
     assert payload["available"] is False
     assert payload["routes"] == []
+    assert payload["unavailable_reason"] == "feed_unsupported"
+    assert payload["last_checked"] is None
 
 
 @pytest.mark.asyncio
@@ -1821,6 +1823,65 @@ async def test_dwell_run_not_available_for_unconfirmed_static_join_agency(report
     payload = resp.json()["rows"][0]
     assert payload["available"] is False
     assert payload["routes"] == []
+    assert payload["unavailable_reason"] == "never_probed"
+    assert payload["last_checked"] is None
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_with_an_expired_verdict_says_it_awaits_a_recheck(reports_client):
+    """A verdict that has lapsed is not a feed without arrivals: the payload
+    names the lapse and the day of the last check, and the report text says
+    the same rather than blaming the feed."""
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await _trust_dwell_run(pool, agency_id)
+    await pool.execute(
+        "UPDATE rt_field_coverage_probes SET probed_at = '2026-09-11 10:00+09', expires_at = '2026-10-11 10:00+09' "
+        "WHERE agency_id = $1",
+        agency_id,
+    )
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run", headers={"Accept-Language": "ja"})
+    assert resp.status_code == 200
+    body = resp.json()
+    payload = body["rows"][0]
+    assert payload["available"] is False
+    assert payload["unavailable_reason"] == "probe_expired"
+    assert payload["last_checked"] == "2026-09-11"
+    assert "確認期限が切れている" in body["text"]
+    assert "2026-09-11" in body["text"]
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_leaves_out_a_route_with_no_dwell_or_running_sample(reports_client):
+    """A route-day row with neither a dwell nor a running sample has nothing
+    to show; listing it would draw a row of dashes and zero counts as if the
+    route had been measured."""
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await _trust_dwell_run(pool, agency_id)
+    for route, n in (("EMPTY", 0), ("SEEN", 2)):
+        dwell_hist = [0] * 26
+        run_hist = [0] * 32
+        dwell_hist[5] = n
+        run_hist[5] = n
+        await pool.execute(
+            "INSERT INTO agg_route_daily_dwell_run (agency_id, date, route_code, service_type, dwell_samples, "
+            "dwell_sum_sec, hist_dwell, run_samples, run_sum_sec, hist_run) "
+            "VALUES ($1, '2026-04-01', $2, '平日', $3, $4, $5, $3, $6, $7)",
+            agency_id,
+            route,
+            n,
+            60 * n,
+            dwell_hist,
+            240 * n,
+            run_hist,
+        )
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["unavailable_reason"] is None
+    assert [r["route_code"] for r in payload["routes"]] == ["SEEN"]
 
 
 @pytest.mark.asyncio

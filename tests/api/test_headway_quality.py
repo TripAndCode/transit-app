@@ -215,6 +215,47 @@ async def test_headway_quality_unconfirmed_static_join_agency_returns_no_rows(he
     r = await client.get(f"/api/{unconfirmed_aid}/headway_quality?from=2026-04-01&to=2026-04-02")
     assert r.status_code == 200
     assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] == "never_probed"
+    assert r.json()["last_checked"] is None
+
+
+async def test_headway_quality_confirmed_agency_names_no_reason(headway_client):
+    client, aid = headway_client
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+    assert r.status_code == 200
+    assert r.json()["rows"]
+    assert r.json()["unavailable_reason"] is None
+
+
+async def test_headway_quality_says_when_no_route_is_scheduled_often_enough(headway_client):
+    """An agency whose timetable has no high-frequency route has nothing for
+    this panel to measure, whatever its feed's coverage; blaming the data or
+    an awaited check would promise figures that can never appear. The
+    classification comes from the static timetable, so it is told first."""
+    client, _aid = headway_client
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, 'static_join') "
+            "RETURNING agency_id",
+            "Headway Quality Infrequent Agency",
+            "http://headway-quality-infrequent.example.com",
+        )
+        infrequent_aid = row["agency_id"]
+        await conn.execute(
+            "INSERT INTO agg_route_headway "
+            "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
+            " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_HOURLY', 3600.0, 10, FALSE, 1800.0)",
+            infrequent_aid,
+        )
+    finally:
+        await conn.close()
+
+    r = await client.get(f"/api/{infrequent_aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+    assert r.status_code == 200
+    assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] == "no_high_frequency_routes"
+    assert r.json()["last_checked"] is None
 
 
 async def _seed_weekday_dominant_route(aid: int) -> None:

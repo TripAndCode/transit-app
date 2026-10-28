@@ -19,6 +19,7 @@ from pipeline.strategies.static_join import (
     record_field_coverage_probe,
     rt_field_coverage_confirmed,
     rt_field_coverage_confirmed_agencies,
+    rt_field_coverage_gap,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -207,3 +208,52 @@ async def test_batch_and_single_gate_agree(aconn, aagency_id):
 
     assert await rt_field_coverage_confirmed_agencies(aconn, [aagency_id, other]) == {aagency_id}
     assert await rt_field_coverage_confirmed_agencies(aconn, []) == set()
+
+
+async def _expire(conn, aid):
+    await conn.execute(
+        "UPDATE rt_field_coverage_probes SET expires_at = now() - INTERVAL '1 day' WHERE agency_id = $1", aid
+    )
+
+
+async def _drop_arr_delay(conn, aid):
+    await conn.execute("DELETE FROM rt_field_coverage_probes WHERE agency_id = $1 AND field_name = 'arr_delay'", aid)
+
+
+@pytest.mark.parametrize(
+    "strategy, cov, ttl_days, after, reason",
+    [
+        ("static_join", None, None, None, "never_probed"),
+        ("static_join", _cov(), 30, None, None),
+        ("static_join", _cov(), None, None, None),
+        ("static_join", _cov(), 30, _expire, "probe_expired"),
+        ("static_join", _cov(), 30, _drop_arr_delay, "probe_expired"),
+        ("static_join", _cov(stop_id_coverage=0.0), 30, None, "probe_refuted"),
+        ("aomori_regex", _cov(), 30, None, "feed_unsupported"),
+        ("aomori_regex", None, None, None, "feed_unsupported"),
+    ],
+)
+async def test_gap_names_the_reason_exactly_when_the_gate_is_closed(
+    aconn, aagency_id, strategy, cov, ttl_days, after, reason
+):
+    """A page that says why a gated analysis is missing reads
+    rt_field_coverage_gap; it must be None exactly when the gate is open, and
+    a recorded probe's day is the one it names as the last check."""
+    await _set_strategy(aconn, aagency_id, strategy)
+    if cov is not None:
+        await record_field_coverage_probe(aconn, aagency_id, cov, "https://feed.example/tu.bin", ttl_days=ttl_days)
+    if after is not None:
+        await after(aconn, aagency_id)
+
+    gap = await rt_field_coverage_gap(aagency_id, aconn)
+
+    assert (gap is None) is await rt_field_coverage_confirmed(aagency_id, aconn)
+    assert (gap.reason if gap else None) == reason
+    if reason in ("probe_expired", "probe_refuted"):
+        probed_day = await aconn.fetchval(
+            "SELECT max(probed_at AT TIME ZONE 'Asia/Tokyo')::date FROM rt_field_coverage_probes WHERE agency_id = $1",
+            aagency_id,
+        )
+        assert gap.last_checked == probed_day
+    elif gap is not None:
+        assert gap.last_checked is None

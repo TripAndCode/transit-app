@@ -21,7 +21,7 @@ from __future__ import annotations
 from api.range import RangeCtx, dow_clause
 from pipeline.day_types import agrees, load_day_types, load_dominant_day_types
 from pipeline.headways import coefficient_of_variation_from_pooled, mean_wait_from_pooled
-from pipeline.strategies.static_join import rt_field_coverage_confirmed
+from pipeline.strategies.static_join import rt_field_coverage_gap
 
 
 def _daily_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
@@ -62,15 +62,35 @@ def _sum(values: list) -> float | None:
     return sum(present) if present else None
 
 
+# How many of the agency's routes the static timetable classified, and how
+# many of those as high-frequency.
+_FREQUENCY_SQL = """
+    SELECT count(*) AS routes, count(*) FILTER (WHERE is_high_frequency) AS high_frequency
+    FROM agg_route_headway
+    WHERE agency_id = $1
+"""
+
+_AVAILABLE = {"unavailable_reason": None, "last_checked": None}
+
+
 async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[dict]:
     """:func:`compute_headway_quality_report`'s rows."""
-    rows, _ = await compute_headway_quality_report(agency_id, ctx, conn)
+    rows, _, _ = await compute_headway_quality_report(agency_id, ctx, conn)
     return rows
 
 
-async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) -> tuple[list[dict], int]:
-    """Per-route EWT / CoV / long-gap-rate, high-frequency routes only, and how
-    many routes had data in range but none on a day of their class.
+async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) -> tuple[list[dict], int, dict]:
+    """Per-route EWT / CoV / long-gap-rate, high-frequency routes only, how
+    many routes had data in range but none on a day of their class, and why
+    the panel is empty when it is bound to be.
+
+    The third value is ``{"unavailable_reason", "last_checked"}``. The reason
+    is ``no_high_frequency_routes`` when the timetable classified routes but
+    none as high-frequency: that comes from the static schedule alone, so no
+    renewed feed check could fill the panel, and it is told ahead of any
+    coverage gap. Otherwise it is the agency's
+    ``pipeline.strategies.static_join.CoverageGap`` when the feed's fields
+    are not trusted, and None when the rows are worth reading.
 
     Pools `agg_route_headway_daily`'s per-day sufficient statistics
     (`actual_headway_sum_sec` / `actual_headway_sumsq_sec2` /
@@ -104,12 +124,16 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     live feed would otherwise get its rows pooled here as if trustworthy.
     This additionally requires a live RT field-coverage verdict for the
     agency (via `pipeline.strategies.static_join.
-    rt_field_coverage_confirmed`) before returning anything, returning no
+    rt_field_coverage_gap`) before returning anything, returning no
     rows and a zero count for an unconfirmed agency rather than a
     possibly-empty-but-still-queried result.
     """
-    if not await rt_field_coverage_confirmed(agency_id, conn):
-        return [], 0
+    frequency = await conn.fetchrow(_FREQUENCY_SQL, agency_id)
+    if frequency["routes"] and not frequency["high_frequency"]:
+        return [], 0, {"unavailable_reason": "no_high_frequency_routes", "last_checked": None}
+    gap = await rt_field_coverage_gap(agency_id, conn)
+    if gap is not None:
+        return [], 0, gap.payload()
 
     frag, params, _ = _daily_filter(ctx, 2)
     sql = f"""
@@ -162,4 +186,4 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
             }
         )
     off_timetable = len({r["route_code"] for r in rows} - by_route.keys())
-    return out, off_timetable
+    return out, off_timetable, dict(_AVAILABLE)

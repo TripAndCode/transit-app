@@ -16,7 +16,8 @@ populate them, as recorded in the ``rt_field_coverage_probes`` registry.
 matches an already-verified agency's; it does NOT mean the feed populates
 these optional fields the same way (see ``field_coverage``'s docstring).
 Every reader that trusts these fields calls ``rt_field_coverage_confirmed``
-below rather than re-deriving the check inline, so a newly added reader
+below, or ``rt_field_coverage_gap`` when it must also say why the gate is
+closed, rather than re-deriving the check inline, so a newly added reader
 can't silently skip half the gate.
 
 Verifying a feed is an operational act, not a code change: run
@@ -31,6 +32,11 @@ its expiry.
 """
 
 import logging
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import parse_departure_time
@@ -155,6 +161,81 @@ async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
     alone.
     """
     return agency_id in await rt_field_coverage_confirmed_agencies(conn, [agency_id])
+
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+#: Why an agency's RT-optional fields are untrusted, as a page states it:
+#: its ingest strategy cannot carry them; a live probe found one missing; a
+#: recorded verdict has lapsed or is incomplete, so it awaits a re-check; or
+#: no probe has ever been recorded.
+CoverageGapReason = Literal["feed_unsupported", "probe_refuted", "probe_expired", "never_probed"]
+
+
+@dataclass(frozen=True)
+class CoverageGap:
+    """Why the coverage gate is closed, and the JST day of the latest probe
+    behind that answer (None when no probe counts)."""
+
+    reason: CoverageGapReason
+    last_checked: date | None
+
+    def payload(self) -> dict[str, Any]:
+        """The two fields a report response carries to say why it is empty."""
+        return {
+            "unavailable_reason": self.reason,
+            "last_checked": self.last_checked.isoformat() if self.last_checked else None,
+        }
+
+
+def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]], now: datetime) -> CoverageGap | None:
+    """Why ``rt_field_coverage_confirmed`` says no, or None when it says yes.
+
+    *rows* are the agency's ``rt_field_coverage_probes`` rows and *now* the
+    database's clock, the one ``expires_at`` is judged by in the gate's SQL.
+    None exactly when every ``RT_COVERAGE_FIELDS`` field holds a live,
+    affirmative verdict, which is the gate's own rule. A live refutation is
+    reported ahead of a lapsed field: re-checking the lapsed one cannot open
+    the gate while the refutation stands.
+    """
+    if ingest_strategy not in RT_INGEST_STRATEGIES:
+        return CoverageGap("feed_unsupported", None)
+    by_field = {r["field_name"]: r for r in rows if r["field_name"] in RT_COVERAGE_FIELDS}
+    if not by_field:
+        return CoverageGap("never_probed", None)
+    last_checked = max(r["probed_at"] for r in by_field.values()).astimezone(_JST).date()
+
+    def live(row: Mapping[str, Any]) -> bool:
+        return row["expires_at"] is None or row["expires_at"] > now
+
+    if any(live(r) and not r["confirmed"] for r in by_field.values()):
+        return CoverageGap("probe_refuted", last_checked)
+    if len(by_field) == len(RT_COVERAGE_FIELDS) and all(live(r) and r["confirmed"] for r in by_field.values()):
+        return None
+    return CoverageGap("probe_expired", last_checked)
+
+
+_COVERAGE_STATE_SQL = """
+    SELECT a.ingest_strategy, now() AS now,
+           p.field_name, p.confirmed, p.probed_at, p.expires_at
+    FROM agencies a
+    LEFT JOIN rt_field_coverage_probes p ON p.agency_id = a.agency_id
+    WHERE a.agency_id = $1
+"""
+
+
+async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
+    """``coverage_gap`` for *agency_id*, read in one round trip.
+
+    A reader that has to say why it is empty gates on this instead of
+    ``rt_field_coverage_confirmed``: it is None exactly when that gate is
+    open, so the two cannot disagree about whether to show the data.
+    """
+    rows = await conn.fetch(_COVERAGE_STATE_SQL, agency_id)
+    if not rows:
+        return coverage_gap(None, [], datetime.now().astimezone())
+    probes = [r for r in rows if r["field_name"] is not None]
+    return coverage_gap(rows[0]["ingest_strategy"], probes, rows[0]["now"])
 
 
 def assess_field_coverage(cov: dict) -> dict[str, bool] | None:

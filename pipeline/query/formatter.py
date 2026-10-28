@@ -95,11 +95,34 @@ _LOCALES: dict[tuple[str, str], str] = {
         "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} samples), "
         "running avg {run} min ({run_samples} samples)"
     ),
-    ("dwell_run_not_available", "ja"): (
-        "この事業者のフィードは到着遅延（arr_delay）を送信しないため、滞留・走行時間の内訳は利用できません。"
+    ("dwell_run_feed_unsupported", "ja"): (
+        "この事業者のフィードからは到着時刻を取り込めないため、滞留・走行時間の内訳は表示できません。"
     ),
-    ("dwell_run_not_available", "en"): (
-        "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available."
+    ("dwell_run_feed_unsupported", "en"): (
+        "Arrival times can't be taken from this agency's feed, so the dwell/running time breakdown can't be shown."
+    ),
+    ("dwell_run_probe_refuted", "ja"): (
+        "最終確認（{last_checked}）で、この事業者のフィードが内訳に必要な項目を送っていないと分かったため、"
+        "滞留・走行時間の内訳は表示していません。"
+    ),
+    ("dwell_run_probe_refuted", "en"): (
+        "The last check ({last_checked}) found that this agency's feed doesn't send the fields the breakdown "
+        "needs, so the dwell/running time breakdown isn't shown."
+    ),
+    ("dwell_run_probe_expired", "ja"): (
+        "到着時刻データの確認期限が切れているため、再確認が済むまで滞留・走行時間の内訳は表示していません"
+        "（最終確認：{last_checked}）。"
+    ),
+    ("dwell_run_probe_expired", "en"): (
+        "The check of this feed's arrival-time data has expired, so the dwell/running time breakdown isn't "
+        "shown until it is re-checked (last checked {last_checked})."
+    ),
+    ("dwell_run_never_probed", "ja"): (
+        "この事業者のフィードが到着時刻を送っているかをまだ確認していないため、滞留・走行時間の内訳は表示していません。"
+    ),
+    ("dwell_run_never_probed", "en"): (
+        "Whether this agency's feed sends arrival times hasn't been checked yet, so the dwell/running time "
+        "breakdown isn't shown."
     ),
     ("dwell_run_time_band_unsupported", "ja"): "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
@@ -412,13 +435,16 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
     """Locale-aware text for the dwell/running-time decomposition report.
 
     ``payload`` is ``pipeline.reports.compute_dwell_run_decomposition``'s own
-    dict shape -- ``available=False`` (this agency's feed never sends
-    `arr_delay`) and ``time_band_supported=False`` (a time-band filter isn't
-    servable for this decomposition yet) each get their own explicit copy,
-    never a silently empty/zero table.
+    dict shape -- ``available=False`` (worded by its ``unavailable_reason``,
+    a ``pipeline.strategies.static_join.CoverageGapReason``) and
+    ``time_band_supported=False`` (a time-band filter isn't servable for this
+    decomposition yet) each get their own explicit copy, never a silently
+    empty/zero table. A payload without a reason reads as never checked, the
+    one cause that claims nothing about the feed.
     """
     if not payload.get("available"):
-        return _t("dwell_run_not_available", locale)
+        reason = payload.get("unavailable_reason") or "never_probed"
+        return _t(f"dwell_run_{reason}", locale, last_checked=payload.get("last_checked") or "")
     if not payload.get("time_band_supported", True):
         return _t("dwell_run_time_band_unsupported", locale)
     routes = payload.get("routes") or []

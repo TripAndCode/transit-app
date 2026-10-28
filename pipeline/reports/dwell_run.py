@@ -2,7 +2,7 @@
 
 Reads `agg_route_daily_dwell_run` (built by `pipeline.analyze.analyze()`),
 gated on a live RT field-coverage verdict for the agency (see
-`pipeline.strategies.static_join.rt_field_coverage_confirmed` and
+`pipeline.strategies.static_join.rt_field_coverage_gap` and
 that module's docstring for why `ingest_strategy` alone isn't sufficient
 trust: sharing the static_join JOIN mechanism doesn't imply a feed actually
 populates `arr_delay`, only that its wire shape matches an agency that's
@@ -30,7 +30,7 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter, _service_label
-from pipeline.strategies.static_join import rt_field_coverage_confirmed
+from pipeline.strategies.static_join import rt_field_coverage_gap
 
 
 @perf.timed("reports.dwell_run")
@@ -38,11 +38,14 @@ from pipeline.strategies.static_join import rt_field_coverage_confirmed
 async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Per-route dwell/running-time distribution summary over ``ctx``'s range.
 
-    Returns ``{"available": bool, "time_band_supported": bool, "routes": [...]}``.
+    Returns ``{"available": bool, "time_band_supported": bool, "routes": [...],
+    "unavailable_reason": str | None, "last_checked": str | None}``.
 
-    ``available=False`` means this agency's ingest strategy never populates
-    `arr_delay` -- the caller must render an explicit "not available" state,
-    never a zero/blank decomposition. ``time_band_supported=False`` (only
+    ``available=False`` means the agency's arrival data is not trusted, and
+    ``unavailable_reason``/``last_checked`` say why
+    (``pipeline.strategies.static_join.CoverageGap``) -- the caller must
+    render that explicit state, never a zero/blank decomposition. Both are
+    None when ``available`` is True. ``time_band_supported=False`` (only
     possible when ``available`` is True) means the current time-band filter
     can't be served by this report yet (see module docstring) -- again, a
     caller must render an explicit state, not silently ignore the filter.
@@ -56,12 +59,16 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     (unlike ranking/on_time's ``> 20``/``> 10`` gates) -- `arr_delay`'s own
     sparse coverage already means legitimate samples counts are frequently
     thin, so every route is returned with its own transparent sample count
-    for the caller to weigh, rather than being hidden below a threshold.
+    for the caller to weigh, rather than being hidden below a threshold. A
+    route with neither a dwell nor a running sample in range is left out: it
+    was seen, but nothing about its dwell or running time was.
     """
-    if not await rt_field_coverage_confirmed(agency_id, conn):
-        return {"available": False, "time_band_supported": ctx.time_band == "all", "routes": []}
+    gap = await rt_field_coverage_gap(agency_id, conn)
+    if gap is not None:
+        return {"available": False, "time_band_supported": ctx.time_band == "all", "routes": [], **gap.payload()}
+    available = {"unavailable_reason": None, "last_checked": None}
     if ctx.time_band != "all":
-        return {"available": True, "time_band_supported": False, "routes": []}
+        return {"available": True, "time_band_supported": False, "routes": [], **available}
 
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
@@ -94,6 +101,7 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
         "           SUM(dwell_samples) AS dwell_samples, SUM(dwell_sum_sec) AS dwell_sum_sec,\n"
         "           SUM(run_samples) AS run_samples, SUM(run_sum_sec) AS run_sum_sec\n"
         "    FROM ranged GROUP BY route_code\n"
+        "    HAVING SUM(dwell_samples) + SUM(run_samples) > 0\n"
         ")\n"
         "SELECT s.route_code,\n"
         "       s.dwell_samples, s.dwell_sum_sec, dh.hist_dwell,\n"
@@ -130,4 +138,4 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
                 "run_p90_sec": percentile_from_run_hist(r["hist_run"], 0.9),
             }
         )
-    return {"available": True, "time_band_supported": True, "routes": routes}
+    return {"available": True, "time_band_supported": True, "routes": routes, **available}
