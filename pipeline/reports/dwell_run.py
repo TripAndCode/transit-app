@@ -32,6 +32,10 @@ from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_h
 from pipeline.reports.filters import _dist_filter, _service_label
 from pipeline.strategies.static_join import rt_field_coverage_gap
 
+# Every route in scope was seen, but no observation paired an arrival with a
+# departure, so neither a dwell nor a running time could be worked out.
+_NO_PAIRED_SAMPLES = {"unavailable_reason": "no_paired_samples"}
+
 
 @perf.timed("reports.dwell_run")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
@@ -44,8 +48,13 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     ``available=False`` means the agency's arrival data is not trusted, and
     ``unavailable_reason``/``last_checked`` say why
     (``pipeline.strategies.static_join.CoverageGap``) -- the caller must
-    render that explicit state, never a zero/blank decomposition. Both are
-    None when ``available`` is True. ``time_band_supported=False`` (only
+    render that explicit state, never a zero/blank decomposition. With
+    ``available`` True, ``unavailable_reason`` is ``no_paired_samples`` when
+    routes are in scope but not one holds a dwell or running sample -- a
+    state no other range or filter is known to change, so it is not the
+    "nothing matched" of an empty scope, which carries no reason; otherwise
+    it is None. ``last_checked`` is None whenever ``available`` is True.
+    ``time_band_supported=False`` (only
     possible when ``available`` is True) means the current time-band filter
     can't be served by this report yet (see module docstring) -- again, a
     caller must render an explicit state, not silently ignore the filter.
@@ -112,6 +121,12 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
         "ORDER BY route_code"
     )
     rows = await conn.fetch(sql, agency_id, *params)
+    if not rows and await conn.fetchval(
+        f"SELECT EXISTS (SELECT 1 FROM agg_route_daily_dwell_run WHERE agency_id = $1 AND {where})",
+        agency_id,
+        *params,
+    ):
+        return {"available": True, "time_band_supported": True, "routes": [], **available, **_NO_PAIRED_SAMPLES}
     service = _service_label(ctx)
 
     routes = []

@@ -148,6 +148,29 @@ describe("WhyAnalyses", () => {
     ).toBeInTheDocument();
   });
 
+  it("says when routes matched but none has a dwell or running sample, without blaming the filters", () => {
+    show(
+      { available: true, time_band_supported: true, routes: [], unavailable_reason: "no_paired_samples", last_checked: null },
+      WEATHER,
+      HEADWAY,
+    );
+    expect(within(row("Dwell/running time")).getByText("No observations")).toBeInTheDocument();
+    expect(
+      within(row("Dwell/running time")).getByText(
+        "There are no observations in this period from which dwell or running time can be calculated.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No matching data")).not.toBeInTheDocument();
+    expect(screen.queryByText("Try a different range or filters")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "See when delay happens" })).toBeInTheDocument();
+  });
+
+  it("leaves an empty scope to the filters' own empty state", () => {
+    show({ available: true, time_band_supported: true, routes: [], unavailable_reason: null, last_checked: null }, WEATHER, HEADWAY);
+    expect(screen.getByText("No matching data")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Analyses not shown" })).not.toBeInTheDocument();
+  });
+
   it("dates a refutation and calls it unsupported", () => {
     show(unavailableDwell("probe_refuted", "2026-09-11"), WEATHER, HEADWAY);
     expect(within(row("Dwell/running time")).getByText("Not supported")).toBeInTheDocument();

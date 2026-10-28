@@ -277,6 +277,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
   - “Not supported”: arrival times and related records can’t be taken from the agency’s feed, or the last check found the feed lacks a field the analysis needs.
   - “Needs re-check”: the check of whether the feed sends arrival times and related data has expired and awaits a re-check. The day of the last check is given too.
   - “Not checked”: whether the feed sends arrival times and related data hasn’t been checked yet.
+  - “No observations”: there are no observations in this period from which dwell or running time can be calculated.
   - “Not set up”: no weather station is set up for the agency.
   - “Not applicable”: the timetable has no route scheduled every 12 minutes or more often.
 - When dwell/running time can’t be shown, **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1) are offered.

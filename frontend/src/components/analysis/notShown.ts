@@ -31,11 +31,18 @@ function coverageNotShown(t: TFunction, reason: CoverageGapReason, lastChecked: 
 }
 
 /** The dwell/running split can't be shown whenever the payload says it isn't
- *  available; a payload naming no reason reads as never checked, the one
- *  cause that claims nothing about the feed. */
+ *  available, or when routes matched but none holds a sample; an unavailable
+ *  payload naming no reason reads as never checked, the one cause that
+ *  claims nothing about the feed. An available payload with no rows and no
+ *  reason is an empty scope, which the split's own empty state words. */
 export function dwellNotShown(t: TFunction, payload: DwellRunPayload | undefined): NotShown | null {
-  if (payload?.available) return null;
-  return coverageNotShown(t, payload?.unavailable_reason ?? "never_probed", payload?.last_checked);
+  const reason = payload?.unavailable_reason;
+  if (payload?.available) {
+    return reason === "no_paired_samples"
+      ? { status: t("reports.status.no_observations"), text: t("reports.dwell_run.no_paired_samples") }
+      : null;
+  }
+  return coverageNotShown(t, reason == null || reason === "no_paired_samples" ? "never_probed" : reason, payload?.last_checked);
 }
 
 /** Headway quality can't be shown when the API names why its rows are bound

@@ -85,6 +85,24 @@ def test_each_reason_reads_its_own_true_sentence(reason, last_checked, locale, e
     assert format_dwell_run_text(_unavailable(reason, last_checked), locale=locale) == expected
 
 
+@pytest.mark.parametrize(
+    "locale, expected",
+    [
+        ("ja", "この期間には、滞留・走行の時間を計算できる観測がありません。"),
+        ("en", "There are no observations in this period from which dwell or running time can be calculated."),
+    ],
+)
+def test_matched_routes_without_a_paired_sample_say_so_without_blaming_the_filters(locale, expected):
+    payload = {
+        "available": True,
+        "time_band_supported": True,
+        "routes": [],
+        "unavailable_reason": "no_paired_samples",
+        "last_checked": None,
+    }
+    assert format_dwell_run_text(payload, locale=locale) == expected
+
+
 @pytest.mark.parametrize("locale", ["ja", "en"])
 def test_a_payload_without_a_reason_reads_as_never_checked(locale):
     payload = {"available": False, "time_band_supported": True, "routes": []}

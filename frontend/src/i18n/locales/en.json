@@ -1185,6 +1185,7 @@
     },
     "dwell_run": {
       "time_band_unsupported": "This decomposition doesn't support a time-band filter yet.",
+      "no_paired_samples": "There are no observations in this period from which dwell or running time can be calculated.",
       "col": {
         "dwell_avg": "Dwell avg",
         "dwell_p50": "Dwell p50",
@@ -1269,7 +1270,8 @@
       "recheck": "Needs re-check",
       "unchecked": "Not checked",
       "not_set": "Not set up",
-      "not_applicable": "Not applicable"
+      "not_applicable": "Not applicable",
+      "no_observations": "No observations"
     },
     "why": {
       "not_shown_title": "Analyses not shown"

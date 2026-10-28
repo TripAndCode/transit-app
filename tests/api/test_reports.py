@@ -1851,37 +1851,105 @@ async def test_dwell_run_with_an_expired_verdict_says_it_awaits_a_recheck(report
     assert "2026-09-11" in body["text"]
 
 
+async def _seed_dwell_run_day(pool, agency_id, route, samples):
+    """One 2026-04-01 `agg_route_daily_dwell_run` row for *route* holding
+    *samples* dwell and *samples* running observations."""
+    dwell_hist = [0] * 26
+    run_hist = [0] * 32
+    dwell_hist[5] = samples
+    run_hist[5] = samples
+    await pool.execute(
+        "INSERT INTO agg_route_daily_dwell_run (agency_id, date, route_code, service_type, dwell_samples, "
+        "dwell_sum_sec, hist_dwell, run_samples, run_sum_sec, hist_run) "
+        "VALUES ($1, '2026-04-01', $2, '平日', $3, $4, $5, $3, $6, $7)",
+        agency_id,
+        route,
+        samples,
+        60 * samples,
+        dwell_hist,
+        240 * samples,
+        run_hist,
+    )
+
+
+async def _trusted_static_join(pool, agency_id):
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await _trust_dwell_run(pool, agency_id)
+
+
 @pytest.mark.asyncio
 async def test_dwell_run_leaves_out_a_route_with_no_dwell_or_running_sample(reports_client):
     """A route-day row with neither a dwell nor a running sample has nothing
     to show; listing it would draw a row of dashes and zero counts as if the
     route had been measured."""
     client, agency_id, pool = reports_client
-    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
-    await _trust_dwell_run(pool, agency_id)
-    for route, n in (("EMPTY", 0), ("SEEN", 2)):
-        dwell_hist = [0] * 26
-        run_hist = [0] * 32
-        dwell_hist[5] = n
-        run_hist[5] = n
-        await pool.execute(
-            "INSERT INTO agg_route_daily_dwell_run (agency_id, date, route_code, service_type, dwell_samples, "
-            "dwell_sum_sec, hist_dwell, run_samples, run_sum_sec, hist_run) "
-            "VALUES ($1, '2026-04-01', $2, '平日', $3, $4, $5, $3, $6, $7)",
-            agency_id,
-            route,
-            n,
-            60 * n,
-            dwell_hist,
-            240 * n,
-            run_hist,
-        )
+    await _trusted_static_join(pool, agency_id)
+    await _seed_dwell_run_day(pool, agency_id, "EMPTY", 0)
+    await _seed_dwell_run_day(pool, agency_id, "SEEN", 2)
     resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01")
     assert resp.status_code == 200
     payload = resp.json()["rows"][0]
     assert payload["available"] is True
     assert payload["unavailable_reason"] is None
     assert [r["route_code"] for r in payload["routes"]] == ["SEEN"]
+
+
+NO_PAIRED_SAMPLES_JA = "この期間には、滞留・走行の時間を計算できる観測がありません。"
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_says_when_matched_routes_have_no_paired_sample(reports_client):
+    """Routes in scope whose every row holds no dwell and no running sample
+    are not a filter that matched nothing: the payload names that, and the
+    text says so without suggesting another filter."""
+    client, agency_id, pool = reports_client
+    await _trusted_static_join(pool, agency_id)
+    await _seed_dwell_run_day(pool, agency_id, "R1", 0)
+    await _seed_dwell_run_day(pool, agency_id, "R2", 0)
+    resp = await client.get(
+        f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01", headers={"Accept-Language": "ja"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    payload = body["rows"][0]
+    assert payload["available"] is True
+    assert payload["routes"] == []
+    assert payload["unavailable_reason"] == "no_paired_samples"
+    assert payload["last_checked"] is None
+    assert body["text"] == NO_PAIRED_SAMPLES_JA
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_says_when_matched_routes_have_no_paired_sample(reports_client):
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await _trusted_static_join(pool, agency_id)
+    await _seed_dwell_run_day(pool, agency_id, "R1", 0)
+    resp = await client.get(
+        f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01&format=csv",
+        headers={"Accept-Language": "ja"},
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    assert len(rows) == 3
+    assert rows[2][0] == NO_PAIRED_SAMPLES_JA
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_with_no_route_in_scope_names_no_reason(reports_client):
+    """Nothing in scope at all is the range's or the filters' answer, which
+    the reader can change, so it carries no reason of its own."""
+    client, agency_id, pool = reports_client
+    await _trusted_static_join(pool, agency_id)
+    await _seed_dwell_run_day(pool, agency_id, "R1", 0)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-05-01&to=2026-05-07")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["routes"] == []
+    assert payload["unavailable_reason"] is None
 
 
 @pytest.mark.asyncio

@@ -1185,6 +1185,7 @@
     },
     "dwell_run": {
       "time_band_unsupported": "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
+      "no_paired_samples": "この期間には、滞留・走行の時間を計算できる観測がありません。",
       "col": {
         "dwell_avg": "滞留平均",
         "dwell_p50": "滞留p50",
@@ -1269,7 +1270,8 @@
       "recheck": "要再確認",
       "unchecked": "未確認",
       "not_set": "未設定",
-      "not_applicable": "対象外"
+      "not_applicable": "対象外",
+      "no_observations": "観測なし"
     },
     "why": {
       "not_shown_title": "表示できない分析"

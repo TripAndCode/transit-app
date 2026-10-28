@@ -1304,7 +1304,11 @@ async def get_report(
         # JSON/text response's own wording for these two states.
         text = format_dwell_run_text(payload, locale=locale)
         if format == "csv":
-            if not payload["available"] or not payload.get("time_band_supported", True):
+            if (
+                not payload["available"]
+                or not payload.get("time_band_supported", True)
+                or payload["unavailable_reason"]
+            ):
                 return _csv_response(report_type, [], ctx, definition, unavailable_message=text)
             return _csv_response(report_type, payload["routes"], ctx, definition)
         return ReportResponse(

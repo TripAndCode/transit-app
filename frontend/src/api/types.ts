@@ -697,8 +697,11 @@ export type DwellRunPayload = {
   available: boolean;
   time_band_supported: boolean;
   routes: DwellRunRoute[];
-  unavailable_reason?: CoverageGapReason | null;
-  /** The ISO day of the feed check behind `unavailable_reason`. */
+  /** A coverage reason when `available` is false. With `available` true,
+   *  `no_paired_samples` says routes matched but none holds a dwell or
+   *  running sample, unlike an empty scope, which carries no reason. */
+  unavailable_reason?: CoverageGapReason | "no_paired_samples" | null;
+  /** The ISO day of the feed check behind a coverage reason. */
   last_checked?: string | null;
 };
 

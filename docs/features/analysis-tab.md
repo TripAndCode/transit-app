@@ -87,7 +87,11 @@ What the user sees/does:
   dwell-time/running-time table decomposing `arr_delay` (populated only for
   `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately from
   the existing delay histogram. A route with neither a dwell nor a running
-  sample in range is left out. When the agency's arrival data isn't trusted
+  sample in range is left out; when routes are in scope but every one is,
+  the payload stays `available` and names `no_paired_samples`, which the
+  not-shown list states without suggesting another filter (an empty scope
+  carries no reason and gets the filters' own empty state). When the
+  agency's arrival data isn't trusted
   (`available: false`), the split joins the not-shown list under the reason
   the payload names (`unavailable_reason`, from
   `pipeline.strategies.static_join.coverage_gap`): `feed_unsupported` (the

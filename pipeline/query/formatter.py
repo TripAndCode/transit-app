@@ -117,6 +117,10 @@ _LOCALES: dict[tuple[str, str], str] = {
         "The check of this feed's arrival-time data has expired, so the dwell/running time breakdown isn't "
         "shown until it is re-checked (last checked {last_checked})."
     ),
+    ("dwell_run_no_paired_samples", "ja"): "この期間には、滞留・走行の時間を計算できる観測がありません。",
+    ("dwell_run_no_paired_samples", "en"): (
+        "There are no observations in this period from which dwell or running time can be calculated."
+    ),
     ("dwell_run_never_probed", "ja"): (
         "この事業者のフィードが到着時刻を送っているかをまだ確認していないため、滞留・走行時間の内訳は表示していません。"
     ),
@@ -439,14 +443,18 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
     a ``pipeline.strategies.static_join.CoverageGapReason``) and
     ``time_band_supported=False`` (a time-band filter isn't servable for this
     decomposition yet) each get their own explicit copy, never a silently
-    empty/zero table. A payload without a reason reads as never checked, the
-    one cause that claims nothing about the feed.
+    empty/zero table, and neither is the ``no_paired_samples`` reason an
+    available payload can carry. An unavailable payload without a reason
+    reads as never checked, the one cause that claims nothing about the
+    feed.
     """
     if not payload.get("available"):
         reason = payload.get("unavailable_reason") or "never_probed"
         return _t(f"dwell_run_{reason}", locale, last_checked=payload.get("last_checked") or "")
     if not payload.get("time_band_supported", True):
         return _t("dwell_run_time_band_unsupported", locale)
+    if payload.get("unavailable_reason") == "no_paired_samples":
+        return _t("dwell_run_no_paired_samples", locale)
     routes = payload.get("routes") or []
     if not routes:
         return _no_data(locale)
