@@ -1,60 +1,53 @@
 import { useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { useRovingCells } from "../../hooks/useRovingCells";
-import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
+import { delayRampVar } from "../../styles/tokens";
+import type { ForecastOverviewGridCell } from "../../api/types";
+import { BAND_ORDER, bandHours, bandHoursText, bandLabel, bandName } from "../../api/timeBands";
 import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
-import { fixedTenth, formatMinutes } from "../../utils/format";
-
-const RAMP_STOPS = 5;
+import { formatMinutes } from "../../utils/format";
+import "./DowBandGrid.css";
 
 /** Where a tooltip is anchored: a pointer position, or the cell's own edge for a
  *  keyboard focus, which has no pointer. */
 export type TipAnchor = { clientX: number; clientY: number };
 
-/** Anchored min→max colour ramp legend (shown inline, not only in the modal).
- * `colorFor` defaults to the absolute ramp; pass the grid's own ramp when it uses
- * another, so the legend reflects the encoding actually shown. */
-export function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(min)}</span>
-      <span style={{ display: "inline-flex", gap: 2 }}>
-        {Array.from({ length: RAMP_STOPS }, (_, i) => (
-          <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: colorFor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
-        ))}
-      </span>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fixedTenth(max)}</span>
-      <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>{unit}</span>
-    </div>
-  );
-}
+/** A day and time without measurements, hatched so it never reads as a calm cell. */
+export const EMPTY_CELL_FILL =
+  "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)";
 
-/** 7-day × 5-band grid. Dense by construction — used for the agency overview and
- * the per-route detail (route cells collapsed to bands client-side).
+/** 7-day × time-band grid, one column per band of `BAND_ORDER`. Dense by
+ * construction — used for the agency overview and the per-route detail (route
+ * cells collapsed to bands client-side). Each column is headed by its band's
+ * name over its hours; a phone column is too narrow for a name, so there it
+ * shows the bare hours, stacked ("17" over "–20"), and every cell still names
+ * its band in full.
  *
- * A cell at or beyond the severe threshold is outlined rather than
- * recoloured, so the outline survives whatever ramp `colorFor` applies. */
+ * Cells are shaded by the shared delay steps (`delayRampVar`), with no
+ * outline over the heavy ones; `DelayScaleLegend` labels the steps. */
 export function BandGrid({
   ariaLabel,
   grid,
-  bandLabel,
   dayLabel,
-  colorFor,
+  markFallback = false,
   onTip,
   onLeave,
 }: {
   /** Already-translated accessible name for the grid. */
   ariaLabel: string;
   grid: ForecastOverviewGridCell[];
-  bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
-  colorFor: (v: number) => string;
+  /** The model forecasts this view, so a band showing past averages alone is marked. */
+  markFallback?: boolean;
   onTip: (anchor: TipAnchor, text: string) => void;
   onLeave: () => void;
 }) {
+  const { t } = useTranslation();
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
-  const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
+  // minmax(0, …): a column may shrink below its header's width, so the grid
+  // never outgrows a phone's card.
+  const cols = `auto repeat(${BAND_ORDER.length}, minmax(0, 1fr))`;
   const entered = useFirstData(grid.length > 0);
   // The cell under the pointer or holding keyboard focus, outlined so a sighted
   // keyboard user sees which cell the tooltip is about.
@@ -91,8 +84,13 @@ export function BandGrid({
         <div role="row" style={{ display: "contents" }}>
           <span aria-hidden="true" />
           {BAND_ORDER.map((b) => (
-            <span key={b} role="columnheader" style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
-              {bandLabel(b)}
+            <span key={b} role="columnheader" aria-label={bandLabel(t, b)} className="band-grid__head">
+              <span className="band-grid__name" aria-hidden="true">{bandName(t, b)}</span>
+              <span className="band-grid__hours" aria-hidden="true">{bandHoursText(t, b)}</span>
+              <span className="band-grid__hours band-grid__hours--short" aria-hidden="true">
+                <span>{bandHours(b).from}</span>
+                <span>–{bandHours(b).to}</span>
+              </span>
             </span>
           ))}
         </div>
@@ -106,7 +104,8 @@ export function BandGrid({
             {BAND_ORDER.map((b, bi) => {
               const c = byKey.get(`${dow}-${b}`);
               const v = c?.expected_avg_min ?? null;
-              const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : formatMinutes(v)}`;
+              const fallback = markFallback && v != null && c?.source !== "ml";
+              const tipText = [`${dayLabel(dow)} ${bandLabel(t, b)}`, v == null ? "—" : formatMinutes(v), ...(fallback ? [t("forecast.fallback_cell")] : [])].join(" · ");
               // The dimming for a low-confidence cell (--cell-opacity) has to
               // come from a CSS custom property, not a plain inline
               // `opacity` -- an inline style always wins over the
@@ -137,12 +136,6 @@ export function BandGrid({
                   onLeave();
                 },
               };
-              // inset, not `border`/`outline`: a border would resize the cell
-              // and break the grid's alignment with its unmarked neighbours.
-              const severeOutline =
-                v != null && v >= DELAY_THRESHOLDS.severe
-                  ? { boxShadow: "inset 0 0 0 1px var(--delay-severe)" }
-                  : null;
               if (v == null) {
                 return (
                   <div
@@ -155,7 +148,7 @@ export function BandGrid({
                     style={{
                       height: 30,
                       borderRadius: 3,
-                      background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                      background: EMPTY_CELL_FILL,
                       ...highlight,
                       ...staggerStyle,
                     }}
@@ -166,12 +159,15 @@ export function BandGrid({
                 <div
                   key={b}
                   data-testid="ov-band-cell"
+                  data-fallback={fallback ? "" : undefined}
                   {...cellA11y}
                   className={cellClass}
                   onMouseEnter={showTip}
                   onMouseMove={showTip}
-                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...highlight, ...staggerStyle }}
-                />
+                  style={{ position: "relative", height: 30, borderRadius: 3, background: delayRampVar(v), ...highlight, ...staggerStyle }}
+                >
+                  {fallback && <span className="fallback-mark" aria-hidden="true" />}
+                </div>
               );
             })}
             </div>

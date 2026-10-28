@@ -12,3 +12,8 @@
    tooltip carry the whole date, and the expanded chart has room. */
 .fc-axis-day { display: block; }
 @media (max-width: 640px) { .fc-bars--compact .fc-axis-day { display: none; } }
+.fc-ml-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 8px; font-size: var(--text-xs); }
+.fc-ml-link { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
+.fc-worst-band { display: block; margin-top: 4px; font-size: var(--text-sm); font-weight: 400; color: var(--text-secondary); }
+.fc-worst-range { display: block; margin-top: 2px; font-size: var(--text-sm); font-weight: 400; color: var(--text-secondary); }
+

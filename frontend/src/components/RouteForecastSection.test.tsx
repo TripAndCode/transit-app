@@ -4,8 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
-import { BAND_ORDER, type ForecastDay, type ForecastOverview } from "../api/types";
-import { calmDelayColor } from "../styles/tokens";
+import { BAND_ORDER } from "../api/timeBands";
+import { type ForecastDay, type ForecastOverview } from "../api/types";
+import { delayRampVar } from "../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []) {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -28,8 +29,8 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
 
 function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
   return {
-    grid: fullGrid([{ dow: 1, band: "midday", v: 6.8, n: 250 }]),
-    worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
+    grid: fullGrid([{ dow: 1, band: "forenoon", v: 6.8, n: 250 }]),
+    worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "baseline" },
     routes: [
       { route_code: "100", route_name: "Main Line", expected_avg_min: 6.8, samples: 250, low_confidence: false },
       { route_code: "200", route_name: "Side Line", expected_avg_min: 9.9, samples: 5, low_confidence: true },
@@ -84,11 +85,11 @@ function renderSection(ov: ForecastOverview | undefined = overview(), initialRou
 }
 
 describe("RouteForecastSection", () => {
-  it("renders the agency landing with worst window, 35-cell grid, and ranked routes", () => {
+  it("renders the agency landing with worst window, a cell for every weekday and band, and ranked routes", () => {
     renderSection();
     expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
-    expect(screen.getByText(/When to watch out/i)).toBeInTheDocument();
-    expect(screen.getAllByTestId("ov-band-cell").length).toBe(35);
+    expect(screen.getByText("When it has run latest (all routes, band average)")).toBeInTheDocument();
+    expect(screen.getAllByTestId("ov-band-cell").length).toBe(7 * BAND_ORDER.length);
     const ranked = within(screen.getByTestId("fc-overview-routes"));
     expect(ranked.getByText("Main Line")).toBeInTheDocument();
     expect(ranked.getByText("Side Line")).toBeInTheDocument();
@@ -141,6 +142,17 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("fc-detail-fullgrid")).toBeInTheDocument();
   });
 
+  it("never stacks an hour label's digits, on the full grid or on the by-hour bars", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByRole("button", { name: "Show day × hour detail" }));
+    const grid = screen.getByTestId("fc-detail-fullgrid");
+    const gridAxis = within(grid).getAllByText(/^(0|6|12|18)$/);
+    expect(gridAxis).toHaveLength(4);
+    for (const label of gridAxis) expect(label).toHaveStyle({ whiteSpace: "nowrap" });
+    const barAxis = within(screen.getByTestId("fc-card-hr")).getAllByText(/^(0|6|12|18)$/);
+    for (const label of barAxis) expect(label).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
@@ -170,12 +182,12 @@ describe("RouteForecastSection", () => {
   });
 
   it("says an early-running worst window is early, not late", () => {
-    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250, source: "baseline" } }));
+    renderSection(overview({ worst: { dow: 1, band: "forenoon", expected_avg_min: -0.4, samples: 250, source: "baseline" } }));
     expect(screen.getByTestId("worst-headline")).toHaveTextContent("avg 0.4 min early");
   });
 
   it("words a worst window the ML model set as expected, not as an average", () => {
-    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "ml" } }));
+    renderSection(overview({ worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "ml" } }));
     const headline = screen.getByTestId("worst-headline");
     expect(headline).toHaveTextContent("6.8 min late expected");
     expect(headline).not.toHaveTextContent("avg");
@@ -257,7 +269,7 @@ describe("RouteForecastSection", () => {
 
   it("dates each forecast row and a forecast worst window, leaving the past-average rows as weekdays", () => {
     const mlGrid = fullGrid([
-      { dow: 1, band: "midday", v: 2.0 },
+      { dow: 1, band: "forenoon", v: 2.0 },
       { dow: 5, band: "evening", v: 5.8 },
     ]).map((c) => (c.dow === 5 && c.expected_avg_min != null ? { ...c, source: "ml" as const } : c));
     renderSection(
@@ -268,7 +280,7 @@ describe("RouteForecastSection", () => {
       }),
     );
     expect(screen.getByTestId("fc-period")).toHaveTextContent("Forecast for Fri, Oct 30.");
-    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Fri 10/30 Evening runs latest");
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Fri 10/30 Evening 17–20h runs latest");
     const rows = within(screen.getByTestId("fc-overview-grid")).getAllByRole("rowheader").map((h) => h.textContent);
     expect(rows).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri 10/30", "Sat", "Sun"]);
   });
@@ -277,10 +289,10 @@ describe("RouteForecastSection", () => {
     renderSection(
       overview({
         forecast_days: [{ dow: 1, service_date: "2026-10-26" }],
-        worst: { dow: 1, band: "midday", expected_avg_min: 6.8, samples: 250, source: "baseline" },
+        worst: { dow: 1, band: "forenoon", expected_avg_min: 6.8, samples: 250, source: "baseline" },
       }),
     );
-    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Mon Midday runs latest");
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("Mon Late morning 9–12h runs latest");
     expect(screen.getByTestId("worst-headline")).not.toHaveTextContent("10/26");
   });
 
@@ -295,9 +307,9 @@ describe("RouteForecastSection", () => {
     );
     const fill = (row: HTMLElement) => (row.children[1].firstElementChild as HTMLElement).style.background;
     const [worse, better] = screen.getAllByTestId("ranked-route");
-    expect(fill(better)).toBe(calmDelayColor(7.3));
+    expect(fill(better)).toBe(delayRampVar(7.3));
     expect(fill(better)).toBe(fill(worse));
-    expect(fill(better)).not.toBe(calmDelayColor(0));
+    expect(fill(better)).not.toBe(delayRampVar(0));
   });
 
   it("dates a chosen route's full day × hour rows and its by-day bars where its forecast covers them", () => {
@@ -392,15 +404,17 @@ describe("RouteForecastSection", () => {
     expect(within(dialog).getByText("Past observations")).toBeInTheDocument();
     expect(within(dialog).queryByText("Measurements")).toBeNull();
     // The route figure pools the model's forecasts, so it is not called an average.
-    expect(within(dialog).getByText("Route expected")).toBeInTheDocument();
-    expect(within(dialog).queryByText("Route avg")).toBeNull();
+    expect(within(dialog).getByText("All days and hours, expected")).toBeInTheDocument();
+    expect(within(dialog).queryByText("All days and hours, average")).toBeNull();
+    // Each extreme says what it pools: a weekday over its whole day.
+    expect(within(dialog).getByText("Latest day (whole-day average)")).toBeInTheDocument();
   });
 
   it("keeps calling the detail's count measurements for a baseline forecast", () => {
     renderSection(overview(), "100");
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
     expect(within(screen.getByRole("dialog")).getByText("Measurements")).toBeInTheDocument();
-    expect(within(screen.getByRole("dialog")).getByText("Route avg")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("All days and hours, average")).toBeInTheDocument();
   });
 
   it("marks a route's forecast as the ML model's when its cells come from it", () => {
@@ -415,7 +429,51 @@ describe("RouteForecastSection", () => {
     const ml = heatmap();
     ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
     renderSection(overview(), "100", ml);
-    expect(screen.getByTestId("fc-ml-chip")).toHaveAttribute("href", "/model?from=1");
+    const link = within(screen.getByTestId("fc-ml-chip")).getByRole("link", { name: "How accurate is it? →" });
+    expect(link).toHaveAttribute("href", "/model?from=1");
+    expect(link).toHaveClass("fc-ml-link");
+  });
+
+  it("pools a band's hours by their past observations, a forecast hour and a past one alike", () => {
+    const hm = heatmap([
+      { d: 5, h: 17, v: 6.0, n: 200 },
+      { d: 5, h: 18, v: 2.0, n: 100 },
+    ]);
+    hm.cells = hm.cells.map((c) => (c.dow === 5 && c.hour === 17 ? { ...c, source: "ml" as const } : c));
+    renderSection(overview(), "100", hm);
+    const band = within(screen.getByTestId("fc-detail-bandgrid")).getByRole("gridcell", { name: /^Fri Evening 17–20h/ });
+    // (6.0 × 200 + 2.0 × 100) / 300, not the forecast hour alone.
+    expect(band).toHaveAccessibleName(/· 4\.7 min$/);
+  });
+
+  it("names the route's latest hour with its forecast range, then its latest band with the band's hours", () => {
+    const hm = heatmap([{ d: 5, h: 18, v: 14.0, n: 300 }]);
+    hm.forecast_days = [{ dow: 5, service_date: "2026-10-30" }];
+    hm.cells = hm.cells.map((c) => (c.dow === 5 && c.hour === 18 ? { ...c, source: "ml" as const, q10: 6.0, q90: 21.5 } : c));
+    renderSection(overview(), "100", hm);
+    const headline = screen.getByTestId("detail-worst");
+    expect(headline).toHaveTextContent("Latest at Fri 10/30 18:00 (14.0 min late expected)");
+    expect(headline).toHaveTextContent("8 runs in 10 within 6.0–21.5 min late");
+    expect(headline).toHaveTextContent("By time band, Fri 10/30 Evening 17–20h (14.0 min late expected)");
+  });
+
+  it("marks a past-average cell in a view the model forecasts, and says so in the legend and the cell's label", () => {
+    const hm = heatmap();
+    hm.cells = hm.cells.map((c) => (c.dow === 1 && c.hour === 12 ? { ...c, source: "ml" as const } : c));
+    renderSection(overview(), "100", hm);
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const grid = screen.getByTestId("fc-detail-fullgrid");
+    const marked = grid.querySelectorAll("[data-fallback]");
+    expect(marked).toHaveLength(6); // noon on Tuesday to Sunday shows a past average
+    expect(marked[0].getAttribute("aria-label")).toContain("past average (no forecast)");
+    expect(within(grid).getByTestId("delay-scale-legend")).toHaveTextContent("No forecast: past average");
+  });
+
+  it("marks nothing as a past average where nothing is forecast", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    expect(screen.getByTestId("fc-detail-fullgrid").querySelectorAll("[data-fallback]")).toHaveLength(0);
+    expect(screen.queryByText("No forecast: past average")).toBeNull();
   });
 
   it("shows no ML mark on a baseline-only route or agency landing", () => {

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
-import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import i18n from "../../i18n";
 
 function renderHeatmap(cells: HourlyCell[]) {
@@ -15,8 +15,7 @@ function renderHeatmap(cells: HourlyCell[]) {
   );
 }
 
-// A single non-empty cell is enough to skip the empty-state early return and
-// reach the legend toggle.
+// A single non-empty cell is enough to skip the empty-state early return.
 const ONE_CELL: HourlyCell[] = [{ date: "2026-06-01", hour: 8, avg_min: 2.0, samples: 50 }];
 
 function cellAt(container: HTMLElement, date: string, hour: number): Element {
@@ -34,56 +33,40 @@ describe("HourlyHeatmap tooltip", () => {
 });
 
 describe("HourlyHeatmap legend", () => {
-  it("describes one accent ramp over the delay domain instead of four colour bands", async () => {
+  it("labels the shared delay steps, always shown, with how a cell without data looks", async () => {
     await i18n.changeLanguage("en");
     renderHeatmap(ONE_CELL);
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("reports.heatmap.legend_aria") }));
-
-    expect(screen.getByText(i18n.t("reports.heatmap.ramp_max", { min: HEAT_RAMP.maxMin }))).toBeInTheDocument();
-    expect(
-      screen.getByText(i18n.t("reports.heatmap.severe_outline", { min: DELAY_THRESHOLDS.severe })),
-    ).toBeInTheDocument();
-
-    // None of the four-colour band labels survive.
-    expect(screen.queryByText("1.5–3 min")).toBeNull();
-    expect(screen.queryByText("3–5 min")).toBeNull();
-    expect(screen.queryByText("> 5 min")).toBeNull();
+    const legend = screen.getByTestId("delay-scale-legend");
+    expect(legend).toHaveTextContent("under 1.5 min");
+    expect(legend).toHaveTextContent("3.5–5 min");
+    expect(legend).toHaveTextContent("5 min or more");
+    expect(legend).toHaveTextContent("No data");
+    expect(screen.queryByRole("button", { name: "Show legend" })).toBeNull();
   });
 });
 
-describe("HourlyHeatmap ramp", () => {
-  it("paints every populated cell in one hue, varying only its opacity", () => {
+describe("HourlyHeatmap shading", () => {
+  it("shades every populated cell by the shared delay steps, the same scale as the surface above it", () => {
     const { container } = renderHeatmap([
       { date: "2026-06-01", hour: 8, avg_min: 1.0, samples: 50 },
-      { date: "2026-06-01", hour: 9, avg_min: 5.0, samples: 50 },
+      { date: "2026-06-01", hour: 9, avg_min: 4.0, samples: 50 },
+      { date: "2026-06-01", hour: 10, avg_min: DELAY_THRESHOLDS.severe + 1, samples: 50 },
     ]);
-    const light = cellAt(container, "2026-06-01", 8) as SVGElement;
-    const dark = cellAt(container, "2026-06-01", 9) as SVGElement;
-
-    expect(light.style.fill).toBe("var(--accent)");
-    expect(dark.style.fill).toBe("var(--accent)");
-    expect(light.getAttribute("opacity")).toBe(String(heatOpacity(1.0)));
-    expect(dark.getAttribute("opacity")).toBe(String(heatOpacity(5.0)));
-    expect(heatOpacity(5.0)).toBeGreaterThan(heatOpacity(1.0));
+    expect((cellAt(container, "2026-06-01", 8) as SVGElement).style.fill).toBe(delayRampVar(1.0));
+    expect((cellAt(container, "2026-06-01", 9) as SVGElement).style.fill).toBe(delayRampVar(4.0));
+    expect((cellAt(container, "2026-06-01", 10) as SVGElement).style.fill).toBe(delayRampVar(DELAY_THRESHOLDS.severe + 1));
   });
 
-  it("carries the ramp value as --cell-opacity so the entrance fade lands on it", () => {
+  it("draws no outline over a heavy cell, so heavy hours never stand out as a red grid", () => {
+    const { container } = renderHeatmap([{ date: "2026-06-01", hour: 8, avg_min: DELAY_THRESHOLDS.severe + 3, samples: 50 }]);
+    expect(container.querySelectorAll("[data-testid='heat-severe-outline']")).toHaveLength(0);
+    expect(container.innerHTML).not.toContain("--delay-severe");
+  });
+
+  it("fades every cell in to full opacity, the colour alone carrying the delay", () => {
     const { container } = renderHeatmap(ONE_CELL);
     const cell = cellAt(container, "2026-06-01", 8) as SVGElement;
-    expect(cell.style.getPropertyValue("--cell-opacity")).toBe(String(heatOpacity(2.0)));
-  });
-
-  it("outlines a cell over the severe threshold rather than recolouring it", () => {
-    const { container } = renderHeatmap([
-      { date: "2026-06-01", hour: 8, avg_min: DELAY_THRESHOLDS.severe + 1, samples: 50 },
-      { date: "2026-06-01", hour: 9, avg_min: 1.0, samples: 50 },
-    ]);
-    const outlines = container.querySelectorAll("[data-testid='heat-severe-outline']");
-    expect(outlines).toHaveLength(1);
-    expect(outlines[0].getAttribute("stroke")).toBe("var(--delay-severe)");
-    expect(outlines[0].getAttribute("fill")).toBe("none");
-    // The cell itself is still the single accent hue.
-    expect((cellAt(container, "2026-06-01", 8) as SVGElement).style.fill).toBe("var(--accent)");
+    expect(cell.style.getPropertyValue("--cell-opacity")).toBe("1");
   });
 });
 
@@ -134,15 +117,6 @@ describe("HourlyHeatmap keyboard access", () => {
     renderWithProbe();
     expect(screen.queryByRole("img", { name: "Time-band delay heatmap" })).toBeNull();
     expect(screen.getByRole("group", { name: "Time-band delay heatmap" })).toBeInTheDocument();
-  });
-
-  it("tells assistive tech whether the legend is open", async () => {
-    await i18n.changeLanguage("en");
-    renderWithProbe();
-    const toggle = screen.getByRole("button", { name: "Show legend" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 });
 

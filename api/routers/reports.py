@@ -120,25 +120,48 @@ _ML_FRESHNESS_DAYS = 2
 # share a weekday with the new horizon's row for that slot.
 _ML_HORIZON_DAYS = 7
 
-# The rows the heatmap overlays: inside the forecast horizon, from a recent
-# publish, and within a day's 24 hours -- a run starting after midnight of its
-# service day keeps an hour of 24 or more, which no band covers and the
-# baseline leaves out too. Built from the constants above, never from input.
+# The rows the heatmap overlays: inside the horizon, from a recent publish, and
+# within a day's 24 hours (no band covers a run's hour 24 or later). Only the
+# latest publish (one generated_at) counts: a slot it dropped still holds a
+# superseded model's row. Built from the constants above, never from input.
 _ML_FRESH_ROWS = (
     "service_date > now()::date "
     f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
     f"AND origin_date >= now()::date - {_ML_FRESHNESS_DAYS} "
-    "AND hour < 24"
+    "AND hour < 24 "
+    "AND generated_at = (SELECT MAX(generated_at) FROM agg_route_forecast_ml)"
+)
+
+
+# Each forecast row's own route-hour history, which the agency overview
+# weights a band's forecast rows by. Columns are renamed so the shared
+# predicate's bare names (hour, service_date, ...) mean only the forecast's.
+_ML_PAST_JOIN = (
+    "LEFT JOIN ("
+    "  SELECT route_code AS past_route, dow AS past_dow, hour AS past_hour, "
+    "    SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS past_samples, "
+    "    SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL) AS past_sum_delay_sec "
+    "  FROM agg_route_hour_dow WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
+    "  GROUP BY route_code, dow, hour"
+    ") past ON past.past_route = route_code AND past.past_dow = EXTRACT(ISODOW FROM service_date) "
+    "  AND past.past_hour = hour "
 )
 
 
 async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: str | None) -> list[dict[str, Any]]:
     """Fresh `agg_route_forecast_ml` rows for this agency (and route, if
-    given), as plain dicts with `dow`/`hour`/`mean_min`/`service_date`. Returns a list of
+    given), as plain dicts with `dow`/`hour`/`mean_min`/`q10`/`q90`/
+    `service_date`. Returns a list of
     rows rather than a (dow, hour)-keyed mapping: when `route_code` is
     `None` (the agency-wide overview), more than one route can share a
     (dow, hour) slot, and collapsing them into one dict entry per key would
     silently drop every route but the last one fetched.
+
+    Only the agency-wide read (`route_code` `None`) also carries each row's
+    own route-hour history from `agg_route_hour_dow`, which its bands weight
+    the row by: `samples` (0 where that route-hour has none) and
+    `sum_delay_sec` (null there). A single route's heatmap weights by its own
+    baseline cells, so its read skips that join.
 
     Never raises: this overlay is additive and flag-gated, so a DB failure
     here (a migration not yet applied, a transient error) degrades to no
@@ -147,25 +170,39 @@ async def _fetch_ml_cells(conn: asyncpg.Connection, agency_id: int, route_code: 
     """
     if not await aflag("ml_forecast"):
         return []
+    agency_wide = route_code is None
     try:
-        rows = await conn.fetch(
-            "SELECT service_date, hour, mean_min FROM agg_route_forecast_ml "
-            f"WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2) AND {_ML_FRESH_ROWS}",
-            agency_id,
-            route_code,
-        )
+        if agency_wide:
+            rows = await conn.fetch(
+                "SELECT service_date, hour, mean_min, q10, q90, past.past_samples, past.past_sum_delay_sec "
+                f"FROM agg_route_forecast_ml {_ML_PAST_JOIN}WHERE agency_id = $1 AND {_ML_FRESH_ROWS}",
+                agency_id,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT service_date, hour, mean_min, q10, q90 FROM agg_route_forecast_ml "
+                f"WHERE agency_id = $1 AND route_code = $2 AND {_ML_FRESH_ROWS}",
+                agency_id,
+                route_code,
+            )
     except Exception:
         _log.warning("_fetch_ml_cells: could not read agg_route_forecast_ml -- degrading to no overlay", exc_info=True)
         return []
-    return [
-        {
+    cells: list[dict[str, Any]] = []
+    for row in rows:
+        cell = {
             "dow": row["service_date"].isoweekday(),
             "hour": row["hour"],
             "mean_min": row["mean_min"],
+            "q10": row["q10"],
+            "q90": row["q90"],
             "service_date": row["service_date"],
         }
-        for row in rows
-    ]
+        if agency_wide:
+            cell["samples"] = row["past_samples"] or 0
+            cell["sum_delay_sec"] = row["past_sum_delay_sec"]
+        cells.append(cell)
+    return cells
 
 
 async def _fetch_span(conn: asyncpg.Connection, sql: str, *args: Any) -> tuple[date | None, date | None]:
@@ -672,6 +709,10 @@ class ForecastHeatmapCell(BaseModel):
     samples: int
     low_confidence: bool
     source: Literal["ml", "baseline"]
+    # The forecast's 10th-90th percentile range, each bound the mean over the
+    # slot's trips; null on a cell that shows a past average.
+    q10: float | None = None
+    q90: float | None = None
 
 
 class ForecastDay(BaseModel):

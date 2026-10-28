@@ -243,9 +243,11 @@ Time holds **Trend**, **Routes on weekdays**, **Routes on weekends and holidays*
 
 ![Trend](./07-time-trend.en.png)
 
-- **Day × hour surface**: the days of the week against the hours of the day. Darker cells mean more delay, an inset ring marks a cell over the moderate or severe threshold, and a faint cell rests on few observations. “By hour” shows each hour; “By band” averages the same period by time band. Pointing at a cell keeps only its hour column and weekday row, and the other charts pick out the same weekday. The sentence above the grid names the day and time band that ran latest over the period.
+- **Day × hour surface**: the days of the week against the hours of the day. Darker cells mean more delay, an inset ring marks a cell over the moderate or severe threshold, and a faint cell rests on few observations. “By hour” shows each hour; “By band” averages the same period by time band. Pointing at a cell keeps only its hour column and weekday row, and the other charts pick out the same weekday. The sentences above the grid name the day and hour that ran latest over the period (such as “Fri 18:00”) and, averaged by time band, the day and band that ran latest, each with its average. The hour’s average covers that one hour and the band’s pools all of its hours, so the two figures differ. An hour or band with few observations is left out of them.
 - The daily chart: the average delay day by day, with a dashed 7-day average and a “Schedule change” mark where a new timetable took effect. A rising line means delays are growing. Drag across the chart to narrow the period (“Drag across the chart to narrow the period”); “Reset period” undoes it.
-- **Time-band heatmap**: hours 0–23 down the side, dates along the bottom. Darker means more delay, and an outline marks the most severe cells. Click a cell to narrow the screen to that day and time band.
+- **Time-band heatmap**: hours 0–23 down the side, dates along the bottom. Darker means more delay. Click a cell to narrow the screen to that day and time band.
+
+The shading has five steps, “under 1.5 min”, “1.5–2.5 min”, “2.5–3.5 min”, “3.5–5 min” and “5 min or more”, shown in each chart’s legend; the same minutes are the same colour on every screen. The time bands are the same as the scope sentence’s time-of-day choices: late night 0–5h, morning 5–9h, late morning 9–12h, midday 12–14h, afternoon 14–17h, evening 17–20h and night 20–24h.
 
 A trend needs more than one day. For a one-day period, only the heatmap is shown, with a suggestion to pick a longer period.
 
@@ -255,7 +257,12 @@ Each route’s average delay (“Avg (min)”, with “Samples”) on the days t
 
 ### 6-3. Route forecast
 
-When routes tend to run late, by day of week and time of day. “Day × time of day (all routes)” shows the agency as a whole, and “Routes that run late” lists the routes. Click one, or pick it from the “Route” list, for that route’s breakdown.
+When routes tend to run late, by day of week and time of day. “Day × time of day (all routes)” shows the agency as a whole, and “Routes that ran late” lists the routes. Click one, or pick it from the “Route” list, for that route’s breakdown.
+
+- Where the machine-learning model forecasts, the dates it forecasts and “ML forecast” appear at the top; “How accurate is it?” opens the model evaluation page. A forecast figure combines the forecasts for the trips that run in that hour.
+- A route’s headline names the hour it is likely to run latest (such as “Fri 10/30 18:00”), then the time band that runs latest. When that hour is a forecast, it also gives the range about 8 trips in 10 fall in (“8 runs in 10 within 3.0–17.2 min late”). Only an hour’s forecast has a range; a band or an all-routes figure does not.
+- A band’s figure averages its hours (on the all-routes grid, each route’s hours), weighted by how often each was observed before, using the forecast where there is one and the past average otherwise.
+- On a screen with forecasts, a cell that shows a past average because the model has no forecast for it carries a small ring, shown in the legend as “No forecast: past average”.
 
 ---
 

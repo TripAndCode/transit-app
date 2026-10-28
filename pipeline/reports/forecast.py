@@ -27,6 +27,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
+from api.range import TIME_BAND_RANGES
 from api.triage import LOW_CONFIDENCE_SAMPLES
 
 # Plain-language disclaimer — NO jargon (p90/percentile/baseline forbidden).
@@ -81,6 +82,10 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
 }
 
 
+def _rounded(value: Any) -> float | None:
+    return round(float(value), 1) if value is not None else None
+
+
 def _disclaimer(case: str, locale: str, **vars: Any) -> str:
     lang = locale if locale in ("ja", "en") else "ja"
     tpl = _DISCLAIMER.get((case, lang)) or _DISCLAIMER[(case, "ja")]
@@ -133,10 +138,12 @@ def summarize_expected_delay_heatmap(
     `ml_cells`: published-forecast rows (already flag- and freshness-
     filtered by the caller, bounded to the forward horizon the daily publish
     job actually covers) with keys ``dow``, ``hour``, ``mean_min`` and the
-    ``service_date`` that `forecast_days` names -- this
-    `route`'s own forecast, so at most one row per (dow, hour). When present
-    for a cell, its `mean_min` replaces `expected_avg_min` and `source`
-    becomes ``"ml"``; `samples` stays whatever the historical baseline above
+    ``service_date`` that `forecast_days` names, and optionally ``q10`` and
+    ``q90`` -- this `route`'s own forecast, so at most one row per (dow,
+    hour). When present for a cell, its `mean_min` replaces
+    `expected_avg_min`, its ``q10``/``q90`` become the cell's range (null on
+    every past-average cell) and `source` becomes ``"ml"``; `samples` stays
+    whatever the historical baseline above
     already computed for that slot (how much history backs the comparison,
     not the prediction), but `low_confidence` is also true at zero baseline
     samples for an ML cell -- unlike a baseline-only cell, where zero samples
@@ -146,24 +153,26 @@ def summarize_expected_delay_heatmap(
     """
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
     ml_cells = list(ml_cells)
-    ml_by = {(int(r["dow"]), int(r["hour"])): float(r["mean_min"]) for r in ml_cells}
+    ml_by = {(int(r["dow"]), int(r["hour"])): r for r in ml_cells}
     cells: list[dict[str, Any]] = []
     for d in range(1, 8):
         for h in range(24):
             r = by.get((d, h))
             n = int(r["samples"]) if r else 0
-            ml_mean = ml_by.get((d, h))
+            ml = ml_by.get((d, h))
             baseline_mean = round(float(r["avg_min"]), 1) if r else None
-            source = "ml" if ml_mean is not None else "baseline"
+            source = "ml" if ml is not None else "baseline"
             low_confidence = n < LOW_CONFIDENCE_SAMPLES if source == "ml" else 0 < n < LOW_CONFIDENCE_SAMPLES
             cells.append(
                 {
                     "dow": d,
                     "hour": h,
-                    "expected_avg_min": round(ml_mean, 1) if ml_mean is not None else baseline_mean,
+                    "expected_avg_min": round(float(ml["mean_min"]), 1) if ml is not None else baseline_mean,
                     "samples": n,
                     "low_confidence": low_confidence,
                     "source": source,
+                    "q10": _rounded(ml.get("q10")) if ml is not None else None,
+                    "q90": _rounded(ml.get("q90")) if ml is not None else None,
                 }
             )
     case = "heatmap_ml" if any(c["source"] == "ml" for c in cells) else "heatmap"
@@ -175,15 +184,22 @@ def summarize_expected_delay_heatmap(
     }
 
 
-# Ordered hour→band mapping. SINGLE SOURCE OF TRUTH for the time bands (the
-# frontend BAND_ORDER mirrors only the keys/order, for labels — keep identical).
-BANDS: list[tuple[str, range]] = [
-    ("early", range(0, 6)),
-    ("morning", range(6, 9)),
-    ("midday", range(9, 16)),
-    ("evening", range(16, 19)),
-    ("night", range(19, 24)),
-]
+def _whole_hour(clock: str) -> int:
+    hour, minute = clock.split(":")
+    if minute != "00":
+        raise ValueError(f"a time band must start and end on the hour, not at {clock}")
+    return int(hour)
+
+
+# The time-band filter's own bands (api.range.TIME_BAND_RANGES), in clock
+# order, so a band the forecast or the trend names covers exactly the hours
+# the filter of the same name selects. The cells pooled here are whole clock
+# hours, which is why every band has to start and end on the hour.
+# frontend/src/api/timeBands.ts mirrors the hours for its labels and banding.
+BANDS: list[tuple[str, range]] = sorted(
+    ((key, range(_whole_hour(start), _whole_hour(end))) for key, (start, end) in TIME_BAND_RANGES.items()),
+    key=lambda band: band[1].start,
+)
 _HOUR_BAND = {h: key for key, hrs in BANDS for h in hrs}
 
 
@@ -213,7 +229,7 @@ def hourly_cells_to_dow_band(
     locale: str = "ja",
 ) -> dict[str, Any]:
     """Range-filtered {date,hour,avg_min,samples,sum_delay_sec} rows (as
-    returned by compute_hourly_heatmap) -> a 7x5 dow x band grid + worst
+    returned by compute_hourly_heatmap) -> a 7-day x time-band grid + worst
     window, via summarize_agency_overview. No route ranking (route_rows is
     always empty here) and no disclaimer (summarize_agency_overview's
     disclaimer text is forecast-specific "seasonal-naive historical average"
@@ -278,13 +294,17 @@ def summarize_agency_overview(
 
     ``ml_cells``: published-forecast rows (already flag- and freshness-
     filtered by the caller) with keys ``dow``, ``hour``, ``mean_min`` and the
-    ``service_date`` that `forecast_days` names, one
-    row per (route, upcoming slot) -- unlike the heatmap's single-route
-    ``ml_cells``, this agency-wide grid can see several routes sharing a
-    (dow, hour), and several hours sharing a (dow, band); both are pooled
-    into a plain (unweighted) mean, since a published forecast carries no
-    per-row sample count to weight by. When a (dow, band) has any ML rows,
-    that mean replaces ``expected_avg_min`` and ``source`` becomes ``"ml"``;
+    ``service_date`` that `forecast_days` names, one row per (route, upcoming
+    slot), each with its own route-hour's past ``samples`` and
+    ``sum_delay_sec`` (absent or zero where that route-hour has none).
+    A band pools every route-hour by its past observations, the forecast's
+    figure where there is one and the past average otherwise, so a forecast
+    band and a past one are averaged the same way and a band's figure is the
+    one its hours add up to: a forecast row takes its route-hour's place in
+    the baseline pool, at that route-hour's weight. A forecast row with no
+    past observations weighs nothing, except in a band with nothing else,
+    which then shows the plain mean of its forecast rows. A band any
+    weighted forecast row reaches has ``source`` ``"ml"``;
     ``samples``/``low_confidence`` stay whatever the historical baseline
     already computed, for the same reason as the heatmap's own ``ml_cells``.
     A published forecast's ``mean_min`` is the model's point forecast, which
@@ -293,10 +313,18 @@ def summarize_agency_overview(
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     ml_cells = list(ml_cells)
-    ml_buckets: dict[tuple[int, str], list[float]] = {}
+    # Per (dow, band): the forecast rows' plain values, and how much the
+    # weighted ones move the baseline total (their figure in place of their
+    # route-hour's past one, at that route-hour's weight).
+    ml_values: dict[tuple[int, str], list[float]] = {}
+    ml_shift: dict[tuple[int, str], float] = {}
     for r in ml_cells:
         key = (int(r["dow"]), band_of(int(r["hour"])))
-        ml_buckets.setdefault(key, []).append(float(r["mean_min"]))
+        ml_values.setdefault(key, []).append(float(r["mean_min"]))
+        weight = int(r.get("samples") or 0)
+        if weight:
+            past_min = float(r.get("sum_delay_sec") or 0) / 60.0
+            ml_shift[key] = ml_shift.get(key, 0.0) + float(r["mean_min"]) * weight - past_min
 
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
     for r in grid_rows:
@@ -321,9 +349,16 @@ def summarize_agency_overview(
     for d in range(1, 8):
         for band, _ in BANDS:
             mean, n = _pooled(buckets.get((d, band), []))
-            ml_values = ml_buckets.get((d, band))
-            if ml_values:
-                display_mean: float | None = sum(ml_values) / len(ml_values)
+            plain = ml_values.get((d, band))
+            shift = ml_shift.get((d, band))
+            display_mean: float | None
+            if shift is not None and mean is not None:
+                display_mean = (mean * n + shift) / n
+            elif plain and mean is None:
+                display_mean = sum(plain) / len(plain)
+            else:
+                display_mean = None
+            if display_mean is not None:
                 source = "ml"
                 # Unlike a baseline-only band (zero samples already shows as
                 # expected_avg_min: null, needing no separate flag), an

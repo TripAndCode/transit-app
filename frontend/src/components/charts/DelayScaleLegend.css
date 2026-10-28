@@ -1,0 +1,4 @@
+.delay-scale-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--text-xs); color: var(--text-secondary); }
+.delay-scale-legend__title { color: var(--text-tertiary); }
+.delay-scale-legend__item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.delay-scale-legend__item i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; }

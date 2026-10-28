@@ -83,16 +83,21 @@ async def test_anomaly_today_wins_when_present(suggest_agency, ch_client):
     assert result["report_type"] == "trend"
     assert result["route_code"] == "R1"
     assert result["severity"] == "notable"
-    # No static route for R1: the text names it the way the app does.
-    assert result["reason_text"].startswith("路線R1の")
+    # The card names the route; the text names the day it judged.
+    assert result["reason_text"].startswith(f"{today.month}/{today.day}（")
 
 
 @pytest.mark.asyncio
-async def test_reason_text_names_the_route_rather_than_its_code(suggest_agency, ch_client):
+async def test_reason_text_dates_the_day_it_judged_and_leaves_the_route_to_the_card(suggest_agency, ch_client):
+    """The rule judges the agency's latest analyzed day, which lags the wall
+    clock, so the text names that date rather than calling it today. The
+    route's name is the card's own label, which tells apart routes sharing a
+    number, so the text carries neither the name nor the code."""
     pool, agency_id = suggest_agency
     today = jst_today()
-    await _seed(pool, agency_id, "47011", (today - timedelta(days=3)).isoformat(), [60] * 30)
-    await _seed(pool, agency_id, "47011", today.isoformat(), [300] * 30)
+    judged = today - timedelta(days=2)
+    await _seed(pool, agency_id, "47011", (judged - timedelta(days=3)).isoformat(), [60] * 30)
+    await _seed(pool, agency_id, "47011", judged.isoformat(), [300] * 30)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, $2, $3)",
@@ -106,8 +111,12 @@ async def test_reason_text_names_the_route_rather_than_its_code(suggest_agency, 
         result = await compute_suggestion(agency_id, conn, ch_client, locale="en")
 
     assert result is not None and result["route_code"] == "47011"
-    assert result["reason_text"].startswith("Average delay on W54 沖舘・新田線 today")
+    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[judged.weekday()]
+    assert result["reason_text"].startswith(f"Average delay on {weekday} {judged.month}/{judged.day} was much worse")
+    assert result["to_date"] == judged.isoformat()
+    assert "today" not in result["reason_text"]
     assert "47011" not in result["reason_text"]
+    assert "W54" not in result["reason_text"]
 
 
 @pytest.mark.asyncio

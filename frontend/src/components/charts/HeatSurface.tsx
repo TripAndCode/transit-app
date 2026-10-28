@@ -1,17 +1,18 @@
 import { useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ForecastOverviewGridCell, ForecastOverviewWorst, TrendPayload } from "../../api/types";
-import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
+import { delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
+import { bandLabel } from "../../api/timeBands";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
-import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
+import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, worstHour, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
+import { DelayScaleLegend } from "./DelayScaleLegend";
 import "./HeatSurface.css";
 
 const DIM_RULES = heatSurfaceDimRules();
 const PROFILES: readonly Profile[] = ["hourly", "banded"];
-const RAMP = ["--d0", "--d1", "--d2", "--d3", "--d4"] as const;
 
 function cellOf(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>(".heat-surface__cell") : null;
@@ -75,6 +76,10 @@ export function HeatSurface({
   const pointerPressRef = useRef(false);
   const keyboardFocusRef = useRef(false);
   const { surface: observed, thin: observedThin } = observedProfile(hourly);
+  // The headline names the darkest cell's own hour and figure first, then the
+  // band: a band pools an hour with the quieter hours around it, so its
+  // figure alone would not match any cell the reader can see.
+  const peak = worstHour({ surface: observed, thin: observedThin });
   const surface = profile === "hourly" ? observed : bandSurface(grid, observed);
   const thin = profile === "hourly" ? observedThin : bandThin(grid, observed);
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
@@ -179,24 +184,25 @@ export function HeatSurface({
             </button>
           ))}
         </div>
-        <div className="heat-surface__legend" aria-hidden="true">
-          <span>{t("reports.heat_surface.legend_low")}</span>
-          <span className="heat-surface__ramp">
-            {RAMP.map((v) => (
-              <i key={v} style={{ background: `var(${v})` }} />
-            ))}
-          </span>
-          <span>{t("reports.heat_surface.legend_high", { min: DELAY_THRESHOLDS.severe })}</span>
-        </div>
+        <DelayScaleLegend noData />
       </div>
-      {worst && (
-        <p className="heat-surface__worst">
-          {t("reports.dow_band.worst_phrase", {
-            count: rangeDays,
-            day: dayLabel(worst.dow),
-            band: t(`forecast.band_${worst.band}`),
-            avg: avgDelayText(t, worst.expected_avg_min),
-          })}
+      {(peak || worst) && (
+        <p className="heat-surface__worst" data-testid="heat-surface-worst">
+          {peak && (
+            <span className="heat-surface__worst-hour">
+              {t("reports.dow_band.worst_hour", { count: rangeDays, day: dayLabel(peak.dow), hour: peak.hour, avg: avgDelayText(t, peak.avg_min) })}
+            </span>
+          )}
+          {worst && (
+            <span className={peak ? "heat-surface__worst-band" : "heat-surface__worst-hour"}>
+              {t(peak ? "reports.dow_band.worst_band" : "reports.dow_band.worst_band_only", {
+                count: rangeDays,
+                day: dayLabel(worst.dow),
+                band: bandLabel(t, worst.band),
+                avg: avgDelayText(t, worst.expected_avg_min),
+              })}
+            </span>
+          )}
         </p>
       )}
       <div

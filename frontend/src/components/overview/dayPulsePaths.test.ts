@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RIBBON_H, RIBBON_W, pulseGradientStops, pulsePaths } from "./dayPulsePaths";
-import { HEAT_RAMP } from "../../styles/tokens";
+import { RIBBON_H, RIBBON_MAX_MIN, RIBBON_W, pulseGradientStops, pulsePaths } from "./dayPulsePaths";
 import { fixedTenth } from "../../utils/format";
 
 const flat = Array.from({ length: 24 }, () => 2);
@@ -8,7 +7,7 @@ const flat = Array.from({ length: 24 }, () => 2);
 describe("pulsePaths", () => {
   it("maps 24 hours across the width and clamps the value to the ramp ceiling", () => {
     const { line, area } = pulsePaths(flat);
-    const y = RIBBON_H - 8 - (2 / HEAT_RAMP.maxMin) * (RIBBON_H - 20);
+    const y = RIBBON_H - 8 - (2 / RIBBON_MAX_MIN) * (RIBBON_H - 20);
     expect(line.startsWith(`M0,${fixedTenth(y)}`)).toBe(true);
     expect(line.endsWith(`L${RIBBON_W},${fixedTenth(y)}`)).toBe(true);
     expect(area.endsWith(`L${RIBBON_W},${RIBBON_H} L0,${RIBBON_H}Z`)).toBe(true);

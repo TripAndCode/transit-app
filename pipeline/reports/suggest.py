@@ -23,10 +23,11 @@ the same figure an unfiltered report shows for that route.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from api.range import RangeCtx
 from api.triage import classify_route
+from pipeline.query.labels import dow_label
 from pipeline.query.tool_queries import route_trend_shift
 from pipeline.query.tools import _summary
 from pipeline.reports.rankings import compute_on_time, compute_ranking
@@ -48,19 +49,15 @@ ON_TIME_FALLBACK_FETCH_LIMIT = 5000
 ExcludeSet = frozenset[tuple[str, str]]
 
 
-# The same name order as the routes endpoint (routeDisplayName on the
-# frontend); route_code is not a column, so it is read off route_id.
-_ROUTE_NAME_SQL = (
-    "SELECT COALESCE(NULLIF(route_short_name, ''), NULLIF(route_long_name, '')) FROM static_routes "
-    "WHERE agency_id = $1 AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = $2 "
-    "ORDER BY route_short_name LIMIT 1"
-)
+def _day_text(day: date, locale: str) -> str:
+    """A day as the reason text names it ("10/23（金）", "Fri 10/23")."""
+    return _summary("suggest_day", lang=locale, month=day.month, day=day.day, dow=dow_label(day.isoweekday(), locale))
 
 
-async def _route_name(agency_id: int, conn, route_code: str, locale: str) -> str:
-    """What the reason text calls a route: its name, never a bare GTFS code."""
-    name = await conn.fetchval(_ROUTE_NAME_SQL, agency_id, route_code)
-    return name or _summary("route_code_fallback", lang=locale, code=route_code)
+def _span_text(ctx: RangeCtx, locale: str) -> str:
+    return _summary(
+        "suggest_span", lang=locale, first=_day_text(ctx.from_date, locale), last=_day_text(ctx.to_date, locale)
+    )
 
 
 async def _latest_analyzed_date(agency_id: int, conn):
@@ -130,7 +127,7 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
     documented, unit-tested judgment the 最新観測 tab uses (anomaly = today's
     avg > baseline p90), including its low-sample-confidence gate (a thin
     route never gets promoted into "anomaly"). Each side is one row per route,
-    so the comparison -- and the route+number the reason text names --
+    so the comparison -- and the figure the reason text names --
     matches what an unfiltered report would show for that route.
 
     ``avg_delay_sec``/``baseline_avg_sec``/``baseline_p90_sec`` round
@@ -177,7 +174,7 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
         "reason_text": _summary(
             "suggest_reason_anomaly",
             lang=locale,
-            route=await _route_name(agency_id, conn, route_code, locale),
+            day=_day_text(today_ctx.to_date, locale),
             avg_min=f"{today_avg:.1f}",
         ),
         "severity": "notable",
@@ -218,7 +215,7 @@ async def _trend_shift_this_week(agency_id, conn, ch, week_ctx, baseline_ctx, ex
             # delta_min is second-half minus first-half, so a positive shift is a worsening.
             "suggest_reason_trend_worsened" if delta_min > 0 else "suggest_reason_trend_improved",
             lang=locale,
-            route=await _route_name(agency_id, conn, route_code, locale),
+            span=_span_text(week_ctx, locale),
             delta_min=f"{delta_min:+.1f}",
         ),
         "severity": "notable",
@@ -241,7 +238,7 @@ async def _on_time_fallback(agency_id, conn, ch, week_ctx, exclude, locale) -> d
             "reason_text": _summary(
                 "suggest_reason_on_time_fallback",
                 lang=locale,
-                route=await _route_name(agency_id, conn, route_code, locale),
+                span=_span_text(week_ctx, locale),
                 pct=f"{stats['on_time_pct']:.0f}",
             ),
             "severity": "normal",

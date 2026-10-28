@@ -1,10 +1,14 @@
-import { HEAT_RAMP, delayRampVar } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import { fixedTenth } from "../../utils/format";
 
 export const RIBBON_W = 960;
 export const RIBBON_H = 160;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 8;
+/** Minutes at the ribbon's top: a little past the severe threshold, so a
+ *  severe hour reads as near the top rather than every hour from five
+ *  minutes up flattening against it. */
+export const RIBBON_MAX_MIN = DELAY_THRESHOLDS.severe + 0.5;
 /** Hours the gradient samples, spread across the day. */
 const GRADIENT_HOURS = [3, 8, 13, 18, 23];
 
@@ -20,8 +24,8 @@ export type PulsePaths = { area: string; line: string };
 export function pulsePaths(byHour: readonly (number | null)[]): PulsePaths {
   if (!byHour.some((v) => v != null)) return { area: "", line: "" };
   const n = Math.max(1, byHour.length - 1);
-  const maxMin = HEAT_RAMP.maxMin;
-  // Clamped to the ramp's ceiling: a 9-minute hour is still "the top".
+  const maxMin = RIBBON_MAX_MIN;
+  // Clamped to the ceiling: a 9-minute hour is still "the top".
   const yOf = (v: number) =>
     fixedTenth((RIBBON_H - PAD_BOTTOM - (Math.min(Math.max(v, 0), maxMin) / maxMin) * (RIBBON_H - PAD_TOP - PAD_BOTTOM)));
   // Whole numbers print bare ("0", "960"), the rest to one decimal.

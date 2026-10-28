@@ -1,4 +1,5 @@
-import { LOW_CONFIDENCE_SAMPLES, bandOf, type Band } from "../../api/types";
+import { LOW_CONFIDENCE_SAMPLES } from "../../api/types";
+import { bandOf, type Band } from "../../api/timeBands";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 import { isoDow } from "./trendFocus";
 
@@ -59,8 +60,8 @@ function eachBandHour(grid: readonly BandCell[], paint: (cell: BandCell, d: numb
   }
 }
 
-/** The same range averaged by time band: the band grid is five bands wide
- *  and the surface 24 hours wide, so a band's average is drawn across its
+/** The same range averaged by time band: the band grid is one column per
+ *  band and the surface 24 hours wide, so a band's average is drawn across its
  *  hours (`bandOf`) -- only those `observed` has a value for, so an hour no
  *  trip ran in stays empty in both profiles. */
 export function bandSurface(grid: readonly BandCell[], observed: Surface): Surface {
@@ -79,6 +80,20 @@ export function bandThin(grid: readonly BandCell[], observed: Surface): Thin {
     if (cell.low_confidence && observed[d][h] != null) thin[d][h] = true;
   });
   return thin;
+}
+
+/** The weekday and hour with the highest pooled delay, passing over a cell
+ *  too few observations back, the same rule that keeps a thin band out of
+ *  the band headline. A tie goes to the earlier weekday and hour. */
+export function worstHour(profile: { surface: Surface; thin: Thin }): { dow: number; hour: number; avg_min: number } | null {
+  let worst: { dow: number; hour: number; avg_min: number } | null = null;
+  profile.surface.forEach((row, d) =>
+    row.forEach((v, h) => {
+      if (v == null || profile.thin[d][h]) return;
+      if (worst == null || v > worst.avg_min) worst = { dow: d + 1, hour: h, avg_min: v };
+    }),
+  );
+  return worst;
 }
 
 export function surfaceHasData(surface: Surface): boolean {

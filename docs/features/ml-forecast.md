@@ -68,7 +68,7 @@ B0 is a seasonal-naive baseline: the same route×weekday×hour, pooled by runs, 
 
 ## Models
 
-The weekly job also backtests LightGBM forecasters of each trip run's delay: one model each for the 10th, 50th and 90th percentiles, plus a mean model only when a variant or the published point reads it. They are trained on runs from every agency (`python -m ml.cli train-eval`, which needs the optional `ml` Poetry group the bootstrap installs). The forecast a cell shows, and the one scored against B0, is the median model's (`ModelParams.point`): a cell is scored by its absolute error, and the median does not follow one extreme run in a slot's history the way the squared-error mean does.
+The weekly job also backtests LightGBM forecasters of each trip run's delay: one model each for the 10th, 50th and 90th percentiles, plus a mean model only when a variant or the published point reads it. They are trained on runs from every agency (`python -m ml.cli train-eval`, which needs the optional `ml` Poetry group the bootstrap installs). The point forecast, the one scored against B0 and the one a published cell shows, is the model `ModelParams.point` names: the median model's by default (`DEFAULT_POINT`), since a cell is scored by its absolute error and the median does not follow one extreme run in a slot's history the way the squared-error mean does. A published model's `meta.json` records the point it was adopted with, and `predict` uses it; a meta that records none belongs to a model adopted on the mean, which then serves the mean model's forecast (see Publishing and serving the forecast). The weekly summary's `point_metric` says which point that week scored.
 
 - **Features** come from runs on or before the day before the forecast is made: the route×weekday×hour slot's mean (B0), count, spread and latest day (B1); the route's means over the window, the last week, the last three days and the day before; the trip's own mean, typical stop count and scheduled span; and how many days the agency was observed in the window. The run's own timetable facts are added: hour, weekday, days ahead, and how often its service runs at weekends, which marks holiday timetables.
 - **Training** makes every past run a target once, forecast from an origin 1–7 days earlier with the lead drawn at random, so the lead never stands in for the weekday. Older targets weigh less.
@@ -166,7 +166,16 @@ Outside the VPS, production's `/internal/cron/ingest` sweep polls R2 for a newer
 published forecast and upserts it into Postgres's `agg_route_forecast_ml`
 (`pipeline/ml_forecast_ingest.py`), keyed by `(agency_id, route_code, service_date,
 hour)` so a forecast is replaced in place rather than accumulating duplicates, and
-pruned once its service date is old enough. The `ml_forecast` flag
+pruned once its service date is old enough. An upsert leaves alone the slots a
+publish does not forecast, so a route, hour or agency that an earlier publish
+covered and the latest one dropped keeps the earlier model's row until the prune.
+The API therefore reads only the latest publish (the rows with the newest
+`generated_at`, which one publish shares), on top of its freshness and horizon
+checks (`api/routers/reports.py`, `_ML_FRESH_ROWS`). "Latest" is across every
+agency, so an agency the newest publish leaves out (a stopped feed) drops at
+once. It also means a partial publish, such as a manual
+`ml.cli predict --agency <id>`, once ingested, hides every other agency's
+forecast until the next full sweep: publish full sweeps only. The `ml_forecast` flag
 (`pipeline/flags.py`, default off) gates whether `/forecast/heatmap` and
 `/forecast/overview` overlay this table's rows (`source: "ml"`) over the seasonal
 baseline (`source: "baseline"`); with the flag off, the ingest still runs and the
@@ -187,4 +196,6 @@ says "no forecast has been published yet" (and, for the summaries, "no evaluatio
 summary has been published yet") rather than reporting zero rows; a summary it
 skips is named in a warning. The
 heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
-and marks them as the ML model's.
+and marks them as the ML model's: each forecast cell shows its `q10`–`q90` range
+as the span about 8 runs in 10 fall in, and a cell the latest publish does not
+forecast shows its past average with a mark.
