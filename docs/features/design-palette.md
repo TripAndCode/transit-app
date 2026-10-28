@@ -36,12 +36,14 @@ pair.
 `--none` fills a cell with no observations. `tokens.test.ts` asserts the
 five light values and that every step and `--none` exists in both themes.
 `DELAY_RAMP_STEPS` in `tokens.ts` holds the five cuts, `delayRampVar()` maps
-a delay onto them, and `delayScaleSteps()` (`DelayScaleLegend.tsx`) labels
-them for every legend, so a label cannot drift from the colour it explains.
-They shade the Time page's heat surface and hourly heatmap, the forecast's
-band grids, day × hour grid and bars, the period brush, the day-pulse
-gradient and the scope and rail swatches, with no outline over a heavy
-cell. Other charts, tables and the map color delay through the
+a delay onto them, and `delayScaleSteps()` (`delayScale.ts`, which
+`DelayScaleLegend` renders) labels them for every legend, so a label cannot
+drift from the colour it explains. They shade the Time page's heat surface
+and hourly heatmap, the forecast's band grids, day × hour grid and bars, the
+period brush, the day-pulse gradient and the scope and rail swatches. The
+hourly heatmap and the band grids draw no outline over a heavy cell; the heat
+surface keeps its neutral inset ring (`ringFor`) at the moderate and severe
+cuts. Other charts, tables and the map color delay through the
 `--delay-*` ramp (`DELAY_RAMP` / `delayColor()` in `tokens.ts`), until each
 is redesigned onto them.
 

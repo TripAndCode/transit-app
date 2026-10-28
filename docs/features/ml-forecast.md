@@ -171,7 +171,11 @@ publish does not forecast, so a route, hour or agency that an earlier publish
 covered and the latest one dropped keeps the earlier model's row until the prune.
 The API therefore reads only the latest publish (the rows with the newest
 `generated_at`, which one publish shares), on top of its freshness and horizon
-checks (`api/routers/reports.py`, `_ML_FRESH_ROWS`). The `ml_forecast` flag
+checks (`api/routers/reports.py`, `_ML_FRESH_ROWS`). "Latest" is across every
+agency, so an agency the newest publish leaves out (a stopped feed) drops at
+once. It also means a partial publish, such as a manual
+`ml.cli predict --agency <id>`, once ingested, hides every other agency's
+forecast until the next full sweep: publish full sweeps only. The `ml_forecast` flag
 (`pipeline/flags.py`, default off) gates whether `/forecast/heatmap` and
 `/forecast/overview` overlay this table's rows (`source: "ml"`) over the seasonal
 baseline (`source: "baseline"`); with the flag off, the ingest still runs and the
