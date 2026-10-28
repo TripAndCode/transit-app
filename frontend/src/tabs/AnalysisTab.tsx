@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   REPORT_ROWS_MAX,
@@ -13,7 +13,7 @@ import {
 import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
-import type { DwellRunPayload, ReportResponse, TrendPayload } from "../api/types";
+import type { ReportResponse, TrendPayload } from "../api/types";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
@@ -27,24 +27,20 @@ import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
-import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
-import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
-import { formatNumber, formatDateRange } from "../utils/format";
+import { formatDateRange } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
-import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
-import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
-import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
+import { WhyAnalyses } from "../components/analysis/WhyAnalyses";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
-import { destHref, pickReport, reportHref } from "../routes/destinations";
+import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
 
@@ -248,7 +244,7 @@ export function AnalysisTab({
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              <DwellRunBlock payload={detail.data.rows[0]} />
+              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               <CouncilSummaryBlock report={detail.data} />
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
@@ -274,15 +270,6 @@ export function AnalysisTab({
                   t,
                 })}
               />
-            )}
-            {/* Evidence panels, rendered alongside (never instead of) the
-                report above: dwell vs run pairs with rain and long gaps. The
-                rain panel says so when no weather station is mapped. */}
-            {detail.data.report_type === "dwell_run" && id != null && (
-              <>
-                <WeatherDelayPanel aid={id} ctx={ctx} />
-                <HeadwayQualityPanel aid={id} ctx={ctx} />
-              </>
             )}
             {/* The API's raw rows help someone checking the pipeline, not
                 someone reading the report. */}
@@ -416,99 +403,5 @@ function TrendBlock({
         <HourlyHeatmap cells={payload.hourly} />
       </div>
     </TrendFocusProvider>
-  );
-}
-
-function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
-  const { t } = useTranslation();
-  const id = useAgencyId();
-  const routeNames = useRouteNames(id);
-  const [ctx, update] = useScope();
-  // The agency and filters the report was fetched for identify the list: a
-  // refetch under the same ones is the same list, however new its objects are.
-  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, `${id ?? "none"}:${scopeToQueryString(ctx)}`);
-  const jumpToLatestData = useJumpToLatestDataRange(id);
-  const navigate = useNavigate();
-
-  if (!payload || !payload.available) {
-    const search = `?${scopeToQueryString(ctx)}`;
-    return (
-      <EmptyState
-        title={t("reports.dwell_run.needs_arrivals")}
-        hint={t("reports.dwell_run.not_available")}
-        recoveries={
-          id == null
-            ? []
-            : [
-                { label: t("reports.dwell_run.see_when"), onClick: () => navigate(destHref(id, "time", search)) },
-                { label: t("reports.dwell_run.compare_day_types"), onClick: () => navigate(reportHref(id, "compare_ranking", search)) },
-              ]
-        }
-      />
-    );
-  }
-  if (!payload.time_band_supported) {
-    return <EmptyState title={t("reports.dwell_run.time_band_unsupported")} />;
-  }
-  if (payload.routes.length === 0) {
-    return (
-      <EmptyState
-        title={t("reports.no_data.title")}
-        hint={t("reports.no_data.hint")}
-        reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
-        recoveries={buildFilterCtxRecoveries({
-          ctx,
-          onClearRoutes: () => update({ routes: null }),
-          onResetService: () => update({ service: "all" }),
-          jumpToLatestData,
-          t,
-        })}
-      />
-    );
-  }
-
-  const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
-  const fmtSamples = (v: number): string => formatNumber(v);
-
-  return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={SHARED_TABLE}>
-        <thead>
-          <tr style={{ background: "var(--bg-soft)" }}>
-            <th style={th({ width: 40 })}>#</th>
-            <th style={th()}>{t("common.route")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p90")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_samples")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_avg")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p50")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p90")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_samples")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {cappedRoutes.visible.map((r, i) => (
-            <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
-              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
-              <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSamples(r.dwell_samples)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.run_avg_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.run_p50_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSamples(r.run_samples)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {cappedRoutes.remaining > 0 && (
-        <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
-          {t("common.show_more", { count: cappedRoutes.remaining })}
-        </button>
-      )}
-    </div>
   );
 }

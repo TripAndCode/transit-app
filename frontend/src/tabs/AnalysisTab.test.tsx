@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
@@ -15,6 +15,14 @@ import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPaylo
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
 vi.mock("../components/WeatherDelayPanel", () => ({ WeatherDelayPanel: () => <div>weather-panel</div> }));
+
+// Why reads the rain and headway answers itself to sort what it can show from
+// what it can't. Still loading, both keep their panels (mocked above).
+beforeEach(() => {
+  const loading = { data: undefined, isLoading: true, error: null, refetch: vi.fn() } as never;
+  vi.spyOn(hooks, "useWeatherDelay").mockReturnValue(loading);
+  vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue(loading);
+});
 
 const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
@@ -659,7 +667,18 @@ describe("AnalysisTab Why without arrival times", () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dwell_run")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...emptyReport("dwell_run"), rows: [{ available: false, time_band_supported: true, routes: [] }] },
+      data: {
+        ...emptyReport("dwell_run"),
+        rows: [
+          {
+            available: false,
+            time_band_supported: true,
+            routes: [],
+            unavailable_reason: "probe_expired",
+            last_checked: "2026-09-11",
+          },
+        ],
+      },
       isFetching: false,
       error: null,
       refetch: vi.fn(),
@@ -669,7 +688,12 @@ describe("AnalysisTab Why without arrival times", () => {
 
   it("says why the split can't be shown and where to look instead", async () => {
     const { router } = showUnavailableDwellRun();
-    expect(screen.getByText("Splitting delay needs arrival times")).toBeInTheDocument();
+    const dwell = within(screen.getByRole("region", { name: "Analyses not shown" })).getByRole("listitem", {
+      name: "Dwell/running time",
+    });
+    expect(within(dwell).getByText("Needs re-check")).toBeInTheDocument();
+    expect(within(dwell).getByText(/re-checked \(last checked Sep 11, 2026\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/departures only/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "See when delay happens" }));
     expect(router.state.location.pathname).toBe("/agencies/1/time");
     expect(new URLSearchParams(router.state.location.search).get("from")).toBe("2026-09-01");

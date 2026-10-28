@@ -1,8 +1,8 @@
 import type { TFunction } from "i18next";
 
 /** The report list's reading order: what ranks, what measures punctuality,
- *  what describes a pattern over time, and what is produced to hand to
- *  someone else. A flat run of identically-shaped buttons gives a reader no
+ *  what describes a pattern over time, what breaks delay into its parts, and
+ *  what is produced to hand to someone else. A flat run of identically-shaped buttons gives a reader no
  *  way to tell a ranking from a certificate; the grouping is the difference.
  *
  *  `route_forecast` is listed here like any other type, although the reports
@@ -11,7 +11,8 @@ import type { TFunction } from "i18next";
 export const REPORT_GROUPS = {
   ranking: ["ranking", "ranking_best", "compare_ranking"],
   punctuality: ["on_time", "worst_5min"],
-  pattern: ["trend", "dow_weekday", "dow_weekend", "dwell_run"],
+  pattern: ["trend", "dow_weekday", "dow_weekend"],
+  breakdown: ["dwell_run"],
   forecast: ["route_forecast", "council_summary", "delay_certificate"],
 } as const satisfies Record<string, readonly string[]>;
 
