@@ -8,10 +8,19 @@ import { readTourSeen, writeTourSeen } from "../api/tourSeen";
 import { coalesceToFrame } from "../utils/frameCoalesce";
 import "./FirstRunTour.css";
 
-type Step = { selector: string; placement: TooltipPlacement; titleKey: string; bodyKey: string };
+/** `clear` names an element beside the anchor the panel must not cover: the
+ *  panel is placed against the box holding both, whenever it is present. */
+type Step = { selector: string; clear?: string; placement: TooltipPlacement; titleKey: string; bodyKey: string };
 
 const STEPS: readonly Step[] = [
-  { selector: '[data-tour="filter-bar"]', placement: "bottom", titleKey: "tour.filters.title", bodyKey: "tour.filters.body" },
+  {
+    selector: '[data-tour="filter-bar"]',
+    // The map legend hangs under the filter dock; below the dock alone is on top of it.
+    clear: '[data-tour="map-reference"]',
+    placement: "bottom",
+    titleKey: "tour.filters.title",
+    bodyKey: "tour.filters.body",
+  },
   { selector: '[data-tour="map-inspect"]', placement: "top", titleKey: "tour.map.title", bodyKey: "tour.map.body" },
   { selector: '[data-tour="ask-nav"]', placement: "bottom", titleKey: "tour.ask.title", bodyKey: "tour.ask.body" },
 ];
@@ -42,6 +51,15 @@ const FIND_RETRY_MS = 250;
 function boxOf(marker: Element | null): Element | null {
   if (marker && getComputedStyle(marker).display === "contents") return marker.firstElementChild;
   return marker;
+}
+
+/** The smallest box holding both rects. */
+function unionRect(a: DOMRect, b: DOMRect) {
+  const top = Math.min(a.top, b.top);
+  const left = Math.min(a.left, b.left);
+  const bottom = Math.max(a.bottom, b.bottom);
+  const right = Math.max(a.right, b.right);
+  return { top, left, bottom, right, width: right - left, height: bottom - top };
 }
 
 export function FirstRunTour() {
@@ -125,8 +143,12 @@ export function FirstRunTour() {
           intervalId = 0;
         }
       }
+      const clear = step.clear ? document.querySelector(step.clear) : null;
+      const anchorRect = clear
+        ? unionRect(target.getBoundingClientRect(), clear.getBoundingClientRect())
+        : target.getBoundingClientRect();
       const pos = computeTooltipPosition(
-        target.getBoundingClientRect(),
+        anchorRect,
         panel.getBoundingClientRect(),
         step.placement,
         { width: window.innerWidth, height: window.innerHeight },
@@ -151,7 +173,7 @@ export function FirstRunTour() {
       window.removeEventListener("resize", frame.schedule);
       window.removeEventListener("scroll", frame.schedule, true);
     };
-  }, [dismissed, step.selector, step.placement]);
+  }, [dismissed, step.selector, step.clear, step.placement]);
 
   if (dismissed) return null;
 

@@ -1038,6 +1038,12 @@ export type OverviewSummary = {
   period_to: string;
 };
 
+/** An agency's stops as [west, south, east, north] degrees. */
+export type StopBounds = [number, number, number, number];
+
+/** `GET /api/{agency_id}/stops/bounds`: null for an agency with no located stop. */
+export type StopBoundsResponse = { bounds: StopBounds | null };
+
 export type NetworkAgencyRow = {
   agency_id: number;
   agency_name: string;

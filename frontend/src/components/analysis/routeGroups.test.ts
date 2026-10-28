@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { routeGroups, selectedGroup } from "./routeGroups";
+import { groupPlates, routeGroups, selectedGroup } from "./routeGroups";
 import { routeLabelPartsByCode } from "../../api/routeDisplayName";
 import type { Route } from "../../api/types";
 
@@ -92,5 +92,27 @@ describe("routeGroups", () => {
       if (name === "") continue;
       expect(routeGroups(routes, routeLabelPartsByCode(routes)).some(([groupName]) => groupName === name)).toBe(true);
     }
+  });
+});
+
+describe("groupPlates", () => {
+  it("lists a line's distinct route numbers in number order, so lines whose names the feed spells alike read apart", () => {
+    const routes: Route[] = [
+      { route_id: "2746947792", route_code: "2746947792", route_short_name: "64-1", route_long_name: "くすの木台線", trip_headsigns: [] },
+      { route_id: "1966423767", route_code: "1966423767", route_short_name: "64", route_long_name: "くすの木台線", trip_headsigns: [] },
+      { route_id: "2457585921", route_code: "2457585921", route_short_name: "65", route_long_name: "くすのき台線", trip_headsigns: [] },
+      { route_id: "2021255729", route_code: "2021255729", route_short_name: "65-3", route_long_name: "くすのき台線", trip_headsigns: [] },
+      { route_id: "9", route_code: "9", route_short_name: "64", route_long_name: "くすの木台線", trip_headsigns: [] },
+    ];
+    const labels = routeLabelPartsByCode(routes);
+    const groups = new Map(routeGroups(routes, labels));
+    expect(groupPlates(groups.get("くすの木台線")!, labels)).toEqual(["64", "64-1"]);
+    expect(groupPlates(groups.get("くすのき台線")!, labels)).toEqual(["65", "65-3"]);
+  });
+
+  it("has no plates for a line whose routes carry no number", () => {
+    const routes = [route("a", "共立ハイツ線")];
+    const labels = routeLabelPartsByCode(routes);
+    expect(groupPlates(routes, labels)).toEqual([]);
   });
 });

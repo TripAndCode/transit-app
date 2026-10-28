@@ -573,3 +573,63 @@ describe("a theme toggle repaints layers whose source already exists", () => {
     expect(map.getPaintProperty(LIVE_TRIPS_LABEL_LAYER, "text-halo-color")).toBe(DARK["--bg-surface"]);
   });
 });
+
+describe("useOperationsMapLayers agency reveal", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const HIRODEN: [number, number, number, number] = [132.18, 34.1, 132.92, 34.67];
+  const NO_TRIPS: LiveTripsResponse = { ...LIVE, rows: [] };
+  type Args = { live?: LiveTripsResponse; route?: string | null; agency?: number; bounds: [number, number, number, number] | null | "pending" };
+  function mount(map: MockMap, initial: Args) {
+    return renderHook(
+      ({ live = NO_TRIPS, route = null, agency = 8, bounds }: Args) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, live, undefined, route, 0, agency, 0, null, undefined, undefined, 0, bounds);
+      },
+      { initialProps: initial },
+    );
+  }
+  const framed = (fit: ReturnType<typeof vi.spyOn>, call = 0) =>
+    (fit.mock.calls[call][0] as { toArray: () => number[][] }).toArray();
+
+  it("frames the agency's stops on arrival, with no live trip to frame", () => {
+    const map = makeMockMap();
+    const fit = vi.spyOn(map, "fitBounds");
+    mount(map, { bounds: HIRODEN });
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(framed(fit)).toEqual([[132.18, 34.1], [132.92, 34.67]]);
+  });
+
+  it("frames each agency once, not again on every poll, and frames the next agency it is switched to", () => {
+    const map = makeMockMap();
+    const fit = vi.spyOn(map, "fitBounds");
+    const { rerender } = mount(map, { bounds: HIRODEN });
+    rerender({ bounds: HIRODEN, live: LIVE });
+    expect(fit).toHaveBeenCalledTimes(1);
+    rerender({ agency: 1, bounds: [140.65, 40.74, 140.86, 40.95] });
+    expect(fit).toHaveBeenCalledTimes(2);
+    expect(framed(fit, 1)).toEqual([[140.65, 40.74], [140.86, 40.95]]);
+  });
+
+  it("waits for the agency's extent rather than framing the first trips to arrive", () => {
+    const map = makeMockMap();
+    const fit = vi.spyOn(map, "fitBounds");
+    const { rerender } = mount(map, { bounds: "pending", live: LIVE });
+    expect(fit).not.toHaveBeenCalled();
+    rerender({ bounds: HIRODEN, live: LIVE });
+    expect(framed(fit)).toEqual([[132.18, 34.1], [132.92, 34.67]]);
+  });
+
+  it("frames the live trips when the agency has no located stops", () => {
+    const map = makeMockMap();
+    const fit = vi.spyOn(map, "fitBounds");
+    mount(map, { bounds: null, live: LIVE });
+    expect(framed(fit)).toEqual([[140.7, 40.8], [140.7, 40.8]]);
+  });
+
+  it("leaves the camera to a selected route, which frames its own shape", () => {
+    const map = makeMockMap();
+    const fit = vi.spyOn(map, "fitBounds");
+    mount(map, { bounds: HIRODEN, live: LIVE, route: "12" });
+    expect(fit).not.toHaveBeenCalled();
+  });
+});

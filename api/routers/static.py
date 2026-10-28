@@ -42,6 +42,13 @@ class StaticStopsResponse(BaseModel):
     rows: list[StaticStop]
 
 
+class StopBoundsResponse(BaseModel):
+    """``[west, south, east, north]`` of the agency's located stops, or None
+    when it has none."""
+
+    bounds: tuple[float, float, float, float] | None
+
+
 @router.get("/routes", response_model=StaticRoutesResponse)
 @limiter.limit(tier_limit)
 async def list_routes(
@@ -99,3 +106,29 @@ async def list_stops(
         agency_id,
     )
     return StaticStopsResponse(rows=[StaticStop(**dict(r)) for r in rows])
+
+
+# A stop with no position, or at (0, 0), the placeholder some feeds give a
+# stop they cannot place, would stretch the box across the world.
+_STOP_BOUNDS_SQL = """
+    SELECT MIN(stop_lon) AS west, MIN(stop_lat) AS south, MAX(stop_lon) AS east, MAX(stop_lat) AS north
+    FROM static_stops
+    WHERE agency_id = $1
+      AND stop_lat IS NOT NULL AND stop_lon IS NOT NULL
+      AND NOT (stop_lat = 0 AND stop_lon = 0)
+"""
+
+
+@router.get("/stops/bounds", response_model=StopBoundsResponse)
+@limiter.limit(tier_limit)
+async def stop_bounds(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> StopBoundsResponse:
+    """The box the Live map opens on: the extent of the agency's stops, so the
+    map frames the agency's network whether or not any vehicle is reporting."""
+    row = await conn.fetchrow(_STOP_BOUNDS_SQL, agency_id)
+    if row is None or row["west"] is None:
+        return StopBoundsResponse(bounds=None)
+    return StopBoundsResponse(bounds=(row["west"], row["south"], row["east"], row["north"]))

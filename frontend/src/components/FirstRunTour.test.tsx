@@ -77,6 +77,31 @@ describe("FirstRunTour", () => {
     expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(340);
   });
 
+  it("sits below the map legend under the filter dock, so the first step never covers it", () => {
+    const rect = (top: number, left: number, width: number, height: number) =>
+      ({ top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    render(
+      <I18nextProvider i18n={i18n}>
+        <div data-tour="filter-bar" style={{ display: "contents" }}>
+          <div data-testid="dock">filter dock</div>
+        </div>
+        <div data-tour="map-reference" data-testid="legend">legend</div>
+        <FirstRunTour />
+      </I18nextProvider>,
+    );
+    vi.spyOn(screen.getByTestId("dock"), "getBoundingClientRect").mockReturnValue(rect(300, 400, 200, 40));
+    vi.spyOn(screen.getByTestId("legend"), "getBoundingClientRect").mockReturnValue(rect(350, 400, 260, 60));
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((run) => {
+      run(0);
+      return 1;
+    });
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    const panel = document.querySelector<HTMLElement>(".first-run-tour")!;
+    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(410);
+  });
+
   it("describes the filters Live actually has", () => {
     renderTourWithAnchors();
     expect(within(screen.getByRole("dialog")).getByText(/Filter by route or service pattern/)).toBeTruthy();

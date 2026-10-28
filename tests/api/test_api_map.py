@@ -486,6 +486,38 @@ async def test_stops_list_tolerates_a_stop_with_no_name_or_position(map_app):
 
 
 @pytest.mark.asyncio
+async def test_stop_bounds_is_null_for_an_agency_without_located_stops(map_client):
+    client, agency_id = map_client
+    resp = await client.get(f"/api/{agency_id}/stops/bounds")
+    assert resp.status_code == 200
+    assert resp.json() == {"bounds": None}
+
+
+@pytest.mark.asyncio
+async def test_stop_bounds_spans_the_agencys_located_stops_only(map_app):
+    """The Live map opens on this box, so a stop with no position, a (0, 0)
+    placeholder, or another agency's stop must not stretch it."""
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        other = await conn.fetchval(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('other', 'http://other') RETURNING agency_id"
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_lat, stop_lon) "
+            "VALUES ($1, 'A', 34.39, 132.45), ($1, 'B', 34.67, 132.92), ($1, 'C', 34.10, 132.18), "
+            "       ($1, 'ZERO', 0, 0), ($2, 'FAR', 40.82, 140.74)",
+            agency_id,
+            other,
+        )
+        await conn.execute("INSERT INTO static_stops (agency_id, stop_id) VALUES ($1, 'NOPOS')", agency_id)
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/stops/bounds")
+    assert resp.status_code == 200
+    assert resp.json() == {"bounds": [132.18, 34.10, 132.92, 34.67]}
+
+
+@pytest.mark.asyncio
 async def test_heatmap_route_filter_from_aggregate(map_app):
     """Route-filtered heatmap reads agg_route_stop_daily (not raw updates): one dot
     per stop with the route's avg delay; the route_codes label comes from the agg."""
