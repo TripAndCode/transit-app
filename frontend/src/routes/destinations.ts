@@ -166,11 +166,11 @@ export function destHref(
 /** A route dossier's route lives in its path; a `routes` param would only
  *  contradict it. The params that picked another screen's report, document
  *  or ranking coverage and order (`report`, `sort`, `doc`, `by`, `sparse`,
- *  `order`), and the compare bars' shown `period`, mean nothing on a route's
+ *  `order`), and the compare bars' `rank`, mean nothing on a route's
  *  page either, nor does the path (`variant`) picked on another route's. */
 export function routeHref(agencyId: number | string, code: string, search = ""): string {
   const params = new URLSearchParams(search);
-  for (const key of ["routes", "report", "sort", "doc", "by", "sparse", "order", "period", "variant"]) params.delete(key);
+  for (const key of ["routes", "report", "sort", "doc", "by", "sparse", "order", "rank", "variant"]) params.delete(key);
   return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), {})}`;
 }
 

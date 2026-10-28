@@ -17,7 +17,7 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
-    covered_days: 7, window_days: 7,
+    covered_days: 7, window_days: 7, delivered_missing: null,
     has_ridership_weights: false, weighted_on_time_pct: null,
     static_version_id: null, planned_trip_count: null, planned_vehicle_km: null,
     vehicle_km_delivered_pct: null, ...over,
@@ -69,7 +69,7 @@ describe("NetworkTab", () => {
         from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 10, on_time_pct: 50, clamp_pct: 0.14 }),
-          row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true, data_from: "2026-04-03", data_to: "2026-04-05" }),
+          row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true, data_from: "2026-04-03", data_to: "2026-04-04" }),
           row({ agency_id: 3, agency_name: "Aomori", avg_delay_min: null, on_time_pct: null, samples: 0, clamp_pct: null, data_from: null, data_to: null }),
         ],
       },
@@ -122,25 +122,28 @@ describe("NetworkTab", () => {
     expect(aomoriCard).toHaveTextContent("—");
   });
 
-  it("says how many of the period's days a partly timetabled agency's delivered rate covers, with a footnote", () => {
+  it("says on the planned figure how many of the period's days a timetable plans, rate or no rate, with a footnote", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-03-02", to: "2026-03-31", definition,
         agencies: [
-          row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 16, window_days: 30 }),
-          row({ agency_id: 2, agency_name: "HiroBus", service_delivered_pct: 98.1, covered_days: 30, window_days: 30 }),
-          // A rate the feed cannot measure reads as a dash; a coverage note
-          // beside it would qualify nothing.
-          row({ agency_id: 3, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, covered_days: 12, window_days: 30 }),
+          row({ agency_id: 1, agency_name: "Hiroden", planned_trips: 57887, service_delivered_pct: 96.7, covered_days: 16, window_days: 30 }),
+          row({ agency_id: 2, agency_name: "HiroBus", planned_trips: 18415, service_delivered_pct: 98.1, covered_days: 30, window_days: 30 }),
+          // The plan is partial whether or not the feed can measure a rate.
+          row({ agency_id: 3, agency_name: "Geiyo", planned_trips: 7353, service_delivered_pct: null, executed_trips: null, covered_days: 13, window_days: 30, delivered_missing: "feed_unverified" }),
+          // No plan at all: there is nothing to qualify.
+          row({ agency_id: 4, agency_name: "Onomichi", planned_trips: 0, service_delivered_pct: null, executed_trips: null, covered_days: 0, window_days: 30, delivered_missing: "no_plan" }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
     const card = (name: string) => screen.getByText(name).closest(".network-row");
-    expect(card("Hiroden")).toHaveTextContent("Service delivered % 96.7% (16/30 days a timetable plans)");
+    expect(card("Hiroden")).toHaveTextContent("Planned trips 57,887 (16/30 days a timetable plans)");
+    expect(card("Hiroden")).toHaveTextContent("Service delivered % 96.7%");
     expect(card("HiroBus")).not.toHaveTextContent("a timetable plans");
-    expect(card("Aomori")).not.toHaveTextContent("a timetable plans");
+    expect(card("Geiyo")).toHaveTextContent("Planned trips 7,353 (13/30 days a timetable plans)");
+    expect(card("Onomichi")).not.toHaveTextContent("a timetable plans");
     expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
       /count only the days a timetable plans/,
     );
@@ -156,19 +159,19 @@ describe("NetworkTab", () => {
     } as never);
     await i18n.changeLanguage("ja");
     renderTab();
-    expect(screen.getByText("Hiroden").closest(".network-row")).toHaveTextContent("運行率 96.7%（時刻表に計画がある16/30日分）");
+    expect(screen.getByText("Hiroden").closest(".network-row")).toHaveTextContent("計画便数 120便（時刻表に計画がある16/30日分）");
     expect(screen.getByTestId("network-plan-coverage-footnote")).toHaveTextContent(
       "時刻表に計画がある日だけを数えています",
     );
   });
 
-  it("leaves the coverage footnote out when every shown rate spans the whole period", () => {
+  it("leaves the coverage footnote out when every plan spans the whole period or there is none", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-03-02", to: "2026-03-31", definition,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 30, window_days: 30 }),
-          row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, covered_days: 3, window_days: 30 }),
+          row({ agency_id: 2, agency_name: "Onomichi", planned_trips: 0, service_delivered_pct: null, executed_trips: null, covered_days: 0, window_days: 30, delivered_missing: "no_plan" }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -178,41 +181,114 @@ describe("NetworkTab", () => {
     expect(screen.queryByTestId("network-plan-coverage-footnote")).not.toBeInTheDocument();
   });
 
-  it("shows vehicle-km delivered %, falls back to planned trip count, and shows a dash otherwise", () => {
+  it("prints the period's planned trips, never the loaded timetable's trip definitions", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-09-24", to: "2026-10-23", definition,
         agencies: [
           row({
-            agency_id: 1, agency_name: "Hiroden",
-            static_version_id: "gtfs_static_20260101", planned_trip_count: 300,
-            planned_vehicle_km: 1234.5, vehicle_km_delivered_pct: 91.2,
-          }),
-          // No shapes.txt loaded -> vehicle_km_delivered_pct is None; falls
-          // back to the plain planned trip count, never a dash that hides
-          // real supply data the backend does have.
-          row({
-            agency_id: 2, agency_name: "HiroBus",
-            static_version_id: "gtfs_static_20260101", planned_trip_count: 150,
-            planned_vehicle_km: null, vehicle_km_delivered_pct: null,
-          }),
-          // No static-feed version recorded at all -> dash.
-          row({
-            agency_id: 3, agency_name: "Aomori",
-            static_version_id: null, planned_trip_count: null,
-            planned_vehicle_km: null, vehicle_km_delivered_pct: null,
+            agency_id: 8, agency_name: "Hiroden", planned_trips: 57887, covered_days: 30, window_days: 30,
+            static_version_id: "gtfs_static_20261001", planned_trip_count: 9632, planned_vehicle_km: 115756.3,
+            service_delivered_pct: null, executed_trips: null, vehicle_km_delivered_pct: null, delivered_missing: "feed_unverified",
           }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.getByText(/91\.2%/)).toBeInTheDocument();
-    const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
-    expect(hiroBusCard).toHaveTextContent("Planned trips 150 (vehicle-km not available)");
-    expect(hiroBusCard).not.toHaveTextContent("Vehicle-km delivered %");
-    const aomoriCard2 = screen.getByText("Aomori").closest(".network-row");
-    expect(aomoriCard2).toHaveTextContent("—");
+    const card = screen.getByText("Hiroden").closest(".network-row");
+    expect(card).toHaveTextContent("Planned trips 57,887");
+    expect(card).not.toHaveTextContent("9,632");
+  });
+
+  it("says why a delivered rate is missing, and never prints 0 planned trips for a read that failed", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Unverified", service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_unverified" }),
+          row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_cannot_report" }),
+          row({ agency_id: 3, agency_name: "Planless", planned_trips: 0, covered_days: 0, service_delivered_pct: null, executed_trips: null, delivered_missing: "no_plan" }),
+          row({ agency_id: 4, agency_name: "Unread", planned_trips: 0, covered_days: 0, service_delivered_pct: null, executed_trips: null, delivered_missing: "unreadable" }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Unverified")).toHaveTextContent("Service delivered % — (the feed is not yet checked for cancellations)");
+    expect(card("Aomori")).toHaveTextContent("Service delivered % — (this feed format cannot report cancellations)");
+    expect(card("Planless")).toHaveTextContent("Service delivered % — (no timetable plans this period)");
+    expect(card("Planless")).toHaveTextContent("Planned trips 0");
+    expect(card("Unread")).toHaveTextContent("Service delivered % — (the plan could not be read)");
+    expect(card("Unread")).toHaveTextContent("Planned trips —");
+    expect(card("Unread")).not.toHaveTextContent("Planned trips 0");
+  });
+
+  it("shows vehicle-km delivered % where it is computed, says why where only it is missing, and never calls vehicle-km itself unavailable", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", planned_vehicle_km: 1234.5, vehicle_km_delivered_pct: 91.2, service_delivered_pct: 91.2 }),
+          // A rate, but no route shapes to turn it into vehicle-km.
+          row({ agency_id: 2, agency_name: "HiroBus", planned_vehicle_km: null, vehicle_km_delivered_pct: null, service_delivered_pct: 95 }),
+          // No rate: the same reason covers both, so vehicle-km says nothing more.
+          row({ agency_id: 3, agency_name: "Aomori", planned_vehicle_km: 52991.9, vehicle_km_delivered_pct: null, service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_cannot_report" }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Hiroden")).toHaveTextContent("Vehicle-km delivered % 91.2%");
+    expect(card("HiroBus")).toHaveTextContent("Vehicle-km delivered % — (no route shapes loaded)");
+    expect(card("Aomori")).not.toHaveTextContent("Vehicle-km delivered %");
+    expect(document.body).not.toHaveTextContent("vehicle-km not available");
+  });
+
+  it("marks an agency whose data stopped, as the agency picker does, and lists it after the current ones", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-09-28", to: "2026-10-27", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Aomori", avg_delay_min: 5, data_from: "2026-09-28", data_to: "2026-10-14" }),
+          row({ agency_id: 8, agency_name: "Hiroden", avg_delay_min: 3, data_from: "2026-09-28", data_to: "2026-10-23" }),
+          // Two days behind the newest closes by itself; not stopped.
+          row({ agency_id: 9, agency_name: "HiroBus", avg_delay_min: 2, data_from: "2026-09-28", data_to: "2026-10-21" }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const names = screen.getAllByTestId("network-row").map((r) => r.querySelector("a")?.textContent);
+    expect(names).toEqual(["Hiroden", "HiroBus", "Aomori"]);
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Aomori")).toHaveTextContent("No updates after Oct 14");
+    expect(card("HiroBus")).not.toHaveTextContent("No updates after");
+  });
+
+  it("writes the period and each agency's own data range in one date style, the range only where it differs", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Whole", data_from: "2026-04-01", data_to: "2026-04-07" }),
+          row({ agency_id: 2, agency_name: "Part", data_from: "2026-04-01", data_to: "2026-04-06" }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/network?from=2026-04-01&to=2026-04-07"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Across all agencies · Apr 1 – Apr 7, 2026")).toBeInTheDocument();
+    expect(screen.getByText("Whole").closest(".network-row")).not.toHaveTextContent("Apr");
+    expect(screen.getByText("Part").closest(".network-row")).toHaveTextContent("Apr 1 – Apr 6, 2026");
   });
 
   it("leaves the route and stop filter off the agency links, since their codes belong to one agency", () => {
@@ -314,7 +390,7 @@ describe("NetworkTab", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("shows a 'you' badge and highlights the card matching the current agencyId in the URL", () => {
+  it("marks the agency selected in the URL as the one being viewed, not as the visitor's own", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -326,14 +402,16 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab("2"); // viewing agency 2 (HiroBus)
-    const badges = screen.getAllByTestId("you-badge");
+    const badges = screen.getAllByTestId("viewing-badge");
     expect(badges).toHaveLength(1);
+    expect(badges[0]).toHaveTextContent("Viewing");
+    expect(screen.queryByText("YOU")).not.toBeInTheDocument();
     // the badge sits inside HiroBus's row, not Hiroden's
     const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
     expect(hiroBusCard).toContainElement(badges[0]);
   });
 
-  it("shows no 'you' badge when there is no agencyId in the URL", () => {
+  it("shows no viewing badge when there is no agencyId in the URL", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -346,7 +424,7 @@ describe("NetworkTab", () => {
         <NetworkTab />
       </MemoryRouter>,
     );
-    expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("viewing-badge")).not.toBeInTheDocument();
   });
 
   it("writes the coverage range in the language's date style", async () => {
@@ -445,15 +523,14 @@ describe("NetworkTab", () => {
     expect(names).toEqual(["Worst", "Middle", "Mild", "Unknown"]);
   });
 
-  it("draws every bar against the same 0-6 minute axis, not against the largest value", () => {
+  it("draws every bar against one shared axis, stepped up from 6 minutes to hold the largest agency", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [
-          // 12 min is past the top of the axis: it fills it, and the exact
-          // figure stays in the value column.
-          row({ agency_id: 1, agency_name: "Over", avg_delay_min: 12 }),
-          row({ agency_id: 2, agency_name: "Half", avg_delay_min: 3 }),
+          // 7.5 min is past 6, so the shared axis steps up to 12 for every row.
+          row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 7.5 }),
+          row({ agency_id: 2, agency_name: "Quarter", avg_delay_min: 3 }),
           row({ agency_id: 3, agency_name: "None", avg_delay_min: null }),
         ],
       },
@@ -461,7 +538,10 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     const widths = screen.getAllByTestId("network-axis-fill").map((el) => el.style.width);
-    expect(widths).toEqual(["100%", "50%", "0%"]);
+    expect(widths).toEqual(["62.5%", "25%", "0%"]);
+    expect(screen.getByText("Shared axis · 0–12 min")).toBeInTheDocument();
+    // Filled with the shared delay steps, not the old severe ramp.
+    expect(screen.getAllByTestId("network-axis-fill")[0].style.background).toBe("var(--d4)");
   });
 
   it("shows the observation count as text, with no bar encoding it", () => {

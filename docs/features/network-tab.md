@@ -31,24 +31,36 @@ What the user sees/does:
   and write the scope's `from`/`to` URL params through `useScope`, as every
   scoped screen does.
 - **Ranked agency card list** — one card per agency, sorted client-side
-  worst-avg-delay first, agencies with no data in range last
-  (`byDelayDescending`), each showing: agency name (links to that
-  agency's Live view, carrying the current scope minus its `routes` and
-  `stop` params, which name one agency's codes), avg delay + on-time % +
-  service-delivered % (executed trips ÷
-  planned trips from the static GTFS schedule — reads "—" rather than a
-  misleading 100% for an agency whose feed doesn't report cancellations;
-  when a timetable plans only some of the window's days, by a count saved
-  for the day or the loaded timetable, the rate carries "N/M days a timetable
-  plans" and a footnote under the list says both delivered rates count only
-  those days; when the planned figures cannot be read at all, every agency's
-  rate reads "—" and the delay figures still show),
-  a delay bar on a fixed 0–6 minute axis shared by every card
-  (`DELAY_AXIS_MAX_MIN`, marked at 5 minutes) and colored by `delayColor()`,
-  sample count, and two optional flags: an amber (`--error-fg`) dot when
+  worst-avg-delay first (`byDelayDescending`), agencies whose data stopped
+  after the current ones and agencies with no data in range last
+  (`dataRank`). "Stopped" is the agency picker's rule
+  (`hasStopped` in `components/agencyDirectory.ts`): the row's `data_to`
+  trails the newest `data_to` on the board by three days or more, and the
+  row then reads the picker's "No updates after <date>". Each card shows:
+  agency name (links to that agency's Live view, carrying the current scope
+  minus its `routes` and `stop` params, which name one agency's codes), its
+  own data range only where it differs from the period (the period itself
+  is the eyebrow, in the same date style), avg delay + on-time %, planned
+  trips for the period (`planned_trips`, never the loaded timetable's
+  `planned_trip_count`; when a timetable plans only some of the window's
+  days, by a count saved for the day or the loaded timetable, it carries
+  "N/M days a timetable plans" and a footnote under the list says every
+  plan-based figure counts only those days), service-delivered % (executed
+  trips ÷ planned trips — reads "—" rather than a misleading 100%, followed
+  by the reason from `delivered_missing`: no plan this period, a feed format
+  that cannot report cancellations, or a feed no live verdict has confirmed;
+  when the planned figures cannot be read at all, `delivered_missing` is
+  `unreadable`, planned trips read "—" rather than 0, and the delay figures
+  still show), vehicle-km delivered % only beside a delivered rate ("—" when
+  no shapes are loaded), a delay bar on one axis shared by every card
+  (`delayAxisMax` in `components/charts/delayAxis.ts`: 6, 12, 18 or 24
+  minutes, the smallest step holding the latest-running agency; marked at 5
+  minutes) filled with the shared delay steps (`delayRampVar()`), sample
+  count, and two optional flags: an amber (`--error-fg`) dot when
   `clamp_pct` (implausible/clamped readings) is above 1%, and a "Behind" badge
-  (`network.stale_badge`) when the feed hasn't reported recently. The current agency's own card is visually
-  highlighted with a "YOU" badge.
+  (`network.stale_badge`) when the feed hasn't reported recently. The agency
+  selected in the URL (there is no per-user agency) is highlighted and
+  tagged "Viewing".
 - **Definition metadata block** (`DefinitionMetaBlock`, a collapsed
   `<details>` disclosure above the card list) — states the on-time/late
   tolerance, measurement point, dedup rule, and exclusion threshold behind
@@ -75,7 +87,7 @@ What the user sees/does:
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips per day from Postgres `planned_trips_daily` where a day's count was saved, else from the loaded `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); `covered_days`/`window_days` say how many of the range's days have a plan, saved or from the loaded timetable, the only days all three count; `executed_trips`/`service_delivered_pct` read `None` for an agency without a live, complete RT field-coverage verdict (`rt_field_coverage_confirmed_agencies()` in `pipeline/strategies/static_join.py`, which also requires `ingest_strategy` `static_join`), or that has no static schedule loaded. `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
+| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips per day from Postgres `planned_trips_daily` where a day's count was saved, else from the loaded `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); `covered_days`/`window_days` say how many of the range's days have a plan, saved or from the loaded timetable, the only days all three count; `executed_trips`/`service_delivered_pct` read `None` for an agency without a live, complete RT field-coverage verdict (`rt_field_coverage_confirmed_agencies()` in `pipeline/strategies/static_join.py`, which also requires `ingest_strategy` `static_join`), or that has no static schedule loaded, and `delivered_missing` says which (`no_plan`, `feed_cannot_report`, `feed_unverified`, or `unreadable` when the read itself failed). `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
 
 ## Key files
 
@@ -121,7 +133,7 @@ What the user sees/does:
 2. Click "Compare" in the rail, then its "Agencies" button → URL
    `/agencies/:agencyId/compare?by=agencies`.
 3. Expect a ranked card list, worst-avg-delay first, with the current
-   agency's card visually highlighted and tagged "YOU".
+   agency's card visually highlighted and tagged "Viewing".
 4. Click another agency's name — expect navigation to that agency's
    Live view, carrying the same scope in the URL query string minus
    `routes` and `stop`.

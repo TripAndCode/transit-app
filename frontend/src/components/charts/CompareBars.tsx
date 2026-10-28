@@ -8,20 +8,36 @@ import { routeHref } from "../../routes/destinations";
 import { useCappedList } from "../../hooks/useCappedList";
 import { useCountUp } from "../../hooks/useCountUp";
 import { useFlipRows } from "../../hooks/useFlipRows";
-import { delayColor, delayTextColor } from "../../styles/tokens";
+import { delayRampVar } from "../../styles/tokens";
 import { serviceValueLabel, type LabelT } from "../../utils/filterValueLabels";
 import { RouteLabel } from "../RouteLabel";
-import { PERIODS, deltaFor, orderByPeriod, otherPeriod, parseCompareRows, type Period } from "./compareBarMath";
-import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "./delayAxis";
+import {
+  COMPARE_ORDERS,
+  PERIODS,
+  gapVerdict,
+  orderRows,
+  otherPeriod,
+  parseCompareRows,
+  solidSide,
+  type CompareOrder,
+  type CompareRow,
+  type Period,
+} from "./compareBarMath";
+import { delayAxisMax, delayAxisShare } from "./delayAxis";
+import { DelayScaleLegend } from "./DelayScaleLegend";
 import "./compareBars.css";
-import { fixedTenth, roundTenth } from "../../utils/format";
+import { fixedTenth } from "../../utils/format";
 
 const ROWS_CAP = 200;
 
-/** The compare report splits days by the agency's day types, so each period
- *  reads as the service value naming that side. */
+/** The compare report splits days by the agency's day types, so each side
+ *  reads as the service value naming it. */
 function periodLabel(period: Period, t: LabelT): string {
   return serviceValueLabel(period === "weekday" ? "平日" : "土日祝", t); // i18n-ignore: query contract
+}
+
+function orderLabel(order: CompareOrder, t: LabelT): string {
+  return order === "gap" ? t("compare.bars.order_gap") : t("compare.bars.order_side", { side: periodLabel(order, t) });
 }
 
 function Figure({ value }: { value: number }) {
@@ -29,13 +45,25 @@ function Figure({ value }: { value: number }) {
   return <>{fixedTenth(shown)}</>;
 }
 
+function GapText({ row }: { row: CompareRow }) {
+  const { t } = useTranslation();
+  const verdict = gapVerdict(row);
+  if (verdict == null) return <>—</>;
+  if (verdict.later == null) return <>{t("compare.bars.gap_even")}</>;
+  return <>{t("compare.bars.gap_later", { side: periodLabel(verdict.later, t), minutes: fixedTenth(verdict.minutes) })}</>;
+}
+
 /**
- * The compare report as bars that morph. Switching the period slides every
- * bar to its new length (translateX, never width or scaleX), re-sorts the
- * rows and lets FLIP carry each to its new rank, while the other period stays
- * as a dashed ghost so the comparison is on screen rather than in memory.
+ * The compare report as bars against one shared axis. Each route shows both
+ * sides' figures and says which side runs later and by how much, so the gap,
+ * the report's subject, is read rather than worked out. The list is ranked
+ * by that gap unless the reader ranks it by one side's level; that side is
+ * then the solid bar (switching slides each bar by translateX, never width or
+ * scaleX, and FLIP carries each row to its new rank) and the other stays as a
+ * dashed ghost. The axis is stepped from the largest figure on either side,
+ * so no order switch rescales it.
  *
- * `resetKey` names the list (its scope): "show more" holds across a period
+ * `resetKey` names the list (its scope): "show more" holds across an order
  * switch, which re-ranks the same routes, and resets for a different list.
  */
 export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; resetKey: string }) {
@@ -43,35 +71,51 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
   const id = useAgencyId();
   const names = useRouteNames(id);
   const { search } = useLocation();
-  const [period, setPeriod] = useUrlState<Period>("period", "weekday", PERIODS);
+  const [order, setOrder] = useUrlState<CompareOrder>("rank", "gap", COMPARE_ORDERS);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const ordered = orderByPeriod(parseCompareRows(rows), period);
+  const parsed = parseCompareRows(rows);
+  const axisMax = delayAxisMax(parsed.flatMap((r) => [r.weekday, r.weekend]));
+  const ordered = orderRows(parsed, order);
   useFlipRows(listRef, ordered.map((r) => r.route_code).join(","));
   const capped = useCappedList(ordered, ROWS_CAP, resetKey);
-  const ghost = otherPeriod(period);
+  const solid = solidSide(order);
+  const ghost = otherPeriod(solid);
 
   return (
     <div className="compare-bars">
       <div className="compare-bars__head">
-        <div className="compare-bars__seg" role="group" aria-label={t("compare.bars.period_label")}>
-          {PERIODS.map((p) => (
-            <button key={p} type="button" aria-pressed={period === p} onClick={() => setPeriod(p)}>
-              {periodLabel(p, t)}
+        <div className="compare-bars__seg" role="group" aria-label={t("compare.bars.order_label")}>
+          {COMPARE_ORDERS.map((o) => (
+            <button key={o} type="button" aria-pressed={order === o} onClick={() => setOrder(o)}>
+              {orderLabel(o, t)}
             </button>
           ))}
         </div>
-        <span className="compare-bars__legend">{t("compare.bars.ghost_legend", { period: periodLabel(ghost, t) })}</span>
+        <span className="compare-bars__legend" data-testid="compare-bars-legend">
+          {t("compare.bars.legend", { solid: periodLabel(solid, t), ghost: periodLabel(ghost, t), max: axisMax })}
+        </span>
+      </div>
+      <DelayScaleLegend />
+      {/* The headings, drawn on the rows' grid; each row's own cells carry
+          their side's name for a screen reader. */}
+      <div className="compare-bar-row compare-bar-row--head" data-testid="compare-bars-head" aria-hidden="true">
+        <span>{t("compare.bars.col_route")}</span>
+        <span />
+        {PERIODS.map((p) => (
+          <span key={p} className="compare-bar__value">
+            {t("compare.bars.col_side", { side: periodLabel(p, t) })}
+          </span>
+        ))}
+        <span className="compare-bar__gap">{t("compare.bars.col_gap")}</span>
       </div>
       <div
         ref={listRef}
         className="compare-bars__list"
         role="list"
-        aria-label={t("compare.bars.aria", { period: periodLabel(period, t), max: DELAY_AXIS_MAX_MIN })}
+        aria-label={t("compare.bars.aria", { order: orderLabel(order, t), max: axisMax })}
       >
         {capped.visible.map((row) => {
-          const v = row[period];
-          const d = deltaFor(row, period);
-          const tone = d == null || d === 0 ? "" : d > 0 ? " compare-bar__delta--up" : " compare-bar__delta--down";
+          const v = row[solid];
           return (
             <div key={row.route_code} role="listitem" className="compare-bar-row" data-flip-key={row.route_code} data-testid="compare-bar-row">
               <span className="compare-bar__route">
@@ -84,14 +128,29 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
                 )}
               </span>
               <span className="compare-bar__track" aria-hidden="true">
-                <i className="compare-bar__fill" style={{ "--bar-share": delayAxisShare(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
+                <i
+                  className="compare-bar__fill"
+                  style={{ "--bar-share": delayAxisShare(v, axisMax), background: v == null ? "transparent" : delayRampVar(v) } as CSSProperties}
+                />
                 {/* After the fill, so its dashed edge paints over a longer fill. */}
-                <i className="compare-bar__ghost" style={{ "--bar-share": delayAxisShare(row[ghost]) } as CSSProperties} />
+                <i className="compare-bar__ghost" style={{ "--bar-share": delayAxisShare(row[ghost], axisMax) } as CSSProperties} />
               </span>
-              <span className="compare-bar__value num" style={{ color: v == null ? undefined : delayTextColor(v) }}>
-                {v == null ? "—" : <Figure value={v} />}
+              {PERIODS.map((p) => {
+                const value = row[p];
+                return (
+                  <span
+                    key={p}
+                    className={`compare-bar__value num${p === solid ? " compare-bar__value--solid" : ""}`}
+                    data-testid={`compare-bar-${p}`}
+                  >
+                    <span className="compare-bars__sr">{periodLabel(p, t)} </span>
+                    {value == null ? "—" : <Figure value={value} />}
+                  </span>
+                );
+              })}
+              <span className="compare-bar__gap" data-testid="compare-bar-gap">
+                <GapText row={row} />
               </span>
-              <span className={`compare-bar__delta num${tone}`}>{d == null ? "—" : `${roundTenth(d) > 0 ? "+" : ""}${fixedTenth(d)}`}</span>
             </div>
           );
         })}

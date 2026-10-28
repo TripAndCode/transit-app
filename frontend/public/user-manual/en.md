@@ -291,15 +291,15 @@ Two buttons at the top switch between **Weekdays and weekends/holidays** and **A
 
 ### 8-1. Weekdays and weekends/holidays
 
-**Weekday and weekend/holiday gap** puts each route’s average delay on weekdays and on weekends and holidays side by side (“Weekday (min)”, “Weekend/Holiday (min)”), with the gap (“Diff (min)”) and which side is higher (“Direction”: “Weekend/Holiday > Weekday” or “Weekday > Weekend/Holiday”). Routes with the largest gap come first. Days are split the same way as in the reports of section 6-2, so public holidays count as weekends and holidays.
+**Weekday and weekend/holiday gap** draws each route’s average delay on weekdays and on weekends and holidays as bars, with both figures (“Weekday (min)”, “Weekend/Holiday (min)”) and, under “Gap”, which side runs later and by how much, such as “Weekday 3.9 min later”. Routes with the largest gap come first (“Largest gap”); “Weekday: latest first” and “Weekend/Holiday: latest first” rank by one side instead. The side the list is ranked by (weekdays, for the largest gap) is the solid bar and the other a dashed outline. The axis is 6, 12, 18 or 24 minutes, whichever holds every figure shown, and does not change when you switch the order. Days are split the same way as in the reports of section 6-2, so public holidays count as weekends and holidays.
 
 ### 8-2. Agencies
 
 ![Compare agencies](./10-compare-agencies.en.png)
 
-“Compare agencies” lists every agency for the dates in “From” and “To”, latest-running first (“Average delay — lower is better”). Your own agency carries a “YOU” badge.
+“Compare agencies” lists every agency for the dates in “From” and “To”, latest-running first (“Average delay — lower is better”). An agency whose data stopped reads “No updates after Oct 14” or similar, as on the agency picker, and comes after the agencies whose data is current. The agency selected in the sidebar carries a “Viewing” badge.
 
-Each row shows “Avg delay (min)” on a shared axis, “On-time %”, “Service delivered %”, “Vehicle-km delivered %”, “Samples” and the dates the agency has data for. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
+Each row shows “Avg delay (min)” with its bar, “On-time %”, “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Samples”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations” or “the feed is not yet checked for cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
 
 Click an agency’s name to open that agency’s **Live** screen.
 
@@ -440,6 +440,6 @@ What the words on the screens and in this manual mean.
 ### 13-3. Service and spacing
 
 - **Planned trips**: the number of trips the timetable planned to run over the period, counted day by day from the timetables running that day.
-- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed that does not report cancellations.
-- **Vehicle-km delivered %**: service delivered % applied to the planned vehicle-km, so the share is the same as service delivered %; a cancelled trip’s distance is taken to be an average trip’s. It shows “—” for an agency whose timetable has no route shapes (shapes.txt).
+- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed format that cannot report cancellations, or a feed a check has not confirmed reports them; Compare agencies gives the reason.
+- **Vehicle-km delivered %**: service delivered % applied to the planned vehicle-km, so the share is the same as service delivered %; a cancelled trip’s distance is taken to be an average trip’s. It is left out where service delivered % is, and shows “—” for an agency whose timetable has no route shapes (shapes.txt).
 - **Headway quality**: for routes whose planned headway (the median) is 12 minutes or less, how far the actual spacing strays. “Excess wait” is the average extra wait that the irregular spacing adds over the planned spacing.

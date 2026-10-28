@@ -108,11 +108,18 @@ What the user sees/does:
   (agency-wide landing view, or a per-route detail view when exactly one
   route is selected in the shared filter - see its own file-header comment).
   `compare_ranking` instead renders
-  `frontend/src/components/charts/CompareBars.tsx`: one bar per route on the
-  fixed delay axis, ranked worst first by the period a URL-backed `period`
-  toggle (`weekday`/`weekend`, the 平日 and 土日祝 day types) shows, with the other period as a dashed ghost
-  and the signed gap beside it. The API orders this report by gap, so the tab
-  asks for its maximum length rather than the default widest-gap top.
+  `frontend/src/components/charts/CompareBars.tsx`: one row per route under
+  the headings 路線 / 平日（分） / 土日祝（分） / 差, with both day types'
+  figures and a sentence naming the later side and by how much (「平日のほうが
+  3.9分遅い」, in a neutral ink, so the gap never reads as red against green
+  and never flips meaning). A URL-backed `rank` (`gap`, the default, or
+  `weekday`/`weekend`, the 平日 and 土日祝 day types) orders the list by the
+  printed gap or by one side's level; the ranked side (平日 for the gap) is the
+  solid bar, filled with the shared delay steps, and the other a dashed ghost.
+  Every bar is drawn against one axis, `delayAxisMax` over both sides of
+  every row (6, 12, 18 or 24 minutes), so switching the order never rescales
+  it. On a phone the bar and the gap sentence take their own lines. The tab
+  asks for the API's maximum length, so the whole compared list is ranked.
 - **Insight Panel** (right column) —
   `frontend/src/components/InsightPanel.tsx`: a single proactive suggestion
   ("this route's trend just shifted", "on-time rate dropped", etc.) whose
@@ -362,8 +369,8 @@ the scope as one sentence above their content
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
 | `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by `RouteForecastSection` |
 | `frontend/src/components/charts/HeatSurface.tsx`, `heatSurfaceModel.ts` | The trend report's dow x hour surface: the two profiles, the faint low-confidence cells, and the generated row/column dim rules |
-| `frontend/src/components/charts/CompareBars.tsx`, `compareBarMath.ts` | `compare_ranking` report body: per-period ranking, ghost bar, and rounded gap |
-| `frontend/src/components/charts/delayAxis.ts` | The fixed delay axis shared by the compare bars and the Network screen's agency bars |
+| `frontend/src/components/charts/CompareBars.tsx`, `compareBarMath.ts` | `compare_ranking` report body: gap or per-side ranking, ghost bar, and the printed gap as a sentence |
+| `frontend/src/components/charts/delayAxis.ts` | The stepped delay axis (6/12/18/24 min) the compare bars and the Network screen's agency bars each pick from their own figures |
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |

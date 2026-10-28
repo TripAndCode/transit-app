@@ -36,9 +36,16 @@
     "mode_periods": "平日と土日祝",
     "mode_agencies": "事業者どうし",
     "bars": {
-      "period_label": "期間",
-      "ghost_legend": "破線 = {{period}}",
-      "aria": "路線ごとの平均遅延（{{period}}、軸は {{max}} 分まで）"
+      "aria": "路線ごとの平日と土日祝の平均遅延（{{order}}、軸は{{max}}分まで）",
+      "order_label": "並び順",
+      "order_gap": "差の大きい順",
+      "order_side": "{{side}}の遅い順",
+      "legend": "塗り＝{{solid}}・破線＝{{ghost}}・軸 0〜{{max}}分",
+      "col_route": "路線",
+      "col_side": "{{side}}（分）",
+      "col_gap": "差",
+      "gap_later": "{{side}}のほうが{{minutes}}分遅い",
+      "gap_even": "差なし"
     }
   },
   "saved": {
@@ -247,7 +254,7 @@
   },
   "network": {
     "title": "事業者比較",
-    "eyebrow": "全事業者 · {{from}} 〜 {{to}}",
+    "eyebrow": "全事業者 · {{range}}",
     "from": "開始",
     "to": "終了",
     "col_avg_delay": "平均遅延（分）",
@@ -262,7 +269,7 @@
     "howto_title": "この表の見方",
     "help_avg_delay": "期間中の平均的な遅れ（分）。ドットは深刻度を示します。",
     "help_on_time": "定時基準内に収まった割合。",
-    "help_delivered": "静的時刻表に対して実際に運行された便の割合 — 事業者のフィードが運休情報を送っていない場合は「—」と表示されます。",
+    "help_delivered": "時刻表が計画した便のうち、運休と報告されずに走った割合。配信が運休を伝えるかを点検で確かめた事業者だけに出し、ほかは「—」とその理由を表示します。",
     "help_samples": "数値の基となる観測数。",
     "help_feed": "異常値として除外された割合 — 高い場合はフィード停止の可能性。",
     "help_freshness": "表の数値が最新の取り込みデータまで反映されているか。「未更新」は集計が追いついておらず、直近の日付がまだ含まれていない可能性を示します。",
@@ -271,19 +278,30 @@
     "no_data_in_range": "期間内のデータなし",
     "view_agency": "{{name}} をライブで開く",
     "delay_unit": "分",
-    "you_badge": "あなた",
     "ridership_weighted_toggle": "利用者数で重み付け",
     "col_on_time_weighted": "定時率（利用者数で重み付け）",
     "on_time_weighted_suffix": "（重み付け）",
     "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。",
     "col_vehicle_km_delivered": "走行キロ達成率",
-    "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行率」も参照）。",
-    "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
-    "delivered_partly_timetabled": "{{value}}（時刻表に計画がある{{covered}}/{{window}}日分）",
-    "plan_coverage_footnote": "※ 運行率に「時刻表に計画があるN/M日分」と添えた事業者は、運行率・走行キロ達成率とも、時刻表に計画がある日だけを数えています。計画があるのが期間の一部の日だけのため、ほかの事業者とは数えた日数が異なります。",
+    "help_vehicle_km_delivered": "運行率を現行ダイヤの計画走行キロに当てはめた割合です。運行率が出る事業者だけに出し、経路の形状データ（shapes.txt）がない場合は「—」です。",
+    "plan_coverage_footnote": "※「時刻表に計画があるN/M日分」と添えた事業者は、計画便数・運行率・走行キロ達成率とも、時刻表に計画がある日だけを数えています。計画があるのが期間の一部の日だけのため、ほかの事業者とは数えた日数が異なります。",
     "schedule_version_title": "静的ダイヤバージョン: {{version}}",
     "col_agency": "事業者",
-    "axis_caption": "共通軸 · 0〜{{max}} 分"
+    "axis_caption": "共通軸 · 0〜{{max}} 分",
+    "viewing_badge": "表示中",
+    "col_planned_trips": "計画便数",
+    "help_planned_trips": "期間中に時刻表が走らせる予定だった便の数。その日の時刻表を記録した値か、読み込み中の時刻表から数えます。",
+    "planned_trips": "計画便数 {{count}}便",
+    "planned_trips_partly": "計画便数 {{count}}便（時刻表に計画がある{{covered}}/{{window}}日分）",
+    "planned_trips_unknown": "計画便数 —",
+    "delivered_value_missing": "—（{{reason}}）",
+    "delivered_missing": {
+      "no_plan": "期間に時刻表の計画なし",
+      "unreadable": "計画を読み込めませんでした",
+      "feed_cannot_report": "この配信形式は運休を伝えられません",
+      "feed_unverified": "配信が運休を伝えるか未確認"
+    },
+    "vehicle_km_no_shapes": "—（経路の形状データなし）"
   },
   "definitionMeta": {
     "summary": "集計のしかた",
@@ -1290,7 +1308,7 @@
       "on_time": "定時基準内に収まった出発の割合を、低い系統から並べます。",
       "worst_5min": "5分を超える遅れが多い系統を抽出します。",
       "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
-      "compare_ranking": "路線ごとの平日または土日祝の遅れを、選んだ側の遅い順に並べ、もう一方を破線で重ねて示します。各日は、事業者の時刻表がその日に走らせたダイヤで平日か土日祝に分けます。",
+      "compare_ranking": "路線ごとに平日と土日祝の平均遅延を並べ、差の大きい順に示します。どちらが何分遅いかを文で添え、並び順は片側の遅い順にも切り替えられます。各日は、事業者の時刻表がその日に走らせたダイヤで平日か土日祝に分けます（祝日は土日祝）。",
       "dow_weekday": "平日ダイヤで運行した日の、系統ごとの平均遅延です。祝日など、時刻表が土日祝のダイヤを走らせた日は土日祝に数えます。",
       "dow_weekend": "土日祝のダイヤで運行した日の、系統ごとの平均遅延です。土曜・日曜のほか、祝日など時刻表が土日祝のダイヤを走らせた平日も含みます。",
       "dwell_run": "停留所での滞留時間と、停留所間の走行時間の内訳を見ます。",

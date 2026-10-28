@@ -1058,6 +1058,9 @@ export type NetworkAgencyRow = {
    *  rates count only those days. */
   covered_days: number;
   window_days: number;
+  /** Why service_delivered_pct is null, or null beside a rate:
+   *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
+  delivered_missing: "no_plan" | "feed_cannot_report" | "feed_unverified" | "unreadable" | null;
   /** False whenever this agency has no manually-configured ridership weights
    * at all -- the weighted-view toggle must key off this, not off
    * weighted_on_time_pct being null (a configured agency with zero samples
@@ -1075,9 +1078,8 @@ export type NetworkAgencyRow = {
   /** Vehicle-km one full run of the current static schedule represents;
    *  null when this agency has no shapes.txt loaded (never 0). */
   planned_vehicle_km: number | null;
-  /** "Vehicle-km delivered" rate -- null (fall back to planned_trip_count
-   *  alone) whenever planned_vehicle_km or service_delivered_pct isn't
-   *  available. */
+  /** "Vehicle-km delivered" rate -- null whenever planned_vehicle_km or
+   *  service_delivered_pct isn't available. */
   vehicle_km_delivered_pct: number | null;
 };
 

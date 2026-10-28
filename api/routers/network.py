@@ -11,6 +11,7 @@ from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
 from pipeline.reports.network import compute_network_summary
+from pipeline.reports.service_delivered import DeliveredMissing
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -43,6 +44,9 @@ class NetworkAgencyRow(BaseModel):
     # days.
     covered_days: int
     window_days: int
+    # Why service_delivered_pct is None, or None beside a rate; see
+    # pipeline.reports.service_delivered.DeliveredMissing.
+    delivered_missing: DeliveredMissing | None
     # pipeline.reports.ridership: has_ridership_weights is False (and
     # weighted_on_time_pct None) whenever this agency has no ridership_weights
     # rows at all -- the frontend toggle must key off has_ridership_weights,
