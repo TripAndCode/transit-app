@@ -2,8 +2,9 @@
 
 An empty decomposition states its true cause: a feed whose arrival times
 cannot be taken in, a check that found the needed fields missing, a check
-that has lapsed, or one that never ran. None of these says the feed sends
-departures only, which no feed this app ingests has been shown to do.
+that has lapsed, or one that never ran. No reason blames a departures-only
+feed: a feed whose arrivals can't be taken in is named as exactly that, and
+the other three describe the check, not the feed.
 """
 
 import pytest
