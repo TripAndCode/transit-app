@@ -317,3 +317,47 @@ async def test_a_route_with_no_day_of_its_timetable_in_range_is_counted_off_time
     body = r.json()
     assert "R_DAY" not in {row["route_code"] for row in body["rows"]}
     assert body["routes_off_timetable"] == 1
+
+
+class _RecordingConn:
+    """An asyncpg connection that keeps every statement it is asked to run."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.sql: list[str] = []
+
+    def __getattr__(self, name):
+        target = getattr(self._conn, name)
+        if name not in ("fetch", "fetchrow", "fetchval", "execute"):
+            return target
+
+        async def recorded(sql, *args, **kwargs):
+            self.sql.append(sql)
+            return await target(sql, *args, **kwargs)
+
+        return recorded
+
+
+async def test_a_full_answer_skips_the_frequency_count(headway_client):
+    """The high-frequency count only explains an empty answer, so an answer
+    with rows never pays for it, while an agency whose feed is untrusted
+    still has it asked first."""
+    from api.range import RangeCtx
+    from pipeline.reports.headway_quality import _FREQUENCY_SQL, compute_headway_quality_report
+
+    _client, aid = headway_client
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 2))
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        recording = _RecordingConn(conn)
+        rows, _, unavailable = await compute_headway_quality_report(aid, ctx, recording)
+        assert rows and unavailable["unavailable_reason"] is None
+        assert _FREQUENCY_SQL not in recording.sql
+
+        await conn.execute("DELETE FROM rt_field_coverage_probes WHERE agency_id = $1", aid)
+        recording = _RecordingConn(conn)
+        rows, _, unavailable = await compute_headway_quality_report(aid, ctx, recording)
+        assert rows == [] and unavailable["unavailable_reason"] == "never_probed"
+        assert _FREQUENCY_SQL in recording.sql
+    finally:
+        await conn.close()

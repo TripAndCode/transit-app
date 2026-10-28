@@ -71,6 +71,13 @@ _FREQUENCY_SQL = """
 """
 
 _AVAILABLE = {"unavailable_reason": None, "last_checked": None}
+_NO_HIGH_FREQUENCY = {"unavailable_reason": "no_high_frequency_routes", "last_checked": None}
+
+
+async def _no_high_frequency_route(agency_id: int, conn) -> bool:
+    """Whether the timetable classified routes but none as high-frequency."""
+    frequency = await conn.fetchrow(_FREQUENCY_SQL, agency_id)
+    return bool(frequency["routes"]) and not frequency["high_frequency"]
 
 
 async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[dict]:
@@ -90,7 +97,9 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     renewed feed check could fill the panel, and it is told ahead of any
     coverage gap. Otherwise it is the agency's
     ``pipeline.strategies.static_join.CoverageGap`` when the feed's fields
-    are not trusted, and None when the rows are worth reading.
+    are not trusted, and None when the rows are worth reading. The
+    classification is read only to explain an empty answer, so a response
+    with rows never pays for it.
 
     Pools `agg_route_headway_daily`'s per-day sufficient statistics
     (`actual_headway_sum_sec` / `actual_headway_sumsq_sec2` /
@@ -128,11 +137,10 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     rows and a zero count for an unconfirmed agency rather than a
     possibly-empty-but-still-queried result.
     """
-    frequency = await conn.fetchrow(_FREQUENCY_SQL, agency_id)
-    if frequency["routes"] and not frequency["high_frequency"]:
-        return [], 0, {"unavailable_reason": "no_high_frequency_routes", "last_checked": None}
     gap = await rt_field_coverage_gap(agency_id, conn)
     if gap is not None:
+        if await _no_high_frequency_route(agency_id, conn):
+            return [], 0, dict(_NO_HIGH_FREQUENCY)
         return [], 0, gap.payload()
 
     frag, params, _ = _daily_filter(ctx, 2)
@@ -147,6 +155,8 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
         ORDER BY h.route_code, d.date
     """
     rows = await conn.fetch(sql, agency_id, *params)
+    if not rows and await _no_high_frequency_route(agency_id, conn):
+        return [], 0, dict(_NO_HIGH_FREQUENCY)
     classes = await load_dominant_day_types(conn, agency_id) if rows else {}
     day_types = (
         await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
