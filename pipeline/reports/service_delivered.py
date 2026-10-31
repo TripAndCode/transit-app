@@ -36,11 +36,9 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_cover
 
 #: Why an agency's rate is ``None``, in the order the checks run: no plan to
 #: measure against; an ingest strategy that cannot carry the trip status at
-#: all; or a strategy that can, but no live verdict says this feed does (a
-#: verdict never recorded reads the same as one that expired, see
-#: ``pipeline.strategies.static_join``). ``"unreadable"`` is for a caller
-#: whose read of these figures failed outright, so a reader can tell a failed
-#: read from a real plan of nothing.
+#: all; or one that can, but no live verdict says this feed does.
+#: ``"unreadable"`` is for a caller whose read of these figures failed
+#: outright, so a failed read is never shown as a real plan of nothing.
 DeliveredMissing = Literal["no_plan", "feed_cannot_report", "feed_unverified", "unreadable"]
 
 # A day has a plan when planned_trips_daily saved one for it or the loaded

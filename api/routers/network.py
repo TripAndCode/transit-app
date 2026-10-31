@@ -60,7 +60,7 @@ class NetworkAgencyRow(BaseModel):
     # date-range total). planned_vehicle_km and vehicle_km_delivered_pct are
     # None together whenever vehicle-km isn't computable (no shapes.txt) or
     # the executed/planned trip ratio isn't available for this agency —
-    # never a misleading 100%; the UI falls back to planned_trip_count alone.
+    # never a misleading 100%; delivered_missing says why the ratio is absent.
     static_version_id: str | None
     planned_trip_count: int | None
     planned_vehicle_km: float | None

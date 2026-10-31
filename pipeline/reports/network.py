@@ -34,9 +34,8 @@ weight.
 `pipeline.reports.supply.compute_supply_metrics_by_agency` — see that module
 for why these describe the current static-feed version's schedule
 definition rather than a date-range total, and why
-``vehicle_km_delivered_pct`` reads `None` ("trip-count-only" — fall back to
-`planned_trip_count`) whenever either the vehicle-km figure or the
-executed/planned trip ratio isn't available for this agency.
+``vehicle_km_delivered_pct`` reads `None` whenever either the vehicle-km
+figure or the executed/planned trip ratio isn't available for this agency.
 """
 
 import logging
