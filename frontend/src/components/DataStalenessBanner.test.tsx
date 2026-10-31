@@ -32,8 +32,8 @@ function hoursAgoIso(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
-// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
-// max-width:640px query used by useTapToExpandBanner.
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper, at the shared
+// max-width:640px phone breakpoint.
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
     matches,
@@ -48,6 +48,8 @@ function mockMatchMedia(matches: boolean) {
 }
 
 describe("DataStalenessBanner", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("shows a warning when the latest observation is stale (> 24h old)", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: summary({ latest_captured_at: hoursAgoIso(48) }),
@@ -74,15 +76,16 @@ describe("DataStalenessBanner", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("renders the message as a single tappable line on a narrow viewport", () => {
+  it("prints the whole message on a narrow viewport, with the dismiss button its only control", () => {
     mockMatchMedia(true);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: summary({ latest_captured_at: hoursAgoIso(48) }),
     } as never);
     renderBanner();
-    const buttons = screen.getAllByRole("button");
-    const messageButton = buttons.find((b) => b.getAttribute("aria-expanded") === "false");
-    expect(messageButton).toBeDefined();
+    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Dismiss" })]);
+    const message = screen.getByText(/Data is out of date/);
+    expect(message.style.textOverflow).toBe("");
+    expect(message.style.whiteSpace).toBe("");
     vi.restoreAllMocks();
   });
 });

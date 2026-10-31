@@ -75,7 +75,7 @@ A route you check often can go into **My routes** in the sidebar: press **Pin**,
 
 The field at the top of every agency screen, “Search routes, reports and screens”, opens a search box (shortcut ⌘K on a Mac, Ctrl+K elsewhere). Type to jump to a screen, an agency, a route, a report or a time band.
 
-Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible. Days without readings are left out, not counted as on time.
+Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible; the figures on screen already leave those out. Days without readings are left out, not counted as on time.
 
 ### On a phone
 
@@ -86,7 +86,7 @@ On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **
 On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 - “Data is out of date — last ingest: …” appears when no new reading has arrived for a day or more. Data collection is running behind; the app itself is working. Close the notice with ×.
-- A “Feed health” notice says how many implausible readings (likely from a stuck or stale feed) were filtered out over the last 7 days. The figures on screen already leave them out.
+- “… implausible readings are left out of the figures. The figures shown already exclude them.” appears when 0.1% or more of the readings over the last 7 analyzed days were set aside as implausible (likely a stuck or stale feed). Below that there is no notice, and the count appears only under “How fresh the data is”. × dismisses it.
 
 ---
 

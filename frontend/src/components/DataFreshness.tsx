@@ -53,6 +53,9 @@ export function DataFreshness({ agencyId, through }: { agencyId: number; through
             <dt>{t("topbar.freshness.set_aside")}</dt>
             <dd>{data ? formatNumber(data.clamp_count) : EM_DASH}</dd>
           </dl>
+          {/* Every set-aside count is told here; the shell banner repeats it
+              only past FEED_HEALTH_BANNER_MIN_SHARE (api/feedHealth.ts). */}
+          {data != null && data.clamp_count > 0 && <p>{t("topbar.freshness.set_aside_note")}</p>}
           <p>{t("topbar.freshness.note")}</p>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
@@ -28,8 +28,8 @@ function renderBanner() {
   );
 }
 
-// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
-// max-width:640px query used by useTapToExpandBanner.
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper, at the shared
+// max-width:640px phone breakpoint.
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
     matches,
@@ -44,30 +44,47 @@ function mockMatchMedia(matches: boolean) {
 }
 
 describe("FeedHealthBanner", () => {
-  it("shows the count when clamp_count > 0", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("says how many readings were left out once they reach a thousandth of the readings", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
-      data: summary({ clamp_count: 1906 }),
+      data: summary({ raw_samples: 1_011_299, clamp_count: 2_321 }),
     } as never);
     renderBanner();
     const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("1,906");
+    expect(banner).toHaveTextContent(
+      "2,321 implausible readings are left out of the figures. The figures shown already exclude them.",
+    );
     // scripts/capture_user_manual_screenshots.py hides the shell banners by this attribute.
     expect(banner).toHaveAttribute("data-shell-banner");
   });
 
-  it("renders the message as a single tappable line on a narrow viewport", () => {
-    mockMatchMedia(true);
+  it("shows at exactly a thousandth", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
-      data: summary({ clamp_count: 5 }),
+      data: summary({ raw_samples: 100_000, clamp_count: 100 }),
     } as never);
     renderBanner();
-    // The message itself becomes a second, distinctly-named "button" (tap to
-    // expand) alongside the existing dismiss "×" button — getByRole with a
-    // name scopes to it specifically, so this fails loudly if the dismiss
-    // button's own accessible name ever collided with the message text.
-    const messageButton = screen.getByRole("button", { name: /5/ });
-    expect(messageButton).toHaveAttribute("aria-expanded", "false");
-    vi.restoreAllMocks();
+    expect(screen.getByRole("status")).toHaveTextContent("100 implausible readings");
+  });
+
+  it("renders nothing below a thousandth, leaving the count to the freshness panel", () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ raw_samples: 19_345_155, clamp_count: 112 }),
+    } as never);
+    renderBanner();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("prints the whole message on a narrow viewport, with the dismiss button its only control", () => {
+    mockMatchMedia(true);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ raw_samples: 1_000, clamp_count: 5 }),
+    } as never);
+    renderBanner();
+    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Dismiss" })]);
+    const message = screen.getByText(/5 implausible readings/);
+    expect(message.style.textOverflow).toBe("");
+    expect(message.style.whiteSpace).toBe("");
   });
 
   it("renders nothing when clamp_count is 0 (healthy feed)", () => {
