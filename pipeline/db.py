@@ -210,13 +210,19 @@ def build_stop_visits_ch_sql(
 
     The visit is keyed on `(trip_id, service date, stop_sequence)` alone.
     `route_code`, `service_type` and `scheduled_time` come from the latest
-    departure poll, or the latest arrival poll for an arrival-only visit, each
-    wrapped in a tuple so a NULL there is kept rather than skipped by
-    `argMax`. Ingest looks all three up by trip and stop, so they agree across
-    a visit's polls unless a static reload lands between them. Keying on them
+    departure poll, or the latest arrival poll for an arrival-only visit.
+    Ingest looks all three up by trip and stop, so they agree across a
+    visit's polls unless a static reload lands between them. Keying on them
     would then split the arrival from its departure and leave two rows for
     one stop in a running-time window. Wherever they agree, a row with a
     departure is the dedup's row for that visit, column for column.
+
+    Each kind is one `argMaxIf` over a tuple of the poll's delay and schedule
+    columns: one state per kind keeps a full-history rebuild's GROUP BY close
+    to the dedup's cost, the delay and the columns filed with it always come
+    from the same poll, and a NULL inside the tuple is kept rather than
+    skipped the way `argMax` skips a NULL argument. A kind with no plausible
+    reading leaves the default tuple, whose delay is NULL.
 
     `scheduled_sec`, when requested, is the latest departure poll's, as in the
     dedup, and NULL for an arrival-only visit.
@@ -234,26 +240,24 @@ def build_stop_visits_ch_sql(
     dep_ok = _plausible_delay_ch("u.dep_delay")
     arr_ok = _plausible_delay_ch("u.arr_delay")
     latest = "(u.captured_at, u.file_name)"
-    key = "tuple(u.route_code, u.service_type, u.scheduled_time)"
+    schedule = "u.route_code, u.service_type, u.scheduled_time"
+    sched_sec = ", u.scheduled_sec" if include_scheduled_sec else ""
     extra = f" AND ({extra_where})" if extra_where else ""
-    scheduled_sec_inner = (
-        f", tupleElement(argMaxIf(tuple(u.scheduled_sec), {latest}, {dep_ok}), 1) AS visit_scheduled_sec"
-        if include_scheduled_sec
-        else ""
+    filed_under = ", ".join(
+        f"if(tupleElement(visit_dep, 1) IS NOT NULL, tupleElement(visit_dep, {i}), tupleElement(visit_arr, {i})) "
+        f"AS {name}"
+        for i, name in ((2, "route_code"), (3, "service_type"), (4, "scheduled_time"))
     )
-    scheduled_sec_outer = ", visit_scheduled_sec AS scheduled_sec" if include_scheduled_sec else ""
     return (
-        "SELECT tupleElement(visit_key, 1) AS route_code, tupleElement(visit_key, 2) AS service_type, "
-        "tupleElement(visit_key, 3) AS scheduled_time, visit_trip_id AS trip_id, visit_date AS date, "
-        f"visit_stop_sequence AS stop_sequence, visit_dep_delay AS dep_delay{scheduled_sec_outer}, "
-        "visit_arr_delay AS arr_delay "
+        f"SELECT {filed_under}, visit_trip_id AS trip_id, visit_date AS date, "
+        "visit_stop_sequence AS stop_sequence, tupleElement(visit_dep, 1) AS dep_delay"
+        + (", tupleElement(visit_dep, 5) AS scheduled_sec" if include_scheduled_sec else "")
+        + ", tupleElement(visit_arr, 1) AS arr_delay "
         "FROM ("
         f"SELECT u.trip_id AS visit_trip_id, {service_date_ch('u.captured_at')} AS visit_date, "
         "u.stop_sequence AS visit_stop_sequence, "
-        f"if(countIf({dep_ok}) > 0, argMaxIf({key}, {latest}, {dep_ok}), argMaxIf({key}, {latest}, {arr_ok})) "
-        "AS visit_key, "
-        f"argMaxIf(u.dep_delay, {latest}, {dep_ok}) AS visit_dep_delay{scheduled_sec_inner}, "
-        f"argMaxIf(u.arr_delay, {latest}, {arr_ok}) AS visit_arr_delay "
+        f"argMaxIf(tuple(u.dep_delay, {schedule}{sched_sec}), {latest}, {dep_ok}) AS visit_dep, "
+        f"argMaxIf(tuple(u.arr_delay, {schedule}), {latest}, {arr_ok}) AS visit_arr "
         f"FROM {checked_table(table)} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
         f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
