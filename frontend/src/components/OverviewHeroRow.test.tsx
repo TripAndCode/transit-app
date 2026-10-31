@@ -233,19 +233,19 @@ describe("OverviewHeroRow", () => {
     expect(onOpenFact).toHaveBeenCalledWith("late_routes");
   });
 
-  it("gives the late-route count, and only it, the warm tone while any route is late", () => {
+  it("prints the late-route count in ink like every other fact while routes are late", () => {
     mockFeed(0.1);
-    const { container } = renderHero();
-    const warm = container.querySelectorAll(".ov-hero-fact--attn");
-    expect(warm).toHaveLength(1);
-    expect(warm[0]).toHaveAccessibleName(/Averaging 5 min or more late/);
+    renderHero();
+    const late = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
+    expect(late).toHaveClass("ov-hero-fact", { exact: true });
   });
 
-  it("keeps the late-route count neutral when no route is in the top band", () => {
+  it("prints a zero late-route count the same way", () => {
     mockFeed(0.1);
-    const { container } = renderHero({ severeCount: 0 });
-    expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("0/ 38 routes");
-    expect(container.querySelector(".ov-hero-fact--attn")).toBeNull();
+    renderHero({ severeCount: 0 });
+    const late = screen.getByRole("button", { name: /Averaging 5 min or more late/ });
+    expect(late).toHaveTextContent("0/ 38 routes");
+    expect(late).toHaveClass("ov-hero-fact", { exact: true });
   });
 
   // The routes-to-check list holds five routes; the count is the server's,

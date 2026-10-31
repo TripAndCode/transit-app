@@ -62,46 +62,53 @@
   margin-top: 18px;
 }
 
-.ov-pareto-row {
+/* The rows share one grid, so every route's name starts on one column, plate
+   or none: the plate track is as wide as the widest plate the list shows
+   (RouteLabel.css, plate column). Margins space the tracks rather than a
+   column gap, which would indent the names of a list without plates by an
+   empty track's gap. */
+.ov-pareto-list {
   display: grid;
-  grid-template-columns: minmax(160px, 1.2fr) 2.5fr 56px;
+  grid-template-columns: [plate] auto [name] minmax(120px, 1.2fr) [bar] 2.5fr [pct] 56px;
+  column-gap: 0;
+}
+.ov-pareto-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 10px;
   font-size: 13px;
   padding: 6px 8px;
   margin: 0 -8px;
   border-radius: var(--radius);
   transition: background-color var(--dur-1) var(--ease-out);
 }
-/* Plain fallback first: color-mix() has no built-in fallback, and an
-   engine without it would resolve `background` to its initial value
-   (transparent) — silently losing the hover feedback. The fallback is the
-   exact original literal (not a --trend-*-bg token, whose fixed opacity
-   doesn't match this rule's intended percentage) so it's a precise, not
-   approximate, degradation. */
-.ov-pareto-row:hover { background: rgba(180, 83, 9, 0.04); background: color-mix(in srgb, var(--trend-bad) 4%, transparent); }
+.ov-pareto-row:hover { background: var(--hover-tint); }
 .ov-pareto-label {
+  grid-column: plate / bar;
+  display: grid;
+  grid-template-columns: subgrid;
   color: var(--text-primary);
   font-weight: 500;
 }
 .ov-pareto-track {
+  margin-inline: 10px;
   height: 8px;
   background: var(--track-bg);
   border-radius: var(--radius);
   overflow: hidden;
   position: relative;
 }
+/* A share of the delay, not a delay: the neutral tone of the service-split
+   bars, the same at every rank, since the bar's length already ranks it.
+   The delay scale's colours stay with minutes. Plain fallback first, for an
+   engine without color-mix(). */
 .ov-pareto-fill {
   height: 100%;
   border-radius: var(--radius);
-  outline: 1px solid var(--border-soft);
-  outline-offset: -1px;
-  /* Rank intensity arrives as a custom property rather than an inline
-     opacity, which would outrank the hover rule below. */
-  opacity: var(--rank-opacity, 1);
-  transition: opacity var(--dur-1) var(--ease-out);
+  background: rgba(71, 85, 105, 0.5);
+  background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
 }
-.ov-pareto-row:hover .ov-pareto-fill { opacity: calc(var(--rank-opacity, 1) * 0.85); }
 .ov-pareto-pct {
   text-align: right;
   color: var(--text-secondary);
@@ -123,7 +130,14 @@
   color: var(--text-tertiary);
   margin-bottom: 10px;
 }
+/* One grid for every row, as .ov-pareto-list, so the names line up. */
+.ov-check-list {
+  display: grid;
+  grid-template-columns: [plate] auto [name] minmax(0, 1fr) [bar] auto [figures] auto [arrow] auto;
+  column-gap: 0;
+}
 .ov-check-band-hd {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -136,9 +150,10 @@
   transition: transform var(--dur-3) var(--ease-out);
 }
 .ov-check-row {
-  display: flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px;
   padding: 10px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
@@ -155,14 +170,19 @@
   background: var(--bg-soft);
 }
 .ov-check-name {
+  grid-column: plate / bar;
+  display: grid;
+  grid-template-columns: subgrid;
   font-size: var(--text-sm);
   color: var(--text-primary);
-  flex: 1;
-  min-width: 0;
+}
+.ov-check-track,
+.ov-check-figures,
+.ov-check-arrow {
+  margin-inline-start: 12px;
 }
 .ov-check-track {
   width: 120px;
-  flex-shrink: 0;
   height: 4px;
   background: var(--bg-soft);
   border-radius: 2px;
@@ -189,7 +209,6 @@
 .ov-check-arrow {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
-  flex-shrink: 0;
 }
 .ov-check-empty {
   font-size: 13px;
@@ -208,7 +227,6 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  flex-shrink: 0;
   gap: 2px;
   width: 92px;
   text-align: right;
@@ -217,6 +235,9 @@
 .ov-check-change {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+}
+.ov-check-legend {
+  margin: 10px 0 4px;
 }
 .ov-check-more {
   display: inline-block;
@@ -499,9 +520,30 @@
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
   /* The route's name needs the width more than the bar does. */
-  .ov-check-row { gap: 8px; padding: 10px 12px; }
+  .ov-check-row { padding: 10px 12px; }
+  .ov-check-track,
+  .ov-check-figures,
+  .ov-check-arrow { margin-inline-start: 8px; }
   .ov-check-track { width: 48px; }
-  .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
+  /* A concentration route's name takes the row's whole width, its bar and
+     share beneath it: beside them it had a third of a phone's width. */
+  .ov-pareto-list {
+    grid-template-columns: [plate] auto [name] minmax(0, 1fr) [pct] auto;
+  }
+  .ov-pareto-row { font-size: 12px; }
+  .ov-pareto-label {
+    grid-column: plate / -1;
+  }
+  .ov-pareto-track {
+    grid-column: name / pct;
+    grid-row: 2;
+    margin: 6px 10px 0 0;
+  }
+  .ov-pareto-pct {
+    grid-column: pct;
+    grid-row: 2;
+    margin-top: 6px;
+  }
   .ov-modal {
     width: 100%;
     max-height: 100vh;
@@ -724,12 +766,6 @@
   line-height: 1.1;
   color: var(--text-primary);
   white-space: nowrap;
-}
-/* The hero's only warm value: --d4 on the large numeral clears 4.5:1
-   on the light surface and the 3:1 large-text floor on the dark one, so it
-   stays on the figure only and never reaches the small unit beside it. */
-.ov-hero-fact--attn .ov-hero-fact-value {
-  color: var(--d4);
 }
 .ov-hero-fact-unit {
   margin-left: 4px;

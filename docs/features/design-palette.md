@@ -40,8 +40,9 @@ a delay onto them, and `delayScaleSteps()` (`delayScale.ts`, which
 `DelayScaleLegend` renders) labels them for every legend, so a label cannot
 drift from the colour it explains. They shade the Time page's heat surface
 and hourly heatmap, the forecast's band grids, day × hour grid and bars, the
-period brush, the day-pulse gradient, the scope and rail swatches, and the
-bars of both Compare views (the weekday/weekend bars and the agencies board). The
+period brush, the day-pulse gradient, the scope and rail swatches, the bars
+of both Compare views (the weekday/weekend bars and the agencies board), and
+the bars of Pulse's routes-to-check list, which carries the legend too. The
 hourly heatmap and the band grids draw no outline over a heavy cell; the heat
 surface keeps its neutral inset ring (`ringFor`) at the moderate and severe
 cuts. Other charts, tables and the map color delay through the

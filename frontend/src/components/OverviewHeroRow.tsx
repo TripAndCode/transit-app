@@ -246,9 +246,6 @@ export function OverviewHeroRow({
                 <span className="ov-hero-fact-unit">{t("overview.hero_row.fact_share_unit")}</span>
               </FactRow>
             )}
-            {/* The hero's only warm value, and only while a route is over the
-                bound: it is the finding that asks for action. Gated on the
-                real count, not the counting-up display, which starts from 0. */}
             {/* Out of the routes the list ranks, not the timetable's: the
                 count and its total are one population, and the period line
                 says which. */}
@@ -256,7 +253,6 @@ export function OverviewHeroRow({
               label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
               period={t("overview.hero_row.fact_late_routes_period", { range, min: minSamples })}
               onClick={() => onOpenFact("late_routes")}
-              attention={severeCount > 0}
             >
               {severeCountDisplay}
               <span className="ov-hero-fact-unit">
@@ -275,18 +271,16 @@ function FactRow({
   label,
   period,
   onClick,
-  attention = false,
   children,
 }: {
   label: string;
   period: string;
   onClick: () => void;
-  attention?: boolean;
   children: ReactNode;
 }) {
   return (
     <li>
-      <button type="button" className={`ov-hero-fact${attention ? " ov-hero-fact--attn" : ""}`} onClick={onClick}>
+      <button type="button" className="ov-hero-fact" onClick={onClick}>
         <span className="ov-hero-fact-label">
           {label}{" "}
           <span className="ov-hero-fact-period">{period}</span>

@@ -68,14 +68,13 @@ describe("ConcentrationBar", () => {
     expect(fills[1]).toBeCloseTo(33.33, 1);
   });
 
-  it("hands each fill its rank opacity as a custom property, so the stylesheet's hover rule can still change it", () => {
+  it("leaves each fill's colour to the stylesheet's one neutral tone, with no rank fade", () => {
     const { container } = renderBar(<ConcentrationBar periodRange={PERIOD} concentration={concentration} />);
     const fills = [...container.querySelectorAll<HTMLElement>(".ov-pareto-fill")];
     expect(fills).toHaveLength(2);
-    // An inline `opacity` outranks every class rule, which would leave the
-    // hover affordance in overview.css with nothing to act on.
+    expect(fills.map((f) => f.style.background)).toEqual(["", ""]);
     expect(fills.map((f) => f.style.opacity)).toEqual(["", ""]);
-    expect(fills.map((f) => f.style.getPropertyValue("--rank-opacity"))).toEqual(["1", "0.8"]);
+    expect(fills.map((f) => f.style.getPropertyValue("--rank-opacity"))).toEqual(["", ""]);
   });
 
   it("labels each route with the shared route label, never its route_id", () => {
@@ -99,6 +98,28 @@ describe("ConcentrationBar", () => {
     expect(labels[1].querySelector(".route-label__ends")).toHaveTextContent("広島バスセンター → あさひが丘下");
     expect(container).not.toHaveTextContent("360868713");
     expect(container).not.toHaveTextContent("1471981638");
+  });
+
+  it("sets every row in one list whose labels share a plate column, plate or none", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar
+        periodRange={PERIOD}
+        concentration={{
+          top_routes: [
+            { route_code: "360868713", route_short_name: "3", share_pct: 6.2 },
+            { route_code: "1471981638", route_short_name: "70-3", share_pct: 4.4 },
+            { route_code: "99", route_short_name: null, share_pct: 1 },
+          ],
+          rest_share_pct: 88.4,
+          rest_route_count: 155,
+        }}
+      />,
+    );
+    const list = container.querySelector(".ov-pareto-list");
+    expect(list?.querySelectorAll(":scope > .ov-pareto-row")).toHaveLength(3);
+    const labels = [...container.querySelectorAll(".ov-pareto-label")].map((cell) => cell.firstElementChild);
+    expect(labels.every((label) => label?.classList.contains("route-label--plate-column"))).toBe(true);
   });
 
   it("names a route by the payload's short name until the static routes load", () => {

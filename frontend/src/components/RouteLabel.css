@@ -69,3 +69,27 @@
   color: var(--text-tertiary);
   font-size: 0.9em;
 }
+
+/* A label in a list that lines its routes' names up on one column, plate or
+   none (`plateColumn`). The list's grid holds a plate track, as wide as its
+   widest plate, and a name track, and passes both down through the row and
+   the label's cell as subgrids; the label then sets its plate in the first
+   and everything else in the second. The plate brings its own spacing, so a
+   list with no plate at all has a zero-width plate track and starts its
+   names flush. Placed last: it overrides the label's own grid rules above at
+   equal specificity. */
+.route-label.route-label--plate-column {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 0;
+}
+
+.route-label.route-label--plate-column > .route-label__plate {
+  justify-self: start;
+  margin-inline-end: 0.6em;
+}
+
+.route-label.route-label--plate-column > :not(.route-label__plate) {
+  grid-column: 2 / -1;
+}

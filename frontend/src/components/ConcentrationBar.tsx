@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
@@ -23,9 +22,6 @@ type Props = {
   /** When set, the card becomes clickable. */
   onClick?: () => void;
 };
-
-// Saturation-by-rank intensity. Top row is fully saturated; rank 5 fades.
-const RANK_OPACITY = [1, 0.8, 0.6, 0.45, 0.35];
 
 export function ConcentrationBar({
   concentration,
@@ -134,27 +130,19 @@ export function ConcentrationBar({
         })}
       </p>
 
-      {visibleRoutes.map((r, idx) => {
-        const opacity = RANK_OPACITY[Math.min(idx, RANK_OPACITY.length - 1)];
-        return (
+      <div className="ov-pareto-list">
+        {visibleRoutes.map((r) => (
           <div className="ov-pareto-row" key={r.route_code}>
             <div className="ov-pareto-label">
-              <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
+              <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} plateColumn />
             </div>
             <div className="ov-pareto-track">
-              <div
-                className="ov-pareto-fill"
-                style={{
-                  width: `${maxShare > 0 ? (r.share_pct / maxShare) * 100 : 0}%`,
-                  background: "var(--trend-bad)",
-                  "--rank-opacity": opacity,
-                } as CSSProperties}
-              />
+              <div className="ov-pareto-fill" style={{ width: `${maxShare > 0 ? (r.share_pct / maxShare) * 100 : 0}%` }} />
             </div>
             <div className="ov-pareto-pct num">{fixedTenth(r.share_pct)}%</div>
           </div>
-        );
-      })}
+        ))}
+      </div>
       {restPct > 0 && restCount > 0 && (
         <p className="ov-pareto-rest">
           {t("overview.concentration_rest", {
