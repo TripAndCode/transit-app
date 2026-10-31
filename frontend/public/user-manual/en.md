@@ -50,7 +50,7 @@ You can also type an agency’s name into the search field at the top of the scr
 
 ### The sidebar
 
-The sidebar on the left lists the screens. Each one answers one kind of question.
+The sidebar on the left lists the screens. Each one answers one kind of question. The circle beside each screen’s name holds its icon, the same one the bottom bar shows on a phone.
 
 | Screen | What it answers |
 |---|---|

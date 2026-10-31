@@ -437,6 +437,21 @@ describe("Sidebar", () => {
       expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies"]);
     });
 
+    it("marks each station with its screen's own icon rather than a station code, the link carrying the name", async () => {
+      const user = userEvent.setup();
+      const { container } = renderSidebar("/agencies/8/pulse");
+      const badges = [...container.querySelectorAll(".rail-line .rail-station .rail-badge")];
+      expect(badges).toHaveLength(7);
+      for (const badge of badges) {
+        expect(badge).toHaveAttribute("aria-hidden", "true");
+        expect(badge.querySelector("svg")).not.toBeNull();
+        expect(badge.textContent).toBe("");
+      }
+      expect(screen.getByRole("link", { name: /^Pulse/ })).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.getByRole("link", { name: "Pulse" })).toBeTruthy();
+    });
+
     it("names Ask by its label alone, with no transfer tag that reads as a journey planner", () => {
       renderSidebar();
       expect(screen.getByRole("link", { name: "Ask" })).not.toHaveTextContent("Transfer");
