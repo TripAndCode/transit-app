@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ruleBody, decl } from "../test/cssRules";
-import { contrastRatio } from "./tokens";
 
 const css = readFileSync(resolve(__dirname, "./overview.css"), "utf-8");
 const uiCss = readFileSync(resolve(__dirname, "../components/ui/ui.css"), "utf-8");
@@ -87,8 +86,6 @@ describe("overview.css living hero", () => {
 });
 
 describe("overview.css hero facts", () => {
-  const globalCss = readFileSync(resolve(__dirname, "./global.css"), "utf-8");
-  const token = (block: string, prop: string) => decl(ruleBody(globalCss, block), prop)!;
 
   it("the verdict chip stays neutral, whatever the direction", () => {
     const chip = ruleBody(css, ".ov-hero-state {");
