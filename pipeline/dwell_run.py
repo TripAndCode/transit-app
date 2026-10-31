@@ -7,21 +7,21 @@ actual arrival minus the PREVIOUS stop visit's actual departure (same trip,
 same service day). Both derive an "actual" timestamp (seconds since the
 service day's midnight) from the static schedule's own arrival_time/
 departure_time (``static_stop_times``) plus the RT feed's `arr_delay`/
-`dep_delay` for that stop visit -- `agg_route_daily_dist` and every other
-pre-existing `agg_*` builder never read `arr_delay` or the schedule's
-`arrival_time`; `_analyze_deduped` carries `arr_delay` solely so this
-module's own analyze()-time materialization (`agg_route_daily_dwell_run`,
-see pipeline/analyze.py) can consume it.
+`dep_delay` for that stop visit.
 
-A dwell-time observation needs this visit's own `arr_delay`; a running-time
-observation needs this visit's `arr_delay` too, PLUS the PREVIOUS visit's
-`dep_delay` (always present once dep_delay is non-NULL at all -- see
-pipeline.db.build_dedup_ch_sql's ``dep_delay IS NOT NULL`` filter). So a
-stop visit with `arr_delay` populated contributes a dwell-time observation
-always, and a running-time observation whenever a previous visit exists in
-the same trip/service day -- `arr_delay`'s own sparse, per-row coverage (see
-pipeline/strategies/static_join.py's parse_feed docstring) means most stop
-visits contribute neither.
+The feed reports a stop's arrival and its departure in separate polls, never
+on one row, and a trip's last stop only as an arrival.
+`pipeline.db.build_stop_visits_ch_sql` pairs the two per stop visit; both
+readers (analyze()'s `agg_route_daily_dwell_run` and the Ask tool's
+`schedule_realism_padding`) take their visits from it. A visit can therefore
+lack either side:
+
+- with both, it yields a dwell time, and a running time when the previous
+  visit's departure is known;
+- with only an arrival (always the terminus), it yields a running time and
+  no dwell, and leaves the next visit's running time unknown;
+- with only a departure, it yields neither, but anchors the next visit's
+  running time.
 
 Only ingest strategies confirmed to send `StopTimeUpdate.arrival`
 (`ingest_strategy == 'static_join'` -- same agencies as
@@ -98,11 +98,12 @@ def actual_arrival_sec(sched_arr_sec: int | None, arr_delay: int | None) -> int 
     return sched_arr_sec + arr_delay
 
 
-def actual_departure_sec(sched_dep_sec: int | None, dep_delay: int) -> int | None:
+def actual_departure_sec(sched_dep_sec: int | None, dep_delay: int | None) -> int | None:
     """Actual departure time (seconds since the service day's midnight), or
-    ``None`` when the static schedule has no `departure_time` for this stop
-    visit."""
-    if sched_dep_sec is None:
+    ``None`` when the RT feed reported this stop visit only as an arrival
+    (`dep_delay` is NULL) or the static schedule has no `departure_time` for
+    it."""
+    if sched_dep_sec is None or dep_delay is None:
         return None
     return sched_dep_sec + dep_delay
 
@@ -136,7 +137,8 @@ class StopVisit:
     midnight (``None`` when the schedule has no value for this stop --
     common for `arrival_time` at non-timepoint stops in some GTFS feeds).
     `arr_delay` is ``None`` when the RT feed never sent this stop visit's
-    arrival; `dep_delay` is always a real int (see module docstring).
+    arrival, `dep_delay` when it reported the visit only as an arrival (see
+    the module docstring).
     """
 
     __slots__ = ("arr_delay", "dep_delay", "sched_arr_sec", "sched_dep_sec", "stop_sequence")
@@ -147,7 +149,7 @@ class StopVisit:
         sched_arr_sec: int | None,
         sched_dep_sec: int | None,
         arr_delay: int | None,
-        dep_delay: int,
+        dep_delay: int | None,
     ) -> None:
         self.stop_sequence = stop_sequence
         self.sched_arr_sec = sched_arr_sec

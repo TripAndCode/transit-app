@@ -86,7 +86,13 @@ What the user sees/does:
   instead renders `WhyAnalyses`, whose `DwellRunBlock` is a per-route
   dwell-time/running-time table decomposing `arr_delay` (populated only for
   `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately from
-  the existing delay histogram. A route with neither a dwell nor a running
+  the existing delay histogram. The feed reports a stop's arrival and its
+  departure in separate polls, and a trip's last stop only as an arrival, so
+  analyze pairs them per stop visit (trip, service day, stop) with
+  `pipeline/db.py`'s `build_stop_visits_ch_sql`, each side the latest
+  plausible reading of its own kind under the same delay clamp. Dwell needs
+  both sides of a visit; running time needs this visit's arrival and the
+  previous visit's departure, which is how the terminus gets one. A route with neither a dwell nor a running
   sample in range is left out; when routes are in scope but every one is,
   the payload stays `available` and names `no_paired_samples`, which the
   not-shown list states without suggesting another filter (an empty scope

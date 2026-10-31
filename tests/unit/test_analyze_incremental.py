@@ -484,7 +484,7 @@ def test_analyze_names_the_bootstrap_when_a_clickhouse_aggregate_table_is_missin
 
 
 def test_the_dated_slice_loads_no_capture_time():
-    """No builder reading _analyze_deduped needs a capture time, so its load leaves it out."""
+    """No builder reading _analyze_visits needs a capture time, so its load leaves it out."""
     _, ch = _changed_run()
     dated = [s for s in ch.streams if "arr_delay" in s and "service_type IS NOT NULL" not in s]
     assert dated, "the changed run loaded no dated slice"

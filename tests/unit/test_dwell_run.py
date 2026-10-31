@@ -42,6 +42,11 @@ def test_actual_departure_is_none_without_schedule():
     assert actual_departure_sec(None, 90) is None
 
 
+def test_actual_departure_is_none_without_dep_delay():
+    # A trip's last stop is only ever reported as an arrival.
+    assert actual_departure_sec(36000, None) is None
+
+
 def test_dwell_seconds_is_departure_minus_arrival():
     # Bus arrives at 10:00:45, departs at 10:02:30 -> 105s dwell.
     assert dwell_seconds(36045, 36150) == 105
@@ -123,6 +128,34 @@ def test_compute_trip_dwell_running_missing_schedule_yields_none_not_zero():
     # unknown (no schedule) -- so it's None too, not silently skipped to
     # some earlier known stop.
     assert result[1]["running_sec"] is None
+
+
+def test_compute_trip_dwell_running_with_arrival_only_and_departure_only_visits():
+    """The feed reports a stop's arrival and its departure in separate polls,
+    and some visits get only one of them.
+
+    Schedule: stop 1 10:00:00, stop 2 10:05:00/10:06:00, stop 3 10:10:00,
+    stop 4 (terminus) 10:15:00.
+
+    RT delays:
+      stop 1 (origin): arrival 0, departure +30 -> dwell 30; no running (first stop)
+      stop 2: arrival only, +20 -> actual arrival 36320; running 36320 - 36030 = 290;
+              no dwell, and no departure for stop 3 to run from
+      stop 3: departure only, +10 -> no arrival, so no dwell and no running
+      stop 4: arrival only, +60 -> actual arrival 36960; running 36960 - 36610 = 350
+    """
+    visits = [
+        StopVisit(stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=0, dep_delay=30),
+        StopVisit(stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=None),
+        StopVisit(stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=None, dep_delay=10),
+        StopVisit(stop_sequence=4, sched_arr_sec=36900, sched_dep_sec=36900, arr_delay=60, dep_delay=None),
+    ]
+    assert compute_trip_dwell_running(visits) == [
+        {"stop_sequence": 1, "dwell_sec": 30, "running_sec": None},
+        {"stop_sequence": 2, "dwell_sec": None, "running_sec": 290},
+        {"stop_sequence": 3, "dwell_sec": None, "running_sec": None},
+        {"stop_sequence": 4, "dwell_sec": None, "running_sec": 350},
+    ]
 
 
 def test_dwell_bucket_bounds_and_count():

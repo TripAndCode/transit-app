@@ -200,7 +200,7 @@ def test_static_join_nulls_scheduled_time_on_non_numeric_departure_time_hour(pg_
     non-numeric hour (garbage static data) must null that one row's
     scheduled_time rather than raise ValueError out of parse_feed (taking
     out the whole file's insert_updates batch) OR keep the raw garbage text
-    (which analyze()'s `_analyze_deduped.scheduled_time time` column can't
+    (which analyze()'s `_analyze_visits.scheduled_time time` column can't
     cast, permanently failing that agency's analyze() once the row is
     durably stored in ClickHouse). NULL is already a first-class value
     here -- the row's dep_delay observation is kept, only the unusable

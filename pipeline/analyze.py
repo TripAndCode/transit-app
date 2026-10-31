@@ -89,7 +89,7 @@ import psycopg2.extras
 
 from pipeline import ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, dominant_service_ctes, reconstruct_headways
 from pipeline.histogram import bucket_case_sql, hist_array_sql
@@ -107,31 +107,27 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 5
+ANALYZE_LOGIC_VERSION = 6
 
 # The service date of an observation, spliced into the builders below that
 # group or bucket raw `updates` rows by day (`pipeline.service_day`).
 _SERVICE_DATE = service_date_ch()
 
 
-# The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
-# (see analyze()), because the dedup is the expensive scan and GROUP BY over
-# every date being rebuilt, and every aggregate built in Postgres below needs it. The dedup itself runs in
-# ClickHouse (build_dedup_ch_sql, the `updates` fact table's home) and its result
-# is bulk-loaded into the temp table those builders read; none of them reads
-# `updates` directly. The ClickHouse-computed tables (pipeline/ch_aggregates.py)
-# run their own dedup there instead, or read `updates` whole where a table needs
-# rows the dedup's delay filter drops.
+# The stop visits of the dates being rebuilt are materialised per agency into a
+# Postgres TEMP TABLE, _analyze_visits (see analyze()), for
+# agg_route_daily_dwell_run, the Postgres builder that pairs RT arrivals and
+# departures with the static schedule. The visits are resolved in ClickHouse
+# (build_stop_visits_ch_sql, the `updates` fact table's home) and streamed into
+# the temp table, so no builder here reads `updates` row by row. They carry
+# arrival-only visits, so they are not the departure dedup: the departure-derived
+# tables (pipeline/ch_aggregates.py) run build_dedup_ch_sql in ClickHouse, or read
+# `updates` whole where a table needs rows the dedup's delay filter drops.
 #
-# The temp table, _analyze_deduped, holds every column for only the dates being
-# rebuilt. It is UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス —
-# which the reports and route-summary surface), plus arr_delay
-# (agg_route_daily_dwell_run). The aggregates spanning all of history are
-# finalized in ClickHouse from its internal tables, so no slice of the whole
-# history is loaded here.
-#
-# NULL service is coalesced to '' where it must fit a NOT NULL column; the
-# endpoints map it back.
+# The slice keeps NULL-service rows (notably agency 9, 広島バス). NULL service is
+# coalesced to '' where it must fit a NOT NULL column; the endpoints map it back.
+# The aggregates spanning all of history are finalized in ClickHouse from its
+# internal tables, so no slice of the whole history is loaded here.
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -669,8 +665,8 @@ def _load_temp_table(
     sizes at a few thousand rows however many the table actually holds.
 
     *columns* must list the table's columns in the order *ch_sql*'s SELECT list
-    projects them; see ``build_dedup_ch_sql``'s docstring for the order it
-    guarantees and which optional columns land where.
+    projects them; the SQL builder's docstring states the order it guarantees
+    and which optional columns land where.
 
     ``load=False`` creates the table and skips the scan, for the caller whose
     filter it already knows selects nothing — the table still has to exist,
@@ -1032,22 +1028,21 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                         (agency_id, rebuild_dates),
                     )
 
-        # ── Materialise the deduped fact slice ──────────────────────────
+        # ── Materialise the stop visits ──────────────────────────────────
         # Every column, NULL-service rows included, for only the dates being rebuilt.
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
                 ch_client,
-                # Column order must match build_dedup_ch_sql's SELECT list exactly:
+                # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
                 # route_code, service_type, scheduled_time, trip_id, date,
                 # stop_sequence, dep_delay, arr_delay.
-                table="_analyze_deduped",
+                table="_analyze_visits",
                 columns=(
                     "route_code text, service_type text, scheduled_time time, "
                     "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int"
                 ),
-                ch_sql=build_dedup_ch_sql(
-                    include_arr_delay=True,
+                ch_sql=build_stop_visits_ch_sql(
                     extra_where=_date_predicate(rebuild_dates, "u.captured_at"),
                 ),
                 parameters=date_params,
@@ -1055,7 +1050,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 # skipped rather than asked to prove it — the run where nothing
                 # changed is the common one.
                 load=rebuild_dates != [],
-                label="dedup",
+                label="visits",
             )
 
         # ── agg_feed_health (per-day data-quality signal and rebuild ledger) ──
@@ -1352,9 +1347,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # visit's departure minus its own arrival) and running time (this
         # visit's arrival minus the PREVIOUS visit's departure) -- see
         # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
-        # arr_delay straight from _analyze_deduped (materialised once above)
-        # rather than running its own second ClickHouse scan: the dedup is the
-        # expensive scan, so it runs once and every Postgres builder reads its result.
+        # the stop visits from _analyze_visits (materialised once above): one
+        # row per trip, service day and stop, pairing the arrival and the
+        # departure the feed reports in separate polls. A visit reported only
+        # as an arrival (every trip's terminus) has a NULL dep_delay; one
+        # reported only as a departure, a NULL arr_delay.
         # Requires BOTH a static schedule (arrival_time/departure_time come
         # from static_stop_times, which `has_static` alone confirms rows
         # exist for) AND an ingest strategy confirmed to send `arr_delay`
@@ -1380,7 +1377,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                         d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay,
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
-                    FROM _analyze_deduped d
+                    FROM _analyze_visits d
                     LEFT JOIN static_stop_times sst
                       ON sst.agency_id = %(agency_id)s
                      AND sst.trip_id = d.trip_id
@@ -1394,15 +1391,13 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     -- LAG() window below sees every stop_sequence in order;
                     -- dropping the row would let LAG() silently skip past it
                     -- and pair the FOLLOWING stop with the wrong previous
-                    -- departure. actual_dep_sec is NULL exactly when
-                    -- sched_dep_sec is NULL. actual_arr_sec additionally needs
-                    -- BOTH arr_delay and sched_arr_sec, so it's frequently
-                    -- NULL even when actual_dep_sec resolves -- that's the
-                    -- "dwell/running needs arr_delay, running's previous-stop
-                    -- side only needs dep_delay" split pipeline.dwell_run's
-                    -- module docstring describes.
+                    -- departure. Each actual time needs its own delay and its
+                    -- own scheduled time, so an arrival-only visit (no
+                    -- dep_delay) runs into this stop but leaves the next
+                    -- stop's running time unknown -- the split
+                    -- pipeline.dwell_run's module docstring describes.
                     SELECT route_code, service_type, trip_id, date, stop_sequence,
-                        CASE WHEN sched_dep_sec IS NOT NULL
+                        CASE WHEN dep_delay IS NOT NULL AND sched_dep_sec IS NOT NULL
                              THEN sched_dep_sec + dep_delay END AS actual_dep_sec,
                         CASE WHEN arr_delay IS NOT NULL AND sched_arr_sec IS NOT NULL
                              THEN sched_arr_sec + arr_delay END AS actual_arr_sec
@@ -1493,7 +1488,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # scheduled_sec + dep_delay) -- cardinality is bounded by routes ×
             # stops × days, not by raw observation count, so it's safe to fetch
             # as one block (ch_client.query(), not the streaming reader
-            # `_analyze_deduped` needs) even though the pre-aggregation GROUP BY
+            # `_analyze_visits` needs) even though the pre-aggregation GROUP BY
             # underneath it scans every `updates` row of the dates being rebuilt
             # (the agency's whole history on a full rebuild).
             #

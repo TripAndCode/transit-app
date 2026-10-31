@@ -2004,6 +2004,44 @@ async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_emp
     assert rows[2][0]
 
 
+def _separate_polls(day, trip_id, service_id, visits):
+    """ClickHouse `updates` rows for route 44's *visits*, given as
+    ``(stop_sequence, dep_delay, arr_delay)``, the way the feed reports them:
+    a stop's departure and its arrival in separate polls, never on one row.
+
+    Each row is (file_name, captured_at, trip_id, service_type, scheduled_time,
+    route_code, stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip,
+    sched_rel_stop, feed_timestamp)."""
+    from datetime import timedelta
+
+    rows = []
+    for seq, dep_delay, arr_delay in visits:
+        for kind, at, dep, arr in (
+            ("dep", day, dep_delay, None),
+            ("arr", day + timedelta(seconds=30), None, arr_delay),
+        ):
+            if dep is None and arr is None:
+                continue
+            rows.append(
+                (
+                    f"{kind}-{trip_id}-{seq}.pb",
+                    at,
+                    trip_id,
+                    service_id,
+                    "10:00:00",
+                    "44",
+                    seq,
+                    dep,
+                    "S1",
+                    arr,
+                    None,
+                    None,
+                    None,
+                )
+            )
+    return rows
+
+
 @pytest.mark.asyncio
 async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client):
     """End-to-end: seed a static schedule + ClickHouse `arr_delay`/`dep_delay`
@@ -2033,13 +2071,7 @@ async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, c
         )
 
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
-    # (file_name, captured_at, trip_id, service_type, scheduled_time, route_code,
-    #  stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop, feed_timestamp)
-    rows = [
-        ("f.pb", day, "T1", "平日", "10:00:00", "44", 1, 30, "S1", None, None, None, None),
-        ("f.pb", day, "T1", "平日", "10:00:00", "44", 2, 50, "S1", 20, None, None, None),
-        ("f.pb", day, "T1", "平日", "10:00:00", "44", 3, 10, "S1", 10, None, None, None),
-    ]
+    rows = _separate_polls(day, "T1", "平日", ((1, 30, None), (2, 50, 20), (3, 10, 10)))
     insert_updates(ch_client, agency_id, rows)
     _run_analyze_from_ch(agency_id, ch_client)
 
@@ -2089,9 +2121,9 @@ async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_clien
 
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # Wednesday 2026-04-01 11:00 JST
     rows = [
-        ("f.pb", day, trip_id, service_id, "10:00:00", "44", seq, dep_delay, "S1", arr_delay, None, None, None)
+        row
         for trip_id, service_id in (("T1", "11_平日(共通)"), ("T2", None))
-        for seq, dep_delay, arr_delay in ((1, 30, None), (2, 50, 20), (3, 10, 10))
+        for row in _separate_polls(day, trip_id, service_id, ((1, 30, None), (2, 50, 20), (3, 10, 10)))
     ]
     insert_updates(ch_client, agency_id, rows)
     _run_analyze_from_ch(agency_id, ch_client)

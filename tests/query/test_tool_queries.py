@@ -566,6 +566,43 @@ async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency
     assert result == []
 
 
+def _separate_polls(
+    prefix, day, trip_id, route, stop_sequence, scheduled_time, scheduled_sec, *, dep_delay=None, arr_delay=None
+):
+    """ClickHouse `updates` rows for one stop visit, the way a static_join feed
+    reports it: the departure and the arrival in separate polls, never on one
+    row. Each row is (file_name, captured_at, trip_id, service_type,
+    scheduled_time, route_code, stop_sequence, dep_delay, stop_id, arr_delay,
+    sched_rel_trip, sched_rel_stop, feed_timestamp, scheduled_sec,
+    static_version_id)."""
+    rows = []
+    for kind, at, dep, arr in (
+        ("dep", day, dep_delay, None),
+        ("arr", day + timedelta(seconds=30), None, arr_delay),
+    ):
+        if dep is not None or arr is not None:
+            rows.append(
+                (
+                    f"{prefix}_{kind}{stop_sequence}",
+                    at,
+                    trip_id,
+                    "平日",
+                    scheduled_time,
+                    route,
+                    stop_sequence,
+                    dep,
+                    "S1",
+                    arr,
+                    None,
+                    None,
+                    None,
+                    scheduled_sec,
+                    None,
+                )
+            )
+    return rows
+
+
 @pytest.mark.asyncio
 async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_rate(
     aagency_id, aconn, ch_client, ch_async_client
@@ -622,16 +659,15 @@ async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_ra
 
     day_a = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
     day_b = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
-    # (file_name, captured_at, trip_id, service_type, scheduled_time, route_code,
-    #  stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop,
-    #  feed_timestamp, scheduled_sec, static_version_id)
+    # The feed reports a stop's departure and its arrival in separate polls,
+    # and the terminus only as an arrival.
     rows = [
-        ("pad_a1", day_a, "T_PAD", "平日", "10:00:00", "R9", 1, 0, "S1", None, None, None, None, 36000, None),
-        ("pad_a2", day_a, "T_PAD", "平日", "10:06:00", "R9", 2, 0, "S1", 0, None, None, None, 36360, None),
-        ("pad_a3", day_a, "T_PAD", "平日", "10:15:00", "R9", 3, -300, "S1", -300, None, None, None, 36900, None),
-        ("pad_b1", day_b, "T_PAD", "平日", "10:00:00", "R9", 1, 0, "S1", None, None, None, None, 36000, None),
-        ("pad_b2", day_b, "T_PAD", "平日", "10:06:00", "R9", 2, 0, "S1", 0, None, None, None, 36360, None),
-        ("pad_b3", day_b, "T_PAD", "平日", "10:15:00", "R9", 3, 0, "S1", 0, None, None, None, 36900, None),
+        *_separate_polls("pad_a", day_a, "T_PAD", "R9", 1, "10:00:00", 36000, dep_delay=0),
+        *_separate_polls("pad_a", day_a, "T_PAD", "R9", 2, "10:06:00", 36360, dep_delay=0, arr_delay=0),
+        *_separate_polls("pad_a", day_a, "T_PAD", "R9", 3, "10:15:00", 36900, arr_delay=-300),
+        *_separate_polls("pad_b", day_b, "T_PAD", "R9", 1, "10:00:00", 36000, dep_delay=0),
+        *_separate_polls("pad_b", day_b, "T_PAD", "R9", 2, "10:06:00", 36360, dep_delay=0, arr_delay=0),
+        *_separate_polls("pad_b", day_b, "T_PAD", "R9", 3, "10:15:00", 36900, arr_delay=0),
     ]
     insert_updates(ch_client, aagency_id, rows)
 
@@ -687,9 +723,9 @@ async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(aagency
 
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
     rows = [
-        ("hold_1", day, "T_HOLD", "平日", "10:00:00", "R10", 1, 0, "S1", None, None, None, None, 36000, None),
-        ("hold_2", day, "T_HOLD", "平日", "10:05:30", "R10", 2, 200, "S1", 0, None, None, None, 36330, None),
-        ("hold_3", day, "T_HOLD", "平日", "10:10:00", "R10", 3, 0, "S1", 0, None, None, None, 36600, None),
+        *_separate_polls("hold", day, "T_HOLD", "R10", 1, "10:00:00", 36000, dep_delay=0),
+        *_separate_polls("hold", day, "T_HOLD", "R10", 2, "10:05:30", 36330, dep_delay=200, arr_delay=0),
+        *_separate_polls("hold", day, "T_HOLD", "R10", 3, "10:10:00", 36600, arr_delay=0),
     ]
     insert_updates(ch_client, aagency_id, rows)
 

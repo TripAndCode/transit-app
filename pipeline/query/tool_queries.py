@@ -34,7 +34,7 @@ from dataclasses import replace
 from api.range import DAY_TYPE_SERVICE, RangeCtx, day_types_for
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
-from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
+from pipeline.reports.filters import _ch_rows, _dedup_cte_ch, _stop_visits_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
 from pipeline.stats import linear_percentile
 from pipeline.strategies.static_join import rt_field_coverage_confirmed
@@ -370,6 +370,11 @@ async def schedule_realism_padding(
     which falls back to the dep_delay-only `schedule_realism_segments` view
     when this returns ``available: False`` or no rows.
 
+    Its rows are stop visits (`pipeline.db.build_stop_visits_ch_sql`), which
+    pair each stop's arrival with its departure across the separate polls the
+    feed reports them in, and keep each trip's terminus, which the feed
+    reports only as an arrival.
+
     Only agencies confirmed to send `StopTimeUpdate.arrival`
     (`pipeline.strategies.static_join.rt_field_coverage_confirmed` — the
     shared `RT_INGEST_STRATEGIES` ∩ live-probe-verdict gate every such
@@ -423,11 +428,11 @@ async def schedule_realism_padding(
     if not await rt_field_coverage_confirmed(agency_id, conn):
         return empty
 
-    cte_sql, ch_params = _dedup_cte_ch(ctx, include_arr_delay=True, include_scheduled_sec=True)
+    cte_sql, ch_params = _stop_visits_cte_ch(ctx, include_scheduled_sec=True)
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay\n"
-        "FROM deduped\n"
+        "FROM visits\n"
         "WHERE route_code = {srp_route:String}\n"
         "ORDER BY trip_id, date, stop_sequence",
         parameters={"agency_id": agency_id, "srp_route": str(route), **ch_params},

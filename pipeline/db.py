@@ -221,6 +221,92 @@ def build_dedup_ch_sql(
     )
 
 
+def _plausible_delay_ch(column: str) -> str:
+    """A measured delay inside the ±MAX_PLAUSIBLE_DELAY_SEC clamp."""
+    return f"({column} IS NOT NULL AND {column} BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC})"
+
+
+def build_stop_visits_ch_sql(
+    *,
+    extra_where: str = "",
+    include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
+) -> str:
+    """Return the SQL body that resolves one row per stop visit (a trip's stop
+    on one service day) with the latest plausible departure AND the latest
+    plausible arrival the feed reported for it, for the readers that pair the
+    two: dwell time and running time (`pipeline.dwell_run`).
+
+    The feeds that send arrivals report a stop's arrival and its departure in
+    separate polls: a row carries one or the other, never both, and a trip's
+    last stop is reported only as an arrival. `build_dedup_ch_sql` keeps only
+    rows with a departure, so it never sees an arrival. This query admits a
+    row carrying either and resolves each kind on its own:
+
+    - `dep_delay` is picked exactly as `build_dedup_ch_sql` picks it:
+      implausible readings are dropped, then the latest
+      `(captured_at, file_name)` wins. NULL for a visit reported only as an
+      arrival.
+    - `arr_delay` goes through the same clamp and the same latest-wins pick
+      over the arrival readings alone. A departure poll's empty arrival field
+      is not a retraction, so it never hides an earlier arrival. NULL when the
+      visit has no plausible arrival.
+    - A visit with no plausible reading of either kind has no row, just as
+      the dedup has none for a visit with no plausible departure.
+
+    The visit is keyed on `(trip_id, service date, stop_sequence)` alone.
+    `route_code`, `service_type` and `scheduled_time` come from the latest
+    departure poll, or the latest arrival poll for an arrival-only visit, each
+    wrapped in a tuple so a NULL there is kept rather than skipped by
+    `argMax`. Ingest looks all three up by trip and stop, so they agree across
+    a visit's polls unless a static reload lands between them. Keying on them
+    would then split the arrival from its departure and leave two rows for
+    one stop in a running-time window. Wherever they agree, a row with a
+    departure is the dedup's row for that visit, column for column.
+
+    `scheduled_sec`, when requested, is the latest departure poll's, as in the
+    dedup, and NULL for an arrival-only visit.
+
+    Columns, in this order (`pipeline/analyze.py` loads them by position):
+    `route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
+    dep_delay[, scheduled_sec], arr_delay`.
+
+    The inner query's aliases are named apart from every `updates` column, so
+    a caller's `extra_where` (applied to raw rows, like the dedup's) can name
+    `route_code` or `scheduled_time` without ClickHouse substituting an
+    aggregate into WHERE (the alias rule `build_dedup_ch_sql`'s docstring
+    describes).
+    """
+    dep_ok = _plausible_delay_ch("u.dep_delay")
+    arr_ok = _plausible_delay_ch("u.arr_delay")
+    latest = "(u.captured_at, u.file_name)"
+    key = "tuple(u.route_code, u.service_type, u.scheduled_time)"
+    extra = f" AND ({extra_where})" if extra_where else ""
+    scheduled_sec_inner = (
+        f", tupleElement(argMaxIf(tuple(u.scheduled_sec), {latest}, {dep_ok}), 1) AS visit_scheduled_sec"
+        if include_scheduled_sec
+        else ""
+    )
+    scheduled_sec_outer = ", visit_scheduled_sec AS scheduled_sec" if include_scheduled_sec else ""
+    return (
+        "SELECT tupleElement(visit_key, 1) AS route_code, tupleElement(visit_key, 2) AS service_type, "
+        "tupleElement(visit_key, 3) AS scheduled_time, visit_trip_id AS trip_id, visit_date AS date, "
+        f"visit_stop_sequence AS stop_sequence, visit_dep_delay AS dep_delay{scheduled_sec_outer}, "
+        "visit_arr_delay AS arr_delay "
+        "FROM ("
+        f"SELECT u.trip_id AS visit_trip_id, {service_date_ch('u.captured_at')} AS visit_date, "
+        "u.stop_sequence AS visit_stop_sequence, "
+        f"if(countIf({dep_ok}) > 0, argMaxIf({key}, {latest}, {dep_ok}), argMaxIf({key}, {latest}, {arr_ok})) "
+        "AS visit_key, "
+        f"argMaxIf(u.dep_delay, {latest}, {dep_ok}) AS visit_dep_delay{scheduled_sec_inner}, "
+        f"argMaxIf(u.arr_delay, {latest}, {arr_ok}) AS visit_arr_delay "
+        f"FROM {checked_table(table)} AS u "
+        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
+        f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
+        ")"
+    )
+
+
 def hms_to_sec_sql(column: str) -> str:
     """Return a SQL expression parsing a static-schedule HH:MM:SS (or H:MM)
     text field into seconds since the service day's midnight. Whitespace

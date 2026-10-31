@@ -18,7 +18,7 @@ class _FakeChClient:
     `_run_ingest_and_analyze` feeds this same stub to BOTH
     `check_agg_freshness` (a `maxOrNull(captured_at)` scalar query, one row
     shaped `(None,)`) and `analyze()`'s dedup materialization
-    (`build_dedup_ch_sql`, an 8-column row-set query) since both go through
+    (`build_stop_visits_ch_sql`, an 8-column row-set query) since both go through
     one `ch_client`. Returning `[(None,)]` unconditionally would make
     analyze()'s bulk-load try to insert a 1-column row into an 8-column temp
     table and crash, so dispatch on the SQL text: the scalar query gets its

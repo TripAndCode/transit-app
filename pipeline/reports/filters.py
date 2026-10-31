@@ -12,7 +12,7 @@ from api.range import (
     service_date_clause,
 )
 from pipeline.clickhouse import UPDATES_TABLE
-from pipeline.db import build_dedup_ch_sql
+from pipeline.db import build_dedup_ch_sql, build_stop_visits_ch_sql
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
 # submodule that reconciles ClickHouse's round-half-to-even live path against
@@ -87,6 +87,21 @@ def _dedup_cte_ch(
     )
     cte_sql = f"deduped AS ({body})"
     return cte_sql, params
+
+
+def _stop_visits_cte_ch(
+    ctx: RangeCtx,
+    *,
+    include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
+) -> tuple[str, dict]:
+    """:func:`_dedup_cte_ch`'s counterpart for a reader that pairs a stop's
+    arrival with its departure: a ``visits`` CTE over
+    `pipeline.db.build_stop_visits_ch_sql`, filtered by ``ctx`` the same way.
+    Returns ``(cte_sql, parameters)``; ``agency_id`` is the caller's to add."""
+    where, params = build_updates_filter_ch(ctx)
+    body = build_stop_visits_ch_sql(extra_where=where, include_scheduled_sec=include_scheduled_sec, table=table)
+    return f"visits AS ({body})", params
 
 
 def _ch_rows(result) -> list[dict]:
