@@ -92,7 +92,8 @@ What the user sees/does:
   `pipeline/db.py`'s `build_stop_visits_ch_sql`, each side the latest
   plausible reading of its own kind under the same delay clamp. Dwell needs
   both sides of a visit; running time needs this visit's arrival and the
-  previous visit's departure, which is how the terminus gets one. A route with neither a dwell nor a running
+  previous visit's departure, which is how the terminus gets one. A route
+  with neither a dwell nor a running
   sample in range is left out; when routes are in scope but every one is,
   the payload stays `available` and names `no_paired_samples`, which the
   not-shown list states without suggesting another filter (an empty scope
