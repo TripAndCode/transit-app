@@ -792,9 +792,14 @@ describe("AnalysisTab council report", () => {
     expect(figure("Service delivered %")).toHaveTextContent("the feed is not yet checked for cancellations");
   });
 
-  it("keeps each figure on one line, so a phone never breaks a number in two", () => {
+  it("keeps each figure on one line in a tile wide enough to hold it, so a phone never breaks a number in two", () => {
     const css = readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8");
     expect(decl(ruleBody(css, ".council-report__value"), "white-space")).toBe("nowrap");
+    // A ten-character figure at the tile's type size, plus its padding, fits
+    // 200px; narrower than that the tiles stack instead of squeezing it.
+    expect(decl(ruleBody(css, ".council-report__figures"), "grid-template-columns")).toBe(
+      "repeat(auto-fit, minmax(min(100%, 200px), 1fr))",
+    );
   });
 
   it("offers to print the report or save it as a PDF", async () => {
