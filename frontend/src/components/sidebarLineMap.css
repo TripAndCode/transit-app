@@ -87,8 +87,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  line-height: 0.95;
   transition: background var(--transition), color var(--transition);
 }
 .rail-station:hover .rail-badge {

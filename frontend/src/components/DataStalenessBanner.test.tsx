@@ -86,7 +86,6 @@ describe("DataStalenessBanner", () => {
     const message = screen.getByText(/Data is out of date/);
     expect(message.style.textOverflow).toBe("");
     expect(message.style.whiteSpace).toBe("");
-    vi.restoreAllMocks();
   });
 });
 

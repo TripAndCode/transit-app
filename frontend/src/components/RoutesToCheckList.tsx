@@ -140,9 +140,9 @@ export function RoutesToCheckList({ routes, bandCounts, routeCount, minSamples, 
           ])}
         </div>
       )}
-      {/* The bands cut at whole minutes and the scale at its own steps, so
-          one band can hold two colours: the legend says which minutes each
-          colour holds. */}
+      {/* The bands cut at DELAY_THRESHOLDS (1.5/3/5 min) and the scale at its
+          own finer steps, so one band can hold two colours: the legend says
+          which minutes each colour holds. */}
       {groups.length > 0 && (
         <div className="ov-check-legend">
           <DelayScaleLegend />
