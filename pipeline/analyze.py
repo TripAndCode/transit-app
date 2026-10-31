@@ -114,10 +114,10 @@ ANALYZE_LOGIC_VERSION = 6
 _SERVICE_DATE = service_date_ch()
 
 
-# The stop visits of the dates being rebuilt are materialised per agency into a
-# Postgres TEMP TABLE, _analyze_visits (see analyze()), for
-# agg_route_daily_dwell_run, the Postgres builder that pairs RT arrivals and
-# departures with the static schedule. The visits are resolved in ClickHouse
+# The stop visits of the dates being rebuilt are materialised into a Postgres
+# TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run, the
+# Postgres builder that pairs RT arrivals and departures with the static
+# schedule, and only for an agency that builder runs for. The visits are resolved in ClickHouse
 # (build_stop_visits_ch_sql, the `updates` fact table's home) and streamed into
 # the temp table, so no builder here reads `updates` row by row. They carry
 # arrival-only visits, so they are not the departure dedup: the departure-derived
@@ -1030,6 +1030,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── Materialise the stop visits ──────────────────────────────────
         # Every column, NULL-service rows included, for only the dates being rebuilt.
+        # agg_route_daily_dwell_run is the only reader, so an agency it is not
+        # built for gets the empty table without the scan.
+        builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
@@ -1049,7 +1052,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
                 # changed is the common one.
-                load=rebuild_dates != [],
+                load=builds_dwell_run and rebuild_dates != [],
                 label="visits",
             )
 
@@ -1363,7 +1366,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # coverage, so pipeline.reports.dwell_run's reader additionally
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
-        if has_static and ingest_strategy in RT_INGEST_STRATEGIES:
+        if builds_dwell_run:
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)

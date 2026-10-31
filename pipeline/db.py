@@ -1,10 +1,12 @@
 """Shared DB helpers and SQL builders for the (psycopg2) Postgres side of
-this codebase, plus the ClickHouse dedup query builder.
+this codebase, plus the ClickHouse builders that resolve `updates`.
 
-`build_dedup_ch_sql` lives here so the analyze materializer, every report
-endpoint, and the LLM tool helpers can't drift apart on the definition of
-"the latest observation per stop event" — they all read the ClickHouse
-`updates` table through this one builder.
+`build_dedup_ch_sql` (the latest departure per stop event) and
+`build_stop_visits_ch_sql` (the latest departure and the latest arrival per
+stop visit) live here side by side, under one delay clamp, so the analyze
+materializers, every report endpoint and the LLM tool helpers can't drift
+apart on what "the latest observation" means: they read the ClickHouse
+`updates` table through these two builders.
 """
 
 import psycopg2
@@ -45,10 +47,12 @@ MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 
 def observation_filter_ch(extra_where: str = "") -> str:
-    """The row-level WHERE every read of observations shares: the agency, a
-    measured `dep_delay` inside the plausibility clamp, and the caller's own
-    filter. Columns are `u.`-qualified for the alias rule
-    :func:`build_dedup_ch_sql` explains."""
+    """The row-level WHERE of every departure read (the shared dedup and the
+    readers that sample its rows): the agency, a measured `dep_delay` inside
+    the plausibility clamp, and the caller's own filter.
+    :func:`build_stop_visits_ch_sql` admits arrival-only rows as well, so it
+    applies the same clamp through a WHERE of its own. Columns are
+    `u.`-qualified for the alias rule :func:`build_dedup_ch_sql` explains."""
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     return (

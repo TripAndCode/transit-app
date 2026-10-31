@@ -483,9 +483,24 @@ def test_analyze_names_the_bootstrap_when_a_clickhouse_aggregate_table_is_missin
         _noop_run(ch_tables=())
 
 
+def _visit_scans(ch) -> list[str]:
+    return [s for s in ch.streams if "visit_arr" in s]
+
+
 def test_the_dated_slice_loads_no_capture_time():
     """No builder reading _analyze_visits needs a capture time, so its load leaves it out."""
-    _, ch = _changed_run()
-    dated = [s for s in ch.streams if "arr_delay" in s and "service_type IS NOT NULL" not in s]
+    _, ch = _changed_run(ingest_strategy="static_join", has_static=True)
+    dated = _visit_scans(ch)
     assert dated, "the changed run loaded no dated slice"
     assert not [s for s in dated if "last_captured_at" in s]
+
+
+@pytest.mark.parametrize(
+    ("ingest_strategy", "has_static"),
+    [("aomori_regex", True), (None, True), ("static_join", False)],
+)
+def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(ingest_strategy, has_static):
+    """agg_route_daily_dwell_run is the slice's only reader: an agency without
+    both an arrival-carrying feed and a schedule never pays for the scan."""
+    _, ch = _changed_run(ingest_strategy=ingest_strategy, has_static=has_static)
+    assert _visit_scans(ch) == []

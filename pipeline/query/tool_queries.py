@@ -428,14 +428,20 @@ async def schedule_realism_padding(
     if not await rt_field_coverage_confirmed(agency_id, conn):
         return empty
 
-    cte_sql, ch_params = _stop_visits_cte_ch(ctx, include_scheduled_sec=True)
+    # The route goes into ctx so the filter lands on raw rows, ahead of the
+    # per-visit aggregation; a visit's route_code is an aggregate, so a filter
+    # on it after the CTE would aggregate every route in the window first.
+    # A visit whose polls disagree on the route (a static reload between
+    # them) keeps only this route's polls, the narrow edge
+    # build_stop_visits_ch_sql's docstring describes.
+    route_ctx = replace(ctx, routes=(str(route),))
+    cte_sql, ch_params = _stop_visits_cte_ch(route_ctx, include_scheduled_sec=True)
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay\n"
         "FROM visits\n"
-        "WHERE route_code = {srp_route:String}\n"
         "ORDER BY trip_id, date, stop_sequence",
-        parameters={"agency_id": agency_id, "srp_route": str(route), **ch_params},
+        parameters={"agency_id": agency_id, **ch_params},
     )
     ch_rows = _ch_rows(result)
     if not ch_rows:
