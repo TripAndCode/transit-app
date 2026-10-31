@@ -407,7 +407,10 @@ export type CouncilSummaryRow = [
 
 /** `delay_certificate` -- one row per physical trip-run exceeding the
  *  threshold. `actual_time` is `scheduled_time` shifted by `dep_delay_sec`,
- *  and may carry a day-boundary suffix rather than being a bare clock time. */
+ *  and may carry a day-boundary suffix rather than being a bare clock time.
+ *  The times are at the earliest stop the feed recorded for the trip:
+ *  `stop_name` names it and `stop_is_first` says whether the timetable starts
+ *  the trip there, both null when the loaded timetable does not name it. */
 export type DelayCertificateRow = [
   agency_name: string,
   route_code: string,
@@ -416,6 +419,8 @@ export type DelayCertificateRow = [
   scheduled_time: string,
   actual_time: string,
   dep_delay_sec: number,
+  stop_name: string | null,
+  stop_is_first: boolean | null,
 ];
 
 /** One hour-of-day × date cell of the trend heatmap. `sum_delay_sec` is the

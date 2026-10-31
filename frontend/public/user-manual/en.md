@@ -92,7 +92,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ## 3. The scope sentence: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays), and the period summary, council report and delay record (for reference) in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with one sentence that says what the screen is counting (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions it reads like this:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
 
@@ -347,13 +347,17 @@ The list on the left holds **Council report** and **Delay record (for reference)
 
 ![Delay record (for reference)](./15-reports-certificate.en.png)
 
-1. Choose the “Date” and the “Route” they travelled on (“Search routes”).
-2. Under “Scheduled departure”, pick their departure (“Choose a departure”). Each one shows how late it left.
-3. The record appears with a statement and the “Operator”, “Route”, “Date”, “Scheduled departure”, “Actual departure” and “Delay”. Times are at the first stop recorded for that trip in the operator’s real-time feed. Press **Print / Save as PDF**.
+1. Under “Date”, choose the day they travelled. Days up to the last day with data can be chosen.
+2. Under “Route”, choose the route they travelled on (“Search routes”).
+3. Under “Departure”, pick their departure (“Choose a departure”). Each one reads like “17:42 from Hiroshima Station (8 min late)”: the timetable time, the stop the time was recorded at, and how late it left.
+
+The record appears with a sentence such as “The 17:42 departure left Hiroshima Station 8 min late (17:50).” and the “Operator”, “Route”, “Date”, “Stop”, “Scheduled departure”, “Actual departure” and “Delay”. Press **Print / Save as PDF**.
+
+Times are not at the stop where the passenger boarded but at the first stop recorded for that trip in the real-time data. When the timetable starts the trip at that stop, the record says the time is on the side where the trip starts; when it does not, the record says so. When the timetable has no name for the stop, the record speaks of the first recorded stop.
 
 The list holds only departures that left late. A departure missing from it left on time or early, or was not in the live feed. If no departure of the route left late that day, the page says so.
 
-For staff, “All late departures in the period” opens the full list under the scope sentence’s conditions, with **Download CSV**.
+For staff, “Late departures” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
 
 ---
 

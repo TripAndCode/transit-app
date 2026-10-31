@@ -772,10 +772,11 @@ describe("AnalysisTab delay record", () => {
     vi.restoreAllMocks();
   });
 
-  // The page reads the certificate's list from the cache without fetching it,
-  // so only a call that would fetch counts as asking for the list.
-  const fetchesCertificate = ([, type, , options]: Parameters<typeof hooks.useReport>) =>
-    type === "delay_certificate" && !options?.observeOnly;
+  // The lookup fetches one route; the staff list fetches every route.
+  const fetchesStaffList = ([, type, scope]: Parameters<typeof hooks.useReport>) =>
+    type === "delay_certificate" && scope.routes.length === 0;
+
+  const ROW = ["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355, "Aomori Station", true];
 
   function showCertificate(types: ReportType[] = ["delay_certificate"]) {
     mockSupportHooks();
@@ -787,9 +788,9 @@ describe("AnalysisTab delay record", () => {
           : {
               data: {
                 ...reportResponse("delay_certificate"),
-                rows: [["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355]],
+                rows: [ROW],
                 text: "1 departure left more than 300 s late.",
-                ctx: { from: "2026-09-01", to: "2026-09-30" },
+                ctx: { from: "2026-09-02", to: "2026-09-02" },
               },
               isFetching: false,
               isPlaceholderData: false,
@@ -800,10 +801,10 @@ describe("AnalysisTab delay record", () => {
     return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", types);
   }
 
-  it("opens on the passenger's lookup, with the period's full list folded away until asked for", async () => {
+  it("opens on the passenger's lookup, with the day's late departures folded away until asked for", async () => {
     showCertificate();
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    const summary = screen.getByText("All late departures in the period");
+    const summary = screen.getByText("Late departures");
     const staff = summary.closest("details")!;
     expect(staff).not.toHaveAttribute("open");
     expect(screen.queryByRole("table")).toBeNull();
@@ -813,47 +814,45 @@ describe("AnalysisTab delay record", () => {
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
   });
 
-  it("counts the period's full list only once staff open it", async () => {
+  it("counts the late departures only once staff open them, and only for the lookup's day", async () => {
     showCertificate();
-    const asked = () => vi.mocked(hooks.useReport).mock.calls.filter(fetchesCertificate);
+    const asked = () => vi.mocked(hooks.useReport).mock.calls.filter(fetchesStaffList);
     expect(asked()).toEqual([]);
-    await userEvent.click(screen.getByText("All late departures in the period"));
-    expect(asked().length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByText("Late departures"));
+    const day = (screen.getByLabelText("Date") as HTMLInputElement).value;
+    expect(asked().at(-1)![2]).toMatchObject({ from: day, to: day, routes: [] });
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toContain(`from=${day}&to=${day}`);
+  });
+
+  it("follows the day the passenger picks", async () => {
+    showCertificate();
+    await userEvent.click(screen.getByText("Late departures"));
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-08-20" } });
+    expect(vi.mocked(hooks.useReport).mock.calls.filter(fetchesStaffList).at(-1)![2]).toMatchObject({
+      from: "2026-08-20",
+      to: "2026-08-20",
+    });
   });
 
   it("starts folded again after staff leave the certificate, without counting the list", async () => {
     const { router } = showCertificate(["council_summary", "delay_certificate"]);
-    await userEvent.click(screen.getByText("All late departures in the period"));
+    await userEvent.click(screen.getByText("Late departures"));
     await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
     const before = vi.mocked(hooks.useReport).mock.calls.length;
     await act(() => router.navigate("/agencies/1/analysis/reports?report=delay_certificate"));
-    const asked = vi.mocked(hooks.useReport).mock.calls.slice(before).filter(fetchesCertificate);
+    const asked = vi.mocked(hooks.useReport).mock.calls.slice(before).filter(fetchesStaffList);
     expect(asked).toEqual([]);
-    expect(screen.getByText("All late departures in the period").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Late departures").closest("details")).not.toHaveAttribute("open");
   });
 
-  it("greys the scope conditions the period's full list did not use", async () => {
-    mockSupportHooks();
-    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useReport").mockImplementation(
-      (_aid, reportType) =>
-        ({
-          data:
-            reportType == null
-              ? undefined
-              : { ...reportResponse("delay_certificate"), rows: [], scope_applied: { from: true, to: true, dow: false } },
-          isFetching: false,
-          isPlaceholderData: false,
-          error: null,
-          refetch: vi.fn(),
-        }) as never,
-    );
-    renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate&dow=weekday", ["delay_certificate"]);
-    await userEvent.click(screen.getByText("All late departures in the period"));
-    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
+  it("leaves the screen's period sentence off the record, whose own day and route are its scope", async () => {
+    const { router } = showCertificate(["council_summary", "delay_certificate"]);
+    expect(document.querySelector(".scope-sentence")).toBeNull();
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
+    expect(document.querySelector(".scope-sentence")).not.toBeNull();
   });
 
-  it("keeps the period's full list on screen while a changed period counts", async () => {
+  it("keeps the day's list on screen while a changed day counts", async () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockImplementation(
@@ -864,7 +863,7 @@ describe("AnalysisTab delay record", () => {
               ? undefined
               : {
                   ...reportResponse("delay_certificate"),
-                  rows: [["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355]],
+                  rows: [ROW],
                   text: "1 departure left more than 300 s late.",
                 },
           isFetching: reportType != null,
@@ -874,12 +873,12 @@ describe("AnalysisTab delay record", () => {
         }) as never,
     );
     renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
-    const summary = screen.getByText("All late departures in the period");
+    const summary = screen.getByText("Late departures");
     await userEvent.click(summary);
     expect(summary.closest("details")).toContainElement(screen.getByRole("table"));
   });
 
-  it("keeps the passenger's lookup when the period's full list fails", async () => {
+  it("keeps the passenger's lookup when the day's list fails", async () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
@@ -891,17 +890,16 @@ describe("AnalysisTab delay record", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    const summary = screen.getByText("All late departures in the period");
+    const summary = screen.getByText("Late departures");
     await userEvent.click(summary);
     expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
   });
 
-  it("prints a report without the list, the insights or, beside a certificate, the screen's scope", () => {
+  it("prints a report without the list, the insights or the staff list", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
-    expect(decl(ruleBody(print, ".analysis-tab:has(.cert-card) .scope-sentence"), "display")).toBe("none");
   });
 });
 

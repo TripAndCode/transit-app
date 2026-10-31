@@ -20,7 +20,6 @@
     "reports": "レポート",
     "destinations_label": "画面",
     "other": "その他",
-    "transfer": "乗換",
     "ticket_agency": "事業者",
     "ticket_period": "期間",
     "stops_label": "{{screen}}の切り替え",
@@ -1055,7 +1054,7 @@
         "title": "定時率ランキング",
         "best": "良い順",
         "worst": "悪い順",
-        "example_answer": "例: 定時率の高い順（または低い順）に、路線と割合を一覧表示します。",
+        "example_answer": "例: 定時率の低い順に、路線と割合を一覧表示します。",
         "summary_worst": "定時率の低い路線：{{k}}件",
         "summary_best": "定時率の高い路線：{{k}}件"
       },
@@ -1076,7 +1075,7 @@
       }
     },
     "landing": {
-      "header_title": "遅延について聞いてみましょう",
+      "header_title": "よくある質問から選んで調べる",
       "header_subtitle": "路線や停留所を選ぶだけで、すぐに答えが返ってきます",
       "cards_title": "こんな質問ができます",
       "pills_title": "その他の質問"
@@ -1116,7 +1115,9 @@
       "scheduled_time": "定刻",
       "actual_time": "実績時刻",
       "with_unit": "{{label}}（{{unit}}）",
-      "delay": "遅延"
+      "delay": "遅延",
+      "recorded_stop": "記録した停留所",
+      "trip_start": "始発"
     },
     "confidence_low_mark": "データ少",
     "wide_margin_mark": "誤差大",
@@ -1348,23 +1349,29 @@
       "date": "日付",
       "route": "路線",
       "route_placeholder": "路線を検索",
-      "departure": "定刻の発車時刻",
+      "departure": "便",
       "departure_prompt": "便を選択",
-      "departure_option": "{{time}}（{{delay}}遅れ）",
+      "departure_option": "{{time}} 発（{{delay}}遅れ）",
       "loading": "遅れた便を検索しています…",
       "none": "この日、この路線に遅れて発車した便はありません。",
       "no_data": "この日、この路線のリアルタイムデータはありません。遅れて発車した便があったかは確かめられません。",
       "unconfirmed": "遅れて発車した便は見つかりませんでした。この日のデータの有無は確認できませんでした。",
       "not_listed": "一覧にない便は、定刻どおりか早く発車したか、リアルタイムデータに含まれていません。",
       "card": "選んだ便の遅延の記録",
-      "statement": "{{date}}、{{route}} {{scheduled}}発の便は、最初に記録された停留所を{{actual}}に発車し、{{delay}}遅れました。",
+      "statement": "{{scheduled}}発の便は、最初に記録された停留所を{{delay}}遅れて発車しました（{{actual}}）。",
       "operator": "事業者",
       "scheduled": "定刻の発車",
       "actual": "実際の発車",
       "delay": "遅れ",
-      "measured_at": "時刻は、事業者のリアルタイムデータでこの便が最初に記録された停留所でのものです。",
+      "measured_at": "時刻は、事業者のリアルタイムデータでこの便が最初に記録された停留所でのものです。乗車した停留所での時刻とは異なることがあります。",
       "disclaimer": "この記録は、{{operator}}が公開しているリアルタイムデータをもとに本サービスが作成した参考資料です。事業者が発行する遅延証明書ではありません。",
-      "all_late": "期間内のすべての遅延便"
+      "departure_option_at": "{{time}} {{stop}} 発（{{delay}}遅れ）",
+      "statement_at": "{{scheduled}}発の便は、{{stop}}を{{delay}}遅れて発車しました（{{actual}}）。",
+      "stop": "停留所",
+      "stop_origin": "始発側の「{{stop}}」での発車時刻です。乗車した停留所での時刻とは異なることがあります。",
+      "stop_later": "リアルタイムデータでこの便が最初に記録された「{{stop}}」での発車時刻です（始発の停留所ではありません）。乗車した停留所での時刻とは異なることがあります。",
+      "late_list": "遅れた便の一覧",
+      "late_list_scope": "{{date}}・すべての路線"
     }
   },
   "routeTable": {

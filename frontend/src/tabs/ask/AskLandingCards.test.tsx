@@ -138,6 +138,20 @@ describe("AskLandingCards", () => {
     expect(screen.getByText(/least on-time routes$/)).toBeInTheDocument();
   });
 
+  it("heads the page as a choice among common questions, since it has no box to type one into", () => {
+    setup();
+    expect(screen.getByText("Pick a common question to look into")).toBeInTheDocument();
+    expect(i18n.getFixedT("ja")("ask.landing.header_title")).toBe("よくある質問から選んで調べる");
+  });
+
+  it("describes the on-time card's answer in the order the card asks for, least on time first", () => {
+    setup();
+    expect(screen.getByText("e.g., lists the least on-time routes first, with each route's on-time rate.")).toBeInTheDocument();
+    expect(i18n.getFixedT("ja")("ask.card.ontime_rank.example_answer")).toBe(
+      "例: 定時率の低い順に、路線と割合を一覧表示します。",
+    );
+  });
+
   it("cites no route codes in its examples, since they may not exist in this agency", () => {
     for (const key of ["ask.card.top_delay.example_answer", "ask.card.ontime_rank.example_answer"]) {
       expect(i18n.t(key)).not.toMatch(/[A-Z]\d{2}/);

@@ -41,6 +41,24 @@ saved-analysis bookmarks — plus a link out to Time for deeper reports.
   `doc=certificate` param and the API keep the old name so links and saved
   views keep working. `tests/frontend/i18n_glossary.test.mjs` holds the copy
   to that name.
+- The delay record is three numbered steps
+  (`frontend/src/components/analysis/DelayCertificateLookup.tsx`): the day,
+  which stops at the agency's last data day (a typed later day is pulled back
+  to it), the route, then the departure among that day's late ones, each
+  shown as 「17:42 広島駅 発（8分遅れ）」. The record's sentence names the stop
+  its times were taken at. That stop is the earliest one the feed recorded
+  for the trip; a feed often sends nothing for a trip's first stop, so each
+  row also says whether the loaded timetable starts the trip there
+  (`compute_delay_certificate`'s `stop_name`/`stop_is_first`, looked up in
+  `static_stop_times`/`static_stops`). Only then does the record call it the
+  trip's start (「始発側の「広島駅」での発車時刻です。」); otherwise it says
+  the stop is not where the trip starts, and with no name in the timetable it
+  speaks of the first recorded stop. It never names the stop the passenger
+  boarded at.
+- Staff open 「遅れた便の一覧」 under the lookup: every route's late
+  departures (the report's default threshold) on the day the lookup shows,
+  fetched only once the section is opened, with that day's CSV. The record's
+  day and route are its whole scope, so this document has no scope sentence.
 - The council document's planned trips, executed trips and service-delivered
   rate count only the days a timetable plans: a day's count saved in
   `planned_trips_daily` while its timetable was loaded, or else the loaded

@@ -2321,6 +2321,19 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     assert data_row[2] == "25"  # samples
 
 
+_CERT_CSV_HEADER = [
+    "事業者名",
+    "系統コード",
+    "種別",
+    "日付",
+    "定刻",
+    "実績時刻",
+    "遅延(秒)",
+    "記録した停留所",
+    "始発の停留所",
+]
+
+
 @pytest.mark.asyncio
 async def test_delay_certificate_excludes_at_threshold_includes_one_above(reports_client, ch_client, ch_async_client):
     """Core boundary check: a synthetic trip's dep_delay exactly AT the
@@ -2377,8 +2390,10 @@ async def test_delay_certificate_uses_default_threshold_when_omitted(reports_cli
 @pytest.mark.asyncio
 async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client, ch_client, ch_async_client):
     """Row shape is (agency_name, route_code, service_type, date,
-    scheduled_time, actual_time, dep_delay); actual_time is scheduled_time
-    shifted by dep_delay seconds. _seed_route schedules every row at 10:00:00."""
+    scheduled_time, actual_time, dep_delay, stop_name, stop_is_first);
+    actual_time is scheduled_time shifted by dep_delay seconds. _seed_route
+    schedules every row at 10:00:00 and loads no timetable, so the stop is
+    unknown."""
     from api.main import app
 
     client, agency_id, pool = reports_client
@@ -2393,13 +2408,14 @@ async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client,
     assert resp.status_code == 200
     rows = [r for r in resp.json()["rows"] if r[1] == "RSHIFT"]
     assert len(rows) == 1
-    _agency_name, route_code, service_type, date_str, scheduled_time, actual_time, dep_delay = rows[0]
+    _agency_name, route_code, service_type, date_str, scheduled_time, actual_time, dep_delay, stop, first = rows[0]
     assert route_code == "RSHIFT"
     assert service_type == "平日"
     assert date_str == day
     assert scheduled_time == "10:00:00"
     assert dep_delay == 400
     assert actual_time == "10:06:40"  # 10:00:00 + 400s
+    assert (stop, first) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -2449,7 +2465,7 @@ async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_
     # The saved file is named for what the page calls it, a delay record.
     assert resp.headers["content-disposition"] == f'attachment; filename="delay_record_{day}_{day}.csv"'
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     data = [r for r in rows[header_idx + 1 :] if r and r[1] == "RCSV"]
     assert len(data) == 1
     assert data[0][6] == "400"
@@ -2475,7 +2491,7 @@ async def test_delay_certificate_csv_export_includes_threshold_footnote(reports_
     )
     assert resp.status_code == 200
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     footnote_cells = [r[0] for r in rows[1:header_idx]]
     assert any("300" in c for c in footnote_cells)
 
@@ -2510,7 +2526,7 @@ async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_cl
 
     resp = await client.get(f"{url}&limit=2&format=csv")
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     assert "該当3件のうち、日付順の先頭2件のみを掲載しています。残りは期間を絞って出力してください。" in [
         r[0] for r in rows[1:header_idx]
     ]

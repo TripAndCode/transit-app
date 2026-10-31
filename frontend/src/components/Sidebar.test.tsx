@@ -437,10 +437,10 @@ describe("Sidebar", () => {
       expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies"]);
     });
 
-    it("names Ask by its label alone, leaving the transfer mark to sight", () => {
+    it("names Ask by its label alone, with no transfer tag that reads as a journey planner", () => {
       renderSidebar();
-      expect(screen.getByRole("link", { name: "Ask" })).toBeTruthy();
-      expect(screen.getByText("Transfer")).toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByRole("link", { name: "Ask" })).not.toHaveTextContent("Transfer");
+      expect(screen.queryByText("Transfer")).toBeNull();
     });
 
     it("shows the period of the screen on show beside the agency", () => {

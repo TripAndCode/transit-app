@@ -306,9 +306,12 @@ async def compute_delay_certificate(
     because the same `trip_id` recurs across many service days.
 
     Returns ``(rows, total)``. Rows are shaped ``(agency_name, route_code,
-    service_type, date, scheduled_time, actual_time, dep_delay)``.
-    ``actual_time`` is ``scheduled_time`` shifted by ``dep_delay`` seconds
-    (see :func:`shift_time_str`). They are ordered by ``(date, route_code,
+    service_type, date, scheduled_time, actual_time, dep_delay, stop_name,
+    stop_is_first)``. ``actual_time`` is ``scheduled_time`` shifted by
+    ``dep_delay`` seconds (see :func:`shift_time_str`). ``stop_name`` and
+    ``stop_is_first`` describe that earliest observed stop
+    (:func:`_recorded_stops`); both are ``None`` when the loaded timetable
+    does not name it. They are ordered by ``(date, route_code,
     scheduled_time)`` and capped at ``limit``, the same "sane and
     reproducible cap" convention as every other report in this package's
     ``limit`` query param. ``total`` counts every qualifying trip-run before
@@ -339,11 +342,13 @@ async def compute_delay_certificate(
         "        argMin(route_code, stop_sequence) AS route_code,\n"
         "        argMin(service_type, stop_sequence) AS service_type,\n"
         "        argMin(scheduled_time, stop_sequence) AS scheduled_time,\n"
-        "        argMin(dep_delay, stop_sequence) AS dep_delay\n"
+        "        argMin(dep_delay, stop_sequence) AS dep_delay,\n"
+        "        min(stop_sequence) AS first_stop_sequence\n"
         "    FROM filtered\n"
         "    GROUP BY trip_id, date\n"
         ")\n"
-        "SELECT route_code, service_type, date, scheduled_time, dep_delay, count() OVER () AS total\n"
+        "SELECT route_code, service_type, date, scheduled_time, dep_delay, trip_id, first_stop_sequence,\n"
+        "    count() OVER () AS total\n"
         "FROM per_trip\n"
         "WHERE dep_delay > {dc_threshold:Int32}\n"
         "ORDER BY date, route_code, scheduled_time\n"
@@ -356,9 +361,11 @@ async def compute_delay_certificate(
         },
     )
     total = int(result.first_item["total"]) if result.result_rows else 0
+    stops = await _recorded_stops(conn, agency_id, [(r[5], int(r[6])) for r in result.result_rows])
     rows: list[tuple] = []
-    for route_code, service_type, d, scheduled_time, dep_delay, _total in result.result_rows:
+    for route_code, service_type, d, scheduled_time, dep_delay, trip_id, stop_sequence, _total in result.result_rows:
         actual_time = shift_time_str(scheduled_time, int(dep_delay), locale)
+        stop_name, stop_is_first = stops.get((trip_id, int(stop_sequence)), (None, None))
         rows.append(
             (
                 agency_name,
@@ -368,9 +375,41 @@ async def compute_delay_certificate(
                 scheduled_time,
                 actual_time,
                 int(dep_delay),
+                stop_name,
+                stop_is_first,
             )
         )
     return rows, total
+
+
+async def _recorded_stops(
+    conn, agency_id: int, events: list[tuple[str, int]]
+) -> dict[tuple[str, int], tuple[str, bool]]:
+    """The loaded timetable's name for each ``(trip_id, stop_sequence)`` stop
+    event, and whether the timetable starts that trip there.
+
+    A certificate row's times are those of the earliest stop the feed
+    reported for the trip, and a feed often sends nothing for a trip's first
+    stop, so that stop is the trip's origin only when no stop of the trip
+    comes before it in the timetable. A trip the loaded timetable no longer
+    holds, or a stop it does not name, is left out.
+    """
+    if not events:
+        return {}
+    found = await conn.fetch(
+        "SELECT q.trip_id, q.stop_sequence, s.stop_name,"
+        " NOT EXISTS (SELECT 1 FROM static_stop_times e"
+        "  WHERE e.agency_id = $1 AND e.trip_id = q.trip_id AND e.stop_sequence < q.stop_sequence) AS is_first"
+        " FROM unnest($2::text[], $3::int[]) AS q(trip_id, stop_sequence)"
+        " JOIN static_stop_times st ON st.agency_id = $1 AND st.trip_id = q.trip_id"
+        "  AND st.stop_sequence = q.stop_sequence"
+        " JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id"
+        " WHERE s.stop_name IS NOT NULL AND s.stop_name <> ''",
+        agency_id,
+        [trip_id for trip_id, _ in events],
+        [stop_sequence for _, stop_sequence in events],
+    )
+    return {(r["trip_id"], r["stop_sequence"]): (r["stop_name"], r["is_first"]) for r in found}
 
 
 async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:

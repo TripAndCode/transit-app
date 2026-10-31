@@ -246,10 +246,28 @@ describe("ReportTable delay_certificate schema", () => {
 
   it("renders a delay_certificate row without crashing on the un-enriched route column", () => {
     mockRoutes([]);
-    renderTable([["Test Agency", "RCERT", "平日", "2026-06-20", "10:00:00", "10:06:40", 400]], "delay_certificate");
+    renderTable([["Test Agency", "RCERT", "平日", "2026-06-20", "10:00:00", "10:06:40", 400, null, null]], "delay_certificate");
     expect(screen.getByText("Test Agency")).toBeInTheDocument();
     // 400 seconds reads as minutes and seconds, like every other delay.
     expect(screen.getByText("6 min 40 s")).toBeInTheDocument();
+  });
+
+  it("names the stop each time was recorded at, marking it only where the trip starts", () => {
+    mockRoutes([]);
+    renderTable(
+      [
+        ["Test Agency", "R1", "平日", "2026-06-20", "10:00:00", "10:06:40", 400, "Aomori Station", true],
+        ["Test Agency", "R2", "平日", "2026-06-20", "11:00:00", "11:06:40", 400, "Furukawa", false],
+        ["Test Agency", "R3", "平日", "2026-06-20", "12:00:00", "12:06:40", 400, null, null],
+      ],
+      "delay_certificate",
+    );
+    expect(screen.getByRole("columnheader", { name: "Recorded stop" })).toBeInTheDocument();
+    const [origin, later, unknown] = screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").at(-1)!);
+    expect(origin).toHaveTextContent(/^Aomori Station trip start$/);
+    expect(within(origin).getByText("trip start")).toHaveClass("caveat-badge");
+    expect(later).toHaveTextContent(/^Furukawa$/);
+    expect(unknown).toHaveTextContent(/^—$/);
   });
 });
 
@@ -410,7 +428,7 @@ describe("ReportTable on a phone", () => {
   });
 
   it("titles a certificate row by its own route column, not the agency in column 0", () => {
-    renderTable([["Agency A", "39061", "平日", "2026-09-01", "08:00", "08:12", 720]], "delay_certificate");
+    renderTable([["Agency A", "39061", "平日", "2026-09-01", "08:00", "08:12", 720, "Aomori Station", true]], "delay_certificate");
     const [item] = screen.getAllByRole("listitem");
     expect(item.querySelector(".report-cards__route")).toHaveTextContent(/^T50 石江・新城線/);
     expect(within(item).getAllByText("Agency A")).toHaveLength(1);
@@ -429,7 +447,7 @@ describe("ReportTable on a phone", () => {
   });
 
   it("shows a missing service as a dash, not as the word null", () => {
-    renderTable([["Agency A", "39061", null, "2026-09-01", "08:00", "08:12", 720]], "delay_certificate");
+    renderTable([["Agency A", "39061", null, "2026-09-01", "08:00", "08:12", 720, "Aomori Station", true]], "delay_certificate");
     const [item] = screen.getAllByRole("listitem");
     expect(item).not.toHaveTextContent(/null/);
     expect(within(item).getByText("—")).toBeInTheDocument();
