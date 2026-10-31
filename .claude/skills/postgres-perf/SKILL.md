@@ -26,11 +26,14 @@ become Nullable.
   narrow-ctx filter falls back to a live ClickHouse scan of `updates` (see
   `pipeline/reports/filters.py::_dedup_cte_ch`); those live-fallback paths are
   where a new perf trap is most likely to show up first, not the fast path.
-- Materialize the dedup once per agency. `analyze()` builds `_analyze_deduped` (a
-  Postgres TEMP table, `ON COMMIT DROP`) from ClickHouse via
-  `pipeline/db.py::build_dedup_ch_sql`, streamed in blocks (not `.query()`, which
-  buffers the whole result in memory, scaling with the agency's row count), and
-  every builder reads that temp table instead of re-scanning ClickHouse.
+- Most departure `agg_*` tables are built in ClickHouse (`pipeline/ch_aggregates.py`)
+  over `pipeline/db.py::build_dedup_ch_sql`; `agg_feed_health` and
+  `agg_route_headway_daily` run their own ClickHouse SQL from `analyze.py`.
+  `analyze()` streams the stop visits
+  (`build_stop_visits_ch_sql`, arrivals paired with departures) in blocks into the
+  `_analyze_visits` TEMP table (`ON COMMIT DROP`) for dwell_run, its only reader,
+  and only for agencies that build it; never `.query()`, which buffers the whole
+  result in memory, scaling with the agency's row count.
   Exception: `agg_stop_routes` is finalized in ClickHouse from `stop_route_days`,
   which reads every `updates` row rather than the dedup — the dedup is
   pre-filtered by the delay clamp below, which would silently drop stops whose

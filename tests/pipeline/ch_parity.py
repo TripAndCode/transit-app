@@ -24,7 +24,7 @@ from pipeline.histogram import (
 _DEDUPED_COLUMNS = (
     "route_code text, service_type text, scheduled_time time, "
     "trip_id text, date date, stop_sequence int, dep_delay int, "
-    "captured_at timestamptz, arr_delay int"
+    "captured_at timestamptz"
 )
 
 # _analyze_alltime's columns and slice, as analyze loaded them for the whole-history builders.
@@ -266,7 +266,7 @@ def legacy_rows(conn, ch_client, agency_id: int, table: str) -> list[str]:
         load = {
             "table": "_analyze_deduped",
             "columns": _DEDUPED_COLUMNS,
-            "ch_sql": build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True),
+            "ch_sql": build_dedup_ch_sql(include_captured_at=True),
         }
     with conn.cursor() as cur:
         _load_temp_table(cur, ch_client, **load, parameters={"agency_id": agency_id}, label="parity")

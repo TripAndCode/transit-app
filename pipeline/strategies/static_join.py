@@ -524,7 +524,7 @@ def parse_feed(
         # storing an uncastable value). GTFS's departure_time is raw, unpadded,
         # unvalidated text -- "7:05:00" is as valid as "07:05:00" per spec,
         # and nothing guarantees the rest is even numeric. ClickHouse's plain
-        # String column does not validate it, so analyze()'s `_analyze_deduped.
+        # String column does not validate it, so analyze()'s `_analyze_visits.
         # scheduled_time time` column is the only place format errors
         # surface -- and once a bad value is durably stored in ClickHouse,
         # it fails analyze() for this ENTIRE agency on every subsequent

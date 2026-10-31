@@ -66,7 +66,7 @@ def _parse_scheduled_time(value: _time | str) -> _time:
     `pipeline.clickhouse.UPDATE_COLUMNS`'s `scheduled_time` column) -- not a
     typed time value; a caller that already has a real `datetime.time` (a
     test fixture, or a future caller reading Postgres's typed
-    `_analyze_deduped.scheduled_time` instead) is passed through unchanged.
+    `_analyze_visits.scheduled_time` instead) is passed through unchanged.
     Stop events with a NULL `scheduled_time` (extended-hour GTFS notation
     ">=24:00:00", or no static match) are filtered out of the query, so every
     string this sees parses as a plain "H:MM[:SS]" time-of-day.

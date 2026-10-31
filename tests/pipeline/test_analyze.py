@@ -1194,36 +1194,50 @@ def _ch_headway_row(
     )
 
 
-def _ch_dwell_run_row(
+def _ch_dwell_run_polls(
     trip_id,
     captured_at,
     stop_sequence,
     dep_delay,
     arr_delay,
     *,
-    file_name="f.pb",
     route_code="R1",
     service_type="平日",
+    arrival_offset_sec=30,
 ):
-    """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
-    (agency_id excluded), populating just the fields
-    `agg_route_daily_dwell_run` reads (dep_delay always; arr_delay per the
-    per-row sparsity `pipeline.dwell_run`'s module docstring describes)."""
-    return (
-        file_name,
-        captured_at,
-        trip_id,
-        service_type,
-        "10:00:00",  # scheduled_time -- unused by this builder, must still be a valid time string
-        route_code,
-        stop_sequence,
-        dep_delay,
-        "S1",  # stop_id
-        arr_delay,
-        None,  # schedule_relationship_trip
-        None,  # schedule_relationship_stop
-        None,  # feed_timestamp
-    )
+    """The ClickHouse `updates` rows one stop visit gets from a static_join
+    feed, shaped for `pipeline.clickhouse.insert_updates` (agency_id excluded).
+
+    The feed reports a stop's departure and its arrival in separate polls,
+    never on one row, so each reading present is its own row of its own poll:
+    the departure at *captured_at*, the arrival *arrival_offset_sec* later (a
+    negative offset puts the arrival poll first). A trip's last stop gets
+    arrival polls only."""
+    rows = []
+    for kind, at, dep, arr in (
+        ("dep", captured_at, dep_delay, None),
+        ("arr", captured_at + timedelta(seconds=arrival_offset_sec), None, arr_delay),
+    ):
+        if dep is None and arr is None:
+            continue
+        rows.append(
+            (
+                f"{kind}-{trip_id}-{stop_sequence}-{at:%H%M%S}.pb",
+                at,
+                trip_id,
+                service_type,
+                "10:00:00",  # scheduled_time -- unused by this builder, must still be a valid time string
+                route_code,
+                stop_sequence,
+                dep,
+                "S1",  # stop_id
+                arr,
+                None,  # schedule_relationship_trip
+                None,  # schedule_relationship_stop
+                None,  # feed_timestamp
+            )
+        )
+    return rows
 
 
 def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, agency_id, ch_client):
@@ -1458,10 +1472,11 @@ def test_analyze_skips_agg_route_headway_daily_for_non_static_join_agency(pg_con
 
 
 def _seed_dwell_run_schedule(pg_conn, agency_id, trip_id):
-    """Static schedule for a 3-stop trip, matching
-    tests/unit/test_dwell_run.py's hand-computed fixture: stop 2 has a 60s
-    scheduled dwell (10:05:00 arrival / 10:06:00 departure); stops 1 and 3
-    have zero scheduled dwell (arrival_time == departure_time)."""
+    """Static schedule for a 4-stop trip, matching
+    tests/unit/test_dwell_run.py's hand-computed fixtures: stop 2 has a 60s
+    scheduled dwell (10:05:00 arrival / 10:06:00 departure); stops 1, 3 and
+    the terminus, stop 4 (10:15:00), have zero scheduled dwell
+    (arrival_time == departure_time)."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Test Stop')",
@@ -1471,6 +1486,7 @@ def _seed_dwell_run_schedule(pg_conn, agency_id, trip_id):
             (1, "10:00:00", "10:00:00"),
             (2, "10:05:00", "10:06:00"),
             (3, "10:10:00", "10:10:00"),
+            (4, "10:15:00", "10:15:00"),
         ]:
             cur.execute(
                 "INSERT INTO static_stop_times "
@@ -1481,14 +1497,25 @@ def _seed_dwell_run_schedule(pg_conn, agency_id, trip_id):
     pg_conn.commit()
 
 
+def _dwell_run_totals(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        return cur.fetchone()
+
+
 def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn, agency_id, ch_client):
     """Known synthetic arrival/departure timestamps (mirroring
-    tests/unit/test_dwell_run.py's hand-computed fixture) produce the
-    expected dwell/running split once run through analyze()'s SQL builder.
+    tests/unit/test_dwell_run.py's hand-computed fixture), reported in
+    separate polls as the feed sends them, produce the expected dwell/running
+    split once run through analyze()'s SQL builder.
 
-    Stop 1 has no `arr_delay` (no arrival ping) -> contributes neither
-    dwell nor running. Stop 2: actual arrival 36320s, actual departure
-    36410s -> dwell 90s; running (vs. stop 1's actual departure 36030s) 290s.
+    Stop 1 has no arrival poll -> contributes neither dwell nor running.
+    Stop 2: actual arrival 36320s, actual departure 36410s -> dwell 90s;
+    running (vs. stop 1's actual departure 36030s) 290s.
     Stop 3: actual arrival == actual departure == 36610s -> dwell 0s;
     running (vs. stop 2's actual departure 36410s) 200s.
     """
@@ -1496,9 +1523,9 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
     rows = [
-        _ch_dwell_run_row("T1", day, 1, 30, None),
-        _ch_dwell_run_row("T1", day, 2, 50, 20),
-        _ch_dwell_run_row("T1", day, 3, 10, 10),
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
@@ -1521,8 +1548,52 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     assert hist_run_len == 32
 
 
+def test_analyze_dwell_run_over_a_whole_trip_of_separate_polls(pg_conn, agency_id, ch_client):
+    """A whole trip as the feed reports it: the origin gets an arrival and a
+    departure, an intermediate stop only a departure prediction, another
+    stop both, and the terminus arrival polls only.
+
+    Stop 1 (origin): arrival 36000, departure 36030 -> dwell 30; no running.
+    Stop 2: departure 36410 only -> neither dwell nor running.
+    Stop 3: arrival 36620, departure 36610 -> dwell -10; running 36620 - 36410 = 210.
+    Stop 4 (terminus): arrival 36960 only -> running 36960 - 36610 = 350; no dwell.
+    """
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        *_ch_dwell_run_polls("T1", day, 1, 30, 0, arrival_offset_sec=-60),
+        *_ch_dwell_run_polls("T1", day, 2, 50, None),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 20),
+        *_ch_dwell_run_polls("T1", day, 4, None, 30),
+        *_ch_dwell_run_polls("T1", day + timedelta(minutes=5), 4, None, 60),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _dwell_run_totals(pg_conn, agency_id) == (2, 20, 2, 560)
+
+
+def test_analyze_dwell_run_arrival_only_stop_leaves_the_next_running_unknown(pg_conn, agency_id, ch_client):
+    """Stop 2 is reported only as an arrival. Its own running time is known
+    (36320 - 36030 = 290s), but stop 3 has no departure to run from: pairing
+    it with stop 1's departure instead would claim 36610 - 36030 = 580s."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day, 2, None, 20),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _dwell_run_totals(pg_conn, agency_id) == (1, 0, 1, 290)
+
+
 def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_anchor(pg_conn, agency_id, ch_client):
-    """Stop 2's poll carries no route_code. Its own dwell and running cannot
+    """Stop 2's polls carry no route_code. Its own dwell and running cannot
     enter the NOT NULL route key, but its departure still anchors stop 3's
     running time: 36610 - 36410 = 200s. Filtering it out before `LAG()` would
     pair stop 3 with stop 1's departure instead (580s)."""
@@ -1530,9 +1601,9 @@ def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_ancho
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
     rows = [
-        _ch_dwell_run_row("T1", day, 1, 30, None),
-        _ch_dwell_run_row("T1", day, 2, 50, 20, route_code=None),
-        _ch_dwell_run_row("T1", day, 3, 10, 10),
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20, route_code=None),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
@@ -1554,8 +1625,8 @@ def test_analyze_skips_agg_route_daily_dwell_run_for_non_static_join_agency(pg_c
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
     rows = [
-        _ch_dwell_run_row("T1", day, 1, 30, None),
-        _ch_dwell_run_row("T1", day, 2, 50, 20),
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)  # agency_id fixture leaves ingest_strategy NULL
@@ -1573,7 +1644,7 @@ def test_analyze_skips_agg_route_daily_dwell_run_without_static_schedule(pg_conn
     rather than a schedule-less (and therefore meaningless) computation."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
-    rows = [_ch_dwell_run_row("T1", day, 1, 30, 20)]
+    rows = _ch_dwell_run_polls("T1", day, 1, 30, 20)
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
 
@@ -1583,49 +1654,23 @@ def test_analyze_skips_agg_route_daily_dwell_run_without_static_schedule(pg_conn
     assert count == 0
 
 
-def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, agency_id, ch_client):
-    """A stop event whose LATEST poll has `arr_delay = NULL`
-    (feed stopped sending an arrival estimate for that stop) must be treated
-    as unavailable for that stop-visit, not silently resurrect an EARLIER
-    poll's non-NULL `arr_delay` -- ClickHouse's `argMax(arg, val)` silently
-    SKIPS a row whose `arg` is NULL when picking the row with the maximal
-    `val`, so a naive `argMax(u.arr_delay, (captured_at, file_name))` would
-    return the earlier, stale value instead of NULL. `build_dedup_ch_sql`
-    guards against this with a `coalesce`/`NULLIF` sentinel wrap (the same
-    wrap `schedule_relationship_trip`/`schedule_relationship_stop` use)."""
+def test_analyze_dwell_run_keeps_an_arrival_its_later_departure_poll_does_not_carry(pg_conn, agency_id, ch_client):
+    """Stop 2's arrival poll comes an hour before its departure poll, whose
+    row carries no arrival. That row is a departure report, not a retraction
+    of the arrival, so stop 2 still yields its dwell (90s) and running (290s):
+    the same totals as the happy path."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
-    early = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
     later = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
     rows = [
-        _ch_dwell_run_row("T1", later, 1, 30, None, file_name="s1.pb"),
-        # Stop 2: early poll has a real arr_delay; the LATEST poll (higher
-        # captured_at) has none -- the true latest-observation-wins answer
-        # for this stop-visit is "no arrival estimate", not the early value.
-        _ch_dwell_run_row("T1", early, 2, 50, 20, file_name="s2a.pb"),
-        _ch_dwell_run_row("T1", later, 2, 50, None, file_name="s2b.pb"),
-        _ch_dwell_run_row("T1", later, 3, 10, 10, file_name="s3.pb"),
+        *_ch_dwell_run_polls("T1", later, 1, 30, None),
+        *_ch_dwell_run_polls("T1", later, 2, 50, 20, arrival_offset_sec=-3600),
+        *_ch_dwell_run_polls("T1", later, 3, 10, 10),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
-            "FROM agg_route_daily_dwell_run WHERE agency_id = %s AND route_code = 'R1'",
-            (agency_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
-    # Only stop 3 (dwell 0, running 200) contributes -- stop 2's dwell/running
-    # must NOT be computed from the stale resurrected arr_delay=20 (which
-    # would wrongly produce dwell_samples=2/dwell_sum_sec=90/run_samples=2/
-    # run_sum_sec=490, identical to the single-poll-per-stop happy path).
-    assert dwell_samples == 1
-    assert dwell_sum_sec == 0
-    assert run_samples == 1
-    assert run_sum_sec == 200
+    assert _dwell_run_totals(pg_conn, agency_id) == (2, 90, 2, 490)
 
 
 def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_next_running(
@@ -1659,32 +1704,20 @@ def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_ne
     pg_conn.commit()
     day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
     rows = [
-        _ch_dwell_run_row("T1", day, 1, 30, None, file_name="s1.pb"),
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
         # Stop 2 has real RT data but no static schedule row above.
-        _ch_dwell_run_row("T1", day, 2, 50, 20, file_name="s2.pb"),
-        _ch_dwell_run_row("T1", day, 3, 10, 10, file_name="s3.pb"),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
-            "FROM agg_route_daily_dwell_run WHERE agency_id = %s AND route_code = 'R1'",
-            (agency_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
     # Stop 3's own dwell (0) is unaffected -- it doesn't depend on stop 2.
     # Stop 3's running time DOES depend on stop 2's actual departure, which
     # is None (no schedule) -- run_samples must be 0, not 1 (which skipping
     # past the missing stop would produce by pairing stop 3 with stop 1's
     # departure instead: actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
-    assert dwell_samples == 1
-    assert dwell_sum_sec == 0
-    assert run_samples == 0
-    assert run_sum_sec == 0
+    assert _dwell_run_totals(pg_conn, agency_id) == (1, 0, 0, 0)
 
 
 def _seed_static_version(pg_conn, agency_id, version, trip_shape_pairs):
