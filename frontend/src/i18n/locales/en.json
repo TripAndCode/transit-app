@@ -54,7 +54,7 @@
     "view_reports": "Council report & delay record",
     "subtitle_summary": "How service ran over the period, on one printable page.",
     "subtitle_saved": "Analyses saved on route pages in this browser.",
-    "subtitle_reports": "A summary for a council or board, and a delay record for reference."
+    "subtitle_reports": "The council report, and a delay record for reference."
   },
   "sheet": {
     "handle": "Resize the sheet"
@@ -1314,7 +1314,7 @@
       "dow_weekend": "Each route's average delay on the days the agency ran its weekend or holiday timetable: weekends, plus public holidays and any other weekday it ran that timetable.",
       "dwell_run": "Where time goes: dwell at stops against running between them.",
       "route_forecast": "When routes tend to run late, by day of week and time of day.",
-      "council_summary": "A period summary written for a council or board.",
+      "council_summary": "The period's service, summarised for the council.",
       "delay_certificate": "A reference record of a specific late departure, for a passenger."
     },
     "card": {
@@ -1339,9 +1339,12 @@
       "figures": "Headline figures",
       "on_time": "On time",
       "avg_delay": "Average delay",
-      "departures": "Departures observed",
       "planned_trips": "Planned trips",
-      "planned_trips_agency_wide": "Planned trips (whole agency)"
+      "planned_trips_agency_wide": "Planned trips (whole agency)",
+      "observations": "Observations (stop level)",
+      "plan_coverage": "* {{covered}}/{{window}} days a timetable plans",
+      "delivered": "Service delivered %",
+      "delivered_agency_wide": "Service delivered % (whole agency)"
     },
     "print": "Print / Save as PDF",
     "certificate": {

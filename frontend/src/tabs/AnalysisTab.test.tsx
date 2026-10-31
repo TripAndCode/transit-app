@@ -720,7 +720,7 @@ describe("AnalysisTab council report", () => {
   const ALL_SIX = { from: true, to: true, dow: true, time_band: true, service: true, routes: true };
   const DATES_ONLY = { from: true, to: true, dow: false, time_band: false, service: false, routes: false };
 
-  function showCouncil(routes: string[] = []) {
+  function showCouncil(routes: string[] = [], extra: Record<string, unknown> = {}) {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
@@ -731,6 +731,10 @@ describe("AnalysisTab council report", () => {
         ctx: { from: "2026-09-01", to: "2026-09-28", dow: "all", time_band: "all", service: "all", routes },
         scope_applied: ALL_SIX,
         delivered_scope_applied: DATES_ONLY,
+        covered_days: 28,
+        window_days: 28,
+        delivered_missing: null,
+        ...extra,
       },
       isFetching: false,
       error: null,
@@ -757,6 +761,40 @@ describe("AnalysisTab council report", () => {
     cleanup();
     showCouncil(["R1"]);
     expect(screen.getByRole("list", { name: "Headline figures" })).toHaveTextContent("Planned trips (whole agency)");
+  });
+
+  function figure(label: string) {
+    const list = screen.getByRole("list", { name: "Headline figures" });
+    return within(list).getByText(label).closest("li")!;
+  }
+
+  it("names the observation count as stop-level readings, not departures", () => {
+    showCouncil();
+    expect(figure("Observations (stop level)")).toHaveTextContent("540,357");
+    expect(screen.queryByText("Departures observed")).toBeNull();
+  });
+
+  it("says how many of the period's days the planned trips cover, in the agencies board's words", () => {
+    showCouncil([], { rows: [[22.6, 2.5, 540357, 57887, null, null]], covered_days: 16, window_days: 30 });
+    expect(figure("Planned trips")).toHaveTextContent("57,887");
+    expect(figure("Planned trips")).toHaveTextContent("16/30 days a timetable plans");
+    cleanup();
+    showCouncil();
+    expect(figure("Planned trips")).not.toHaveTextContent("days a timetable plans");
+  });
+
+  it("shows the service-delivered rate, or why it is missing in the agencies board's words", () => {
+    showCouncil();
+    expect(figure("Service delivered %")).toHaveTextContent("98.6%");
+    cleanup();
+    showCouncil([], { rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_unverified" });
+    expect(figure("Service delivered %")).toHaveTextContent("—");
+    expect(figure("Service delivered %")).toHaveTextContent("the feed is not yet checked for cancellations");
+  });
+
+  it("keeps each figure on one line, so a phone never breaks a number in two", () => {
+    const css = readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8");
+    expect(decl(ruleBody(css, ".council-report__value"), "white-space")).toBe("nowrap");
   });
 
   it("offers to print the report or save it as a PDF", async () => {

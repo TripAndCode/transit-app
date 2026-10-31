@@ -329,7 +329,12 @@ Three tabs along the top: **Period summary**, **Saved analyses** and **Council r
 
 ### 10-1. Period summary
 
-How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page). Each part has its own **Download CSV**. The **Export** menu at the top right offers “Download PNG”, “Download CSV”, “Create share link” and “Print / Save as PDF”. At the bottom, “View filters and definitions” links to the detailed reports.
+How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page).
+
+- Under the chart, the page names the day whose mean delay rose furthest above its 7-day average, and the routes with the most delay that day.
+- The table lists the 10 routes with the most delay. “Every route on the Routes table →” opens every route on **Routes**.
+- Everything the page exports is in the **Export** menu at the top right: “Download PNG”, “Download CSV” (the chart’s daily figures and the table of every route), “Create share link” and “Print / Save as PDF”.
+- At the bottom, “View filters and definitions” links to the detailed reports.
 
 Missing observations are not counted as on time; only the periods with observations are shown.
 
@@ -337,11 +342,19 @@ Missing observations are not counted as on time; only the periods with observati
 
 The analyses you saved with **Save analysis** on a route’s page. Click one to reopen it with the latest data; **Delete** removes it. They are kept in this browser only, so another browser or device will not show them.
 
+**Saved views** (chapter 3) are a different thing: conditions saved under “Saved views ▾” at the top of a screen while signed in are kept with your account and open from that same menu on any device. They do not appear on this tab.
+
 ### 10-3. Council report & delay record
 
 The list on the left holds **Council report** and **Delay record (for reference)**.
 
-**Council report** is a period summary written for a council or board: four headline figures (“On time”, “Average delay”, “Departures observed”, “Planned trips”), a written summary with its notes, and **Print / Save as PDF**. Planned trips, the service-delivered rate and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tile and the summary say “whole agency”.
+**Council report** is the period’s service, summarised for the council: five headline figures (“On time”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”), a written summary with its notes, and **Print / Save as PDF**.
+
+- “Observations (stop level)” counts records of a trip leaving a stop (13-1). One trip counts once per stop, so the figure is far larger than the planned trips.
+- When a timetable plans only some of the period’s days, the planned trips say so, such as “* 16/30 days a timetable plans”. Service delivered % counts the same days.
+- When Service delivered % cannot be shown, “—” is followed by the reason, in the same words as Compare agencies (such as “the feed is not yet checked for cancellations”).
+- The notes’ “On-time definition” gives the on-time tolerance used, such as “no more than 1 min late (early departures count as on time)”.
+- Planned trips, Service delivered % and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tiles and the summary say “whole agency”.
 
 **Delay record (for reference)** gives a passenger a record of a late departure. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
 
@@ -421,7 +434,7 @@ What the words on the screens and in this manual mean.
 ### 13-1. Units of data
 
 - **Feed**: the data an agency publishes. Delays are the departure delays its real-time feed (GTFS-Realtime) reports at each stop, used as they are; the Service does not work delays out from the timetable and vehicle positions. Route names, scheduled times, timetables and planned trips come from the timetable feed (GTFS).
-- **Reading** (“Samples” in the tables): one trip departing one stop counts as one reading. When the same trip and stop are reported many times, the last report is used. “Samples” counts readings, so one trip gives one reading per stop.
+- **Reading** (“Samples” in the tables): one trip departing one stop counts as one reading. When the same trip and stop are reported many times, the last report is used. “Samples” counts readings, so one trip gives one reading per stop. The council report’s “Observations (stop level)” is the same count.
 - **Set aside as implausible**: a report more than 2 hours (7,200 seconds) late or early is left out as a feed fault.
 - **Missing data**: days or hours with no readings are left out, not counted as on time.
 - **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.
@@ -444,7 +457,7 @@ What the words on the screens and in this manual mean.
 
 ### 13-3. Service and spacing
 
-- **Planned trips**: the number of trips the timetable planned to run over the period, counted day by day from the timetables running that day.
-- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed format that cannot report cancellations, or a feed a check has not confirmed reports them; Compare agencies gives the reason.
+- **Planned trips**: the number of trips the timetable planned to run over the period, counted day by day from the timetables running that day. When a timetable plans only some of the period’s days, the figure says how many were counted, such as “16/30 days a timetable plans”.
+- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed format that cannot report cancellations, or a feed a check has not confirmed reports them; Compare agencies and the council report give the reason.
 - **Vehicle-km delivered %**: service delivered % applied to the planned vehicle-km, so the share is the same as service delivered %; a cancelled trip’s distance is taken to be an average trip’s. It is left out where service delivered % is, and shows “—” for an agency whose timetable has no route shapes (shapes.txt).
 - **Headway quality**: for routes whose planned headway (the median) is 12 minutes or less, how far the actual spacing strays. “Excess wait” is the average extra wait that the irregular spacing adds over the planned spacing.

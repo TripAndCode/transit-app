@@ -11,16 +11,15 @@ import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import type { RankingRow, TrendDay } from "../api/types";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
-import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
+import { buildCsv, type CsvColumn } from "../components/analysis/csv";
 import { ExportMenu } from "../components/ExportMenu";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
 import { PeriodChart } from "../components/analysis/PeriodChart";
-import { RowsShown } from "../components/analysis/RankingCoverage";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { FILTER_SEPARATOR, fixedTenth, formatDateRange, formatNumber } from "../utils/format";
+import { FILTER_SEPARATOR, fixedTenth, formatDate, formatDateRange, formatMinutes, formatNumber } from "../utils/format";
 import { translationT as tt } from "../utils/filterValueLabels";
 import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import "../styles/focusedAnalysis.css";
@@ -42,8 +41,27 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
   { header: "observations", value: (r) => r[5] },
 ];
 
-/** The API's longest ranking, so a summary meant to be printed or exported is not cut at the default first page. */
+/** The API's longest ranking, so the exported CSV is not cut at the default first page. */
 const RANKING_OPTIONS = { limit: REPORT_ROWS_MAX };
+
+/** How many routes the printable page lists; every route is on the Routes table. */
+const SUMMARY_ROUTES = 10;
+
+/** The day whose mean rose furthest above its 7-day moving average: the
+ *  spike a reader of the chart asks about. None when no day rose above it. */
+function spikeDay(days: TrendDay[]): TrendDay | undefined {
+  let best: TrendDay | undefined;
+  let bestExcess = 0;
+  for (const d of days) {
+    if (d.avg_min_smoothed == null) continue;
+    const excess = d.avg_min - d.avg_min_smoothed;
+    if (excess > bestExcess) {
+      best = d;
+      bestExcess = excess;
+    }
+  }
+  return best;
+}
 
 export function ReportsHomeTab() {
   const id = useAgencyId();
@@ -66,6 +84,9 @@ export function ReportsHomeTab() {
   const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
   const rowsTotal = ranking.data?.rows_total ?? null;
   const truncated = rowsTotal != null && rowsTotal > rows.length;
+  const shownRows = rows.slice(0, SUMMARY_ROUTES);
+  const routesTotal = rowsTotal ?? rows.length;
+  const spike = spikeDay(days);
   const coverageCsv = truncated ? [["rows_shown", String(rows.length), "rows_total", String(rowsTotal)]] : [];
   const queryString = scopeToQueryString(ctx);
   const chartWrapRef = useRef<HTMLDivElement>(null);
@@ -94,7 +115,7 @@ export function ReportsHomeTab() {
       />
     </div>}
     {notice && <p role="status">{notice}</p>}
-    {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
+    {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p><p className="focus-muted">{t("savedKinds")}</p>
       {!saved.some((s) => s.agencyId === id) && (
         <EmptyState title={t("noSaved")} recoveries={[{ label: t("goToRoutes"), onClick: () => navigate(routesHref(String(id), `?${queryString}`)) }]} />
       )}
@@ -105,23 +126,26 @@ export function ReportsHomeTab() {
     </section> : <>
       <ScopeSentence applied={trend.data?.scope_applied} />
       <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{formatDateRange(ctx.from, ctx.to)}</h2>
-      <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
-        ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),
-      ])}>{t("csv")}</button></div></div>
+      <section><h2>{t("trend")}</h2>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
-        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { range: formatDateRange(days[0]?.date ?? "", days.at(-1)?.date ?? "") })}</p><div ref={chartWrapRef} className="focus-chart-scroll"><PeriodChart days={days} /></div></>}
+        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { range: formatDateRange(days[0]?.date ?? "", days.at(-1)?.date ?? "") })}</p><div ref={chartWrapRef} className="focus-chart-scroll"><PeriodChart days={days} /></div>
+          {spike && <p>
+            {t("spike", { date: formatDate(spike.date, { weekday: true }), avg: formatMinutes(spike.avg_min), label: tt(t, "reports.daily.smoothed_label"), smoothed: formatMinutes(spike.avg_min_smoothed) })}
+            {spike.top_offenders.length > 0 && <> {t("spikeRoutes", { routes: spike.top_offenders.map((o) => tt(t, "reports.daily.offender", { route: names.format(o.route_code), min: formatMinutes(o.avg_min) })).join(tt(t, "common.list_separator")) })}</>}
+          </p>}</>}
       </AsyncSection></section>
-      <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
-        ["definition", JSON.stringify(ranking.data?.definition)], ...coverageCsv, [], ...buildCsv(rows, rankingColumns, ctx),
-      ])}>{t("csv")}</button></div></div>
+      <section><h2>{t("routesToCheck")}</h2>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
-          {rows.map((row) => <tr key={row[0]}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[2] == null ? "—" : fixedTenth(Number(row[2]))}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
+          {shownRows.map((row) => <tr key={row[0]}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[2] == null ? "—" : fixedTenth(Number(row[2]))}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
             <Link to={routeHref(String(id), String(row[0]), `?${queryString}`)}>{t("open")}</Link>
           </td></tr>)}
         </tbody></table></div>}
       </AsyncSection>
-      {truncated && <RowsShown shown={rows.length} total={rowsTotal} />}
+      {routesTotal > shownRows.length && shownRows.length > 0 && <p className="focus-muted">
+        {t("topRoutes", { shown: shownRows.length, total: formatNumber(routesTotal) })}{" "}
+        <Link to={routesHref(String(id), `?${queryString}`)}>{t("allRoutes")}</Link>
+      </p>}
       {ranking.data?.reliable_min_samples != null && <p className="focus-muted">{t("routesFloor", { floor: ranking.data.reliable_min_samples })}</p>}
       </section>
       <p className="focus-muted">{t("reportNote")}</p>

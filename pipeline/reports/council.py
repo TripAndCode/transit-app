@@ -191,7 +191,7 @@ async def compute_council_summary(
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
-    "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    "delivered_missing", "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
@@ -199,7 +199,7 @@ async def compute_council_summary(
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     exactly when :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`
-    says so (see that module). ``clamp_pct`` is ``None`` when this agency has
+    says so (see that module), and ``delivered_missing`` then says why. ``clamp_pct`` is ``None`` when this agency has
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
     """
@@ -250,6 +250,7 @@ async def compute_council_summary(
         "service_delivered_pct": d["service_delivered_pct"],
         "covered_days": d["covered_days"],
         "window_days": d["window_days"],
+        "delivered_missing": d["delivered_missing"],
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),

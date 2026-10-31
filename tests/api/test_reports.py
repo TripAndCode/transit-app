@@ -2190,9 +2190,9 @@ async def test_council_summary_custom_tolerance_pools_histogram_not_naive_averag
 
 @pytest.mark.asyncio
 async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
-    """The report template's rendered footnotes must show the exact
-    tolerance/preset actually used, not the legacy_60s defaults -- mirrors
-    the CSV preamble's own guarantee (pipeline.reports.definition)."""
+    """The report template's rendered footnotes must state the exact
+    tolerance actually used, in plain words rather than a preset name --
+    mirrors the CSV preamble's own guarantee (pipeline.reports.definition)."""
     client, agency_id, pool = reports_client
     day = "2026-06-12"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
@@ -2205,18 +2205,17 @@ async def test_council_summary_footnotes_change_with_custom_tolerance(reports_cl
     assert default_resp.status_code == custom_resp.status_code == 200
     default_text = default_resp.json()["text"]
     custom_text = custom_resp.json()["text"]
-    assert "legacy_60s" in default_text
-    assert "45秒" in custom_text
-    assert "90秒" in custom_text
-    assert "custom" in custom_text
-    assert "legacy_60s" not in custom_text
+    assert "定時の定義：定刻から1分以内の遅れ（早発も定時として数えます）" in default_text
+    assert "定時の定義：定刻から1分30秒以内の遅れと、45秒以内の早発" in custom_text
+    assert "legacy_60s" not in default_text + custom_text
+    assert "custom" not in custom_text
 
 
 @pytest.mark.asyncio
 async def test_council_summary_service_delivered_not_available_footnote(reports_client, ch_client):
     """An agency with no static schedule (planned_trips == 0, the default
     reports_client fixture's agency) must show "not available", never a
-    misleading 100%, and the footnotes must say so explicitly."""
+    misleading 100%, and the footnotes and the response must say why."""
     client, agency_id, pool = reports_client
     day = "2026-06-13"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
@@ -2228,7 +2227,8 @@ async def test_council_summary_service_delivered_not_available_footnote(reports_
     row = body["rows"][0]
     assert row[4] is None  # executed_trips
     assert row[5] is None  # service_delivered_pct
-    assert "計測できません" in body["text"]
+    assert "運行率：—（期間に時刻表の計画なし）" in body["text"]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("no_plan", 0, 1)
 
 
 @pytest.mark.asyncio
@@ -2251,7 +2251,8 @@ async def test_council_summary_service_delivered_available_when_static_join_and_
     assert row[3] == 4  # planned_trips
     assert row[4] == 3  # executed_trips
     assert row[5] == 75.0  # service_delivered_pct
-    assert "計測できません" not in body["text"]
+    assert "運行率：—" not in body["text"]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == (None, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -2280,7 +2281,7 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
     assert body["scope_applied"]["routes"] is True
     delivered_scope = body["delivered_scope_applied"]
     assert {f for f, on in delivered_scope.items() if on} == {"from", "to"}
-    assert "運行実績率 75.0%（事業者全体）" in body["text"]
+    assert "運行率 75.0%（事業者全体）" in body["text"]
     assert "事業者全体の値です" in body["text"]
 
     unfiltered = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")).json()
@@ -2294,6 +2295,7 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
 
     other = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()
     assert other["delivered_scope_applied"] is None
+    assert (other["delivered_missing"], other["covered_days"], other["window_days"]) == (None, None, None)
 
 
 @pytest.mark.asyncio
@@ -2316,7 +2318,7 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
     assert header_idx >= 1
     footnote_cells = [r[0] for r in rows[1:header_idx]]
-    assert any("計測できません" in c for c in footnote_cells)
+    assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
 

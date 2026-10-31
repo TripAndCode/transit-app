@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import i18n from "../i18n";
 import { SavedExportTab } from "./SavedExportTab";
 
 vi.mock("../routes/lazyTabs", () => ({
@@ -83,6 +84,19 @@ describe("SavedExportTab", () => {
   it("says what the council documents are for on their own tab", async () => {
     open("/agencies/9/reports?doc=council");
     expect(await screen.findByRole("heading", { level: 1, name: "Reports" })).toBeInTheDocument();
-    expect(screen.getByText("A summary for a council or board, and a delay record for reference.")).toBeInTheDocument();
+    expect(screen.getByText("The council report, and a delay record for reference.")).toBeInTheDocument();
+  });
+
+  it("names the council document one way wherever it appears", () => {
+    const ja = i18n.getFixedT("ja");
+    const en = i18n.getFixedT("en");
+    for (const key of ["saved.view_reports", "saved.subtitle_reports", "reports.type.council_summary"]) {
+      expect(ja(key)).toContain("協議会向け報告");
+      expect(en(key)).toMatch(/council report/i);
+    }
+    for (const key of ["saved.view_reports", "saved.subtitle_reports", "reports.type.council_summary", "reports.desc.council_summary"]) {
+      expect(ja(key)).not.toMatch(/役員会|取締役会|協議会向けまとめ/);
+      expect(en(key)).not.toMatch(/board/);
+    }
   });
 });

@@ -76,6 +76,7 @@ from pipeline.reports.forecast import (
 )
 from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
+from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
     RETIRED,
@@ -377,6 +378,13 @@ class ReportResponse(BaseModel):
     # service-delivered figures and data-quality caveat honoured. `scope_applied`
     # is the scope of its on-time figures, which follow the whole filter.
     delivered_scope_applied: dict[str, bool] | None = None
+    # council_summary only (None elsewhere): of the period's window_days, the
+    # covered_days a timetable plans, the only days its planned and executed
+    # trips count; and, beside a missing service-delivered rate, why it is
+    # missing (pipeline.reports.service_delivered.DeliveredMissing).
+    covered_days: int | None = None
+    window_days: int | None = None
+    delivered_missing: DeliveredMissing | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking
     # and delay_certificate; None elsewhere), and, for route_table, ranking and
@@ -1373,6 +1381,9 @@ async def get_report(
             definition=definition,
             scope_applied=report_scope_applied(report_type),
             delivered_scope_applied=_COUNCIL_DELIVERED_SCOPE,
+            covered_days=payload["covered_days"],
+            window_days=payload["window_days"],
+            delivered_missing=payload["delivered_missing"],
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec

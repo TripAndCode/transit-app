@@ -51,10 +51,10 @@
     "title": "レポート",
     "view_summary": "期間のまとめ",
     "view_saved": "保存した分析",
-    "view_reports": "協議会向けまとめ・遅延の記録",
+    "view_reports": "協議会向け報告・遅延の記録",
     "subtitle_summary": "期間中の運行を、印刷できる一枚にまとめます。",
     "subtitle_saved": "このブラウザで路線のページから保存した分析です。",
-    "subtitle_reports": "協議会や役員会向けのまとめと、遅延の記録（参考）です。"
+    "subtitle_reports": "協議会向け報告と、遅延の記録（参考）です。"
   },
   "sheet": {
     "handle": "シートの高さを変える"
@@ -1314,7 +1314,7 @@
       "dow_weekend": "土日祝のダイヤで運行した日の、系統ごとの平均遅延です。土曜・日曜のほか、祝日など時刻表が土日祝のダイヤを走らせた平日も含みます。",
       "dwell_run": "停留所での滞留時間と、停留所間の走行時間の内訳を見ます。",
       "route_forecast": "系統ごとに、曜日と時間帯で遅れやすい時を示します。",
-      "council_summary": "協議会・取締役会向けの期間まとめです。",
+      "council_summary": "協議会向けに、期間の運行をまとめた報告です。",
       "delay_certificate": "特定の便の遅れを記録した参考資料です。"
     },
     "card": {
@@ -1339,9 +1339,12 @@
       "figures": "主な数値",
       "on_time": "定時率",
       "avg_delay": "平均遅延",
-      "departures": "観測した発車",
       "planned_trips": "計画便数",
-      "planned_trips_agency_wide": "計画便数（事業者全体）"
+      "planned_trips_agency_wide": "計画便数（事業者全体）",
+      "observations": "観測データ数（停留所単位）",
+      "plan_coverage": "※時刻表に計画がある{{covered}}/{{window}}日分",
+      "delivered": "運行率",
+      "delivered_agency_wide": "運行率（事業者全体）"
     },
     "print": "印刷 / PDFで保存",
     "certificate": {
