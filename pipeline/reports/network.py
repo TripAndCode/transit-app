@@ -47,7 +47,7 @@ from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
-from pipeline.reports.service_delivered import compute_service_delivered_by_agency
+from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
 from pipeline.service_day import service_date_of
 
@@ -128,15 +128,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         )
     except Exception:
         _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
-        no_plan = {
-            "planned_trips": 0,
-            "executed_trips": None,
-            "service_delivered_pct": None,
-            "covered_days": 0,
-            "window_days": (to_date - from_date).days + 1,
-            "delivered_missing": "unreadable",
-        }
-        delivered = {a["agency_id"]: no_plan for a in agencies}
+        unreadable = unreadable_service_delivered(from_date, to_date)
+        delivered = {a["agency_id"]: unreadable for a in agencies}
 
     # static_version_id/planned_trip_count/planned_vehicle_km/
     # vehicle_km_delivered_pct: see pipeline.reports.supply — reuses

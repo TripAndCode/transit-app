@@ -164,9 +164,6 @@ export function useScopeSummary(
 /** A report's own options beyond the scope: whether a ranking's groups
  *  observed too few times to trust join it, how many rows come back, and
  *  how late a departure must be for the delay certificate to list it. */
-/** `observeOnly` reads whatever another caller fetched under the same query
- *  without ever fetching itself, so a screen can show a report's metadata
- *  without paying for a report that only an opened section asks for. */
 export type ReportOptions = {
   /** The Routes table: the figure it is sorted by. */
   sort?: RouteTableSort;
@@ -180,7 +177,6 @@ export type ReportOptions = {
   order?: "best";
   limit?: number;
   thresholdSec?: number;
-  observeOnly?: boolean;
 };
 
 /** The most rows a report lists in one response, not counting the routes a
@@ -221,13 +217,12 @@ export function useReport(
     ],
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${reportQueryString(ctx, options)}`, { signal }),
-    enabled: agencyId != null && !!reportType && !options.observeOnly,
+    enabled: agencyId != null && !!reportType,
     // Keep the prior report mounted while a new report type or filter change
     // loads, so callers can gate their skeleton on `isPending` (first load
     // only) instead of `isFetching` (every refetch), matching AnalysisTab's
-    // report-switch UX to useNetworkSummary/useForecastOverview's. An
-    // observer never loads, so a kept report would never be replaced.
-    placeholderData: options.observeOnly ? undefined : keepPreviousData,
+    // report-switch UX to useNetworkSummary/useForecastOverview's.
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -407,7 +407,10 @@ export type CouncilSummaryRow = [
 
 /** `delay_certificate` -- one row per physical trip-run exceeding the
  *  threshold. `actual_time` is `scheduled_time` shifted by `dep_delay_sec`,
- *  and may carry a day-boundary suffix rather than being a bare clock time. */
+ *  and may carry a day-boundary suffix rather than being a bare clock time.
+ *  The times are at the earliest stop the feed recorded for the trip:
+ *  `stop_name` names it and `stop_is_first` says whether the timetable starts
+ *  the trip there, both null when the loaded timetable does not name it. */
 export type DelayCertificateRow = [
   agency_name: string,
   route_code: string,
@@ -416,6 +419,8 @@ export type DelayCertificateRow = [
   scheduled_time: string,
   actual_time: string,
   dep_delay_sec: number,
+  stop_name: string | null,
+  stop_is_first: boolean | null,
 ];
 
 /** One hour-of-day × date cell of the trend heatmap. `sum_delay_sec` is the
@@ -453,11 +458,21 @@ export type TrendPayload = {
  *  not applied by this screen. */
 type ScopeApplied = Partial<Record<string, boolean>>;
 
+/** Why an agency's service-delivered rate is missing
+ *  (pipeline.reports.service_delivered.DeliveredMissing). */
+type DeliveredMissing = "no_plan" | "feed_cannot_report" | "feed_unverified" | "unreadable";
+
 type ReportEnvelope<T extends ReportType, Row> = {
   scope_applied?: ScopeApplied;
   /** council_summary only: the scope its planned/executed/delivered figures
    *  honoured, narrower than `scope_applied`. Null for every other report. */
   delivered_scope_applied?: ScopeApplied | null;
+  /** council_summary only: of the period's `window_days`, the `covered_days`
+   *  a timetable plans, the only days its planned and executed trips count,
+   *  and why a missing service-delivered rate is missing. */
+  covered_days?: number | null;
+  window_days?: number | null;
+  delivered_missing?: DeliveredMissing | null;
   report_type: T;
   rendered_at: string;
   text: string;
@@ -1066,7 +1081,7 @@ export type NetworkAgencyRow = {
   window_days: number;
   /** Why service_delivered_pct is null, or null beside a rate:
    *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
-  delivered_missing: "no_plan" | "feed_cannot_report" | "feed_unverified" | "unreadable" | null;
+  delivered_missing: DeliveredMissing | null;
   /** False whenever this agency has no manually-configured ridership weights
    * at all -- the weighted-view toggle must key off this, not off
    * weighted_on_time_pct being null (a configured agency with zero samples

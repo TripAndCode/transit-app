@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -119,6 +119,17 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("tells saved analyses in this browser apart from saved views kept with an account", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?doc=saved");
+    expect(
+      screen.getByText(
+        "These are saved analyses, kept in this browser by “Save analysis” on a route's page. Saved views are different: " +
+          "while signed in, “Saved views ▾” at the top of a screen keeps them with your account, and opens them on any device.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("asks for the API's longest ranking list, not its default first page", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
@@ -126,20 +137,16 @@ describe("ReportsHomeTab", () => {
     expect(rankingCall?.[3]).toEqual({ limit: hooks.REPORT_ROWS_MAX });
   });
 
-  it("says how many routes it shows, on screen and in the CSV, when the ranking is longer still", async () => {
+  it("says how many routes it shows, and keeps the API's coverage in the CSV, when the ranking is longer still", async () => {
     const download = vi.spyOn(csv, "downloadCsv").mockImplementation(() => {});
     const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), rows_total: 600 };
     mockReports(trendResponse(), ranking);
     renderTab();
-    expect(screen.getByText("Showing 1 of 600")).toBeInTheDocument();
-    const section = screen.getByRole("heading", { name: "Mean delay by service pattern" }).closest("section") as HTMLElement;
-    await userEvent.click(within(section).getByRole("button", { name: "Download CSV" }));
+    expect(screen.getByText("Showing the 1 slowest of 600 routes.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Download CSV" }));
-    expect(download).toHaveBeenCalledTimes(2);
-    for (const [, csvRows] of download.mock.calls) {
-      expect(csvRows).toContainEqual(["rows_shown", "1", "rows_total", "600"]);
-    }
+    expect(download).toHaveBeenCalledOnce();
+    expect(download.mock.calls[0][1]).toContainEqual(["rows_shown", "1", "rows_total", "600"]);
   });
 
   it("says nothing about coverage when every route is listed", () => {
@@ -147,6 +154,59 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse(), ranking);
     renderTab();
     expect(screen.queryByText(/^Showing /)).toBeNull();
+  });
+
+  it("prints a short list: the ten slowest routes, with every route a link away on the Routes table", () => {
+    const rows = Array.from({ length: 15 }, (_, i) => [String(100 + i), null, 15 - i, 1, 3, 400] as unknown as RankingRow);
+    mockReports(trendResponse(), { ...rankingResponse(rows), rows_total: 15 });
+    renderTab();
+    expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(10);
+    expect(screen.getByText("Showing the 10 slowest of 15 routes.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Every route on the Routes table →" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/agencies\/1\/routes/),
+    );
+  });
+
+  it("keeps the page's exports in its one Export menu", () => {
+    mockReports(trendResponse([{ date: "2026-10-23", avg_min: 5, samples: 10, top_offenders: [] }]), rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]));
+    renderTab();
+    expect(screen.queryByRole("button", { name: "Download CSV" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
+  });
+
+  it("explains the day the mean rose furthest above its 7-day average, naming that day's slowest routes", () => {
+    const day = (date: string, avg: number, smoothed: number, offenders: TrendDay["top_offenders"] = []): TrendDay => ({
+      date,
+      avg_min: avg,
+      avg_min_smoothed: smoothed,
+      samples: 1000,
+      top_offenders: offenders,
+    });
+    mockReports(
+      trendResponse([
+        day("2026-10-21", 2.9, 3.0),
+        day("2026-10-22", 3.6, 3.0),
+        day("2026-10-23", 5.02, 3.23, [
+          { route_code: "301", avg_min: 27.85, samples: 155 },
+          { route_code: "302", avg_min: 25.74, samples: 532 },
+        ]),
+      ]),
+      rankingResponse(),
+    );
+    renderTab();
+    const note = screen.getByText(/rose furthest above/);
+    expect(note).toHaveTextContent("On Fri, Oct 23, 2026, the mean of 5.0 min rose furthest above the 7-day average (3.2 min).");
+    expect(note).toHaveTextContent("Slowest routes that day: Route 301 (27.9 min), Route 302 (25.7 min)");
+  });
+
+  it("explains no day when none rose above its 7-day average", () => {
+    mockReports(
+      trendResponse([{ date: "2026-10-23", avg_min: 3, avg_min_smoothed: 3, samples: 10, top_offenders: [] }]),
+      rankingResponse(),
+    );
+    renderTab();
+    expect(screen.queryByText(/rose furthest above/)).toBeNull();
   });
 
   it("says the routes list leaves out routes observed too few times to trust", () => {

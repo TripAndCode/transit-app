@@ -2190,9 +2190,9 @@ async def test_council_summary_custom_tolerance_pools_histogram_not_naive_averag
 
 @pytest.mark.asyncio
 async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
-    """The report template's rendered footnotes must show the exact
-    tolerance/preset actually used, not the legacy_60s defaults -- mirrors
-    the CSV preamble's own guarantee (pipeline.reports.definition)."""
+    """The report template's rendered footnotes must state the exact
+    tolerance actually used, in plain words rather than a preset name --
+    mirrors the CSV preamble's own guarantee (pipeline.reports.definition)."""
     client, agency_id, pool = reports_client
     day = "2026-06-12"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
@@ -2205,18 +2205,17 @@ async def test_council_summary_footnotes_change_with_custom_tolerance(reports_cl
     assert default_resp.status_code == custom_resp.status_code == 200
     default_text = default_resp.json()["text"]
     custom_text = custom_resp.json()["text"]
-    assert "legacy_60s" in default_text
-    assert "45秒" in custom_text
-    assert "90秒" in custom_text
-    assert "custom" in custom_text
-    assert "legacy_60s" not in custom_text
+    assert "定時の定義：定刻から1分以内の遅れ（早発も定時として数えます）" in default_text
+    assert "定時の定義：定刻から1分30秒以内の遅れと、45秒以内の早発" in custom_text
+    assert "legacy_60s" not in default_text + custom_text
+    assert "custom" not in custom_text
 
 
 @pytest.mark.asyncio
 async def test_council_summary_service_delivered_not_available_footnote(reports_client, ch_client):
     """An agency with no static schedule (planned_trips == 0, the default
     reports_client fixture's agency) must show "not available", never a
-    misleading 100%, and the footnotes must say so explicitly."""
+    misleading 100%, and the footnotes and the response must say why."""
     client, agency_id, pool = reports_client
     day = "2026-06-13"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
@@ -2228,7 +2227,33 @@ async def test_council_summary_service_delivered_not_available_footnote(reports_
     row = body["rows"][0]
     assert row[4] is None  # executed_trips
     assert row[5] is None  # service_delivered_pct
-    assert "計測できません" in body["text"]
+    assert "運行率：—（期間に時刻表の計画なし）" in body["text"]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("no_plan", 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_council_summary_says_the_plan_could_not_be_read_when_the_planned_figures_fail(
+    reports_client, ch_client, monkeypatch
+):
+    """The planned figures failing in Postgres, as they do on a schema behind
+    its migrations, leave the report standing: the on-time figures answer,
+    and the rate says its plan could not be read rather than a plan of
+    nothing or a 500."""
+    from pipeline.reports import service_delivered
+
+    client, agency_id, pool = reports_client
+    day = "2026-06-13"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    monkeypatch.setattr(service_delivered, "_SERVICE_SQL", "SELECT * FROM planned_trips_not_migrated")
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rows"][0][2] == 25  # samples
+    assert body["rows"][0][3:] == [0, None, None]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("unreadable", 0, 1)
+    assert "運行率：—（計画を読み込めませんでした）" in body["text"]
 
 
 @pytest.mark.asyncio
@@ -2251,7 +2276,8 @@ async def test_council_summary_service_delivered_available_when_static_join_and_
     assert row[3] == 4  # planned_trips
     assert row[4] == 3  # executed_trips
     assert row[5] == 75.0  # service_delivered_pct
-    assert "計測できません" not in body["text"]
+    assert "運行率：—" not in body["text"]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == (None, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -2280,7 +2306,7 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
     assert body["scope_applied"]["routes"] is True
     delivered_scope = body["delivered_scope_applied"]
     assert {f for f, on in delivered_scope.items() if on} == {"from", "to"}
-    assert "運行実績率 75.0%（事業者全体）" in body["text"]
+    assert "運行率 75.0%（事業者全体）" in body["text"]
     assert "事業者全体の値です" in body["text"]
 
     unfiltered = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")).json()
@@ -2294,6 +2320,7 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
 
     other = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()
     assert other["delivered_scope_applied"] is None
+    assert (other["delivered_missing"], other["covered_days"], other["window_days"]) == (None, None, None)
 
 
 @pytest.mark.asyncio
@@ -2316,9 +2343,22 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
     assert header_idx >= 1
     footnote_cells = [r[0] for r in rows[1:header_idx]]
-    assert any("計測できません" in c for c in footnote_cells)
+    assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
+
+
+_CERT_CSV_HEADER = [
+    "事業者名",
+    "系統コード",
+    "種別",
+    "日付",
+    "定刻",
+    "実績時刻",
+    "遅延(秒)",
+    "記録した停留所",
+    "始発の停留所",
+]
 
 
 @pytest.mark.asyncio
@@ -2377,8 +2417,10 @@ async def test_delay_certificate_uses_default_threshold_when_omitted(reports_cli
 @pytest.mark.asyncio
 async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client, ch_client, ch_async_client):
     """Row shape is (agency_name, route_code, service_type, date,
-    scheduled_time, actual_time, dep_delay); actual_time is scheduled_time
-    shifted by dep_delay seconds. _seed_route schedules every row at 10:00:00."""
+    scheduled_time, actual_time, dep_delay, stop_name, stop_is_first);
+    actual_time is scheduled_time shifted by dep_delay seconds. _seed_route
+    schedules every row at 10:00:00 and loads no timetable, so the stop is
+    unknown."""
     from api.main import app
 
     client, agency_id, pool = reports_client
@@ -2393,13 +2435,14 @@ async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client,
     assert resp.status_code == 200
     rows = [r for r in resp.json()["rows"] if r[1] == "RSHIFT"]
     assert len(rows) == 1
-    _agency_name, route_code, service_type, date_str, scheduled_time, actual_time, dep_delay = rows[0]
+    _agency_name, route_code, service_type, date_str, scheduled_time, actual_time, dep_delay, stop, first = rows[0]
     assert route_code == "RSHIFT"
     assert service_type == "平日"
     assert date_str == day
     assert scheduled_time == "10:00:00"
     assert dep_delay == 400
     assert actual_time == "10:06:40"  # 10:00:00 + 400s
+    assert (stop, first) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -2449,7 +2492,7 @@ async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_
     # The saved file is named for what the page calls it, a delay record.
     assert resp.headers["content-disposition"] == f'attachment; filename="delay_record_{day}_{day}.csv"'
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     data = [r for r in rows[header_idx + 1 :] if r and r[1] == "RCSV"]
     assert len(data) == 1
     assert data[0][6] == "400"
@@ -2475,7 +2518,7 @@ async def test_delay_certificate_csv_export_includes_threshold_footnote(reports_
     )
     assert resp.status_code == 200
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     footnote_cells = [r[0] for r in rows[1:header_idx]]
     assert any("300" in c for c in footnote_cells)
 
@@ -2510,7 +2553,7 @@ async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_cl
 
     resp = await client.get(f"{url}&limit=2&format=csv")
     rows = list(csv.reader(io.StringIO(resp.text)))
-    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    header_idx = rows.index(_CERT_CSV_HEADER)
     assert "該当3件のうち、日付順の先頭2件のみを掲載しています。残りは期間を絞って出力してください。" in [
         r[0] for r in rows[1:header_idx]
     ]

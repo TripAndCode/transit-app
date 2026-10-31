@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { use, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../api/hooks";
 import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
-import { scopeToQueryString, useScope, type Scope } from "../api/scope";
+import { DataEndContext, defaultPeriod, scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { ReportResponse, TrendPayload } from "../api/types";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
@@ -27,7 +27,7 @@ import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
-import { formatDateRange } from "../utils/format";
+import { FILTER_SEPARATOR, formatDate, formatDateRange } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useRouteNames } from "../api/useRouteNames";
@@ -40,6 +40,7 @@ import { useIsAdmin } from "../api/useIsAdmin";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
+import { certificateDayScope } from "../components/analysis/certificateDayScope";
 import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
@@ -59,10 +60,6 @@ function hasCsv(data: ReportResponse): boolean {
   }
   return true;
 }
-
-/** The certificate's period list is fetched by its own section; the screen
- *  only reads it back for the scope sentence. */
-const OBSERVE_ONLY: ReportOptions = { observeOnly: true };
 
 /** Which of the routes a route list leaves out by default it keeps. */
 type KeptRoutes = Required<Pick<ReportOptions, "includeRetired" | "includeZeroDelay">>;
@@ -115,8 +112,9 @@ export function AnalysisTab({
   };
   const list = useReports(id);
   // The certificate, like route_forecast, owns its section and its queries.
+  // Its day and route are its own scope, so the screen's period sentence,
+  // which nothing on it reads, is left off.
   const isCertificate = reportType === "delay_certificate";
-  const certificateList = useReport(id, isCertificate ? "delay_certificate" : null, ctx, OBSERVE_ONLY);
   const detail = useReport(
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
@@ -138,11 +136,9 @@ export function AnalysisTab({
       ? forecastRoute != null
         ? routeForecast.data?.scope_applied
         : forecast.data?.scope_applied
-      : isCertificate
-        ? certificateList.data?.scope_applied
-        : detail.data?.report_type === reportType
-          ? detail.data.scope_applied
-          : undefined;
+      : detail.data?.report_type === reportType
+        ? detail.data.scope_applied
+        : undefined;
 
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);
@@ -157,7 +153,7 @@ export function AnalysisTab({
 
   return (
     <div className="analysis-tab" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <ScopeSentence applied={scopeApplied} />
+      {!isCertificate && <ScopeSentence applied={scopeApplied} />}
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -207,7 +203,7 @@ export function AnalysisTab({
           </div>
         )}
         {isCertificate && id != null && (
-          <CertificateSection key={id} aid={id} csvHref={csvHref("delay_certificate")} />
+          <CertificateSection key={id} aid={id} />
         )}
         {reportType && reportType !== "route_forecast" && !isCertificate && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
@@ -315,34 +311,42 @@ export function AnalysisTab({
 }
 
 /** A passenger starts from the lookup, which fetches one day and one route.
- *  The period's every late departure is a far heavier scan that only staff
- *  ask for, so it is fetched once they open its section and can never hold
- *  the lookup back. The open state lives here, so leaving the certificate
- *  drops it and a return starts folded. */
-function CertificateSection({ aid, csvHref }: { aid: number; csvHref: string }) {
+ *  Staff can open every route's late departures for the same day, fetched
+ *  only once they open the list, so it never holds the lookup back. The
+ *  open state lives here, so leaving the certificate drops it and a return
+ *  starts folded. */
+function CertificateSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
-  const [ctx, update] = useScope();
+  const latestDay = defaultPeriod(use(DataEndContext)).to;
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const date = pickedDate ?? latestDay;
   const [staffOpen, setStaffOpen] = useState(false);
-  const all = useReport(aid, staffOpen ? "delay_certificate" : null, ctx);
+  const day = certificateDayScope(date, null);
+  const all = useReport(aid, staffOpen ? "delay_certificate" : null, day);
   const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
   return (
     <div>
       <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
-      <DelayCertificateLookup aid={aid} />
+      <DelayCertificateLookup aid={aid} date={date} latestDay={latestDay} onDateChange={setPickedDate} />
       <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
-        <summary>{t("reports.certificate.all_late")}</summary>
+        <summary>{t("reports.certificate.late_list")}</summary>
         {staffOpen && all.error && <ErrorBanner error={all.error} onRetry={() => all.refetch()} />}
         {staffOpen && all.isFetching && (
           <>
             {!data && <SkeletonTable rows={6} rowHeight={36} />}
-            <StillWorking scope={ctx} update={update} />
+            <StillWorking />
           </>
         )}
         {staffOpen && data && (
           <>
-            <ReportMeta data={data} />
-            <p className="cert-staff__summary">{data.text}</p>
-            <CsvLink href={csvHref} />
+            <p className="cert-staff__summary">
+              {/* The day the rows on screen are for, which a changed day's
+                  list keeps showing until its own rows arrive. */}
+              {t("reports.certificate.late_list_scope", { date: formatDate(data.ctx?.from ?? date, { weekday: true }) })}
+              {FILTER_SEPARATOR}
+              {data.text}
+            </p>
+            <CsvLink href={apiUrl(`/api/${aid}/reports/delay_certificate?${reportQueryString(day)}&format=csv`)} />
             {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
           </>
         )}

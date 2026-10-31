@@ -145,14 +145,7 @@ export function SidebarLineMap({
             <span className="rail-badge rail-badge--transfer" aria-hidden="true">
               {askChord?.toUpperCase()}
             </span>
-            {!collapsed && (
-              <span className="rail-name">
-                {askLabel}
-                <span className="rail-transfer-tag" aria-hidden="true">
-                  {t("nav.transfer")}
-                </span>
-              </span>
-            )}
+            {!collapsed && <span className="rail-name">{askLabel}</span>}
             {!collapsed && <Chord to="ask" />}
           </PendingNavLink>
         </RailTooltip>

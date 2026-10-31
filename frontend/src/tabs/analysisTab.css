@@ -21,13 +21,11 @@
 .cert-staff__summary { font-size: var(--text-sm); }
 
 /* A printed report is the report alone: the list beside it and the insight
-   panel are the screen's navigation, and beside a certificate the screen's
-   scope would contradict the departure the certificate names. */
+   panel are the screen's navigation, and the staff list is not the record. */
 @media print {
   .analysis-report-list { display: none !important; }
   .analysis-insights { display: none !important; }
   .cert-staff { display: none; }
-  .analysis-tab:has(.cert-card) .scope-sentence { display: none; }
 }
 
 /* Why's analyses that can't be shown: one quiet list under the ones that can,

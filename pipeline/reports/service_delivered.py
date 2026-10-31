@@ -92,6 +92,21 @@ _SERVICE_SQL = (
 )
 
 
+def unreadable_service_delivered(from_date: date, to_date: date) -> dict[str, Any]:
+    """The figures :func:`compute_service_delivered_by_agency` gives an agency
+    when its read fails outright: no plan counted, no rate, and
+    ``delivered_missing="unreadable"``, so a caller never shows the 0 as a
+    real plan of nothing."""
+    return {
+        "planned_trips": 0,
+        "executed_trips": None,
+        "service_delivered_pct": None,
+        "covered_days": 0,
+        "window_days": (to_date - from_date).days + 1,
+        "delivered_missing": "unreadable",
+    }
+
+
 async def compute_service_delivered_by_agency(
     conn, agency_ids: list[int], from_date: date, to_date: date
 ) -> dict[int, dict[str, Any]]:

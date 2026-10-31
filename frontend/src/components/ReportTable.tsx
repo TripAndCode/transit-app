@@ -125,8 +125,10 @@ const SCHEMAS: Record<string, Schema[]> = {
   dow_weekend: DOW_COLS,
   dow_weekday: DOW_COLS,
   // (agency_name, route_code, service_type, date, scheduled_time,
-  // actual_time, dep_delay_sec) -- one row per over-threshold departure
-  // observation (see pipeline.reports.council.compute_delay_certificate).
+  // actual_time, dep_delay_sec, stop_name, stop_is_first) -- one row per
+  // over-threshold departure observation (see
+  // pipeline.reports.council.compute_delay_certificate). The stop is marked
+  // as the trip's start only where the timetable starts the trip there.
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
     { index: 1, labelKey: "common.route", align: "left", route: "full" },
@@ -135,6 +137,12 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
     { index: 5, labelKey: "reports.col.actual_time", align: "left" },
     { index: 6, labelKey: "reports.col.delay", align: "right", format: (v) => formatDuration(v == null ? null : Number(v)) },
+    {
+      index: 7,
+      labelKey: "reports.col.recorded_stop",
+      align: "left",
+      caveat: (row, t) => (row[8] === true ? { mark: t("reports.col.trip_start") } : undefined),
+    },
   ],
 };
 

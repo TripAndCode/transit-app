@@ -156,14 +156,12 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
     report rendered with a non-default tolerance/definition shows those exact
     values here too -- the same guarantee the CSV preamble already gives.
 
-    The tolerance/preset line is omitted entirely when *meta* has no
-    on-time/late tolerance concept at all (``preset is None`` and both
-    tolerance fields are ``None`` -- see :class:`DefinitionMeta`'s own
-    docstring), matching :func:`format_definition_csv_line`'s own choice to
-    still render a "対象外" (n/a) preset there rather than nothing: a CSV's
-    single preamble cell needs a stable column count regardless of report
-    type, while a footnote list has no such constraint and can just leave the
-    line out.
+    The on-time rule is stated in a reader's words (:func:`_on_time_rule`),
+    not by its preset name, which is an identifier for comparing exports.
+    It is omitted when *meta* has no late tolerance, a report type with no
+    on-time concept (see :class:`DefinitionMeta`), unlike
+    :func:`format_definition_csv_line`, whose single preamble cell keeps a
+    stable shape for every report type.
 
     Raises ``KeyError`` for an unrecognized ``measurement_point``/
     ``dedup_rule`` -- same failure mode as ``format_definition_csv_line``;
@@ -176,20 +174,8 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
     dedup_rule = _DEDUP_RULE_TEXT[(meta.dedup_rule, locale)]
 
     lines: list[str] = []
-    has_tolerance_concept = (
-        meta.preset is not None or meta.early_tolerance_sec is not None or meta.late_tolerance_sec is not None
-    )
-    if has_tolerance_concept:
-        if locale == "en":
-            early = "unbounded" if meta.early_tolerance_sec is None else f"{meta.early_tolerance_sec}s"
-            late = "n/a" if meta.late_tolerance_sec is None else f"{meta.late_tolerance_sec}s"
-            preset = meta.preset or "n/a"
-            lines.append(f"Definition: preset={preset}; early tolerance={early}; late tolerance={late}")
-        else:
-            early = "無制限" if meta.early_tolerance_sec is None else f"{meta.early_tolerance_sec}秒"
-            late = "対象外" if meta.late_tolerance_sec is None else f"{meta.late_tolerance_sec}秒"
-            preset = meta.preset or "対象外"
-            lines.append(f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}")
+    if meta.late_tolerance_sec is not None:
+        lines.append(_on_time_rule(meta.late_tolerance_sec, meta.early_tolerance_sec, locale))
 
     if locale == "en":
         lines.append(f"Measurement scope: {measurement_point}")
@@ -200,3 +186,28 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
         lines.append(f"重複排除: {dedup_rule}")
         lines.append(f"除外基準: |遅延|>{meta.exclusion_threshold_sec}秒を除外")
     return lines
+
+
+def _duration_text(sec: int, locale: str) -> str:
+    """*sec* as whole minutes and seconds, the way the screens write a
+    tolerance: 60 -> "1分" / "1 min", 90 -> "1分30秒" / "1 min 30 s"."""
+    minutes, seconds = divmod(sec, 60)
+    if locale == "en":
+        parts = ([f"{minutes} min"] if minutes else []) + ([f"{seconds} s"] if seconds or not minutes else [])
+        return " ".join(parts)
+    return (f"{minutes}分" if minutes else "") + (f"{seconds}秒" if seconds or not minutes else "")
+
+
+def _on_time_rule(late_sec: int, early_sec: int | None, locale: str) -> str:
+    """What counts as on time: up to *late_sec* late and, with no early
+    tolerance, any early departure, which is said outright because a reader
+    otherwise assumes a window on both sides."""
+    late = _duration_text(late_sec, locale)
+    early = None if early_sec is None else _duration_text(early_sec, locale)
+    if locale == "en":
+        if early is None:
+            return f"On-time definition: no more than {late} late (early departures count as on time)"
+        return f"On-time definition: no more than {late} late and no more than {early} early"
+    if early is None:
+        return f"定時の定義：定刻から{late}以内の遅れ（早発も定時として数えます）"
+    return f"定時の定義：定刻から{late}以内の遅れと、{early}以内の早発"
