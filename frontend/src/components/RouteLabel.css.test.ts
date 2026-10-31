@@ -32,3 +32,17 @@ describe("RouteLabel.css plate column", () => {
     );
   });
 });
+
+describe("RouteLabel.css plate column without subgrid", () => {
+  it("keeps a listed label's own plate and name columns", () => {
+    const fallback = ruleBody(css, "@supports not (grid-template-columns: subgrid) {");
+    expect(decl(ruleBody(fallback, ".route-label.route-label--plate-column {"), "grid-template-columns")).toBe("minmax(0, 1fr)");
+    expect(
+      decl(ruleBody(fallback, ".route-label.route-label--plate-column.route-label--plated {"), "grid-template-columns"),
+    ).toBe("auto minmax(0, 1fr)");
+    expect(decl(ruleBody(fallback, ".route-label.route-label--plate-column > :not(.route-label__plate) {"), "grid-column")).toBe(
+      "auto",
+    );
+  });
+});
+

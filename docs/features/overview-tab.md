@@ -52,7 +52,9 @@ What the user sees/does:
   form, so the plate track is as wide as the list's widest plate and every
   name starts on one column whether or not its route has a plate. On a phone
   the concentration rows put the name on its own line, the bar and share
-  beneath it.
+  beneath it. The build's default browser target predates subgrid in
+  Chromium, so an `@supports not (grid-template-columns: subgrid)` block in
+  each stylesheet gives every row back its own columns there.
 - **Module sections** — up to three modules, each rendered inline and
   always visible when it has data, wrapped in
   `frontend/src/components/overview/RevealSection.tsx`, which animates it

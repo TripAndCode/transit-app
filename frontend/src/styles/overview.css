@@ -820,3 +820,38 @@
   }
   .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
 }
+
+/* Without subgrid, inside the build's browser floor, each route row keeps
+   its own columns and reads across as a row should; only the names stop
+   sharing one column. Kept after the phone rules, which it overrides. */
+@supports not (grid-template-columns: subgrid) {
+  .ov-pareto-row {
+    grid-template-columns: minmax(160px, 1.2fr) 2.5fr 56px;
+  }
+  .ov-check-row {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+  .ov-pareto-label {
+    grid-column: auto;
+    display: block;
+  }
+  .ov-check-name {
+    grid-column: auto;
+    display: block;
+  }
+  @media (max-width: 640px) {
+    .ov-pareto-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .ov-pareto-label {
+      grid-column: 1 / -1;
+    }
+    .ov-pareto-track {
+      grid-column: 1;
+    }
+    .ov-pareto-pct {
+      grid-column: 2;
+    }
+  }
+}
+

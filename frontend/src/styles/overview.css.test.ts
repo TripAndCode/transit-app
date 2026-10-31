@@ -148,3 +148,33 @@ describe("overview.css route lists line their names up on one column", () => {
   });
 });
 
+describe("overview.css route lists without subgrid", () => {
+  // The build's browser floor (Vite's default target) predates subgrid in
+  // Chromium, where the row would otherwise collapse to one stacked column.
+  const fallback = ruleBody(css, "@supports not (grid-template-columns: subgrid) {");
+
+  it("gives each row back its own columns, reading across as before", () => {
+    expect(decl(ruleBody(fallback, ".ov-pareto-row {"), "grid-template-columns")).toBe("minmax(160px, 1.2fr) 2.5fr 56px");
+    expect(decl(ruleBody(fallback, ".ov-check-row {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto auto auto");
+    // The list's named lines do not reach a row that is not a subgrid.
+    for (const cell of [".ov-pareto-label {", ".ov-check-name {"]) {
+      expect(decl(ruleBody(fallback, cell), "grid-column")).toBe("auto");
+      expect(decl(ruleBody(fallback, cell), "display")).toBe("block");
+    }
+  });
+
+  it("keeps a phone's name on its own line, the bar and share beneath it", () => {
+    const phone = ruleBody(fallback, "@media (max-width: 640px) {");
+    expect(decl(ruleBody(phone, ".ov-pareto-row {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto");
+    expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("1 / -1");
+    expect(decl(ruleBody(phone, ".ov-pareto-track {"), "grid-column")).toBe("1");
+    expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-column")).toBe("2");
+  });
+
+  it("comes after the phone rules it overrides", () => {
+    expect(css.indexOf("@supports not (grid-template-columns: subgrid) {")).toBeGreaterThan(
+      css.indexOf("/* ---------- Mobile ---------- */"),
+    );
+  });
+});
+
