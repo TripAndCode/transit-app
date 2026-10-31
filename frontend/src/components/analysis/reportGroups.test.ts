@@ -11,6 +11,14 @@ describe("groupReports", () => {
     expect(groups.map((g) => g.types)).toEqual([["ranking"], ["trend"]]);
   });
 
+  it("files the dwell/running split as a breakdown, apart from the patterns over time", () => {
+    const groups = groupReports(["trend", "dwell_run"]);
+    expect(groups).toEqual([
+      { key: "pattern", types: ["trend"] },
+      { key: "breakdown", types: ["dwell_run"] },
+    ]);
+  });
+
   it("orders reports within a group by the group's own order, not the API's", () => {
     const groups = groupReports(["compare_ranking", "ranking_best", "ranking"]);
     expect(groups).toHaveLength(1);

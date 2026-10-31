@@ -1184,8 +1184,8 @@
       "worst_day_label": "Worst day"
     },
     "dwell_run": {
-      "not_available": "This agency's feed reports departures only, so delay can't yet be split into time spent at stops and time spent between them.",
       "time_band_unsupported": "This decomposition doesn't support a time-band filter yet.",
+      "no_paired_samples": "There are no observations in this period from which dwell or running time can be calculated.",
       "col": {
         "dwell_avg": "Dwell avg",
         "dwell_p50": "Dwell p50",
@@ -1196,7 +1196,6 @@
         "run_p90": "Running p90",
         "run_samples": "Running samples"
       },
-      "needs_arrivals": "Splitting delay needs arrival times",
       "see_when": "See when delay happens",
       "compare_day_types": "Compare weekdays with weekends and holidays"
     },
@@ -1204,6 +1203,7 @@
       "title": "Headway quality",
       "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
       "empty": "No high-frequency route has enough data in this range yet.",
+      "no_high_frequency_routes": "This agency's timetable has no high-frequency route (one scheduled every 12 minutes or more often).",
       "day_type_note": "Each route is compared only on the days that run its main timetable, named beside it.",
       "empty_off_timetable": "There are high-frequency routes, but none of them runs its main timetable on the selected days.",
       "some_off_timetable_one": "{{count}} more high-frequency route runs no day of its main timetable on the selected days, so it is left out.",
@@ -1235,7 +1235,9 @@
     "weather_delay": {
       "title": "Rain vs. dry average delay",
       "subtitle": "Average recorded delay on days with observed rain compared to days without, for this agency's one documented weather station.",
-      "unavailable": "No observation station is configured for this agency, or no matching service days were found for this range.",
+      "subtitle_no_station": "Average recorded delay on days with observed rain compared to days without.",
+      "no_station": "No weather station is set up for this agency.",
+      "no_matched_days": "No weather observation matches a service day in this range.",
       "station_label": "Station: {{name}}",
       "low_confidence_badge": "Low confidence",
       "col": {
@@ -1257,10 +1259,28 @@
         "bar_aria": "{{label}}: {{value}}, {{count}} samples"
       }
     },
+    "coverage": {
+      "feed_unsupported": "Arrival times and related records can't be taken from this agency's feed, so this can't be shown.",
+      "probe_refuted": "The last check ({{date}}) found that this agency's feed doesn't send the fields this needs, so it isn't shown.",
+      "probe_expired": "The check of this feed's arrival times and related data has expired, so this isn't shown until it is re-checked (last checked {{date}}).",
+      "never_probed": "Whether this agency's feed sends arrival times and related data hasn't been checked yet, so this isn't shown."
+    },
+    "status": {
+      "unsupported": "Not supported",
+      "recheck": "Needs re-check",
+      "unchecked": "Not checked",
+      "not_set": "Not set up",
+      "not_applicable": "Not applicable",
+      "no_observations": "No observations"
+    },
+    "why": {
+      "not_shown_title": "Analyses not shown"
+    },
     "group": {
       "ranking": "Rankings",
       "punctuality": "Punctuality",
       "pattern": "Patterns over time",
+      "breakdown": "Breakdowns",
       "forecast": "Forecasts and records",
       "other": "Other"
     },
@@ -1273,7 +1293,7 @@
       "compare_ranking": "Each route's weekday or weekend/holiday delay, worst first for the period you pick, with the other period as a dashed outline. Each day is a weekday or a weekend/holiday by the timetable the agency ran that day.",
       "dow_weekday": "Each route's average delay on the days the agency ran its weekday timetable. A public holiday, or any other day it ran a weekend or holiday timetable, counts as a weekend/holiday.",
       "dow_weekend": "Each route's average delay on the days the agency ran its weekend or holiday timetable: weekends, plus public holidays and any other weekday it ran that timetable.",
-      "dwell_run": "Where time goes: waiting at stops against running between them.",
+      "dwell_run": "Where time goes: dwell at stops against running between them.",
       "route_forecast": "When routes tend to run late, by day of week and time of day.",
       "council_summary": "A period summary written for a council or board.",
       "delay_certificate": "A reference record of a specific late departure, for a passenger."

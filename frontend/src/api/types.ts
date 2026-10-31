@@ -523,6 +523,11 @@ export type HeadwayQualityResponse = {
   rows: HeadwayQualityRow[];
   /** Routes with data in range but none of it on a day of their main timetable. */
   routes_off_timetable?: number;
+  /** Why `rows` is bound to be empty: the timetable has no high-frequency
+   *  route, or the feed's fields aren't trusted. Null when the rows are worth reading. */
+  unavailable_reason?: "no_high_frequency_routes" | CoverageGapReason | null;
+  /** The ISO day of the feed check behind a coverage reason. */
+  last_checked?: string | null;
   ctx: ResponseCtx;
 };
 
@@ -675,17 +680,29 @@ type DwellRunRoute = {
   run_p90_sec: number | null;
 };
 
+/** Why an analysis built on the feed's arrival times and related fields is
+ *  not shown -- see pipeline/strategies/static_join.py's CoverageGap: the
+ *  feed can't carry them, the last check found them missing, that check has
+ *  lapsed, or none has run. */
+export type CoverageGapReason = "feed_unsupported" | "probe_refuted" | "probe_expired" | "never_probed";
+
 /** Payload for the ``dwell_run`` report -- see
  *  pipeline/reports/dwell_run.py's compute_dwell_run_decomposition, the
- *  single source of truth for this shape. `available=false` means this
- *  agency's feed never reports arrival delay (dwell/running time can't be
- *  derived at all); `time_band_supported=false` means the current time-band
- *  filter isn't servable by this decomposition yet -- both are explicit
- *  states the UI must render, never a silently empty/zero table. */
+ *  single source of truth for this shape. `available=false` means the
+ *  agency's arrival data isn't trusted, for the reason `unavailable_reason`
+ *  names; `time_band_supported=false` means the current time-band filter
+ *  isn't servable by this decomposition yet -- both are explicit states the
+ *  UI must render, never a silently empty/zero table. */
 export type DwellRunPayload = {
   available: boolean;
   time_band_supported: boolean;
   routes: DwellRunRoute[];
+  /** A coverage reason when `available` is false. With `available` true,
+   *  `no_paired_samples` says routes matched but none holds a dwell or
+   *  running sample, unlike an empty scope, which carries no reason. */
+  unavailable_reason?: CoverageGapReason | "no_paired_samples" | null;
+  /** The ISO day of the feed check behind a coverage reason. */
+  last_checked?: string | null;
 };
 
 export type ToolResult = {

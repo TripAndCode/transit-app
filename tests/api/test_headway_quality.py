@@ -215,6 +215,47 @@ async def test_headway_quality_unconfirmed_static_join_agency_returns_no_rows(he
     r = await client.get(f"/api/{unconfirmed_aid}/headway_quality?from=2026-04-01&to=2026-04-02")
     assert r.status_code == 200
     assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] == "never_probed"
+    assert r.json()["last_checked"] is None
+
+
+async def test_headway_quality_confirmed_agency_names_no_reason(headway_client):
+    client, aid = headway_client
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+    assert r.status_code == 200
+    assert r.json()["rows"]
+    assert r.json()["unavailable_reason"] is None
+
+
+async def test_headway_quality_says_when_no_route_is_scheduled_often_enough(headway_client):
+    """An agency whose timetable has no high-frequency route has nothing for
+    this panel to measure, whatever its feed's coverage; blaming the data or
+    an awaited check would promise figures that can never appear. The
+    classification comes from the static timetable, so it is told first."""
+    client, _aid = headway_client
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, 'static_join') "
+            "RETURNING agency_id",
+            "Headway Quality Infrequent Agency",
+            "http://headway-quality-infrequent.example.com",
+        )
+        infrequent_aid = row["agency_id"]
+        await conn.execute(
+            "INSERT INTO agg_route_headway "
+            "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
+            " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_HOURLY', 3600.0, 10, FALSE, 1800.0)",
+            infrequent_aid,
+        )
+    finally:
+        await conn.close()
+
+    r = await client.get(f"/api/{infrequent_aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+    assert r.status_code == 200
+    assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] == "no_high_frequency_routes"
+    assert r.json()["last_checked"] is None
 
 
 async def _seed_weekday_dominant_route(aid: int) -> None:
@@ -276,3 +317,47 @@ async def test_a_route_with_no_day_of_its_timetable_in_range_is_counted_off_time
     body = r.json()
     assert "R_DAY" not in {row["route_code"] for row in body["rows"]}
     assert body["routes_off_timetable"] == 1
+
+
+class _RecordingConn:
+    """An asyncpg connection that keeps every statement it is asked to run."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.sql: list[str] = []
+
+    def __getattr__(self, name):
+        target = getattr(self._conn, name)
+        if name not in ("fetch", "fetchrow", "fetchval", "execute"):
+            return target
+
+        async def recorded(sql, *args, **kwargs):
+            self.sql.append(sql)
+            return await target(sql, *args, **kwargs)
+
+        return recorded
+
+
+async def test_a_full_answer_skips_the_frequency_count(headway_client):
+    """The high-frequency count only explains an empty answer, so an answer
+    with rows never pays for it, while an agency whose feed is untrusted
+    still has it asked first."""
+    from api.range import RangeCtx
+    from pipeline.reports.headway_quality import _FREQUENCY_SQL, compute_headway_quality_report
+
+    _client, aid = headway_client
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 2))
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        recording = _RecordingConn(conn)
+        rows, _, unavailable = await compute_headway_quality_report(aid, ctx, recording)
+        assert rows and unavailable["unavailable_reason"] is None
+        assert _FREQUENCY_SQL not in recording.sql
+
+        await conn.execute("DELETE FROM rt_field_coverage_probes WHERE agency_id = $1", aid)
+        recording = _RecordingConn(conn)
+        rows, _, unavailable = await compute_headway_quality_report(aid, ctx, recording)
+        assert rows == [] and unavailable["unavailable_reason"] == "never_probed"
+        assert _FREQUENCY_SQL in recording.sql
+    finally:
+        await conn.close()

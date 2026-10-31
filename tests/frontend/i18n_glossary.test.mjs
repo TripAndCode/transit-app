@@ -20,6 +20,10 @@ const JA_VARIANTS = [
   // certificate or proof; the copy names the operator's certificate only to
   // say the record is not one.
   [/証明(?!書では)/, "遅延の記録（参考）"],
+  // The time a trip spends at a stop is 滞留 wherever the dwell figures
+  // are named; 停車 stays only for other things (a stopping pattern, the
+  // holds behind the time-adjustment rate).
+  [/停留所での停車/, "滞留"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],

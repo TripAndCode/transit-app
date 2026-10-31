@@ -90,6 +90,30 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.getByText(/no high-frequency route/i)).toBeInTheDocument();
   });
 
+  it("says the feed check has lapsed, with its day, rather than blaming the data", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: { rows: [], ctx: CTX, unavailable_reason: "probe_expired", last_checked: "2026-09-11" },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(
+      screen.getByText(
+        "The check of this feed's arrival times and related data has expired, so this isn't shown until it is re-checked (last checked Sep 11, 2026).",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/enough data/)).not.toBeInTheDocument();
+  });
+
+  it("says when the timetable has no high-frequency route at all", () => {
+    mockRoutes();
+    mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "no_high_frequency_routes", last_checked: null } });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(
+      screen.getByText("This agency's timetable has no high-frequency route (one scheduled every 12 minutes or more often)."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/enough data/)).not.toBeInTheDocument();
+  });
+
   it("shows a skeleton while loading", () => {
     mockRoutes();
     mockHeadwayQuality({ isLoading: true });

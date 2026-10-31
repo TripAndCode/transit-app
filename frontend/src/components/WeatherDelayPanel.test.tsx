@@ -39,9 +39,32 @@ describe("WeatherDelayPanel", () => {
     });
     renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
 
-    expect(screen.getByText(/no observation station is configured/i)).toBeInTheDocument();
+    expect(screen.getByText("No weather station is set up for this agency.")).toBeInTheDocument();
+    expect(screen.queryByText(/one documented weather station/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("Observed rainfall, not a forecast or a causal claim.")).not.toBeInTheDocument();
+  });
+
+  it("names the station's lack of matching days, not a missing station, when one is set up", () => {
+    mockWeatherDelay({
+      data: {
+        available: false,
+        station: { station_id: "47765", station_name: "Example Station", note: null },
+        wet_day_threshold_mm: 1.0,
+        wet: { days: 0, samples: 0, avg_delay_sec: null, avg_precip_mm: null },
+        dry: { days: 0, samples: 0, avg_delay_sec: null, avg_precip_mm: null },
+        delta_sec: null,
+        low_confidence: false,
+        ctx: CTX,
+        disclaimer: "d",
+        attribution: "a",
+      },
+    });
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+
+    expect(screen.getByText(/one documented weather station/)).toBeInTheDocument();
+    expect(screen.getByText("No weather observation matches a service day in this range.")).toBeInTheDocument();
+    expect(screen.queryByText("No weather station is set up for this agency.")).not.toBeInTheDocument();
   });
 
   it("shows a muted low-confidence badge when either group has too few days", () => {

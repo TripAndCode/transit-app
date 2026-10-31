@@ -29,3 +29,15 @@
   .cert-staff { display: none; }
   .analysis-tab:has(.cert-card) .scope-sentence { display: none; }
 }
+
+/* Why's analyses that can't be shown: one quiet list under the ones that can,
+   each with a status chip (caveat-badge) and the sentence giving its cause. */
+.why-not-shown { margin-top: 20px; padding: 16px; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--bg-surface); }
+.why-not-shown__title { margin: 0 0 8px; font-size: var(--text-sm); color: var(--text-secondary); }
+.why-not-shown__list { margin: 0; padding: 0; list-style: none; }
+.why-not-shown__item { padding: 10px 0; border-top: 1px solid var(--border-subtle); }
+.why-not-shown__item:first-child { border-top: none; }
+.why-not-shown__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.why-not-shown__name { font-size: var(--text-sm); font-weight: 500; }
+.why-not-shown__text { margin: 4px 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.why-not-shown__elsewhere { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }

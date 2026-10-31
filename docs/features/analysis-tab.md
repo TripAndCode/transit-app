@@ -14,7 +14,12 @@ with a proactive "Insight Panel" suggesting what to look at next.
     `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
   - Why (`/agencies/:agencyId/why`, `frontend/src/tabs/WhyTab.tsx`) —
     `dwell_run`, with the rain (`WeatherDelayPanel`) and long-gap
-    (`HeadwayQualityPanel`) panels beside it;
+    (`HeadwayQualityPanel`) panels beside it. `WhyAnalyses`
+    (`frontend/src/components/analysis/WhyAnalyses.tsx`) draws the three:
+    the ones with something to show first, in full, and each one that can't
+    be shown once in a closing 「表示できない分析」 list, with a status chip and
+    the sentence giving its cause (`components/analysis/notShown.ts`), not
+    as an empty card;
   - Compare (`/agencies/:agencyId/compare`, `frontend/src/tabs/CompareTab.tsx`)
     for any `by` other than `agencies` (default `periods`) —
     `compare_ranking`.
@@ -78,13 +83,27 @@ What the user sees/does:
   a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). `dwell_run`
-  instead renders `DwellRunBlock` (defined inline in `AnalysisTab.tsx`): a
-  per-route dwell-time/running-time table decomposing `arr_delay` (populated
-  only for `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately
-  from the existing delay histogram — an explicit `EmptyState` renders
-  instead when the agency's feed never sends `arr_delay` (`available:
-  false`) or the current time-band filter isn't servable by this
-  decomposition (`time_band_supported: false`), never a misleading zero.
+  instead renders `WhyAnalyses`, whose `DwellRunBlock` is a per-route
+  dwell-time/running-time table decomposing `arr_delay` (populated only for
+  `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately from
+  the existing delay histogram. A route with neither a dwell nor a running
+  sample in range is left out; when routes are in scope but every one is,
+  the payload stays `available` and names `no_paired_samples`, which the
+  not-shown list states without suggesting another filter (an empty scope
+  carries no reason and gets the filters' own empty state). When the
+  agency's arrival data isn't trusted
+  (`available: false`), the split joins the not-shown list under the reason
+  the payload names (`unavailable_reason`, from
+  `pipeline.strategies.static_join.coverage_gap`): `feed_unsupported` (the
+  ingest strategy cannot carry the fields), `probe_refuted` (the live
+  verdict found one missing), `probe_expired` (the verdict lapsed or is
+  partial and awaits the daily re-probe) or `never_probed`, with the JST day
+  of the last probe in `last_checked`. A time-band filter this decomposition
+  can't serve (`time_band_supported: false`) gets its own `EmptyState`;
+  neither state is ever drawn as a misleading zero. `/headway_quality`
+  carries the same two fields, and names `no_high_frequency_routes` ahead of
+  any coverage reason when the timetable classified routes but none as
+  high-frequency.
   `route_forecast` instead renders `frontend/src/components/RouteForecastSection.tsx`
   (agency-wide landing view, or a per-route detail view when exactly one
   route is selected in the shared filter - see its own file-header comment).

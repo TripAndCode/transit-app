@@ -6,7 +6,8 @@
  * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
  * nothing extra for a non-high-frequency route -- such routes simply never
  * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * report above this panel is completely unaffected either way.
+ * report above this panel is completely unaffected either way. An empty
+ * answer the API gives a reason for says that reason, not a lack of data.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -19,6 +20,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber, fmtRatioPct } from "../utils/format";
 import { DAY_TYPE_KEY } from "./dayTypeKey";
+import { headwayNotShown } from "./analysis/notShown";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -44,7 +46,8 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && data.rows.length === 0 && (
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-          {t((data.routes_off_timetable ?? 0) > 0 ? "reports.headway_quality.empty_off_timetable" : "reports.headway_quality.empty")}
+          {headwayNotShown(t, data)?.text ??
+            t((data.routes_off_timetable ?? 0) > 0 ? "reports.headway_quality.empty_off_timetable" : "reports.headway_quality.empty")}
         </p>
       )}
       {data && data.rows.some((r) => r.day_type) && (

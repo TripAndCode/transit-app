@@ -3,7 +3,8 @@
  * rain-vs-dry average delay from `useWeatherDelay`.
  * `available: false` is an expected, common configuration -- most agencies
  * have no representative weather station mapped yet -- so it renders one
- * calm line, never `ErrorBanner`/red styling. The server's own
+ * calm line, never `ErrorBanner`/red styling, and the subtitle speaks of
+ * "the one station" only when there is one. The server's own
  * `disclaimer`/`attribution` strings carry the correlation-not-causation and
  * source-attribution wording and are rendered verbatim rather than restated.
  */
@@ -37,13 +38,13 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
       <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>{t("reports.weather_delay.title")}</h3>
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
-        {t("reports.weather_delay.subtitle")}
+        {t(data?.station ? "reports.weather_delay.subtitle" : "reports.weather_delay.subtitle_no_station")}
       </p>
       {isLoading && <Skeleton height={80} />}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && !data.available && (
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-          {t("reports.weather_delay.unavailable")}
+          {t(data.station ? "reports.weather_delay.no_matched_days" : "reports.weather_delay.no_station")}
         </p>
       )}
       {data && data.available && (

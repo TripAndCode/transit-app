@@ -268,13 +268,20 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 7. Why — what the data can explain
 
-![Why, for a feed that reports departures only](./09-why.en.png)
+![Why, for a feed whose arrival times can’t be taken in](./09-why.en.png)
 
-**Dwell/running time** shows, for each route, the time spent waiting at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each. These are the times actually taken, not delays (chapter 13).
+**Dwell/running time** shows, for each route, the dwell at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each. These are the times actually taken, not delays (chapter 13).
 
-- Splitting delay needs arrival times. When an agency’s feed reports departures only, the report says “Splitting delay needs arrival times” and offers **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1).
+- Beside it are “Rain vs. dry average delay”, which compares days with and without rain, and “Headway quality”, which covers the high-frequency routes.
+- The analyses that can be shown come first. The rest are gathered under “Analyses not shown” at the end, each with one of these marks and a sentence giving the reason:
+  - “Not supported”: arrival times and related records can’t be taken from the agency’s feed, or the last check found the feed lacks a field the analysis needs.
+  - “Needs re-check”: the check of whether the feed sends arrival times and related data has expired and awaits a re-check. The day of the last check is given too.
+  - “Not checked”: whether the feed sends arrival times and related data hasn’t been checked yet.
+  - “No observations”: there are no observations in this period from which dwell or running time can be calculated.
+  - “Not set up”: no weather station is set up for the agency.
+  - “Not applicable”: the timetable has no route scheduled every 12 minutes or more often.
+- When dwell/running time can’t be shown, **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1) are offered.
 - The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
-- Under the report, “Rain vs. dry average delay” compares days with and without rain where a weather station is set up for the agency, and “Headway quality” covers the high-frequency routes.
 
 ---
 
