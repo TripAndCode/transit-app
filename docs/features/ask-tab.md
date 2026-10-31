@@ -16,7 +16,8 @@ this doc expands on with file-level detail.
   entry, or the `g q` chord.
 - Entry points: Ask is not one of the seven destinations in
   `SIDEBAR_NAV_ITEMS`; the rail shows it as a separate dashed link below
-  them (`frontend/src/components/Sidebar.tsx`). The top bar
+  them (`frontend/src/components/Sidebar.tsx`), labelled by its name alone,
+  with no 「乗換」 (transfer) tag, which would read as a journey planner. The top bar
   (`frontend/src/components/TopBar.tsx`) above every agency screen carries
   a search field (`topbar.ask_placeholder`) that opens the command palette
   (also ⌘K); the palette's "Go to" group lists Ask after the rail
@@ -37,7 +38,11 @@ this doc expands on with file-level detail.
 What the user sees/does:
 
 - **Empty thread (landing state)** —
-  `frontend/src/tabs/ask/AskLandingCards.tsx`: `buildCardTemplates()`
+  `frontend/src/tabs/ask/AskLandingCards.tsx`, headed 「よくある質問から選んで
+  調べる」 / "Pick a common question to look into": the page has no box to
+  type a question into, only the cards below. Each instant card's example
+  answer describes the answer its default settings give (the on-time card
+  lists the least on-time routes first). `buildCardTemplates()`
   (`frontend/src/components/askCardTemplates.ts`) defines the templates,
   each labelled with a line icon from the app's set, split by
   `needsRoute()` into instant-run cards that need no route ("Top-N delays"

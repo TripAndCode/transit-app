@@ -20,7 +20,6 @@
     "reports": "Reports",
     "destinations_label": "Destinations",
     "other": "Other",
-    "transfer": "Transfer",
     "ticket_agency": "Agency",
     "ticket_period": "Period",
     "stops_label": "{{screen}} views",
@@ -55,7 +54,7 @@
     "view_reports": "Council report & delay record",
     "subtitle_summary": "How service ran over the period, on one printable page.",
     "subtitle_saved": "Analyses saved on route pages in this browser.",
-    "subtitle_reports": "A summary for a council or board, and a delay record for reference."
+    "subtitle_reports": "The council report, and a delay record for reference."
   },
   "sheet": {
     "handle": "Resize the sheet"
@@ -1055,7 +1054,7 @@
         "title": "On-time rate ranking",
         "best": "Best first",
         "worst": "Worst first",
-        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first.",
+        "example_answer": "e.g., lists the least on-time routes first, with each route's on-time rate.",
         "summary_worst": "{{k}} least on-time routes",
         "summary_best": "{{k}} most on-time routes"
       },
@@ -1076,7 +1075,7 @@
       }
     },
     "landing": {
-      "header_title": "Ask about a delay",
+      "header_title": "Pick a common question to look into",
       "header_subtitle": "Pick a route or stop and get an answer right away",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
@@ -1116,7 +1115,9 @@
       "scheduled_time": "Scheduled",
       "actual_time": "Actual",
       "with_unit": "{{label}} ({{unit}})",
-      "delay": "Delay"
+      "delay": "Delay",
+      "recorded_stop": "Recorded stop",
+      "trip_start": "trip start"
     },
     "confidence_low_mark": "few data",
     "wide_margin_mark": "wide margin",
@@ -1313,7 +1314,7 @@
       "dow_weekend": "Each route's average delay on the days the agency ran its weekend or holiday timetable: weekends, plus public holidays and any other weekday it ran that timetable.",
       "dwell_run": "Where time goes: dwell at stops against running between them.",
       "route_forecast": "When routes tend to run late, by day of week and time of day.",
-      "council_summary": "A period summary written for a council or board.",
+      "council_summary": "The period's service, summarised for the council.",
       "delay_certificate": "A reference record of a specific late departure, for a passenger."
     },
     "card": {
@@ -1338,9 +1339,12 @@
       "figures": "Headline figures",
       "on_time": "On time",
       "avg_delay": "Average delay",
-      "departures": "Departures observed",
       "planned_trips": "Planned trips",
-      "planned_trips_agency_wide": "Planned trips (whole agency)"
+      "planned_trips_agency_wide": "Planned trips (whole agency)",
+      "observations": "Observations (stop level)",
+      "plan_coverage": "* {{covered}}/{{window}} days a timetable plans",
+      "delivered": "Service delivered %",
+      "delivered_agency_wide": "Service delivered % (whole agency)"
     },
     "print": "Print / Save as PDF",
     "certificate": {
@@ -1348,7 +1352,7 @@
       "date": "Date",
       "route": "Route",
       "route_placeholder": "Search routes",
-      "departure": "Scheduled departure",
+      "departure": "Departure",
       "departure_prompt": "Choose a departure",
       "departure_option": "{{time}} ({{delay}} late)",
       "loading": "Looking up late departures…",
@@ -1357,14 +1361,20 @@
       "unconfirmed": "No late departure was found; whether the feed reported this day couldn't be checked.",
       "not_listed": "A departure that isn't listed left on time or early, or wasn't in the live feed.",
       "card": "Delay record for the chosen departure",
-      "statement": "On {{date}}, the {{scheduled}} departure of {{route}} left its first recorded stop at {{actual}}, {{delay}} late.",
+      "statement": "The {{scheduled}} departure left its first recorded stop {{delay}} late ({{actual}}).",
       "operator": "Operator",
       "scheduled": "Scheduled departure",
       "actual": "Actual departure",
       "delay": "Delay",
-      "measured_at": "Times are at the first stop recorded for this trip in the operator's real-time feed.",
+      "measured_at": "Times are at the first stop recorded for this trip in the operator's real-time feed. It can differ from the time at the stop you boarded.",
       "disclaimer": "This record is a reference document this service made from the real-time data that {{operator}} publishes. It is not a delay certificate issued by the operator.",
-      "all_late": "All late departures in the period"
+      "departure_option_at": "{{time}} from {{stop}} ({{delay}} late)",
+      "statement_at": "The {{scheduled}} departure left {{stop}} {{delay}} late ({{actual}}).",
+      "stop": "Stop",
+      "stop_origin": "This is the departure time at {{stop}}, on the side where the trip starts. It can differ from the time at the stop you boarded.",
+      "stop_later": "This is the departure time at {{stop}}, the first stop the real-time data recorded for this trip, which is not where it starts. It can differ from the time at the stop you boarded.",
+      "late_list": "Late departures",
+      "late_list_scope": "{{date}}, every route"
     }
   },
   "routeTable": {

@@ -76,6 +76,7 @@ from pipeline.reports.forecast import (
 )
 from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
+from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
     RETIRED,
@@ -377,6 +378,13 @@ class ReportResponse(BaseModel):
     # service-delivered figures and data-quality caveat honoured. `scope_applied`
     # is the scope of its on-time figures, which follow the whole filter.
     delivered_scope_applied: dict[str, bool] | None = None
+    # council_summary only (None elsewhere): of the period's window_days, the
+    # covered_days a timetable plans, the only days its planned and executed
+    # trips count; and, beside a missing service-delivered rate, why it is
+    # missing (pipeline.reports.service_delivered.DeliveredMissing).
+    covered_days: int | None = None
+    window_days: int | None = None
+    delivered_missing: DeliveredMissing | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking
     # and delay_certificate; None elsewhere), and, for route_table, ranking and
@@ -958,7 +966,17 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
     "dwell_run": ["系統コード", "種別", "滞留観測数", "滞留平均(秒)", "走行観測数", "走行平均(秒)"],
     "council_summary": ["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"],
-    "delay_certificate": ["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"],
+    "delay_certificate": [
+        "事業者名",
+        "系統コード",
+        "種別",
+        "日付",
+        "定刻",
+        "実績時刻",
+        "遅延(秒)",
+        "記録した停留所",
+        "始発の停留所",
+    ],
 }
 
 # A downloaded file's name, where the report's user-facing name differs from
@@ -1017,6 +1035,13 @@ def _csv_response(
         for r in rows:
             *lead, low_confidence, margin_pp = r
             w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp])
+    elif report_type == "delay_certificate":
+        # A stop the loaded timetable does not name is left blank, not called
+        # a non-origin: whether the trip starts there is unknown.
+        for r in rows:
+            *lead, stop_name, stop_is_first = r
+            first = "" if stop_is_first is None else ("はい" if stop_is_first else "いいえ")
+            w.writerow([*lead, stop_name or "", first])
     elif report_type == "dwell_run":
         for r in rows:
             w.writerow(
@@ -1356,6 +1381,9 @@ async def get_report(
             definition=definition,
             scope_applied=report_scope_applied(report_type),
             delivered_scope_applied=_COUNCIL_DELIVERED_SCOPE,
+            covered_days=payload["covered_days"],
+            window_days=payload["window_days"],
+            delivered_missing=payload["delivered_missing"],
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec

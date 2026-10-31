@@ -25,19 +25,30 @@ function plannedIsWider({ ctx, scope_applied: applied, delivered_scope_applied: 
   return Object.keys(narrows).some((field) => narrows[field] && applied[field] && !delivered[field]);
 }
 
-/** The council report as a page someone can read aloud or print: the four
- *  headline figures as tiles, then the server's prose — its header line,
- *  the headline sentence and its footnotes — then a print action. */
+/** The council report as a page someone can read aloud or print: the
+ *  headline figures as tiles, then the server's prose -- its header line,
+ *  the headline sentence and its footnotes -- then a print action. Planned
+ *  trips say how many of the period's days a timetable plans, and a missing
+ *  service-delivered rate says why, in the words the agencies board uses. */
 export function CouncilSummaryBlock({ report }: { report: CouncilReport }) {
   const { t } = useTranslation();
-  const [onTimePct, avgDelayMin, samples, plannedTrips] = report.rows[0];
-  const figures = [
+  const [onTimePct, avgDelayMin, samples, plannedTrips, , deliveredPct] = report.rows[0];
+  const { covered_days: covered, window_days: days, delivered_missing: missing } = report;
+  const agencyWide = plannedIsWider(report);
+  const partlyPlanned = !!plannedTrips && covered != null && days != null && covered < days;
+  const figures: { label: string; value: string; note?: string }[] = [
     { label: t("reports.council.on_time"), value: fmtPct(onTimePct, t) },
     { label: t("reports.council.avg_delay"), value: formatMinutes(avgDelayMin) },
-    { label: t("reports.council.departures"), value: count(samples) },
+    { label: t("reports.council.observations"), value: count(samples) },
     {
-      label: plannedIsWider(report) ? t("reports.council.planned_trips_agency_wide") : t("reports.council.planned_trips"),
+      label: agencyWide ? t("reports.council.planned_trips_agency_wide") : t("reports.council.planned_trips"),
       value: count(plannedTrips),
+      note: partlyPlanned ? t("reports.council.plan_coverage", { covered, window: days }) : undefined,
+    },
+    {
+      label: agencyWide ? t("reports.council.delivered_agency_wide") : t("reports.council.delivered"),
+      value: fmtPct(deliveredPct, t),
+      note: deliveredPct == null && missing != null ? t(`network.delivered_missing.${missing}`) : undefined,
     },
   ];
   const lines = report.text.split("\n").filter((line) => line.trim() !== "");
@@ -50,6 +61,7 @@ export function CouncilSummaryBlock({ report }: { report: CouncilReport }) {
           <li key={f.label} className="council-report__figure">
             <span className="council-report__label">{f.label}</span>
             <span className="council-report__value">{f.value}</span>
+            {f.note && <span className="council-report__note">{f.note}</span>}
           </li>
         ))}
       </ul>

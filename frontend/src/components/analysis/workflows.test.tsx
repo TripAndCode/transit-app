@@ -121,7 +121,8 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   await user.click(within(picker).getByRole("button", { name: /^9 ?Coast$/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
   await user.keyboard("{Escape}");
-  await user.click(screen.getAllByRole("button", { name: "Download CSV" })[0]);
+  await user.click(screen.getByRole("button", { name: "Export" }));
+  await user.click(screen.getByRole("menuitem", { name: "Download CSV" }));
   // The mocked ranking data itself never changes (it's a fixed fixture), so
   // "999" can only appear via the `buildCsv` query-string metadata line,
   // proving the export used the current ctx rather than a stale one.
@@ -144,9 +145,8 @@ it("saved analyses stay agency-scoped and open with their original filters", asy
 it("the header export menu's CSV item exports the report data, not just the filter-metadata prefix", async () => {
   show("reports");
   const user = setupUser();
-  // The trend and ranking sections each export just their own dataset
-  // ("changing keito scopes both report queries and CSV to the selected
-  // code" covers those); only the header ExportMenu's CSV item combines both.
+  // The header ExportMenu is the page's one export, and its CSV combines the
+  // trend's days with the ranking's rows.
   await user.click(screen.getByRole("button", { name: "Export" }));
   await user.click(screen.getByRole("menuitem", { name: "Download CSV" }));
   const payload = vi.mocked(downloadCsv).mock.calls.at(-1)![1];

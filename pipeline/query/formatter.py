@@ -130,27 +130,26 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("dwell_run_time_band_unsupported", "ja"): "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
-    ("council_header", "ja"): "【運行実績月次・年次報告（{agency}、{from_date} 〜 {to_date}）】",
-    ("council_header", "en"): "[Monthly/annual performance report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測{samples}件）",
-    ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} samples)",
-    ("council_headline_delivered", "ja"): "、運行実績率 {delivered}%",
-    ("council_headline_delivered", "en"): ", service-delivered rate {delivered}%",
-    ("council_headline_delivered_agency_wide", "ja"): "、運行実績率 {delivered}%（事業者全体）",
-    ("council_headline_delivered_agency_wide", "en"): ", service-delivered rate {delivered}% (whole agency)",
+    ("council_header", "ja"): "【協議会向け報告（{agency}、{from_date} 〜 {to_date}）】",
+    ("council_header", "en"): "[Council report ({agency}, {from_date} to {to_date})]",
+    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測データ{samples}件・停留所単位）",
+    ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} stop-level observations)",
+    ("council_headline_delivered", "ja"): "、運行率 {delivered}%",
+    ("council_headline_delivered", "en"): ", service delivered {delivered}%",
+    ("council_headline_delivered_agency_wide", "ja"): "、運行率 {delivered}%（事業者全体）",
+    ("council_headline_delivered_agency_wide", "en"): ", service delivered {delivered}% (whole agency)",
     ("council_planned_coverage_caveat", "ja"): (
-        "計画本数・運行本数・運行実績率は、時刻表に計画がある{covered}日分（期間{window}日中）だけを数えています。"
+        "計画便数・運行便数・運行率は、時刻表に計画がある{covered}/{window}日分だけを数えています。"
     ),
     ("council_planned_coverage_caveat", "en"): (
-        "Planned and executed trips and the service-delivered rate count only the {covered} of the period's "
-        "{window} days a timetable plans."
+        "Planned and executed trips and Service delivered % count only the {covered}/{window} days a timetable plans."
     ),
     ("council_agency_wide_caveat", "ja"): (
-        "計画本数・運行本数・運行実績率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
+        "計画便数・運行便数・運行率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
         "この期間の事業者全体の値です。"
     ),
     ("council_agency_wide_caveat", "en"): (
-        "Planned and executed trips, the service-delivered rate and data quality cover the whole agency "
+        "Planned and executed trips, Service delivered % and data quality cover the whole agency "
         "for the period; the route, day, service and time-band filters apply to the on-time figures only."
     ),
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
@@ -159,8 +158,19 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of observations were excluded as implausible.",
     ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の生観測データがありません）。",
     ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
-    ("council_service_delivered_unavailable", "ja"): "運行実績率: この事業者のフィードでは計測できません。",
-    ("council_service_delivered_unavailable", "en"): "Service-delivered rate: not available for this agency's feed.",
+    # A missing service-delivered rate gives its reason in the words the
+    # agencies board shows beside its own (frontend network.delivered_missing),
+    # one per pipeline.reports.service_delivered.DeliveredMissing value.
+    ("council_delivered_missing", "ja"): "運行率：—（{reason}）",
+    ("council_delivered_missing", "en"): "Service delivered %: — ({reason})",
+    ("council_delivered_missing_no_plan", "ja"): "期間に時刻表の計画なし",
+    ("council_delivered_missing_no_plan", "en"): "no timetable plans this period",
+    ("council_delivered_missing_feed_cannot_report", "ja"): "この配信形式は運休を伝えられません",
+    ("council_delivered_missing_feed_cannot_report", "en"): "this feed format cannot report cancellations",
+    ("council_delivered_missing_feed_unverified", "ja"): "配信が運休を伝えるか未確認",
+    ("council_delivered_missing_feed_unverified", "en"): "the feed is not yet checked for cancellations",
+    ("council_delivered_missing_unreadable", "ja"): "計画を読み込めませんでした",
+    ("council_delivered_missing_unreadable", "en"): "the plan could not be read",
     ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",
     ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
@@ -495,10 +505,12 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
         lines.append(_t("council_quality_unavailable", locale))
     elif clamp_pct > 0:
         lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
-    if payload.get("service_delivered_pct") is None:
-        lines.append(_t("council_service_delivered_unavailable", locale))
-    # An agency with no plan at all already reads "unavailable" above; the
-    # coverage note is for a plan that covers only part of the period.
+    missing = payload.get("delivered_missing")
+    if payload.get("service_delivered_pct") is None and missing is not None:
+        reason = _t(f"council_delivered_missing_{missing}", locale)
+        lines.append(_t("council_delivered_missing", locale, reason=reason))
+    # An agency with no plan at all already gets the no_plan reason above;
+    # the coverage note is for a plan that covers only part of the period.
     covered, window = payload.get("covered_days"), payload.get("window_days")
     if payload.get("planned_trips") and covered is not None and window and covered < window:
         lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))

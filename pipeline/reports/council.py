@@ -51,10 +51,11 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_in_range,
 )
+from pipeline.planned_trips import plan_ctes
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
-from pipeline.reports.service_delivered import compute_service_delivered_by_agency
+from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ async def compute_council_summary(
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
-    "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    "delivered_missing", "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
@@ -199,7 +200,7 @@ async def compute_council_summary(
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     exactly when :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`
-    says so (see that module). ``clamp_pct`` is ``None`` when this agency has
+    says so (see that module), and ``delivered_missing`` then says why. ``clamp_pct`` is ``None`` when this agency has
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
     """
@@ -207,8 +208,14 @@ async def compute_council_summary(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
     )
 
-    delivered = await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date)
-    d = delivered[agency_id]
+    # A failed read of the planned figures leaves the on-time figures
+    # standing and says the plan could not be read, as the agencies board
+    # does, rather than failing the whole report.
+    try:
+        d = (await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date))[agency_id]
+    except Exception:
+        _log.warning("council summary: service-delivered figures unavailable for agency %s", agency_id, exc_info=True)
+        d = unreadable_service_delivered(ctx.from_date, ctx.to_date)
 
     # Freshness (agg-lag) + quality (implausible-reading share), scoped to
     # THIS agency's ctx.from_date/to_date range -- the same two signals
@@ -250,6 +257,7 @@ async def compute_council_summary(
         "service_delivered_pct": d["service_delivered_pct"],
         "covered_days": d["covered_days"],
         "window_days": d["window_days"],
+        "delivered_missing": d["delivered_missing"],
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),
@@ -306,9 +314,12 @@ async def compute_delay_certificate(
     because the same `trip_id` recurs across many service days.
 
     Returns ``(rows, total)``. Rows are shaped ``(agency_name, route_code,
-    service_type, date, scheduled_time, actual_time, dep_delay)``.
-    ``actual_time`` is ``scheduled_time`` shifted by ``dep_delay`` seconds
-    (see :func:`shift_time_str`). They are ordered by ``(date, route_code,
+    service_type, date, scheduled_time, actual_time, dep_delay, stop_name,
+    stop_is_first)``. ``actual_time`` is ``scheduled_time`` shifted by
+    ``dep_delay`` seconds (see :func:`shift_time_str`). ``stop_name`` and
+    ``stop_is_first`` describe that earliest observed stop
+    (:func:`_recorded_stops`); both are ``None`` when the loaded timetable
+    does not name it. They are ordered by ``(date, route_code,
     scheduled_time)`` and capped at ``limit``, the same "sane and
     reproducible cap" convention as every other report in this package's
     ``limit`` query param. ``total`` counts every qualifying trip-run before
@@ -339,11 +350,13 @@ async def compute_delay_certificate(
         "        argMin(route_code, stop_sequence) AS route_code,\n"
         "        argMin(service_type, stop_sequence) AS service_type,\n"
         "        argMin(scheduled_time, stop_sequence) AS scheduled_time,\n"
-        "        argMin(dep_delay, stop_sequence) AS dep_delay\n"
+        "        argMin(dep_delay, stop_sequence) AS dep_delay,\n"
+        "        min(stop_sequence) AS first_stop_sequence\n"
         "    FROM filtered\n"
         "    GROUP BY trip_id, date\n"
         ")\n"
-        "SELECT route_code, service_type, date, scheduled_time, dep_delay, count() OVER () AS total\n"
+        "SELECT route_code, service_type, date, scheduled_time, dep_delay, trip_id, first_stop_sequence,\n"
+        "    count() OVER () AS total\n"
         "FROM per_trip\n"
         "WHERE dep_delay > {dc_threshold:Int32}\n"
         "ORDER BY date, route_code, scheduled_time\n"
@@ -356,9 +369,11 @@ async def compute_delay_certificate(
         },
     )
     total = int(result.first_item["total"]) if result.result_rows else 0
+    stops = await _recorded_stops(conn, agency_id, [(r[5], r[2], int(r[6])) for r in result.result_rows])
     rows: list[tuple] = []
-    for route_code, service_type, d, scheduled_time, dep_delay, _total in result.result_rows:
+    for route_code, service_type, d, scheduled_time, dep_delay, trip_id, stop_sequence, _total in result.result_rows:
         actual_time = shift_time_str(scheduled_time, int(dep_delay), locale)
+        stop_name, stop_is_first = stops.get((trip_id, d, int(stop_sequence)), (None, None))
         rows.append(
             (
                 agency_name,
@@ -368,9 +383,68 @@ async def compute_delay_certificate(
                 scheduled_time,
                 actual_time,
                 int(dep_delay),
+                stop_name,
+                stop_is_first,
             )
         )
     return rows, total
+
+
+# The loaded timetable's stop for each (trip_id, service day, stop_sequence)
+# event, and whether the trip starts there, kept to the events whose trip the
+# loaded timetable runs on that day (plan_ctes' running rule, the one planned
+# trips count by).
+_RECORDED_STOPS_SQL = (
+    "WITH"
+    + plan_ctes("ARRAY[$1::int]", "$5::date", "$6::date")
+    + """
+    SELECT q.trip_id, q.day, q.stop_sequence, s.stop_name,
+           NOT EXISTS (
+               SELECT 1 FROM static_stop_times e
+               WHERE e.agency_id = $1 AND e.trip_id = q.trip_id AND e.stop_sequence < q.stop_sequence
+           ) AS is_first
+    FROM unnest($2::text[], $3::date[], $4::int[]) AS q(trip_id, day, stop_sequence)
+    JOIN static_trips t ON t.agency_id = $1 AND t.trip_id = q.trip_id
+    JOIN running r ON r.agency_id = $1 AND r.service_id = t.service_id AND r.day = q.day
+    JOIN static_stop_times st ON st.agency_id = $1 AND st.trip_id = q.trip_id AND st.stop_sequence = q.stop_sequence
+    JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id
+    WHERE s.stop_name IS NOT NULL AND s.stop_name <> ''
+"""
+)
+
+
+async def _recorded_stops(
+    conn, agency_id: int, events: list[tuple[str, date, int]]
+) -> dict[tuple[str, date, int], tuple[str, bool]]:
+    """The loaded timetable's name for each ``(trip_id, service day,
+    stop_sequence)`` stop event, and whether the timetable starts that trip
+    there.
+
+    A certificate row's times are those of the earliest stop the feed
+    reported for the trip, and a feed often sends nothing for a trip's first
+    stop, so that stop is the trip's origin only when no stop of the trip
+    comes before it in the timetable.
+
+    Only the loaded timetable is kept, and a reload replaces it in place, so
+    its stops describe a past day only if it was the timetable that day. An
+    event counts only when the loaded timetable runs its trip on its day: a
+    day before the loaded timetable starts, or a trip_id it reuses under a
+    service that does not run that day, is left out, and so is a trip it no
+    longer holds or a stop it does not name.
+    """
+    if not events:
+        return {}
+    days = [day for _, day, _ in events]
+    found = await conn.fetch(
+        _RECORDED_STOPS_SQL,
+        agency_id,
+        [trip_id for trip_id, _, _ in events],
+        days,
+        [stop_sequence for _, _, stop_sequence in events],
+        min(days),
+        max(days),
+    )
+    return {(r["trip_id"], r["day"], r["stop_sequence"]): (r["stop_name"], r["is_first"]) for r in found}
 
 
 async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
