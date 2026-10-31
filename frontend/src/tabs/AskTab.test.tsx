@@ -72,7 +72,7 @@ describe("AskTab layout", () => {
   it("renders the question composer above the landing cards when there are no messages", () => {
     const { container } = renderAskTab();
     const dock = container.querySelector(".ask-tool-menu");
-    const landing = screen.getByText(new RegExp("^Ask about a delay$"));
+    const landing = screen.getByText(new RegExp("^Pick a common question to look into$"));
     expect(dock).toBeInTheDocument();
     // DOCUMENT_POSITION_PRECEDING (2) means the dock comes before the
     // landing content in the DOM -- "moved to the top" for a fresh visit.
@@ -186,7 +186,7 @@ describe("AskTab dispatch failures", () => {
   });
 
   function firstInstantCard() {
-    const landing = screen.getByText("Ask about a delay").parentElement!.parentElement!;
+    const landing = screen.getByText("Pick a common question to look into").parentElement!.parentElement!;
     const card = landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
     expect(card).toBeDefined();
     return card;
@@ -267,7 +267,7 @@ describe("AskTab unsaved filter edits", () => {
   }
 
   function firstInstantCard() {
-    const landing = screen.getByText("Ask about a delay").parentElement!.parentElement!;
+    const landing = screen.getByText("Pick a common question to look into").parentElement!.parentElement!;
     return landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
   }
 
