@@ -2232,6 +2232,31 @@ async def test_council_summary_service_delivered_not_available_footnote(reports_
 
 
 @pytest.mark.asyncio
+async def test_council_summary_says_the_plan_could_not_be_read_when_the_planned_figures_fail(
+    reports_client, ch_client, monkeypatch
+):
+    """The planned figures failing in Postgres, as they do on a schema behind
+    its migrations, leave the report standing: the on-time figures answer,
+    and the rate says its plan could not be read rather than a plan of
+    nothing or a 500."""
+    from pipeline.reports import service_delivered
+
+    client, agency_id, pool = reports_client
+    day = "2026-06-13"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    monkeypatch.setattr(service_delivered, "_SERVICE_SQL", "SELECT * FROM planned_trips_not_migrated")
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rows"][0][2] == 25  # samples
+    assert body["rows"][0][3:] == [0, None, None]
+    assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("unreadable", 0, 1)
+    assert "運行率：—（計画を読み込めませんでした）" in body["text"]
+
+
+@pytest.mark.asyncio
 async def test_council_summary_service_delivered_available_when_static_join_and_scheduled(reports_client, ch_client):
     client, agency_id, pool = reports_client
     await confirm_rt_field_coverage(pool, agency_id)

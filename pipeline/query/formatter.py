@@ -509,8 +509,8 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
     if payload.get("service_delivered_pct") is None and missing is not None:
         reason = _t(f"council_delivered_missing_{missing}", locale)
         lines.append(_t("council_delivered_missing", locale, reason=reason))
-    # An agency with no plan at all already reads "unavailable" above; the
-    # coverage note is for a plan that covers only part of the period.
+    # An agency with no plan at all already gets the no_plan reason above;
+    # the coverage note is for a plan that covers only part of the period.
     covered, window = payload.get("covered_days"), payload.get("window_days")
     if payload.get("planned_trips") and covered is not None and window and covered < window:
         lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))

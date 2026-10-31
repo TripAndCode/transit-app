@@ -69,9 +69,22 @@ async def test_delay_certificate_uses_origin_stop_only_for_each_trip(
     assert keep_rows[0][6] == 400
 
 
-def _seed_static_trip(pg_conn, agency_id, trip_id, stops):
-    """The loaded timetable's stops for one trip, as ``(stop_sequence, stop_id, stop_name)``."""
+def _seed_static_trip(pg_conn, agency_id, trip_id, stops, runs=("2026-06-01", "2026-12-31")):
+    """One trip of the loaded timetable: its stops, as ``(stop_sequence,
+    stop_id, stop_name)``, under a service of its own that runs every day of
+    ``runs`` (both ends inclusive)."""
+    service_id = f"SVC-{trip_id}"
     with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday,"
+            " saturday, sunday, start_date, end_date)"
+            " VALUES (%s, %s, true, true, true, true, true, true, true, %s, %s)",
+            (agency_id, service_id, *runs),
+        )
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, service_id) VALUES (%s, %s, %s)",
+            (agency_id, trip_id, service_id),
+        )
         for stop_sequence, stop_id, stop_name in stops:
             cur.execute(
                 "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
@@ -162,3 +175,29 @@ async def test_delay_certificate_csv_names_the_recorded_stop(client, agency_id, 
     assert rows[header_idx][7:] == ["記録した停留所", "始発の停留所"]
     by_route = {r[1]: r[7:] for r in rows[header_idx + 1 :]}
     assert by_route == {"RORIGIN": ["広島駅", "はい"], "RLATER": ["紙屋町", "いいえ"], "RGONE": ["", ""]}
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_names_no_stop_on_a_day_the_loaded_timetable_does_not_run_the_trip(
+    client, agency_id, pg_conn, ch_client, ch_async_client
+):
+    """A reload replaces the loaded timetable in place, and a new timetable
+    can reuse a trip_id with another stop order. Before the loaded timetable
+    starts, its stops are not the ones the trip ran, so a record from then
+    names no stop and claims no trip start; from its start, it does."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    app.state.ch_client = ch_async_client
+    before, inside = "2026-06-26", "2026-06-27"
+    _seed_static_trip(
+        pg_conn, agency_id, "T-RELOADED", [(1, "S1", "広島駅"), (2, "S2", "紙屋町")], runs=(inside, "2026-12-31")
+    )
+    _seed_observation(pg_conn, agency_id, "RRELOAD", before, "T-RELOADED", 1, 400)
+    _seed_observation(pg_conn, agency_id, "RRELOAD", inside, "T-RELOADED", 1, 400)
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={before}&to={inside}&threshold_sec=300")
+    assert resp.status_code == 200
+    by_day = {r[3]: r[7:] for r in resp.json()["rows"] if r[1] == "RRELOAD"}
+    assert by_day == {before: [None, None], inside: ["広島駅", True]}

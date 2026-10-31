@@ -74,8 +74,9 @@ describe("AskTab layout", () => {
     const dock = container.querySelector(".ask-tool-menu");
     const landing = screen.getByText(new RegExp("^Pick a common question to look into$"));
     expect(dock).toBeInTheDocument();
-    // DOCUMENT_POSITION_PRECEDING (2) means the dock comes before the
-    // landing content in the DOM -- "moved to the top" for a fresh visit.
+    // DOCUMENT_POSITION_FOLLOWING (4) on dock.compareDocumentPosition(landing)
+    // means the landing follows the dock in the DOM, so the dock comes first
+    // -- "moved to the top" for a fresh visit.
     expect(dock!.compareDocumentPosition(landing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

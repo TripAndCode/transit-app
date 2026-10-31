@@ -55,7 +55,11 @@ reports.
   trip's start (「始発側の「広島駅」での発車時刻です。」); otherwise it says
   the stop is not where the trip starts, and with no name in the timetable it
   speaks of the first recorded stop. It never names the stop the passenger
-  boarded at.
+  boarded at. Only the loaded timetable is kept and a reload replaces it in
+  place, so a stop is named only when the loaded timetable runs the trip on
+  the record's day (`plan_ctes`' running rule, the one planned trips count
+  by): a record from before it starts, or a trip_id it reuses under a service
+  not running that day, falls back to the first recorded stop.
 - Staff open 「遅れた便の一覧」 under the lookup: every route's late
   departures (the report's default threshold) on the day the lookup shows,
   fetched only once the section is opened, with that day's CSV. The record's
