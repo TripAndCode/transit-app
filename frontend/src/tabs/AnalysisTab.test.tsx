@@ -890,6 +890,15 @@ describe("AnalysisTab delay record", () => {
     expect(document.querySelector(".scope-sentence")).not.toBeNull();
   });
 
+  it("labels the late departures by the day their rows are for, not a day still loading", async () => {
+    showCertificate();
+    await userEvent.click(screen.getByText("Late departures"));
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-08-20" } });
+    const staff = screen.getByText("Late departures").closest("details")!;
+    expect(staff).toHaveTextContent("Wed, Sep 2, 2026, every route");
+    expect(staff).not.toHaveTextContent("Aug 20");
+  });
+
   it("keeps the day's list on screen while a changed day counts", async () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);

@@ -340,7 +340,9 @@ function CertificateSection({ aid }: { aid: number }) {
         {staffOpen && data && (
           <>
             <p className="cert-staff__summary">
-              {t("reports.certificate.late_list_scope", { date: formatDate(date, { weekday: true }) })}
+              {/* The day the rows on screen are for, which a changed day's
+                  list keeps showing until its own rows arrive. */}
+              {t("reports.certificate.late_list_scope", { date: formatDate(data.ctx?.from ?? date, { weekday: true }) })}
               {FILTER_SEPARATOR}
               {data.text}
             </p>
