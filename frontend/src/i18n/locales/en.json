@@ -323,8 +323,8 @@
       "dismiss_aria": "Dismiss"
     },
     "feed_health": {
-      "banner_one": "Feed health: {{count, number}} implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
-      "banner_other": "Feed health: {{count, number}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+      "banner_one": "{{count, number}} implausible reading is left out of the figures. The figures shown already exclude it.",
+      "banner_other": "{{count, number}} implausible readings are left out of the figures. The figures shown already exclude them.",
       "dismiss_aria": "Dismiss"
     },
     "loading": {
@@ -2040,6 +2040,7 @@
       "live_none": "No readings received yet",
       "readings": "Readings, last 7 analyzed days",
       "set_aside": "Set aside as implausible",
+      "set_aside_note": "The figures shown already exclude them.",
       "note": "Days without readings are left out, not counted as on time."
     }
   },

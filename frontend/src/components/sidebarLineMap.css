@@ -85,18 +85,9 @@
   background: var(--bg-surface);
   color: var(--text-primary);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  line-height: 0.95;
   transition: background var(--transition), color var(--transition);
-}
-.rail-badge-line {
-  font-size: var(--text-xs);
-}
-.rail-badge-no {
-  font-size: var(--text-sm);
 }
 .rail-station:hover .rail-badge {
   background: var(--accent-soft);

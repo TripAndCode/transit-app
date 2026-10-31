@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ruleBody, decl } from "../test/cssRules";
-import { contrastRatio } from "./tokens";
 
 const css = readFileSync(resolve(__dirname, "./overview.css"), "utf-8");
 const uiCss = readFileSync(resolve(__dirname, "../components/ui/ui.css"), "utf-8");
@@ -17,12 +16,15 @@ describe("overview.css page width", () => {
 describe("overview.css hover affordances change colour or opacity only", () => {
   it("the pareto track does not grow on hover", () => {
     expect(css).not.toMatch(/\.ov-pareto-row:hover \.ov-pareto-track\s*\{[^}]*height/);
-    expect(decl(ruleBody(css, ".ov-pareto-fill"), "transition")).not.toMatch(/height/);
+    expect(decl(ruleBody(css, ".ov-pareto-fill"), "transition") ?? "").not.toMatch(/height/);
   });
 
-  it("the pareto fill's rest and hover opacity both derive from its rank", () => {
-    expect(decl(ruleBody(css, ".ov-pareto-fill"), "opacity")).toMatch(/var\(--rank-opacity, 1\)/);
-    expect(decl(ruleBody(css, ".ov-pareto-row:hover .ov-pareto-fill"), "opacity")).toMatch(/var\(--rank-opacity, 1\)/);
+  it("the pareto fill is one neutral tone at every rank, as a share of delay is not a delay", () => {
+    const fill = ruleBody(css, ".ov-pareto-fill {");
+    expect(decl(fill, "background")).toBe("color-mix(in srgb, var(--trend-neutral) 50%, transparent)");
+    expect(fill).not.toMatch(/--rank-opacity|--trend-bad/);
+    expect(css).not.toMatch(/\.ov-pareto-row:hover \.ov-pareto-fill/);
+    expect(decl(ruleBody(css, ".ov-pareto-row:hover {"), "background")).toBe("var(--hover-tint)");
   });
 
   it("a clickable card neither lifts nor changes elevation on hover", () => {
@@ -84,8 +86,6 @@ describe("overview.css living hero", () => {
 });
 
 describe("overview.css hero facts", () => {
-  const globalCss = readFileSync(resolve(__dirname, "./global.css"), "utf-8");
-  const token = (block: string, prop: string) => decl(ruleBody(globalCss, block), prop)!;
 
   it("the verdict chip stays neutral, whatever the direction", () => {
     const chip = ruleBody(css, ".ov-hero-state {");
@@ -93,17 +93,9 @@ describe("overview.css hero facts", () => {
     expect(decl(chip, "background")).toBe("var(--bg-soft)");
   });
 
-  it("only the late-routes value takes the warm tone, and only as large text it can carry", () => {
-    expect(decl(ruleBody(css, ".ov-hero-fact--attn .ov-hero-fact-value {"), "color")).toBe("var(--d4)");
+  it("prints every fact value in ink, the late-routes count included", () => {
+    expect(css).not.toMatch(/\.ov-hero-fact--attn/);
     expect(decl(ruleBody(css, ".ov-hero-fact-value {"), "color")).toBe("var(--text-primary)");
-    expect(css.match(/var\(--d4\)/g)).toHaveLength(1);
-    // --text-xl is 26px, past WCAG's 24px large-text line, where 3:1 is AA.
-    expect(decl(ruleBody(css, ".ov-hero-fact-value {"), "font-size")).toBe("var(--text-xl)");
-    expect(token(":root {", "--text-xl")).toBe("26px");
-    expect(contrastRatio(token(":root {", "--d4"), token(":root {", "--bg-surface"))).toBeGreaterThanOrEqual(4.5);
-    expect(
-      contrastRatio(token(':root[data-theme="dark"] {', "--d4"), token(':root[data-theme="dark"] {', "--bg-surface")),
-    ).toBeGreaterThanOrEqual(3);
     // The unit beside the count keeps its own neutral tone.
     expect(decl(ruleBody(css, ".ov-hero-fact-unit {"), "color")).toBe("var(--text-tertiary)");
   });
@@ -124,3 +116,65 @@ describe("overview.css peak label", () => {
     expect(decl(ruleBody(css, ".ov-peak-label--flip {"), "transform")).toBe("translate(-100%, -50%)");
   });
 });
+
+describe("overview.css route lists line their names up on one column", () => {
+  const phone = ruleBody(css.slice(css.indexOf("/* ---------- Mobile ---------- */")), "@media (max-width: 640px) {");
+
+  it.each([
+    [".ov-pareto-list {", ".ov-pareto-row {", ".ov-pareto-label {"],
+    [".ov-check-list {", ".ov-check-row {", ".ov-check-name {"],
+  ])("%s gives the plate a track as wide as its widest plate, passed down to each label", (list, row, cell) => {
+    const listBody = ruleBody(css, list);
+    expect(decl(listBody, "display")).toBe("grid");
+    expect(decl(listBody, "grid-template-columns")).toMatch(/^\[plate\] auto \[name\] minmax\(/);
+    // The plate's own margin spaces it, so a list without plates starts its
+    // names flush rather than after an empty gap.
+    expect(decl(listBody, "column-gap")).toBe("0");
+    const rowBody = ruleBody(css, row);
+    expect(decl(rowBody, "grid-column")).toBe("1 / -1");
+    expect(decl(rowBody, "grid-template-columns")).toBe("subgrid");
+    const cellBody = ruleBody(css, cell);
+    expect(decl(cellBody, "grid-column")).toBe("plate / bar");
+    expect(decl(cellBody, "grid-template-columns")).toBe("subgrid");
+  });
+
+  it("on a phone, gives a concentration route's name the row's whole width, its bar and share beneath it", () => {
+    expect(decl(ruleBody(phone, ".ov-pareto-list {"), "grid-template-columns")).toBe("[plate] auto [name] minmax(0, 1fr) [pct] auto");
+    expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("plate / -1");
+    const track = ruleBody(phone, ".ov-pareto-track {");
+    expect(decl(track, "grid-column")).toBe("name / pct");
+    expect(decl(track, "grid-row")).toBe("2");
+    expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-row")).toBe("2");
+  });
+});
+
+describe("overview.css route lists without subgrid", () => {
+  // The build's browser floor (Vite's default target) predates subgrid in
+  // Chromium, where the row would otherwise collapse to one stacked column.
+  const fallback = ruleBody(css, "@supports not (grid-template-columns: subgrid) {");
+
+  it("gives each row back its own columns, reading across as before", () => {
+    expect(decl(ruleBody(fallback, ".ov-pareto-row {"), "grid-template-columns")).toBe("minmax(160px, 1.2fr) 2.5fr 56px");
+    expect(decl(ruleBody(fallback, ".ov-check-row {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto auto auto");
+    // The list's named lines do not reach a row that is not a subgrid.
+    for (const cell of [".ov-pareto-label {", ".ov-check-name {"]) {
+      expect(decl(ruleBody(fallback, cell), "grid-column")).toBe("auto");
+      expect(decl(ruleBody(fallback, cell), "display")).toBe("block");
+    }
+  });
+
+  it("keeps a phone's name on its own line, the bar and share beneath it", () => {
+    const phone = ruleBody(fallback, "@media (max-width: 640px) {");
+    expect(decl(ruleBody(phone, ".ov-pareto-row {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto");
+    expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("1 / -1");
+    expect(decl(ruleBody(phone, ".ov-pareto-track {"), "grid-column")).toBe("1");
+    expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-column")).toBe("2");
+  });
+
+  it("comes after the phone rules it overrides", () => {
+    expect(css.indexOf("@supports not (grid-template-columns: subgrid) {")).toBeGreaterThan(
+      css.indexOf("/* ---------- Mobile ---------- */"),
+    );
+  });
+});
+

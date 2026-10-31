@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { delayColor } from "../styles/tokens";
+import { delayRampVar } from "../styles/tokens";
 import { useAgencyId } from "../api/useAgencyId";
 import { useCountUp } from "../hooks/useCountUp";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -10,6 +10,7 @@ import { reportHref, routeHref } from "../routes/destinations";
 import { fixedTenth, formatMinutes } from "../utils/format";
 import { windowDays } from "./overview/storySentence";
 import { RouteLabel } from "./RouteLabel";
+import { DelayScaleLegend } from "./charts/DelayScaleLegend";
 import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
@@ -97,45 +98,55 @@ export function RoutesToCheckList({ routes, bandCounts, routeCount, minSamples, 
         // Headers and rows are siblings in one keyed list, not rows nested
         // per band: a route crossing a threshold keeps its node, so its
         // figure counts and its bar slides instead of remounting.
-        groups.flatMap((g) => [
-          <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
-            {bandCounts[g.band].count > g.routes.length
-              ? t(`overview.routes_to_check.band_${g.band}_truncated`, {
-                  count: bandCounts[g.band].count,
-                  shown: g.routes.length,
-                  ...BAND_BOUNDS[g.band],
-                })
-              : t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
-          </div>,
-          ...g.routes.map((r) => (
-            <Link
-              className="ov-check-row"
-              key={`route:${r.route_code}`}
-              data-flip-key={r.route_code}
-              to={agencyId != null ? routeHref(agencyId, r.route_code, search) : "."}
-            >
-              <span className="ov-check-name">
-                <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
-              </span>
-              <span className="ov-check-track">
-                <span
-                  className="ov-check-fill"
-                  style={
-                    {
-                      "--bar-share": maxMin > 0 ? r.avg_min / maxMin : 0,
-                      background: delayColor(r.avg_min),
-                    } as CSSProperties
-                  }
-                />
-              </span>
-              <span className="ov-check-figures">
-                <CheckValue value={r.avg_min} />
-                {r.delta_min != null && <span className="ov-check-change num">{changeLabel(r.delta_min)}</span>}
-              </span>
-              <span className="ov-check-arrow" aria-hidden="true">›</span>
-            </Link>
-          )),
-        ])
+        <div className="ov-check-list">
+          {groups.flatMap((g) => [
+            <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
+              {bandCounts[g.band].count > g.routes.length
+                ? t(`overview.routes_to_check.band_${g.band}_truncated`, {
+                    count: bandCounts[g.band].count,
+                    shown: g.routes.length,
+                    ...BAND_BOUNDS[g.band],
+                  })
+                : t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
+            </div>,
+            ...g.routes.map((r) => (
+              <Link
+                className="ov-check-row"
+                key={`route:${r.route_code}`}
+                data-flip-key={r.route_code}
+                to={agencyId != null ? routeHref(agencyId, r.route_code, search) : "."}
+              >
+                <span className="ov-check-name">
+                  <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} plateColumn />
+                </span>
+                <span className="ov-check-track">
+                  <span
+                    className="ov-check-fill"
+                    style={
+                      {
+                        "--bar-share": maxMin > 0 ? r.avg_min / maxMin : 0,
+                        background: delayRampVar(r.avg_min),
+                      } as CSSProperties
+                    }
+                  />
+                </span>
+                <span className="ov-check-figures">
+                  <CheckValue value={r.avg_min} />
+                  {r.delta_min != null && <span className="ov-check-change num">{changeLabel(r.delta_min)}</span>}
+                </span>
+                <span className="ov-check-arrow" aria-hidden="true">›</span>
+              </Link>
+            )),
+          ])}
+        </div>
+      )}
+      {/* The bands cut at DELAY_THRESHOLDS (1.5/3/5 min) and the scale at its
+          own finer steps, so one band can hold two colours: the legend says
+          which minutes each colour holds. */}
+      {groups.length > 0 && (
+        <div className="ov-check-legend">
+          <DelayScaleLegend />
+        </div>
       )}
       {agencyId != null && routeCount > routes.length && (
         <Link className="ov-check-more" to={routeTableHref(agencyId, search, windowFrom, windowTo)}>

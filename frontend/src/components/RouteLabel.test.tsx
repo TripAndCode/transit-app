@@ -157,4 +157,31 @@ describe("RouteLabel", () => {
     const { container } = render(<RouteLabel code="53011" names={names} />);
     expect(container).toHaveTextContent(/^Route 53011$/);
   });
+
+  describe("in a list's plate column", () => {
+    it("marks a plated label and a plate-less one alike, so the list can line their names up", () => {
+      const plated = render(<RouteLabel code="1471981638" names={names} plateColumn />);
+      expect(plated.container.firstElementChild).toHaveClass("route-label--plate-column");
+      expect(plated.container.querySelector(".route-label__plate")).toHaveTextContent(/^70-3$/);
+      const bare = render(<RouteLabel code="360868713" names={names} plateColumn />);
+      expect(bare.container.firstElementChild).toHaveClass("route-label--plate-column");
+      expect(bare.container.querySelector(".route-label__plate")).toBeNull();
+      expect(bare.container.querySelector(".route-label__line")).toHaveTextContent(/^3号線$/);
+    });
+
+    it("gives a label nothing names an element of its own, so it takes the name's column, not the plate's", () => {
+      const { container } = render(<RouteLabel code="53011" names={names} plateColumn />);
+      const label = container.firstElementChild;
+      expect(label).toHaveClass("route-label", "route-label--plate-column");
+      expect(label?.querySelector(".route-label__line")).toHaveTextContent(/^Route 53011$/);
+    });
+
+    it("leaves a label outside such a list as it was", () => {
+      const { container } = render(<RouteLabel code="1471981638" names={names} />);
+      expect(container.firstElementChild).not.toHaveClass("route-label--plate-column");
+      const bare = render(<RouteLabel code="53011" names={names} />);
+      expect(bare.container.firstElementChild).toBeNull();
+    });
+  });
 });
+

@@ -14,25 +14,40 @@ import "./RouteLabel.css";
  *
  *  `fallbackName` is a name the caller's own payload carries, read like a
  *  short name until the static routes load or when they lack the code; with
- *  neither, the label reads "Route <code>". */
+ *  neither, the label reads "Route <code>".
+ *
+ *  `plateColumn` is for a list that lines its routes' names up on one
+ *  column whatever their plates (see RouteLabel.css); the list's grid sets
+ *  the column. */
 export function RouteLabel({
   code,
   names,
   fallbackName,
   compact = false,
+  plateColumn = false,
 }: {
   code: string;
   names: RouteNames;
   fallbackName?: string | null;
   compact?: boolean;
+  plateColumn?: boolean;
 }) {
   const parts =
     names.parts.get(code) ??
     (fallbackName
       ? routeLabelParts({ route_id: code, route_short_name: fallbackName, route_long_name: null }, names.agencyName)
       : null);
-  if (parts == null) return <>{names.format(code)}</>;
-  return <RoutePartsLabel parts={parts} compact={compact} />;
+  if (parts == null) {
+    // Bare text in the list's grid would land in the plate's track.
+    return plateColumn ? (
+      <span className="route-label route-label--full route-label--plate-column">
+        <span className="route-label__line">{names.format(code)}</span>
+      </span>
+    ) : (
+      <>{names.format(code)}</>
+    );
+  }
+  return <RoutePartsLabel parts={parts} compact={compact} plateColumn={plateColumn} />;
 }
 
 /** `RouteLabel` for a caller that holds the label's parts rather than a code.
@@ -43,10 +58,12 @@ export function RoutePartsLabel({
   parts,
   compact = false,
   nameOnly = false,
+  plateColumn = false,
 }: {
   parts: RouteLabelParts;
   compact?: boolean;
   nameOnly?: boolean;
+  plateColumn?: boolean;
 }) {
   const { t } = useTranslation();
   const { plate, line, terminals, qualifier, ambiguous, id } = parts;
@@ -59,6 +76,7 @@ export function RoutePartsLabel({
     compact ? "route-label--compact" : "route-label--full",
     plate ? "route-label--plated" : "",
     twoLines ? "route-label--has-ends" : "",
+    plateColumn ? "route-label--plate-column" : "",
   ].filter(Boolean).join(" ");
   const pieces = [
     terminals && <span key="ends">{routeTerminalsText(terminals, t)}</span>,

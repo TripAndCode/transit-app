@@ -162,6 +162,31 @@ describe("RoutesToCheckList", () => {
     expect((bars[0] as HTMLElement).style.getPropertyValue("--bar-share")).toBe("1");
   });
 
+  it("colours each bar by the shared delay scale, never the alarm end of the old ramp", () => {
+    renderList([route("A", 10.1), route("B", 4.3), route("C", 3.2), route("D", 2.1)]);
+    const fills = [...document.querySelectorAll<HTMLElement>(".ov-check-fill")];
+    expect(fills.map((f) => f.style.background)).toEqual(["var(--d4)", "var(--d3)", "var(--d2)", "var(--d1)"]);
+  });
+
+  it("labels those colours with the shared delay-scale legend, since a band can hold two of them", () => {
+    renderList(routes());
+    expect(screen.getByTestId("delay-scale-legend")).toHaveTextContent("under 1.5 min");
+  });
+
+  it("draws no legend when it lists no route", () => {
+    renderList([]);
+    expect(screen.queryByTestId("delay-scale-legend")).toBeNull();
+  });
+
+  it("sets band headers and rows in one list whose labels share a plate column", () => {
+    renderList([route("K31", 6.6), route("W53", 2.1)]);
+    const list = document.querySelector(".ov-check-list");
+    expect(list?.querySelectorAll(":scope > .ov-check-band-hd")).toHaveLength(2);
+    expect(list?.querySelectorAll(":scope > .ov-check-row")).toHaveLength(2);
+    const labels = [...document.querySelectorAll(".ov-check-name")].map((cell) => cell.firstElementChild);
+    expect(labels.every((label) => label?.classList.contains("route-label--plate-column"))).toBe(true);
+  });
+
   it("keys every row for FLIP and sizes the bar with a transform, not a width", () => {
     renderList([route("3", 4.2), route("12", 2.1)]);
     const rows = screen.getAllByRole("link");

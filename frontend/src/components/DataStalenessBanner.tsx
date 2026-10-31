@@ -14,7 +14,6 @@
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
-import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 import { useBannerDismissal } from "./bannerDismissalsContext";
 import { useNow } from "../hooks/useNow";
 
@@ -37,7 +36,6 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
   const { data } = useTodayRouteSummary(hidden ? null : agencyId, { autoRefresh: false });
   const now = useNow(AGE_RECHECK_MS);
   const [dismissed, dismiss] = useBannerDismissal("data_stale", agencyId);
-  const { messageProps } = useTapToExpandBanner();
 
   if (hidden || agencyId == null) return null;
   const captured = data?.latest_captured_at;
@@ -77,7 +75,9 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
       }}
     >
       <span aria-hidden="true">⚠</span>
-      <span {...messageProps}>{t("app.data_stale.banner", { when: ageLabel })}</span>
+      {/* Wraps rather than truncates on a phone: a cut-off notice reads as
+          a broken one. */}
+      <span style={{ flex: 1, minWidth: 0 }}>{t("app.data_stale.banner", { when: ageLabel })}</span>
       <button
         type="button"
         onClick={dismiss}

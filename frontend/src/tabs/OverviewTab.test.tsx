@@ -218,7 +218,9 @@ describe("OverviewTab", () => {
       renderOverview(withFacts());
       expect(screen.getByText("2 routes averaging 5 min or more late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("2")).toBeInTheDocument();
-      expect(lateRow()).toHaveClass("ov-hero-fact--attn");
+      // A count, printed in ink like the facts beside it: the list below
+      // carries the delay colours.
+      expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });
 
     it("counts out of the same routes the list says it ranks", () => {
@@ -239,7 +241,7 @@ describe("OverviewTab", () => {
       renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], bandCounts(0, 1, 1)));
       expect(screen.getByText("1 route averaging 3–5 min late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("0")).toBeInTheDocument();
-      expect(lateRow()).not.toHaveClass("ov-hero-fact--attn");
+      expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });
 
     // The routes-to-check list is inline, with no modal of its own: the row

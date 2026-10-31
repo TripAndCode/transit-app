@@ -38,10 +38,23 @@ What the user sees/does:
   `OverviewTab.tsx` for why).
 - **Hero row** — `frontend/src/components/OverviewHeroRow.tsx`: the headline
   avg-delay delta vs. a prior-week baseline, delayed-route count, and a
-  sparkline.
+  sparkline. Every fact value, the delayed-route count included, prints in
+  ink; the list below carries the delay colours.
 - **Routes to check** — `frontend/src/components/RoutesToCheckList.tsx`: the
   top-5 routes by absolute avg delay over the same 7-day window as the
-  headline.
+  headline. Each bar takes the shared delay ramp (`delayRampVar`, see
+  `design-palette.md`) and `DelayScaleLegend` labels it, since the list's
+  bands (1.5/3/5 min, `routesToCheckBands.ts`) and the ramp's steps differ and
+  one band can hold two colours.
+- **Route names on one column** — the routes-to-check rows and the
+  concentration bar's rows each share one CSS grid (`.ov-check-list`,
+  `.ov-pareto-list`) passed down as subgrids to `RouteLabel`'s `plateColumn`
+  form, so the plate track is as wide as the list's widest plate and every
+  name starts on one column whether or not its route has a plate. On a phone
+  the concentration rows put the name on its own line, the bar and share
+  beneath it. The build's default browser target predates subgrid in
+  Chromium, so an `@supports not (grid-template-columns: subgrid)` block in
+  each stylesheet gives every row back its own columns there.
 - **Module sections** — up to three modules, each rendered inline and
   always visible when it has data, wrapped in
   `frontend/src/components/overview/RevealSection.tsx`, which animates it
@@ -50,6 +63,8 @@ What the user sees/does:
   - `frontend/src/components/ConcentrationBar.tsx` — Pareto-style "which
     routes account for most of the delay" bar (card shows 5, modal shows the
     top 20 + a Lorenz-curve overlay), plus the worsening/improving movers list.
+    Its bars are one neutral tone, the service split's: they show a share of
+    the delay, not minutes, so the delay ramp stays off them.
   - `frontend/src/components/PeakHourRibbon.tsx` — 24-hour avg-delay ribbon;
     clicking an hour bar that has data opens
     `frontend/src/components/PeakHourModal.tsx` with the top routes for that

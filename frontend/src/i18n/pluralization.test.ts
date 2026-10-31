@@ -42,11 +42,22 @@ describe("English pluralization", () => {
 
   it("app.feed_health.banner uses the singular noun for count=1", () => {
     expect(i18n.t("app.feed_health.banner", { count: 1 })).toBe(
-      "Feed health: 1 implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
+      "1 implausible reading is left out of the figures. The figures shown already exclude it.",
     );
     expect(i18n.t("app.feed_health.banner", { count: 2 })).toBe(
-      "Feed health: 2 implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+      "2 implausible readings are left out of the figures. The figures shown already exclude them.",
     );
+  });
+
+  it("app.feed_health.banner reads as the plain Japanese statement of what was left out", () => {
+    const ja = i18n.getFixedT("ja");
+    expect(ja("app.feed_health.banner", { count: 112 })).toBe(
+      "異常値112件を集計から除いています。表示中の数値は除外後の値です。",
+    );
+    expect(ja("app.feed_health.banner", { count: 2321 })).toBe(
+      "異常値2,321件を集計から除いています。表示中の数値は除外後の値です。",
+    );
+    expect(ja("topbar.freshness.set_aside_note")).toBe("表示中の数値は除外後の値です。");
   });
 
   it("marey trip counts use the singular noun for count=1", () => {

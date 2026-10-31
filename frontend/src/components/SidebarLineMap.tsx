@@ -29,8 +29,11 @@ function Chord({ to }: { to: string }) {
   );
 }
 
-/** The desktop rail's destinations as stations on one line, numbered in
- *  rail order. The current station opens its stops (the reports or boards
+/** The desktop rail's destinations as stations on one line, each marked
+ *  with its screen's own icon, the one the phone's tab bar and More sheet
+ *  show: a station code would number the stations without saying what any of
+ *  them is, and a collapsed rail shows the marks alone. The current station
+ *  opens its stops (the reports or boards
  *  its screen switches between) below itself, and Ask is a transfer off the
  *  line's end. Which station is open follows a navigation as soon as it
  *  starts, so a click opens the next station's stops before its screen
@@ -73,7 +76,7 @@ export function SidebarLineMap({
           current="a.rail-station.active"
           pending='a.rail-station[aria-busy="true"]'
         />
-        {SIDEBAR_NAV_ITEMS.map((item, i) => {
+        {SIDEBAR_NAV_ITEMS.map((item) => {
           const label = t(item.labelKey);
           const stops = place?.dest === item.to ? openStops : undefined;
           const figure = collapsed ? undefined : figures[item.to];
@@ -89,8 +92,7 @@ export function SidebarLineMap({
                   onFocus={() => prefetchRouteChunk(item.to)}
                 >
                   <span className="rail-badge" aria-hidden="true">
-                    <span className="rail-badge-line">D</span>
-                    <span className="rail-badge-no num">{String(i + 1).padStart(2, "0")}</span>
+                    <item.Icon size={18} strokeWidth={2} />
                   </span>
                   {!collapsed && <span className="rail-name">{label}</span>}
                   {/* The link keeps the screen's name through aria-label and

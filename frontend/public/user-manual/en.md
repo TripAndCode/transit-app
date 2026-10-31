@@ -50,7 +50,7 @@ You can also type an agency’s name into the search field at the top of the scr
 
 ### The sidebar
 
-The sidebar on the left lists the screens. Each one answers one kind of question.
+The sidebar on the left lists the screens. Each one answers one kind of question. The circle beside each screen’s name holds its icon, the same one the bottom bar shows on a phone.
 
 | Screen | What it answers |
 |---|---|
@@ -75,7 +75,7 @@ A route you check often can go into **My routes** in the sidebar: press **Pin**,
 
 The field at the top of every agency screen, “Search routes, reports and screens”, opens a search box (shortcut ⌘K on a Mac, Ctrl+K elsewhere). Type to jump to a screen, an agency, a route, a report or a time band.
 
-Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible. Days without readings are left out, not counted as on time.
+Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible; the figures on screen already leave those out. Days without readings are left out, not counted as on time.
 
 ### On a phone
 
@@ -86,7 +86,7 @@ On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **
 On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 - “Data is out of date — last ingest: …” appears when no new reading has arrived for a day or more. Data collection is running behind; the app itself is working. Close the notice with ×.
-- A “Feed health” notice says how many implausible readings (likely from a stuck or stale feed) were filtered out over the last 7 days. The figures on screen already leave them out.
+- “… implausible readings are left out of the figures. The figures shown already exclude them.” appears when 0.1% or more of the readings over the last 7 analyzed days were set aside as implausible (likely a stuck or stale feed). Below that there is no notice, and the count appears only under “How fresh the data is”. × dismisses it.
 
 ---
 
@@ -138,7 +138,7 @@ Pulse is the screen an agency opens on. It sums up the period in the scope sente
 - “Average delay, last … days (…)”: the average delay in minutes, drawn over a small line of the daily values.
 - The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
 - Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of the routes observed 100 or more times over the latest days: the same number as the “… averaging … min or more late” heading of **Routes to check** below, when that heading appears). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check**.
-- **Routes to check**: of the routes observed 100 or more times over the latest days, the most delayed, grouped by how late they ran on average. A route observed fewer times is left out, since a handful of trips can swing its average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Each row’s “vs last week” is its change from the same number of days before (missing for a route observed too little then). Click a route to open its page (section 5-6), or “See all … routes” to open the **Routes** table (section 5-3) over the same days, sorted by average delay, worst first. “No routes need attention” means none qualifies.
+- **Routes to check**: of the routes observed 100 or more times over the latest days, the most delayed, grouped by how late they ran on average. A route observed fewer times is left out, since a handful of trips can swing its average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Each row’s “vs last week” is its change from the same number of days before (missing for a route observed too little then). Each row’s bar shows its average delay in the same five colour steps as every other screen, with the legend below the list. Click a route to open its page (section 5-6), or “See all … routes” to open the **Routes** table (section 5-3) over the same days, sorted by average delay, worst first. “No routes need attention” means none qualifies.
 - **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how the day types compare: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. A day’s type is the timetable the agency’s schedule ran that day. A day type with too few days or observations shows “Not enough data” and is left out of the comparison. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.
