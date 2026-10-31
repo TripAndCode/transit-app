@@ -7,8 +7,12 @@
 .compare-bars__list { display: grid; gap: 10px; }
 /* A re-ranked row travels (useFlipRows); background is the only other
    thing that moves on it. */
-.compare-bar-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 2fr) 7ch 7ch; gap: 12px; align-items: center; font-size: var(--text-sm); border-radius: var(--radius); transition: transform var(--dur-3) var(--ease-out), background var(--dur-1) var(--ease-out); }
-.compare-bar-row:hover { background: var(--bg-soft); }
+/* The heading row shares the rows' grid and font size, so its columns line
+   up with theirs; only its text is set smaller. */
+.compare-bar-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 2fr) 5.5em 5.5em minmax(7.5em, 1fr); gap: 12px; align-items: center; font-size: var(--text-sm); border-radius: var(--radius); transition: transform var(--dur-3) var(--ease-out), background var(--dur-1) var(--ease-out); }
+.compare-bar-row:not(.compare-bar-row--head):hover { background: var(--bg-soft); }
+.compare-bar-row--head { align-items: end; }
+.compare-bar-row--head > span { font-size: var(--text-xs); color: var(--text-tertiary); }
 .compare-bar__route { min-width: 0; font-weight: 500; }
 .compare-bar__route a { color: inherit; text-decoration: none; }
 .compare-bar__route a:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -19,8 +23,17 @@
    drawn size, which scaling would squash. */
 .compare-bar__track i { position: absolute; inset: 0; transform: translateX(calc((var(--bar-share, 0) - 1) * 100%)); border-radius: 4px; transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out); }
 .compare-bar__ghost { background: transparent; border: 1px dashed var(--border-subtle); opacity: .9; }
-.compare-bar__value { text-align: right; font-weight: 600; }
-.compare-bar__delta { text-align: right; color: var(--text-secondary); }
-.compare-bar__delta--up { color: var(--delay-text-moderate); }
-.compare-bar__delta--down { color: var(--delay-text-ok); }
-@media (max-width: 640px) { .compare-bar-row { grid-template-columns: minmax(0, 1fr) 6ch; } .compare-bar__track { grid-column: 1 / -1; grid-row: 2; } .compare-bar__delta { display: none; } }
+.compare-bar__value { text-align: right; color: var(--text-secondary); }
+.compare-bar__value--solid { color: var(--text-primary); font-weight: 600; }
+/* The gap is told in words and a neutral ink: which side runs later is in
+   the sentence, never in a red or green the reader has to decode. */
+.compare-bar__gap { font-size: var(--text-xs); color: var(--text-secondary); }
+.compare-bars__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* On a narrow screen the route keeps both figures beside it, the bar takes
+   the next line and the gap sentence the one after, so nothing is dropped. */
+@media (max-width: 640px) {
+  .compare-bar-row { grid-template-columns: minmax(0, 1fr) 5.5em 5.5em; row-gap: 6px; }
+  .compare-bar__track { grid-column: 1 / -1; grid-row: 2; }
+  .compare-bar__gap { grid-column: 1 / -1; grid-row: 3; }
+  .compare-bar-row--head > span:nth-child(2), .compare-bar-row--head > .compare-bar__gap { display: none; }
+}

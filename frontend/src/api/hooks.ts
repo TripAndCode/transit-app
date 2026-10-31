@@ -43,6 +43,8 @@ import type {
   RouteSummaryResponse,
   RouteTripsResponse,
   RoutesResponse,
+  StopBounds,
+  StopBoundsResponse,
   Suggestion,
   SuggestionEnvelope,
   WeatherDelayResponse,
@@ -86,6 +88,18 @@ export function useForecastOverview(
       apiGet<ForecastOverview>(`/api/${agencyId}/forecast/overview`, { signal }),
     enabled: agencyId != null,
     placeholderData: keepPreviousData,
+  });
+}
+
+/** The box the Live map opens on: the agency's stops, which move only with
+ *  a timetable reload. */
+export function useStopBounds(agencyId: number | null): UseQueryResult<StopBounds | null> {
+  return useQuery({
+    queryKey: ["stop-bounds", agencyId],
+    queryFn: ({ signal }) =>
+      apiGet<StopBoundsResponse>(`/api/${agencyId}/stops/bounds`, { signal }).then((r) => r.bounds),
+    enabled: agencyId != null,
+    staleTime: 60 * 60 * 1000,
   });
 }
 

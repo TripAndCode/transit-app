@@ -29,10 +29,17 @@ to plan against (``planned_trips == 0``).
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pipeline.planned_trips import plan_ctes
-from pipeline.strategies.static_join import rt_field_coverage_confirmed_agencies
+from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_coverage_confirmed_agencies
+
+#: Why an agency's rate is ``None``, in the order the checks run: no plan to
+#: measure against; an ingest strategy that cannot carry the trip status at
+#: all; or one that can, but no live verdict says this feed does.
+#: ``"unreadable"`` is for a caller whose read of these figures failed
+#: outright, so a failed read is never shown as a real plan of nothing.
+DeliveredMissing = Literal["no_plan", "feed_cannot_report", "feed_unverified", "unreadable"]
 
 # A day has a plan when planned_trips_daily saved one for it or the loaded
 # timetable covers it, and the saved count wins. A capture records what the
@@ -75,10 +82,12 @@ _SERVICE_SQL = (
     SELECT a.agency_id,
            COALESCE(p.planned, 0) AS planned,
            COALESCE(p.covered_days, 0) AS covered_days,
-           COALESCE(m.non_executed, 0) AS non_executed
+           COALESCE(m.non_executed, 0) AS non_executed,
+           g.ingest_strategy
     FROM unnest($1::int[]) AS a(agency_id)
     LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
+    LEFT JOIN agencies g USING (agency_id)
 """
 )
 
@@ -87,7 +96,8 @@ async def compute_service_delivered_by_agency(
     conn, agency_ids: list[int], from_date: date, to_date: date
 ) -> dict[int, dict[str, Any]]:
     """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct",
-    "covered_days", "window_days"}`` over ``[from_date, to_date]``.
+    "covered_days", "window_days", "delivered_missing"}`` over
+    ``[from_date, to_date]``.
 
     ``covered_days`` counts the window's days with a plan, saved in
     ``planned_trips_daily`` or covered by the loaded timetable; both sides of
@@ -96,7 +106,9 @@ async def compute_service_delivered_by_agency(
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     whenever the ratio isn't computable for this agency/range (see module
-    docstring) — never silently 0 canceled / 100% delivered. One query reads
+    docstring) — never silently 0 canceled / 100% delivered — and
+    ``delivered_missing`` then says why (:data:`DeliveredMissing`); it is
+    ``None`` beside a rate. One query reads
     the saved and loaded plans and a precomputed aggregate in Postgres — no
     ClickHouse access on this read path.
     """
@@ -115,8 +127,21 @@ async def compute_service_delivered_by_agency(
     for aid in agency_ids:
         p = int(rows[aid]["planned"])
         coverage = {"covered_days": int(rows[aid]["covered_days"]), "window_days": window_days}
-        if aid not in populated_ids or p <= 0:
-            result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None, **coverage}
+        missing: DeliveredMissing | None = None
+        if p <= 0:
+            missing = "no_plan"
+        elif rows[aid]["ingest_strategy"] not in RT_INGEST_STRATEGIES:
+            missing = "feed_cannot_report"
+        elif aid not in populated_ids:
+            missing = "feed_unverified"
+        if missing is not None:
+            result[aid] = {
+                "planned_trips": p,
+                "executed_trips": None,
+                "service_delivered_pct": None,
+                **coverage,
+                "delivered_missing": missing,
+            }
             continue
         # Clamp at 0: a canceled/skipped trip-day whose trip_id doesn't
         # actually match anything in the static schedule (feed drift, or a
@@ -128,5 +153,6 @@ async def compute_service_delivered_by_agency(
             "executed_trips": executed,
             "service_delivered_pct": round(executed / p * 100, 1),
             **coverage,
+            "delivered_missing": None,
         }
     return result

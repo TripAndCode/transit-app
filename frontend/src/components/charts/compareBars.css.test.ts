@@ -15,9 +15,16 @@ describe("compareBars.css", () => {
     expect(decl(ruleBody(css, ".compare-bar-row {"), "transition")).toBe("transform var(--dur-3) var(--ease-out), background var(--dur-1) var(--ease-out)");
     expect(css).not.toMatch(/transition:[^;]*\b(width|height|left|top)\b/);
   });
-  it("on a narrow screen the bar takes its own second row and the value stays beside the route", () => {
+  it("on a narrow screen the bar takes the second row and the gap the third, so the gap is never dropped", () => {
     const narrow = ruleBody(css, "@media (max-width: 640px) {");
     expect(decl(ruleBody(narrow, ".compare-bar__track {"), "grid-row")).toBe("2");
+    const gap = ruleBody(narrow, ".compare-bar__gap {");
+    expect(decl(gap, "grid-row")).toBe("3");
+    expect(decl(gap, "display")).toBeNull();
+  });
+  it("the gap reads in a neutral ink, with no up/down colour pair", () => {
+    expect(decl(ruleBody(css, ".compare-bar__gap {"), "color")).toBe("var(--text-secondary)");
+    expect(css).not.toMatch(/--delay-text-(ok|moderate)/);
   });
   it("the ghost is a dashed outline in the border colour", () => {
     expect(decl(ruleBody(css, ".compare-bar__ghost {"), "border")).toBe("1px dashed var(--border-subtle)");

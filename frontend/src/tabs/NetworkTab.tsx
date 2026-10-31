@@ -9,10 +9,11 @@ import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { Section } from "../components/ui/Section";
-import { delayColor } from "../styles/tokens";
+import { delayRampVar } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
-import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
-import { fixedTenth, fmtPct, formatDateRange, formatNumber, roundTenth } from "../utils/format";
+import { delayAxisMax, delayAxisShare } from "../components/charts/delayAxis";
+import { hasStopped } from "../components/agencyDirectory";
+import { fixedTenth, fmtPct, formatDate, formatDateRange, formatNumber, roundTenth } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -34,11 +35,27 @@ function byDelayDescending(a: NetworkAgencyRow, b: NetworkAgencyRow): number {
   return b.avg_delay_min - a.avg_delay_min;
 }
 
-/** A delivered rate counts only the days a timetable plans, so a plan for
- *  part of the window gives a rate over fewer days than its neighbours'. A
- *  rate the feed cannot measure has nothing to qualify. */
+/** The newest last-data day across the board, against which a row's own
+ *  last day says whether its data stopped (the agency picker's rule). */
+function newestDataTo(agencies: readonly NetworkAgencyRow[]): string | null {
+  let newest: string | null = null;
+  for (const { data_to: day } of agencies) if (day && (newest == null || day > newest)) newest = day;
+  return newest;
+}
+
+/** 0 for current data, 1 for data that stopped, 2 for none: a stopped
+ *  agency's figures cover fewer days than the window, so it is ranked after
+ *  the agencies whose figures cover it, as the agency picker orders them. */
+function dataRank(a: NetworkAgencyRow, newest: string | null): number {
+  if (a.data_to == null) return 2;
+  return hasStopped(a.data_to, newest) ? 1 : 0;
+}
+
+/** The planned figure, and every rate built on it, counts only the days a
+ *  timetable plans, so a plan for part of the window counts fewer days than
+ *  its neighbours'. With no plan there is nothing to qualify. */
 function isPartlyTimetabled(a: NetworkAgencyRow): boolean {
-  return a.service_delivered_pct != null && a.covered_days < a.window_days;
+  return a.planned_trips > 0 && a.covered_days < a.window_days;
 }
 
 /** The schedule version is only known for some agencies; with none there is
@@ -82,21 +99,49 @@ function AgencyRow({
   isCurrent,
   weightedView,
   linkSuffix,
+  axisMax,
+  windowFrom,
+  windowTo,
+  newest,
 }: {
   agency: NetworkAgencyRow;
   isCurrent: boolean;
   weightedView: boolean;
   linkSuffix: string;
+  axisMax: number;
+  windowFrom: string;
+  windowTo: string;
+  newest: string | null;
 }) {
   const { t } = useTranslation();
   const a = agency;
   const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
-  const axisPct = delayAxisShare(a.avg_delay_min) * 100;
-  const delivered = a.service_delivered_pct == null ? "—" : `${fixedTenth(a.service_delivered_pct)}%`;
+  const axisPct = delayAxisShare(a.avg_delay_min, axisMax) * 100;
+  const stopped = a.data_to != null && hasStopped(a.data_to, newest);
+  // The period is the board's own heading; a row repeats it only where its
+  // data covers less of it.
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
-      : formatDateRange(a.data_from ?? a.data_to, a.data_to);
+      : a.data_from !== windowFrom || a.data_to !== windowTo
+        ? formatDateRange(a.data_from ?? a.data_to, a.data_to)
+        : null;
+  const planned =
+    a.delivered_missing === "unreadable"
+      ? t("network.planned_trips_unknown")
+      : isPartlyTimetabled(a)
+        ? t("network.planned_trips_partly", {
+            count: formatNumber(a.planned_trips),
+            covered: a.covered_days,
+            window: a.window_days,
+          })
+        : t("network.planned_trips", { count: formatNumber(a.planned_trips) });
+  const delivered =
+    a.service_delivered_pct != null
+      ? `${fixedTenth(a.service_delivered_pct)}%`
+      : a.delivered_missing != null
+        ? t("network.delivered_value_missing", { reason: t(`network.delivered_missing.${a.delivered_missing}`) })
+        : "—";
 
   return (
     <div
@@ -109,11 +154,16 @@ function AgencyRow({
           <Link to={`/agencies/${a.agency_id}/live${linkSuffix}`}>{a.agency_name}</Link>
         </Tooltip>
         {isCurrent && (
-          <span data-testid="you-badge" className="network-row__you">
-            {t("network.you_badge")}
+          <span data-testid="viewing-badge" className="network-row__viewing">
+            {t("network.viewing_badge")}
           </span>
         )}
-        <span className="network-row__sub">{coverage}</span>
+        {coverage != null && <span className="network-row__sub">{coverage}</span>}
+        {stopped && a.data_to != null && newest != null && (
+          <span className="network-row__sub network-row__stopped">
+            {t("onboarding.stopped", { date: formatDate(a.data_to, { year: a.data_to.slice(0, 4) !== newest.slice(0, 4) }) })}
+          </span>
+        )}
       </span>
 
       <span className="network-row__value num" aria-label={t("network.col_avg_delay")}>
@@ -128,12 +178,12 @@ function AgencyRow({
           data-testid="network-axis-fill"
           style={{
             width: `${axisPct}%`,
-            background: a.avg_delay_min == null ? "transparent" : delayColor(a.avg_delay_min),
+            background: a.avg_delay_min == null ? "transparent" : delayRampVar(a.avg_delay_min),
           }}
         />
         <span
           className="network-row__axis-mark"
-          style={{ left: `${delayAxisShare(AXIS_MARK_MIN) * 100}%` }}
+          style={{ left: `${delayAxisShare(AXIS_MARK_MIN, axisMax) * 100}%` }}
         />
       </div>
 
@@ -147,33 +197,29 @@ function AgencyRow({
       </span>
 
       <div className="network-row__meta">
+        <span>{planned}</span>
         <span>
-          {t("network.col_delivered")}{" "}
-          {isPartlyTimetabled(a)
-            ? t("network.delivered_partly_timetabled", {
-                value: delivered,
-                covered: a.covered_days,
-                window: a.window_days,
-              })
-            : delivered}
+          {t("network.col_delivered")} {delivered}
         </span>
-        <ScheduleVersionTooltip
-          label={
-            a.static_version_id
-              ? t("network.schedule_version_title", { version: a.static_version_id })
-              : null
-          }
-        >
-          {/* The planned-trip fallback carries its own label: after the
-              vehicle-km label, a trip count would read as that percentage. */}
-          <span>
-            {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
-              ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
-              : `${t("network.col_vehicle_km_delivered")} ${
-                  a.vehicle_km_delivered_pct != null ? `${fixedTenth(a.vehicle_km_delivered_pct)}%` : "—"
-                }`}
-          </span>
-        </ScheduleVersionTooltip>
+        {/* Vehicle-km delivered is the delivered rate applied to the current
+            timetable's planned vehicle-km, so without a rate there is nothing
+            to add to the reason the rate already gives. */}
+        {a.service_delivered_pct != null && (
+          <ScheduleVersionTooltip
+            label={
+              a.static_version_id
+                ? t("network.schedule_version_title", { version: a.static_version_id })
+                : null
+            }
+          >
+            <span>
+              {t("network.col_vehicle_km_delivered")}{" "}
+              {a.vehicle_km_delivered_pct != null
+                ? `${fixedTenth(a.vehicle_km_delivered_pct)}%`
+                : t("network.vehicle_km_no_shapes")}
+            </span>
+          </ScheduleVersionTooltip>
+        )}
         <span>
           {t("network.col_samples")} {formatNumber(a.samples)}
         </span>
@@ -227,7 +273,13 @@ export function NetworkTab() {
   const linkQS = linkParams.toString();
   const suffix = linkQS ? `?${linkQS}` : "";
 
-  const ordered = data ? [...data.agencies].sort(byDelayDescending) : [];
+  const newest = data ? newestDataTo(data.agencies) : null;
+  const ordered = data
+    ? [...data.agencies].sort((a, b) => dataRank(a, newest) - dataRank(b, newest) || byDelayDescending(a, b))
+    : [];
+  // Every agency's figure, not only the shown ones, so "show more" never
+  // rescales the bars already on screen.
+  const axisMax = delayAxisMax(data?.agencies.map((a) => a.avg_delay_min) ?? []);
   // Whatever can change the order: the sorted identity itself. Cheap to build
   // and exact, where a data revision counter would also fire on a refetch that
   // changed nothing.
@@ -240,7 +292,7 @@ export function NetworkTab() {
   return (
     <div className="network-page">
       <Section
-        eyebrow={t("network.eyebrow", { from: ctx.from, to: ctx.to })}
+        eyebrow={t("network.eyebrow", { range: formatDateRange(ctx.from, ctx.to) })}
         title={t("network.title")}
         description={t("network.help")}
       />
@@ -252,6 +304,7 @@ export function NetworkTab() {
           {ridershipWeightingAvailable && (
             <li><strong>{t("network.ridership_weighted_toggle")}</strong> — {t("network.help_ridership_weighted")}</li>
           )}
+          <li><strong>{t("network.col_planned_trips")}</strong> — {t("network.help_planned_trips")}</li>
           <li><strong>{t("network.col_delivered")}</strong> — {t("network.help_delivered")}</li>
           <li><strong>{t("network.col_vehicle_km_delivered")}</strong> — {t("network.help_vehicle_km_delivered")}</li>
           <li><strong>{t("network.col_samples")}</strong> — {t("network.help_samples")}</li>
@@ -308,7 +361,7 @@ export function NetworkTab() {
               <div className="network-row network-row--head" aria-hidden="true">
                 <span>{t("network.col_agency")}</span>
                 <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
-                <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
+                <span>{t("network.axis_caption", { max: axisMax })}</span>
                 <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
               </div>
               {cappedAgencies.visible.map((a) => (
@@ -322,6 +375,10 @@ export function NetworkTab() {
                   // that doesn't exist.
                   weightedView={showRidershipWeighted && a.has_ridership_weights}
                   linkSuffix={suffix}
+                  axisMax={axisMax}
+                  windowFrom={data?.from ?? ctx.from}
+                  windowTo={data?.to ?? ctx.to}
+                  newest={newest}
                 />
               ))}
               {cappedAgencies.remaining > 0 && (

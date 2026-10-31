@@ -189,6 +189,7 @@ async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_p
     assert by[a]["planned_trips"] == 5
     assert by[a]["executed_trips"] == 4
     assert by[a]["service_delivered_pct"] == 80.0
+    assert by[a]["delivered_missing"] is None
     assert by[b]["planned_trips"] == 3
     assert by[b]["executed_trips"] == 3
     assert by[b]["service_delivered_pct"] == 100.0
@@ -208,6 +209,8 @@ async def test_compute_service_delivered_not_available_when_not_static_join(net_
     assert row["planned_trips"] == 3
     assert row["executed_trips"] is None
     assert row["service_delivered_pct"] is None
+    # Its ingest strategy cannot carry the trip status at all, whatever a probe says.
+    assert row["delivered_missing"] == "feed_cannot_report"
 
 
 async def test_compute_service_delivered_not_available_for_unconfirmed_static_join_agency(net_pool, ch_async_client):
@@ -232,6 +235,7 @@ async def test_compute_service_delivered_not_available_for_unconfirmed_static_jo
     assert row["planned_trips"] == 2
     assert row["executed_trips"] is None
     assert row["service_delivered_pct"] is None
+    assert row["delivered_missing"] == "feed_unverified"
 
 
 async def test_compute_service_delivered_no_static_schedule_is_not_available(net_pool, ch_async_client):
@@ -249,6 +253,7 @@ async def test_compute_service_delivered_no_static_schedule_is_not_available(net
     assert row["planned_trips"] == 0
     assert row["executed_trips"] is None
     assert row["service_delivered_pct"] is None
+    assert row["delivered_missing"] == "no_plan"
 
 
 async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client):
@@ -496,6 +501,7 @@ async def test_network_summary_endpoint(net_client, ch_client):
         "service_delivered_pct",
         "covered_days",
         "window_days",
+        "delivered_missing",
         "has_ridership_weights",
         "weighted_on_time_pct",
     }
@@ -537,6 +543,8 @@ async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_
     for aid in (a, b):
         delivered = {k: by[aid][k] for k in ("planned_trips", "executed_trips", "service_delivered_pct")}
         assert delivered == {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None}
+        # Not a plan of nothing: the board must not print 0 planned trips for a read that failed.
+        assert by[aid]["delivered_missing"] == "unreadable"
         assert (by[aid]["covered_days"], by[aid]["window_days"], by[aid]["vehicle_km_delivered_pct"]) == (0, 7, None)
 
 

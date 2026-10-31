@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { LayerSpecification, Map as MLMap } from "maplibre-gl";
-import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
+import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow, StopBounds } from "../../api/types";
 import {
   DELAY_THRESHOLDS,
   accentColorResolved,
@@ -179,12 +179,37 @@ export function useOperationsMapLayers(
   progress?: LiveTripProgressResponse,
   stopProfile?: RouteStopProfileRow[],
   restPitch = 0,
+  agencyBounds: StopBounds | null | "pending" = null,
 ): void {
+  // The agency the camera has arrived at. Each agency is revealed once, on
+  // the whole of its stops: `agencyBounds` is "pending" while they load, and
+  // null for an agency with no located stop, whose live trips are then the
+  // only extent there is. A selected route frames its own shape, so the
+  // reveal stands down for it rather than fighting that move.
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
   // Read at reveal time, not a dependency: the relief toggling the rest pitch
   // must not re-run the effect that feeds the live layers.
   const reveal = useEffectEvent((map: MLMap, bounds: maplibregl.LngLatBounds) => revealAgency(map, bounds, restPitch));
+  const revealFromTrips = useEffectEvent((map: MLMap, features: GeoJSON.Feature<GeoJSON.Point>[]) => {
+    if (agencyId == null || fittedAgencyRef.current === agencyId || agencyBounds !== null || features.length === 0) return;
+    if (selectedRoute == null) {
+      const bounds = new maplibregl.LngLatBounds();
+      for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
+      reveal(map, bounds);
+    }
+    fittedAgencyRef.current = agencyId;
+  });
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || agencyId == null || fittedAgencyRef.current === agencyId || agencyBounds == null || agencyBounds === "pending") return;
+    if (selectedRoute == null) {
+      const [west, south, east, north] = agencyBounds;
+      reveal(map, new maplibregl.LngLatBounds([west, south], [east, north]));
+    }
+    fittedAgencyRef.current = agencyId;
+  }, [agencyBounds, agencyId, mapRef, selectedRoute]);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
   useEffect(() => {
@@ -269,12 +294,7 @@ export function useOperationsMapLayers(
         });
       }
 
-      if (agencyId != null && fittedAgencyRef.current !== agencyId && features.length > 0) {
-        const bounds = new maplibregl.LngLatBounds();
-        for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
-        reveal(map, bounds);
-        fittedAgencyRef.current = agencyId;
-      }
+      revealFromTrips(map, features);
     });
   }, [agencyId, live, mapRef, selectedRoute, selectedTripId, styleEpoch, theme]);
 

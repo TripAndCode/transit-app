@@ -14,6 +14,7 @@ from tests.unit.test_response_schema_ratchet import _schema_routes
 ENVELOPED = {
     "GET /api/{agency_id}/routes": "rows",
     "GET /api/{agency_id}/stops": "rows",
+    "GET /api/{agency_id}/stops/bounds": "bounds",
     "GET /api/{agency_id}/ask/suggest": "rows",
     "GET /api/{agency_id}/reports/suggest": "suggestion",
 }

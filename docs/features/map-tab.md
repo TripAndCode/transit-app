@@ -52,6 +52,19 @@ but are not plotted.
   context.
 - The period summary is Pulse at `/agencies/:agencyId/pulse` — see
   `docs/features/overview-tab.md`.
+- On arrival at an agency the camera reveals the extent of its stops
+  (`GET /api/{agency_id}/stops/bounds`, `revealAgency`), once per agency,
+  whether or not any trip is reporting, so a quiet night or a stalled feed
+  still opens on the agency's own network. Only an agency with no located
+  stop is framed on its live trips instead, and a selected route frames its
+  own shape rather than the agency.
+- The route filter's line options carry each line's route numbers
+  (「くすの木台線（64・64-1）」, three numbers and a count beyond that), because
+  a feed can spell two different lines alike; names are shown as the feed
+  writes them.
+- The first-run tour's first step sits below both the filter dock and the
+  map legend under it (a step's `clear` element), so it never covers the
+  legend.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
@@ -154,7 +167,7 @@ whole day, so endpoints that can be asked about either today or a past day
 | File | Role |
 |---|---|
 | `frontend/src/tabs/MapTab.tsx` | Operations workspace, MapLibre lifecycle, marker interactions, freshness, and route selection |
-| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Trip markers (stacked by exact reported stop), selected-route shape, and selected-trip report trail |
+| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Trip markers (stacked by exact reported stop), selected-route shape, selected-trip report trail, and the once-per-agency reveal of its stop extent |
 | `frontend/src/tabs/map/selectedRouteDelay.ts` | Mean live delay of the selected route, which keys the route overlay's severity colour |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
@@ -165,6 +178,7 @@ whole day, so endpoints that can be asked about either today or a past day
 | `frontend/src/tabs/map/useTimelineLayers.ts` | Playback map layer; hides/restores the live trip layers |
 | `frontend/src/api/hooks.ts` | Current report, route baseline, shape, timeline, and detail queries |
 | `api/routers/map.py` | Current report enrichment and map/detail/timeline endpoints |
+| `api/routers/static.py` | Static routes and stops, and the stop extent the map opens on (`/stops/bounds`) |
 | `pipeline/reports/timeline.py` | `compute_delay_timeline()` — per-bucket positioned stop delays for one service day |
 
 MapLibre remains lazy-loaded through `MapTab` so it does not enter the main

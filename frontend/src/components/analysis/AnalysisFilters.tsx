@@ -5,9 +5,23 @@ import { distinctRouteTexts } from "../../api/routeDisplayName";
 import { useRouteNames } from "../../api/useRouteNames";
 import { useScope, type TimeBand, type DowFilter } from "../../api/scope";
 import { ErrorBanner } from "../ErrorBanner";
-import { routeGroups, selectedGroup } from "./routeGroups";
+import { groupPlates, routeGroups, selectedGroup } from "./routeGroups";
 import { sameCodes } from "../../utils/sameCodes";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
+import type { TFunction } from "i18next";
+
+/** How many of a line's route numbers its option names before counting the rest. */
+const PLATES_SHOWN = 3;
+
+/** A line's option text: its name and route numbers, the numbers being what
+ *  tells apart two lines the feed names alike. */
+function lineOptionText(name: string, plates: string[], t: TFunction<"design">): string {
+  if (plates.length === 0) return name;
+  const shown = plates.slice(0, PLATES_SHOWN).join(t("plateSeparator"));
+  return plates.length > PLATES_SHOWN
+    ? t("lineWithPlatesMore", { name, plates: shown, count: plates.length - PLATES_SHOWN })
+    : t("lineWithPlates", { name, plates: shown });
+}
 
 export function PatternFilters({ agencyId, codes, onChange }: {
   agencyId: number | null; codes: string[]; onChange: (codes: string[]) => void;
@@ -28,7 +42,7 @@ export function PatternFilters({ agencyId, codes, onChange }: {
   return <>
     <label>{t("line")}<select value={group} disabled={query.isPending} onChange={(e) => {
       onChange([...new Set((routesByGroup.get(e.target.value) ?? []).flatMap((r) => r.route_code ? [r.route_code] : []))]);
-    }}><option value="">{t("allLines")}</option>{groups.map(([name]) => <option key={name} value={name}>{name}</option>)}</select></label>
+    }}><option value="">{t("allLines")}</option>{groups.map(([name, entries]) => <option key={name} value={name}>{lineOptionText(name, groupPlates(entries, names.parts), t)}</option>)}</select></label>
     <label>{t("pattern")}<select value={codes.length === 1 ? codes[0] : ""} disabled={query.isPending} onChange={(e) => {
       onChange(e.target.value ? [e.target.value] : group ? options.flatMap((r) => r.route_code ? [r.route_code] : []) : []);
     }}><option value="">{t("allPatterns")}</option>

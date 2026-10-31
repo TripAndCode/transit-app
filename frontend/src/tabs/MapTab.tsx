@@ -14,7 +14,7 @@ import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
-import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useTodayRouteSummary } from "../api/hooks";
+import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip } from "../api/types";
@@ -321,6 +321,7 @@ export function MapTab() {
   const effectiveTrip = directionTrips.find((trip) => trip.trip_id === selectedTripId) ?? directionTrips[0] ?? null;
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
+  const stopBoundsQuery = useStopBounds(id);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   // The live table keeps only the last few days, so a feed stalled longer has
   // no live timestamp; the summary then dates its newest report from the
@@ -480,6 +481,9 @@ export function MapTab() {
     progressQuery.data,
     stopProfileQuery.data?.stops,
     restPitch,
+    // Pending while it loads, so the reveal waits for the agency's extent
+    // rather than framing the first trips; a failed read frames the trips.
+    stopBoundsQuery.isPending ? "pending" : (stopBoundsQuery.data ?? null),
   );
   // After useOperationsMapLayers, so the reported trail it lies on exists.
   usePearlLayer(mapRef, styleEpoch, progressQuery.data, pearlOn);

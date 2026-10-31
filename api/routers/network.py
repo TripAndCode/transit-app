@@ -11,6 +11,7 @@ from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
 from pipeline.reports.network import compute_network_summary
+from pipeline.reports.service_delivered import DeliveredMissing
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -43,6 +44,9 @@ class NetworkAgencyRow(BaseModel):
     # days.
     covered_days: int
     window_days: int
+    # Why service_delivered_pct is None, or None beside a rate; see
+    # pipeline.reports.service_delivered.DeliveredMissing.
+    delivered_missing: DeliveredMissing | None
     # pipeline.reports.ridership: has_ridership_weights is False (and
     # weighted_on_time_pct None) whenever this agency has no ridership_weights
     # rows at all -- the frontend toggle must key off has_ridership_weights,
@@ -56,7 +60,7 @@ class NetworkAgencyRow(BaseModel):
     # date-range total). planned_vehicle_km and vehicle_km_delivered_pct are
     # None together whenever vehicle-km isn't computable (no shapes.txt) or
     # the executed/planned trip ratio isn't available for this agency —
-    # never a misleading 100%; the UI falls back to planned_trip_count alone.
+    # never a misleading 100%; delivered_missing says why the ratio is absent.
     static_version_id: str | None
     planned_trip_count: int | None
     planned_vehicle_km: float | None

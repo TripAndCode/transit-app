@@ -18,8 +18,9 @@ of the range's days a timetable plans (a day's saved count, or the loaded
 timetable's); all three count only those, so a row whose ``covered_days``
 falls short is comparable to its neighbours only with that note beside it.
 When those figures cannot be read at all, every agency reads as one with no
-plan (0 planned trips and covered days, ``None`` rates) and the rest of the
-board stands.
+plan (0 planned trips and covered days, ``None`` rates) whose
+``delivered_missing`` is ``"unreadable"``, so the board never prints that 0 as
+a plan, and the rest of the board stands.
 
 ``has_ridership_weights``/``weighted_on_time_pct`` come from
 `pipeline.reports.ridership.compute_ridership_weighted_on_time_by_agency` —
@@ -33,9 +34,8 @@ weight.
 `pipeline.reports.supply.compute_supply_metrics_by_agency` — see that module
 for why these describe the current static-feed version's schedule
 definition rather than a date-range total, and why
-``vehicle_km_delivered_pct`` reads `None` ("trip-count-only" — fall back to
-`planned_trip_count`) whenever either the vehicle-km figure or the
-executed/planned trip ratio isn't available for this agency.
+``vehicle_km_delivered_pct`` reads `None` whenever either the vehicle-km
+figure or the executed/planned trip ratio isn't available for this agency.
 """
 
 import logging
@@ -134,6 +134,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
             "service_delivered_pct": None,
             "covered_days": 0,
             "window_days": (to_date - from_date).days + 1,
+            "delivered_missing": "unreadable",
         }
         delivered = {a["agency_id"]: no_plan for a in agencies}
 
@@ -193,6 +194,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "service_delivered_pct": d["service_delivered_pct"],
                 "covered_days": d["covered_days"],
                 "window_days": d["window_days"],
+                "delivered_missing": d["delivered_missing"],
                 # has_ridership_weights distinguishes "not configured for
                 # this agency" (weighted_on_time_pct is meaningless, hide any
                 # toggle) from "configured, but None because there were no
