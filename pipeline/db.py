@@ -43,14 +43,6 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # genuinely very-late bus still counts everywhere.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
-# Outside the +/-MAX_PLAUSIBLE_DELAY_SEC window every non-NULL arr_delay reaching
-# argMax already satisfies (see build_dedup_ch_sql's arr_clamp), so this can never
-# collide with a real value; derived from MAX_PLAUSIBLE_DELAY_SEC so the two can't
-# drift apart. -1 (used for the small schedule_relationship_trip/_stop enums
-# elsewhere) isn't safe here since arr_delay is a signed seconds value and small
-# negative delays are legitimate.
-_ARR_DELAY_NULL_SENTINEL = -MAX_PLAUSIBLE_DELAY_SEC - 1
-
 
 def observation_filter_ch(extra_where: str = "") -> str:
     """The row-level WHERE every read of observations shares: the agency, a
@@ -69,7 +61,6 @@ def build_dedup_ch_sql(
     *,
     extra_where: str = "",
     include_captured_at: bool = False,
-    include_arr_delay: bool = False,
     include_scheduled_sec: bool = False,
     table: str = UPDATES_TABLE,
 ) -> str:
@@ -125,17 +116,16 @@ def build_dedup_ch_sql(
     than a Python-formatted literal, for clickhouse-connect's server-side
     parameter binding.
 
-    Column order/count in the SELECT list must stay exactly
-    `route_code, service_type, scheduled_time, trip_id, date,
-    stop_sequence, dep_delay[, last_captured_at][, scheduled_sec][, arr_delay]`
-    — `pipeline/analyze.py` loads the result into its TEMP tables by
-    position, so `arr_delay`, when requested, is always the LAST column
-    regardless of which other optional columns are also requested (a caller
-    combining every flag still finds it at `r[-1]`). A caller that wants
-    positionally-stable access to `scheduled_sec` too (not just `arr_delay`)
-    should read the result by column name instead (e.g.
-    `pipeline.reports.filters._ch_rows`), since its own position shifts
-    depending on `include_captured_at`.
+    The SELECT list is `route_code, service_type, scheduled_time, trip_id,
+    date, stop_sequence, dep_delay[, last_captured_at][, scheduled_sec]`.
+    `scheduled_sec`'s position shifts with `include_captured_at`, so a caller
+    wanting it reads the result by column name (e.g.
+    `pipeline.reports.filters._ch_rows`).
+
+    Departures only: a row with no measured `dep_delay` never reaches the
+    `argMax`, and the feeds report a stop's arrival in a poll of its own, so
+    this query never sees an arrival. A reader pairing a stop's arrival with
+    its departure uses `build_stop_visits_ch_sql`.
 
     `include_scheduled_sec` projects the raw seconds-since-service-day-start
     schedule value ingest stored alongside `scheduled_time` (see
@@ -151,36 +141,8 @@ def build_dedup_ch_sql(
     those polls apart, because `scheduled_time` is NULL in every one of them.
     The value is wrapped in a `tuple` so `argMax` keeps a latest poll whose
     `scheduled_sec` is NULL (a reload that leaves the stop with no departure
-    time) instead of skipping it for an older poll's schedule, the skip that
-    the `arr_delay` sentinel below guards against.
-
-    `include_arr_delay` additionally clamps `arr_delay` to the same
-    plausibility window as `dep_delay` (`MAX_PLAUSIBLE_DELAY_SEC`) whenever
-    it's non-NULL — a frozen/stale feed can corrupt `arr_delay` the same way
-    it corrupts `dep_delay` (see that constant's own docstring), and an
-    implausible `arr_delay` would otherwise inflate a dwell/running-time
-    computation built from it. This clamp is folded into the `arr_delay`
-    SELECT expression itself (an out-of-range value becomes unmeasured for
-    THAT COLUMN ONLY, via the same NULL-handling path as a genuinely-NULL
-    `arr_delay`), NOT into this query's shared row-level `WHERE` — this
-    query's `WHERE`/`GROUP BY` is shared by every caller (including plain
-    `include_captured_at=True` callers with no interest in `arr_delay` at
-    all), so a row-level filter here would drop that row from the `dep_delay`
-    `argMax` too, silently resurrecting a stale `dep_delay` for a row whose
-    only problem was an implausible `arr_delay`.
-
-    `arr_delay` is legitimately NULL per-row (sparse RT arrival coverage), but
-    ClickHouse's `argMax(arg, val)` silently SKIPS a row whose `arg` is NULL
-    when picking the row with the maximal `val` — it does not fall back to
-    NULL just because the true-latest `(captured_at, file_name)` row happens
-    to have a NULL `arr_delay`. Left unguarded, that resurrects an earlier,
-    stale non-NULL `arr_delay` instead of correctly reporting "no arrival
-    estimate for the latest observation". The `coalesce(u.arr_delay,
-    _ARR_DELAY_NULL_SENTINEL)` / `NULLIF(..., _ARR_DELAY_NULL_SENTINEL)` wrap
-    below forces every row into `argMax`'s selection (so latest-observation-
-    wins is still honored) while converting the sentinel back to NULL in the
-    final result. The same fix already applies to `schedule_relationship_trip`/
-    `schedule_relationship_stop` elsewhere in this codebase.
+    time) instead of skipping it for an older poll's schedule, which `argMax`
+    does to a NULL argument.
 
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
@@ -202,18 +164,10 @@ def build_dedup_ch_sql(
         if include_scheduled_sec
         else ""
     )
-    arr = (
-        ", NULLIF(argMax(coalesce(CASE WHEN u.arr_delay BETWEEN "
-        f"-{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC} THEN u.arr_delay END, "
-        f"{_ARR_DELAY_NULL_SENTINEL}), (u.captured_at, u.file_name)), "
-        f"{_ARR_DELAY_NULL_SENTINEL}) AS arr_delay"
-        if include_arr_delay
-        else ""
-    )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
-        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec} "
         f"FROM {checked_table(table)} AS u "
         f"WHERE {observation_filter_ch(extra_where)} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "

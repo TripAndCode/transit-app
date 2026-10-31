@@ -47,7 +47,6 @@ def _service_label(ctx: RangeCtx) -> str | None:
 def _dedup_cte_ch(
     ctx: RangeCtx,
     *,
-    include_arr_delay: bool = False,
     include_scheduled_sec: bool = False,
     table: str = UPDATES_TABLE,
 ) -> tuple[str, dict]:
@@ -60,13 +59,10 @@ def _dedup_cte_ch(
     through this one builder so the dedup+filter shape can't drift between
     call sites.
 
-    ``include_arr_delay``/``include_scheduled_sec`` forward straight to
-    `build_dedup_ch_sql` — pass ``include_arr_delay`` when the caller needs
-    the `arr_delay` column (e.g. a live dwell/running-time decomposition) and
-    ``include_scheduled_sec`` when it needs an hour-of-day bucket that
-    doesn't silently drop after-midnight extended-hour trips (see that
-    function's own docstring). Both default to omitted since most callers
-    only ever read `dep_delay`.
+    ``include_scheduled_sec`` forwards straight to `build_dedup_ch_sql` — pass
+    it when the caller needs an hour-of-day bucket that doesn't silently drop
+    after-midnight extended-hour trips (see that function's own docstring).
+    A caller that needs arrivals reads :func:`_stop_visits_cte_ch` instead.
 
     Returns ``(cte_sql, parameters)`` instead of a bare CTE fragment string,
     because ClickHouse parameters are a ``{name: value}`` dict passed to
@@ -81,7 +77,6 @@ def _dedup_cte_ch(
     body = build_dedup_ch_sql(
         extra_where=where,
         include_captured_at=False,
-        include_arr_delay=include_arr_delay,
         include_scheduled_sec=include_scheduled_sec,
         table=table,
     )
