@@ -9,6 +9,7 @@ here are where every reader learns which table a service day lives in.
 import os
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
@@ -146,7 +147,7 @@ def get_client(*, send_receive_timeout: int | None = None):
     # This is also the factory `make ch-bootstrap` and CI's schema-apply
     # step use (see Makefile), so the DDL/bootstrap path gets the same TLS
     # coverage as ingest/analyze.
-    timeout = {} if send_receive_timeout is None else {"send_receive_timeout": send_receive_timeout}
+    timeout: dict[str, Any] = {} if send_receive_timeout is None else {"send_receive_timeout": send_receive_timeout}
     return clickhouse_connect.get_client(
         **ch_conn_kwargs(),
         # No server session: nothing here relies on session state, and a
