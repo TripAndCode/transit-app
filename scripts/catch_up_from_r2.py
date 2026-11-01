@@ -33,8 +33,11 @@ Per agency (every active one, or each --agency-id):
    after the load for them, so the morning of D joins D. Midnight is where
    ingest can hold members back, not the 04:00 service-day cutover, so the
    after-midnight end of service day D-1 joins D too.
-   A timetable in force only on days already written is skipped. Timetables
-   newer than the last archive load at the end, so the newest stays loaded.
+   A timetable in force only on days already written is skipped. A timetable
+   loads only ahead of days the plan writes: none dated past the JST day after
+   the newest archive R2 holds (that archive's tail writes that day), nor past
+   a stop. Loaded sooner, it would sit ahead of the next run's open day, so it
+   waits for a later run.
 
 Agency 1's timetable reaches R2 only by hand: the collector has no static
 source for it, and `aomori_index_scrape` names its zips by the fetching host's
@@ -45,13 +48,15 @@ The plan refuses an agency, and --apply runs nothing, when:
 - its ingest reads the timetable (REQUIRES_STATIC_TIMETABLE in
   pipeline/strategies/__init__.py) and none is loaded;
 - it has no rows: this tool continues a history, it does not start one;
-- its loaded timetable came into force after the open day, or
-  carries no date to order R2's against, so those days would join the wrong one;
+- its loaded timetable came into force after the open day, or carries no
+  date to order R2's against, so those days would join the wrong one (with
+  --allow-gaps, days before a loaded timetable are taken as empty instead);
 - R2 lists one day twice;
 - a local copy of a file it needs differs in size from R2's.
 An archive missing in R2 stops the agency's plan at that day, with the
 timetables in force from it, because going past it would leave it older than
-the newest ingested day for good: --allow-gaps goes past every missing day.
+the newest ingested day for good. --allow-gaps goes past every day with no rows:
+one R2 has no archive for, and one whose archive polled nothing (an outage).
 
 The plan (the default) lists R2 and reads Postgres through a read-only session
 and ClickHouse through a readonly=1 client; it downloads and writes nothing.
@@ -60,11 +65,17 @@ held for the whole run, and then runs the plan. Each ingest step first checks
 that the open day has not moved past its first day, which catches a plan gone
 stale under a writer that lock does not exclude (promotion takes the
 per-agency lock instead). What keeps an archive member from going in twice is
-ingest's own skip-list of the file names already stored. Files download into the local layout `make fetch` uses
-(raw_archives/<id>/, raw_archives_static/<id>/) and each ingest step reads its
-own temporary directory of links to just its archives, never the whole local
-history. It stops at the first failure. A rerun is safe: ingested archive
-members are skipped, and a loaded timetable is not loaded again.
+ingest's own skip-list of the file names already stored. Each timetable load
+first checks that the open day has reached the timetable's day: an archive can
+be ingested and still add no row (an outage polls an empty feed), and `updates`
+cannot tell such a day from one not yet ingested, so a timetable loaded then
+would sit ahead of the next run's open day. The run stops before that load
+unless --allow-gaps takes those days as empty; an agency whose ingest reads no
+timetable is not checked. Files download into the local layout `make fetch`
+uses (raw_archives/<id>/, raw_archives_static/<id>/), and each ingest step
+reads its own temporary directory of links to just its archives, never the
+whole local history. It stops at the first failure. A rerun is safe: ingested
+archive members are skipped, and a loaded timetable is not loaded again.
 
 Aggregates are left to the next analyze, which the run prints, or --analyze
 runs in-process afterwards (incremental, like analyze_all): a timetable load
@@ -330,17 +341,25 @@ def plan_agency(
             "ingest reads none, so R2's are left to load by hand"
         )
     if loaded_day is not None and loaded_day > first:
-        if state.requires_timetable:
+        if state.requires_timetable and not allow_gaps:
             plan.refusal = (
                 f"{state.loaded_version} is loaded, in force from {loaded_day}, but JST {first}..{loaded_day - _DAY} "
-                f"are not ingested yet and would join it, not the timetable in force on them"
-                f"{_in_force_hint(timetables, first)}. Load that one with gtfs_pipeline.py load_static, then rerun"
+                f"hold no rows: not ingested yet, they would join it, not the timetable in force on them"
+                f"{_in_force_hint(timetables, first)}. Load that one with gtfs_pipeline.py load_static, then rerun. "
+                "If their archives were ingested and polled nothing (an outage), --allow-gaps takes them as empty "
+                "and goes on"
             )
             return plan
-        plan.notes.append(
-            f"{state.loaded_version} came into force after {first}; this agency's ingest reads no timetable, "
-            "so the order leaves its rows unchanged"
-        )
+        if state.requires_timetable:
+            plan.notes.append(
+                f"JST {first}..{loaded_day - _DAY} hold no rows and {state.loaded_version} is loaded: --allow-gaps "
+                "takes them as empty, so their archives are read again against it"
+            )
+        else:
+            plan.notes.append(
+                f"{state.loaded_version} came into force after {first}; this agency's ingest reads no timetable, "
+                "so the order leaves its rows unchanged"
+            )
 
     since = first - _DAY
     wanted = [a for a in archives if since <= a.day <= today - _DAY]
@@ -399,6 +418,29 @@ def check_order(open_day: date | None, first_day: date) -> None:
             f"`updates` is written through JST {open_day - _DAY}, and this step writes from {first_day}. Another "
             "ingest ran since the plan was made; rerun to plan again"
         )
+
+
+def check_reached(reached: date | None, timetable: RemoteFile, through: date | None, *, allow_gaps: bool) -> str | None:
+    """Refuse to load ``timetable`` while `updates` leaves a day before it open.
+
+    ``reached`` is the open day after the archives before the load were
+    ingested, ``through`` the newest of those archives. Days with no rows are
+    either not ingested or ingested empty, and `updates` cannot tell which, so a
+    timetable loaded past them would get the next run refused. With
+    ``allow_gaps`` they are taken as empty: the returned warning says so.
+    """
+    if reached is not None and reached >= timetable.day:
+        return None
+    still = f"JST {reached}..{timetable.day - _DAY}" if reached else f"every day before {timetable.day}"
+    if allow_gaps:
+        return f"{still} hold no rows; --allow-gaps takes them as empty and loads {timetable.name}"
+    ingested = f"archives through {through:%Y%m%d} are ingested" if through else "no archive was ingested before it"
+    reach = f"`updates` reaches only JST {reached - _DAY}" if reached else "`updates` holds no row"
+    raise Refusal(
+        f"{ingested}, but {reach}, so {timetable.name} is not loaded: in force from {timetable.day}, it would sit "
+        f"ahead of the next run's open day. If {still} hold no rows because their archives polled nothing (an "
+        "outage), rerun with --allow-gaps to take them as empty and load it"
+    )
 
 
 # ── object store and local files ──────────────────────────────────────────────
@@ -734,11 +776,22 @@ def _ingest_step(step: IngestStep, agency_id: int, conn, ch_client, store: Objec
     print(f"  ingested JST {_span(step.first_day, step.last_day(jst_date(now)))}: {run.rows:,} rows")
 
 
-def _load_step(step: LoadStep, agency_id: int, conn, store: ObjectStore, layout: Layout) -> None:
+def _load_step(
+    step: LoadStep,
+    state: AgencyState,
+    conn,
+    ch_client,
+    store: ObjectStore,
+    layout: Layout,
+    now: datetime,
+    through: date | None,
+    allow_gaps: bool,
+) -> None:
     from pipeline import day_types, route_catalog, service_hours
     from pipeline import runs as pipeline_runs
     from pipeline.static_loader import load_static
 
+    agency_id = state.agency_id
     timetable = step.timetable
     current = loaded_version(conn, agency_id)
     conn.commit()
@@ -748,6 +801,11 @@ def _load_step(step: LoadStep, agency_id: int, conn, store: ObjectStore, layout:
     current_day = version_day(current)
     if current_day is not None and current_day > timetable.day:
         raise Refusal(f"{current} is loaded, newer than {timetable.name}; rerun to plan again")
+    if state.requires_timetable:
+        reached = open_day(*newest_row(ch_client, agency_id, jst_date(now)))
+        warning = check_reached(reached, timetable, through, allow_gaps=allow_gaps)
+        if warning:
+            print(f"  {warning}")
     path = layout.fetch(store, agency_id, timetable)
     with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
         load_static(str(path), agency_id, conn)
@@ -805,13 +863,15 @@ def run_apply(args, store: ObjectStore, layout: Layout, now: datetime) -> int:
             return 1
         for plan in plans:
             agency_id = plan.state.agency_id
+            through: date | None = None
             for i, step in enumerate(plan.steps, 1):
                 print(f"[a{agency_id}] step {i}/{len(plan.steps)}")
                 try:
                     if isinstance(step, IngestStep):
                         _ingest_step(step, agency_id, conn, ch_client, store, layout, now)
+                        through = step.archives[-1].day
                     else:
-                        _load_step(step, agency_id, conn, store, layout)
+                        _load_step(step, plan.state, conn, ch_client, store, layout, now, through, args.allow_gaps)
                 except Exception as exc:
                     conn.rollback()
                     print(
@@ -857,7 +917,11 @@ def main(argv: list[str] | None = None, *, store: ObjectStore | None = None, now
     parser.add_argument("--apply", action="store_true", help="download, ingest and load (default: print the plan)")
     parser.add_argument("--yes", action="store_true", help="skip the --apply confirmation prompt")
     parser.add_argument("--analyze", action="store_true", help="after --apply, analyze the agencies in scope")
-    parser.add_argument("--allow-gaps", action="store_true", help="go past days R2 has no archive for")
+    parser.add_argument(
+        "--allow-gaps",
+        action="store_true",
+        help="go past days with no rows: R2 has no archive for them, or their archive polled nothing",
+    )
     parser.add_argument("--archives-dir", type=pathlib.Path, default=ROOT / "raw_archives")
     parser.add_argument("--static-dir", type=pathlib.Path, default=ROOT / "raw_archives_static")
     args = parser.parse_args(argv)

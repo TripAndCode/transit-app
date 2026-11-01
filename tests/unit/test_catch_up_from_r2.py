@@ -573,3 +573,47 @@ def test_a_local_copy_of_another_size_is_refused_and_nothing_downloads(tmp_path)
     assert store.downloads == []
     assert local.read_bytes() == b"old"
     assert layout.to_download(8, [_remote(10)])[1]
+
+
+def test_a_timetable_loaded_ahead_of_days_with_no_rows_needs_allow_gaps():
+    """Archives can be ingested and still leave no rows (an outage polls an
+    empty feed), so `updates` alone cannot tell such days from days not yet
+    ingested. The plan refuses unless --allow-gaps takes them as empty."""
+    state = _state(
+        loaded="gtfs_static_20261031",
+        newest_row=datetime(2026, 10, 29, 10, 0, tzinfo=timezone.utc),  # JST 10-29 19:00
+    )
+    timetables = _timetables(8, ["20261031"])
+
+    refused = cu.plan_agency(state, [], timetables, today=TODAY)
+    assert refused.refusal is not None
+    assert "--allow-gaps" in refused.refusal
+
+    allowed = cu.plan_agency(
+        state, _archives(8, ["20261029", "20261030", "20261031"]), timetables, today=TODAY, allow_gaps=True
+    )
+    assert allowed.refusal is None
+    assert any("2026-10-30" in note for note in allowed.notes)
+    assert _shape(allowed) == [("ingest", "20261030", None, ["20261029", "20261030", "20261031"])]
+
+
+def test_a_timetable_loads_once_updates_reaches_its_first_day():
+    timetable = _timetables(8, ["20261025"])[0]
+
+    assert cu.check_reached(date(2026, 10, 25), timetable, date(2026, 10, 24), allow_gaps=False) is None
+
+
+def test_a_timetable_is_not_loaded_while_updates_stops_short_of_its_first_day():
+    """The archives before it were ingested and wrote nothing past JST 10-23:
+    loaded now, the timetable would sit ahead of the next run's open day."""
+    timetable = _timetables(8, ["20261025"])[0]
+
+    with pytest.raises(cu.Refusal) as refused:
+        cu.check_reached(date(2026, 10, 24), timetable, date(2026, 10, 24), allow_gaps=False)
+    message = str(refused.value)
+    assert "gtfs_static_20261025.zip" in message
+    assert "20261024" in message and "2026-10-23" in message
+    assert "--allow-gaps" in message
+
+    warning = cu.check_reached(date(2026, 10, 24), timetable, date(2026, 10, 24), allow_gaps=True)
+    assert warning is not None and "2026-10-24" in warning

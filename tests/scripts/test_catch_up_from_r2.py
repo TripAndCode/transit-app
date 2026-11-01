@@ -232,3 +232,44 @@ def test_apply_refuses_an_agency_with_no_timetable_and_writes_nothing(world, pg_
     assert "REQUIRES_STATIC_TIMETABLE" in capsys.readouterr().out
     assert list(_rows(ch_client, agency_id)) == [world["ingested"]]
     assert world["store"].downloads == []
+
+
+def _empty_archive(path: pathlib.Path) -> None:
+    """An archive of a day the collector polled nothing from: its day directory alone."""
+    with tarfile.open(path, "w:gz") as tf:
+        info = tarfile.TarInfo(path.name.split(".")[0])
+        info.type = tarfile.DIRTYPE
+        tf.addfile(info)
+
+
+def test_a_timetable_is_not_loaded_after_days_that_wrote_no_rows(world, pg_conn, ch_client, capsys):
+    """Archive D-1 is empty, so after the days before D are ingested `updates`
+    still ends on JST D-2. Loading D then would leave it ahead of the next
+    run's open day, which refuses the agency, so the run stops before it."""
+    agency_id = world["agency_id"]
+    _empty_archive(world["store"].root / "rt" / str(agency_id) / f"{world['head'][:8]}.tar.gz")
+
+    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"], now=world["now"]) == 1
+
+    assert f"{world['new']}.zip is not loaded" in capsys.readouterr().err
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT static_version_id FROM static_trips WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(world["old"],)]
+    pg_conn.commit()
+    assert _runs(pg_conn, agency_id) == {"ingest": 1}
+    assert f"static/{agency_id}/{world['new']}.zip" not in world["store"].downloads
+    assert list(_rows(ch_client, agency_id)) == [world["ingested"]]
+
+
+def test_allow_gaps_loads_a_timetable_after_days_taken_as_empty(world, pg_conn, ch_client):
+    agency_id = world["agency_id"]
+    _empty_archive(world["store"].root / "rt" / str(agency_id) / f"{world['head'][:8]}.tar.gz")
+
+    argv = [*world["dirs"], "--apply", "--yes", "--allow-gaps"]
+    assert cu.main(argv, store=world["store"], now=world["now"]) == 0
+
+    assert _rows(ch_client, agency_id) == {
+        world["ingested"]: [(None, None)],
+        world["later"]: [(world["new"], 8 * 3600)],
+    }
+    assert _runs(pg_conn, agency_id) == {"ingest": 2, "static": 1}
