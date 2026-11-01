@@ -1,6 +1,6 @@
 import type { RouteShapeResponse, RouteShapeStop, RouteTrip } from "../../api/types";
 import { orderedStops } from "../analysis/stopSeries";
-import { tripsInWindow, type MareyStop, type TimeWindow } from "./mareyLayout";
+import { plottableTrips, tripsInWindow, type MareyStop, type TimeWindow } from "./mareyLayout";
 
 export type TripSpan = { startSec: number; endSec: number };
 export type ScrubPosition = { trip_id: string; fromSeq: number; toSeq: number; f: number; axisFraction: number; delaySec: number };
@@ -58,9 +58,10 @@ export function positionsAt(trips: RouteTrip[], sec: number, axis: MareyStop[]):
 }
 
 /** The positions both the diagram and the map show: only trips the diagram
- *  draws, those departing inside `viewWindow`, so the two never disagree. */
+ *  draws, those departing inside `viewWindow` that it can place stop by stop,
+ *  so the two never disagree. */
 function scrubPositions(trips: RouteTrip[], viewWindow: TimeWindow, sec: number, axis: MareyStop[]): ScrubPosition[] {
-  return positionsAt(tripsInWindow(trips, viewWindow), sec, axis);
+  return positionsAt(plottableTrips(tripsInWindow(trips, viewWindow)).plotted, sec, axis);
 }
 
 export function scrubBounds(viewWindow: TimeWindow): { min: number; max: number; step: number } {

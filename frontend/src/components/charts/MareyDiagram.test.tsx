@@ -29,6 +29,21 @@ function trip(id: string, departSec: number, delays: number[]): RouteTrip {
   };
 }
 
+/** A trip whose feed gave only its start: that one time sits on every stop,
+ *  while each stop still carries a delay of its own. */
+function startOnlyTrip(id: string, startSec: number, delays: number[]): RouteTrip {
+  const base = trip(id, startSec, delays);
+  return {
+    ...base,
+    stops: base.stops.map((stop) => ({ ...stop, scheduled_sec: startSec, observed_sec: startSec + stop.delay_sec })),
+  };
+}
+
+const START_ONLY_TRIPS = [
+  startOnlyTrip("S1", 7 * 3600, [10, 145, 61]),
+  startOnlyTrip("S2", 8 * 3600, [0, 85, 94]),
+];
+
 const THREE_TRIPS = [
   trip("T1", 7 * 3600, [0, 60, 120]),
   trip("T2", 7 * 3600 + 1800, [120, 300, 600]),
@@ -328,5 +343,57 @@ describe("MareyDiagram scrubber", () => {
     const { container } = show({ onScrub: vi.fn() });
     expect(container.querySelector(".marey-cursor")).toBeNull();
     expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(0);
+  });
+});
+
+describe("MareyDiagram for trips whose feed gave only a start time", () => {
+  const NOTE = /live feed gives only each trip's departure time/;
+
+  it("says why in place of the chart, and lists the trips as a table instead", () => {
+    const { container } = show({ trips: START_ONLY_TRIPS, onScrub: vi.fn() });
+    expect(container.querySelector("svg.marey__chart")).toBeNull();
+    expect(container.querySelectorAll("[data-trip-id]")).toHaveLength(0);
+    expect(screen.getByTestId("marey-start-only")).toHaveTextContent(NOTE);
+    expect(screen.queryByText("No trips ran in this window")).toBeNull();
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByTestId("marey-readout")).toBeNull();
+    const table = screen.getByTestId("marey-table");
+    expect(table.className).not.toContain("marey__table--hidden");
+    expect(within(table).getAllByRole("row").slice(1)).toHaveLength(2);
+  });
+
+  it("still counts the trips that ran in the caption", () => {
+    const { container } = show({ trips: START_ONLY_TRIPS });
+    expect(container.querySelector(".marey__caption")?.textContent).toContain("2 trips");
+  });
+
+  it("offers no chart toggle on a narrow viewport", () => {
+    mockViewport(true);
+    show({ trips: START_ONLY_TRIPS });
+    expect(screen.queryByRole("button", { name: "Show diagram" })).toBeNull();
+    expect(screen.getByTestId("marey-start-only")).toHaveTextContent(NOTE);
+  });
+
+  it("draws the timed trips beside them and says how many were left out", () => {
+    const { container } = show({ trips: [...THREE_TRIPS, START_ONLY_TRIPS[0]] });
+    expect([...container.querySelectorAll("[data-trip-id]")].map((g) => g.getAttribute("data-trip-id"))).toEqual([
+      "T1",
+      "T2",
+      "T3",
+    ]);
+    expect(screen.getByTestId("marey-start-only")).toHaveTextContent(
+      "1 trip isn't drawn: the live feed gave only its departure time, not a time at each stop",
+    );
+    expect(within(screen.getByTestId("marey-table")).getAllByRole("row").slice(1)).toHaveLength(3);
+  });
+
+  it("draws no previous-week trip that carries only a start time", () => {
+    const { container } = show({ previousTrips: [startOnlyTrip("P1", 7 * 3600 + 300, [0, 60, 120])] });
+    expect(container.querySelectorAll("[data-ghost='true']")).toHaveLength(0);
+  });
+
+  it("says nothing of the kind for trips with stop-by-stop times", () => {
+    show();
+    expect(screen.queryByTestId("marey-start-only")).toBeNull();
   });
 });

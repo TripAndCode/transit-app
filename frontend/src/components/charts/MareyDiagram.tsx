@@ -12,6 +12,7 @@ import {
   formatClock,
   hourTicks,
   peakWindow,
+  plottableTrips,
   ribbonSegments,
   segmentColor,
   seqToY,
@@ -94,6 +95,11 @@ function tripSummary(trip: RouteTrip, t: (key: string) => string): string {
  *  keep their size; a narrower column scrolls it sideways. Below the phone
  *  breakpoint, where that scroll would be most of the chart, the diagram is
  *  opt-in: the table leads there and the chart is revealed on request.
+ *
+ *  A trip whose feed gave only its start time has no line to draw
+ *  (`plottableTrips`), and a note says so. When no trip of the day can be
+ *  drawn, the note takes the chart's place and the table, whose departures
+ *  and terminal delays the feed does carry, is shown at every width.
  */
 export function MareyDiagram({
   trips,
@@ -130,9 +136,13 @@ export function MareyDiagram({
   const scrubId = `marey-scrub-${instanceId}`;
 
   const viewWindow = timeWindowForBand(band);
-  const drawn = tripsInWindow(trips, viewWindow);
-  const ghosts = tripsInWindow(previousTrips, viewWindow);
-  const peak = peakWindow(drawn, viewWindow);
+  const ran = tripsInWindow(trips, viewWindow);
+  const { plotted: drawn, startOnly } = plottableTrips(ran);
+  const ghosts = plottableTrips(tripsInWindow(previousTrips, viewWindow)).plotted;
+  const chartable = drawn.length > 0 || ghosts.length > 0;
+  // The peak and the ribbon read departures and per-stop delays, which a
+  // start-only feed carries too, so they cover every trip that ran.
+  const peak = peakWindow(ran, viewWindow);
   const active = focused ?? hovered;
   const activeTrip = drawn.find((trip) => trip.trip_id === active) ?? null;
   const labelStep = Math.max(1, Math.ceil(axis.length / MAX_STOP_LABELS));
@@ -141,10 +151,12 @@ export function MareyDiagram({
     from: formatClock(ribbonWindow.startSec),
     to: formatClock(ribbonWindow.endSec),
   });
-  const chartShown = !narrow || chartRevealed;
-  const rows = drawn.map((trip) => tripRow(trip, axis));
+  const chartShown = chartable && (!narrow || chartRevealed);
+  // The table is the chart's text reading, so it lists the drawn trips; with
+  // no chart it is the reading of the day on its own and lists every trip.
+  const rows = (chartable ? drawn : ran).map((trip) => tripRow(trip, axis));
   const crossing = scrubSec == null ? null : new Set(tripsCrossing(drawn, scrubSec).map((trip) => trip.trip_id));
-  // `drawn` is the window's trips, the same set scrubMapPositions places on the map.
+  // `drawn` is the window's plottable trips, the same set scrubMapPositions places on the map.
   const positions = scrubSec == null ? [] : positionsAt(drawn, scrubSec, axis);
   const bounds = scrubBounds(viewWindow);
   const scrubValue = scrubSec ?? defaultScrubSec(viewWindow, peak);
@@ -158,7 +170,7 @@ export function MareyDiagram({
     <div className={scrubSec != null && active === null ? "marey marey--scrubbing" : "marey"}>
       <p className="focus-muted marey__caption">
         {t("mareyWindow", { from: formatClock(viewWindow.startSec), to: formatClock(viewWindow.endSec) })} ·{" "}
-        {t("mareyTripCount", { count: drawn.length })}
+        {t("mareyTripCount", { count: ran.length })}
         {date ? ` · ${formatDate(date)}` : ""}
         {peak ? ` · ${t("mareyPeak")} ${formatClock(peak.startSec)}–${formatClock(peak.endSec)}` : ""}
       </p>
@@ -167,11 +179,16 @@ export function MareyDiagram({
           {t("mareyTruncated", { n: trips.length })}
         </p>
       )}
-      {drawn.length === 0 && ghosts.length === 0 ? (
+      {startOnly > 0 && (
+        <p className="focus-muted marey__caption" data-testid="marey-start-only">
+          {drawn.length > 0 ? t("mareyStartOnlyLeftOut", { count: startOnly }) : t("mareyStartOnly")}
+        </p>
+      )}
+      {ran.length === 0 && ghosts.length === 0 ? (
         <p className="focus-muted">{t("mareyEmpty")}</p>
       ) : (
         <>
-          {narrow && (
+          {narrow && chartable && (
             <button
               type="button"
               className="btn-ghost marey__toggle"
@@ -370,7 +387,7 @@ export function MareyDiagram({
             </p>
           )}
           <table
-            className={`focus-table marey__table${narrow ? "" : " marey__table--hidden"}`}
+            className={`focus-table marey__table${narrow || !chartable ? "" : " marey__table--hidden"}`}
             data-testid="marey-table"
           >
             <caption>{t("mareyTableCaption")}</caption>
@@ -395,11 +412,11 @@ export function MareyDiagram({
               ))}
             </tbody>
           </table>
-          {drawn.length > 0 && (
+          {ran.length > 0 && (
             <>
               <p className="focus-muted marey__caption">{ribbonLabel}</p>
               <StopRibbon
-                segments={ribbonSegments(drawn, axis, ribbonWindow)}
+                segments={ribbonSegments(ran, axis, ribbonWindow)}
                 label={ribbonLabel}
                 markers={positions.map((p) => ({ key: p.trip_id, fraction: p.axisFraction, color: segmentColor(p.delaySec) }))}
               />

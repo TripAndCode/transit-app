@@ -80,7 +80,14 @@ What the user sees/does:
   week earlier draws behind it at reduced opacity as ghost context, not a
   second reading; a one-minute scrubber over the diagram's window keeps the
   trips under way at that second bright, recedes the rest, and marks each
-  one's position on the stop ribbon), Map
+  one's position on the stop ribbon; a trip whose three or more timed stops
+  all carry one scheduled time is one the feed gave only a start time for,
+  so it is left out of the drawing, the scrub and the map's positions
+  (`plottableTrips` in `mareyLayout.ts`) and a note counts it; when no trip
+  of the day has stop-by-stop times, the note takes the chart's place and
+  the trips' table, departures and last-stop delays, shows instead; two
+  stops at one time are left drawn, since a short timetable leg schedules
+  both alike), Map
   (`frontend/src/components/analysis/AnalysisMap.tsx`, mounted only after
   first visited, hidden rather than unmounted afterward; while a scrub is
   set it draws the same trips' positions, interpolated between stops and

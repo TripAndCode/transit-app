@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MAREY_WINDOW,
+  carriesOnlyStartTime,
   formatClock,
   peakWindow,
+  plottableTrips,
   ribbonSegments,
   segmentColor,
   seqToY,
@@ -37,6 +39,16 @@ function trip(id: string, departSec: number, delays: number[]): RouteTrip {
       observed_sec: departSec + i * 300 + delay_sec,
       delay_sec,
     })),
+  };
+}
+
+/** A trip whose feed gave only its start: that one time sits on every stop,
+ *  while each stop still carries a delay of its own. */
+function startOnlyTrip(id: string, startSec: number, delays: number[]): RouteTrip {
+  const base = trip(id, startSec, delays);
+  return {
+    ...base,
+    stops: base.stops.map((stop) => ({ ...stop, scheduled_sec: startSec, observed_sec: startSec + stop.delay_sec })),
   };
 }
 
@@ -205,5 +217,53 @@ describe("formatClock", () => {
     // 25:30 is a real GTFS departure time; wrapping it to 01:30 would put the
     // trip at the wrong end of the axis.
     expect(formatClock(25 * 3600 + 30 * 60)).toBe("25:30");
+  });
+});
+
+describe("carriesOnlyStartTime", () => {
+  it("flags a trip whose every stop carries the same scheduled time", () => {
+    expect(carriesOnlyStartTime(startOnlyTrip("A", 8 * 3600, [10, 145, 61, 85]))).toBe(true);
+  });
+
+  it("leaves a trip with a time at each stop alone", () => {
+    expect(carriesOnlyStartTime(trip("A", 8 * 3600, [0, 60, 120]))).toBe(false);
+  });
+
+  it("does not judge two stops at one time: a short timetable leg schedules both alike", () => {
+    expect(carriesOnlyStartTime(startOnlyTrip("A", 8 * 3600, [0, 0]))).toBe(false);
+  });
+
+  it("does not judge a trip seen at one stop", () => {
+    expect(carriesOnlyStartTime(startOnlyTrip("A", 8 * 3600, [30]))).toBe(false);
+  });
+
+  it("counts only the stops that carry a time", () => {
+    const sparse = startOnlyTrip("A", 8 * 3600, [0, 0, 0]);
+    sparse.stops = sparse.stops.map((stop, i) => (i === 0 ? stop : { ...stop, scheduled_sec: null, observed_sec: null }));
+    expect(carriesOnlyStartTime(sparse)).toBe(false);
+  });
+});
+
+describe("plottableTrips", () => {
+  const timed = trip("TIMED", 8 * 3600, [0, 60, 120]);
+  const startOnly = startOnlyTrip("START", 8 * 3600, [10, 145, 61]);
+
+  it("keeps every trip when none carries only a start time", () => {
+    const twoAlike = startOnlyTrip("SHUTTLE", 8 * 3600, [0, 0]);
+    const single = startOnlyTrip("ONE", 9 * 3600, [30]);
+    expect(plottableTrips([timed, twoAlike, single])).toEqual({ plotted: [timed, twoAlike, single], startOnly: 0 });
+  });
+
+  it("leaves out the start-only trips beside trips with stop-by-stop times", () => {
+    expect(plottableTrips([timed, startOnly])).toEqual({ plotted: [timed], startOnly: 1 });
+  });
+
+  it("draws nothing when no trip has stop-by-stop times, short trips included", () => {
+    const short = startOnlyTrip("SHORT", 9 * 3600, [0, 40]);
+    expect(plottableTrips([startOnly, short])).toEqual({ plotted: [], startOnly: 1 });
+  });
+
+  it("has nothing to leave out of an empty day", () => {
+    expect(plottableTrips([])).toEqual({ plotted: [], startOnly: 0 });
   });
 });

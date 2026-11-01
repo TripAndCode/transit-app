@@ -75,4 +75,13 @@ describe("scrubMapPositions", () => {
     const trips = [trip("T1", [[1, 25_200], [2, 25_800]]), trip("EARLY", [[1, 20_700], [2, 25_800]])];
     expect(scrubMapPositions(trips, shape, viewWindow, 25_500)).toEqual([{ key: "T1", lon: 133, lat: 35, delaySec: 0 }]);
   });
+
+  it("places no trip whose feed gave only its start, which the diagram does not draw either", () => {
+    // Every stop carries the 07:00 start; the delays differ stop by stop.
+    const startOnly = trip("START", [[1, 25_200, 0], [2, 25_200, 300], [3, 25_200, 600]]);
+    expect(scrubMapPositions([trip("T1", [[1, 25_200], [2, 25_800]]), startOnly], shape, viewWindow, 25_500)).toEqual([
+      { key: "T1", lon: 133, lat: 35, delaySec: 0 },
+    ]);
+    expect(scrubMapPositions([startOnly], shape, viewWindow, 25_500)).toEqual([]);
+  });
 });
