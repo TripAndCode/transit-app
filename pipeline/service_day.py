@@ -92,3 +92,21 @@ def clock_to_sec(text: str | None) -> int | None:
     if m is None:
         return None
     return service_day_seconds(int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+
+
+def service_day_seconds_sql(seconds: str) -> str:
+    """The Postgres mirror of :func:`service_day_seconds`, over an integer
+    expression already counting seconds from midnight
+    (:func:`pipeline.db.hms_to_sec_sql`). A NULL stays NULL.
+    """
+    return f"(CASE WHEN ({seconds}) < {SERVICE_DAY_CUTOVER_HOURS * 3600} THEN ({seconds}) + 86400 ELSE ({seconds}) END)"
+
+
+def service_day_moment_utc(day: date, seconds: int) -> datetime:
+    """The UTC instant a timetable time of service day ``day`` falls at.
+
+    A GTFS time counts from midnight of its service date in the feed's zone,
+    Japan time here, which has no daylight saving, so ``24:27`` is 00:27 the
+    next morning.
+    """
+    return (datetime.combine(day, time(0), tzinfo=_JST) + timedelta(seconds=seconds)).astimezone(timezone.utc)

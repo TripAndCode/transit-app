@@ -45,6 +45,7 @@ import type {
   RouteSummaryResponse,
   RouteTripsResponse,
   RoutesResponse,
+  ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
   Suggestion,
@@ -476,6 +477,24 @@ export function useLiveTrips(
     queryFn: ({ signal }) => apiGet<LiveTripsResponse>(`/api/${agencyId}/delays/live`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+/** Today's hours by the loaded timetable, which the empty live map is judged
+ *  by. Keyed by the service date the caller's clock is in, so the hours are
+ *  read afresh when the day turns over at the cutover; the server answers for
+ *  its own service day, which the response names. Polled at the pace the
+ *  server caches them, so a timetable load shows within one cache lifetime. */
+export function useServiceHours(
+  agencyId: number | null,
+  serviceDate: string,
+): UseQueryResult<ServiceHoursResponse> {
+  return useQuery({
+    queryKey: ["service_hours", agencyId, serviceDate],
+    queryFn: ({ signal }) => apiGet<ServiceHoursResponse>(`/api/${agencyId}/today/service-hours`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
   });
 }
 

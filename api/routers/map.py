@@ -1,8 +1,10 @@
 """Map-tab endpoints.
 
-Three resources back the Map tab:
+Four resources back the Map tab:
 
 - ``GET /delays/live``: each current trip's latest reported stop and delay.
+- ``GET /today/service-hours``: the first departure and last arrival the
+  loaded timetable plans for the service day in progress.
 - ``GET /route-shape``: ordered stop sequence for one route plus, when
   the agency has loaded GTFS ``shapes.txt``, a real road-shape
   ``geometry`` field. Falls back to ``geometry: null`` so the frontend
@@ -63,6 +65,7 @@ from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 from pipeline.service_day import clock_to_sec, service_date_ch, service_date_of, service_day_start_utc
+from pipeline.service_hours import load_service_hours
 
 _log = logging.getLogger(__name__)
 
@@ -792,6 +795,43 @@ async def today_route_summary(
         "raw_samples": fh["raw_samples"] if fh else 0,
         "clamp_count": fh["clamp_count"] if fh else 0,
     }
+
+
+class ServiceHours(BaseModel):
+    """When a service day's first trip leaves and its last trip arrives."""
+
+    first_departure_at: datetime
+    last_arrival_at: datetime
+
+
+class ServiceHoursResponse(BaseModel):
+    """Envelope for ``GET /today/service-hours``: the service day in progress,
+    and its hours, null when the loaded timetable runs no trip that day."""
+
+    date: CalendarDate
+    hours: ServiceHours | None
+
+
+@router.get("/today/service-hours", response_model=ServiceHoursResponse)
+@limiter.limit(tier_limit)
+async def today_service_hours(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> ServiceHoursResponse:
+    """Today's hours by the loaded timetable (:mod:`pipeline.service_hours`).
+
+    Today is the service day in progress (:func:`api.range.current_service_date`),
+    so between midnight and the cutover hour these are still the evening's
+    hours. The Live map reads them to tell an empty map outside service hours
+    from a feed that stopped during them.
+    """
+    today = current_service_date()
+    hours = await load_service_hours(conn, agency_id, today)
+    return ServiceHoursResponse(
+        date=today,
+        hours=None if hours is None else ServiceHours(**hours._asdict()),
+    )
 
 
 MAX_ROUTE_TRIPS = 400

@@ -19,6 +19,7 @@ ENVELOPED = {
     "GET /api/{agency_id}/reports/suggest": "suggestion",
     "GET /api/{agency_id}/delay_record/trips": "trips",
     "GET /api/{agency_id}/delay_record/stops": "stops",
+    "GET /api/{agency_id}/today/service-hours": "hours",
 }
 
 
@@ -42,3 +43,10 @@ def test_reports_suggest_envelope_carries_the_absent_case_inside_it():
     """'No suggestion right now' is a populated 200 body, not a null one."""
     model = _response_models()["GET /api/{agency_id}/reports/suggest"]
     assert model.model_fields["suggestion"].is_required() is False
+
+
+def test_service_hours_envelope_carries_the_no_timetable_case_inside_it():
+    """'The timetable runs nothing today' is a populated 200 body naming the day, not a null one."""
+    model = _response_models()["GET /api/{agency_id}/today/service-hours"]
+    assert model.model_fields["hours"].is_required()
+    assert "date" in model.model_fields

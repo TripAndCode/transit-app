@@ -765,6 +765,10 @@
     "empty": {
       "title": "No vehicles are reporting right now",
       "overnight_hint": "Few or no trips run late at night (00:00–05:00), so this is normal.",
+      "ended_title": "Today's service has ended (last trip arrived {{time}})",
+      "ended_hint": "The timetable has no trips until the next first departure.",
+      "before_first_title": "The first trip leaves at {{time}}",
+      "before_first_hint": "The timetable has no trips before the first departure.",
       "stale_title": "No new reports since {{time}} ({{duration}})",
       "stale_hint": "The operator's feed may have stopped.",
       "none_title": "No live reports received yet",

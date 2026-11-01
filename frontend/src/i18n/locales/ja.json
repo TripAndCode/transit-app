@@ -765,6 +765,10 @@
     "empty": {
       "title": "いま走行を報告している車両はありません",
       "overnight_hint": "深夜（0〜5時）は運行がほとんどないため、通常の状態です。",
+      "ended_title": "本日の運行は終了しました（最終便の到着 {{time}}）",
+      "ended_hint": "時刻表では、次の始発まで走る便はありません。",
+      "before_first_title": "始発は {{time}} です",
+      "before_first_hint": "時刻表では、始発まで走る便はありません。",
       "stale_title": "{{time}}から新しい運行情報が届いていません（{{duration}}）",
       "stale_hint": "事業者の配信が止まっている可能性があります。",
       "none_title": "まだ運行情報を受信していません",

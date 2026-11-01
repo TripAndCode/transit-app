@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import i18n from "../i18n";
-import { EM_DASH, FILTER_SEPARATOR, fixedTenth, fmtPct, fmtRatioPct, formatDate, formatDateRange, formatDateTime, formatDuration, formatHourRange, formatMinutes, formatNumber, formatReportDateTime, formatReportTime, formatShortDate, roundTenth } from "./format";
+import { EM_DASH, FILTER_SEPARATOR, fixedTenth, fmtPct, fmtRatioPct, formatDate, formatDateRange, formatDateTime, formatDuration, formatHourRange, formatJstTime, formatMinutes, formatNumber, formatReportDateTime, formatReportTime, formatShortDate, roundTenth } from "./format";
 
 describe("formatNumber", () => {
   afterEach(async () => {
@@ -207,6 +207,26 @@ describe("formatReportTime", () => {
     vi.setSystemTime(new Date("2026-10-08T16:00:00Z")); // 01:00 JST on Oct 9
     // 00:30 JST on Oct 9: a viewer in New York would otherwise read 11:30 AM.
     expect(plain(formatReportTime("2026-10-08T15:30:00Z"))).toBe("12:30 AM JST");
+  });
+});
+
+describe("formatJstTime", () => {
+  afterEach(async () => {
+    vi.useRealTimers();
+    await i18n.changeLanguage("en");
+  });
+  const plain = (s: string) => s.replace(/\s/g, " ");
+
+  it("gives the time of day in JST alone, for a sentence that already says which day", async () => {
+    await i18n.changeLanguage("en");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z")); // 22:24 JST
+    expect(plain(formatJstTime("2026-09-29T00:59:00Z"))).toBe("9:59 AM JST");
+  });
+
+  it("writes a timetable hour the Japanese way, unpadded", async () => {
+    await i18n.changeLanguage("ja");
+    expect(formatJstTime("2026-10-24T21:05:00Z")).toBe("6:05 JST");
   });
 });
 

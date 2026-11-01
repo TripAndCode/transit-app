@@ -91,6 +91,12 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
  *  suffix so a viewer in another zone knows which clock it is. */
 export function formatReportTime(iso: string): string {
   if (!isToday(iso)) return formatReportDateTime(iso);
+  return formatJstTime(iso);
+}
+
+/** The time of day `iso` falls at in JST, with the "JST" suffix and no date,
+ *  for a sentence that already says which day it means. */
+export function formatJstTime(iso: string): string {
   return i18n.t("common.report_time_jst", { time: formatDateTime(iso, { timeStyle: "short", timeZone: JST_TZ }) });
 }
 

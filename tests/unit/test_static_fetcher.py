@@ -736,6 +736,26 @@ def test_refresh_static_forgets_the_cached_calendar_only_after_a_load(tmp_path, 
     assert cleared == ([] if has_timetable else [True])
 
 
+@pytest.mark.parametrize("has_timetable", [False, True], ids=["a load", "nothing newer"])
+def test_refresh_static_forgets_the_cached_service_hours_only_after_a_load(tmp_path, monkeypatch, has_timetable):
+    """The Live map judges an empty map by hours read from the calendar and
+    stop times a load replaces."""
+    from pipeline import db, service_hours, static_fetcher
+
+    strategy = _ManifestSaysUnchanged(tmp_path / "gtfs_static_20261015.zip")
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
+    monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
+    monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+    cleared: list[bool] = []
+    monkeypatch.setattr(service_hours, "invalidate_service_hours", lambda: cleared.append(True))
+
+    static_fetcher.refresh_static(8, conn, tmp_path)
+
+    assert cleared == ([] if has_timetable else [True])
+
+
 class _SourceSendsNothing:
     """A source that answers 304 even to a request carrying no validators."""
 
