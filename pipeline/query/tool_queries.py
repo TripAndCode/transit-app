@@ -409,7 +409,10 @@ async def schedule_realism_padding(
       genuine schedule slack apart from delay that started upstream.
     - `time_adjustment_rate` is the share of this stop's on-time-or-early
       arrivals (`arr_delay <= 0`) where the vehicle then dwelled more than
-      `hold_allowance_sec` beyond its scheduled dwell — a stop reached LATE
+      `hold_allowance_sec` beyond its scheduled dwell, over the arrivals
+      whose departure was observed (`compute_trip_dwell_running`'s dwell:
+      a departure reported only before the arrival is a prediction and
+      makes no dwell) — a stop reached LATE
       is excluded, since holding there guards against nothing (the "avoid
       an early departure" hold this indicator targets only makes sense for
       a vehicle that is already at or ahead of schedule). ``None`` when no
@@ -438,7 +441,7 @@ async def schedule_realism_padding(
     cte_sql, ch_params = _stop_visits_cte_ch(route_ctx, include_scheduled_sec=True)
     result = await ch.query(
         f"WITH {cte_sql}\n"
-        "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay\n"
+        "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay, dep_observed\n"
         "FROM visits\n"
         "ORDER BY trip_id, date, stop_sequence",
         parameters={"agency_id": agency_id, **ch_params},
@@ -472,7 +475,7 @@ async def schedule_realism_padding(
     groups: dict[tuple, list[tuple]] = defaultdict(list)
     for r in ch_rows:
         groups[(r["trip_id"], r["date"])].append(
-            (r["stop_sequence"], r["scheduled_sec"], r["dep_delay"], r["arr_delay"])
+            (r["stop_sequence"], r["scheduled_sec"], r["dep_delay"], r["arr_delay"], r["dep_observed"])
         )
 
     segment_actual_run: dict[tuple[int, int, int], list[float]] = defaultdict(list)
@@ -488,20 +491,26 @@ async def schedule_realism_padding(
             continue
         visits.sort(key=lambda v: v[0])
         stop_visits = [
-            StopVisit(stop_sequence, *sched_map.get(stop_sequence, (None, None)), arr_delay, dep_delay)  # type: ignore[call-arg]
-            for stop_sequence, _scheduled_sec, dep_delay, arr_delay in visits
+            StopVisit(
+                stop_sequence,
+                *sched_map.get(stop_sequence, (None, None)),
+                arr_delay,
+                dep_delay,
+                dep_observed=dep_observed,
+            )
+            for stop_sequence, _scheduled_sec, dep_delay, arr_delay, dep_observed in visits
         ]
         computed = {c["stop_sequence"]: c for c in compute_trip_dwell_running(stop_visits)}
 
         term_seq = terminus_seq.get(trip_id)
-        for stop_sequence, _scheduled_sec, _dep_delay, arr_delay in visits:
+        for stop_sequence, _scheduled_sec, _dep_delay, arr_delay, _dep_observed in visits:
             if stop_sequence == term_seq and arr_delay is not None:
                 terminus_total += 1
                 if arr_delay <= -early_threshold_sec:
                     terminus_early += 1
 
         for i in range(len(visits) - 1):
-            s_cur, sched_sec_cur, _dep_delay_cur, arr_delay_cur = visits[i]
+            s_cur, sched_sec_cur, _dep_delay_cur, arr_delay_cur, _dep_observed_cur = visits[i]
             s_next = visits[i + 1][0]
             if s_next != s_cur + 1:
                 continue

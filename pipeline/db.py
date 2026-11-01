@@ -211,6 +211,13 @@ def build_stop_visits_ch_sql(
       visit has no plausible arrival.
     - A visit with no plausible reading of either kind has no row, just as
       the dedup has none for a visit with no plausible departure.
+    - `dep_observed` says whether the feed reported that departure after the
+      bus reached the stop: true when the departure poll picked above was
+      captured at or after the visit's first plausible arrival poll, false
+      when every plausible departure poll came before it. A departure still
+      standing from before the arrival is the feed's last prediction of it,
+      so only an observed one measures the time spent at the stop. NULL when
+      the visit lacks either side, which leaves nothing to judge.
 
     The visit is keyed on `(trip_id, service date, stop_sequence)` alone.
     `route_code`, `service_type` and `scheduled_time` come from the latest
@@ -228,12 +235,20 @@ def build_stop_visits_ch_sql(
     skipped the way `argMax` skips a NULL argument. A kind with no plausible
     reading leaves the default tuple, whose delay is NULL.
 
+    `dep_observed` adds two plain states to the same GROUP BY, under the same
+    conditions as the two `argMaxIf`s: `maxIf` of the departure polls'
+    `captured_at` is the picked poll's own (it wins on the maximal
+    `(captured_at, file_name)`, as `build_dedup_ch_sql`'s `max()` note
+    explains), and `minIf` of the arrival polls' is the first arrival. Both
+    return the epoch, not NULL, over no rows, which is why the comparison is
+    made only when both delays are present.
+
     `scheduled_sec`, when requested, is the latest departure poll's, as in the
     dedup, and NULL for an arrival-only visit.
 
     Columns, in this order (`pipeline/analyze.py` loads them by position):
     `route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
-    dep_delay[, scheduled_sec], arr_delay`.
+    dep_delay[, scheduled_sec], arr_delay, dep_observed`.
 
     The inner query's aliases are named apart from every `updates` column, so
     a caller's `extra_where` (applied to raw rows, like the dedup's) can name
@@ -256,12 +271,16 @@ def build_stop_visits_ch_sql(
         f"SELECT {filed_under}, visit_trip_id AS trip_id, visit_date AS date, "
         "visit_stop_sequence AS stop_sequence, tupleElement(visit_dep, 1) AS dep_delay"
         + (", tupleElement(visit_dep, 5) AS scheduled_sec" if include_scheduled_sec else "")
-        + ", tupleElement(visit_arr, 1) AS arr_delay "
+        + ", tupleElement(visit_arr, 1) AS arr_delay, "
+        "if(tupleElement(visit_dep, 1) IS NOT NULL AND tupleElement(visit_arr, 1) IS NOT NULL, "
+        "toBool(visit_dep_at >= visit_first_arr_at), NULL) AS dep_observed "
         "FROM ("
         f"SELECT u.trip_id AS visit_trip_id, {service_date_ch('u.captured_at')} AS visit_date, "
         "u.stop_sequence AS visit_stop_sequence, "
         f"argMaxIf(tuple(u.dep_delay, {schedule}{sched_sec}), {latest}, {dep_ok}) AS visit_dep, "
-        f"argMaxIf(tuple(u.arr_delay, {schedule}), {latest}, {arr_ok}) AS visit_arr "
+        f"argMaxIf(tuple(u.arr_delay, {schedule}), {latest}, {arr_ok}) AS visit_arr, "
+        f"maxIf(u.captured_at, {dep_ok}) AS visit_dep_at, "
+        f"minIf(u.captured_at, {arr_ok}) AS visit_first_arr_at "
         f"FROM {checked_table(table)} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
         f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"

@@ -567,18 +567,31 @@ async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency
 
 
 def _separate_polls(
-    prefix, day, trip_id, route, stop_sequence, scheduled_time, scheduled_sec, *, dep_delay=None, arr_delay=None
+    prefix,
+    day,
+    trip_id,
+    route,
+    stop_sequence,
+    scheduled_time,
+    scheduled_sec,
+    *,
+    dep_delay=None,
+    arr_delay=None,
+    departure_offset_sec=30,
 ):
     """ClickHouse `updates` rows for one stop visit, the way a static_join feed
-    reports it: the departure and the arrival in separate polls, never on one
-    row. Each row is (file_name, captured_at, trip_id, service_type,
-    scheduled_time, route_code, stop_sequence, dep_delay, stop_id, arr_delay,
-    sched_rel_trip, sched_rel_stop, feed_timestamp, scheduled_sec,
-    static_version_id)."""
+    reports it: the arrival and the departure in separate polls, never on one
+    row. The arrival poll is at *day* and the departure poll
+    *departure_offset_sec* from it: after it by default, as a bus reports
+    them, while a negative offset leaves the departure the prediction standing
+    before the arrival. Each row is (file_name, captured_at, trip_id,
+    service_type, scheduled_time, route_code, stop_sequence, dep_delay,
+    stop_id, arr_delay, sched_rel_trip, sched_rel_stop, feed_timestamp,
+    scheduled_sec, static_version_id)."""
     rows = []
     for kind, at, dep, arr in (
-        ("dep", day, dep_delay, None),
-        ("arr", day + timedelta(seconds=30), None, arr_delay),
+        ("arr", day, None, arr_delay),
+        ("dep", day + timedelta(seconds=departure_offset_sec), dep_delay, None),
     ):
         if dep is not None or arr is not None:
             rows.append(
@@ -735,6 +748,53 @@ async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(aagency
     assert result["available"] is True
     row = next(r for r in result["rows"] if r[0] == 2 and r[1] == 3)
     assert row[8] == pytest.approx(1.0)  # time_adjustment_rate
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_padding_counts_no_hold_from_a_predicted_departure(
+    aagency_id, aconn, ch_client, ch_async_client
+):
+    """test_schedule_realism_padding_flags_held_dwell_beyond_schedule's trip,
+    except that stop 2's only departure poll precedes its arrival poll: the
+    230s "dwell" is the prediction standing when the bus arrived, so it is no
+    dwell sample and no hold. The running time from stop 2 to stop 3,
+    36600 - 36530 = 70s, still counts."""
+    from pipeline.clickhouse import insert_updates
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    await _trust_schedule_padding(aconn, aagency_id)
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+    )
+    for seq, arr, dep in [(1, None, "10:00:00"), (2, "10:05:00", "10:05:30"), (3, "10:10:00", "10:10:00")]:
+        await aconn.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T_HOLD', $2, 'S1', $3, $4)",
+            aagency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        *_separate_polls("hold", day, "T_HOLD", "R10", 1, "10:00:00", 36000, dep_delay=0),
+        *_separate_polls(
+            "hold", day, "T_HOLD", "R10", 2, "10:05:30", 36330, dep_delay=200, arr_delay=0, departure_offset_sec=-30
+        ),
+        *_separate_polls("hold", day, "T_HOLD", "R10", 3, "10:10:00", 36600, arr_delay=0),
+    ]
+    insert_updates(ch_client, aagency_id, rows)
+
+    ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, ch_async_client, route="R10")
+
+    row = next(r for r in result["rows"] if r[0] == 2 and r[1] == 3)
+    assert row[6] == 1  # samples
+    assert row[4] == pytest.approx(1.17)  # actual_run_p50_min, 70s
+    assert row[8] is None  # time_adjustment_rate
 
 
 @pytest.mark.asyncio

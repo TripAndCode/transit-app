@@ -88,9 +88,15 @@ def test_compute_trip_dwell_running_known_synthetic_timestamps():
       stop 3: dwell = 36610 - 36610 = 0; running = 36610 - 36410 = 200
     """
     visits = [
-        StopVisit(stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=None, dep_delay=30),
-        StopVisit(stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50),
-        StopVisit(stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=10, dep_delay=10),
+        StopVisit(
+            stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=None, dep_delay=30, dep_observed=None
+        ),
+        StopVisit(
+            stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50, dep_observed=True
+        ),
+        StopVisit(
+            stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=10, dep_delay=10, dep_observed=True
+        ),
     ]
     result = compute_trip_dwell_running(visits)
     assert result == [
@@ -105,8 +111,12 @@ def test_compute_trip_dwell_running_sorts_by_stop_sequence():
     so the previous-stop dependency is always the schedule-adjacent one, not
     whatever order the caller happened to pass them in."""
     visits = [
-        StopVisit(stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50),
-        StopVisit(stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=None, dep_delay=30),
+        StopVisit(
+            stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50, dep_observed=True
+        ),
+        StopVisit(
+            stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=None, dep_delay=30, dep_observed=None
+        ),
     ]
     result = compute_trip_dwell_running(visits)
     assert [r["stop_sequence"] for r in result] == [1, 2]
@@ -119,8 +129,12 @@ def test_compute_trip_dwell_running_missing_schedule_yields_none_not_zero():
     misleading 0 -- the "not available" state applies at the per-visit
     grain too, not just the per-agency one."""
     visits = [
-        StopVisit(stop_sequence=1, sched_arr_sec=None, sched_dep_sec=None, arr_delay=30, dep_delay=30),
-        StopVisit(stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50),
+        StopVisit(
+            stop_sequence=1, sched_arr_sec=None, sched_dep_sec=None, arr_delay=30, dep_delay=30, dep_observed=True
+        ),
+        StopVisit(
+            stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=50, dep_observed=True
+        ),
     ]
     result = compute_trip_dwell_running(visits)
     assert result[0] == {"stop_sequence": 1, "dwell_sec": None, "running_sec": None}
@@ -145,10 +159,18 @@ def test_compute_trip_dwell_running_with_arrival_only_and_departure_only_visits(
       stop 4: arrival only, +60 -> actual arrival 36960; running 36960 - 36610 = 350
     """
     visits = [
-        StopVisit(stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=0, dep_delay=30),
-        StopVisit(stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=None),
-        StopVisit(stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=None, dep_delay=10),
-        StopVisit(stop_sequence=4, sched_arr_sec=36900, sched_dep_sec=36900, arr_delay=60, dep_delay=None),
+        StopVisit(
+            stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=0, dep_delay=30, dep_observed=True
+        ),
+        StopVisit(
+            stop_sequence=2, sched_arr_sec=36300, sched_dep_sec=36360, arr_delay=20, dep_delay=None, dep_observed=None
+        ),
+        StopVisit(
+            stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=None, dep_delay=10, dep_observed=None
+        ),
+        StopVisit(
+            stop_sequence=4, sched_arr_sec=36900, sched_dep_sec=36900, arr_delay=60, dep_delay=None, dep_observed=None
+        ),
     ]
     assert compute_trip_dwell_running(visits) == [
         {"stop_sequence": 1, "dwell_sec": 30, "running_sec": None},
@@ -156,6 +178,55 @@ def test_compute_trip_dwell_running_with_arrival_only_and_departure_only_visits(
         {"stop_sequence": 3, "dwell_sec": None, "running_sec": None},
         {"stop_sequence": 4, "dwell_sec": None, "running_sec": 350},
     ]
+
+
+def _three_stops(stop_2_dep_observed):
+    """test_compute_trip_dwell_running_known_synthetic_timestamps's trip, with
+    stop 2's departure reported after its arrival (True), only before it
+    (False), or with nothing to judge it against (None)."""
+    return [
+        StopVisit(
+            stop_sequence=1, sched_arr_sec=36000, sched_dep_sec=36000, arr_delay=None, dep_delay=30, dep_observed=None
+        ),
+        StopVisit(
+            stop_sequence=2,
+            sched_arr_sec=36300,
+            sched_dep_sec=36360,
+            arr_delay=20,
+            dep_delay=50,
+            dep_observed=stop_2_dep_observed,
+        ),
+        StopVisit(
+            stop_sequence=3, sched_arr_sec=36600, sched_dep_sec=36600, arr_delay=10, dep_delay=10, dep_observed=True
+        ),
+    ]
+
+
+def test_a_departure_reported_after_the_arrival_makes_a_dwell_sample():
+    assert compute_trip_dwell_running(_three_stops(True))[1] == {
+        "stop_sequence": 2,
+        "dwell_sec": 90,
+        "running_sec": 290,
+    }
+
+
+def test_a_departure_reported_only_before_the_arrival_makes_no_dwell_sample():
+    """That departure is the prediction still standing when the bus arrived,
+    not a departure anyone saw, so it says nothing about the time spent at
+    the stop."""
+    assert compute_trip_dwell_running(_three_stops(False))[1]["dwell_sec"] is None
+
+
+def test_a_departure_with_nothing_to_judge_it_against_makes_no_dwell_sample():
+    assert compute_trip_dwell_running(_three_stops(None))[1]["dwell_sec"] is None
+
+
+def test_a_predicted_departure_still_anchors_the_next_running_time():
+    """Running time is not judged by this rule: stop 3 still runs from stop
+    2's departure, 36610 - 36410 = 200s, however that departure was reported."""
+    for stop_2_dep_observed in (True, False, None):
+        result = compute_trip_dwell_running(_three_stops(stop_2_dep_observed))
+        assert result[2] == {"stop_sequence": 3, "dwell_sec": 0, "running_sec": 200}
 
 
 def test_dwell_bucket_bounds_and_count():

@@ -16,8 +16,12 @@ readers (analyze()'s `agg_route_daily_dwell_run` and the Ask tool's
 `schedule_realism_padding`) take their visits from it. A visit can therefore
 lack either side:
 
-- with both, it yields a dwell time, and a running time when the previous
-  visit's departure is known;
+- with both, it yields a running time when the previous visit's departure
+  is known, and a dwell time when its departure was observed: reported in
+  a poll at or after the visit's first arrival poll. A departure whose
+  every poll came before the arrival is the prediction still standing when
+  the bus arrived, which says nothing about the time spent at the stop, so
+  it makes no dwell sample. It still anchors the next visit's running time;
 - with only an arrival (always the terminus), it yields a running time and
   no dwell, and leaves the next visit's running time unknown;
 - with only a departure, it yields neither, but anchors the next visit's
@@ -138,10 +142,13 @@ class StopVisit:
     common for `arrival_time` at non-timepoint stops in some GTFS feeds).
     `arr_delay` is ``None`` when the RT feed never sent this stop visit's
     arrival, `dep_delay` when it reported the visit only as an arrival (see
-    the module docstring).
+    the module docstring). `dep_observed` is
+    `pipeline.db.build_stop_visits_ch_sql`'s: true when the departure was
+    reported after the arrival, false when only before it, ``None`` when the
+    visit lacks either side. Only a true one makes a dwell sample.
     """
 
-    __slots__ = ("arr_delay", "dep_delay", "sched_arr_sec", "sched_dep_sec", "stop_sequence")
+    __slots__ = ("arr_delay", "dep_delay", "dep_observed", "sched_arr_sec", "sched_dep_sec", "stop_sequence")
 
     def __init__(
         self,
@@ -150,22 +157,26 @@ class StopVisit:
         sched_dep_sec: int | None,
         arr_delay: int | None,
         dep_delay: int | None,
+        *,
+        dep_observed: bool | None,
     ) -> None:
         self.stop_sequence = stop_sequence
         self.sched_arr_sec = sched_arr_sec
         self.sched_dep_sec = sched_dep_sec
         self.arr_delay = arr_delay
         self.dep_delay = dep_delay
+        self.dep_observed = dep_observed
 
 
 def compute_trip_dwell_running(visits: list[StopVisit]) -> list[dict]:
     """Return one dict per visit, sorted by `stop_sequence`:
     ``{"stop_sequence": int, "dwell_sec": int | None, "running_sec": int | None}``.
 
-    `dwell_sec` needs only this visit's own data; `running_sec` additionally
-    needs the PREVIOUS visit's actual departure, so a trip's very first stop
-    always has ``running_sec is None`` (there is nothing to run FROM) even
-    when its own arrival is fully known.
+    `dwell_sec` needs only this visit's own data, and an observed departure
+    (`StopVisit.dep_observed`); `running_sec` additionally needs the
+    PREVIOUS visit's actual departure, observed or not, so a trip's very
+    first stop always has ``running_sec is None`` (there is nothing to run
+    FROM) even when its own arrival is fully known.
     """
     ordered = sorted(visits, key=lambda v: v.stop_sequence)
     out = []
@@ -176,7 +187,7 @@ def compute_trip_dwell_running(visits: list[StopVisit]) -> list[dict]:
         out.append(
             {
                 "stop_sequence": v.stop_sequence,
-                "dwell_sec": dwell_seconds(actual_arr, actual_dep),
+                "dwell_sec": dwell_seconds(actual_arr, actual_dep) if v.dep_observed else None,
                 "running_sec": running_seconds(prev_actual_dep, actual_arr),
             }
         )

@@ -107,7 +107,7 @@ logger = logging.getLogger(__name__)
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
 # produces.
-ANALYZE_LOGIC_VERSION = 6
+ANALYZE_LOGIC_VERSION = 7
 
 # The service date of an observation, spliced into the builders below that
 # group or bucket raw `updates` rows by day (`pipeline.service_day`).
@@ -1039,11 +1039,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_client,
                 # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
                 # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, arr_delay.
+                # stop_sequence, dep_delay, arr_delay, dep_observed.
                 table="_analyze_visits",
                 columns=(
                     "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int"
+                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
+                    "dep_observed boolean"
                 ),
                 ch_sql=build_stop_visits_ch_sql(
                     extra_where=_date_predicate(rebuild_dates, "u.captured_at"),
@@ -1377,7 +1378,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 WITH visits AS (
                     SELECT
                         d.route_code, COALESCE(d.service_type, '') AS service_type,
-                        d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay,
+                        d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
                     FROM _analyze_visits d
@@ -1399,7 +1400,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     -- dep_delay) runs into this stop but leaves the next
                     -- stop's running time unknown -- the split
                     -- pipeline.dwell_run's module docstring describes.
-                    SELECT route_code, service_type, trip_id, date, stop_sequence,
+                    SELECT route_code, service_type, trip_id, date, stop_sequence, dep_observed,
                         CASE WHEN dep_delay IS NOT NULL AND sched_dep_sec IS NOT NULL
                              THEN sched_dep_sec + dep_delay END AS actual_dep_sec,
                         CASE WHEN arr_delay IS NOT NULL AND sched_arr_sec IS NOT NULL
@@ -1416,7 +1417,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 computed AS (
                     SELECT
                         route_code, service_type, date,
-                        CASE WHEN actual_arr_sec IS NOT NULL
+                        -- Dwell takes only a departure the feed reported
+                        -- after the arrival (dep_observed): one still
+                        -- standing from before it is a prediction, not a
+                        -- departure anyone saw. Running time takes the
+                        -- previous departure either way.
+                        CASE WHEN actual_arr_sec IS NOT NULL AND dep_observed
                              THEN actual_dep_sec - actual_arr_sec END AS dwell_sec,
                         CASE WHEN actual_arr_sec IS NOT NULL AND prev_actual_dep_sec IS NOT NULL
                              THEN actual_arr_sec - prev_actual_dep_sec END AS running_sec

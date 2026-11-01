@@ -9,7 +9,7 @@ from api.range import RangeCtx
 
 
 class _EmptyResult:
-    column_names = ("trip_id", "date", "stop_sequence", "scheduled_sec", "dep_delay", "arr_delay")
+    column_names = ("trip_id", "date", "stop_sequence", "scheduled_sec", "dep_delay", "arr_delay", "dep_observed")
     result_rows: list = []
 
 

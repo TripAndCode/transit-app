@@ -1203,16 +1203,17 @@ def _ch_dwell_run_polls(
     *,
     route_code="R1",
     service_type="平日",
-    arrival_offset_sec=30,
+    arrival_offset_sec=-30,
 ):
     """The ClickHouse `updates` rows one stop visit gets from a static_join
     feed, shaped for `pipeline.clickhouse.insert_updates` (agency_id excluded).
 
     The feed reports a stop's departure and its arrival in separate polls,
     never on one row, so each reading present is its own row of its own poll:
-    the departure at *captured_at*, the arrival *arrival_offset_sec* later (a
-    negative offset puts the arrival poll first). A trip's last stop gets
-    arrival polls only."""
+    the departure at *captured_at*, the arrival *arrival_offset_sec* from it.
+    The default puts the arrival first, as a bus reports them; a positive
+    offset leaves the departure the prediction standing before the arrival.
+    A trip's last stop gets arrival polls only."""
     rows = []
     for kind, at, dep, arr in (
         ("dep", captured_at, dep_delay, None),
@@ -1590,6 +1591,45 @@ def test_analyze_dwell_run_arrival_only_stop_leaves_the_next_running_unknown(pg_
     analyze(agency_id, pg_conn, ch_client)
 
     assert _dwell_run_totals(pg_conn, agency_id) == (1, 0, 1, 290)
+
+
+def test_analyze_dwell_run_counts_no_dwell_for_a_departure_reported_before_the_arrival(pg_conn, agency_id, ch_client):
+    """Stop 2's only departure poll precedes its arrival poll, so its 90s
+    "dwell" is the prediction standing when the bus arrived and is not a
+    sample. Running time is unchanged: stop 2 still runs 290s from stop 1,
+    and stop 3 still runs 200s from stop 2's departure. Stop 3's departure
+    follows its arrival, so its 0s dwell is the one sample."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20, arrival_offset_sec=30),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _dwell_run_totals(pg_conn, agency_id) == (1, 0, 2, 490)
+
+
+def test_analyze_dwell_run_counts_a_departure_polled_again_after_the_arrival(pg_conn, agency_id, ch_client):
+    """Stop 2's departure is predicted at +40 before the bus arrives and
+    reported at +50 after it: the later poll is observed, so stop 2's dwell
+    of 36410 - 36320 = 90s counts beside stop 3's 0s."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        *_ch_dwell_run_polls("T1", day, 1, 30, None),
+        *_ch_dwell_run_polls("T1", day - timedelta(minutes=1), 2, 40, None),
+        *_ch_dwell_run_polls("T1", day, 2, 50, 20),
+        *_ch_dwell_run_polls("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _dwell_run_totals(pg_conn, agency_id) == (2, 90, 2, 490)
 
 
 def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_anchor(pg_conn, agency_id, ch_client):
