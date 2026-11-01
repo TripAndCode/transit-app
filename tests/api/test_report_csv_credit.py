@@ -106,6 +106,7 @@ async def test_lang_changes_only_the_credit_row(client, agency_id, pg_conn, ch_a
     in_ja = await _csv_rows(client, agency_id, report_type, "en", "ja")
     in_en = await _csv_rows(client, agency_id, report_type, "en", "en")
     assert [CREDIT_LINES[AOMORI]["ja"]] in in_ja
+    assert [CREDIT_LINES[AOMORI]["en"]] in in_en
     assert [row for row in in_ja if row != [CREDIT_LINES[AOMORI]["ja"]]] == [
         row for row in in_en if row != [CREDIT_LINES[AOMORI]["en"]]
     ]
