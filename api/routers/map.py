@@ -64,7 +64,13 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
-from pipeline.service_day import clock_to_sec, service_date_ch, service_date_of, service_day_start_utc
+from pipeline.service_day import (
+    clock_to_sec,
+    service_date_ch,
+    service_date_of,
+    service_day_offset,
+    service_day_start_utc,
+)
 from pipeline.service_hours import load_service_hours
 
 _log = logging.getLogger(__name__)
@@ -964,6 +970,13 @@ def build_route_trips(
     the drawing order of its polyline, so it is preserved as given rather than
     re-derived.
 
+    A stop's time is seconds since the service day's 00:00. Ingest stores a
+    feed's clock as written, so ``scheduled_sec`` goes through the same
+    service-day cutover as the clock fallback
+    (:func:`pipeline.service_day.service_day_offset`): an un-extended
+    ``00:10`` lands after its ``23:50`` neighbour, and a GTFS extended hour
+    (``24:10``) is kept as it is.
+
     Two independent caps apply, in order: first ``limit`` trips (the existing
     trip-count cap), then ``stop_budget`` total stop rows across whatever
     trips that leaves. The stop budget walks the already worst-first-sorted
@@ -984,7 +997,7 @@ def build_route_trips(
         t = per_trip[trip_id]
         if scheduled_time is not None:
             t["clocks"].append(scheduled_time)
-        sched = scheduled_sec if scheduled_sec is not None else clock_to_sec(scheduled_time)
+        sched = service_day_offset(int(scheduled_sec)) if scheduled_sec is not None else clock_to_sec(scheduled_time)
         delay = int(dep_delay)
         t["stops"].append(
             RouteTripStop(

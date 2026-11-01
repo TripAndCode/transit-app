@@ -291,3 +291,31 @@ def test_a_trip_crossing_midnight_keeps_increasing_positions_and_its_earliest_cl
     trips, _ = build_route_trips([_row("N", 1, "23:50", 0), _row("N", 2, "00:10", 0)])
     assert [s.scheduled_sec for s in trips[0].stops] == [23 * 3600 + 50 * 60, 24 * 3600 + 10 * 60]
     assert trips[0].scheduled_time == "23:50"
+
+
+def test_a_feed_writing_an_unextended_post_midnight_clock_stays_on_the_service_day_next_to_a_clock_neighbour():
+    """Ingest stores a feed's "00:10:00" as written (600), while a neighbour
+    placed from its clock string goes through the service-day cutover: both
+    must land on the same axis, so the trip keeps running forward."""
+    trips, _ = build_route_trips([_row("N", 1, "23:50", 60), _row("N", 2, "00:10", 120, sched_sec=600)])
+    stops = trips[0].stops
+    assert [s.scheduled_sec for s in stops] == [85800, 87000]
+    assert [s.observed_sec for s in stops] == [85860, 87120]
+
+
+def test_an_unextended_post_midnight_scheduled_sec_follows_its_evening_neighbour():
+    trips, _ = build_route_trips(
+        [_row("N", 1, "23:50:00", 0, sched_sec=85800), _row("N", 2, "00:10:00", 0, sched_sec=600)]
+    )
+    assert [s.scheduled_sec for s in trips[0].stops] == [85800, 87000]
+    assert trips[0].scheduled_time == "23:50"
+
+
+def test_a_feed_writing_gtfs_extended_hours_is_drawn_as_written():
+    # static_join leaves scheduled_time NULL for an hour of 24 or more.
+    trips, _ = build_route_trips(
+        [_row("N", 1, "23:50:00", 30, sched_sec=85800), _row("N", 2, None, 30, sched_sec=87000)]
+    )
+    stops = trips[0].stops
+    assert [s.scheduled_sec for s in stops] == [85800, 87000]
+    assert [s.observed_sec for s in stops] == [85830, 87030]
