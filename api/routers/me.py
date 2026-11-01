@@ -56,10 +56,9 @@ async def get_me(
     """Return the caller's profile and linked OAuth identities, or ``null`` when signed out.
 
     Signed out is an answer to who-am-I rather than a refusal, because the SPA asks it on
-    every page. It discloses nothing, and every other ``/me`` route keeps ``require_user``.
-    While sign-in is enforced, the login gate still answers a signed-out caller with 401
-    before this route runs. The connection is borrowed per statement, so a signed-out
-    caller holds none.
+    every page. It discloses nothing, so the login gate lets a signed-out GET through even
+    while sign-in is required; every other ``/me`` route keeps ``require_user`` and the
+    gate. The connection is borrowed per statement, so a signed-out caller holds none.
     """
     if user is None:
         return None

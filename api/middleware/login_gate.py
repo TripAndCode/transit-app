@@ -32,12 +32,18 @@ AUTH_REQUIRED = {"detail": "auth required"}
 
 _PUBLIC_PREFIXES = ("/api/auth/",)
 _PUBLIC_PATHS = frozenset({"/api/config"})
+# Public to read only: who-am-I answers a signed-out caller with null, while
+# DELETE /api/me (account erasure) stays behind the gate.
+_PUBLIC_READS = frozenset({"/api/me"})
+_READ_METHODS = frozenset({"GET", "HEAD"})
 _GATED_PATHS = frozenset({"/docs", "/redoc", "/openapi.json"})
 
 
-def needs_login(path: str) -> bool:
-    """Whether ``path`` is refused to a signed-out caller while the gate is enforced."""
+def needs_login(path: str, method: str) -> bool:
+    """Whether ``method path`` is refused to a signed-out caller while the gate is enforced."""
     if path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PREFIXES):
+        return False
+    if path in _PUBLIC_READS and method in _READ_METHODS:
         return False
     return path in _GATED_PATHS or path.startswith("/api/")
 
@@ -58,7 +64,7 @@ class LoginRequiredMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not needs_login(scope["path"]):
+        if scope["type"] != "http" or not needs_login(scope["path"], scope["method"]):
             await self.app(scope, receive, send)
             return
         state = request_state(scope)

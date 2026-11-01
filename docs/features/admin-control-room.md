@@ -274,8 +274,9 @@ registry, precedence, and cache TTL, and `README.md`'s kill-switch section
 for the full key list.
 
 `login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
-every `/api/*` route except the sign-in flow and `/api/config` refuses a
-signed-out caller while SSO is configured. Turning it off reopens the app to
+every `/api/*` route except the sign-in flow, `/api/config` and a read of
+`/api/me` (who-am-I, `null` when signed out) refuses a signed-out caller while
+SSO is configured. Turning it off reopens the app to
 signed-out visitors; it is the recovery switch when OAuth is down (see
 `docs/deploy-railway.md`).
 
