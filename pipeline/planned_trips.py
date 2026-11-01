@@ -116,6 +116,25 @@ def plan_ctes(agency_ids: str, from_date: str, to_date: str) -> str:
     )"""
 
 
+def running_trip_join(agency_id: str, trip_id: str, day: str) -> str:
+    """JOINs that keep a ``(trip_id, day)`` pair only when the loaded timetable
+    runs that trip on that day: the running rule :func:`plan_ctes` counts
+    planned trips by, applied to one trip. Needs :func:`plan_ctes` in the
+    query's WITH, over a span that covers every ``day``, and binds ``t`` to the
+    trip's ``static_trips`` row.
+
+    Only the loaded timetable is kept and a reload replaces it in place, so its
+    stops describe a past day only if it was the timetable that day: a day
+    before it starts, or a trip_id it reuses under a service that does not run
+    that day, finds no row here. The arguments are SQL expressions, as in
+    :func:`plan_ctes`.
+    """
+    return (
+        f"JOIN static_trips t ON t.agency_id = {agency_id} AND t.trip_id = {trip_id} "
+        f"JOIN running r ON r.agency_id = {agency_id} AND r.service_id = t.service_id AND r.day = {day}"
+    )
+
+
 _CAPTURE_SQL = (
     "WITH"
     + plan_ctes("ARRAY[%(agency_id)s]::int[]", "%(from_date)s::date", "%(to_date)s::date")

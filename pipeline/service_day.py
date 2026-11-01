@@ -17,6 +17,7 @@ cannot disagree at the edge of a day.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -59,5 +60,35 @@ def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:
     value: ``00:10`` is ``24:10``. GTFS's own extended hours (``24:10``) already
     say so and are left as they are.
     """
-    seconds = hour * 3600 + minute * 60 + second
-    return seconds + 24 * 3600 if hour < SERVICE_DAY_CUTOVER_HOURS else seconds
+    return service_day_offset(hour * 3600 + minute * 60 + second)
+
+
+def service_day_offset(seconds: int) -> int:
+    """:func:`service_day_seconds` for a value already in seconds since 00:00,
+    such as the ``scheduled_sec`` ingest stores from a feed's clock as
+    written: below the cutover it is a day later, and a GTFS extended hour
+    (``24:10`` as 87000) is left as it is."""
+    return seconds + 24 * 3600 if seconds < SERVICE_DAY_CUTOVER_HOURS * 3600 else seconds
+
+
+_CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")
+
+
+def clock_to_sec(text: str | None) -> int | None:
+    """Seconds since the service day's 00:00 for a GTFS ``HH:MM[:SS]`` clock,
+    or None for anything that is not one.
+
+    Fallback for rows whose ``scheduled_sec`` is NULL: the `aomori_regex`
+    ingest strategy writes a 5-char ``"HH:MM"`` with no seconds, while
+    static_join agencies write 8 chars. An hour past 24 is a real GTFS
+    post-midnight continuation and stays unwrapped, and a clock before the
+    service-day cutover (``00:10``) is placed a day later
+    (:func:`service_day_seconds`), so a trip that crosses midnight keeps a
+    monotonically increasing position on a time axis.
+    """
+    if not text:
+        return None
+    m = _CLOCK_RE.match(text)
+    if m is None:
+        return None
+    return service_day_seconds(int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))

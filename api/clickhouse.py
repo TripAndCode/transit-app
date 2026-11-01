@@ -22,7 +22,8 @@ async def get_ch_client():
     tables, but ClickHouse is also read directly, on every call, by the live
     and per-day endpoints (/delays/live, /delays/live-progress,
     /delays/timeline, /today/route-summary, the /today/route/* trips and
-    stop-profile, /route-shape and delay_certificate), and by the narrowed
+    stop-profile, /route-shape, delay_certificate and the delay record's
+    /delay_record/*), and by the narrowed
     time-band fallbacks of the report family. These caps are a safety net
     against a hung or runaway request, not a throttle on normal traffic.
 

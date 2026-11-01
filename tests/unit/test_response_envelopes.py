@@ -17,6 +17,8 @@ ENVELOPED = {
     "GET /api/{agency_id}/stops/bounds": "bounds",
     "GET /api/{agency_id}/ask/suggest": "rows",
     "GET /api/{agency_id}/reports/suggest": "suggestion",
+    "GET /api/{agency_id}/delay_record/trips": "trips",
+    "GET /api/{agency_id}/delay_record/stops": "stops",
 }
 
 

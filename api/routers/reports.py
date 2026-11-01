@@ -4,8 +4,9 @@ Each report is computed per request so the global time-range / DOW /
 time-band filter changes the numbers. Most reports read precomputed ``agg_*``
 tables and fall back to scanning ClickHouse ``updates`` only for a narrowed
 time band (or, for on-time, a custom tolerance); others (dwell/run, forecast,
-headway, performance) read aggregates only, and ``delay_certificate`` always
-scans ClickHouse. ``rendered_at`` reflects the moment the request was served.
+headway, performance) read aggregates only, and ``delay_certificate`` and the
+passenger delay record (``/delay_record/*``) always scan ClickHouse.
+``rendered_at`` reflects the moment the request was served.
 """
 
 import csv
@@ -66,6 +67,7 @@ from pipeline.reports import (
 )
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
+from pipeline.reports.delay_record import compute_record_stops, compute_record_trips
 from pipeline.reports.filters import _service_label
 from pipeline.reports.forecast import (
     RECENT_DAYS,
@@ -333,6 +335,8 @@ _WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
 _FORECAST_HEATMAP_SCOPE = scope_applied("routes")
 _FORECAST_OVERVIEW_SCOPE = scope_applied()
 _COUNCIL_DELIVERED_SCOPE = scope_applied(*COUNCIL_DELIVERED_HONOURS)
+# The delay record reads the one day its own `date` names, for one route.
+_DELAY_RECORD_SCOPE = scope_applied("routes")
 
 
 class ReportMeta(BaseModel):
@@ -662,6 +666,116 @@ async def get_weather_delay(
         disclaimer=observation_disclaimer(locale),
         attribution=weather_attribution(locale),
         scope_applied=_WEATHER_SCOPE,
+    )
+
+
+class DelayRecordTrip(BaseModel):
+    """One trip a route ran on the record's day, as
+    ``pipeline.reports.delay_record.record_trips`` labels it."""
+
+    trip_id: str
+    departure_sec: int | None = Field(
+        description=(
+            "Seconds since the service day's 00:00 (past 24h for an after-midnight departure). "
+            "The trip's origin departure when `matched`; otherwise the schedule of its earliest "
+            "recorded stop, which need not be where it began."
+        )
+    )
+    terminal: str | None = Field(
+        description="Where the trip runs to: its last stop's name, without platform notes. Null unless `matched`."
+    )
+    headsign: str | None = Field(
+        description="The feed's trip_headsign (often a via point or line name), when it says more than "
+        "`terminal`. Null unless `matched`."
+    )
+    matched: bool = Field(description="Whether the loaded timetable runs this trip on the record's day.")
+    observed_stops: int = Field(description="How many of its stops have a departure reading.")
+
+
+class DelayRecordTripsResponse(BaseModel):
+    """Payload for ``GET /delay_record/trips``: every trip of ``route`` with a
+    departure reading on ``date``, ordered by departure. Empty when the feed
+    recorded none of them that day."""
+
+    date: str
+    route: str
+    trips: list[DelayRecordTrip]
+    scope_applied: dict[str, bool]
+
+
+class DelayRecordStop(BaseModel):
+    """One stop of the trip, in stop order. ``dep_delay`` is the latest
+    plausible departure reading, the same one every other surface keeps, or
+    null when the stop has none; ``scheduled_sec`` is the schedule that
+    reading was measured against, else the timetable's departure."""
+
+    stop_sequence: int
+    stop_name: str | None = Field(description="Null when the loaded timetable does not name it for this day.")
+    scheduled_sec: int | None
+    dep_delay: int | None
+
+
+class DelayRecordStopsResponse(BaseModel):
+    """Payload for ``GET /delay_record/stops``: the chosen trip and its stops,
+    from which a record is read at any one of them. ``trip`` is null and
+    ``stops`` empty when the trip has no reading that day."""
+
+    date: str
+    route: str
+    agency_name: str
+    trip: DelayRecordTrip | None
+    stops: list[DelayRecordStop]
+    scope_applied: dict[str, bool]
+
+
+@router.get("/delay_record/trips", response_model=DelayRecordTripsResponse)
+@limiter.limit(tier_limit)
+async def get_delay_record_trips(
+    request: Request,
+    day: date = Query(alias="date", description="The service day travelled on."),
+    route: str = Query(min_length=1, max_length=300, description="The route_code travelled on."),
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> DelayRecordTripsResponse:
+    """Step 3 of the passenger delay record: the trips to choose from.
+
+    A dedicated endpoint, not a ``/reports/{report_type}`` entry: it answers
+    one passenger's day and route with the trips to pick from, not a list of
+    late departures with a threshold and a CSV.
+    """
+    trips = await compute_record_trips(agency_id, day, route, conn, ch)
+    return DelayRecordTripsResponse(
+        date=day.isoformat(),
+        route=route,
+        trips=[DelayRecordTrip(**t) for t in trips],
+        scope_applied=_DELAY_RECORD_SCOPE,
+    )
+
+
+@router.get("/delay_record/stops", response_model=DelayRecordStopsResponse)
+@limiter.limit(tier_limit)
+async def get_delay_record_stops(
+    request: Request,
+    day: date = Query(alias="date", description="The service day travelled on."),
+    route: str = Query(min_length=1, max_length=300, description="The route_code travelled on."),
+    trip: str = Query(min_length=1, max_length=300, description="The trip_id chosen from /delay_record/trips."),
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> DelayRecordStopsResponse:
+    """Step 4 of the passenger delay record: the trip's stops, each with the
+    departure delay it recorded, so the record can be read at the stop the
+    passenger boarded."""
+    agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
+    record = await compute_record_stops(agency_id, day, route, trip, conn, ch)
+    return DelayRecordStopsResponse(
+        date=day.isoformat(),
+        route=route,
+        agency_name=agency_row["agency_name"] if agency_row else str(agency_id),
+        trip=None if record["trip"] is None else DelayRecordTrip(**record["trip"]),
+        stops=[DelayRecordStop(**s) for s in record["stops"]],
+        scope_applied=_DELAY_RECORD_SCOPE,
     )
 
 

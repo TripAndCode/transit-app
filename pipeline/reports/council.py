@@ -51,7 +51,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_in_range,
 )
-from pipeline.planned_trips import plan_ctes
+from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
@@ -392,8 +392,7 @@ async def compute_delay_certificate(
 
 # The loaded timetable's stop for each (trip_id, service day, stop_sequence)
 # event, and whether the trip starts there, kept to the events whose trip the
-# loaded timetable runs on that day (plan_ctes' running rule, the one planned
-# trips count by).
+# loaded timetable runs on that day (running_trip_join).
 _RECORDED_STOPS_SQL = (
     "WITH"
     + plan_ctes("ARRAY[$1::int]", "$5::date", "$6::date")
@@ -404,8 +403,9 @@ _RECORDED_STOPS_SQL = (
                WHERE e.agency_id = $1 AND e.trip_id = q.trip_id AND e.stop_sequence < q.stop_sequence
            ) AS is_first
     FROM unnest($2::text[], $3::date[], $4::int[]) AS q(trip_id, day, stop_sequence)
-    JOIN static_trips t ON t.agency_id = $1 AND t.trip_id = q.trip_id
-    JOIN running r ON r.agency_id = $1 AND r.service_id = t.service_id AND r.day = q.day
+    """
+    + running_trip_join("$1", "q.trip_id", "q.day")
+    + """
     JOIN static_stop_times st ON st.agency_id = $1 AND st.trip_id = q.trip_id AND st.stop_sequence = q.stop_sequence
     JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id
     WHERE s.stop_name IS NOT NULL AND s.stop_name <> ''
@@ -425,12 +425,9 @@ async def _recorded_stops(
     stop, so that stop is the trip's origin only when no stop of the trip
     comes before it in the timetable.
 
-    Only the loaded timetable is kept, and a reload replaces it in place, so
-    its stops describe a past day only if it was the timetable that day. An
-    event counts only when the loaded timetable runs its trip on its day: a
-    day before the loaded timetable starts, or a trip_id it reuses under a
-    service that does not run that day, is left out, and so is a trip it no
-    longer holds or a stop it does not name.
+    An event counts only when the loaded timetable runs its trip on its day
+    (:func:`pipeline.planned_trips.running_trip_join`); a trip it no longer
+    holds or a stop it does not name is left out too.
     """
     if not events:
         return {}

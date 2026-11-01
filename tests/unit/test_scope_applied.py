@@ -44,11 +44,13 @@ def test_reports_that_override_a_field_say_so():
 
 def test_single_route_endpoints_agree_on_routes():
     from api.routers.map import _ROUTE_TRIPS_SCOPE
-    from api.routers.reports import _FORECAST_HEATMAP_SCOPE
+    from api.routers.reports import _DELAY_RECORD_SCOPE, _FORECAST_HEATMAP_SCOPE
 
-    # Both draw the scope's one selected route.
+    # Each draws one selected route.
     assert _ROUTE_TRIPS_SCOPE["routes"] is True
     assert _FORECAST_HEATMAP_SCOPE["routes"] is True
+    # The delay record reads the one day its own `date` names, not the scope's range.
+    assert {f for f, on in _DELAY_RECORD_SCOPE.items() if on} == {"routes"}
 
 
 def test_council_delivered_figures_honour_only_the_dates():
