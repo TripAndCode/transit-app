@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pipeline.service_day import service_date_ch, service_date_of
+from pipeline.service_day import service_date_ch, service_date_of, service_day_offset, service_day_offset_ch
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 
@@ -34,3 +34,18 @@ def test_the_sql_service_date_matches_the_python_one_for_every_minute(ch_client)
     assert len({d for _, d in moments}) >= 2
     assert moments[0][0] == _START
     assert moments[-1][0] == _START + timedelta(minutes=_MINUTES - 1)
+
+
+def test_the_sql_service_day_offset_matches_the_python_one_for_every_minute_around_the_clock(ch_client):
+    # 00:00 through 27:59: the un-extended hours before the cutover, the day,
+    # and GTFS's extended hours past 24:00.
+    rows = ch_client.query(
+        f"SELECT s, {service_day_offset_ch('s')} FROM (SELECT toInt32(number * 60) AS s FROM numbers({28 * 60}))"
+    ).result_rows
+    assert len(rows) == 28 * 60
+    assert [(s, got) for s, got in rows if got != service_day_offset(s)] == []
+
+
+def test_the_sql_service_day_offset_keeps_a_missing_value_missing(ch_client):
+    rows = ch_client.query(f"SELECT {service_day_offset_ch('CAST(NULL AS Nullable(Int32))')}").result_rows
+    assert rows == [(None,)]

@@ -55,6 +55,19 @@ def test_a_run_carries_its_service_stops_and_scheduled_span(ch_client):
     assert run.service_date == pd.Timestamp("2026-06-01")
 
 
+@pytest.mark.parametrize("after_midnight", [600, 24 * 3600 + 600], ids=["as-written", "extended"])
+def test_a_run_crossing_midnight_spans_forward_whichever_way_the_feed_writes_the_hour(ch_client, after_midnight):
+    # 23:50 to 00:10 is 20 minutes whether the feed writes the second stop
+    # as "00:10:00" (600) or as GTFS's extended "24:10:00".
+    rows = [
+        (8, _utc(2026, 6, 1, 14, 50), "a/1.pb", "N1", "svc-wk", "23:50:00", "R1", 1, 60, 23 * 3600 + 50 * 60),
+        (8, _utc(2026, 6, 1, 15, 10), "a/2.pb", "N1", "svc-wk", None, "R1", 2, 60, after_midnight),
+    ]
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    run = fetch_runs(ch_client, 8).iloc[0]
+    assert (int(run.hour), run.span_min) == (23, pytest.approx(20.0))
+
+
 def test_a_feed_without_scheduled_sec_has_no_span(ch_client):
     rows = [(1, _utc(2026, 5, 31, 23, 0), "c/1.pb", "A1", "weekday", "08:05", "A", 1, 120, None)]
     ch_client.insert("updates", rows, column_names=COLUMNS)
