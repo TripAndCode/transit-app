@@ -7,8 +7,8 @@ has one CTA, the way in this visitor has:
 - **Signed in:** "Open the dashboard" (`/`).
 - **Signed out, and `GET /api/config` says `login_required` is off:** "View
   the dashboard (no sign-in needed)" (`/`), with a note that signing in keeps
-  saved views and Ask investigations with the account. The note's "Sign in" links
-  to `/login`, and the note is left out when no provider is configured.
+  saved views and Ask investigations with the account. The note's "Sign in"
+  links to `/login`, and the note is left out when no provider is configured.
 - **Signed out otherwise** (sign-in required, or the config not loaded yet):
   "Sign in" (`/login`). `/` would only bounce such a visitor back here.
 
@@ -82,7 +82,7 @@ figure's measured width (`StopChart`'s `width`), so nothing scrolls sideways.
 |---|---|
 | `frontend/src/pages/LandingPage.tsx` | Hero: headline and the sign-in or dashboard CTA |
 | `frontend/src/pages/LandingPage.css` | Hero and CTA styling |
-| `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero: the operations map with trip dots and the app's right-hand panel, on a fictional city. Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
+| `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero: the operations map with trip dots and the app's right-hand panel, on a fictional city whose rail lines are scenery only (every trip and figure is a bus route's). Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
 | `frontend/src/pages/landing/ScrollNarrative.tsx` | Post-hero scroll narrative on fixture data |
 | `frontend/src/pages/landing/previewData.ts` | Static fixture data for the narrative's charts |
 | `frontend/src/components/RequireAuth.tsx` | Sends signed-out visitors here or to `/login` when sign-in is required |
