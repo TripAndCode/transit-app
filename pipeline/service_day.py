@@ -71,6 +71,13 @@ def service_day_offset(seconds: int) -> int:
     return seconds + 24 * 3600 if seconds < SERVICE_DAY_CUTOVER_HOURS * 3600 else seconds
 
 
+def service_day_offset_ch(seconds: str) -> str:
+    """The ClickHouse mirror of :func:`service_day_offset`, over an integer
+    expression counting seconds from midnight, such as ``scheduled_sec``. A
+    NULL stays NULL: ClickHouse's ``if`` takes a NULL condition as false."""
+    return f"if(({seconds}) < {SERVICE_DAY_CUTOVER_HOURS * 3600}, ({seconds}) + 86400, ({seconds}))"
+
+
 _CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")
 
 

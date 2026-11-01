@@ -124,6 +124,14 @@ def test_a_schedule_string_before_the_cutover_hour_is_an_after_midnight_hour_of_
     assert fetch_cells(ch_client, 1) == [Cell("A", date(2026, 6, 1), 24, 1, 2.0)]
 
 
+def test_a_scheduled_sec_before_the_cutover_hour_is_an_after_midnight_hour_of_the_service_day(ch_client):
+    # Ingest stores a feed's un-extended "00:20:00" as written (1200); on its
+    # service day that is hour 24, the hour the schedule string gives.
+    rows = [(8, _utc(2026, 6, 1, 15, 20), "f/1.pb", "N1", "weekday", "00:20:00", "R1", 1, 120, 1200)]
+    ch_client.insert("updates", rows, column_names=COLUMNS)
+    assert fetch_cells(ch_client, 8) == [Cell("R1", date(2026, 6, 1), 24, 1, 2.0)]
+
+
 def test_a_stop_with_no_schedule_stays_out_of_its_runs_mean(ch_client):
     # A non-timepoint stop carries a realtime delay but no schedule of its own.
     rows = [
