@@ -181,7 +181,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
-| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` goes past a day R2 lacks, `AGENCY="8 53"` narrows it) |
+| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `AGENCY="8 53"` narrows it) |
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |

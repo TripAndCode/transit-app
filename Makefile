@@ -259,7 +259,7 @@ sync-r2:
 # docs/deploy-railway.md covers it beside the rest of R2.
 # Prints the plan only, reading the databases and listing R2. APPLY=1 runs it
 # (after a typed confirmation), ANALYZE=1 analyzes afterwards, and ALLOW_GAPS=1
-# goes past a day R2 has no archive for.
+# passes a day R2 has no archive for and loads a timetable after days with no rows.
 # Narrow it with AGENCY="8 53", not AGENCY_ID: a local .env that sets AGENCY_ID
 # would otherwise narrow every run, and a partial catch-up reads like a whole one.
 catch-up-from-r2:

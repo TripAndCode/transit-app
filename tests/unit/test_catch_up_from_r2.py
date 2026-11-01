@@ -575,26 +575,43 @@ def test_a_local_copy_of_another_size_is_refused_and_nothing_downloads(tmp_path)
     assert layout.to_download(8, [_remote(10)])[1]
 
 
-def test_a_timetable_loaded_ahead_of_days_with_no_rows_needs_allow_gaps():
-    """Archives can be ingested and still leave no rows (an outage polls an
-    empty feed), so `updates` alone cannot tell such days from days not yet
-    ingested. The plan refuses unless --allow-gaps takes them as empty."""
+def test_a_timetable_loaded_ahead_of_the_open_day_is_refused_even_with_allow_gaps():
+    """`updates` cannot tell days not yet ingested from days ingested with no
+    rows, and ingesting the first kind against a timetable loaded ahead of them
+    is the corruption this tool prevents, so no flag lets the plan go on. The
+    refusal says how to recover either way."""
     state = _state(
         loaded="gtfs_static_20261031",
         newest_row=datetime(2026, 10, 29, 10, 0, tzinfo=timezone.utc),  # JST 10-29 19:00
     )
-    timetables = _timetables(8, ["20261031"])
+    archives = _archives(8, ["20261029", "20261030", "20261031"])
+    timetables = _timetables(8, ["20261025", "20261031"])
 
-    refused = cu.plan_agency(state, [], timetables, today=TODAY)
-    assert refused.refusal is not None
-    assert "--allow-gaps" in refused.refusal
+    for allow_gaps in (False, True):
+        plan = cu.plan_agency(state, archives, timetables, today=TODAY, allow_gaps=allow_gaps)
+        assert plan.steps == []
+        assert plan.refusal is not None
+        assert "static/8/gtfs_static_20261025.zip" in plan.refusal
+        assert "load_static" in plan.refusal
+        assert "--allow-gaps" in plan.refusal
+        assert "2026-10-31" in plan.refusal
 
-    allowed = cu.plan_agency(
-        state, _archives(8, ["20261029", "20261030", "20261031"]), timetables, today=TODAY, allow_gaps=True
+
+def test_an_escaped_load_followed_by_rows_on_its_day_plans_on():
+    """Once a day from the escaped timetable's on holds rows, the open day has
+    caught up with it and the next run is not refused."""
+    plan = cu.plan_agency(
+        _state(
+            loaded="gtfs_static_20261025",
+            newest_row=datetime(2026, 10, 25, 10, 0, tzinfo=timezone.utc),  # JST 10-25 19:00
+        ),
+        _archives(8, _days("20261025", "20261031")),
+        _timetables(8, ["20261025"]),
+        today=TODAY,
     )
-    assert allowed.refusal is None
-    assert any("2026-10-30" in note for note in allowed.notes)
-    assert _shape(allowed) == [("ingest", "20261030", None, ["20261029", "20261030", "20261031"])]
+
+    assert plan.refusal is None
+    assert _shape(plan) == [("ingest", "20261026", None, _days("20261025", "20261031"))]
 
 
 def test_a_timetable_loads_once_updates_reaches_its_first_day():
@@ -615,5 +632,9 @@ def test_a_timetable_is_not_loaded_while_updates_stops_short_of_its_first_day():
     assert "20261024" in message and "2026-10-23" in message
     assert "--allow-gaps" in message
 
+    assert "no service" in message
+
     warning = cu.check_reached(date(2026, 10, 24), timetable, date(2026, 10, 24), allow_gaps=True)
     assert warning is not None and "2026-10-24" in warning
+    # A load past empty days stays refused-free only once its own days hold rows.
+    assert "next run" in warning

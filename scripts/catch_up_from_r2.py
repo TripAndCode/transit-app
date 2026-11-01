@@ -49,14 +49,14 @@ The plan refuses an agency, and --apply runs nothing, when:
   pipeline/strategies/__init__.py) and none is loaded;
 - it has no rows: this tool continues a history, it does not start one;
 - its loaded timetable came into force after the open day, or carries no
-  date to order R2's against, so those days would join the wrong one (with
-  --allow-gaps, days before a loaded timetable are taken as empty instead);
+  date to order R2's against, so those days would join the wrong one;
 - R2 lists one day twice;
 - a local copy of a file it needs differs in size from R2's.
 An archive missing in R2 stops the agency's plan at that day, with the
 timetables in force from it, because going past it would leave it older than
-the newest ingested day for good. --allow-gaps goes past every day with no rows:
-one R2 has no archive for, and one whose archive polled nothing (an outage).
+the newest ingested day for good. --allow-gaps passes every day R2 has no
+archive for, and lets the load guard below take days with no rows as empty. It
+never lets a plan ingest days against a timetable already loaded ahead of them.
 
 The plan (the default) lists R2 and reads Postgres through a read-only session
 and ClickHouse through a readonly=1 client; it downloads and writes nothing.
@@ -70,8 +70,10 @@ first checks that the open day has reached the timetable's day: an archive can
 be ingested and still add no row (an outage polls an empty feed), and `updates`
 cannot tell such a day from one not yet ingested, so a timetable loaded then
 would sit ahead of the next run's open day. The run stops before that load
-unless --allow-gaps takes those days as empty; an agency whose ingest reads no
-timetable is not checked. Files download into the local layout `make fetch`
+unless --allow-gaps takes those days as empty (an outage, or days the agency ran
+no service); an agency whose ingest reads no timetable is not checked. Loaded
+that way, the timetable is still ahead of the open day until a day from its
+own on holds rows, and a run before then is refused with the way back. Files download into the local layout `make fetch`
 uses (raw_archives/<id>/, raw_archives_static/<id>/), and each ingest step
 reads its own temporary directory of links to just its archives, never the
 whole local history. It stops at the first failure. A rerun is safe: ingested
@@ -341,25 +343,23 @@ def plan_agency(
             "ingest reads none, so R2's are left to load by hand"
         )
     if loaded_day is not None and loaded_day > first:
-        if state.requires_timetable and not allow_gaps:
+        if state.requires_timetable:
+            # No flag passes this: `updates` cannot tell days not yet ingested
+            # from days ingested with no rows, and the first kind would join a
+            # timetable that was not in force on them.
             plan.refusal = (
                 f"{state.loaded_version} is loaded, in force from {loaded_day}, but JST {first}..{loaded_day - _DAY} "
-                f"hold no rows: not ingested yet, they would join it, not the timetable in force on them"
-                f"{_in_force_hint(timetables, first)}. Load that one with gtfs_pipeline.py load_static, then rerun. "
-                "If their archives were ingested and polled nothing (an outage), --allow-gaps takes them as empty "
-                "and goes on"
+                f"hold no rows. Not ingested yet, they would join it rather than the timetable in force on them"
+                f"{_in_force_hint(timetables, first)}: load that one with gtfs_pipeline.py load_static, then rerun. "
+                "If they were ingested and hold no rows (an outage, or days the agency ran no service), make the "
+                f"same load and rerun with --allow-gaps, which loads {state.loaded_version} again at its day; the "
+                f"agency stops here again until a day from {loaded_day} on holds rows"
             )
             return plan
-        if state.requires_timetable:
-            plan.notes.append(
-                f"JST {first}..{loaded_day - _DAY} hold no rows and {state.loaded_version} is loaded: --allow-gaps "
-                "takes them as empty, so their archives are read again against it"
-            )
-        else:
-            plan.notes.append(
-                f"{state.loaded_version} came into force after {first}; this agency's ingest reads no timetable, "
-                "so the order leaves its rows unchanged"
-            )
+        plan.notes.append(
+            f"{state.loaded_version} came into force after {first}; this agency's ingest reads no timetable, "
+            "so the order leaves its rows unchanged"
+        )
 
     since = first - _DAY
     wanted = [a for a in archives if since <= a.day <= today - _DAY]
@@ -427,19 +427,25 @@ def check_reached(reached: date | None, timetable: RemoteFile, through: date | N
     ingested, ``through`` the newest of those archives. Days with no rows are
     either not ingested or ingested empty, and `updates` cannot tell which, so a
     timetable loaded past them would get the next run refused. With
-    ``allow_gaps`` they are taken as empty: the returned warning says so.
+    ``allow_gaps`` they are taken as empty and the returned warning says so;
+    the next run is still refused if no day from the timetable's on holds rows
+    by then.
     """
     if reached is not None and reached >= timetable.day:
         return None
     still = f"JST {reached}..{timetable.day - _DAY}" if reached else f"every day before {timetable.day}"
     if allow_gaps:
-        return f"{still} hold no rows; --allow-gaps takes them as empty and loads {timetable.name}"
+        return (
+            f"{still} hold no rows; --allow-gaps takes them as empty and loads {timetable.name}. If no day from "
+            f"{timetable.day} on holds rows by the end of this run either, the next run refuses this agency and "
+            "says how to go on"
+        )
     ingested = f"archives through {through:%Y%m%d} are ingested" if through else "no archive was ingested before it"
     reach = f"`updates` reaches only JST {reached - _DAY}" if reached else "`updates` holds no row"
     raise Refusal(
         f"{ingested}, but {reach}, so {timetable.name} is not loaded: in force from {timetable.day}, it would sit "
-        f"ahead of the next run's open day. If {still} hold no rows because their archives polled nothing (an "
-        "outage), rerun with --allow-gaps to take them as empty and load it"
+        f"ahead of the next run's open day. If {still} hold no rows because nothing was polled from them (an "
+        "outage, or a day the agency ran no service), rerun with --allow-gaps to take them as empty and load it"
     )
 
 
@@ -920,7 +926,7 @@ def main(argv: list[str] | None = None, *, store: ObjectStore | None = None, now
     parser.add_argument(
         "--allow-gaps",
         action="store_true",
-        help="go past days with no rows: R2 has no archive for them, or their archive polled nothing",
+        help="pass days R2 has no archive for, and load a timetable after days with no rows",
     )
     parser.add_argument("--archives-dir", type=pathlib.Path, default=ROOT / "raw_archives")
     parser.add_argument("--static-dir", type=pathlib.Path, default=ROOT / "raw_archives_static")

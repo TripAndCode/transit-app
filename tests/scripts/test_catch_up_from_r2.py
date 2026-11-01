@@ -261,7 +261,7 @@ def test_a_timetable_is_not_loaded_after_days_that_wrote_no_rows(world, pg_conn,
     assert list(_rows(ch_client, agency_id)) == [world["ingested"]]
 
 
-def test_allow_gaps_loads_a_timetable_after_days_taken_as_empty(world, pg_conn, ch_client):
+def test_allow_gaps_loads_a_timetable_after_days_taken_as_empty(world, pg_conn, ch_client, capsys):
     agency_id = world["agency_id"]
     _empty_archive(world["store"].root / "rt" / str(agency_id) / f"{world['head'][:8]}.tar.gz")
 
@@ -273,3 +273,27 @@ def test_allow_gaps_loads_a_timetable_after_days_taken_as_empty(world, pg_conn, 
         world["later"]: [(world["new"], 8 * 3600)],
     }
     assert _runs(pg_conn, agency_id) == {"ingest": 2, "static": 1}
+
+    # Archive D held rows, so the open day passed D and the next plan goes on.
+    capsys.readouterr()
+    assert cu.main(world["dirs"], store=world["store"], now=world["now"]) == 0
+    assert "REFUSED" not in capsys.readouterr().out
+
+
+def test_an_escaped_load_with_no_rows_after_it_leaves_the_next_plan_refused(world, capsys):
+    """With D's own archive empty too, nothing moves the open day past D-1, so
+    the timetable stays ahead of it: the next plan is refused, --allow-gaps or
+    not, and its refusal names the way back."""
+    agency_id = world["agency_id"]
+    rt = world["store"].root / "rt" / str(agency_id)
+    _empty_archive(rt / f"{world['head'][:8]}.tar.gz")
+    _empty_archive(rt / f"{world['later'][:8]}.tar.gz")
+    argv = [*world["dirs"], "--apply", "--yes", "--allow-gaps"]
+    assert cu.main(argv, store=world["store"], now=world["now"]) == 0
+    capsys.readouterr()
+
+    assert cu.main([*world["dirs"], "--allow-gaps"], store=world["store"], now=world["now"]) == 0
+
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "load_static" in out and "--allow-gaps" in out
