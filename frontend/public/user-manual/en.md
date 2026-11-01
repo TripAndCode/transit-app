@@ -327,6 +327,8 @@ The first time you open Live, a three-step tour points out the filters, the trip
 
 Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
 
+A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in **Ask**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
+
 ### 10-1. Period summary
 
 How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page).

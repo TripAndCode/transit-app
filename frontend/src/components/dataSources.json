@@ -1,0 +1,24 @@
+[
+  {
+    "creditKey": "credits.aomori",
+    "feeds": [
+      { "host": "aomoricitybus.com" },
+      { "host": "api-public.odpt.org", "pathPrefix": "/api/v4/gtfs/realtime/odpt_AomoriCity_AllLines" }
+    ],
+    "prefectureKey": "prefectures.aomori",
+    "links": {
+      "static": "https://ckan.odpt.org/dataset/aomori_city_all_lines",
+      "realtime": "https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines",
+      "license": "https://creativecommons.org/licenses/by/4.0/deed.{locale}"
+    }
+  },
+  {
+    "creditKey": "credits.hiroshima",
+    "feeds": [{ "host": "ajt-mobusta-gtfs.mcapps.jp" }],
+    "prefectureKey": "prefectures.hiroshima",
+    "links": {
+      "site": "https://www.bus-kyo.or.jp/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/deed.{locale}"
+    }
+  }
+]

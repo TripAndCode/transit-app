@@ -24,16 +24,24 @@ describe("result snapshot", () => {
     expect(snapshot.schema).toBe("transit.ask-result.v1");
   });
   it("exports all table rows, including beyond the UI preview limit, formula safely", () => {
-    const rows = resultTableCsv(9, message)!;
+    const rows = resultTableCsv(9, message, null)!;
     expect(rows.slice(-61)).toEqual(message.result!.rows);
     expect(rows).toContainEqual(["message_created_at", message.created_at]);
     expect(rows).toContainEqual(["historical_filter_ctx", "not_recorded"]);
     expect(csvText(rows)).toContain('"\'=formula","-3"');
   });
   it("does not offer table CSV for text, charts, or malformed rows", () => {
-    expect(resultTableCsv(9, { ...message, result: null })).toBeNull();
-    expect(resultTableCsv(9, { ...message, role: "user" })).toBeNull();
-    expect(resultTableCsv(9, { ...message, result: { ...message.result!, kind: "series" } })).toBeNull();
-    expect(resultTableCsv(9, { ...message, result: { ...message.result!, rows: [{}] } })).toBeNull();
+    expect(resultTableCsv(9, { ...message, result: null }, null)).toBeNull();
+    expect(resultTableCsv(9, { ...message, role: "user" }, null)).toBeNull();
+    expect(resultTableCsv(9, { ...message, result: { ...message.result!, kind: "series" } }, null)).toBeNull();
+    expect(resultTableCsv(9, { ...message, result: { ...message.result!, rows: [{}] } }, null)).toBeNull();
+  });
+  it("ends the preamble with the agency's data-source credit, ahead of the table", () => {
+    const rows = resultTableCsv(9, message, "Credit line")!;
+    const header = rows.findIndex((row) => row[0] === "route" && row[1] === "delay");
+    expect(rows.slice(header - 3, header)).toEqual([["summary", "Stored result"], ["data_source", "Credit line"], []]);
+  });
+  it("leaves the credit row out when no source covers the agency", () => {
+    expect(resultTableCsv(9, message, null)!.some((row) => row[0] === "data_source")).toBe(false);
   });
 });
