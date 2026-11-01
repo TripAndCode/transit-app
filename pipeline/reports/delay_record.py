@@ -36,7 +36,7 @@ from api.range import RangeCtx, build_updates_filter_ch
 from pipeline.db import build_dedup_ch_sql
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.route_terminals import normalize_stop_name
-from pipeline.service_day import clock_to_sec
+from pipeline.service_day import clock_to_sec, service_day_offset
 
 
 def _record_filter(day: date, route_code: str, trip_id: str | None = None) -> tuple[str, dict]:
@@ -150,7 +150,7 @@ def _reading_time(scheduled_time: str | None, scheduled_sec: int | None) -> int 
     stored, or its clock when that is missing. Only labels a trip the
     timetable does not run; the clock is the trip's start for an
     aomori_regex agency (see :func:`record_stops`), never a stop's schedule."""
-    return int(scheduled_sec) if scheduled_sec is not None else clock_to_sec(scheduled_time)
+    return service_day_offset(int(scheduled_sec)) if scheduled_sec is not None else clock_to_sec(scheduled_time)
 
 
 def record_trips(
@@ -213,7 +213,11 @@ def record_stops(
     A stop's schedule is the reading's ``scheduled_sec`` when it has one:
     the static join stores it per stop at ingest, and the delay was measured
     against it, so the actual departure is that schedule plus the delay.
-    Otherwise it is the timetable's departure there. A reading's
+    Otherwise it is the timetable's departure there. Both go through the
+    service-day cutover (:func:`pipeline.service_day.service_day_offset`,
+    :func:`~pipeline.service_day.clock_to_sec`): ingest stores a feed's
+    un-extended ``00:10`` as written, which would otherwise sit a day before
+    a timetable neighbour. A reading's
     ``scheduled_time`` clock is never used: the aomori_regex ingest writes
     the trip's start time, read from its trip_id, as the clock of every stop
     and stores no ``scheduled_sec``.
@@ -232,7 +236,7 @@ def record_stops(
             {"stop_sequence": int(stop_sequence), "stop_name": None, "scheduled_sec": None, "dep_delay": None},
         )
         if scheduled_sec is not None:
-            stop["scheduled_sec"] = int(scheduled_sec)
+            stop["scheduled_sec"] = service_day_offset(int(scheduled_sec))
         stop["dep_delay"] = int(dep_delay)
     return [stops[k] for k in sorted(stops)]
 

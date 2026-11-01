@@ -101,8 +101,9 @@ def build_dedup_ch_sql(
     in api/range.py) would otherwise collide with this SELECT-list alias —
     see the `u.`-qualification note below for why ClickHouse's alias
     substitution rule turns that into `ILLEGAL_AGGREGATION` (confirmed
-    against a live instance). No current caller combines the two, but the
-    distinct alias name means no future one can hit this by accident.
+    against a live instance). The distinct alias name is what lets a caller
+    combine the two safely, as `pipeline.reports.delay_record` does with
+    `api.range.build_updates_filter_ch`'s date clause.
 
     The `date` column is the *service date* (`pipeline.service_day`): the
     Asia/Tokyo day shifted back by the service-day cutover, so a stop polled

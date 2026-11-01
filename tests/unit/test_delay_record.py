@@ -129,3 +129,32 @@ def test_a_readings_clock_is_never_taken_for_its_stops_schedule():
 def test_clock_to_sec_lives_with_the_service_day_rule_it_applies():
     assert clock_to_sec(" 25:30:00 ".strip()) == 25 * 3600 + 30 * 60
     assert clock_to_sec("00:10") == 24 * 3600 + 10 * 60
+
+
+def test_stops_around_midnight_sit_on_one_axis_whichever_source_times_them():
+    """Ingest stores a feed's un-extended "00:10:00" as 600 seconds, while a
+    timetable clock before the cutover reads as the next day; both must land
+    a day later, or a reading's "00:10" would sit beside a neighbour's
+    「翌00:15」."""
+    stops = record_stops(
+        [(2, "00:10:00", 10 * 60, 60)],
+        [(1, "広島駅", "23:55:00"), (2, "紙屋町", "00:10:00"), (3, "八丁堀", "00:15:00")],
+    )
+    assert [s["scheduled_sec"] for s in stops] == [
+        23 * 3600 + 55 * 60,
+        24 * 3600 + 10 * 60,
+        24 * 3600 + 15 * 60,
+    ]
+
+
+def test_a_feed_that_already_writes_extended_hours_keeps_them():
+    stops = record_stops([(2, None, 24 * 3600 + 10 * 60, 60)], [(2, "紙屋町", "24:10:00"), (3, "八丁堀", "24:15:00")])
+    assert [s["scheduled_sec"] for s in stops] == [24 * 3600 + 10 * 60, 24 * 3600 + 15 * 60]
+
+
+def test_an_unmatched_trip_first_recorded_after_midnight_sorts_after_the_evening():
+    trips = record_trips([("NIGHT", 2, ("00:10:00", 10 * 60)), ("EVENING", 2, ("23:50:00", 23 * 3600 + 50 * 60))], {})
+    assert [(t["trip_id"], t["departure_sec"]) for t in trips] == [
+        ("EVENING", 23 * 3600 + 50 * 60),
+        ("NIGHT", 24 * 3600 + 10 * 60),
+    ]

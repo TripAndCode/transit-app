@@ -60,8 +60,15 @@ def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:
     value: ``00:10`` is ``24:10``. GTFS's own extended hours (``24:10``) already
     say so and are left as they are.
     """
-    seconds = hour * 3600 + minute * 60 + second
-    return seconds + 24 * 3600 if hour < SERVICE_DAY_CUTOVER_HOURS else seconds
+    return service_day_offset(hour * 3600 + minute * 60 + second)
+
+
+def service_day_offset(seconds: int) -> int:
+    """:func:`service_day_seconds` for a value already in seconds since 00:00,
+    such as the ``scheduled_sec`` ingest stores from a feed's clock as
+    written: below the cutover it is a day later, and a GTFS extended hour
+    (``24:10`` as 87000) is left as it is."""
+    return seconds + 24 * 3600 if seconds < SERVICE_DAY_CUTOVER_HOURS * 3600 else seconds
 
 
 _CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")

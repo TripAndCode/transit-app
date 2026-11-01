@@ -823,9 +823,8 @@ describe("AnalysisTab delay record", () => {
   // The staff list's heading says what it keys each trip on.
   const STAFF_LIST = "Late departures (delay at each trip's first recorded stop)";
 
-  // The lookup fetches one route; the staff list fetches every route.
-  const fetchesStaffList = ([, type, scope]: Parameters<typeof hooks.useReport>) =>
-    type === "delay_certificate" && scope.routes.length === 0;
+  // Only the staff list reads delay_certificate; the lookup has endpoints of its own.
+  const fetchesStaffList = ([, type]: Parameters<typeof hooks.useReport>) => type === "delay_certificate";
 
   const ROW = ["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355, "Aomori Station", true];
 

@@ -79,7 +79,9 @@ reports.
   filter rows within them. A stop's scheduled time is the `scheduled_sec`
   the static join stored with its reading, the schedule the delay was measured
   against, so the actual time is that plus the delay; without one it is the
-  timetable's departure there. A reading's `scheduled_time` clock is never
+  timetable's departure there. Both are placed in the service day the same
+  way (`service_day_offset` / `clock_to_sec`), so a feed's un-extended
+  「00:10」 sits after the evening, beside a timetable 「24:15」. A reading's `scheduled_time` clock is never
   used: the aomori_regex ingest writes the trip's start time (from its
   trip_id) on every stop. Times past 24:00 read as the next day's
   (「翌00:12」).
