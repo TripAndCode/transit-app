@@ -37,6 +37,10 @@ def test_a_trips_last_stop_is_named_without_its_platform_note():
 def test_a_headsign_that_only_repeats_the_last_stop_is_dropped():
     (trip,) = record_trips([("T1", 3, ("17:45:00", None))], {"T1": _plan(headsign="広島駅", terminal="広島駅")})
     assert (trip["terminal"], trip["headsign"]) == ("広島駅", None)
+    (noted,) = record_trips(
+        [("T1", 3, ("17:45:00", None))], {"T1": _plan(headsign="青森駅（降車専用）", terminal="青森駅 (降車専用)")}
+    )
+    assert (noted["terminal"], noted["headsign"]) == ("青森駅", None)
 
 
 def test_a_trip_the_timetable_does_not_run_that_day_falls_back_to_its_earliest_recorded_time_and_no_headsign():
@@ -99,11 +103,27 @@ def test_a_recorded_stop_the_timetable_does_not_hold_is_kept_without_a_name():
 
 
 def test_a_trip_the_timetable_does_not_run_lists_only_its_recorded_stops_unnamed():
-    stops = record_stops([(4, "17:50", None, 300), (2, "17:46:00", 63960, 240)], [])
+    stops = record_stops([(4, "17:50:00", 64200, 300), (2, "17:46:00", 63960, 240)], [])
     assert stops == [
         {"stop_sequence": 2, "stop_name": None, "scheduled_sec": 63960, "dep_delay": 240},
-        {"stop_sequence": 4, "stop_name": None, "scheduled_sec": 17 * 3600 + 50 * 60, "dep_delay": 300},
+        {"stop_sequence": 4, "stop_name": None, "scheduled_sec": 64200, "dep_delay": 300},
     ]
+
+
+def test_a_readings_clock_is_never_taken_for_its_stops_schedule():
+    """One ingest strategy (aomori_regex) writes the trip's start time, read
+    from its trip_id, as the clock of every stop and stores no
+    scheduled_sec. The timetable gives the stop's own time when it runs the
+    trip that day; otherwise the stop has none rather than the trip's start."""
+    matched = record_stops([(5, "07:05", None, 77)], [(1, "後潟", "07:05:00"), (5, "後潟大原", "07:07:00")])
+    assert matched[1] == {
+        "stop_sequence": 5,
+        "stop_name": "後潟大原",
+        "scheduled_sec": 7 * 3600 + 7 * 60,
+        "dep_delay": 77,
+    }
+    unmatched = record_stops([(5, "07:05", None, 77)], [])
+    assert unmatched == [{"stop_sequence": 5, "stop_name": None, "scheduled_sec": None, "dep_delay": 77}]
 
 
 def test_clock_to_sec_lives_with_the_service_day_rule_it_applies():

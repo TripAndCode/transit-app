@@ -76,9 +76,13 @@ reports.
   row-level predicate, so ClickHouse applies it in PREWHERE before any
   aggregation. `updates` sorts by `captured_at` ahead of `route_code` and
   `trip_id`, so the day bounds which granules are read and the route and trip
-  filter rows within them. Each reading keeps the schedule it was measured
-  against, and the actual time is that schedule plus the delay. Times past
-  24:00 read as the next day's (「翌00:12」).
+  filter rows within them. A stop's scheduled time is the `scheduled_sec`
+  the static join stored with its reading, the schedule the delay was measured
+  against, so the actual time is that plus the delay; without one it is the
+  timetable's departure there. A reading's `scheduled_time` clock is never
+  used: the aomori_regex ingest writes the trip's start time (from its
+  trip_id) on every stop. Times past 24:00 read as the next day's
+  (「翌00:12」).
 
   Stop names, the trip's start and where it runs to come from the loaded
   timetable only when it runs the trip on the record's day (`pipeline.planned_trips.running_trip_join`, the running rule

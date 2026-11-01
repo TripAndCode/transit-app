@@ -145,9 +145,11 @@ _TIMETABLE_STOPS_SQL = (
 )
 
 
-def _schedule_sec(scheduled_time: str | None, scheduled_sec: int | None) -> int | None:
-    """A reading's schedule in service-day seconds: the value ingest stored,
-    or its clock when that is missing."""
+def _reading_time(scheduled_time: str | None, scheduled_sec: int | None) -> int | None:
+    """The time a reading carries, in service-day seconds: the value ingest
+    stored, or its clock when that is missing. Only labels a trip the
+    timetable does not run; the clock is the trip's start for an
+    aomori_regex agency (see :func:`record_stops`), never a stop's schedule."""
     return int(scheduled_sec) if scheduled_sec is not None else clock_to_sec(scheduled_time)
 
 
@@ -167,9 +169,9 @@ def record_trips(
     terminal's alighting platform is not where the trip goes. Feeds fill
     ``trip_headsign`` with a via point, a line name or a route code as often
     as a destination, so it is kept beside the terminal, not in its place,
-    and dropped when it only repeats it.
+    and dropped when, notes aside, it only repeats it.
 
-    Any other trip is labelled by the schedule of its earliest recorded stop,
+    Any other trip is labelled by the time its earliest reading carries,
     with neither (``matched`` False): that stop need not be where the trip
     began, and nothing else says where it ran to.
     """
@@ -180,9 +182,9 @@ def record_trips(
         if plan is not None:
             departure_sec = clock_to_sec(plan["origin_departure"])
             terminal = normalize_stop_name(plan["terminal"])
-            headsign = plan["headsign"] if plan["headsign"] != terminal else None
+            headsign = plan["headsign"] if normalize_stop_name(plan["headsign"]) != terminal else None
         else:
-            departure_sec = _schedule_sec(first_time, first_sec)
+            departure_sec = _reading_time(first_time, first_sec)
         trips.append(
             {
                 "trip_id": trip_id,
@@ -206,9 +208,15 @@ def record_stops(
     ``observed`` is :func:`record_stops_sql`'s rows; ``timetable`` is the
     loaded timetable's ``(stop_sequence, stop_name, departure)`` for the trip,
     empty when it does not run the trip that day. Every timetable stop is
-    listed, and so is a recorded stop it does not hold, unnamed. A reading's
-    own schedule replaces the timetable's: the delay was measured against it,
-    so the actual departure is that schedule plus the delay.
+    listed, and so is a recorded stop it does not hold, unnamed.
+
+    A stop's schedule is the reading's ``scheduled_sec`` when it has one:
+    the static join stores it per stop at ingest, and the delay was measured
+    against it, so the actual departure is that schedule plus the delay.
+    Otherwise it is the timetable's departure there. A reading's
+    ``scheduled_time`` clock is never used: the aomori_regex ingest writes
+    the trip's start time, read from its trip_id, as the clock of every stop
+    and stores no ``scheduled_sec``.
     """
     stops: dict[int, dict] = {}
     for stop_sequence, stop_name, departure in timetable:
@@ -218,14 +226,13 @@ def record_stops(
             "scheduled_sec": clock_to_sec(departure),
             "dep_delay": None,
         }
-    for stop_sequence, scheduled_time, scheduled_sec, dep_delay in observed:
+    for stop_sequence, _clock, scheduled_sec, dep_delay in observed:
         stop = stops.setdefault(
             int(stop_sequence),
             {"stop_sequence": int(stop_sequence), "stop_name": None, "scheduled_sec": None, "dep_delay": None},
         )
-        reading_sec = _schedule_sec(scheduled_time, scheduled_sec)
-        if reading_sec is not None:
-            stop["scheduled_sec"] = reading_sec
+        if scheduled_sec is not None:
+            stop["scheduled_sec"] = int(scheduled_sec)
         stop["dep_delay"] = int(dep_delay)
     return [stops[k] for k in sorted(stops)]
 
