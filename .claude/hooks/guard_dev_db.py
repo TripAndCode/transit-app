@@ -93,6 +93,7 @@ DESTRUCTIVE_TARGETS = {
     "bootstrap": {"pg", "ch"},
     "analyze-all": {"pg", "ch"},
     "build-rag-index": {"pg"},
+    "catch-up-from-r2": {"pg", "ch"},
     "ch-bootstrap": {"ch"},
     "db": {"pg", "ch"},
     "fetch-ingest": {"pg", "ch"},
