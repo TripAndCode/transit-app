@@ -3,7 +3,8 @@ import { contentLocale } from "../../i18n/contentLocale";
 
 /** A report's CSV download from the API, beside its heading. A plain link
  *  sends the browser's Accept-Language rather than the UI's, so the link names
- *  the UI language in `lang`, which the file's data-source credit is written in. */
+ *  the UI language in `lang`, which the rows written to the file's reader (its
+ *  data-source credit, a message standing in for its rows) are in. */
 export function CsvLink({ href }: { href: string }) {
   const { t, i18n } = useTranslation();
   return (

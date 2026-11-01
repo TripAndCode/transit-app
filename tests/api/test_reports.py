@@ -2004,6 +2004,31 @@ async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_emp
     assert rows[2][0]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("ui_lang", "accept_language"), [("ja", "en"), ("en", "ja")])
+async def test_dwell_run_csv_message_is_in_the_ui_language(reports_client, ui_lang, accept_language):
+    """The message standing in for the rows is written to whoever reads the
+    file, like the credit, so it follows `lang` (the app's UI language)
+    rather than the download link's Accept-Language."""
+    import csv
+    import io
+
+    from pipeline.query.formatter import format_dwell_run_text
+
+    client, agency_id, pool = reports_client
+    await _trust_dwell_run(pool, agency_id)
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(
+        f"/api/{agency_id}/reports/dwell_run?time_band=morning&format=csv&lang={ui_lang}",
+        headers={"Accept-Language": accept_language},
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    unsupported = {"available": True, "time_band_supported": False}
+    assert rows[-1] == [format_dwell_run_text(unsupported, locale=ui_lang)]
+    assert rows[-1] != [format_dwell_run_text(unsupported, locale=accept_language)]
+
+
 def _separate_polls(day, trip_id, service_id, visits):
     """ClickHouse `updates` rows for route 44's *visits*, given as
     ``(stop_sequence, dep_delay, arr_delay)``, the way the feed reports them:
