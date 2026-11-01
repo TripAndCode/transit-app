@@ -1127,8 +1127,9 @@ def _csv_response(
 
     `credit` is the last preamble row, right before the column header: the
     open-data credit for the agency's feed (``pipeline.data_sources``), in
-    the request's language because it is the licence's attribution to
-    whoever reads the file. Required, so no export can leave it out; None
+    the reader's language because it is the licence's attribution to
+    whoever reads the file -- the request's `lang` (the app's UI language),
+    else its Accept-Language. Required, so no export can leave it out; None
     only when no credited source covers the feed, which adds no row.
 
     `unavailable_message`, when given, replaces the (otherwise empty) data
@@ -1264,6 +1265,13 @@ async def get_report(
         description="route_table only: the figure the table is sorted by, the average delay "
         f"('{DEFAULT_ROUTE_TABLE_SORT}') unless named.",
     ),
+    lang: str | None = Query(
+        default=None,
+        pattern="^(ja|en)$",
+        description="format=csv only: the language of the data-source credit row, which the app sets to "
+        "its UI language because a download link sends the browser's Accept-Language instead. Unset, "
+        "the credit follows Accept-Language. No other row reads it.",
+    ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -1315,13 +1323,15 @@ async def get_report(
         raise HTTPException(status_code=400, detail="order only applies to the on_time and route_table reports")
     if sort is not None and report_type != "route_table":
         raise HTTPException(status_code=400, detail="sort only applies to the route_table report")
+    if lang is not None and format != "csv":
+        raise HTTPException(status_code=400, detail="lang only applies to format=csv")
 
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
     definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
     credit = (
-        credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), locale)
+        credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
         if format == "csv"
         else None
     )
