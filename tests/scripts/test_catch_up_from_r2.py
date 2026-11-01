@@ -17,8 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from api.range import jst_today
-from pipeline.clickhouse import insert_updates
+from pipeline.clickhouse import insert_updates, jst_date
 from pipeline.static_loader import load_static
 from scripts import catch_up_from_r2 as cu
 from tests.fixtures.gtfs_rt import header_only_feed, stop_time_update, trip_update, trip_update_feed
@@ -88,8 +87,13 @@ def _utc(day: date, hour: int) -> datetime:
 
 @pytest.fixture
 def world(pg_conn, ch_client, tmp_path):
-    """The agency, its loaded timetable, its rows through JST D-2, and R2."""
-    d = jst_today() - 3 * DAY
+    """The agency, its loaded timetable, its rows through JST D-2, and R2.
+
+    The clock is read once: every run gets the same ``now``, so a run that
+    crosses JST midnight cannot move "today" away from the days seeded here.
+    """
+    now = datetime.now(timezone.utc)
+    d = jst_date(now) - 3 * DAY
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES (%s, %s, %s) RETURNING agency_id",
@@ -120,6 +124,7 @@ def world(pg_conn, ch_client, tmp_path):
     _timetable(static / f"{new}.zip", "08:00:00", d)
 
     return {
+        "now": now,
         "agency_id": agency_id,
         "store": DirectoryStore(bucket),
         "dirs": ["--archives-dir", str(tmp_path / "raw_archives"), "--static-dir", str(tmp_path / "raw_static")],
@@ -154,7 +159,7 @@ def _runs(pg_conn, agency_id: int) -> dict[str, int]:
 
 
 def test_plan_mode_downloads_and_writes_nothing(world, pg_conn, ch_client, capsys):
-    assert cu.main(world["dirs"], store=world["store"]) == 0
+    assert cu.main(world["dirs"], store=world["store"], now=world["now"]) == 0
 
     out = capsys.readouterr().out
     assert f"load   {world['new']}.zip" in out
@@ -166,7 +171,7 @@ def test_plan_mode_downloads_and_writes_nothing(world, pg_conn, ch_client, capsy
 def test_apply_joins_each_jst_day_to_the_timetable_in_force_on_it(world, pg_conn, ch_client):
     agency_id = world["agency_id"]
 
-    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"]) == 0
+    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"], now=world["now"]) == 0
 
     rows = _rows(ch_client, agency_id)
     assert rows == {
@@ -196,18 +201,18 @@ def test_apply_joins_each_jst_day_to_the_timetable_in_force_on_it(world, pg_conn
 
 def test_a_rerun_writes_nothing_twice_and_reloads_nothing(world, pg_conn, ch_client):
     agency_id = world["agency_id"]
-    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"]) == 0
+    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"], now=world["now"]) == 0
     first = _rows(ch_client, agency_id)
     runs = _runs(pg_conn, agency_id)
 
-    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"]) == 0
+    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"], now=world["now"]) == 0
 
     assert _rows(ch_client, agency_id) == first
     assert _runs(pg_conn, agency_id)["static"] == runs["static"]
 
 
 def test_apply_with_analyze_builds_the_aggregates(world, pg_conn):
-    assert cu.main([*world["dirs"], "--apply", "--yes", "--analyze"], store=world["store"]) == 0
+    assert cu.main([*world["dirs"], "--apply", "--yes", "--analyze"], store=world["store"], now=world["now"]) == 0
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agg_meta WHERE agency_id = %s", (world["agency_id"],))
@@ -222,7 +227,7 @@ def test_apply_refuses_an_agency_with_no_timetable_and_writes_nothing(world, pg_
         cur.execute("DELETE FROM static_stops WHERE agency_id = %s", (agency_id,))
     pg_conn.commit()
 
-    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"]) == 1
+    assert cu.main([*world["dirs"], "--apply", "--yes"], store=world["store"], now=world["now"]) == 1
 
     assert "REQUIRES_STATIC_TIMETABLE" in capsys.readouterr().out
     assert list(_rows(ch_client, agency_id)) == [world["ingested"]]
