@@ -459,7 +459,7 @@ What the words on the screens and in this manual mean.
 - **wide margin**: shown when the 95% confidence interval (Wilson) of the on-time % is wider than ±5 points.
 - **few data**: shown for a route with fewer than 100 samples.
 - **Dwell**: the time, in seconds, from a trip’s arrival at a stop to its departure from it. The actual arrival and departure times are the scheduled times plus the delays the feed reports, so dwell is available only from feeds that report arrival delays. It counts only a departure the feed reported after it reported the arrival. A departure reported only before the arrival is a prediction, and gives no dwell.
-- **Running**: the time, in seconds, from a trip’s departure from one stop to its arrival at the next. Where the stops in between have no report, it covers the whole stretch.
+- **Running**: the time, in seconds, from a trip’s departure from one stop to its arrival at the next. Where the stops in between have no report, it covers the whole stretch. The departure it starts from can be one the feed reported only as a prediction, before the trip reached that stop.
 
 ### 13-3. Service and spacing
 
