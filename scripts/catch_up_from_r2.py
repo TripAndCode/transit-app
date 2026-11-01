@@ -784,8 +784,10 @@ def run_apply(args, store: ObjectStore, layout: Layout, now: datetime) -> int:
                     conn.rollback()
                     print(
                         f"stopped: agency {agency_id} step {i}: {type(exc).__name__}: {exc}\n"
-                        "Rerun once it is fixed: ingested archive members are skipped, and a loaded timetable is "
-                        "not loaded again.",
+                        "The steps before it are done. A rerun plans again from what `updates` now holds: "
+                        "ingested archive members are skipped and a loaded timetable is not loaded again. A file "
+                        "an ingest step skipped (logged above) is read again only if its archive is still the "
+                        "first one the new plan reads, so deal with it before rerunning if it matters.",
                         file=sys.stderr,
                     )
                     return 1
