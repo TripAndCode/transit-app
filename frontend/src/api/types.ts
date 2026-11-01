@@ -108,6 +108,15 @@ export type DelayTimelineResponse = {
   frames: TimelineFrame[];
 };
 
+/** `GET /today/service-hours`: the service day in progress (YYYY-MM-DD, by
+ *  the server's clock) and, as UTC instants, when its first trip leaves and
+ *  its last trip arrives by the loaded timetable. `hours` is null when the
+ *  timetable runs no trip that day. */
+export type ServiceHoursResponse = {
+  date: string;
+  hours: { first_departure_at: string; last_arrival_at: string } | null;
+};
+
 export type LiveTripsResponse = {
   latest_captured_at: string | null;
   rows: LiveTrip[];

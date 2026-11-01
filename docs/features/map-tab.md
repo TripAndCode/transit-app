@@ -82,6 +82,27 @@ but are not plotted.
   environments without that transport use the agency's live feed URL as a
   fallback, writing to `updates_live` as well, then the client reads the
   newly persisted data.
+- An empty map says why it is empty (`frontend/src/tabs/map/emptyMapReason.ts`).
+  Its reason comes from today's hours by the loaded timetable
+  (`GET /api/{agency_id}/today/service-hours`): the first departure and the
+  last arrival among the trips the calendar runs that service day.
+  - After the last arrival it says the day's service has ended and when the
+    last trip arrived. Before the first departure it names the first trip's
+    time. Neither is claimed unless the feed last reported during the
+    service it follows: the day ending, or for the first trip, the day
+    before.
+  - During service hours, a feed quiet for longer than the live window says
+    since when it has been quiet and that the feed may have stopped. The
+    silence counts from the first departure at the earliest, so the first
+    trip has the live window to start reporting.
+  - A feed still reporting within the live window names neither: a route
+    filter left nothing to draw.
+  - When the timetable runs no trip that day, does not cover it, or the
+    hours cannot be read, the fixed overnight break (00:00–05:00 JST) stands
+    in for them.
+  - While the feed is not current, "Observed" and "5+ min late" read "—"
+    rather than 0, except where the timetable or the night accounts for the
+    silence.
 - A delayed trip's row in the attention panel links to
   `/agencies/:agencyId/routes/<route_code>`, that route's dossier
   (built by `routeHref` in `frontend/src/routes/destinations.ts`), the one
@@ -121,6 +142,7 @@ observations to a replay of one whole service day, one hour at a time
 | `useLiveTrips` | `GET /api/{agency_id}/delays/live` | One latest report per trip from the feed's rolling five-minute window, enriched with static stop coordinates and headsign |
 | `useLiveTripProgress` | `GET /api/{agency_id}/delays/live-progress?trip_id=...` | Nearest reported stop per source snapshot for one trip, compacted to one report per sequence |
 | `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Today's figures, one row per route, computed live from `updates_live` against a same-day-type baseline from `agg_route_daily_dist` |
+| `useServiceHours` | `GET /api/{agency_id}/today/service-hours` | Today's first departure and last arrival by the loaded timetable, which the empty map is judged by |
 | `useRouteShape` | `GET /api/{agency_id}/route-shape` | Static GTFS geometry for the selected route |
 | `useTimeline` | `GET /api/{agency_id}/delays/timeline` | One service day's worth of per-stop delay frames, backing day playback |
 
@@ -153,6 +175,20 @@ Every route's baseline for the day is read at most once every five minutes
 per agency, the report caches' lifetime. A timetable load that changes the
 class of any date in the window takes effect on the next request.
 
+`/today/service-hours` answers `{date, hours}` for the same service day in
+progress. `hours` holds `first_departure_at` and `last_arrival_at` as UTC
+instants, or is null when the loaded timetable runs no timed trip that day.
+`pipeline/service_hours.py` reads them from the timetable alone: the trips
+the `running` rule of `pipeline.planned_trips.plan_ctes` puts on the day, the
+same rule the planned trip counts use. A trip starts when it leaves its first
+stop and ends when it reaches its last. Times past midnight belong to the
+evening before, whether the feed writes `24:30` or `00:30`
+(`pipeline.service_day.service_day_seconds`). The result is cached per agency
+and day for five minutes, and a timetable load in the API process forgets it
+at once. The client keys the query by the service date its own clock is in,
+so the hours are read again when the day turns over at 04:00 JST. It uses
+them only when the response names that same date.
+
 Observations split across two ClickHouse tables: `updates_live` serves the
 current service day, the one before it and any later day; `updates` serves
 every older day, and any day that arrived by archive ingest.
@@ -168,6 +204,8 @@ whole day, so endpoints that can be asked about either today or a past day
 |---|---|
 | `frontend/src/tabs/MapTab.tsx` | Operations workspace, MapLibre lifecycle, marker interactions, freshness, and route selection |
 | `frontend/src/tabs/map/useOperationsMapLayers.ts` | Trip markers (stacked by exact reported stop), selected-route shape, selected-trip report trail, and the once-per-agency reveal of its stop extent |
+| `frontend/src/tabs/map/emptyMapReason.ts` | Why an empty map is empty: the timetable's hours, the overnight fallback, a stalled feed, or nothing yet received |
+| `pipeline/service_hours.py` | A service day's first departure and last arrival by the loaded timetable |
 | `frontend/src/tabs/map/selectedRouteDelay.ts` | Mean live delay of the selected route, which keys the route overlay's severity colour |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |

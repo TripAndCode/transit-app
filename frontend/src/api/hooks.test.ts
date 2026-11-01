@@ -14,6 +14,7 @@ import {
   usePerformanceStandards,
   useReport,
   useRouteShape,
+  useServiceHours,
   useSuggestion,
   useWeatherDelay,
 } from "./hooks";
@@ -470,5 +471,28 @@ describe("the delay record's steps", () => {
     expect(mockApiGet.mock.calls[0][0]).toBe(
       "/api/1/delay_record/stops?date=2026-09-02&route=W54&trip=1_%E5%B9%B3%E6%97%A5%2F%E4%BE%BF%262",
     );
+  });
+});
+
+describe("useServiceHours", () => {
+  it("reads today's hours, and reads them again when the service day turns over", async () => {
+    mockApiGet.mockResolvedValue({ date: "2026-10-25", hours: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ day }: { day: string }) => useServiceHours(1, day),
+      { ...withProviders(queryClient), initialProps: { day: "2026-10-25" } },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet.mock.calls[0][0]).toBe("/api/1/today/service-hours");
+
+    rerender({ day: "2026-10-26" });
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2));
+  });
+
+  it("asks nothing without an agency", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderHook(() => useServiceHours(null, "2026-10-25"), withProviders(queryClient));
+    expect(mockApiGet).not.toHaveBeenCalled();
   });
 });

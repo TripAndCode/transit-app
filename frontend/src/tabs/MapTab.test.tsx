@@ -14,7 +14,7 @@ import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
 import { decl, ruleBody } from "../test/cssRules";
 import { formatDateTime, formatReportTime } from "../utils/format";
-import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
+import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse, ServiceHoursResponse } from "../api/types";
 import { MockMap } from "../test/maplibreMock";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
@@ -33,6 +33,13 @@ function mockCommonHooks() {
     isLoading: false,
     isFetching: false,
     refetch: vi.fn(),
+  } as never);
+  // No timetable hours by default, so the empty map falls back to the fixed
+  // overnight break unless a test supplies them.
+  vi.spyOn(hooks, "useServiceHours").mockReturnValue({
+    data: { date: "2026-01-01", hours: null },
+    isLoading: false,
+    error: null,
   } as never);
   vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined } as never);
   vi.spyOn(hooks, "useLiveTripProgress").mockReturnValue({ data: undefined, isLoading: false } as never);
@@ -285,6 +292,105 @@ describe("MapTab when no trip is reporting", () => {
     expect(empty).not.toHaveTextContent("late at night");
     expect(empty).not.toHaveTextContent("may have stopped");
     expect(tileValue("Observed")).toBe("0");
+  });
+
+  function mockHours(data: ServiceHoursResponse | undefined, state: { isLoading?: boolean; error?: Error } = {}) {
+    return vi.spyOn(hooks, "useServiceHours").mockReturnValue({
+      data,
+      isLoading: state.isLoading ?? false,
+      error: state.error ?? null,
+    } as never);
+  }
+
+  // Service day 10/25 by the timetable: the first trip leaves at 06:05 JST and
+  // the last arrives at 21:48 JST.
+  const HOURS_25: ServiceHoursResponse = {
+    date: "2026-10-25",
+    hours: { first_departure_at: "2026-10-24T21:05:00Z", last_arrival_at: "2026-10-25T12:48:00Z" },
+  };
+  const jstTime = (iso: string) => `${formatDateTime(iso, { timeStyle: "short", timeZone: "Asia/Tokyo" })} JST`;
+
+  it("says the day's service has ended after the last trip, instead of blaming the feed", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-25T13:30:00Z")); // 22:30 JST
+    mockLive("2026-10-25T12:40:00Z"); // 21:40 JST
+    mockHours(HOURS_25);
+    renderMap();
+    const empty = emptyOverlay()!;
+    expect(empty).toHaveTextContent(`Today's service has ended (last trip arrived ${jstTime(HOURS_25.hours!.last_arrival_at)})`);
+    expect(empty).toHaveTextContent("The timetable has no trips until the next first departure.");
+    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(within(empty).queryByRole("button", { name: "Show last reported positions" })).toBeNull();
+    expect(tileValue("Observed")).toBe("0");
+  });
+
+  it("names the first trip's time before it leaves, after the fixed night is over", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-24T20:30:00Z")); // 05:30 JST on the 25th
+    mockLive("2026-10-24T12:40:00Z"); // 21:40 JST the evening before
+    mockHours(HOURS_25);
+    renderMap();
+    const empty = emptyOverlay()!;
+    expect(empty).toHaveTextContent(`The first trip leaves at ${jstTime(HOURS_25.hours!.first_departure_at)}`);
+    expect(empty).toHaveTextContent("The timetable has no trips before the first departure.");
+    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(tileValue("Observed")).toBe("0");
+  });
+
+  it("still says the feed may have stopped when it goes quiet during service hours", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(LAST_REPORT);
+    mockHours(HOURS_25);
+    renderMap();
+    expect(emptyOverlay()).toHaveTextContent("The operator's feed may have stopped.");
+    expect(tileValue("Observed")).toBe("—");
+  });
+
+  it("asks for the hours of the service day the clock is in, which turns over at 04:00 JST", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-25T17:30:00Z")); // 02:30 JST on the 26th
+    mockLive("2026-10-25T14:40:00Z");
+    const hoursHook = mockHours(HOURS_25);
+    renderMap();
+    expect(hoursHook).toHaveBeenCalledWith(1, "2026-10-25");
+  });
+
+  it("decides nothing about an empty map while the hours that explain it are still loading", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(DAYTIME));
+    mockLive(LAST_REPORT);
+    mockHours(undefined, { isLoading: true });
+    renderMap();
+    expect(emptyOverlay()).toBeNull();
+  });
+
+  it("falls back to the fixed night when the hours cannot be read", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-25T17:30:00Z")); // 02:30 JST
+    mockLive("2026-10-25T14:40:00Z");
+    mockHours(undefined, { error: new Error("unavailable") });
+    renderMap();
+    expect(emptyOverlay()).toHaveTextContent("late at night");
+  });
+
+  it("puts the end of service and the first trip in Japanese with their times", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-25T13:30:00Z")); // 22:30 JST
+      mockLive("2026-10-25T12:40:00Z");
+      mockHours(HOURS_25);
+      renderMap();
+      expect(emptyOverlay()).toHaveTextContent("本日の運行は終了しました（最終便の到着 21:48 JST）"); // i18n-ignore: asserts the ja copy
+      cleanup();
+      vi.setSystemTime(new Date("2026-10-24T20:30:00Z")); // 05:30 JST
+      mockLive("2026-10-24T12:40:00Z");
+      renderMap();
+      expect(emptyOverlay()).toHaveTextContent("始発は 6:05 JST です"); // i18n-ignore: asserts the ja copy
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("says nothing has been received when neither the live feed nor the history has a report", () => {

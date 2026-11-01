@@ -14,17 +14,17 @@ import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
-import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useStopBounds, useTodayRouteSummary } from "../api/hooks";
+import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
-import type { LiveTrip } from "../api/types";
+import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import { ApiError, apiPost } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
-import { EM_DASH, FILTER_SEPARATOR, formatReportTime } from "../utils/format";
+import { EM_DASH, FILTER_SEPARATOR, formatJstTime, formatReportTime } from "../utils/format";
 import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
@@ -43,7 +43,7 @@ import { PlaybackRail } from "./map/PlaybackRail";
 import { useDayPlayback } from "./map/useDayPlayback";
 import { useTimelineLayers } from "./map/useTimelineLayers";
 import { filterLastReportedRows, filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
-import { emptyMapReason, type EmptyMapReason } from "./map/emptyMapReason";
+import { emptyMapReason, serviceDateOf, type EmptyMapReason } from "./map/emptyMapReason";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../utils/clockSkew";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
@@ -104,15 +104,29 @@ function freshnessFor(timestamp: string | null | undefined, now: number): Freshn
   return "stale";
 }
 
-/** The empty map's explanation. The night is named only when it accounts for
- *  the silence, and a stalled feed says since when it has been quiet. */
+/** The empty map's explanation. The timetable's hours, or the night without
+ *  them, are named only when they account for the silence, and a stalled feed
+ *  says since when it has been quiet. */
 function emptyMapCopy(
   reason: EmptyMapReason,
   latestReport: string | null,
+  hours: ServiceHoursResponse["hours"],
   clock: number,
   t: ReturnType<typeof useTranslation>["t"],
 ): { title: string; hint?: string } {
   if (reason === "none") return { title: t("operations.empty.none_title"), hint: t("operations.empty.none_hint") };
+  if (reason === "ended" && hours) {
+    return {
+      title: t("operations.empty.ended_title", { time: formatJstTime(hours.last_arrival_at) }),
+      hint: t("operations.empty.ended_hint"),
+    };
+  }
+  if (reason === "before_first" && hours) {
+    return {
+      title: t("operations.empty.before_first_title", { time: formatJstTime(hours.first_departure_at) }),
+      hint: t("operations.empty.before_first_hint"),
+    };
+  }
   if (reason === "overnight") return { title: t("operations.empty.title"), hint: t("operations.empty.overnight_hint") };
   if (reason === "stale" && latestReport) {
     return {
@@ -279,6 +293,7 @@ export function MapTab() {
   // is one the clock has certainly reached.
   const clock = Math.max(now, liveQuery.dataUpdatedAt);
   const summaryQuery = useTodayRouteSummary(id);
+  const hoursQuery = useServiceHours(id, serviceDateOf(clock));
   const routeNames = useRouteNames(id);
   const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], clock, ctx.routes);
   const liveCsvColumns: CsvColumn<LiveTrip>[] = [
@@ -328,19 +343,22 @@ export function MapTab() {
   // history. The header, the empty map and the tiles all read this one value.
   const latestReport = liveQuery.data?.latest_captured_at ?? summaryQuery.data?.latest_captured_at ?? null;
   const freshness = freshnessFor(latestReport, clock);
-  const emptyReason = emptyMapReason(latestReport, clock);
+  const emptyReason = emptyMapReason(latestReport, clock, hoursQuery.data);
   // The tiles count trips reporting now. A trip on the map proves the feed
-  // current; with none, zero is a claim only a current feed or the overnight
-  // break can make, so a stalled or silent one reads unknown.
+  // current; with none, zero is a claim only a current feed, the timetable's
+  // hours or the overnight break can make, so a stalled or silent one reads
+  // unknown.
   const countsKnown = liveRows.length > 0 || freshness === "normal" || freshness === "delayed"
-    || emptyReason === "overnight";
+    || emptyReason === "overnight" || emptyReason === "before_first" || emptyReason === "ended";
   const lastReportedRows = emptyReason === "stale" ? filterLastReportedRows(liveQuery.data?.rows ?? [], ctx.routes) : [];
   const showingLastReported = !playbackOn && liveRows.length === 0 && lastReportedRows.length > 0
     && lastReportedFor != null && lastReportedFor === latestReport;
   // Without a live timestamp the summary dates the feed, so until it answers
-  // the empty map names no reason.
-  const emptyReasonPending = liveQuery.data?.latest_captured_at == null && (summaryQuery.isLoading || !!summaryQuery.error);
-  const emptyCopy = emptyMapCopy(emptyReason, latestReport, clock, t);
+  // the empty map names no reason. Nor does it while the timetable's hours are
+  // on their way; hours that fail to arrive leave the fixed night in their place.
+  const emptyReasonPending = (liveQuery.data?.latest_captured_at == null && (summaryQuery.isLoading || !!summaryQuery.error))
+    || hoursQuery.isLoading;
+  const emptyCopy = emptyMapCopy(emptyReason, latestReport, hoursQuery.data?.hours ?? null, clock, t);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
