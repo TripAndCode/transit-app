@@ -92,8 +92,9 @@ What the user sees/does:
   `pipeline/db.py`'s `build_stop_visits_ch_sql`, each side the latest
   plausible reading of its own kind under the same delay clamp. Dwell needs
   both sides of a visit, and counts only a departure the feed reported after
-  the arrival: the visit's latest plausible departure poll must be captured at
-  or after its first plausible arrival poll (the builder's `dep_observed`).
+  the arrival: the visit's latest plausible departure poll must come at or
+  after its first plausible arrival poll, polls ordered by capture time and
+  then file name (the builder's `dep_observed`).
   A departure whose every poll precedes the arrival is the prediction still
   standing when the bus arrived, and leaves the visit without a dwell sample.
   Running time needs this visit's arrival and the previous visit's departure,

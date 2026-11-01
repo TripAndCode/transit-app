@@ -416,7 +416,8 @@ async def schedule_realism_padding(
       is excluded, since holding there guards against nothing (the "avoid
       an early departure" hold this indicator targets only makes sense for
       a vehicle that is already at or ahead of schedule). ``None`` when no
-      on-time-or-early arrival at that stop was observed in this bucket.
+      on-time-or-early arrival at that stop in this bucket also has an
+      observed departure.
 
     ``terminus_early_rate`` is a single route-level scalar (not broken out
     by segment/hour): the share of trips whose LAST scheduled stop (highest

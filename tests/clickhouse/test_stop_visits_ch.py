@@ -245,12 +245,23 @@ def test_stop_visits_judge_the_departure_against_the_first_arrival_poll():
     assert _observed(polls) == [(2, 50, 25, True)]
 
 
-def test_stop_visits_observe_a_departure_captured_in_the_same_second_as_the_arrival():
+@pytest.mark.parametrize(
+    ("departure_file", "observed"),
+    [("a/000001.pb", False), ("a/000003.pb", True)],
+)
+def test_stop_visits_order_a_departure_in_the_arrivals_second_by_file_name(departure_file, observed):
+    """Within one capture second the file name orders the polls, as it breaks
+    every other tie here: a departure filed before the arrival was predicted,
+    one filed after it was observed."""
     polls = [
         _poll("a/000002.pb", _at(0), 2, arr=20),
-        _poll("a/000001.pb", _at(0), 2, dep=50),
+        _poll(departure_file, _at(0), 2, dep=50),
     ]
-    assert _observed(polls) == [(2, 50, 20, True)]
+    assert _observed(polls) == [(2, 50, 20, observed)]
+
+
+def test_stop_visits_observe_a_departure_reported_in_the_arrivals_own_poll():
+    assert _observed([_poll("a/000002.pb", _at(0), 2, dep=50, arr=20)]) == [(2, 50, 20, True)]
 
 
 def test_stop_visits_judge_only_the_plausible_departure_they_keep():

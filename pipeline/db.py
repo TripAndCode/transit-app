@@ -212,9 +212,11 @@ def build_stop_visits_ch_sql(
     - A visit with no plausible reading of either kind has no row, just as
       the dedup has none for a visit with no plausible departure.
     - `dep_observed` says whether the feed reported that departure after the
-      bus reached the stop: true when the departure poll picked above was
-      captured at or after the visit's first plausible arrival poll, false
-      when every plausible departure poll came before it. A departure still
+      bus reached the stop: true when the departure poll picked above comes
+      at or after the visit's first plausible arrival poll, false when every
+      plausible departure poll came before it. Polls are ordered as
+      everywhere here, by `(captured_at, file_name)`, so within one capture
+      second the file name decides, and a poll carrying both counts. A departure still
       standing from before the arrival is the feed's last prediction of it,
       so only an observed one measures the time spent at the stop. NULL when
       the visit lacks either side, which leaves nothing to judge.
@@ -235,13 +237,13 @@ def build_stop_visits_ch_sql(
     skipped the way `argMax` skips a NULL argument. A kind with no plausible
     reading leaves the default tuple, whose delay is NULL.
 
-    `dep_observed` adds two plain states to the same GROUP BY, under the same
-    conditions as the two `argMaxIf`s: `maxIf` of the departure polls'
-    `captured_at` is the picked poll's own (it wins on the maximal
-    `(captured_at, file_name)`, as `build_dedup_ch_sql`'s `max()` note
-    explains), and `minIf` of the arrival polls' is the first arrival. Both
-    return the epoch, not NULL, over no rows, which is why the comparison is
-    made only when both delays are present.
+    `dep_observed` adds two states to the same GROUP BY, under the same
+    conditions as the two `argMaxIf`s and over the same
+    `(captured_at, file_name)` key they order by: `maxIf` of the departure
+    polls' key is the picked poll's own, and `minIf` of the arrival polls'
+    is the first arrival's. Both return `(epoch, '')`, not NULL, over no
+    rows, which is why the comparison is made only when both delays are
+    present.
 
     `scheduled_sec`, when requested, is the latest departure poll's, as in the
     dedup, and NULL for an arrival-only visit.
@@ -273,14 +275,14 @@ def build_stop_visits_ch_sql(
         + (", tupleElement(visit_dep, 5) AS scheduled_sec" if include_scheduled_sec else "")
         + ", tupleElement(visit_arr, 1) AS arr_delay, "
         "if(tupleElement(visit_dep, 1) IS NOT NULL AND tupleElement(visit_arr, 1) IS NOT NULL, "
-        "toBool(visit_dep_at >= visit_first_arr_at), NULL) AS dep_observed "
+        "toBool(visit_dep_key >= visit_first_arr_key), NULL) AS dep_observed "
         "FROM ("
         f"SELECT u.trip_id AS visit_trip_id, {service_date_ch('u.captured_at')} AS visit_date, "
         "u.stop_sequence AS visit_stop_sequence, "
         f"argMaxIf(tuple(u.dep_delay, {schedule}{sched_sec}), {latest}, {dep_ok}) AS visit_dep, "
         f"argMaxIf(tuple(u.arr_delay, {schedule}), {latest}, {arr_ok}) AS visit_arr, "
-        f"maxIf(u.captured_at, {dep_ok}) AS visit_dep_at, "
-        f"minIf(u.captured_at, {arr_ok}) AS visit_first_arr_at "
+        f"maxIf({latest}, {dep_ok}) AS visit_dep_key, "
+        f"minIf({latest}, {arr_ok}) AS visit_first_arr_key "
         f"FROM {checked_table(table)} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
         f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
