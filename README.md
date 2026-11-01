@@ -78,12 +78,17 @@ The admin agencies page's 再集計 and まとめて更新 read the agency's liv
 which carries only the present moment, so neither fills a past day. Past days
 come from the collector's daily archives. The collector VM deletes each archive
 once R2 holds it, so `make fetch-ingest` (and its `SINCE`) reaches only the days
-not uploaded yet; sync older days from the bucket's `rt/<id>/` prefix with the
-`aws s3 sync` recipe in the Makefile's comment above `fetch`, then run
-`make ingest` and `make analyze` on them.
+not uploaded yet. `make catch-up-from-r2` catches every agency up from the
+bucket instead: it ingests the days after each agency's newest row and loads
+R2's newer timetables between them, so each day joins the timetable in force on
+it, which a plain `make ingest` over many days does not. It prints its plan and
+changes nothing until `APPLY=1`; `scripts/catch_up_from_r2.py`'s docstring has
+its rules.
 
 ```bash
-SINCE=20260917 make fetch-ingest   # fetch and ingest the days still on the VM from that date on
+make catch-up-from-r2              # the plan: days, timetable loads, download size
+make catch-up-from-r2 APPLY=1      # run it; then `make analyze-all`, as it prints
+SINCE=20260917 make fetch-ingest   # or fetch and ingest the days still on the VM from that date on
 make check-aggs                    # confirm the aggregates reach the newest day
 ```
 
@@ -176,6 +181,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
+| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `AGENCY="8 53"` narrows it) |
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |

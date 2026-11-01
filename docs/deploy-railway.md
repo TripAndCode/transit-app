@@ -343,6 +343,17 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > days are not ingested; load the timetable (step 3), then pull and ingest
 > them again.
 
+> **A backlog spanning a timetable change needs `scripts/catch_up_from_r2.py`,
+> not this loop.** `ingest` joins every row to the timetable loaded when it
+> runs, so ingesting a week of archives at once joins the days before a
+> timetable change to the timetable after it. The script plans the catch-up from
+> the bucket for every agency: the days after its newest row, with each newer
+> `static/<id>/gtfs_static_YYYYMMDD.zip` loaded at the JST day it came into
+> force. It prints the plan (days, timetable loads, download size) and changes
+> nothing without `--apply`; its docstring has the rules and refusals. It reads
+> the same `OBJECT_STORE_*`, `DATABASE_URL` and `CLICKHOUSE_*` variables, and
+> locally it is `make catch-up-from-r2`.
+
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
 > `pipeline.locks`' advisory lock (e.g. this job overlapping a manual

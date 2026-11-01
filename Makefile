@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 catch-up-from-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -251,6 +251,19 @@ fetch-ingest:
 # OBJECT_STORE_* vars). Run after `make fetch`.
 sync-r2:
 	bash scripts/sync_archives_to_r2.sh
+
+# Catch every agency up from R2 (OBJECT_STORE_* in .env): its archived days
+# after its newest row in `updates`, with R2's newer timetables loaded between
+# them so each JST day joins the timetable in force on it. The rules and
+# refusals are in scripts/catch_up_from_r2.py's docstring, and
+# docs/deploy-railway.md covers it beside the rest of R2.
+# Prints the plan only, reading the databases and listing R2. APPLY=1 runs it
+# (after a typed confirmation), ANALYZE=1 analyzes afterwards, and ALLOW_GAPS=1
+# goes past a day R2 has no archive for.
+# Narrow it with AGENCY="8 53", not AGENCY_ID: a local .env that sets AGENCY_ID
+# would otherwise narrow every run, and a partial catch-up reads like a whole one.
+catch-up-from-r2:
+	DATABASE_URL=$(db_url) poetry run python scripts/catch_up_from_r2.py $(foreach a,$(AGENCY),--agency-id $(a)) $(if $(APPLY),--apply,) $(if $(ANALYZE),--analyze,) $(if $(ALLOW_GAPS),--allow-gaps,)
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
