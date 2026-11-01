@@ -9,6 +9,7 @@ here are where every reader learns which table a service day lives in.
 import os
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
@@ -136,11 +137,25 @@ def ch_conn_kwargs() -> dict:
     }
 
 
-def get_client():
+# How long an analyze run waits for one query. A full rebuild scans an
+# agency's whole history in one query, which can run for tens of minutes; the
+# driver's default, which every other caller keeps, is five.
+ANALYZE_SEND_RECEIVE_TIMEOUT_SEC = 3600
+
+
+def get_client(*, send_receive_timeout: int | None = None):
     # This is also the factory `make ch-bootstrap` and CI's schema-apply
     # step use (see Makefile), so the DDL/bootstrap path gets the same TLS
     # coverage as ingest/analyze.
-    return clickhouse_connect.get_client(**ch_conn_kwargs())
+    timeout: dict[str, Any] = {} if send_receive_timeout is None else {"send_receive_timeout": send_receive_timeout}
+    return clickhouse_connect.get_client(
+        **ch_conn_kwargs(),
+        # No server session: nothing here relies on session state, and a
+        # query the client gave up on keeps running and holds its session,
+        # so a shared one refuses every later query on the same client.
+        autogenerate_session_id=False,
+        **timeout,
+    )
 
 
 def insert_updates(client, agency_id: int, rows: list[tuple], *, table: str = UPDATES_TABLE) -> int:
