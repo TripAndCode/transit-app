@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   HOURLY_24,
   HOURLY_MEANS,
+  OVERVIEW,
   PEAK_HOUR,
   QUEUE_ROWS,
   ROUTES,
@@ -33,6 +34,13 @@ describe("polyline", () => {
 describe("sample scene", () => {
   it("runs no tram, since no feed the app reads carries one", () => {
     expect(new Set(ROUTES.map((r) => r.mode))).toEqual(new Set(["bus", "train"]));
+  });
+
+  it("keeps the rail lines as scenery: every trip, queue row and route to check is a bus", () => {
+    const modeOf = (key: string) => ROUTES.find((r) => r.key === key)?.mode;
+    expect(TRIPS.every((tp) => ROUTES[tp.route].mode === "bus")).toBe(true);
+    expect(QUEUE_ROWS.every((row) => modeOf(row.route) === "bus")).toBe(true);
+    expect(OVERVIEW.routesToCheck.every((row) => modeOf(row.route) === "bus")).toBe(true);
   });
 
   it("keeps every trip on land and moves each one forward on refresh", () => {

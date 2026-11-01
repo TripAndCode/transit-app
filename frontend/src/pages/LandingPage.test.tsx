@@ -60,7 +60,7 @@ describe("LandingPage", () => {
       expect(screen.getByRole("link", { name: "ダッシュボードを見る（ログイン不要）" })).toHaveAttribute("href", "/");
       const hero = container.querySelector(".landing-hero__content")!;
       expect(hero.textContent).not.toMatch(/最新報告停留所|リアルタイム × 時刻表/);
-      expect(hero.textContent).toContain("ログインすると表示条件の保存と質問の履歴が使えます");
+      expect(hero.textContent).toContain("ログインすると、保存したビューと「質問」画面の調査をアカウントに残せます");
     } finally {
       await i18n.changeLanguage("en");
     }
@@ -69,8 +69,8 @@ describe("LandingPage", () => {
   it("opens the dashboard without sign-in when the deployment needs none, and says what sign-in adds", () => {
     renderLanding();
     expect(screen.getByRole("link", { name: "View the dashboard (no sign-in needed)" })).toHaveAttribute("href", "/");
-    const note = screen.getByText(/to save your view settings/);
-    expect(note).toHaveTextContent("Sign in to save your view settings and keep your question history.");
+    const note = screen.getByText(/to keep your saved views/);
+    expect(note).toHaveTextContent("Sign in to keep your saved views and Ask investigations with your account.");
     expect(within(note).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
@@ -78,7 +78,7 @@ describe("LandingPage", () => {
     mockUseConfig.mockReturnValue({ data: { ...OPEN, auth_enabled: false } });
     renderLanding();
     expect(screen.getByRole("link", { name: "View the dashboard (no sign-in needed)" })).toBeTruthy();
-    expect(screen.queryByText(/to save your view settings/)).toBeNull();
+    expect(screen.queryByText(/to keep your saved views/)).toBeNull();
   });
 
   it("offers sign-in as the way in when the deployment requires it", () => {
@@ -93,7 +93,7 @@ describe("LandingPage", () => {
     renderLanding();
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
     expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
-    expect(screen.queryByText(/to save your view settings/)).toBeNull();
+    expect(screen.queryByText(/to keep your saved views/)).toBeNull();
   });
 
   it("promises no sign-in-free entry before the configuration says so", () => {
@@ -128,7 +128,7 @@ describe("LandingPage", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open the dashboard" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
-    expect(screen.queryByText(/to save your view settings/)).toBeNull();
+    expect(screen.queryByText(/to keep your saved views/)).toBeNull();
   });
 
   it("renders the scroll narrative's real chart sections below the hero, not the retired DashboardPreview mock", () => {
