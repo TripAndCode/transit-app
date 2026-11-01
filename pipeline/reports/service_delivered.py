@@ -70,8 +70,8 @@ CANCELLATION_LOOKBACK_DAYS = 90
 # agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
 # missed trips are there whatever timetable is loaded now. It has a row only
 # for a day with a missed trip: a planned day without one reads 0 missed, and
-# an agency with no row at all in the look-back ($4 to $3) has never reported
-# a cancellation, so reports_cancellations is false.
+# an agency with no row at all in the look-back ($4 to $3) reported no
+# cancellation in it, so reports_cancellations is false.
 _SERVICE_SQL = (
     "WITH"
     + plan_ctes("$1::int[]", "$2::date", "$3::date")
