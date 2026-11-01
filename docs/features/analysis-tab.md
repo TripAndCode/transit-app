@@ -402,6 +402,7 @@ the scope as one sentence above their content
 | `pipeline/reports/dwell_run.py` | `compute_dwell_run_decomposition` — the `dwell_run` report's read side |
 | `pipeline/reports/council.py` | `compute_council_summary`/`compute_delay_certificate` — the `council_summary`/`delay_certificate` reports' read side |
 | `pipeline/reports/delay_record.py` | `compute_record_trips`/`compute_record_stops` — the passenger delay record's trips and per-stop readings |
+| `pipeline/data_sources.py` | `source_of`/`credit_line` — the agency feed's open-data source and its plain-text credit, the CSV preamble's last row, read from `frontend/src/components/dataSources.json` and the `credits.*` locale keys |
 | `pipeline/reports/definition.py` | `DefinitionMeta`/`resolve_definition_meta`/`format_definition_csv_line`/`format_definition_footnotes` — the shared on-time/late definition metadata every report/comparison view surfaces |
 | `pipeline/dwell_run.py` | Pure dwell/running-time math (schedule + `arr_delay`/`dep_delay` → actual timestamps → dwell/running seconds) shared by the analyze-time builder and the read side |
 | `pipeline/histogram.py` | Fixed-width histogram bucketing/percentile math, accepting custom `(lo, hi, width)` bounds so `pipeline/dwell_run.py` can reuse it with its own bucket scale |
@@ -479,3 +480,15 @@ the scope as one sentence above their content
   the `legacy_60s` default. In the CSV it's a one-cell preamble row before
   the column header; in the UI, `DefinitionMetaBlock` renders it from the
   API response's `definition` field.
+- Every CSV export's preamble ends, right before the column header, with a
+  one-cell credit for the open data behind the figures:
+  `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so
+  an Aomori City Bus file carries the CC BY credit with its modification
+  note and a Hiroshima operator's the Hiroshima Bus Association's CC0
+  courtesy credit, never both. Each linked name is followed by its URL,
+  since a CSV cell keeps no link. Unlike the Japanese-only rows above it,
+  the credit follows the request's `Accept-Language`. A plain
+  `CsvLink` download sends the browser's language, not the UI's. A feed no
+  source covers adds no row. The source list and the wording are read from
+  the frontend's `dataSources.json` and `credits.*` locale keys, not copied
+  (see `docs/features/reports-tab.md`).

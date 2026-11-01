@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { downloadCsv } from "../../components/analysis/csv";
+import { useAgencyCredit } from "../../components/useAgencyCredit";
 import type { InvestigationStep } from "./investigationSteps";
 import { downloadSnapshot, resultTableCsv } from "./resultSnapshot";
 
 export function ResultExports({ agencyId, step }: { agencyId: number; step: InvestigationStep }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
+  const credit = useAgencyCredit(agencyId);
   if (!step.messages.some((message) => message.role === "assistant")) return null;
   const tables = step.messages.flatMap((message) => {
-    const rows = resultTableCsv(agencyId, message);
+    const rows = resultTableCsv(agencyId, message, credit);
     return rows ? [{ id: message.message_id, rows }] : [];
   });
   function save(action: () => void) {

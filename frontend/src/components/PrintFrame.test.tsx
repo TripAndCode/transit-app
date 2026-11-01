@@ -1,12 +1,25 @@
-import { act, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { act, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as hooks from "../api/hooks";
+import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { formatDateTime } from "../utils/format";
-import { PrintFrame } from "./PrintFrame";
+import { PrintCredit, PrintFrame } from "./PrintFrame";
 
-const AGENCIES = [{ agency_id: 5, agency_name: "Aomori Bus" }];
+const AOMORI_FEED = "https://aomoricitybus.com/TripUpdate.pb";
+const HIROSHIMA_FEED = "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin";
+const AGENCIES = [
+  { agency_id: 5, agency_name: "Aomori Bus", feed_url: AOMORI_FEED },
+  { agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED },
+  { agency_id: 9, agency_name: "Elsewhere Bus", feed_url: "http://example.com/feed.pb" },
+];
+/** Shared with the backend's CSV credit tests: tests/unit/test_data_sources.py. */
+const CREDIT_LINES: Record<string, Record<"ja" | "en", string>> = JSON.parse(
+  readFileSync(resolve(__dirname, "../../../tests/fixtures/data_source_credit_lines.json"), "utf8"),
+);
 const ROUTES = [
   { route_code: "R1", route_short_name: "A1", route_long_name: "Coast Line" },
   { route_code: "R2", route_short_name: "B2", route_long_name: "Hill Line" },
@@ -94,5 +107,57 @@ describe("PrintFrame", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId("print-frame")).toBeNull();
+  });
+});
+
+function renderCredit(agencyId: number) {
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: AGENCIES } as never);
+  return renderWithProviders(
+    <MemoryRouter initialEntries={[`/agencies/${agencyId}/reports`]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/*" element={<PrintCredit />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("PrintCredit", () => {
+  // Runs before the file's mock restore, so the re-render it causes still
+  // reads the mocked agency list.
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  // Paper keeps no link, and CC BY asks that the material and the licence be
+  // linked, so each linked name is followed by its URL.
+  it("credits an Aomori City Bus printout to its CC BY source, with each URL written out", () => {
+    renderCredit(5);
+    const credit = screen.getByTestId("print-credit");
+    expect(within(credit).getByRole("heading", { name: "Data sources" })).toBeInTheDocument();
+    expect([...credit.querySelectorAll("p")].map((p) => p.textContent)).toEqual([CREDIT_LINES[AOMORI_FEED].en]);
+    expect(credit.querySelector("a")).toBeNull();
+  });
+
+  it("credits a Hiroshima operator's printout to the bus association, in Japanese", async () => {
+    await i18n.changeLanguage("ja");
+    renderCredit(8);
+    const credit = screen.getByTestId("print-credit");
+    expect(within(credit).getByRole("heading", { name: "データの出典" })).toBeInTheDocument();
+    expect([...credit.querySelectorAll("p")].map((p) => p.textContent)).toEqual([CREDIT_LINES[HIROSHIMA_FEED].ja]);
+  });
+
+  it("prints no credit for an agency whose feed no source covers", () => {
+    renderCredit(9);
+    expect(screen.queryByTestId("print-credit")).toBeNull();
+  });
+
+  it("prints no credit outside an agency", () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: AGENCIES } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/account"]}>
+        <PrintCredit />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("print-credit")).toBeNull();
   });
 });

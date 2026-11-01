@@ -25,6 +25,7 @@ from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_loc
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
+from pipeline.data_sources import credit_line
 from pipeline.day_types import DayType
 from pipeline.flags import aflag
 from pipeline.query.formatter import (
@@ -1105,6 +1106,7 @@ def _csv_response(
     ctx: RangeCtx,
     definition: DefinitionMeta,
     *,
+    credit: str | None,
     unavailable_message: str | None = None,
     extra_footnotes: list[str] | None = None,
 ) -> StreamingResponse:
@@ -1123,6 +1125,12 @@ def _csv_response(
     than locale-switched, matching this CSV export's existing operator-facing
     convention.
 
+    `credit` is the last preamble row, right before the column header: the
+    open-data credit for the agency's feed (``pipeline.data_sources``), in
+    the request's language because it is the licence's attribution to
+    whoever reads the file. Required, so no export can leave it out; None
+    only when no credited source covers the feed, which adds no row.
+
     `unavailable_message`, when given, replaces the (otherwise empty) data
     rows with a single explanatory row instead -- for a report type whose
     JSON/text rendering already distinguishes "genuinely zero observations"
@@ -1138,6 +1146,8 @@ def _csv_response(
     w.writerow([format_definition_csv_line(definition)])
     for line in extra_footnotes or []:
         w.writerow([line])
+    if credit is not None:
+        w.writerow([credit])
     w.writerow(cols)
     if unavailable_message is not None:
         w.writerow([unavailable_message])
@@ -1310,6 +1320,11 @@ async def get_report(
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
     definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
+    credit = (
+        credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), locale)
+        if format == "csv"
+        else None
+    )
 
     n = limit or 100
     intent: dict = {}
@@ -1412,7 +1427,7 @@ async def get_report(
         dow_band = hourly_cells_to_dow_band(hourly, locale=locale)
         days = series["days"]
         if format == "csv":
-            return _csv_response(report_type, days, ctx, definition)
+            return _csv_response(report_type, days, ctx, definition, credit=credit)
         # Schedule-revision boundary dates — dates within this
         # range where the static feed version running that day changed —
         # so the Trend chart can mark a timetable revision instead of
@@ -1448,8 +1463,8 @@ async def get_report(
                 or not payload.get("time_band_supported", True)
                 or payload["unavailable_reason"]
             ):
-                return _csv_response(report_type, [], ctx, definition, unavailable_message=text)
-            return _csv_response(report_type, payload["routes"], ctx, definition)
+                return _csv_response(report_type, [], ctx, definition, unavailable_message=text, credit=credit)
+            return _csv_response(report_type, payload["routes"], ctx, definition, credit=credit)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
@@ -1479,12 +1494,12 @@ async def get_report(
             payload["service_delivered_pct"],
         )
         if format == "csv":
-            # The CSV preamble stays Japanese-only (see _csv_response's own
+            # The CSV's caveat rows stay Japanese-only (see _csv_response's own
             # docstring), matching format_definition_csv_line's existing
             # convention -- unlike the JSON `text` body below, which honors
             # the request's locale.
             footnotes = format_council_summary_footnotes(definition, payload, locale="ja")
-            return _csv_response(report_type, [row], ctx, definition, extra_footnotes=footnotes)
+            return _csv_response(report_type, [row], ctx, definition, extra_footnotes=footnotes, credit=credit)
         text = format_council_summary_text(payload, definition, agency_name, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
@@ -1501,14 +1516,14 @@ async def get_report(
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
-        # The CSV is Japanese-only, its rows' day markers and its preamble alike,
-        # matching council_summary's CSV branch and format_definition_csv_line.
+        # The CSV's rows and day markers are Japanese-only, matching
+        # council_summary's CSV branch and format_definition_csv_line.
         rows, rows_total = await compute_delay_certificate(
             agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n, locale="ja" if format == "csv" else locale
         )
         if format == "csv":
             footnotes = format_delay_certificate_footnotes(threshold, len(rows), rows_total, locale="ja")
-            return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
+            return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes, credit=credit)
         observed: bool | None = True
         if rows_total == 0:
             # Only tells an empty list's two causes apart, so a failed probe
@@ -1534,7 +1549,7 @@ async def get_report(
         raise HTTPException(status_code=500, detail="unreachable")
 
     if format == "csv":
-        return _csv_response(report_type, rows, ctx, definition)
+        return _csv_response(report_type, rows, ctx, definition, credit=credit)
 
     text = format_result(intent["query_type"], rows, intent, locale=locale)
     return ReportResponse(

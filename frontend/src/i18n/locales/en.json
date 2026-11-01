@@ -550,7 +550,8 @@
   "credits": {
     "title": "Data sources",
     "aomori": "This service uses the following copyrighted material with modifications. Aomori City, <static>Aomori City Bus information</static> and <realtime>[realtime information] Aomori City Bus information</realtime>, <license>Creative Commons License Attribution 4.0 International</license>",
-    "hiroshima": "This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its <site>GTFS open data site</site> under <license>Creative Commons CC0</license>."
+    "hiroshima": "This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its <site>GTFS open data site</site> under <license>Creative Commons CC0</license>.",
+    "link_with_url": "{{name}} ({{url}})"
   },
   "help": {
     "title": "User Manual",

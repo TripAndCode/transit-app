@@ -60,6 +60,12 @@ What the user sees/does:
   bubbles; assistant bubbles render `frontend/src/tabs/ask/RichResult.tsx`
   (table / kv / chart depending on `result.kind`), with a collapsible
   "details" JSON dump of tool/args/result.
+- **Result exports** — `frontend/src/tabs/ask/ResultExports.tsx`: the
+  selected step as JSON, and a CSV for each table answer (`resultTableCsv`
+  in `resultSnapshot.ts`). The CSV opens with key/value rows recording what
+  produced it, the last being `data_source`: the agency's open-data credit
+  in the UI language (`useAgencyCredit`), left out when no source covers
+  the agency's feed. A blank row and the table follow.
 - **Follow-up box** —
   `frontend/src/tabs/ask/FollowupChipsRow.tsx`: a free-text input and send
   button, grounded on the selected stop when one is selected, otherwise on

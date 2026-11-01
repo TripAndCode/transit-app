@@ -7,6 +7,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
 import { formatDateTime } from "../utils/format";
 import { scopeTitle } from "./scope/scopePhrases";
+import { useAgencyCredit } from "./useAgencyCredit";
 
 /** More routes than this read as a list nobody can scan on paper; the header's
  *  "N routes" already says how many. */
@@ -58,5 +59,22 @@ export function PrintFrame() {
         {printedAt && t("print.generated_at", { time: formatDateTime(printedAt, STAMP_OPTIONS) })}
       </footer>
     </div>
+  );
+}
+
+/** The open data behind the printed figures, credited on paper: the source
+ *  this agency's feed is published under, after the page's content, each
+ *  link written out because paper keeps none. Hidden on screen like the
+ *  frame. */
+export function PrintCredit() {
+  const { t } = useTranslation();
+  const agencyId = useAgencyId();
+  const credit = useAgencyCredit(agencyId);
+  if (credit == null) return null;
+  return (
+    <section className="print-frame print-frame__credit" data-testid="print-credit">
+      <h2>{t("credits.title")}</h2>
+      <p>{credit}</p>
+    </section>
   );
 }

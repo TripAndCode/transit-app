@@ -15,7 +15,10 @@ export function resultSnapshot(agencyId: number, step: InvestigationStep, export
   }, null, 2);
 }
 
-export function resultTableCsv(agencyId: number, message: ConvMessage): unknown[][] | null {
+/** A table answer as CSV rows: a key/value preamble recording what produced
+ *  it, ending with `credit` (the agency's data-source credit) when one
+ *  applies, then a blank row and the table. */
+export function resultTableCsv(agencyId: number, message: ConvMessage, credit: string | null): unknown[][] | null {
   const result = message.result;
   if (message.role !== "assistant" || result?.kind !== "table" || !result.columns || !result.rows?.every(Array.isArray)) return null;
   const rows = result.rows as unknown[][];
@@ -30,6 +33,7 @@ export function resultTableCsv(agencyId: number, message: ConvMessage): unknown[
     ["tool", message.tool],
     ["recorded_args", JSON.stringify(message.args)],
     ["summary", result.summary],
+    ...(credit == null ? [] : [["data_source", credit]]),
     [], ...buildCsv(rows, columns),
   ];
 }

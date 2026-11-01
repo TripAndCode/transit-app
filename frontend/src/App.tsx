@@ -10,7 +10,7 @@ import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { Sidebar } from "./components/Sidebar";
 import { NavPendingProvider } from "./components/navPending";
-import { PrintFrame } from "./components/PrintFrame";
+import { PrintCredit, PrintFrame } from "./components/PrintFrame";
 import "./styles/viewTransitions.css";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
@@ -67,6 +67,9 @@ export default function App() {
                 </Suspense>
               </div>
             </ViewTransition>
+            {/* Inside main, so the print stylesheet's room for the fixed
+                footer keeps the credit clear of it. */}
+            <PrintCredit />
           </main>
           {!focused && <CopilotPanel />}
           {/* Persisted in localStorage (transit.tourSeen); a no-op render

@@ -21,6 +21,8 @@ deploy
 tools
 .pre-commit-config.yaml
 .gitleaks*
+# frontend/src stays in the image: pipeline/data_sources.py reads the
+# data-source list and the credit wording from it at runtime.
 frontend/node_modules
 frontend/dist
 api/static

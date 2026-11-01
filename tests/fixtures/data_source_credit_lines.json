@@ -1,0 +1,10 @@
+{
+  "https://aomoricitybus.com/TripUpdate.pb": {
+    "ja": "本サービスは、以下の著作物を改変して利用しています。青森市企業局交通部、青森市営バス路線情報（https://ckan.odpt.org/dataset/aomori_city_all_lines）および【リアルタイム情報】青森市営バス路線情報（https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines）、クリエイティブ・コモンズ・ライセンス 表示4.0国際（https://creativecommons.org/licenses/by/4.0/deed.ja）",
+    "en": "This service uses the following copyrighted material with modifications. Aomori City, Aomori City Bus information (https://ckan.odpt.org/dataset/aomori_city_all_lines) and [realtime information] Aomori City Bus information (https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines), Creative Commons License Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/deed.en)"
+  },
+  "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin": {
+    "ja": "本サービスは、公益社団法人広島県バス協会が広島県バス協会GTFSオープンデータサイト（https://www.bus-kyo.or.jp/）で公開している広島県内の各バス事業者のデータ（クリエイティブ・コモンズ CC0（https://creativecommons.org/publicdomain/zero/1.0/deed.ja））を加工して利用しています。",
+    "en": "This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its GTFS open data site (https://www.bus-kyo.or.jp/) under Creative Commons CC0 (https://creativecommons.org/publicdomain/zero/1.0/deed.en)."
+  }
+}

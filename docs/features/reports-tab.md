@@ -132,6 +132,26 @@ reports.
   line (`white-space: nowrap`), so a phone never breaks a number in two.
 - The document is called 協議会向け報告 / "Council report" wherever it is
   named: its tab, its subtitle, the report list and the printed header.
+- Every printout of an agency page ends with the credit for the open data
+  behind it. That covers the period summary, the council report, the delay
+  record and any other screen sent to the browser's print. The credit is
+  `PrintCredit` (`frontend/src/components/PrintFrame.tsx`), placed at the end
+  of `<main>` in `App.tsx` and hidden on screen like the print header.
+  - It credits only the source the agency's `feed_url` is published under
+    (`dataSourceOf`): Aomori City Bus's CC BY credit with its modification
+    note, or the Hiroshima Bus Association's CC0 courtesy credit.
+  - Paper keeps no link, so each linked name is followed by its URL
+    (`creditText`, in the `credits.link_with_url` pattern).
+  - The council and delay-record CSVs carry the same credit as their last
+    preamble row (see `docs/features/analysis-tab.md`).
+  - The period summary's combined CSV starts at its header row and gets no
+    credit, so whatever imports it keeps reading the same shape.
+  - `frontend/src/components/dataSources.json` is the one source list. The
+    help page, the welcome footer, the print credit, the feed-host guard
+    test and the server's CSVs (`pipeline/data_sources.py`) all read it. The
+    server reads the credit sentences from the same `credits.*` locale keys,
+    and both renderers are pinned to
+    `tests/fixtures/data_source_credit_lines.json`.
 
 What the user sees/does:
 
@@ -195,6 +215,8 @@ than issuing their own requests.
 | `frontend/src/tabs/SavedExportTab.tsx` | Reports shell: the `doc` strip, the `view` → `doc` replacement, and which screen each document renders |
 | `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend with its spike, the ten slowest routes, saved-analysis list |
 | `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print |
+| `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time), and `PrintCredit`'s data-source credit at the end |
+| `frontend/src/components/dataSources.ts`, `dataSources.json` | The open-data source list, `dataSourceOf` (feed URL → source) and `creditText` (a credit as plain text with its URLs) |
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
@@ -210,6 +232,7 @@ than issuing their own requests.
 | `api/routers/reports.py` | `GET /reports/{report_type}` (shared with the Analysis tab) |
 | `pipeline/reports/rankings.py` | `compute_trend_series()`, `compute_ranking()` |
 | `pipeline/reports/definition.py` | Definition metadata resolved into every report's `definition` field |
+| `pipeline/data_sources.py` | `credit_line` — the data-source credit a report CSV's preamble ends with |
 | `pipeline/analyze.py` | Builds `agg_daily_trend` and the ranking aggregates this tab reads |
 
 ## How to verify manually

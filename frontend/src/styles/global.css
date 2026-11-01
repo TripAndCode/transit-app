@@ -938,5 +938,10 @@ summary::-webkit-details-marker { display: none; }
   .print-frame { display: block !important; color: black; }
   .print-frame__header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #999; font-size: 11pt; }
   .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; color: #444; text-align: right; }
+  /* The credit follows the content and stays whole on one page; its URLs are
+     long unbroken words, so they wrap anywhere rather than overflow the page. */
+  .print-frame__credit { margin-top: 16px; padding-top: 6px; border-top: 1px solid #999; font-size: 9pt; break-inside: avoid; }
+  .print-frame__credit h2 { margin: 0 0 2px; font-size: 9pt; font-weight: 600; }
+  .print-frame__credit p { margin: 0; overflow-wrap: anywhere; }
   main { padding-bottom: 14mm; }
 }
