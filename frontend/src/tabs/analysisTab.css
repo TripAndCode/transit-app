@@ -19,6 +19,7 @@
 .cert-staff { margin-top: 24px; color: var(--text-secondary); }
 .cert-staff > summary { cursor: pointer; font-size: var(--text-sm); }
 .cert-staff__summary { font-size: var(--text-sm); }
+.cert-staff__basis { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
 
 /* A printed report is the report alone: the list beside it and the insight
    panel are the screen's navigation, and the staff list is not the record. */

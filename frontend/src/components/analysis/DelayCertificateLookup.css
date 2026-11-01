@@ -28,6 +28,7 @@
   background: var(--bg-surface);
 }
 .cert-card__statement { margin: 0 0 12px; font-size: var(--text-base); }
+.cert-card__nearby { margin: -4px 0 12px; padding-left: 18px; color: var(--text-secondary); font-size: var(--text-sm); }
 .cert-card__facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

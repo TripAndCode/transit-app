@@ -24,6 +24,8 @@ import type {
   AskResponse,
   ConvMessage,
   Conversation,
+  DelayRecordStopsResponse,
+  DelayRecordTripsResponse,
   DelayTimelineResponse,
   FilterCtx,
   ForecastHeatmap,
@@ -223,6 +225,43 @@ export function useReport(
     // only) instead of `isFetching` (every refetch), matching AnalysisTab's
     // report-switch UX to useNetworkSummary/useForecastOverview's.
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Step 3 of the passenger delay record: every trip `route` ran on `date`
+ *  with a departure reading. Fetched once a route is chosen. */
+export function useDelayRecordTrips(
+  agencyId: number,
+  date: string,
+  route: string | null,
+): UseQueryResult<DelayRecordTripsResponse> {
+  return useQuery({
+    queryKey: ["delay_record_trips", agencyId, date, route],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams({ date, route: route! });
+      return apiGet<DelayRecordTripsResponse>(`/api/${agencyId}/delay_record/trips?${qs.toString()}`, { signal });
+    },
+    enabled: route != null,
+    staleTime: 60 * 1000,
+  });
+}
+
+/** Step 4 of the passenger delay record: the chosen trip's stops, each with
+ *  the departure delay it recorded. Fetched once a trip is chosen. */
+export function useDelayRecordStops(
+  agencyId: number,
+  date: string,
+  route: string | null,
+  trip: string | null,
+): UseQueryResult<DelayRecordStopsResponse> {
+  return useQuery({
+    queryKey: ["delay_record_stops", agencyId, date, route, trip],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams({ date, route: route!, trip: trip! });
+      return apiGet<DelayRecordStopsResponse>(`/api/${agencyId}/delay_record/stops?${qs.toString()}`, { signal });
+    },
+    enabled: route != null && trip != null,
+    staleTime: 60 * 1000,
   });
 }
 

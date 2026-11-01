@@ -62,7 +62,7 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
-from pipeline.service_day import service_date_ch, service_date_of, service_day_seconds, service_day_start_utc
+from pipeline.service_day import clock_to_sec, service_date_ch, service_date_of, service_day_start_utc
 
 _log = logging.getLogger(__name__)
 
@@ -801,27 +801,6 @@ ROUTE_TRIPS_DATE_WINDOW_DAYS = 30
 # an unbounded number of stop rows -- and an unbounded polyline-drawing cost
 # on the frontend -- even while staying under the trip-count cap.
 MAX_ROUTE_TRIP_STOPS = 12000
-
-_CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")
-
-
-def clock_to_sec(text: str | None) -> int | None:
-    """Seconds since the service day's 00:00 for a GTFS ``HH:MM[:SS]`` clock.
-
-    Fallback for rows whose ``scheduled_sec`` is NULL: the `aomori_regex`
-    ingest strategy writes a 5-char ``"HH:MM"`` with no seconds, while
-    static_join agencies write 8 chars. An hour past 24 is a real GTFS
-    post-midnight continuation and stays unwrapped, and a clock before the
-    service-day cutover (``00:10``) is placed a day later (:func:`~pipeline.
-    service_day.service_day_seconds`), so a trip that crosses midnight keeps a
-    monotonically increasing position on a time axis.
-    """
-    if not text:
-        return None
-    m = _CLOCK_RE.match(text)
-    if m is None:
-        return None
-    return service_day_seconds(int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
 
 
 class RouteTripStop(BaseModel):

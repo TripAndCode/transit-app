@@ -423,6 +423,52 @@ export type DelayCertificateRow = [
   stop_is_first: boolean | null,
 ];
 
+/** One trip a route ran on the passenger delay record's day
+ *  (`GET /delay_record/trips`). `departure_sec` counts from the service day's
+ *  00:00 and passes 24h after midnight. When the loaded timetable runs the
+ *  trip that day (`matched`), it is the trip's origin departure, `terminal`
+ *  is its last stop and `headsign` the feed's own note on it (a via point or
+ *  line name as often as a destination) when that says more. Otherwise it is
+ *  the schedule of its earliest recorded stop, which need not be where it
+ *  began, and both are null. */
+export type DelayRecordTrip = {
+  trip_id: string;
+  departure_sec: number | null;
+  terminal: string | null;
+  headsign: string | null;
+  matched: boolean;
+  observed_stops: number;
+};
+
+export type DelayRecordTripsResponse = {
+  date: string;
+  route: string;
+  trips: DelayRecordTrip[];
+  scope_applied: Record<string, boolean>;
+};
+
+/** One stop of the chosen trip, in stop order. `dep_delay` is its latest
+ *  plausible departure reading, or null when it has none; `scheduled_sec` is
+ *  the schedule that reading was measured against, else the timetable's.
+ *  `stop_name` is null when the loaded timetable does not name it that day. */
+export type DelayRecordStop = {
+  stop_sequence: number;
+  stop_name: string | null;
+  scheduled_sec: number | null;
+  dep_delay: number | null;
+};
+
+/** `GET /delay_record/stops`: `trip` is null and `stops` empty when the trip
+ *  has no reading that day. */
+export type DelayRecordStopsResponse = {
+  date: string;
+  route: string;
+  agency_name: string;
+  trip: DelayRecordTrip | null;
+  stops: DelayRecordStop[];
+  scope_applied: Record<string, boolean>;
+};
+
 /** One hour-of-day × date cell of the trend heatmap. `sum_delay_sec` is the
  *  cell's exact raw-seconds total, null until the aggregate row has been
  *  rebuilt since the column was introduced -- only a caller pooling several

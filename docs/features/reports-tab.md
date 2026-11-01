@@ -42,28 +42,66 @@ reports.
   `doc=certificate` param and the API keep the old name so links and saved
   views keep working. `tests/frontend/i18n_glossary.test.mjs` holds the copy
   to that name.
-- The delay record is three numbered steps
+- The delay record is four numbered steps
   (`frontend/src/components/analysis/DelayCertificateLookup.tsx`): the day,
   which stops at the agency's last data day (a typed later day is pulled back
-  to it), the route, then the departure among that day's late ones, each
-  shown as 「17:42 広島駅 発（8分遅れ）」. The record's sentence names the stop
-  its times were taken at. That stop is the earliest one the feed recorded
-  for the trip; a feed often sends nothing for a trip's first stop, so each
-  row also says whether the loaded timetable starts the trip there
-  (`compute_delay_certificate`'s `stop_name`/`stop_is_first`, looked up in
-  `static_stop_times`/`static_stops`). Only then does the record call it the
-  trip's start (「始発側の「広島駅」での発車時刻です。」); otherwise it says
-  the stop is not where the trip starts, and with no name in the timetable it
-  speaks of the first recorded stop. It never names the stop the passenger
-  boarded at. Only the loaded timetable is kept and a reload replaces it in
-  place, so a stop is named only when the loaded timetable runs the trip on
-  the record's day (`plan_ctes`' running rule, the one planned trips count
-  by): a record from before it starts, or a trip_id it reuses under a service
-  not running that day, falls back to the first recorded stop.
-- Staff open 「遅れた便の一覧」 under the lookup: every route's late
-  departures (the report's default threshold) on the day the lookup shows,
-  fetched only once the section is opened, with that day's CSV. The record's
-  day and route are its whole scope, so this document has no scope sentence.
+  to it), the route, the trip, then the stop the passenger boarded at. A trip
+  that leaves its first stop on time can still leave a later stop late, so the
+  record gives the departure delay at the chosen stop and names the trip by its
+  scheduled departure from that stop, so the sentence's figures add up:
+  「17:42発の便は、紙屋町東を8分遅れて発車しました（17:50）。」, with 定刻に / 早く for
+  a departure on time or early. The trip's start and where it runs to are the
+  record's 「便」 line. Two endpoints serve the last two steps
+  (`pipeline/reports/delay_record.py`):
+  - `GET /api/{agency_id}/delay_record/trips?date=&route=` lists every trip
+    of the route with a departure reading that day, late or not, ordered by
+    departure, each as 「17:42発 広島駅行き（旧道・八丁堀経由）」: its start, its last
+    stop without platform notes (`normalize_stop_name`), and the feed's
+    `trip_headsign` beside it. Feeds fill the headsign with a via point, a line
+    name or a route code as often as a destination, so it never stands in for
+    the last stop, and it is dropped when it only repeats it. The list comes from the day's observations, not the timetable:
+    only the loaded timetable is kept, so a day before it starts has no plan,
+    while the feed still recorded that day's trips. A trip with no reading has
+    no record and is not offered (「一覧にない便は、この日のリアルタイムデータに記録が
+    ありません。」).
+  - `GET /api/{agency_id}/delay_record/stops?date=&route=&trip=` lists the
+    trip's stops in order, each with its scheduled time and its departure
+    reading or none. Step 4 marks the recorded ones 「（記録あり）」 and leaves out
+    the trip's last stop when it has no reading, since a feed reports only an
+    arrival there.
+
+  Both read one agency, one service day, one route (and one trip) from
+  ClickHouse through the shared dedup (`build_dedup_ch_sql`: the latest
+  plausible poll per stop event, inside the delay clamp), with every filter a
+  row-level predicate, so ClickHouse applies it in PREWHERE before any
+  aggregation. `updates` sorts by `captured_at` ahead of `route_code` and
+  `trip_id`, so the day bounds which granules are read and the route and trip
+  filter rows within them. Each reading keeps the schedule it was measured
+  against, and the actual time is that schedule plus the delay. Times past
+  24:00 read as the next day's (「翌00:12」).
+
+  Stop names, the trip's start and where it runs to come from the loaded
+  timetable only when it runs the trip on the record's day (`pipeline.planned_trips.running_trip_join`, the running rule
+  planned trips count by). Otherwise step 3 names the trip by its earliest
+  recorded time 「最初の記録 18:04（時刻表と照合できず）」, never as its start; its
+  stops read 「停留所（時刻表と照合できず）」 with their scheduled times; and the
+  record says the trip could not be matched. A chosen stop with no departure
+  reading gets no value: the record says the real-time data has none and names
+  the nearest recorded stops before and after it with their delays. Each
+  choice keeps the day and route it was made for, because a trip_id recurs on
+  every day the trip runs. The response carries no server text; the record's
+  sentences are the SPA's (`reports.certificate.*`).
+- Staff open 「遅れた便の一覧（各便の最初に記録された停留所での遅れ）」 under the
+  lookup: every route's late departures (the report's default threshold) on the
+  day the lookup shows, fetched only once the section is opened, with that
+  day's CSV. It is `delay_certificate`, which keeps one row per trip at its
+  earliest recorded stop (`argMin(…, stop_sequence)`), and the list says so in
+  its heading and a note. A feed often sends nothing for a trip's first stop,
+  so each row also says whether the loaded timetable starts the trip there
+  (`compute_delay_certificate`'s `stop_name`/`stop_is_first`, named only when
+  the loaded timetable runs the trip that day, as above); the CSV keeps both
+  columns. The record's day and route are its whole scope, so this document has
+  no scope sentence.
 - The council document's planned trips, executed trips and service-delivered
   rate count only the days a timetable plans: a day's count saved in
   `planned_trips_daily` while its timetable was loaded, or else the loaded

@@ -7,6 +7,8 @@ import {
   useAppendMessage,
   useConversation,
   useConversations,
+  useDelayRecordStops,
+  useDelayRecordTrips,
   useForecastHeatmap,
   useForecastOverview,
   usePerformanceStandards,
@@ -437,5 +439,36 @@ describe("useRouteShape", () => {
     expect(mockApiGet).toHaveBeenCalledTimes(2);
     expect(String(mockApiGet.mock.calls[0][0])).not.toContain("shape=");
     expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]shape=80305\+0(&|$)/);
+  });
+});
+
+describe("the delay record's steps", () => {
+  it("asks for a route's trips only once a route is chosen", async () => {
+    mockApiGet.mockResolvedValue({ date: "2026-09-02", route: "W54", trips: [], scope_applied: {} });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ route }: { route: string | null }) => useDelayRecordTrips(1, "2026-09-02", route),
+      { ...withProviders(queryClient), initialProps: { route: null as string | null } },
+    );
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockApiGet).not.toHaveBeenCalled();
+    rerender({ route: "W54 本線" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiGet.mock.calls[0][0]).toBe("/api/1/delay_record/trips?date=2026-09-02&route=W54+%E6%9C%AC%E7%B7%9A");
+  });
+
+  it("asks for a trip's stops only once a trip is chosen, with the trip id escaped", async () => {
+    mockApiGet.mockResolvedValue({ date: "2026-09-02", route: "W54", agency_name: "A", trip: null, stops: [], scope_applied: {} });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ trip }: { trip: string | null }) => useDelayRecordStops(1, "2026-09-02", "W54", trip),
+      { ...withProviders(queryClient), initialProps: { trip: null as string | null } },
+    );
+    expect(result.current.fetchStatus).toBe("idle");
+    rerender({ trip: "1_平日/便&2" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiGet.mock.calls[0][0]).toBe(
+      "/api/1/delay_record/stops?date=2026-09-02&route=W54&trip=1_%E5%B9%B3%E6%97%A5%2F%E4%BE%BF%262",
+    );
   });
 });

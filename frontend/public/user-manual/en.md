@@ -356,21 +356,24 @@ The list on the left holds **Council report** and **Delay record (for reference)
 - The notes’ “On-time definition” gives the on-time tolerance used, such as “no more than 1 min late (early departures count as on time)”.
 - Planned trips, Service delivered % and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tiles and the summary say “whole agency”.
 
-**Delay record (for reference)** gives a passenger a record of a late departure. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
+**Delay record (for reference)** gives a passenger a record of how late their trip left the stop where they boarded. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
 
 ![Delay record (for reference)](./15-reports-certificate.en.png)
 
 1. Under “Date”, choose the day they travelled. Days up to the last day with data can be chosen.
 2. Under “Route”, choose the route they travelled on (“Search routes”).
-3. Under “Departure”, pick their departure (“Choose a departure”). Each one reads like “17:42 from Hiroshima Station (8 min late)”: the timetable time, the stop the time was recorded at, and how late it left.
+3. Under “Trip”, pick their trip (“Choose a trip”). Every trip the route ran that day is listed in order of departure, late or not. Each one reads like “17:42 to Hiroshima Station (via Hatchobori)”: the timetable time at the stop where it starts, where it runs to (its last stop), and the destination sign the timetable gives it. A trip missing from the list has no record in the real-time data for that day.
+4. Under “Stop you boarded at”, pick the stop (“Choose a stop”). The trip’s stops are listed in order with their timetable times, and a stop with a departure in the real-time data carries “(recorded)”.
 
-The record appears with a sentence such as “The 17:42 departure left Hiroshima Station 8 min late (17:50).” and the “Operator”, “Route”, “Date”, “Stop”, “Scheduled departure”, “Actual departure” and “Delay”. Press **Print / Save as PDF**.
+The record appears. One sentence, such as “The 17:42 departure left Kamiyacho-higashi 8 min late (17:50).”, gives the timetable time at the chosen stop, the delay and the actual departure, followed by the “Operator”, “Route”, “Date”, “Trip”, “Stop”, “Scheduled departure”, “Actual departure” and “Delay”. A departure on time or early reads “left … on time” or “left … 30 s early”. The delay is the last departure delay the real-time data reported for that stop. Press **Print / Save as PDF**.
 
-Times are not at the stop where the passenger boarded but at the first stop recorded for that trip in the real-time data. When the timetable starts the trip at that stop, the record says the time is on the side where the trip starts; when it does not, the record says so. When the timetable has no name for the stop, the record speaks of the first recorded stop.
+When the chosen stop has no departure in the real-time data, the record gives no delay. It says that no departure from the stop was recorded, and names the recorded stops before and after it, with their delays.
 
-The list holds only departures that left late. A departure missing from it left on time or early, or was not in the live feed. If no departure of the route left late that day, the page says so.
+When the trip can’t be matched to that day’s timetable, as on a day before the timetable in use started, the trip reads “First recorded at 18:04 (not matched to the timetable)” and its stops read “Stop (not matched to the timetable)”, each with its timetable time. No stop name or start time is shown.
 
-For staff, “Late departures” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
+If the route has no real-time data that day, the page says so.
+
+For staff, “Late departures (delay at each trip's first recorded stop)” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. It picks late trips by their delay at the first stop the real-time data recorded for each, so a trip that left its first stop on time and fell behind later is not in it. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
 
 ---
 
@@ -435,6 +438,7 @@ What the words on the screens and in this manual mean.
 
 - **Feed**: the data an agency publishes. Delays are the departure delays its real-time feed (GTFS-Realtime) reports at each stop, used as they are; the Service does not work delays out from the timetable and vehicle positions. Route names, scheduled times, timetables and planned trips come from the timetable feed (GTFS).
 - **Reading** (“Samples” in the tables): one trip departing one stop counts as one reading. When the same trip and stop are reported many times, the last report is used. “Samples” counts readings, so one trip gives one reading per stop. The council report’s “Observations (stop level)” is the same count.
+- **First recorded stop**: the first stop where the real-time data reported the trip’s departure. For a trip with no report from the stop where it starts, it is a later stop. The staff list of late departures picks each trip by its delay there; the delay record (for reference) gives the delay at the stop where the passenger boarded.
 - **Set aside as implausible**: a report more than 2 hours (7,200 seconds) late or early is left out as a feed fault.
 - **Missing data**: days or hours with no readings are left out, not counted as on time.
 - **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.

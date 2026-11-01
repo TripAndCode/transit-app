@@ -820,6 +820,9 @@ describe("AnalysisTab delay record", () => {
     vi.restoreAllMocks();
   });
 
+  // The staff list's heading says what it keys each trip on.
+  const STAFF_LIST = "Late departures (delay at each trip's first recorded stop)";
+
   // The lookup fetches one route; the staff list fetches every route.
   const fetchesStaffList = ([, type, scope]: Parameters<typeof hooks.useReport>) =>
     type === "delay_certificate" && scope.routes.length === 0;
@@ -852,11 +855,15 @@ describe("AnalysisTab delay record", () => {
   it("opens on the passenger's lookup, with the day's late departures folded away until asked for", async () => {
     showCertificate();
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    const summary = screen.getByText("Late departures");
+    const summary = screen.getByText(STAFF_LIST);
     const staff = summary.closest("details")!;
     expect(staff).not.toHaveAttribute("open");
     expect(screen.queryByRole("table")).toBeNull();
     await userEvent.click(summary);
+    expect(staff).toHaveTextContent(
+      "This list picks late trips by their delay at the first stop the real-time data recorded for each. " +
+        "The delay at the stop a passenger boarded is found with the steps above.",
+    );
     expect(staff).toContainElement(screen.getByRole("table"));
     expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
@@ -866,7 +873,7 @@ describe("AnalysisTab delay record", () => {
     showCertificate();
     const asked = () => vi.mocked(hooks.useReport).mock.calls.filter(fetchesStaffList);
     expect(asked()).toEqual([]);
-    await userEvent.click(screen.getByText("Late departures"));
+    await userEvent.click(screen.getByText(STAFF_LIST));
     const day = (screen.getByLabelText("Date") as HTMLInputElement).value;
     expect(asked().at(-1)![2]).toMatchObject({ from: day, to: day, routes: [] });
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toContain(`from=${day}&to=${day}`);
@@ -874,7 +881,7 @@ describe("AnalysisTab delay record", () => {
 
   it("follows the day the passenger picks", async () => {
     showCertificate();
-    await userEvent.click(screen.getByText("Late departures"));
+    await userEvent.click(screen.getByText(STAFF_LIST));
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-08-20" } });
     expect(vi.mocked(hooks.useReport).mock.calls.filter(fetchesStaffList).at(-1)![2]).toMatchObject({
       from: "2026-08-20",
@@ -884,13 +891,13 @@ describe("AnalysisTab delay record", () => {
 
   it("starts folded again after staff leave the certificate, without counting the list", async () => {
     const { router } = showCertificate(["council_summary", "delay_certificate"]);
-    await userEvent.click(screen.getByText("Late departures"));
+    await userEvent.click(screen.getByText(STAFF_LIST));
     await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
     const before = vi.mocked(hooks.useReport).mock.calls.length;
     await act(() => router.navigate("/agencies/1/analysis/reports?report=delay_certificate"));
     const asked = vi.mocked(hooks.useReport).mock.calls.slice(before).filter(fetchesStaffList);
     expect(asked).toEqual([]);
-    expect(screen.getByText("Late departures").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(STAFF_LIST).closest("details")).not.toHaveAttribute("open");
   });
 
   it("leaves the screen's period sentence off the record, whose own day and route are its scope", async () => {
@@ -902,9 +909,9 @@ describe("AnalysisTab delay record", () => {
 
   it("labels the late departures by the day their rows are for, not a day still loading", async () => {
     showCertificate();
-    await userEvent.click(screen.getByText("Late departures"));
+    await userEvent.click(screen.getByText(STAFF_LIST));
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-08-20" } });
-    const staff = screen.getByText("Late departures").closest("details")!;
+    const staff = screen.getByText(STAFF_LIST).closest("details")!;
     expect(staff).toHaveTextContent("Wed, Sep 2, 2026, every route");
     expect(staff).not.toHaveTextContent("Aug 20");
   });
@@ -930,7 +937,7 @@ describe("AnalysisTab delay record", () => {
         }) as never,
     );
     renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
-    const summary = screen.getByText("Late departures");
+    const summary = screen.getByText(STAFF_LIST);
     await userEvent.click(summary);
     expect(summary.closest("details")).toContainElement(screen.getByRole("table"));
   });
@@ -947,7 +954,7 @@ describe("AnalysisTab delay record", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    const summary = screen.getByText("Late departures");
+    const summary = screen.getByText(STAFF_LIST);
     await userEvent.click(summary);
     expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
   });

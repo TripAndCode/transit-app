@@ -310,18 +310,19 @@ export function AnalysisTab({
   );
 }
 
-/** A passenger starts from the lookup, which fetches one day and one route.
- *  Staff can open every route's late departures for the same day, fetched
- *  only once they open the list, so it never holds the lookup back. The
- *  open state lives here, so leaving the certificate drops it and a return
- *  starts folded. */
+/** A passenger starts from the lookup, which reads the delay at the stop
+ *  they boarded. Staff can open every route's late departures for the same
+ *  day, picked by each trip's delay at its first recorded stop, fetched only
+ *  once they open the list, so it never holds the lookup back. The open
+ *  state lives here, so leaving the certificate drops it and a return starts
+ *  folded. */
 function CertificateSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
   const latestDay = defaultPeriod(use(DataEndContext)).to;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const date = pickedDate ?? latestDay;
   const [staffOpen, setStaffOpen] = useState(false);
-  const day = certificateDayScope(date, null);
+  const day = certificateDayScope(date);
   const all = useReport(aid, staffOpen ? "delay_certificate" : null, day);
   const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
   return (
@@ -330,6 +331,7 @@ function CertificateSection({ aid }: { aid: number }) {
       <DelayCertificateLookup aid={aid} date={date} latestDay={latestDay} onDateChange={setPickedDate} />
       <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
         <summary>{t("reports.certificate.late_list")}</summary>
+        <p className="cert-staff__basis">{t("reports.certificate.late_list_basis")}</p>
         {staffOpen && all.error && <ErrorBanner error={all.error} onRetry={() => all.refetch()} />}
         {staffOpen && all.isFetching && (
           <>
