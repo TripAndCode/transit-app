@@ -25,13 +25,11 @@ from pipeline.service_day import service_day_moment_utc, service_day_seconds_sql
 _DEPARTURE = hms_to_sec_sql("s.departure_time")
 _ARRIVAL = hms_to_sec_sql("s.arrival_time")
 
-# A trip starts when it leaves its first stop and ends when it reaches its
-# last; a stop giving only one of the two times stands for both, and one giving
-# neither readably leaves that end of its trip out. Each end is one probe of
-# the stop_times primary key, so the regex parse runs on two stops per trip
-# rather than on every stop. MATERIALIZED keeps the probes to one per end:
-# inlined, they would run again for every reference the service-day shift
-# makes.
+# A trip runs from its first stop's departure to its last stop's arrival (a
+# stop with one time stands for both; an untimed end is left out). Each end is
+# one stop_times primary-key probe, so only two stops per trip are parsed;
+# MATERIALIZED keeps it one probe per end, which the service-day shift's
+# repeated references would otherwise re-run.
 _SERVICE_HOURS_SQL = (
     "WITH"
     + plan_ctes("ARRAY[$1::int]", "$2::date", "$2::date")
