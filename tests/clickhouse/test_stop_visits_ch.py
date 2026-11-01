@@ -3,9 +3,10 @@ departure when the feed reports them in separate polls, which is the only way
 the static_join feeds send them: a StopTimeUpdate row carries an arrival or a
 departure, never both. Each trip's last stop gets arrival polls only.
 
-Also proves its departure side is the shared dedup's: for every visit with a
-departure, the delay, the schedule and the row count are exactly what
-build_dedup_ch_sql resolves."""
+Also proves it tells an observed departure (its poll at or after the visit's
+first arrival poll) from a predicted one, and that its departure side is the
+shared dedup's: for every visit with a departure, the delay, the schedule and
+the row count are exactly what build_dedup_ch_sql resolves."""
 
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -201,6 +202,98 @@ def test_stop_visits_file_an_arrival_only_visit_under_its_latest_arrival_poll():
     ]
 
 
+def _observed(polls):
+    return [(r["stop_sequence"], r["dep_delay"], r["arr_delay"], r["dep_observed"]) for r in _visits(polls)]
+
+
+def test_stop_visits_observe_a_departure_reported_after_the_arrival():
+    polls = [
+        _poll("p1.pb", _at(0), 2, arr=20),
+        _poll("p2.pb", _at(60), 2, dep=50),
+    ]
+    assert _observed(polls) == [(2, 50, 20, True)]
+
+
+def test_stop_visits_do_not_observe_a_departure_whose_polls_all_precede_the_arrival():
+    """The departure still standing when the bus arrived is the feed's last
+    prediction of it, not a departure the feed saw."""
+    polls = [
+        _poll("p1.pb", _at(0), 2, dep=40),
+        _poll("p2.pb", _at(30), 2, dep=50),
+        _poll("p3.pb", _at(60), 2, arr=20),
+    ]
+    assert _observed(polls) == [(2, 50, 20, False)]
+
+
+def test_stop_visits_observe_a_departure_with_a_later_poll_after_the_arrival():
+    polls = [
+        _poll("p1.pb", _at(0), 2, dep=40),
+        _poll("p2.pb", _at(30), 2, arr=20),
+        _poll("p3.pb", _at(60), 2, dep=50),
+    ]
+    assert _observed(polls) == [(2, 50, 20, True)]
+
+
+def test_stop_visits_judge_the_departure_against_the_first_arrival_poll():
+    """A later arrival poll refines the arrival's delay; the departure is
+    observed once it was reported after the bus was first reported there."""
+    polls = [
+        _poll("p1.pb", _at(0), 2, arr=20),
+        _poll("p2.pb", _at(30), 2, dep=50),
+        _poll("p3.pb", _at(60), 2, arr=25),
+    ]
+    assert _observed(polls) == [(2, 50, 25, True)]
+
+
+@pytest.mark.parametrize(
+    ("departure_file", "observed"),
+    [("a/000001.pb", False), ("a/000003.pb", True)],
+)
+def test_stop_visits_order_a_departure_in_the_arrivals_second_by_file_name(departure_file, observed):
+    """Within one capture second the file name orders the polls, as it breaks
+    every other tie here: a departure filed before the arrival was predicted,
+    one filed after it was observed."""
+    polls = [
+        _poll("a/000002.pb", _at(0), 2, arr=20),
+        _poll(departure_file, _at(0), 2, dep=50),
+    ]
+    assert _observed(polls) == [(2, 50, 20, observed)]
+
+
+def test_stop_visits_observe_a_departure_reported_in_the_arrivals_own_poll():
+    assert _observed([_poll("a/000002.pb", _at(0), 2, dep=50, arr=20)]) == [(2, 50, 20, True)]
+
+
+def test_stop_visits_judge_only_the_plausible_departure_they_keep():
+    """An implausible departure after the arrival is dropped, as the dedup
+    drops it, so the departure kept is the earlier, pre-arrival one."""
+    polls = [
+        _poll("p1.pb", _at(0), 2, dep=50),
+        _poll("p2.pb", _at(30), 2, arr=20),
+        _poll("p3.pb", _at(60), 2, dep=MAX_PLAUSIBLE_DELAY_SEC + 1),
+    ]
+    assert _observed(polls) == [(2, 50, 20, False)]
+
+
+def test_stop_visits_judge_against_the_first_plausible_arrival():
+    polls = [
+        _poll("p1.pb", _at(0), 2, arr=MAX_PLAUSIBLE_DELAY_SEC + 1),
+        _poll("p2.pb", _at(30), 2, dep=50),
+        _poll("p3.pb", _at(60), 2, arr=20),
+    ]
+    assert _observed(polls) == [(2, 50, 20, False)]
+
+
+def test_stop_visits_leave_a_one_sided_visit_unjudged():
+    """With no arrival there is nothing to judge a departure against, and with
+    no departure nothing to judge: neither is a predicted departure."""
+    polls = [
+        _poll("p1.pb", _at(0), 2, dep=50),
+        _poll("p2.pb", _at(60), 3, arr=30),
+    ]
+    assert _observed(polls) == [(2, 50, None, None), (3, None, 30, None)]
+
+
 def test_stop_visits_keep_the_dedups_column_order():
     """analyze() loads the result into a TEMP table by position."""
     rows = _query([_poll("p1.pb", _at(0), 2, dep=50, arr=None)], build_stop_visits_ch_sql())
@@ -213,9 +306,10 @@ def test_stop_visits_keep_the_dedups_column_order():
         "stop_sequence",
         "dep_delay",
         "arr_delay",
+        "dep_observed",
     ]
     rows = _query([_poll("p1.pb", _at(0), 2, dep=50)], build_stop_visits_ch_sql(include_scheduled_sec=True))
-    assert list(rows[0])[-2:] == ["scheduled_sec", "arr_delay"]
+    assert list(rows[0])[-3:] == ["scheduled_sec", "arr_delay", "dep_observed"]
 
 
 def _parity_polls():

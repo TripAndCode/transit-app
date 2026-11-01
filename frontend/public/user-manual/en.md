@@ -452,7 +452,7 @@ What the words on the screens and in this manual mean.
 - **p50 and p90**: the values halfway along (the median) and 90% of the way along when the values are sorted from smallest. p90 is a guide to a value exceeded about one time in ten. They are approximations, worked out from counts grouped into fixed-width steps.
 - **wide margin**: shown when the 95% confidence interval (Wilson) of the on-time % is wider than ±5 points.
 - **few data**: shown for a route with fewer than 100 samples.
-- **Dwell**: the time, in seconds, from a trip’s arrival at a stop to its departure from it. The actual arrival and departure times are the scheduled times plus the delays the feed reports, so dwell is available only from feeds that report arrival delays.
+- **Dwell**: the time, in seconds, from a trip’s arrival at a stop to its departure from it. The actual arrival and departure times are the scheduled times plus the delays the feed reports, so dwell is available only from feeds that report arrival delays. It counts only a departure the feed reported after it reported the arrival. A departure reported only before the arrival is a prediction, and gives no dwell.
 - **Running**: the time, in seconds, from a trip’s departure from one stop to its arrival at the next. Where the stops in between have no report, it covers the whole stretch.
 
 ### 13-3. Service and spacing

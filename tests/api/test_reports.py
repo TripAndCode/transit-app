@@ -2007,7 +2007,8 @@ async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_emp
 def _separate_polls(day, trip_id, service_id, visits):
     """ClickHouse `updates` rows for route 44's *visits*, given as
     ``(stop_sequence, dep_delay, arr_delay)``, the way the feed reports them:
-    a stop's departure and its arrival in separate polls, never on one row.
+    a stop's arrival and then its departure in separate polls, never on one
+    row.
 
     Each row is (file_name, captured_at, trip_id, service_type, scheduled_time,
     route_code, stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip,
@@ -2017,8 +2018,8 @@ def _separate_polls(day, trip_id, service_id, visits):
     rows = []
     for seq, dep_delay, arr_delay in visits:
         for kind, at, dep, arr in (
-            ("dep", day, dep_delay, None),
-            ("arr", day + timedelta(seconds=30), None, arr_delay),
+            ("arr", day, None, arr_delay),
+            ("dep", day + timedelta(seconds=30), dep_delay, None),
         ):
             if dep is None and arr is None:
                 continue

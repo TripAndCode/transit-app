@@ -91,8 +91,14 @@ What the user sees/does:
   analyze pairs them per stop visit (trip, service day, stop) with
   `pipeline/db.py`'s `build_stop_visits_ch_sql`, each side the latest
   plausible reading of its own kind under the same delay clamp. Dwell needs
-  both sides of a visit; running time needs this visit's arrival and the
-  previous visit's departure, which is how the terminus gets one. A route
+  both sides of a visit, and counts only a departure the feed reported after
+  the arrival: the visit's latest plausible departure poll must come at or
+  after its first plausible arrival poll, polls ordered by capture time and
+  then file name (the builder's `dep_observed`).
+  A departure whose every poll precedes the arrival is the prediction still
+  standing when the bus arrived, and leaves the visit without a dwell sample.
+  Running time needs this visit's arrival and the previous visit's departure,
+  however that departure was reported, which is how the terminus gets one. A route
   with neither a dwell nor a running
   sample in range is left out; when routes are in scope but every one is,
   the payload stays `available` and names `no_paired_samples`, which the
