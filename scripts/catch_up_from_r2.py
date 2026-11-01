@@ -57,8 +57,10 @@ The plan (the default) lists R2 and reads Postgres through a read-only session
 and ClickHouse through a readonly=1 client; it downloads and writes nothing.
 --apply plans again under the pipeline's ingest/analyze lock (pipeline.locks),
 held for the whole run, and then runs the plan. Each ingest step first checks
-that the open day has not moved past its first day, so no day is written out of
-order or twice. Files download into the local layout `make fetch` uses
+that the open day has not moved past its first day, which catches a plan gone
+stale under a writer that lock does not exclude (promotion takes the
+per-agency lock instead). What keeps an archive member from going in twice is
+ingest's own skip-list of the file names already stored. Files download into the local layout `make fetch` uses
 (raw_archives/<id>/, raw_archives_static/<id>/) and each ingest step reads its
 own temporary directory of links to just its archives, never the whole local
 history. It stops at the first failure. A rerun is safe: ingested archive
@@ -316,12 +318,17 @@ def plan_agency(
         return plan
     loaded_day = version_day(state.loaded_version) if state.has_timetable else None
     if state.has_timetable and loaded_day is None and timetables:
-        plan.refusal = (
-            f"the loaded timetable {state.loaded_version!r} carries no gtfs_static_YYYYMMDD date, so R2's cannot be "
-            f"ordered against it. Load the one in force on {first} by hand{_in_force_hint(timetables, first)}, "
-            "then rerun"
+        if state.requires_timetable:
+            plan.refusal = (
+                f"the loaded timetable {state.loaded_version!r} carries no gtfs_static_YYYYMMDD date, so R2's cannot "
+                f"be ordered against it. Load the one in force on {first} by hand"
+                f"{_in_force_hint(timetables, first)}, then rerun"
+            )
+            return plan
+        plan.notes.append(
+            f"the loaded timetable {state.loaded_version!r} carries no date to order R2's against; this agency's "
+            "ingest reads none, so R2's are left to load by hand"
         )
-        return plan
     if loaded_day is not None and loaded_day > first:
         if state.requires_timetable:
             plan.refusal = (
@@ -351,12 +358,26 @@ def plan_agency(
             plan.notes.append("no timetable is loaded and its ingest reads none; R2's are left to load by hand")
     else:
         newer = [t for t in timetables if t.day > loaded_day]
-    if stop is not None:
-        plan.deferred = [t for t in newer if t.day >= stop]
-        newer = [t for t in newer if t.day < stop]
+    # A timetable loads only ahead of days this plan writes: archive M's tail
+    # is JST M+1, so nothing past the newest archive's next day (nor past a
+    # stop) is written. Loaded any later, it would sit ahead of the next run's
+    # open day, which refuses the agency until the older one is reloaded.
+    if present:
+        horizon = max(present) + 2 * _DAY
+        if stop is not None:
+            horizon = min(horizon, stop)
+        plan.deferred = [t for t in newer if t.day >= horizon]
+        newer = [t for t in newer if t.day < horizon]
+    else:
+        plan.deferred, newer = newer, []
     early = [t for t in newer if t.day <= first]
     plan.superseded = early[:-1]
     loads = early[-1:] + [t for t in newer if t.day > first]
+    if early and state.requires_timetable and state.newest_row and jst_date(state.newest_row) == first:
+        plan.notes.append(
+            f"JST {first} already holds its first hours, joined to {state.loaded_version}; the rest of it joins "
+            f"{early[-1].name}, so that day is split between the two"
+        )
 
     start = first
     for timetable in loads:
@@ -370,7 +391,9 @@ def plan_agency(
 
 def check_order(open_day: date | None, first_day: date) -> None:
     """Refuse an ingest step that starts before the first JST day `updates`
-    leaves open: it would write a closed day again, or out of order."""
+    leaves open: something wrote `updates` since the plan was made, so the plan
+    is stale. Ingest's file-name skip-list, not this check, keeps a member from
+    being stored twice."""
     if open_day is not None and open_day > first_day:
         raise Refusal(
             f"`updates` is written through JST {open_day - _DAY}, and this step writes from {first_day}. Another "
@@ -538,10 +561,17 @@ def plan_all(
 ) -> list[AgencyPlan]:
     plans = []
     for state in read_states(conn, ch_client, agency_ids, today):
-        prefix = f"rt/{state.agency_id}/"
-        after = f"{prefix}{state.open_day - 2 * _DAY:%Y%m%d}.tar.gz" if state.open_day else None
-        archives, odd_archives = archive_files(store.list(prefix, start_after=after))
-        timetables, odd_timetables = timetable_files(store.list(f"static/{state.agency_id}/"))
+        archives: list[RemoteFile] = []
+        timetables: list[RemoteFile] = []
+        odd_archives: list[str] = []
+        odd_timetables: list[str] = []
+        # No open day means no rows, which plan_agency refuses whatever R2
+        # holds, so its listings would only page through the whole history.
+        if state.open_day is not None:
+            prefix = f"rt/{state.agency_id}/"
+            after = f"{prefix}{state.open_day - 2 * _DAY:%Y%m%d}.tar.gz"
+            archives, odd_archives = archive_files(store.list(prefix, start_after=after))
+            timetables, odd_timetables = timetable_files(store.list(f"static/{state.agency_id}/"))
         plan = plan_agency(state, archives, timetables, today=today, allow_gaps=allow_gaps)
         if odd_archives or odd_timetables:
             plan.notes.append(f"R2 names left alone: {', '.join(odd_archives + odd_timetables)}")
@@ -596,8 +626,10 @@ def print_plan(plans: list[AgencyPlan], layout: Layout, today: date) -> None:
         for gap in plan.gaps:
             print(f"  missing in R2: {gap:%Y%m%d}" + (" (gone past: --allow-gaps)" if plan.stopped_at is None else ""))
         if plan.stopped_at:
-            held = f"; held back with it: {', '.join(t.name for t in plan.deferred)}" if plan.deferred else ""
-            print(f"  stops before JST {plan.stopped_at}: --allow-gaps goes past a day lost for good{held}")
+            print(f"  stops before JST {plan.stopped_at}: --allow-gaps goes past a day lost for good")
+        if plan.deferred:
+            names = ", ".join(t.name for t in plan.deferred)
+            print(f"  held back until the days they are in force on are ingested: {names}")
         if plan.superseded:
             print(f"  skipped, in force only on days already ingested: {', '.join(t.name for t in plan.superseded)}")
         for note in plan.notes:

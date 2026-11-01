@@ -9,6 +9,7 @@ splits archives at JST midnight, not at archive boundaries.
 
 from __future__ import annotations
 
+import pathlib
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -98,9 +99,9 @@ def _written(steps: list, today: date = TODAY) -> list[tuple[date, date]]:
 
 
 def test_interleaves_two_newer_timetables_at_jst_midnight():
-    """Hiroden's real state: timetable 20261014 loaded, rows through JST
-    2026-10-23, R2 holding 20261025 and 20261028. Archive 20261024's tail is
-    JST 10-25, so it is read again after 20261025 loads; the same for 20261027."""
+    """Timetable 20261014 loaded, rows through JST 10-23, and R2 holding
+    20261025 and 20261028. Archive 20261024's tail is JST 10-25, so it is read
+    again after 20261025 loads; the same for 20261027."""
     plan = cu.plan_agency(
         _state(),
         _archives(8, _days("20261018", "20261031")),
@@ -136,7 +137,7 @@ def test_each_archive_day_pair_is_written_once_and_none_is_missed():
 
 
 def test_no_newer_timetable_ingests_everything_in_one_step():
-    """広島バス: 20261014 loaded, newest R2 zip 20261009 — nothing to load."""
+    """The loaded timetable is newer than any in R2: nothing to load."""
     plan = cu.plan_agency(
         _state(9),
         _archives(9, _days("20261023", "20261031")),
@@ -224,10 +225,10 @@ def test_the_newest_day_not_yet_uploaded_is_not_a_gap():
 
 
 def test_agency_1_static_naming():
-    """Aomori's timetable comes from the operator's site by
-    aomori_index_scrape, which names it by the fetching host's local date,
-    and R2's static/1/ holds only older zips synced by hand. Its rows take
-    their schedule from the trip_id, so no timetable is needed to ingest."""
+    """An agency whose rows take their schedule from the trip_id, whose
+    loaded timetable is named by aomori_index_scrape (the fetching host's local
+    date), and whose R2 timetables are all older, with names R2 never orders
+    left alone."""
     old = [f"2026{m:02d}{d:02d}" for m, d in [(4, 23), (5, 1), (6, 6), (8, 17)]]
     listing = [(f"static/1/gtfs_static_{t}.zip", 1_360_000) for t in old]
     listing += [("static/1/latest.zip", 10), ("static/1/_manifest.json", 10)]
@@ -300,8 +301,8 @@ def test_refuses_a_timetable_loaded_ahead_of_the_days_still_to_write():
 
 
 def test_a_timetable_in_force_from_the_first_day_to_write_is_accepted():
-    """おのみち: rows through JST 10-23 and 20261024 loaded. JST 10-24 is the
-    first day still to write, and 20261024 is in force from it."""
+    """Rows through JST 10-23 and 20261024 loaded: JST 10-24 is the first day
+    still to write, and 20261024 is in force from it."""
     plan = cu.plan_agency(
         _state(53, loaded="gtfs_static_20261024"),
         _archives(53, _days("20261023", "20261031")),
@@ -451,3 +452,124 @@ def test_an_ingest_step_refuses_to_start_before_the_open_day(open_day, first_day
             cu.check_order(open_day, first_day)
     else:
         cu.check_order(open_day, first_day)
+
+
+def test_a_timetable_past_the_last_archive_waits_for_its_days():
+    """R2's archives end at 20261026, whose tail is JST 10-27. Timetable
+    20261027 is in force from a day those archives still write; 20261028 is
+    not, and loading it now would leave the next run's open day before it."""
+    plan = cu.plan_agency(
+        _state(),
+        _archives(8, _days("20261023", "20261026")),
+        _timetables(8, ["20261027", "20261028"]),
+        today=TODAY,
+    )
+
+    assert plan.refusal is None
+    assert _shape(plan) == [
+        ("ingest", "20261024", "20261027", ["20261023", "20261024", "20261025", "20261026"]),
+        ("load", "gtfs_static_20261027.zip"),
+        ("ingest", "20261027", None, ["20261026"]),
+    ]
+    assert [t.name for t in plan.deferred] == ["gtfs_static_20261028.zip"]
+
+
+def test_no_archive_in_r2_loads_no_timetable():
+    plan = cu.plan_agency(_state(), [], _timetables(8, ["20261020", "20261028"]), today=TODAY)
+
+    assert plan.refusal is None
+    assert plan.steps == []
+    assert [t.name for t in plan.deferred] == ["gtfs_static_20261020.zip", "gtfs_static_20261028.zip"]
+
+
+def test_an_undated_loaded_timetable_is_only_noted_for_an_agency_that_reads_none():
+    plan = cu.plan_agency(
+        _state(
+            1,
+            loaded="aomori_static",
+            newest_row=datetime(2026, 10, 23, 14, 59, tzinfo=timezone.utc),
+            requires_timetable=False,
+        ),
+        _archives(1, _days("20261023", "20261031")),
+        _timetables(1, ["20261025"]),
+        today=TODAY,
+    )
+
+    assert plan.refusal is None
+    assert plan.notes
+    assert _shape(plan) == [("ingest", "20261024", None, _days("20261023", "20261031"))]
+
+
+def test_an_open_day_that_already_holds_rows_is_noted_when_a_timetable_loads_on_it():
+    """JST 10-24's first hours came from archive 20261023's tail under the
+    loaded timetable; the rest of the day joins 20261024, so the day is split
+    between the two."""
+    plan = cu.plan_agency(
+        _state(newest_row=datetime(2026, 10, 23, 16, 0, tzinfo=timezone.utc)),
+        _archives(8, _days("20261023", "20261031")),
+        _timetables(8, ["20261024"]),
+        today=TODAY,
+    )
+
+    assert _shape(plan)[0] == ("load", "gtfs_static_20261024.zip")
+    assert any("2026-10-24" in note and "gtfs_static_20261014" in note for note in plan.notes)
+    unsplit = cu.plan_agency(
+        _state(), _archives(8, _days("20261023", "20261031")), _timetables(8, ["20261024"]), today=TODAY
+    )
+    assert unsplit.notes == []
+
+
+class _Store:
+    description = "stub"
+
+    def __init__(self, payload: bytes):
+        self.payload = payload
+        self.downloads: list[str] = []
+
+    def list(self, prefix, *, start_after=None):
+        return []
+
+    def download(self, key: str, dest: pathlib.Path) -> None:
+        self.downloads.append(key)
+        dest.write_bytes(self.payload)
+
+
+def _remote(size: int) -> cu.RemoteFile:
+    return cu.RemoteFile("rt/8/20261024.tar.gz", "20261024.tar.gz", date(2026, 10, 24), size)
+
+
+def test_fetch_downloads_beside_the_file_and_moves_it_into_place(tmp_path):
+    layout = cu.Layout(tmp_path / "rt", tmp_path / "static")
+    store = _Store(b"x" * 10)
+
+    path = layout.fetch(store, 8, _remote(10))
+
+    assert path == tmp_path / "rt" / "8" / "20261024.tar.gz"
+    assert path.read_bytes() == b"x" * 10
+    assert sorted(p.name for p in path.parent.iterdir()) == ["20261024.tar.gz"]
+    assert layout.fetch(store, 8, _remote(10)) == path
+    assert store.downloads == ["rt/8/20261024.tar.gz"]
+
+
+def test_a_short_download_raises_and_leaves_nothing_behind(tmp_path):
+    layout = cu.Layout(tmp_path / "rt", tmp_path / "static")
+
+    with pytest.raises(RuntimeError, match="10"):
+        layout.fetch(_Store(b"x" * 4), 8, _remote(10))
+
+    assert list((tmp_path / "rt" / "8").iterdir()) == []
+
+
+def test_a_local_copy_of_another_size_is_refused_and_nothing_downloads(tmp_path):
+    layout = cu.Layout(tmp_path / "rt", tmp_path / "static")
+    local = tmp_path / "rt" / "8" / "20261024.tar.gz"
+    local.parent.mkdir(parents=True)
+    local.write_bytes(b"old")
+    store = _Store(b"x" * 10)
+
+    with pytest.raises(cu.Refusal, match="move it aside"):
+        layout.fetch(store, 8, _remote(10))
+
+    assert store.downloads == []
+    assert local.read_bytes() == b"old"
+    assert layout.to_download(8, [_remote(10)])[1]
