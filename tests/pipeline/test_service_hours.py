@@ -100,8 +100,11 @@ async def test_hours_run_from_the_first_departure_to_the_last_arrival_of_the_tri
     # arrives.
     await _trip(aconn, aagency_id, "WD", "early", [("06:03:00", "06:05:00"), ("06:20:00", "06:20:00")])
     await _trip(aconn, aagency_id, "WD", "late", [("21:00:00", "21:00:00"), (" 21:48:00 ", "21:50:00")])
-    # A stop the feed gives no readable time is passed over, not read as midnight.
+    # A first stop the feed gives no readable time leaves that trip's start out
+    # rather than reading it as midnight; its end still counts.
     await _trip(aconn, aagency_id, "WD", "untimed", [("", ""), ("bad", None), ("12:00:00", "12:00:00")])
+    # Only a trip's first and last stops date it.
+    await _trip(aconn, aagency_id, "WD", "middle", [("07:00:00", "07:00:00"), ("x", "05:00"), ("08:00:00", None)])
     await _trip(aconn, aagency_id, "SA", "saturday", [("5:00:00", "5:00:00"), ("23:30:00", "23:30:00")])
 
     assert await load_service_hours(aconn, aagency_id, MONDAY) == ServiceHours(

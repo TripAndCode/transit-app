@@ -22,22 +22,34 @@ from pipeline.db import hms_to_sec_sql
 from pipeline.planned_trips import plan_ctes
 from pipeline.service_day import service_day_moment_utc, service_day_seconds_sql
 
-# A stop with no readable time is passed over. A trip leaves its first stop at
-# its departure time and reaches its last at its arrival time; a stop giving
-# only one of the two stands for both.
+_DEPARTURE = hms_to_sec_sql("s.departure_time")
+_ARRIVAL = hms_to_sec_sql("s.arrival_time")
+
+# A trip starts when it leaves its first stop and ends when it reaches its
+# last; a stop giving only one of the two times stands for both, and one giving
+# neither readably leaves that end of its trip out. Each end is one probe of
+# the stop_times primary key, so the regex parse runs on two stops per trip
+# rather than on every stop. MATERIALIZED keeps the probes to one per end:
+# inlined, they would run again for every reference the service-day shift
+# makes.
 _SERVICE_HOURS_SQL = (
     "WITH"
     + plan_ctes("ARRAY[$1::int]", "$2::date", "$2::date")
     + f""",
-    stop_seconds AS (
-        SELECT {hms_to_sec_sql("s.departure_time")} AS departure, {hms_to_sec_sql("s.arrival_time")} AS arrival
+    trip_ends AS MATERIALIZED (
+        SELECT
+            (SELECT COALESCE({_DEPARTURE}, {_ARRIVAL}) FROM static_stop_times s
+             WHERE s.agency_id = t.agency_id AND s.trip_id = t.trip_id
+             ORDER BY s.stop_sequence LIMIT 1) AS starts,
+            (SELECT COALESCE({_ARRIVAL}, {_DEPARTURE}) FROM static_stop_times s
+             WHERE s.agency_id = t.agency_id AND s.trip_id = t.trip_id
+             ORDER BY s.stop_sequence DESC LIMIT 1) AS ends
         FROM running r
         JOIN static_trips t ON t.agency_id = $1 AND t.agency_id = r.agency_id AND t.service_id = r.service_id
-        JOIN static_stop_times s ON s.agency_id = t.agency_id AND s.trip_id = t.trip_id
     )
-    SELECT MIN({service_day_seconds_sql("COALESCE(departure, arrival)")}) AS first_departure,
-           MAX({service_day_seconds_sql("COALESCE(arrival, departure)")}) AS last_arrival
-    FROM stop_seconds
+    SELECT MIN({service_day_seconds_sql("starts")}) AS first_departure,
+           MAX({service_day_seconds_sql("ends")}) AS last_arrival
+    FROM trip_ends
     """
 )
 
