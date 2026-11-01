@@ -85,7 +85,7 @@
       "subtitle": "いまどの便が何分遅れているか、どの路線・時間帯で遅れやすいかを確認できます。",
       "open_dashboard": "ダッシュボードを開く",
       "view_dashboard": "ダッシュボードを見る（ログイン不要）",
-      "login_note": "<login>ログイン</login>すると表示条件の保存と質問の履歴が使えます"
+      "login_note": "<login>ログイン</login>すると、保存したビューと「質問」画面の調査をアカウントに残せます"
     },
     "hero_map": {
       "screens": {

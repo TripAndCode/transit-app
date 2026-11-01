@@ -59,7 +59,7 @@ The sign-in and LLM providers are all based in the United States. You can read a
 ## How we keep it safe
 
 - Connections are encrypted with HTTPS.
-- Sign-in is handled by Google and GitHub; we never hold a password.
+- Sign-in is handled by Google and GitHub; we never hold a user's password.
 - A registered LLM API key is stored encrypted.
 - Only the operator can see personal information.
 - The country where the servers and database are located will be stated with their provider, under “Sending information to service providers”.

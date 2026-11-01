@@ -1,5 +1,7 @@
 // Deterministic geometry and sample figures for the landing hero's fictional
-// city. Every element stands for something the signed-in app really shows:
+// city. The rail lines are scenery only: the app reads bus feeds, so every
+// trip and figure belongs to a bus route. Every other element stands for
+// something the signed-in app really shows:
 // trip dots at their latest reported stop, one selected route's per-stop
 // average delay, a selected trip's reported-stop history, the day-playback
 // hourly means, and the period-overview numbers. World units are arbitrary:
@@ -100,8 +102,6 @@ const STOP_SPACING: readonly number[] = [1 / 7, 1 / 7, 1 / 7, 1 / 6, 1 / 7, 1 / 
 
 export const TRIPS: readonly Trip[] = (
   [
-    [0, 2 / 7, 0.4, "08:10"], [0, 4 / 7, 0.8, "08:11"], [0, 5 / 7, 1.9, "08:12"], [0, 6 / 7, 0.6, "08:09"],
-    [1, 1 / 7, 0.2, "08:12"], [1, 4 / 7, 0.5, "08:10"],
     [2, 2 / 7, 0.7, "08:11"], [2, 5 / 7, 3.4, "08:12"], [2, 5.4 / 7, 2.6, "08:12"],
     [3, 1 / 6, 1.2, "08:08"], [3, 3 / 6, 6.0, "08:12"], [3, 4 / 6, 3.1, "08:11"], [3, 5 / 6, 2.1, "08:10"],
     [4, 2 / 7, 4.1, "08:12"], [4, 5 / 7, 1.0, "08:09"],
@@ -148,7 +148,7 @@ export const OVERVIEW = {
     { route: "bus12", delay: 6.6 },
     { route: "bus7", delay: 4.6 },
     { route: "bus5", delay: 3.3 },
-    { route: "rapid", delay: 1.9 },
+    { route: "bus3", delay: 1.9 },
   ],
 } as const satisfies {
   networkAvg: number;

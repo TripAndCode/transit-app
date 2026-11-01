@@ -85,7 +85,7 @@
       "subtitle": "See which trips are running late right now and by how much, and which routes and times of day tend to run late.",
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
-      "login_note": "<login>Sign in</login> to save your view settings and keep your question history."
+      "login_note": "<login>Sign in</login> to keep your saved views and Ask investigations with your account."
     },
     "hero_map": {
       "screens": {
