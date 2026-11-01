@@ -303,7 +303,7 @@ def _ingest_and_analyze_sweep(
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
     from pipeline.analyze import analyze
-    from pipeline.clickhouse import get_client
+    from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import StaticTimetableMissing, ingest_live
     from pipeline.promote import promote_closed_days
@@ -323,7 +323,7 @@ def _ingest_and_analyze_sweep(
     ch_client = None
     conn = None
     try:
-        ch_client = get_client()
+        ch_client = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
         conn = psycopg2.connect(db_url)
         # Pin JST so any Postgres-side date cast agrees with the civil day the
         # read API serves under (api/main + gtfs_pipeline._get_conn both pin

@@ -473,14 +473,14 @@ def cmd_analyze(args):
     """Run the analysis pass for one agency. ``--full`` rebuilds every date
     instead of only the ones the ledger sees changed."""
     from pipeline.analyze import analyze, mark_for_full_rebuild
-    from pipeline.clickhouse import get_client
+    from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, get_client
 
     conn = _get_conn()
     _lock_or_skip_agency(conn, "analyze", "analyze", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     if args.full:
         mark_for_full_rebuild(conn, [agency_id])
-    ch_client = get_client()
+    ch_client = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
     with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
         analyze(agency_id, conn, ch_client)
     conn.close()
@@ -495,11 +495,11 @@ def cmd_analyze_all(args):
     ``--full`` rebuilds every date of every agency instead.
     """
     from pipeline.analyze import analyze, mark_for_full_rebuild
-    from pipeline.clickhouse import get_client
+    from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, get_client
 
     conn = _get_conn()
     _lock_or_exit(conn, "analyze-all", "analyze")
-    ch_client = get_client()
+    ch_client = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
         agency_ids = [r[0] for r in cur.fetchall()]
