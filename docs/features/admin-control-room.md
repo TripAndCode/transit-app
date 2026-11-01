@@ -195,8 +195,9 @@ The list and drawer label the row Deleted and offer no Resume control.
 The drawer's "Usage (last 30 days)" section reads
 `GET /api/admin/users/{uid}/activity?days=30` (`days` 1–365): per route
 template and agency, the requests and errors summed from
-`user_activity_daily`. The API counts every authenticated `/api/*` request
-into that table (`api/activity.py`, flushed every 30 s), attributing
+`user_activity_daily`. The API counts every authenticated request to a gated
+`/api/*` route into that table (the sign-in flow, `/api/config` and the
+who-am-I read `GET /api/me` are not counted) (`api/activity.py`, flushed every 30 s), attributing
 API-key requests to the key's owner. It stores route templates and days
 only — never raw paths, query text, or finer timestamps.
 
