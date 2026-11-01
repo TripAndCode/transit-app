@@ -76,7 +76,7 @@ class _Conn:
 
 
 class _ChClient:
-    def __init__(self):
+    def __init__(self, **_kwargs):
         self.closed = False
 
     def close(self):
