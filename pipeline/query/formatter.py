@@ -169,6 +169,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_delivered_missing_feed_cannot_report", "en"): "this feed format cannot report cancellations",
     ("council_delivered_missing_feed_unverified", "ja"): "配信が運休を伝えるか未確認",
     ("council_delivered_missing_feed_unverified", "en"): "the feed is not yet checked for cancellations",
+    ("council_delivered_missing_feed_reports_no_cancellations", "ja"): "この配信は運休を伝えていません",
+    ("council_delivered_missing_feed_reports_no_cancellations", "en"): "this feed doesn't report cancellations",
     ("council_delivered_missing_unreadable", "ja"): "計画を読み込めませんでした",
     ("council_delivered_missing_unreadable", "en"): "the plan could not be read",
     ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",

@@ -1228,8 +1228,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # populate this table (today: the static_join ingest strategy;
         # aomori_regex always leaves both columns NULL) -- an agency on any
         # other ingest_strategy is skipped entirely (zero rows here), which the
-        # read path distinguishes from "confirmed zero cancellations" via
-        # agencies.ingest_strategy, never via row presence in this table.
+        # read path tells apart by agencies.ingest_strategy, checked first.
+        # For a feed that can carry the status, row presence is the read
+        # path's evidence that the feed reports cancellations at all: no row
+        # in its look-back reads "not available", never a 100% that measured
+        # nothing.
         # Materialization here is gated on ingest_strategy alone, not on the
         # per-agency probe verdicts in rt_field_coverage_probes (see
         # pipeline.strategies.static_join.rt_field_coverage_confirmed)

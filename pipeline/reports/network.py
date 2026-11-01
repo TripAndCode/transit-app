@@ -13,10 +13,11 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 `pipeline.reports.service_delivered.compute_service_delivered_by_agency` —
 see that module for the executed/planned definition and why the latter two
 read `None` ("not available") for an agency whose feed doesn't populate
-`schedule_relationship_trip`. ``covered_days`` of ``window_days`` is how many
-of the range's days a timetable plans (a day's saved count, or the loaded
-timetable's); all three count only those, so a row whose ``covered_days``
-falls short is comparable to its neighbours only with that note beside it.
+`schedule_relationship_trip`, or has reported no cancellation in it.
+``covered_days`` of ``window_days`` is how many of the range's days a
+timetable plans (a day's saved count, or the loaded timetable's); all three
+count only those, so a row whose ``covered_days`` falls short is comparable
+to its neighbours only with that note beside it.
 When those figures cannot be read at all, every agency reads as one with no
 plan (0 planned trips and covered days, ``None`` rates) whose
 ``delivered_missing`` is ``"unreadable"``, so the board never prints that 0 as

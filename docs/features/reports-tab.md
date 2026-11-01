@@ -78,7 +78,10 @@ reports.
   and 運行率 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
   missing 運行率 shows 「—」 with the response's `delivered_missing` reason in
   the agencies board's words (`network.delivered_missing.*`), and the server's
-  footnote (`format_council_summary_footnotes`) gives the same reason. The
+  footnote (`format_council_summary_footnotes`) gives the same reason. A feed
+  that sent no cancellation in the period or the 90 days up to its end reads
+  「運行率：—（この配信は運休を伝えていません）」, never a 100% that measures
+  nothing. The
   on-time definition footnote states the tolerance in words, 「定時の定義：定刻
   から1分以内の遅れ（早発も定時として数えます）」, not its preset name; the CSV
   preamble keeps the preset for comparing exports. Each figure keeps to one

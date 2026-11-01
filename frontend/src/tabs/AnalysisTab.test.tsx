@@ -790,6 +790,11 @@ describe("AnalysisTab council report", () => {
     showCouncil([], { rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_unverified" });
     expect(figure("Service delivered %")).toHaveTextContent("—");
     expect(figure("Service delivered %")).toHaveTextContent("the feed is not yet checked for cancellations");
+    cleanup();
+    showCouncil([], { rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_reports_no_cancellations" });
+    expect(figure("Service delivered %")).toHaveTextContent("—");
+    expect(figure("Service delivered %")).toHaveTextContent("this feed doesn't report cancellations");
+    expect(figure("Planned trips")).toHaveTextContent("2,130");
   });
 
   it("keeps each figure on one line in a tile wide enough to hold it, so a phone never breaks a number in two", () => {

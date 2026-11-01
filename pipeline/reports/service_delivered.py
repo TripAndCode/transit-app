@@ -24,22 +24,36 @@ its live feed (``aomori_regex`` always leaves it NULL, and an
 untrusted until probed -- sharing the JOIN mechanism doesn't imply sharing
 field coverage, see that module's docstring), or there is no static schedule
 to plan against (``planned_trips == 0``).
+
+A populated field is not yet a used one. A feed that sends every trip
+SCHEDULED takes nothing off the plan, so its ratio reads 100% whatever ran.
+The rate therefore also needs the feed to have reported at least one
+cancellation (a trip whose last status is CANCELED, or a stop whose last is
+SKIPPED) in the :data:`CANCELLATION_LOOKBACK_DAYS` days up to the range's
+last day, or anywhere in a longer range. The evidence is a row in
+``agg_service_delivered_daily``, the same trip-days the ratio subtracts, so
+the check is an index probe in Postgres rather than a scan of ``updates``,
+whose status columns are outside its sort key and would need every raw row
+of the look-back read. The rate returns by itself once a feed reports one.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from pipeline.planned_trips import plan_ctes
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_coverage_confirmed_agencies
 
-#: Why an agency's rate is ``None``, in the order the checks run: no plan to
-#: measure against; an ingest strategy that cannot carry the trip status at
-#: all; or one that can, but no live verdict says this feed does.
-#: ``"unreadable"`` is for a caller whose read of these figures failed
-#: outright, so a failed read is never shown as a real plan of nothing.
-DeliveredMissing = Literal["no_plan", "feed_cannot_report", "feed_unverified", "unreadable"]
+#: Why an agency's rate is ``None``. ``"unreadable"`` marks a read that failed
+#: outright, so a caller never shows its 0 planned trips as a real plan.
+DeliveredMissing = Literal[
+    "no_plan", "feed_cannot_report", "feed_unverified", "feed_reports_no_cancellations", "unreadable"
+]
+
+#: How far back from a range's last day a reported cancellation shows that a
+#: feed reports them at all.
+CANCELLATION_LOOKBACK_DAYS = 90
 
 # A day has a plan when planned_trips_daily saved one for it or the loaded
 # timetable covers it, and the saved count wins. A capture records what the
@@ -50,8 +64,9 @@ DeliveredMissing = Literal["no_plan", "feed_cannot_report", "feed_unverified", "
 # no plan covers, and missed trips count only on the days the plan counted.
 # agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
 # missed trips are there whatever timetable is loaded now. It has a row only
-# for a day with a missed trip, so an agency with none reads 0, not "not
-# available".
+# for a day with a missed trip: a planned day without one reads 0 missed, and
+# an agency with no row at all in the look-back ($4 to $3) reported no
+# cancellation in it, so reports_cancellations is false.
 _SERVICE_SQL = (
     "WITH"
     + plan_ctes("$1::int[]", "$2::date", "$3::date")
@@ -83,7 +98,13 @@ _SERVICE_SQL = (
            COALESCE(p.planned, 0) AS planned,
            COALESCE(p.covered_days, 0) AS covered_days,
            COALESCE(m.non_executed, 0) AS non_executed,
-           g.ingest_strategy
+           g.ingest_strategy,
+           EXISTS (
+               SELECT 1 FROM agg_service_delivered_daily r
+               WHERE r.agency_id = a.agency_id
+                 AND r.date BETWEEN $4::date AND $3::date
+                 AND r.non_executed_trips > 0
+           ) AS reports_cancellations
     FROM unnest($1::int[]) AS a(agency_id)
     LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
@@ -124,13 +145,15 @@ async def compute_service_delivered_by_agency(
     docstring) — never silently 0 canceled / 100% delivered — and
     ``delivered_missing`` then says why (:data:`DeliveredMissing`); it is
     ``None`` beside a rate. One query reads
-    the saved and loaded plans and a precomputed aggregate in Postgres — no
+    the saved and loaded plans and a precomputed aggregate in Postgres, which
+    also answers whether the feed reports cancellations at all — no
     ClickHouse access on this read path.
     """
     if not agency_ids:
         return {}
     window_days = (to_date - from_date).days + 1
-    rows = {r["agency_id"]: r for r in await conn.fetch(_SERVICE_SQL, agency_ids, from_date, to_date)}
+    lookback_from = min(from_date, to_date - timedelta(days=CANCELLATION_LOOKBACK_DAYS - 1))
+    rows = {r["agency_id"]: r for r in await conn.fetch(_SERVICE_SQL, agency_ids, from_date, to_date, lookback_from)}
 
     # An agency must satisfy both halves of the shared gate: an ingest
     # strategy that CAN send this field, and a live probe verdict saying its
@@ -149,6 +172,8 @@ async def compute_service_delivered_by_agency(
             missing = "feed_cannot_report"
         elif aid not in populated_ids:
             missing = "feed_unverified"
+        elif not rows[aid]["reports_cancellations"]:
+            missing = "feed_reports_no_cancellations"
         if missing is not None:
             result[aid] = {
                 "planned_trips": p,

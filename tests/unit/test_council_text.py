@@ -2,11 +2,13 @@
 
 import json
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
 from pipeline.query.formatter import format_council_summary_footnotes, format_council_summary_text
 from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.service_delivered import DeliveredMissing
 
 _DEFINITION = resolve_definition_meta("council_summary", None, None)
 
@@ -62,7 +64,7 @@ _BOARD_REASONS = {
 }
 
 
-@pytest.mark.parametrize("reason", ["no_plan", "feed_cannot_report", "feed_unverified", "unreadable"])
+@pytest.mark.parametrize("reason", get_args(DeliveredMissing))
 @pytest.mark.parametrize(
     ("locale", "template"),
     [("ja", "運行率：—（{}）"), ("en", "Service delivered %: — ({})")],
@@ -73,6 +75,18 @@ def test_footnotes_give_the_missing_rate_reason_in_the_agencies_board_words(reas
     payload = _payload(service_delivered_pct=None, delivered_missing=reason)
     lines = format_council_summary_footnotes(_DEFINITION, payload, locale)
     assert template.format(_BOARD_REASONS[locale][reason]) in lines
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        ("ja", "運行率：—（この配信は運休を伝えていません）"),
+        ("en", "Service delivered %: — (this feed doesn't report cancellations)"),
+    ],
+)
+def test_footnotes_say_a_feed_that_sends_no_cancellations_has_no_rate(locale, line):
+    payload = _payload(service_delivered_pct=None, delivered_missing="feed_reports_no_cancellations")
+    assert line in format_council_summary_footnotes(_DEFINITION, payload, locale)
 
 
 @pytest.mark.parametrize("locale", ["ja", "en"])
