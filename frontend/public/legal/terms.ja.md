@@ -27,7 +27,7 @@
 本サービスが表示する遅れと運行の数値は、次のオープンデータを本サービスが集計・加工して作ったもので、データの提供元が作ったものではありません。
 
 - 青森市営バス：本サービスは、以下の著作物を改変して利用しています。青森市企業局交通部、[青森市営バス路線情報](https://ckan.odpt.org/dataset/aomori_city_all_lines)および[【リアルタイム情報】青森市営バス路線情報](https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines)、[クリエイティブ・コモンズ・ライセンス 表示4.0国際](https://creativecommons.org/licenses/by/4.0/deed.ja)
-- 広島県内の事業者：本サービスは、公益社団法人広島県バス協会が[広島県バス協会GTFSオープンデータサイト](https://www.bus-kyo.or.jp/)で公開している広島県内の各バス事業者のデータ（[クリエイティブ・コモンズ CC0](https://creativecommons.org/publicdomain/zero/1.0/deed.ja)）を加工して利用しています。
+- 広島県内の事業者：本サービスは、公益社団法人広島県バス協会が[広島県バス協会GTFSオープンデータサイト](https://www.bus-kyo.or.jp/)で、[クリエイティブ・コモンズ CC0](https://creativecommons.org/publicdomain/zero/1.0/deed.ja)のもとで公開している広島県内の各バス事業者のデータを加工して利用しています。
 
 気象の数値（気象庁の観測値）と地図（国土地理院、OpenStreetMap の寄稿者）は、それぞれを表示する場所に出典を記載しています。
 

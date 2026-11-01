@@ -4,7 +4,7 @@
     "en": "This service uses the following copyrighted material with modifications. Aomori City, Aomori City Bus information (https://ckan.odpt.org/dataset/aomori_city_all_lines) and [realtime information] Aomori City Bus information (https://ckan.odpt.org/dataset/odpt_aomori_city_all_lines), Creative Commons License Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/deed.en)"
   },
   "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin": {
-    "ja": "本サービスは、公益社団法人広島県バス協会が広島県バス協会GTFSオープンデータサイト（https://www.bus-kyo.or.jp/）で公開している広島県内の各バス事業者のデータ（クリエイティブ・コモンズ CC0（https://creativecommons.org/publicdomain/zero/1.0/deed.ja））を加工して利用しています。",
+    "ja": "本サービスは、公益社団法人広島県バス協会が広島県バス協会GTFSオープンデータサイト（https://www.bus-kyo.or.jp/）で、クリエイティブ・コモンズ CC0（https://creativecommons.org/publicdomain/zero/1.0/deed.ja）のもとで公開している広島県内の各バス事業者のデータを加工して利用しています。",
     "en": "This service uses, with modifications, the data of each operator in Hiroshima Prefecture that the Hiroshima Bus Association publishes on its GTFS open data site (https://www.bus-kyo.or.jp/) under Creative Commons CC0 (https://creativecommons.org/publicdomain/zero/1.0/deed.en)."
   }
 }
