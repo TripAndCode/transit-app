@@ -487,8 +487,11 @@ the scope as one sentence above their content
   note and a Hiroshima operator's the Hiroshima Bus Association's CC0
   courtesy credit, never both. Each linked name is followed by its URL,
   since a CSV cell keeps no link. Unlike the Japanese-only rows above it,
-  the credit follows the request's `Accept-Language`. A plain
-  `CsvLink` download sends the browser's language, not the UI's. A feed no
+  the credit is in the UI's language. A plain download link sends the
+  browser's `Accept-Language`, which need not be the UI's, so `CsvLink`
+  adds `lang` (`ja`/`en`, from `contentLocale`) to every report CSV link.
+  `get_report` writes the credit in `lang`, else in `Accept-Language`;
+  `lang` changes no other row and is a 400 without `format=csv`. A feed no
   source covers adds no row. The source list and the wording are read from
   the frontend's `dataSources.json` and `credits.*` locale keys, not copied
   (see `docs/features/reports-tab.md`).

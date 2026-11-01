@@ -141,7 +141,10 @@ reports.
     (`dataSourceOf`): Aomori City Bus's CC BY credit with its modification
     note, or the Hiroshima Bus Association's CC0 courtesy credit.
   - Paper keeps no link, so each linked name is followed by its URL
-    (`creditText`, in the `credits.link_with_url` pattern).
+    (`creditText`, in the `credits.link_with_url` pattern). That URL sits in
+    parentheses, so a credit sentence keeps its linked names out of any
+    other parentheses; a URL nested inside them would read as part of the
+    text around it. Both renderers' tests check it.
   - The council and delay-record CSVs carry the same credit as their last
     preamble row (see `docs/features/analysis-tab.md`).
   - The period summary's combined CSV starts at its header row and gets no

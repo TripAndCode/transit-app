@@ -277,6 +277,7 @@ describe("AnalysisTab", () => {
     renderAnalysis("/agencies/1/analysis/rider?report=ranking");
     const csvLink = screen.getAllByRole("link").find((a) => a.getAttribute("href")?.includes("format=csv"));
     expect(csvLink?.getAttribute("href")).toMatch(/^https:\/\/api\.example\.test\/api\/1\/reports\/ranking\?/);
+    expect(csvLink?.getAttribute("href")).toMatch(/[?&]lang=en(&|$)/);
   });
 
   it("keeps a report's raw rows for admins, out of everyone else's way", () => {

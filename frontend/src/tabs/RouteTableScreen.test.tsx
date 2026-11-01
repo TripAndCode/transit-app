@@ -104,6 +104,7 @@ describe("RouteTableScreen", () => {
     expect(options()).toMatchObject({ sort: "late5_share", order: "best" });
     expect(csvHref()).toMatch(/[?&]sort=late5_share(&|$)/);
     expect(csvHref()).toMatch(/[?&]order=best(&|$)/);
+    expect(csvHref()).toMatch(/[?&]lang=en(&|$)/);
   });
 
   it("turns the order around and back", async () => {
