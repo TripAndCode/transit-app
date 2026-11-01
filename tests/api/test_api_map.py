@@ -517,6 +517,72 @@ async def test_stop_bounds_spans_the_agencys_located_stops_only(map_app):
     assert resp.json() == {"bounds": [132.18, 34.10, 132.92, 34.67]}
 
 
+async def _seed_service_hours_timetable(conn, agency_id: int) -> None:
+    """Every day of April 2026, one trip 06:05–21:48 JST and one 23:50–24:20."""
+    await conn.execute(
+        "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+        "saturday, sunday, start_date, end_date) VALUES ($1, 'ALL', true, true, true, true, true, true, true, "
+        "'2026-04-01', '2026-04-30')",
+        agency_id,
+    )
+    for trip_id, first, last in (("day", "06:05:00", "21:48:00"), ("night", "23:50:00", "24:20:00")):
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1, $2, 'R1', 'ALL')",
+            agency_id,
+            trip_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, $2, 1, 'A', $3, $3), ($1, $2, 2, 'B', $4, $4)",
+            agency_id,
+            trip_id,
+            first,
+            last,
+        )
+
+
+@pytest.mark.asyncio
+async def test_service_hours_name_the_service_day_in_progress_and_its_first_and_last_trips(map_app, monkeypatch):
+    """At 02:00 JST on the 7th the service day of the 6th is still running, so
+    its hours are the ones the Live map judges an empty map by."""
+    import api.range
+    from tests.fixtures.clock import JST, freeze_now
+
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await _seed_service_hours_timetable(conn, agency_id)
+    freeze_now(monkeypatch, api.range, datetime(2026, 4, 7, 2, 0, tzinfo=JST))
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/service-hours")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["date"] == "2026-04-06"
+    assert datetime.fromisoformat(body["hours"]["first_departure_at"]) == datetime(2026, 4, 6, 6, 5, tzinfo=JST)
+    assert datetime.fromisoformat(body["hours"]["last_arrival_at"]) == datetime(2026, 4, 7, 0, 20, tzinfo=JST)
+
+
+@pytest.mark.asyncio
+async def test_service_hours_are_null_on_a_day_the_timetable_does_not_cover(map_app, monkeypatch):
+    import api.range
+    from tests.fixtures.clock import JST, freeze_now
+
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await _seed_service_hours_timetable(conn, agency_id)
+    freeze_now(monkeypatch, api.range, datetime(2026, 5, 2, 12, 0, tzinfo=JST))
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/service-hours")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": "2026-05-02", "hours": None}
+
+
+@pytest.mark.asyncio
+async def test_service_hours_of_an_unknown_agency_are_not_found(map_client):
+    client, _agency_id = map_client
+    resp = await client.get("/api/999999/today/service-hours")
+    assert resp.status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_heatmap_route_filter_from_aggregate(map_app):
     """Route-filtered heatmap reads agg_route_stop_daily (not raw updates): one dot

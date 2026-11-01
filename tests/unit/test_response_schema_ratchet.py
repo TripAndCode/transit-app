@@ -73,6 +73,7 @@ TYPED = {
     "GET /api/{agency_id}/delay_record/trips",
     "GET /api/{agency_id}/delays/timeline",
     "GET /api/{agency_id}/today/route/{route_code}/trips",
+    "GET /api/{agency_id}/today/service-hours",
 }
 
 
