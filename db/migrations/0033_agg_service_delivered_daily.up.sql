@@ -12,11 +12,12 @@
 --
 -- Populated only for agencies whose ingest strategy actually sends
 -- `schedule_relationship_*` (today: `static_join`) -- an agency whose feed
--- never sends it gets zero rows here, which the read path distinguishes from
--- "confirmed zero cancellations" via `agencies.ingest_strategy`, not via any
--- row in this table. A day with genuinely zero non-executed trips also has
--- no row (the source aggregation only emits rows that exist), so a reader
--- must SUM with a zero default, never assume row-per-day density.
+-- never sends it gets zero rows here, which the read path tells apart by
+-- `agencies.ingest_strategy`, checked first. For a feed that can, no row in
+-- the reader's look-back means it reported no cancellation there, and the
+-- rate reads "not available". A day with genuinely zero non-executed trips
+-- also has no row (the source aggregation only emits rows that exist), so a
+-- reader must SUM with a zero default, never assume row-per-day density.
 --
 -- `date` is the JST civil day (`toDate(captured_at, 'Asia/Tokyo')`), the same
 -- convention as `agg_route_daily_dist.date`.

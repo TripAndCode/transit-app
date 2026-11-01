@@ -45,13 +45,8 @@ from typing import Any, Literal
 from pipeline.planned_trips import plan_ctes
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_coverage_confirmed_agencies
 
-#: Why an agency's rate is ``None``, in the order the checks run: no plan to
-#: measure against; an ingest strategy that cannot carry the trip status at
-#: all; one that can, but no live verdict says this feed does; or a feed that
-#: carries it but has reported no cancellation in the look-back (see the
-#: module docstring). ``"unreadable"`` is for a caller whose read of these
-#: figures failed outright, so a failed read is never shown as a real plan of
-#: nothing.
+#: Why an agency's rate is ``None``. ``"unreadable"`` marks a read that failed
+#: outright, so a caller never shows its 0 planned trips as a real plan.
 DeliveredMissing = Literal[
     "no_plan", "feed_cannot_report", "feed_unverified", "feed_reports_no_cancellations", "unreadable"
 ]
