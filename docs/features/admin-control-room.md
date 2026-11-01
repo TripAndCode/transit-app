@@ -195,8 +195,9 @@ The list and drawer label the row Deleted and offer no Resume control.
 The drawer's "Usage (last 30 days)" section reads
 `GET /api/admin/users/{uid}/activity?days=30` (`days` 1–365): per route
 template and agency, the requests and errors summed from
-`user_activity_daily`. The API counts every authenticated `/api/*` request
-into that table (`api/activity.py`, flushed every 30 s), attributing
+`user_activity_daily`. The API counts every authenticated request to a gated
+`/api/*` route into that table (the sign-in flow, `/api/config` and the
+who-am-I read `GET /api/me` are not counted) (`api/activity.py`, flushed every 30 s), attributing
 API-key requests to the key's owner. It stores route templates and days
 only — never raw paths, query text, or finer timestamps.
 
@@ -274,8 +275,9 @@ registry, precedence, and cache TTL, and `README.md`'s kill-switch section
 for the full key list.
 
 `login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
-every `/api/*` route except the sign-in flow and `/api/config` refuses a
-signed-out caller while SSO is configured. Turning it off reopens the app to
+every `/api/*` route except the sign-in flow, `/api/config` and a read of
+`/api/me` (who-am-I, `null` when signed out) refuses a signed-out caller while
+SSO is configured. Turning it off reopens the app to
 signed-out visitors; it is the recovery switch when OAuth is down (see
 `docs/deploy-railway.md`).
 

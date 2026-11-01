@@ -75,6 +75,21 @@ async def test_sign_in_flow_and_config_stay_reachable(client, sso_on):
 
 
 @pytest.mark.asyncio
+async def test_who_am_i_answers_a_signed_out_caller_while_sign_in_is_required(client, sso_on):
+    r = await client.get("/api/me")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+@pytest.mark.asyncio
+async def test_the_rest_of_the_account_stays_gated_while_sign_in_is_required(client, sso_on):
+    assert (await client.get("/api/me/sessions")).status_code == 401
+    r = await client.delete("/api/me", headers={"Origin": TEST_ORIGIN})
+    assert r.status_code == 401
+    assert r.json() == _AUTH_REQUIRED
+
+
+@pytest.mark.asyncio
 async def test_without_sso_the_api_stays_open(client):
     r = await client.get("/api/agencies")
     assert r.status_code == 200
