@@ -460,7 +460,12 @@ type ScopeApplied = Partial<Record<string, boolean>>;
 
 /** Why an agency's service-delivered rate is missing
  *  (pipeline.reports.service_delivered.DeliveredMissing). */
-type DeliveredMissing = "no_plan" | "feed_cannot_report" | "feed_unverified" | "unreadable";
+type DeliveredMissing =
+  | "no_plan"
+  | "feed_cannot_report"
+  | "feed_unverified"
+  | "feed_reports_no_cancellations"
+  | "unreadable";
 
 type ReportEnvelope<T extends ReportType, Row> = {
   scope_applied?: ScopeApplied;

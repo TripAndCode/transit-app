@@ -2282,6 +2282,36 @@ async def test_council_summary_service_delivered_available_when_static_join_and_
 
 
 @pytest.mark.asyncio
+async def test_council_summary_has_no_rate_for_a_feed_that_reports_no_cancellations(reports_client, ch_client):
+    """A confirmed static_join feed whose rows were all SCHEDULED takes
+    nothing off the plan, so the council report gives no 100% for it: the
+    rate is missing, the footnote says the feed doesn't report cancellations,
+    and the planned trips still count."""
+    client, agency_id, pool = reports_client
+    await confirm_rt_field_coverage(pool, agency_id)
+    day = "2026-06-15"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    await _seed_static_schedule(
+        pool, agency_id, service_id="WD", trip_ids=["T1", "T2", "T3", "T4"], svc_date="20260615"
+    )
+    await _set_ingest_strategy(pool, agency_id, "static_join")
+
+    for locale, line in (
+        ("ja", "※運行率：—（この配信は運休を伝えていません）"),
+        ("en", "* Service delivered %: — (this feed doesn't report cancellations)"),
+    ):
+        resp = await client.get(
+            f"/api/{agency_id}/reports/council_summary?from={day}&to={day}", headers={"Accept-Language": locale}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["rows"][0][3:] == [4, None, None]  # planned, executed, delivered
+        assert body["delivered_missing"] == "feed_reports_no_cancellations"
+        assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
 async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_route_filter(reports_client, ch_client):
     import csv
     import io

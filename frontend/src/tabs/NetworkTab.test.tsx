@@ -210,6 +210,7 @@ describe("NetworkTab", () => {
           row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_cannot_report" }),
           row({ agency_id: 3, agency_name: "Planless", planned_trips: 0, covered_days: 0, service_delivered_pct: null, executed_trips: null, delivered_missing: "no_plan" }),
           row({ agency_id: 4, agency_name: "Unread", planned_trips: 0, covered_days: 0, service_delivered_pct: null, executed_trips: null, delivered_missing: "unreadable" }),
+          row({ agency_id: 5, agency_name: "Quiet", planned_trips: 1000, planned_vehicle_km: 4210.6, vehicle_km_delivered_pct: null, service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_reports_no_cancellations" }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -223,6 +224,9 @@ describe("NetworkTab", () => {
     expect(card("Unread")).toHaveTextContent("Service delivered % — (the plan could not be read)");
     expect(card("Unread")).toHaveTextContent("Planned trips —");
     expect(card("Unread")).not.toHaveTextContent("Planned trips 0");
+    expect(card("Quiet")).toHaveTextContent("Service delivered % — (this feed doesn't report cancellations)");
+    expect(card("Quiet")).toHaveTextContent("Planned trips 1,000");
+    expect(card("Quiet")).not.toHaveTextContent("Vehicle-km delivered %");
   });
 
   it("shows vehicle-km delivered % where it is computed, says why where only it is missing, and never calls vehicle-km itself unavailable", () => {

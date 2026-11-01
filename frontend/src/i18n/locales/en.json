@@ -268,7 +268,7 @@
     "howto_title": "How to read this",
     "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
     "help_on_time": "Share of readings within the on-time threshold.",
-    "help_delivered": "Share of planned trips that ran without being reported cancelled. Shown only for agencies whose feed a check has confirmed reports cancellations; otherwise \"—\" with the reason.",
+    "help_delivered": "Share of planned trips that ran without being reported cancelled. Shown only for agencies whose feed a check has confirmed can carry cancellations and that reported at least one in the period or the 90 days up to its end; otherwise \"—\" with the reason.",
     "help_samples": "Number of delay observations behind the figures.",
     "help_feed": "Percent of readings dropped as implausible — high means a stuck or frozen feed.",
     "help_freshness": "Whether the figures include the latest ingested data. \"Behind\" means the precomputed totals haven't caught up yet, so the most recent days may be missing.",
@@ -298,7 +298,8 @@
       "no_plan": "no timetable plans this period",
       "unreadable": "the plan could not be read",
       "feed_cannot_report": "this feed format cannot report cancellations",
-      "feed_unverified": "the feed is not yet checked for cancellations"
+      "feed_unverified": "the feed is not yet checked for cancellations",
+      "feed_reports_no_cancellations": "this feed doesn't report cancellations"
     },
     "vehicle_km_no_shapes": "— (no route shapes loaded)"
   },

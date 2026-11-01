@@ -177,10 +177,12 @@ async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_p
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
 
-    # Agency B: static_join too, but its feed had zero cancellations in range
-    # (no agg_service_delivered_daily row at all) -> reads 100%, not "not available".
+    # Agency B: static_join too, with no cancellation in range but one a
+    # fortnight earlier, which shows its feed reports them -> reads 100%,
+    # not "not available".
     await _seed_static_schedule(pool, b, service_id="WD", trip_ids=["U1", "U2", "U3"], svc_date="20260401")
     await _set_ingest_strategy(pool, b, "static_join")
+    await _seed_service_delivered_daily(pool, b, [("2026-03-18", 1)])
 
     async with pool.acquire() as conn:
         rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
@@ -193,6 +195,29 @@ async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_p
     assert by[b]["planned_trips"] == 3
     assert by[b]["executed_trips"] == 3
     assert by[b]["service_delivered_pct"] == 100.0
+
+
+async def test_compute_service_delivered_not_available_for_a_feed_that_reports_no_cancellations(
+    net_pool, ch_async_client
+):
+    """A confirmed static_join feed that sent no CANCELED trip or SKIPPED stop
+    in the 90 days up to the period's end would read 100% whatever ran, so the
+    board reads "not available" with that reason, and vehicle-km delivered,
+    the same rate applied to the planned distance, goes with it."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_version_summary(pool, a, "v1", trip_count=10, vehicle_km=100.0)
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 3
+    assert (row["executed_trips"], row["service_delivered_pct"]) == (None, None)
+    assert row["delivered_missing"] == "feed_reports_no_cancellations"
+    assert row["planned_vehicle_km"] == 100.0
+    assert row["vehicle_km_delivered_pct"] is None
 
 
 async def test_compute_service_delivered_not_available_when_not_static_join(net_pool, ch_async_client):
