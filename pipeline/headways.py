@@ -250,7 +250,11 @@ def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], lis
 
     *ch_rows* are ``(route_code, stop_id, svc_date, times)`` with each stop's
     actual event times; gaps are reconstructed per stop, so a route's gaps never
-    span two stops.
+    span two stops. Pooling follows agg_route_headway's scheduled side: a
+    consistently spaced route has a similar gap distribution at every stop it
+    serves, so no one stop has to be picked as representative. A zero or
+    negative gap (a duplicate or out-of-order observation) is left out rather
+    than counted as a real zero headway.
     """
     pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
     for route_code, _stop_id, svc_date, times in ch_rows:

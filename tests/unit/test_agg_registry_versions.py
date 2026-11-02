@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from pipeline import agg_registry, headways
+from pipeline import agg_registry, ch_aggregates, db, headways
 
 RECORD = pathlib.Path(__file__).with_name("agg_registry_versions.json")
 REPO = RECORD.parents[2]
@@ -40,17 +40,43 @@ def test_every_registered_table_is_recorded():
     assert set(json.loads(RECORD.read_text())) == set(agg_registry.TABLES)
 
 
-@pytest.mark.parametrize("name", sorted(agg_registry.TABLES))
-def test_a_changed_builder_comes_with_a_version_bump(name):
-    recorded = json.loads(RECORD.read_text())[name]
-    table = agg_registry.TABLES[name]
-    assert table.version >= recorded["version"], f"{name}'s version went backwards"
-    if _hash(name) != recorded["hash"]:
-        assert table.version > recorded["version"], (
+def _verdict(name: str, recorded: dict, version: int, digest: str) -> str | None:
+    """Why *name*'s current (version, digest) does not match its record, or None."""
+    if version < recorded["version"]:
+        return f"{name}'s version went backwards ({recorded['version']} recorded, {version} now)."
+    if digest != recorded["hash"] and version == recorded["version"]:
+        return (
             f"{name}'s builder changed (render() differs from {RECORD.name}) but its version is still "
-            f"{table.version}. If stored rows can differ, bump its version in pipeline/agg_registry.py; "
+            f"{version}. If stored rows can differ, bump its version in pipeline/agg_registry.py; "
             f"either way, then run `{UPDATE}`."
         )
+    if (version, digest) != (recorded["version"], recorded["hash"]):
+        return f"{RECORD.name} is stale for {name}: run `{UPDATE}` and commit it with the change."
+    return None
+
+
+def test_an_unchanged_builder_passes():
+    assert _verdict("t", {"version": 1, "hash": "h"}, 1, "h") is None
+
+
+def test_a_changed_builder_without_a_bump_fails():
+    assert "bump its version" in _verdict("t", {"version": 1, "hash": "h"}, 1, "h2")
+
+
+def test_a_bump_left_out_of_the_record_fails():
+    assert "stale" in _verdict("t", {"version": 1, "hash": "h"}, 2, "h2")
+    assert "stale" in _verdict("t", {"version": 1, "hash": "h"}, 2, "h")
+
+
+def test_a_version_going_backwards_fails():
+    assert "backwards" in _verdict("t", {"version": 2, "hash": "h"}, 1, "h")
+
+
+@pytest.mark.parametrize("name", sorted(agg_registry.TABLES))
+def test_each_builder_matches_its_record(name):
+    recorded = json.loads(RECORD.read_text())[name]
+    verdict = _verdict(name, recorded, agg_registry.TABLES[name].version, _hash(name))
+    assert verdict is None, verdict
 
 
 def test_rendering_is_deterministic_within_a_process():
@@ -72,6 +98,20 @@ def test_a_helper_constant_reaches_the_hash(monkeypatch):
     before = _hash("agg_route_headway_daily")
     monkeypatch.setattr(headways, "LONG_GAP_MULTIPLIER", headways.LONG_GAP_MULTIPLIER + 0.25)
     assert _hash("agg_route_headway_daily") != before
+
+
+@pytest.mark.parametrize("name", ["agg_feed_health", "agg_route_headway_daily"])
+def test_a_clamp_bound_as_a_parameter_reaches_the_hash(monkeypatch, name):
+    before = _hash(name)
+    monkeypatch.setattr(db, "MAX_PLAUSIBLE_DELAY_SEC", db.MAX_PLAUSIBLE_DELAY_SEC // 2)
+    assert _hash(name) != before
+
+
+@pytest.mark.parametrize("name", ch_aggregates.WHOLE_HISTORY_TABLES)
+def test_whole_history_tables_render_the_month_stitching_the_build_runs(name):
+    import inspect
+
+    assert inspect.getsource(ch_aggregates._internal_source) in agg_registry.TABLES[name].render()
 
 
 if __name__ == "__main__":

@@ -103,7 +103,7 @@ logger = logging.getLogger(__name__)
 # it is folded into the fingerprint recorded with each build
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
-# produces.
+# produces, together with the table's version in pipeline/agg_registry.py.
 ANALYZE_LOGIC_VERSION = 7
 
 # The service date of an observation, by which _ledger_counts groups raw
@@ -1239,13 +1239,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                 },
             )
-            # Pool every stop's reconstructed gaps for the same (route_code,
-            # date) together -- same rationale as agg_route_headway's static
-            # side: a consistently-spaced route has a similar gap
-            # distribution at every stop it serves, and pooling avoids
-            # having to justify picking one "representative" stop.
-            # Zero/negative gaps (a duplicate or out-of-order observation)
-            # are excluded, not counted as a real zero-headway event.
             # Timed apart from the ClickHouse scan above: this is the one
             # aggregate whose build is partly Python, so moving it would mean
             # expressing reconstruct_headways in SQL, not just relocating a

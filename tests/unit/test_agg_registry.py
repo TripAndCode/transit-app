@@ -1,5 +1,7 @@
 """The aggregate registry names every table analyze builds, and only those."""
 
+import pytest
+
 from pipeline import agg_registry, ch_aggregates
 from pipeline.agg_registry import Kind
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
@@ -45,6 +47,17 @@ def test_dependencies_name_registered_tables():
 
 def test_daily_headways_depend_on_the_scheduled_medians():
     assert agg_registry.TABLES["agg_route_headway_daily"].depends_on == ("agg_route_headway",)
+
+
+def test_a_version_override_reaches_a_table_built_in_the_loop(monkeypatch):
+    monkeypatch.setitem(agg_registry._VERSIONS, "agg_route_stats", 2)
+    assert {t.name: t for t in agg_registry._entries()}["agg_route_stats"].version == 2
+
+
+def test_a_name_registered_twice_is_an_error():
+    first = agg_registry.TABLES["agg_feed_health"]
+    with pytest.raises(ValueError, match="agg_feed_health"):
+        agg_registry._index([first, first])
 
 
 def test_every_render_is_non_empty_text():
