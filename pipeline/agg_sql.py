@@ -396,3 +396,15 @@ STATIC_VERSION_SUMMARY_UPSERT_SQL = (
     "trip_count = EXCLUDED.trip_count, vehicle_km = EXCLUDED.vehicle_km, "
     "computed_at = EXCLUDED.computed_at"
 )
+
+
+# ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
+# order string_agg(... ORDER BY route_code) gave: the database collation's.
+# A list with no comma has nothing to order, and string_to_array splits ''
+# into no element at all, which would write NULL. Splitting on commas is
+# sound because a route code holds none: the API's `routes` filter splits on them too.
+STOP_ROUTES_ORDER_SQL = (
+    "UPDATE agg_stop_routes SET route_codes = "
+    "(SELECT string_agg(r, ',' ORDER BY r) FROM unnest(string_to_array(route_codes, ',')) AS r) "
+    "WHERE agency_id = %s AND strpos(route_codes, ',') > 0"
+)
