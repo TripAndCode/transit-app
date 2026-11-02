@@ -89,13 +89,11 @@ import psycopg2.extras
 
 from pipeline import agg_sql, ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql, hms_to_sec_sql
-from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
-from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, dominant_service_ctes, reconstruct_headways
-from pipeline.histogram import bucket_case_sql, hist_array_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
+from pipeline.headways import count_long_gaps, reconstruct_headways
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch, service_day_seconds_sql
+from pipeline.service_day import service_date_ch
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -1107,93 +1105,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # agg_route_headway_daily below, this needs no ingest_strategy
             # gate; every agency with a static feed loaded (has_static) gets
             # a row for every route_code its schedule resolves to.
-            #
-            # route_code (RT's `updates.route_code`) is matched to the static
-            # schedule's route_id via the SAME digit-suffix regex used
-            # everywhere else this codebase bridges the two id spaces
-            # (api/routers/static.py, pipeline/reports/overview.py's
-            # `_route_short_names`) -- route_id itself IS the route_code for
-            # a feed whose route_id carries no trailing "(NNNN)"
-            # (regexp_replace no-ops on a non-matching input).
-            #
-            # A route can run under more than one GTFS service_id (weekday
-            # vs. weekend calendars, etc.) with genuinely different
-            # headways; mixing both into one sorted sequence of departure
-            # times would interleave two independent schedules and produce a
-            # spuriously DENSER (smaller-gap) blend than either calendar
-            # alone. Instead, for each route this picks the single
-            # service_id with the most distinct trips (its dominant,
-            # most-typical calendar) and derives the median from that
-            # calendar's departures only.
-            #
-            # Headway gaps are pooled across every stop_id the route calls
-            # at (not just one "representative" stop) before taking the
-            # median -- avoids having to justify picking one stop as
-            # representative, and a consistently-spaced route has a similar
-            # gap distribution at every stop it serves. A zero-second gap
-            # (two trips scheduled for the exact same departure_time at the
-            # same stop -- typically a multi-berth stop or a data artifact,
-            # not real zero-headway service) is excluded rather than let it
-            # drag the median down.
-            #
-            # departure_time is raw GTFS text ("H:MM:SS" or similar) --
-            # unlike `updates.scheduled_time` (normalized at ingest time by
-            # pipeline.strategies._time.normalize_departure_time and capped
-            # to same-day hours), static_stop_times stores it completely
-            # unvalidated, so it is parsed with the shared hms_to_sec_sql
-            # (deliberately NOT capped at 24h -- GTFS's
-            # post-midnight-continuation hours like "25:30:00" are valid
-            # schedule data and must not raise or misparse; a malformed shape
-            # parses to NULL and is excluded, exactly as in every other reader
-            # of static times). The parsed value is then placed on the service
-            # day (service_day_seconds_sql): a feed that writes an
-            # after-midnight departure as a plain clock ("00:10:00") would
-            # otherwise sort it before the morning's first departure, where
-            # GTFS's "24:10:00" sorts after 23:50.
-            hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
-            sql = f"""
-                WITH {dominant_service_ctes("%(agency_id)s")},
-                scheduled_departures AS (
-                    SELECT twr.route_code, sst.stop_id,
-                        {service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))} AS dep_sec
-                    FROM trips_with_route twr
-                    JOIN dominant_service ds
-                      ON ds.route_code = twr.route_code AND ds.service_id = twr.service_id
-                    JOIN static_stop_times sst
-                      ON sst.agency_id = %(agency_id)s AND sst.trip_id = twr.trip_id
-                ),
-                gaps AS (
-                    SELECT route_code,
-                           dep_sec - LAG(dep_sec) OVER (PARTITION BY route_code, stop_id ORDER BY dep_sec)
-                               AS headway_sec
-                    FROM scheduled_departures
-                    WHERE dep_sec IS NOT NULL
-                ),
-                medians AS (
-                    SELECT route_code,
-                           PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
-                           COUNT(*) AS scheduled_samples,
-                           -- E[H^2] / (2*E[H]) over this route's scheduled headway
-                           -- distribution -- the mean-wait-time formula
-                           -- (pipeline.headways.mean_wait_from_moments), computed
-                           -- here in SQL instead of pulling every raw headway_sec
-                           -- back into Python. NULLIF guards the (already
-                           -- near-impossible, since headway_sec > 0 is filtered
-                           -- below) zero-mean case.
-                           AVG(headway_sec::float8 * headway_sec::float8)
-                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec
-                    FROM gaps
-                    WHERE headway_sec IS NOT NULL AND headway_sec > 0
-                    GROUP BY route_code
-                )
-                SELECT %(agency_id)s AS agency_id, route_code,
-                       scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
-                       scheduled_wait_mean_sec
-                FROM medians
-            """
             _build_and_insert(
-                sql,
+                agg_sql.route_headway_sql(),
                 "agg_route_headway",
                 [
                     "agency_id",
@@ -1271,15 +1184,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_route_daily_dwell_run (per-day dwell/running-time distribution) ──
-        # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
-        # visit's departure minus its own arrival) and running time (this
-        # visit's arrival minus the PREVIOUS visit's departure) -- see
-        # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
-        # the stop visits from _analyze_visits (materialised once above): one
-        # row per trip, service day and stop, pairing the arrival and the
-        # departure the feed reports in separate polls. A visit reported only
-        # as an arrival (every trip's terminus) has a NULL dep_delay; one
-        # reported only as a departure, a NULL arr_delay.
         # Requires BOTH a static schedule (arrival_time/departure_time come
         # from static_stop_times, which `has_static` alone confirms rows
         # exist for) AND an ingest strategy confirmed to send `arr_delay`
@@ -1292,94 +1196,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
         if builds_dwell_run:
-            dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
-            run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
-            dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
-            run_hist_expr = hist_array_sql("br", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
-            # On the service day's axis, so a run from 23:58 to a stop the
-            # timetable writes as "00:03:00" is five minutes forward, as it is
-            # to GTFS's "24:03:00".
-            sched_arr_expr = service_day_seconds_sql(hms_to_sec_sql("sst.arrival_time"))
-            sched_dep_expr = service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))
-            sql = f"""
-                WITH visits AS (
-                    SELECT
-                        d.route_code, COALESCE(d.service_type, '') AS service_type,
-                        d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
-                        {sched_arr_expr} AS sched_arr_sec,
-                        {sched_dep_expr} AS sched_dep_sec
-                    FROM _analyze_visits d
-                    LEFT JOIN static_stop_times sst
-                      ON sst.agency_id = %(agency_id)s
-                     AND sst.trip_id = d.trip_id
-                     AND sst.stop_sequence = d.stop_sequence
-                ),
-                actuals AS (
-                    -- A stop lacking a static schedule row (LEFT JOIN found no
-                    -- match) or lacking arrival_time/departure_time within one
-                    -- yields NULL sched_dep_sec/sched_arr_sec here -- every
-                    -- such visit is still KEPT (not filtered out) so the
-                    -- LAG() window below sees every stop_sequence in order;
-                    -- dropping the row would let LAG() silently skip past it
-                    -- and pair the FOLLOWING stop with the wrong previous
-                    -- departure. Each actual time needs its own delay and its
-                    -- own scheduled time, so an arrival-only visit (no
-                    -- dep_delay) runs into this stop but leaves the next
-                    -- stop's running time unknown -- the split
-                    -- pipeline.dwell_run's module docstring describes.
-                    SELECT route_code, service_type, trip_id, date, stop_sequence, dep_observed,
-                        CASE WHEN dep_delay IS NOT NULL AND sched_dep_sec IS NOT NULL
-                             THEN sched_dep_sec + dep_delay END AS actual_dep_sec,
-                        CASE WHEN arr_delay IS NOT NULL AND sched_arr_sec IS NOT NULL
-                             THEN sched_arr_sec + arr_delay END AS actual_arr_sec
-                    FROM visits
-                ),
-                with_prev AS (
-                    SELECT *,
-                        LAG(actual_dep_sec) OVER (
-                            PARTITION BY trip_id, date ORDER BY stop_sequence
-                        ) AS prev_actual_dep_sec
-                    FROM actuals
-                ),
-                computed AS (
-                    SELECT
-                        route_code, service_type, date,
-                        -- Dwell takes only a departure the feed reported
-                        -- after the arrival (dep_observed): one still
-                        -- standing from before it is a prediction, not a
-                        -- departure anyone saw. Running time takes the
-                        -- previous departure either way.
-                        CASE WHEN actual_arr_sec IS NOT NULL AND dep_observed
-                             THEN actual_dep_sec - actual_arr_sec END AS dwell_sec,
-                        CASE WHEN actual_arr_sec IS NOT NULL AND prev_actual_dep_sec IS NOT NULL
-                             THEN actual_arr_sec - prev_actual_dep_sec END AS running_sec
-                    FROM with_prev
-                    -- Filtered here, after LAG(), not in `visits`: a no-route
-                    -- visit still anchors the next stop's running time, but
-                    -- cannot enter the NOT NULL route_code key.
-                    WHERE route_code IS NOT NULL
-                ),
-                bucketed AS (
-                    SELECT route_code, service_type, date, dwell_sec, running_sec,
-                        {dwell_bucket_expr} AS bd,
-                        {run_bucket_expr} AS br
-                    FROM computed
-                )
-                SELECT
-                    %(agency_id)s AS agency_id,
-                    date::text, route_code, service_type,
-                    COUNT(*) FILTER (WHERE dwell_sec IS NOT NULL) AS dwell_samples,
-                    COALESCE(SUM(dwell_sec) FILTER (WHERE dwell_sec IS NOT NULL), 0) AS dwell_sum_sec,
-                    {dwell_hist_expr} AS hist_dwell,
-                    COUNT(*) FILTER (WHERE running_sec IS NOT NULL) AS run_samples,
-                    COALESCE(SUM(running_sec) FILTER (WHERE running_sec IS NOT NULL), 0) AS run_sum_sec,
-                    {run_hist_expr} AS hist_run
-                FROM bucketed
-                GROUP BY date, route_code, service_type
-                ORDER BY date, route_code
-            """
             _build_and_insert(
-                sql,
+                agg_sql.dwell_run_sql(),
                 "agg_route_daily_dwell_run",
                 [
                     "agency_id",
@@ -1518,21 +1336,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         if has_static:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    WITH shape_m AS MATERIALIZED (
-                        SELECT shape_id, ST_Length(geom::geography) AS m
-                        FROM static_shapes
-                        WHERE agency_id = %(agency_id)s AND geom IS NOT NULL
-                    )
-                    SELECT
-                        MAX(t.static_version_id) AS static_version_id,
-                        COUNT(*) AS trip_count,
-                        COUNT(s.m) AS trips_with_shape,
-                        SUM(s.m) / 1000.0 AS vehicle_km
-                    FROM static_trips t
-                    LEFT JOIN shape_m s ON s.shape_id = t.shape_id
-                    WHERE t.agency_id = %(agency_id)s
-                    """,
+                    agg_sql.STATIC_VERSION_SUMMARY_SQL,
                     p,
                 )
                 version_row = cur.fetchone()
@@ -1547,12 +1351,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             if static_version_id is not None:
                 with _step("agg_static_version_summary: upsert"), conn.cursor() as cur:
                     cur.execute(
-                        "INSERT INTO agg_static_version_summary "
-                        "(agency_id, static_version_id, trip_count, vehicle_km, computed_at) "
-                        "VALUES (%s, %s, %s, %s, now()) "
-                        "ON CONFLICT (agency_id, static_version_id) DO UPDATE SET "
-                        "trip_count = EXCLUDED.trip_count, vehicle_km = EXCLUDED.vehicle_km, "
-                        "computed_at = EXCLUDED.computed_at",
+                        agg_sql.STATIC_VERSION_SUMMARY_UPSERT_SQL,
                         (agency_id, static_version_id, trip_count, vehicle_km),
                     )
                 logger.info(
