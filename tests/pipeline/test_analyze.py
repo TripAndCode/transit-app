@@ -1158,6 +1158,28 @@ def test_agg_route_headway_counts_whitespace_padded_departure_times(pg_conn, age
     assert median == 600
 
 
+@pytest.mark.parametrize("after_midnight", ["00:10:00", "24:10:00"])
+def test_agg_route_headway_places_an_after_midnight_departure_on_its_service_day(
+    pg_conn, agency_id, ch_client, after_midnight
+):
+    """23:30, 23:50 and an after-midnight departure written either as GTFS's
+    extended 24:10 or as a plain clock 00:10: both are 20 minutes after 23:50,
+    never a departure before the evening's first. The median alone cannot tell
+    (it is the smaller gap either way); the mean wait sees the false 23:30 gap."""
+    _seed_route_headway_schedule(pg_conn, agency_id, "R_NIGHT", "WD", "s1", ["23:30:00", "23:50:00", after_midnight])
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT scheduled_samples, scheduled_headway_median_sec, scheduled_wait_mean_sec FROM agg_route_headway "
+            "WHERE agency_id = %s AND route_code = 'R_NIGHT'",
+            (agency_id,),
+        )
+        samples, median, wait_mean = cur.fetchone()
+    assert (samples, median) == (2, 1200)
+    assert wait_mean == pytest.approx(600)
+
+
 def _ch_headway_row(
     trip_id,
     captured_at,
@@ -1307,6 +1329,40 @@ def test_analyze_reconstructs_actual_headway_from_extended_hour_departures(pg_co
     median_sec, samples = row
     assert samples == 2
     assert abs(median_sec - 480) <= 1
+
+
+@pytest.mark.parametrize(
+    ("scheduled_time", "scheduled_sec"),
+    [("00:10:00", None), (None, 87000)],
+    ids=["clock", "extended"],
+)
+def test_analyze_reconstructs_actual_headway_across_midnight(
+    pg_conn, agency_id, ch_client, scheduled_time, scheduled_sec
+):
+    """The last departure of the 1 April service day runs at 00:10, which a
+    feed stores either as the clock it wrote (600) or as GTFS's extended 24:10
+    (87000). Either way it follows 23:50 by 20 minutes: there is no gap from
+    00:10 forward to 23:30, and the 23:50 -> 00:10 gap is kept."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    night = datetime(2026, 4, 1, 15, 10, tzinfo=timezone.utc)  # 00:10 JST, still the 1 April service day
+    rows = [
+        _ch_headway_row("T1", night, stop_id="s1", scheduled_time="23:30:00", file_name="a.pb"),
+        _ch_headway_row("T2", night, stop_id="s1", scheduled_time="23:50:00", file_name="b.pb"),
+        _ch_headway_row(
+            "T3", night, stop_id="s1", scheduled_time=scheduled_time, scheduled_sec=scheduled_sec, file_name="c.pb"
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date::text, actual_headway_median_sec, actual_samples, actual_headway_sum_sec "
+            "FROM agg_route_headway_daily WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        rows_out = cur.fetchall()
+    assert rows_out == [("2026-04-01", 1200, 2, 2400)]
 
 
 def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is_implausible(
@@ -1547,6 +1603,36 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     assert run_sum_sec == 490
     assert hist_dwell_len == 26
     assert hist_run_len == 32
+
+
+@pytest.mark.parametrize(("arrival", "departure"), [("00:03:00", "00:04:00"), ("24:03:00", "24:04:00")])
+def test_analyze_dwell_run_runs_forward_across_midnight(pg_conn, agency_id, ch_client, arrival, departure):
+    """A trip leaves stop 1 at 23:58 and reaches stop 2 after midnight, which
+    the timetable writes either as GTFS's extended 24:03 or as a plain clock
+    00:03. Either way the run is 5 minutes, not a day backwards, and stop 2's
+    one-minute dwell is unchanged."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Test Stop')", (agency_id,)
+        )
+        for seq, arr, dep in [(1, "23:58:00", "23:58:00"), (2, arrival, departure)]:
+            cur.execute(
+                "INSERT INTO static_stop_times "
+                "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+                "VALUES (%s, 'T1', %s, 'S1', %s, %s)",
+                (agency_id, seq, arr, dep),
+            )
+    pg_conn.commit()
+    leave = datetime(2026, 4, 1, 14, 58, tzinfo=timezone.utc)  # 23:58 JST on 1 April
+    rows = [
+        *_ch_dwell_run_polls("T1", leave, 1, 0, 0),
+        *_ch_dwell_run_polls("T1", leave + timedelta(minutes=6), 2, 0, 0),  # 00:04 JST, same service day
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _dwell_run_totals(pg_conn, agency_id) == (2, 60, 1, 300)
 
 
 def test_analyze_dwell_run_over_a_whole_trip_of_separate_polls(pg_conn, agency_id, ch_client):

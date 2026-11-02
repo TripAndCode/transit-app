@@ -36,6 +36,7 @@ from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch, _stop_visits_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
+from pipeline.service_day import service_day_offset, service_day_seconds_sql
 from pipeline.stats import linear_percentile
 from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
@@ -135,13 +136,15 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
 
     ``departure_time`` is unvalidated GTFS text (``H:MM:SS`` allowed, blank
     for non-timepoint stops), so first/last are taken over the parsed seconds,
-    never over the text; a time that does not parse is ignored.
+    never over the text; a time that does not parse is ignored. The seconds
+    are placed on the service day, so a last departure written as a plain
+    ``00:10:00`` is ``24:10:00``, as GTFS's extended spelling gives it.
     """
     row = await conn.fetchrow(
         "SELECT sr.route_id, sr.route_short_name, "
         "       COUNT(DISTINCT sst.stop_id) AS stop_count, "
-        f"       MIN({hms_to_sec_sql('sst.departure_time')}) AS first_dep_sec, "
-        f"       MAX({hms_to_sec_sql('sst.departure_time')}) AS last_dep_sec, "
+        f"       MIN({service_day_seconds_sql(hms_to_sec_sql('sst.departure_time'))}) AS first_dep_sec, "
+        f"       MAX({service_day_seconds_sql(hms_to_sec_sql('sst.departure_time'))}) AS last_dep_sec, "
         "       COUNT(DISTINCT st.trip_id) AS trip_count "
         "FROM static_routes sr "
         "JOIN static_trips st ON st.route_id = sr.route_id AND st.agency_id=$1 "
@@ -384,7 +387,10 @@ async def schedule_realism_padding(
     (an hour parsed from `scheduled_time` would silently drop every
     after-midnight extended-hour trip, whose `scheduled_time` is NULL by
     design — see `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec`
-    docstring). Returns ``{"available": False, "rows": [],
+    docstring). The hour and the static schedule's times are placed on the
+    service day (`pipeline.service_day`), so a stop after midnight is hour 24
+    or later and a segment across midnight runs forward, whether the feed
+    writes ``00:10:00`` or GTFS's ``24:10:00``. Returns ``{"available": False, "rows": [],
     "terminus_early_rate": None, "terminus_samples": 0}`` for any
     unconfirmed agency, or when `ch` is not attached.
 
@@ -454,8 +460,8 @@ async def schedule_realism_padding(
     trip_ids = sorted({r["trip_id"] for r in ch_rows})
     static_rows = await conn.fetch(
         "SELECT trip_id, stop_sequence, "
-        f"{hms_to_sec_sql('arrival_time')} AS sched_arr_sec, "
-        f"{hms_to_sec_sql('departure_time')} AS sched_dep_sec "
+        f"{service_day_seconds_sql(hms_to_sec_sql('arrival_time'))} AS sched_arr_sec, "
+        f"{service_day_seconds_sql(hms_to_sec_sql('departure_time'))} AS sched_dep_sec "
         "FROM static_stop_times WHERE agency_id = $1 AND trip_id = ANY($2::text[])",
         agency_id,
         trip_ids,
@@ -517,7 +523,7 @@ async def schedule_realism_padding(
                 continue
             if sched_sec_cur is None:
                 continue
-            hour = sched_sec_cur // 3600
+            hour = service_day_offset(sched_sec_cur) // 3600
             key = (s_cur, s_next, hour)
 
             running_sec = computed.get(s_next, {}).get("running_sec")
