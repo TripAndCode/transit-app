@@ -315,6 +315,33 @@ async def test_route_info_orders_departures_by_time_not_by_text(aconn, aagency_i
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("after_midnight", ["00:10:00", "24:10:00"])
+async def test_route_info_places_an_after_midnight_departure_on_its_service_day(aconn, aagency_id, after_midnight):
+    """A last departure after midnight, written as GTFS's extended 24:10 or as
+    a plain clock 00:10, is the route's last departure, never its first."""
+    await aconn.execute(
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R7', 'R7')", aagency_id
+    )
+    await aconn.execute(
+        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', 'R7')", aagency_id
+    )
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 's1', 'A'), ($1, 's2', 'B'), "
+        "($1, 's3', 'C')",
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) VALUES "
+        "($1, 'trip_a', 1, 's1', '06:00:00'), ($1, 'trip_a', 2, 's2', '23:50:00'), ($1, 'trip_a', 3, 's3', $2)",
+        aagency_id,
+        after_midnight,
+    )
+    result = await route_info(aagency_id, aconn, route="R7")
+    assert result is not None
+    assert (result[3], result[4]) == ("06:00:00", "24:10:00")
+
+
+@pytest.mark.asyncio
 async def test_route_info_has_no_departures_when_every_time_is_blank(aconn, aagency_id):
     await aconn.execute(
         "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R8', 'R8')", aagency_id
@@ -795,6 +822,60 @@ async def test_schedule_realism_padding_counts_no_hold_from_a_predicted_departur
     assert row[6] == 1  # samples
     assert row[4] == pytest.approx(1.17)  # actual_run_p50_min, 70s
     assert row[8] is None  # time_adjustment_rate
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arr2", "dep2", "time3", "sec2", "sec3"),
+    [("00:03:00", "00:04:00", "00:10:00", 240, 600), ("24:03:00", "24:04:00", "24:10:00", 86640, 87000)],
+    ids=["clock", "extended"],
+)
+async def test_schedule_realism_padding_runs_forward_across_midnight(
+    aagency_id, aconn, ch_client, ch_async_client, arr2, dep2, time3, sec2, sec3
+):
+    """A trip leaving stop 1 at 23:58 and calling after midnight, which the
+    timetable and the feed write either as GTFS's extended 24:xx or as a plain
+    00:xx clock. Either way the segment from 23:58 runs 5 minutes forward, and
+    the segment leaving at 00:04 belongs to hour 24 of the service day, not
+    hour 0."""
+    from pipeline.clickhouse import insert_updates
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    await _trust_schedule_padding(aconn, aagency_id)
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+    )
+    for seq, arr, dep in [(1, None, "23:58:00"), (2, arr2, dep2), (3, time3, time3)]:
+        await aconn.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T_NIGHT', $2, 'S1', $3, $4)",
+            aagency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    def clock(text):
+        return None if text.startswith("24:") else text
+
+    night = datetime(2026, 4, 1, 15, 5, tzinfo=timezone.utc)  # 00:05 JST, still the 1 April service day
+    rows = [
+        *_separate_polls("night", night, "T_NIGHT", "R11", 1, "23:58:00", 86280, dep_delay=0),
+        *_separate_polls("night", night, "T_NIGHT", "R11", 2, clock(dep2), sec2, dep_delay=0, arr_delay=0),
+        *_separate_polls("night", night, "T_NIGHT", "R11", 3, clock(time3), sec3, arr_delay=0),
+    ]
+    insert_updates(ch_client, aagency_id, rows)
+
+    ctx = RangeCtx(from_date=date(2026, 3, 31), to_date=date(2026, 4, 2))
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, ch_async_client, route="R11")
+
+    # (stop, next stop, hour, scheduled run, actual p50, actual p85, samples, padding, time adjustment rate)
+    assert result["rows"] == [
+        (1, 2, 23, 5.0, 5.0, 5.0, 1, 0.0, None),
+        (2, 3, 24, 6.0, 6.0, 6.0, 1, 0.0, 0.0),
+    ]
 
 
 @pytest.mark.asyncio

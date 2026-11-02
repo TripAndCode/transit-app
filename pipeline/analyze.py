@@ -95,7 +95,7 @@ from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, domin
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -1158,13 +1158,17 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # post-midnight-continuation hours like "25:30:00" are valid
             # schedule data and must not raise or misparse; a malformed shape
             # parses to NULL and is excluded, exactly as in every other reader
-            # of static times).
+            # of static times). The parsed value is then placed on the service
+            # day (service_day_seconds_sql): a feed that writes an
+            # after-midnight departure as a plain clock ("00:10:00") would
+            # otherwise sort it before the morning's first departure, where
+            # GTFS's "24:10:00" sorts after 23:50.
             hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
             sql = f"""
                 WITH {dominant_service_ctes("%(agency_id)s")},
                 scheduled_departures AS (
                     SELECT twr.route_code, sst.stop_id,
-                        {hms_to_sec_sql("sst.departure_time")} AS dep_sec
+                        {service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))} AS dep_sec
                     FROM trips_with_route twr
                     JOIN dominant_service ds
                       ON ds.route_code = twr.route_code AND ds.service_id = twr.service_id
@@ -1375,8 +1379,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_hist_expr = hist_array_sql("br", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
-            sched_arr_expr = hms_to_sec_sql("sst.arrival_time")
-            sched_dep_expr = hms_to_sec_sql("sst.departure_time")
+            # On the service day's axis, so a run from 23:58 to a stop the
+            # timetable writes as "00:03:00" is five minutes forward, as it is
+            # to GTFS's "24:03:00".
+            sched_arr_expr = service_day_seconds_sql(hms_to_sec_sql("sst.arrival_time"))
+            sched_dep_expr = service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))
             sql = f"""
                 WITH visits AS (
                     SELECT
@@ -1497,7 +1504,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         elif ingest_strategy in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
             # that group's actual event times (seconds into the service day:
-            # scheduled_sec + dep_delay) -- cardinality is bounded by routes ×
+            # the schedule plus dep_delay) -- cardinality is bounded by routes ×
             # stops × days, not by raw observation count, so it's safe to fetch
             # as one block (ch_client.query(), not the streaming reader
             # `_analyze_visits` needs) even though the pre-aggregation GROUP BY
@@ -1519,7 +1526,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # GTFS departure (24:30:00 is 88200 here), which the scheduled side
             # counts through hms_to_sec_sql. It comes from the same latest poll
             # as dep_delay: a static reload can move an event's schedule between
-            # polls, and nothing in this key separates the two. The filters are on `u.` columns
+            # polls, and nothing in this key separates the two. Ingest stores
+            # the clock as the feed wrote it, so the outer SELECT places it on
+            # the service day (service_day_offset_ch) before adding the delay:
+            # a plain "00:10:00" (600) then follows 23:50 as GTFS's
+            # "24:10:00" (87000) does, instead of sorting before the morning.
+            # The filters are on `u.` columns
             # because an unqualified name matching a SELECT alias in WHERE is
             # replaced by that alias's aggregate (see build_dedup_ch_sql).
             ch_headway = _ch_query(
@@ -1544,7 +1556,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
                 )
                 SELECT route_code, stop_id, svc_date,
-                       groupArray(toInt64(scheduled_sec) + toInt64(dep_delay)) AS times
+                       groupArray(toInt64("""
+                + service_day_offset_ch("scheduled_sec")
+                + """) + toInt64(dep_delay)) AS times
                 FROM per_event
                 GROUP BY route_code, stop_id, svc_date
                 """,
