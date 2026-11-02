@@ -54,6 +54,12 @@ def test_a_version_override_reaches_a_table_built_in_the_loop(monkeypatch):
     assert {t.name: t for t in agg_registry._entries()}["agg_route_stats"].version == 2
 
 
+def test_a_version_override_for_a_table_outside_the_loops_is_an_error(monkeypatch):
+    monkeypatch.setitem(agg_registry._VERSIONS, "agg_feed_health", 2)
+    with pytest.raises(ValueError, match="agg_feed_health"):
+        agg_registry._entries()
+
+
 def test_a_name_registered_twice_is_an_error():
     first = agg_registry.TABLES["agg_feed_health"]
     with pytest.raises(ValueError, match="agg_feed_health"):

@@ -4,7 +4,8 @@
 hash of `render()`. When a builder's output-deciding text changes:
 
 - if the change can alter any stored row, bump the table's version in
-  pipeline/agg_registry.py, then run
+  pipeline/agg_registry.py and pipeline.analyze.ANALYZE_LOGIC_VERSION, which is
+  what makes analyze rebuild already-built dates, then run
   `poetry run python -m tests.unit.test_agg_registry_versions --update`;
 - if it provably cannot (a comment inside SQL, a pure refactor), run `--update`
   alone and say why in the commit message.
@@ -47,8 +48,8 @@ def _verdict(name: str, recorded: dict, version: int, digest: str) -> str | None
     if digest != recorded["hash"] and version == recorded["version"]:
         return (
             f"{name}'s builder changed (render() differs from {RECORD.name}) but its version is still "
-            f"{version}. If stored rows can differ, bump its version in pipeline/agg_registry.py; "
-            f"either way, then run `{UPDATE}`."
+            f"{version}. If stored rows can differ, bump its version in pipeline/agg_registry.py and "
+            f"pipeline.analyze.ANALYZE_LOGIC_VERSION; either way, then run `{UPDATE}`."
         )
     if (version, digest) != (recorded["version"], recorded["hash"]):
         return f"{RECORD.name} is stale for {name}: run `{UPDATE}` and commit it with the change."
@@ -105,6 +106,13 @@ def test_a_clamp_bound_as_a_parameter_reaches_the_hash(monkeypatch, name):
     before = _hash(name)
     monkeypatch.setattr(db, "MAX_PLAUSIBLE_DELAY_SEC", db.MAX_PLAUSIBLE_DELAY_SEC // 2)
     assert _hash(name) != before
+
+
+@pytest.mark.parametrize("name", ch_aggregates.MONTHLY_TABLES)
+def test_monthly_tables_render_the_copy_forward_an_incremental_build_runs(name):
+    import inspect
+
+    assert inspect.getsource(ch_aggregates._build_month) in agg_registry.TABLES[name].render()
 
 
 @pytest.mark.parametrize("name", ch_aggregates.WHOLE_HISTORY_TABLES)

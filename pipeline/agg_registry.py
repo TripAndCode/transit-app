@@ -3,9 +3,11 @@ the loaded timetable, and the tables it is computed from.
 
 A table's version declares the generation of its builder. Bump it in the same
 commit as any change to what the builder produces: its SQL, a threshold, a
-bucket width, or the Python that shapes its rows. `render()` returns exactly
-that text, and tests/unit/test_agg_registry_versions.py fails when it changes
-while the version does not.
+bucket width, or the Python that shapes its rows. Bump
+pipeline.analyze.ANALYZE_LOGIC_VERSION with it, which is what makes analyze
+rebuild already-built dates. `render()` returns exactly that text, and
+tests/unit/test_agg_registry_versions.py fails when it changes while the
+version does not.
 """
 
 import inspect
@@ -42,7 +44,9 @@ class AggTable:
 
 
 def _monthly(name: str) -> Callable[[], list[str]]:
-    return lambda: [ch_aggregates.select_sql(name, _RENDER_MONTH)[0]]
+    # An incremental build copies a month's unchanged days forward in
+    # _build_month before adding the recomputed ones, so that is rendered too.
+    return lambda: [ch_aggregates.select_sql(name, _RENDER_MONTH)[0], inspect.getsource(ch_aggregates._build_month)]
 
 
 def _whole(name: str) -> Callable[[], list[str]]:
@@ -77,6 +81,9 @@ def _headway_daily() -> list[str]:
 
 
 def _entries() -> list[AggTable]:
+    unknown = set(_VERSIONS) - {*ch_aggregates.MONTHLY_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES}
+    if unknown:
+        raise ValueError(f"_VERSIONS names tables not built in its loops: {', '.join(sorted(unknown))}")
     entries = [
         AggTable("agg_feed_health", 1, Kind.DATED, False, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable("agg_service_delivered_daily", 1, Kind.DATED, False, lambda: [agg_sql.service_delivered_ch_sql("")]),

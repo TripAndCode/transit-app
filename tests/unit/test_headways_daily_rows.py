@@ -36,10 +36,10 @@ def test_each_row_carries_the_moments_and_the_long_gap_count():
     ]
 
 
-def test_a_route_without_a_scheduled_median_counts_long_gaps_against_none():
+def test_a_route_without_a_scheduled_median_counts_no_long_gaps():
     pooled = {("R9", D1): [600.0, 1200.0]}
     (row,) = daily_headway_rows(7, pooled, {})
-    assert row[-1] == count_long_gaps([600.0, 1200.0], None)
+    assert row[-1] == 0
 
 
 def test_a_group_with_no_gaps_is_left_out():

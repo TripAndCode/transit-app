@@ -96,8 +96,8 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
-# The generation of the builders in this module, and of the SQL they run from
-# pipeline.agg_sql. Nothing observes a change to a
+# The generation of the builders in this module, and of the SQL and Python they
+# run from pipeline.agg_sql and pipeline.headways. Nothing observes a change to a
 # builder's SQL, a bucket width, or a threshold, so this number is how such a
 # change tells the incremental path that every already-built date is stale:
 # it is folded into the fingerprint recorded with each build

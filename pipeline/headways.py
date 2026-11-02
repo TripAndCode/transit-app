@@ -269,7 +269,7 @@ def daily_headway_rows(
 ) -> list[tuple]:
     """agg_route_headway_daily rows: per (route, date), the actual median, count, sum
     and sum of squares, and the long gaps measured against the route's scheduled
-    median (None when the schedule gives the route none)."""
+    median. A route the schedule gives no median counts no long gaps."""
     return [
         (
             agency_id,
