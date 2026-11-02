@@ -81,6 +81,41 @@ export function tripTerminalDelay(trip: RouteTrip): number | null {
   return trip.stops.length ? trip.stops[trip.stops.length - 1].delay_sec : null;
 }
 
+/** Fewest timed stops that can show a feed gave a trip one time for all of
+ *  them. Two alike prove nothing: a short timetable leg, or a two-stop
+ *  shuttle, schedules both stops at the same minute. */
+const MIN_STOPS_TO_JUDGE_TIMING = 3;
+
+function scheduledTimes(trip: RouteTrip): number[] {
+  return trip.stops.flatMap((stop) => (stop.scheduled_sec == null ? [] : [stop.scheduled_sec]));
+}
+
+/** Whether the feed gave this trip only its start time: a feed that reports
+ *  each trip's departure and no per-stop schedule leaves that one time on
+ *  every stop. Judged on the schedule, not the observed time, because each
+ *  stop's own delay still spreads the observed times apart. Such a trip's
+ *  stops cannot be told apart in time, so it has no line to draw. */
+export function carriesOnlyStartTime(trip: RouteTrip): boolean {
+  const times = scheduledTimes(trip);
+  return times.length >= MIN_STOPS_TO_JUDGE_TIMING && times.every((sec) => sec === times[0]);
+}
+
+function hasStopTiming(trip: RouteTrip): boolean {
+  const times = scheduledTimes(trip);
+  return times.some((sec) => sec !== times[0]);
+}
+
+/** The trips a time–distance diagram can draw, and how many it leaves out
+ *  because they carry only a start time. When none of the trips has
+ *  stop-by-stop times, the short ones left cannot be judged against anything
+ *  and are most likely the same feed's, so nothing is drawn. */
+export function plottableTrips(trips: RouteTrip[]): { plotted: RouteTrip[]; startOnly: number } {
+  const startOnly = trips.filter(carriesOnlyStartTime).length;
+  if (startOnly === 0) return { plotted: trips, startOnly };
+  if (!trips.some(hasStopTiming)) return { plotted: [], startOnly };
+  return { plotted: trips.filter((trip) => !carriesOnlyStartTime(trip)), startOnly };
+}
+
 export function tripsInWindow(trips: RouteTrip[], viewWindow: TimeWindow): RouteTrip[] {
   return trips.filter((trip) => {
     const departure = tripDeparture(trip);
