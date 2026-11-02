@@ -6,6 +6,9 @@ text can be rendered and compared without a database.
 
 ClickHouse statements keep their `{name:Type}` parameters for the server; they
 are concatenated rather than f-strings so those braces never need escaping.
+
+A change to what any of these statements produces is a builder change: bump
+`pipeline.analyze.ANALYZE_LOGIC_VERSION` in the same commit.
 """
 
 from pipeline.db import hms_to_sec_sql
@@ -124,10 +127,7 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 
 # One row per (route_code, stop_id, service day) with an ARRAY of
 # that group's actual event times (seconds into the service day:
-# the schedule plus dep_delay) -- cardinality is bounded by routes ×
-# stops × days, not by raw observation count, so it's safe to fetch
-# as one block (ch_client.query(), not the streaming reader
-# `_analyze_visits` needs) even though the pre-aggregation GROUP BY
+# the schedule plus dep_delay). The pre-aggregation GROUP BY
 # underneath it scans every `updates` row of the dates being rebuilt
 # (the agency's whole history on a full rebuild).
 #
@@ -277,8 +277,8 @@ def route_headway_sql() -> str:
 # visit's departure minus its own arrival) and running time (this
 # visit's arrival minus the PREVIOUS visit's departure) -- see
 # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
-# the stop visits from _analyze_visits (materialised once above): one
-# row per trip, service day and stop, pairing the arrival and the
+# the stop visits _analyze_locked materialises once into _analyze_visits
+# before this runs: one row per trip, service day and stop, pairing the arrival and the
 # departure the feed reports in separate polls. A visit reported only
 # as an arrival (every trip's terminus) has a NULL dep_delay; one
 # reported only as a departure, a NULL arr_delay.
@@ -288,6 +288,9 @@ def dwell_run_sql() -> str:
     run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
     dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
     run_hist_expr = hist_array_sql("br", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
+    # On the service day's axis, so a run from 23:58 to a stop the
+    # timetable writes as "00:03:00" is five minutes forward, as it is
+    # to GTFS's "24:03:00".
     sched_arr_expr = service_day_seconds_sql(hms_to_sec_sql("sst.arrival_time"))
     sched_dep_expr = service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))
     return f"""

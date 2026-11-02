@@ -98,7 +98,8 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
-# The generation of the builders in this module. Nothing observes a change to a
+# The generation of the builders in this module, and of the SQL they run from
+# pipeline.agg_sql. Nothing observes a change to a
 # builder's SQL, a bucket width, or a threshold, so this number is how such a
 # change tells the incremental path that every already-built date is stale:
 # it is folded into the fingerprint recorded with each build
@@ -107,8 +108,8 @@ logger = logging.getLogger(__name__)
 # produces.
 ANALYZE_LOGIC_VERSION = 7
 
-# The service date of an observation, spliced into the builders below that
-# group or bucket raw `updates` rows by day (`pipeline.service_day`).
+# The service date of an observation, by which _ledger_counts groups raw
+# `updates` rows (`pipeline.service_day`).
 _SERVICE_DATE = service_date_ch()
 
 
@@ -1237,6 +1238,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # nothing changed is exactly the one worth not paying for.
             logger.info("  agg_route_headway_daily: unchanged, not rebuilt")
         elif ingest_strategy in RT_INGEST_STRATEGIES:
+            # Cardinality is bounded by routes × stops × days, not by raw
+            # observation count, so the scan is fetched as one block
+            # (ch_client.query(), not the streaming reader _analyze_visits needs).
             ch_headway = _ch_query(
                 "agg_route_headway_daily: ClickHouse scan",
                 ch_client,

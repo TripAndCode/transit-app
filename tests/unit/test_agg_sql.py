@@ -39,9 +39,9 @@ def test_clickhouse_parameters_reach_the_server_unescaped(name):
 
 
 @pytest.mark.parametrize("name", CH_BUILDERS)
-def test_a_full_rebuild_renders_without_a_date_filter(name):
+def test_the_date_filter_is_the_only_part_that_varies_by_run(name):
     build, _ = CH_BUILDERS[name]
-    assert "<DATE-FILTER>" not in build("")
+    assert build(DATES).replace(DATES, "") == build("")
 
 
 @pytest.mark.parametrize("name", CH_BUILDERS)
