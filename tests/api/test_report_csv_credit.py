@@ -4,8 +4,8 @@ Every report CSV opens with a preamble (the definition line, then any
 caveats) ahead of its column header. Its last preamble row credits the open
 data the agency's feed is published under, and names no other source. The
 credit is in the language the request names in ``lang`` (the app's UI
-language), else its Accept-Language; ``lang`` changes no other row. A feed no
-source covers adds no row, so the file keeps its shape.
+language), else its Accept-Language; in these reports ``lang`` changes no
+other row. A feed no source covers adds no row, so the file keeps its shape.
 """
 
 import csv

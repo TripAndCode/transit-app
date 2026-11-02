@@ -1268,9 +1268,10 @@ async def get_report(
     lang: str | None = Query(
         default=None,
         pattern="^(ja|en)$",
-        description="format=csv only: the language of the data-source credit row, which the app sets to "
-        "its UI language because a download link sends the browser's Accept-Language instead. Unset, "
-        "the credit follows Accept-Language. No other row reads it.",
+        description="format=csv only: the language of the rows written to the file's reader, the "
+        "data-source credit and dwell_run's message standing in for its rows. The app sets it to its UI "
+        "language because a download link sends the browser's Accept-Language instead. Unset, those "
+        "rows follow Accept-Language. No other row reads it.",
     ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
@@ -1465,8 +1466,9 @@ async def get_report(
         # available/time_band_supported "not a real zero" messages -- reusing
         # it here (rather than re-deriving the same two strings a second
         # time) is what guarantees the CSV export can never drift from the
-        # JSON/text response's own wording for these two states.
-        text = format_dwell_run_text(payload, locale=locale)
+        # JSON/text response's own wording for these two states. In a CSV it
+        # stands in for the rows, written to the reader like the credit.
+        text = format_dwell_run_text(payload, locale=lang or locale)
         if format == "csv":
             if (
                 not payload["available"]
