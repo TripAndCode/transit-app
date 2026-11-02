@@ -8,7 +8,8 @@ ClickHouse statements keep their `{name:Type}` parameters for the server; they
 are concatenated rather than f-strings so those braces never need escaping.
 
 A change to what any of these statements produces is a builder change: bump
-`pipeline.analyze.ANALYZE_LOGIC_VERSION` in the same commit.
+`pipeline.analyze.ANALYZE_LOGIC_VERSION` and the table's version in
+`pipeline/agg_registry.py` in the same commit.
 """
 
 from pipeline.db import hms_to_sec_sql
