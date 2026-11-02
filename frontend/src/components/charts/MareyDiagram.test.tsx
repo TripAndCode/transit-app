@@ -387,6 +387,18 @@ describe("MareyDiagram for trips whose feed gave only a start time", () => {
     expect(within(screen.getByTestId("marey-table")).getAllByRole("row").slice(1)).toHaveLength(3);
   });
 
+  it("keeps the note and the table in place of the chart when only last week could be drawn", () => {
+    const { container } = show({
+      trips: START_ONLY_TRIPS,
+      previousTrips: [trip("P1", 7 * 3600 + 300, [0, 60, 120])],
+    });
+    expect(container.querySelector("svg.marey__chart")).toBeNull();
+    expect(screen.getByTestId("marey-start-only")).toHaveTextContent(NOTE);
+    const table = screen.getByTestId("marey-table");
+    expect(table.className).not.toContain("marey__table--hidden");
+    expect(within(table).getAllByRole("row").slice(1)).toHaveLength(2);
+  });
+
   it("draws no previous-week trip that carries only a start time", () => {
     const { container } = show({ previousTrips: [startOnlyTrip("P1", 7 * 3600 + 300, [0, 60, 120])] });
     expect(container.querySelectorAll("[data-ghost='true']")).toHaveLength(0);

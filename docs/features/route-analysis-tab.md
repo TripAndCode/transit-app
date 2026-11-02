@@ -84,10 +84,12 @@ What the user sees/does:
   all carry one scheduled time is one the feed gave only a start time for,
   so it is left out of the drawing, the scrub and the map's positions
   (`plottableTrips` in `mareyLayout.ts`) and a note counts it; when no trip
-  of the day has stop-by-stop times, the note takes the chart's place and
-  the trips' table, departures and last-stop delays, shows instead; two
-  stops at one time are left drawn, since a short timetable leg schedules
-  both alike), Map
+  of the day has stop-by-stop times, the note takes the chart's place, even
+  if last week's lines could be drawn, and the trips' table, departures and
+  last-stop delays, shows instead; the ribbon and the worst hour still count
+  every trip that ran, since they read departures and per-stop delays, which
+  such a feed does carry; two stops at one time are left drawn, since a
+  short timetable leg schedules both alike), Map
   (`frontend/src/components/analysis/AnalysisMap.tsx`, mounted only after
   first visited, hidden rather than unmounted afterward; while a scrub is
   set it draws the same trips' positions, interpolated between stops and

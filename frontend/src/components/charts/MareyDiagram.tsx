@@ -139,7 +139,9 @@ export function MareyDiagram({
   const ran = tripsInWindow(trips, viewWindow);
   const { plotted: drawn, startOnly } = plottableTrips(ran);
   const ghosts = plottableTrips(tripsInWindow(previousTrips, viewWindow)).plotted;
-  const chartable = drawn.length > 0 || ghosts.length > 0;
+  // Last week's lines alone stand in for a day with no trips, never for one
+  // whose trips ran but can't be drawn: that day's reading is the note and table.
+  const chartable = drawn.length > 0 || (startOnly === 0 && ghosts.length > 0);
   // The peak and the ribbon read departures and per-stop delays, which a
   // start-only feed carries too, so they cover every trip that ran.
   const peak = peakWindow(ran, viewWindow);
