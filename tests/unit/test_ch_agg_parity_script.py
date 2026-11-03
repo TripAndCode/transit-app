@@ -3,7 +3,8 @@
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
+from pipeline.static_content import static_parts
 from scripts import ch_agg_parity
 from scripts.ch_agg_parity import (
     _timed,
@@ -47,10 +48,12 @@ class _ClickHouse:
 
     def __init__(self):
         self.queries = []
+        self.params = []
         self.raw = []
 
     def query(self, sql, parameters=None):
         self.queries.append(sql)
+        self.params.append(parameters or {})
         return _Result([])
 
     def raw_query(self, sql, parameters=None):
@@ -59,8 +62,13 @@ class _ClickHouse:
 
 
 class _Cursor:
-    def __init__(self, rows):
+    """Answers fetchall with *rows*, and the loaded-timetable probes with *timetable*:
+    None for no timetable, else the (count, digest) every timetable table reads as."""
+
+    def __init__(self, rows, timetable=None):
         self._rows = rows
+        self._timetable = timetable
+        self._sql = ""
 
     def __enter__(self):
         return self
@@ -69,18 +77,27 @@ class _Cursor:
         return False
 
     def execute(self, sql, params=None):
-        pass
+        self._sql = sql
 
     def fetchall(self):
         return self._rows
 
+    def fetchone(self):
+        if self._sql.startswith("SELECT EXISTS"):
+            return (self._timetable is not None,)
+        return self._timetable
+
 
 class _Conn:
-    def __init__(self, rows):
+    def __init__(self, rows, timetable=None):
         self._rows = rows
+        self._timetable = timetable
 
     def cursor(self):
-        return _Cursor(self._rows)
+        return _Cursor(self._rows, self._timetable)
+
+
+TIMETABLE = (3, 42)
 
 
 def test_parity_fails_when_no_ledger_date_is_current(capsys):
@@ -128,96 +145,112 @@ def test_whole_history_is_compared_only_when_every_date_is_current():
     assert not whole_history_current(stored, {first: (5, 5), second: (6, 6), date(2026, 9, 3): (1, 1)})
 
 
-def _joins_the_mirror(sql: str) -> bool:
-    return ch_aggregates.STATIC_STOP_TIMES in sql and "SELECT fingerprint" not in sql
+def _joins_the_archive(sql: str) -> bool:
+    return static_archive.ARCHIVE in sql and "INNER JOIN" in sql
 
 
-def test_parity_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(capsys, monkeypatch):
-    """They join ClickHouse's schedule mirror, which only an analyze fills. Compared
-    before it, every row Postgres holds would read as missing from ClickHouse."""
+def _loaded_key() -> str:
+    """The archive key of the timetable every loaded fake conn reads as."""
+    return static_archive.content_hash(static_parts(1, _Conn([], TIMETABLE), True))
+
+
+def test_parity_leaves_the_static_joined_tables_until_the_timetable_is_archived(capsys, monkeypatch):
+    """They join the timetable archive, which an analyze fills. Compared before
+    it, every row Postgres holds would read as missing from ClickHouse."""
     day = date(2026, 9, 1)
     # A date ClickHouse has and the ledger lacks keeps the whole-history tables out of it.
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _ClickHouse()
-    parity(ch, _OnePerTable(day), 1)
-    assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
+    parity(ch, _OnePerTable(day, TIMETABLE), 1)
+    assert [sql for sql in ch.queries if _joins_the_archive(sql)] == []
+    # The archive check reads system.tables once; nothing else reads the archive.
     assert len(ch.queries) == len([t for t in ch_aggregates.TABLES if t not in ch_aggregates.STATIC_JOINED_TABLES]) + 1
-    assert "no schedule mirror" in capsys.readouterr().out
+    assert "not archived" in capsys.readouterr().out
 
 
-class _Mirrored(_ClickHouse):
-    """Holds a schedule mirror for every agency, and no other rows."""
+class _Archived(_ClickHouse):
+    """Holds the archive tables, the loaded timetable in them, and no other rows."""
 
     def query(self, sql, parameters=None):
         super().query(sql, parameters)
-        return _Result([("fp",)] if "SELECT fingerprint" in sql or "system.tables" in sql else [])
+        if "system.tables" in sql:
+            return _Result([(static_archive.ARCHIVE,), (static_archive.VERSION_MAP,)])
+        if sql.startswith(f"SELECT count() FROM {static_archive.ARCHIVE}"):
+            return _Result([(5,)])
+        return _Result([])
 
 
-def test_parity_compares_the_static_joined_tables_once_the_schedule_is_mirrored(monkeypatch):
+def test_parity_compares_the_static_joined_tables_once_the_timetable_is_archived(monkeypatch):
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
-    ch = _Mirrored()
-    parity(ch, _OnePerTable(day), 1)
+    ch = _Archived()
+    parity(ch, _OnePerTable(day, TIMETABLE), 1)
     joined = [t for t in ch_aggregates.TABLES if t in ch_aggregates.STATIC_JOINED_TABLES]
-    assert len([sql for sql in ch.queries if _joins_the_mirror(sql)]) == len(joined)
+    bound = [params for sql, params in zip(ch.queries, ch.params, strict=True) if _joins_the_archive(sql)]
+    assert len(bound) == len(joined)
+    assert {params["join_current"] for params in bound} == {_loaded_key()}
 
 
-def test_timing_leaves_the_static_joined_tables_until_the_schedule_is_mirrored(capsys, monkeypatch):
-    """An empty mirror joins nothing, so its figure would be a fast query that measured nothing."""
+def test_timing_leaves_the_static_joined_tables_until_the_timetable_is_archived(capsys, monkeypatch):
+    """An empty archive joins nothing, so its figure would be a fast query that measured nothing."""
     monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
     ch = _ClickHouse()
-    assert timing(ch, 1) == 0
-    assert [sql for sql in ch.raw if _joins_the_mirror(sql)] == []
+    assert timing(ch, _Conn([]), 1) == 0
+    assert [sql for sql in ch.raw if _joins_the_archive(sql)] == []
     assert len(ch.raw) == 1 + len(
         [t for t in ch_aggregates.MONTHLY_TABLES if t not in ch_aggregates.STATIC_JOINED_TABLES]
     )
-    assert "no schedule mirror" in capsys.readouterr().out
+    assert "not archived" in capsys.readouterr().out
 
 
 class _Unmigrated(_ClickHouse):
-    """Predates the schema that adds the schedule mirror, so reading it fails."""
+    """Predates the schema that adds the timetable archive, so reading it fails."""
 
     def query(self, sql, parameters=None):
-        if f"FROM {ch_aggregates.STATIC_STOP_TIMES}" in sql:
+        if f"FROM {static_archive.ARCHIVE}" in sql or f"FROM {static_archive.VERSION_MAP}" in sql:
             raise RuntimeError("UNKNOWN_TABLE")
         return super().query(sql, parameters)
 
 
-def test_both_modes_run_before_the_schema_adds_the_schedule_mirror(monkeypatch):
+def test_both_modes_run_before_the_schema_adds_the_timetable_archive(monkeypatch):
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
-    parity(_Unmigrated(), _OnePerTable(day), 1)
-    assert timing(_Unmigrated(), 1) == 0
+    parity(_Unmigrated(), _OnePerTable(day, TIMETABLE), 1)
+    assert timing(_Unmigrated(), _Conn([], TIMETABLE), 1) == 0
 
 
-def test_parity_leaves_agg_stop_routes_until_the_schedule_is_mirrored(monkeypatch):
+def test_parity_leaves_agg_stop_routes_until_the_timetable_is_archived(monkeypatch):
     """Every date is current, so the whole-history tables are compared, all but this one."""
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5)})
     ch = _ClickHouse()
     parity(ch, _Conn([(day, 5, 5)]), 1)
-    assert [sql for sql in ch.queries if _joins_the_mirror(sql)] == []
+    assert [sql for sql in ch.queries if _joins_the_archive(sql)] == []
     assert len([sql for sql in ch.queries if "GROUP BY" in sql]) > len(ch_aggregates.TABLES)
 
 
 class _OnePerTable:
     """agg_feed_health holds one current date, and every aggregate one row on it."""
 
-    def __init__(self, day):
+    def __init__(self, day, timetable=None):
         self._day = day
+        self._timetable = timetable
 
     def cursor(self):
-        return _OnePerTableCursor(self._day)
+        return _OnePerTableCursor(self._day, self._timetable)
 
 
 class _OnePerTableCursor(_Cursor):
-    def __init__(self, day):
-        super().__init__([])
+    def __init__(self, day, timetable=None):
+        super().__init__([], timetable)
         self._day = day
 
     def execute(self, sql, params=None):
+        super().execute(sql, params)
         table = sql.split(" FROM ")[1].split()[0]
+        if table.startswith("static_"):
+            return
         if table == "agg_feed_health":
             self._rows = [(self._day, 5, 5)]
         else:
@@ -229,7 +262,7 @@ def test_parity_compares_each_table_on_its_own_date_column(capsys, monkeypatch):
     from the second column, their rows would never be on a compared date."""
     day = date(2026, 9, 1)
     monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
-    assert parity(_Mirrored(), _OnePerTable(day), 1) == 1
+    assert parity(_Archived(), _OnePerTable(day, TIMETABLE), 1) == 1
     out = capsys.readouterr().out
     for table in ch_aggregates.TABLES:
         assert f"{table}: 1 Postgres rows compared" in out, table
