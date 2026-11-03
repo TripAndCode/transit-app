@@ -3,9 +3,10 @@ the loaded timetable, and the tables it is computed from.
 
 A table's version declares the generation of its builder. Bump it in the same
 commit as any change to what the builder produces: its SQL, a threshold, a
-bucket width, or the Python that shapes its rows. Bump
-pipeline.analyze.ANALYZE_LOGIC_VERSION with it, which is what makes analyze
-rebuild already-built dates. `render()` returns exactly that text, and
+bucket width, or the Python that shapes its rows. analyze records each
+table's fingerprint, which folds in this version, in agg_table_state, and
+rebuilds the table in full, with the tables computed from it, when the
+fingerprint changes. `render()` returns exactly that text, and
 tests/unit/test_agg_registry_versions.py fails when it changes while the
 version does not.
 """

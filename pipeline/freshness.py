@@ -29,7 +29,7 @@ modes (cron crashed mid-loop, forgot to re-analyze). It does NOT detect an
 interior missing day — analyze rebuilds every date whose source rows changed
 in one transaction, so a mid-range gap would only arise from manual row
 surgery or from a stale interior date the ledger cannot see (see
-`pipeline.analyze._static_fingerprint`).
+`pipeline.analyze._dates_needing_rebuild`).
 """
 
 from collections.abc import Iterable
