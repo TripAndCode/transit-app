@@ -49,7 +49,9 @@ def loaded_stem(conn, agency_id: int) -> str | None:
 def _work_table(agency_id: int, key: str) -> str:
     # Unique per attempt: a load's outgoing archive and an analyze backstop can
     # archive the same content at once, and must not drop each other's table.
-    return f"{ARCHIVE}__work_a{int(agency_id)}_{key[:8]}_{secrets.token_hex(4)}"
+    # It ends like an aggregate work table, so ch_aggregates.WORK_TABLE_PATTERN
+    # also finds one a killed copy left behind.
+    return f"{ARCHIVE}_{key[:8]}_{secrets.token_hex(4)}__work_a{int(agency_id)}"
 
 
 def _stop_time_count(parts: list[str]) -> int:

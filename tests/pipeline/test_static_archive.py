@@ -1,8 +1,10 @@
 """The timetable archive keeps every loaded timetable once per content."""
 
+import re
+
 import pytest
 
-from pipeline import static_archive
+from pipeline import ch_aggregates, static_archive
 from pipeline.static_content import static_parts
 from tests.pipeline.test_analyze import _seed_route_headway_schedule
 
@@ -105,13 +107,18 @@ def test_a_timetable_that_changes_mid_copy_is_not_archived(pg_conn, agency_id, c
     assert _archived(ch_client, agency_id) == []
     leftover = ch_client.query(
         "SELECT name FROM system.tables WHERE database = currentDatabase() "
-        "AND name LIKE 'static_stop_times_archive__work%'"
+        "AND startsWith(name, {archive:String}) AND match(name, {pattern:String})",
+        parameters={"archive": static_archive.ARCHIVE, "pattern": ch_aggregates.WORK_TABLE_PATTERN},
     )
     assert leftover.result_rows == []
 
 
 def test_each_attempt_works_in_its_own_table():
     assert static_archive._work_table(7, "a" * 32) != static_archive._work_table(7, "a" * 32)
+
+
+def test_a_work_table_a_killed_copy_left_behind_matches_the_work_table_pattern():
+    assert re.search(ch_aggregates.WORK_TABLE_PATTERN, static_archive._work_table(7, "ab12cd34" * 4))
 
 
 def test_missing_tables_fail_closed_with_the_bootstrap_hint(ch_client):
