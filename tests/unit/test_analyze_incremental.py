@@ -378,6 +378,30 @@ def test_a_ledger_without_total_rows_rebuilds_every_date():
     ]
 
 
+def _ledger_scans(ch) -> list[str]:
+    return [sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql]
+
+
+def test_a_run_that_rebuilds_every_table_skips_the_ledger_scan():
+    """With no table's fingerprint matching, every table goes in full whatever
+    the ledger says, so the full-history count would be thrown away."""
+    ledger = [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)]
+    conn = FakeConn(ledger_rows=ledger)
+    ch = FakeClickHouse(ledger)
+    analyze(AGENCY_ID, conn, ch)
+    assert _ledger_scans(ch) == []
+
+
+def test_the_timetable_copy_keeps_its_tag_across_the_switch(monkeypatch):
+    """The ClickHouse copy of the timetable is tagged with the agency-wide
+    fingerprint it was mirrored under, so keeping that value avoids
+    re-mirroring every agency's timetable on the first run."""
+    tags = []
+    monkeypatch.setattr(analyze_mod, "_mirror_static_stop_times", lambda *a: tags.append(a[-1]))
+    conn, _ = _noop_run(has_static=True)
+    assert tags == [conn._fingerprint]
+
+
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():
     _, ch = _noop_run()
     ledger_sql = next(sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql)

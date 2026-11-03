@@ -66,12 +66,46 @@ def test_a_run_with_nothing_new_rebuilds_nothing(pg_conn, agency_id, ch_client, 
     assert set(_scopes_logged(caplog).values()) == {"unchanged"}
 
 
-def test_deploy_seeds_the_states_without_a_rebuild(pg_conn, agency_id, ch_client, caplog):
+def _as_if_last_built_before_table_state(pg_conn, agency_id):
+    """Leave the agency as the agency-wide scheme left it: no table states, and
+    agg_meta holding the fingerprint that scheme recorded."""
+    from pipeline.analyze import _legacy_fingerprint, _static_loaded, _static_parts
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        (strategy,) = cur.fetchone()
+        legacy = _legacy_fingerprint(strategy, _static_parts(agency_id, pg_conn, _static_loaded(pg_conn, agency_id)))
+        cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        cur.execute("UPDATE agg_meta SET static_fingerprint = %s WHERE agency_id = %s", (legacy, agency_id))
+    pg_conn.commit()
+
+
+def test_a_run_clears_the_agency_wide_fingerprint(pg_conn, agency_id, ch_client):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT static_fingerprint FROM agg_meta WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] is None
+
+
+def test_states_lost_after_the_switch_rebuild_every_table(pg_conn, agency_id, ch_client, caplog):
+    """Seeding vouches only for what the agency-wide scheme built. Once a run
+    has recorded table states, losing them must rebuild, not re-seed."""
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s", (agency_id,))
     pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"every date (new)"}
+
+
+def test_deploy_seeds_the_states_without_a_rebuild(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    _as_if_last_built_before_table_state(pg_conn, agency_id)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
@@ -85,7 +119,7 @@ def test_without_a_matching_legacy_fingerprint_every_table_rebuilds(pg_conn, age
     _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s", (agency_id,))
-        cur.execute("UPDATE agg_meta SET static_fingerprint = NULL WHERE agency_id = %s", (agency_id,))
+        cur.execute("UPDATE agg_meta SET static_fingerprint = 'logic:6|older code' WHERE agency_id = %s", (agency_id,))
     pg_conn.commit()
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
@@ -140,11 +174,13 @@ def test_a_failed_run_leaves_the_states_it_found(pg_conn, agency_id, ch_client, 
     before = _states(pg_conn, agency_id)
     bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=9)
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    record = analyze_module._record_fingerprints
 
-    def boom(*args, **kwargs):
+    def record_then_fail(*args, **kwargs):
+        record(*args, **kwargs)
         raise RuntimeError("stop before commit")
 
-    monkeypatch.setattr(analyze_module, "ch_max_captured_at", boom)
+    monkeypatch.setattr(analyze_module, "_record_fingerprints", record_then_fail)
     with pytest.raises(RuntimeError, match="stop before commit"):
         analyze(agency_id, pg_conn, ch_client)
     pg_conn.rollback()

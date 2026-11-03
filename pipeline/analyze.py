@@ -42,8 +42,8 @@ Aggregation tables produced:
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
-- agg_meta             — last analyze() time per agency (forensic), plus the static-schedule
-  fingerprint that decides whether the next run may rebuild only the dates that changed
+- agg_meta             — last analyze() time per agency (forensic)
+- agg_table_state      — each table's fingerprint, which decides when the next run rebuilds it in full
 
 Each run also saves the day's planned trips into planned_trips_daily (`analyze`
 below), which is history no run rebuilds, not an aggregate.
@@ -99,10 +99,12 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
-# The logic version of the single agency-wide fingerprint analyze recorded
-# before each table had its own (agg_table_state). Still written to
-# agg_meta.static_fingerprint, and compared there once per agency to seed the
-# per-table fingerprints without a rebuild.
+# The logic version of the single agency-wide fingerprint analyze recorded in
+# agg_meta.static_fingerprint before each table had its own (agg_table_state).
+# An agency's first run under per-table state compares it there to seed the
+# states without a rebuild; every run then clears that column, so the
+# comparison can match only once. It also still tags the ClickHouse copy of
+# the timetable, which is mirrored again only when this value changes.
 _LEGACY_LOGIC_VERSION = 7
 
 # The service date of an observation, by which _ledger_counts groups raw
@@ -507,10 +509,10 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     --full`` / ``analyze_all --full`` (``make analyze-all FULL=1``), which
     calls :func:`mark_for_full_rebuild` first.
     """
-    # Both Postgres-side reads come before the ClickHouse scan, so a run that
-    # already knows it must rebuild everything never pays for a full-history
-    # remote scan to be told so. A first run is exactly the run that can least
-    # afford one.
+    # The Postgres read comes first, so a run with no ledger at all never pays
+    # for a full-history remote scan to be told so. A first run is exactly the
+    # run that can least afford one; _plan skips this call altogether when
+    # every table rebuilds in full anyway.
     with conn.cursor() as cur:
         cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         stored = {d: (raw, total) for d, raw, total in cur.fetchall()}
@@ -528,14 +530,13 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
 
 
 def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
-    """Make each agency's next analyze rebuild every date.
+    """Make each agency's next analyze rebuild every table in full.
 
     For a change the per-date ledger cannot see: rows moved between service
-    dates, where a date whose moves in and out cancel keeps its count. Clearing
-    the recorded static fingerprint takes the same path a changed schedule
-    does, and leaves the stored aggregates readable until the rebuild.
-    Deleting the agency's table states makes every table new to the next run,
-    and the cleared agg_meta fingerprint keeps that run from seeding them back.
+    dates, where a date whose moves in and out cancel keeps its count. Deleting
+    the agency's table states makes every table new to the next run, and the
+    cleared agg_meta fingerprint keeps that run from seeding them back. The
+    stored aggregates stay readable until the rebuild.
     """
     with conn.cursor() as cur:
         cur.execute("DELETE FROM agg_table_state WHERE agency_id = ANY(%s)", (agency_ids,))
@@ -546,10 +547,11 @@ def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
 def _stored_fingerprints(conn, agency_id: int, legacy: str, current: dict[str, str]) -> dict[str, str]:
     """The fingerprints the agency's tables were last built under.
 
-    An agency analyzed only under the retired agency-wide fingerprint has none
+    An agency last analyzed under the retired agency-wide fingerprint has none
     here. When its agg_meta still records the fingerprint that scheme would
-    compute now, every table was built by the code running now, so each is
-    seeded as current rather than rebuilt.
+    compute now, every table was built by the builders running now, so each is
+    seeded as current rather than rebuilt. A run under per-table state clears
+    that column, so an agency that loses its states afterwards rebuilds.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
@@ -577,11 +579,9 @@ def _record_fingerprints(conn, agency_id: int, current: dict[str, str]) -> None:
 
 
 class Plan(NamedTuple):
-    static_parts: list[str]
     legacy: str
     current: dict[str, str]
     scopes: dict[str, list | None]
-    reasons: dict[str, str]
 
 
 def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: str | None) -> Plan:
@@ -595,7 +595,12 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     stored = _stored_fingerprints(conn, agency_id, legacy, current)
-    ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
+    # With no table's fingerprint matching, every table goes in full whatever
+    # the ledger says, so its full-history scan is skipped.
+    if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):
+        ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
+    else:
+        ledger = []
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger)
     for name in sorted(scopes):
         scope = scopes[name]
@@ -606,7 +611,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(static_parts, legacy, current, scopes, reasons)
+    return Plan(legacy, current, scopes)
 
 
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
@@ -780,18 +785,18 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | Non
     (:func:`agg_registry.table_scopes`), or None for all of them.
 
     A table whose ClickHouse rows don't add up to its Postgres copy is rebuilt
-    whole, whatever the ledger says. That covers the first run after a table
+    whole, whatever its scope says. That covers the first run after a table
     moves to ClickHouse, which starts it empty, and a run after one whose
     ClickHouse swap landed but whose Postgres transaction rolled back. Only that
-    table goes whole: the rest keep the ledger's dates, so moving a table never
+    table goes whole: the rest keep their scopes, so moving a table never
     forces a full rebuild of the agency. Comparing the two stores, rather than
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
 
     An internal table has no Postgres copy, so its figure is compared with its
     ch_aggregates.REFERENCES table's instead. A whole-history table is rebuilt whole
-    whenever any month of its internal table is rebuilt, or when its own two stores
-    disagree, and left standing otherwise.
+    when its own scope is None, when any month of its internal table is rebuilt,
+    or when its own two stores disagree, and left standing otherwise.
 
     It first checks that ClickHouse has every such table, so a store that
     predates one stops the run before anything is written.
@@ -1389,7 +1394,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # Last, so a Postgres builder that fails above leaves ClickHouse
         # untouched too.
-        _mirror_static_stop_times(agency_id, conn, ch_client, has_static, "|".join(plan.static_parts))
+        _mirror_static_stop_times(agency_id, conn, ch_client, has_static, plan.legacy)
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes)
 
         # ── agg_meta: record of this build ───────────────────────────────
@@ -1404,8 +1409,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # load-bearing — the next run compares them to decide each table's
         # scope (see _plan) — and they commit with the aggregates they describe,
         # so a rolled-back run leaves the previous ones standing.
-        # `static_fingerprint` keeps the retired agency-wide value, which seeds
-        # the table states of an agency that has none.
+        # `static_fingerprint` is cleared: it held the retired agency-wide
+        # value, which seeds an agency's table states only on its first run
+        # under them (see _stored_fingerprints).
         with _step("agg_meta: max_captured_at"):
             max_cap = ch_max_captured_at(ch_client, agency_id)
         with _step("agg_meta: upsert"), conn.cursor() as cur:
@@ -1417,7 +1423,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 "analyzed_at = EXCLUDED.analyzed_at, "
                 "max_updates_captured_at = EXCLUDED.max_updates_captured_at, "
                 "static_fingerprint = EXCLUDED.static_fingerprint",
-                (agency_id, max_cap, plan.legacy),
+                (agency_id, max_cap, None),
             )
 
         conn.commit()
