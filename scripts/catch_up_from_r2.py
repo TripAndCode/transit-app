@@ -81,10 +81,10 @@ archive members are skipped, and a loaded timetable is not loaded again.
 
 Aggregates are left to the next analyze, which the run prints, or --analyze
 runs in-process afterwards (incremental, like analyze_all): a timetable load
-changes the agency's static fingerprint, so analyze rebuilds every date of an
-agency that loaded one. Analyzing once at the end rather than after each load
-pays that rebuild once per agency; the rows themselves keep the schedule each
-was joined to.
+changes the fingerprint of the tables that read the timetable, so analyze
+rebuilds every date of those tables for an agency that loaded one. Analyzing
+once at the end rather than after each load pays that rebuild once per agency;
+the rows themselves keep the schedule each was joined to.
 
 Usage:
     poetry run python scripts/catch_up_from_r2.py [--agency-id ID ...]
@@ -718,7 +718,7 @@ def print_next_steps(plans: list[AgencyPlan], agency_ids: list[int] | None) -> N
         print("  make analyze-all")
     if reloaded:
         ids = ", ".join(map(str, reloaded))
-        print(f"Agencies {ids} load a timetable, which changes their static fingerprint: they rebuild every date once.")
+        print(f"Agencies {ids} load a timetable: the tables that read it rebuild every date once.")
     print("--apply --analyze runs it in the same run instead.")
 
 
@@ -814,7 +814,7 @@ def _load_step(
             print(f"  {warning}")
     path = layout.fetch(store, agency_id, timetable)
     with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
-        load_static(str(path), agency_id, conn)
+        load_static(str(path), agency_id, conn, ch_client=ch_client)
     # Process-wide caches a later --analyze in this run would otherwise read
     # from the timetable just replaced.
     day_types.invalidate_day_types()

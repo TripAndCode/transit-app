@@ -437,12 +437,13 @@ def _exit_no_timetable(conn, exc) -> NoReturn:
 
 def cmd_load_static(args):
     """Load a GTFS static zip into the database for one agency."""
+    from pipeline.clickhouse import get_client
     from pipeline.static_loader import load_static
 
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
     with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
-        load_static(args.path, agency_id, conn)
+        load_static(args.path, agency_id, conn, ch_client=get_client())
     conn.close()
 
 
@@ -450,16 +451,18 @@ def cmd_refresh_static(args):
     """Conditionally fetch and load static GTFS via each agency's static_strategy."""
     import pathlib
 
+    from pipeline.clickhouse import get_client
     from pipeline.static_fetcher import refresh_all, refresh_static_recorded
 
     conn = _get_conn()
+    ch = get_client()
     dest = pathlib.Path(args.dest)
     if args.agency_id:
-        result = refresh_static_recorded(int(args.agency_id), conn, dest, force=args.force)
+        result = refresh_static_recorded(int(args.agency_id), conn, dest, force=args.force, ch_client=ch)
         if result is None:
             logger.info("No change.")
     else:
-        n, total, failed = refresh_all(conn, dest, force=args.force)
+        n, total, failed = refresh_all(conn, dest, force=args.force, ch_client=ch)
         conn.close()
         if failed:
             logger.error(f"refresh-static: {len(failed)} of {total} agencies failed: {failed}")

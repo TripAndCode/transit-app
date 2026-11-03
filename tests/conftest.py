@@ -10,10 +10,19 @@ import pytest
 from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 from pipeline.db import DEFAULT_DATABASE_URL
 from tests.postgres_ports import candidate_ports
 from tests.sharding import assign_shards, shard_from_env
+
+# The ClickHouse tables analyze writes besides `updates`: dropped at session start
+# and emptied between tests.
+_CH_STORE_TABLES = (
+    *ch_aggregates.ALL_TABLES,
+    ch_aggregates.STATIC_STOP_TIMES,
+    static_archive.ARCHIVE,
+    static_archive.VERSION_MAP,
+)
 
 
 def _dev_ports() -> frozenset[int]:
@@ -345,7 +354,7 @@ def _ch_schema() -> None:
         client.command("DROP TABLE IF EXISTS updates_live")
         client.command("DROP TABLE IF EXISTS updates")
         _drop_ch_work_tables(client)
-        for table in (*ch_aggregates.ALL_TABLES, ch_aggregates.STATIC_STOP_TIMES):
+        for table in _CH_STORE_TABLES:
             client.command(f"DROP TABLE IF EXISTS {table}")
         _apply_ch_schema(client)
     finally:
@@ -374,7 +383,7 @@ def ch_client(_ch_schema):
     client = _ch_test_client()
     client.command("TRUNCATE TABLE IF EXISTS updates")
     client.command("TRUNCATE TABLE IF EXISTS updates_live")
-    for table in (*ch_aggregates.ALL_TABLES, ch_aggregates.STATIC_STOP_TIMES):
+    for table in _CH_STORE_TABLES:
         client.command(f"TRUNCATE TABLE IF EXISTS {table}")
     _drop_ch_work_tables(client)
     yield client

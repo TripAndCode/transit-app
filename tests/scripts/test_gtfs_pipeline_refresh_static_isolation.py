@@ -16,6 +16,14 @@ import pytest
 import gtfs_pipeline
 
 
+@pytest.fixture(autouse=True)
+def _no_clickhouse():
+    """The command opens a ClickHouse client for the loads it hands down, which
+    these tests mock out with the reloads themselves."""
+    with patch("pipeline.clickhouse.get_client", return_value=MagicMock()):
+        yield
+
+
 def test_refresh_static_all_agencies_exits_nonzero_on_any_failure():
     conn = MagicMock()
     with patch.object(gtfs_pipeline, "_get_conn", return_value=conn):

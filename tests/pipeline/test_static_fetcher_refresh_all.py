@@ -22,7 +22,7 @@ def test_refresh_all_skips_deleted_agency(pg_conn, tmp_path):
     pg_conn.commit()
 
     with patch("pipeline.static_fetcher.refresh_static", return_value=None) as fake:
-        refresh_all(pg_conn, tmp_path)
+        refresh_all(pg_conn, tmp_path, ch_client=None)
 
     fetched_ids = [c.args[0] for c in fake.call_args_list]
     assert active_id in fetched_ids
@@ -46,13 +46,13 @@ def test_refresh_all_continues_past_one_agencys_failure(pg_conn, tmp_path):
             ids.append(cur.fetchone()[0])
     pg_conn.commit()
 
-    def fake_refresh_static(aid, conn, dest_dir, *, force=False):
+    def fake_refresh_static(aid, conn, dest_dir, *, force=False, ch_client=None):
         if aid == ids[1]:
             raise ValueError("boom")
         return None
 
     with patch("pipeline.static_fetcher.refresh_static", side_effect=fake_refresh_static) as fake:
-        n, total, failed = refresh_all(pg_conn, tmp_path)
+        n, total, failed = refresh_all(pg_conn, tmp_path, ch_client=None)
 
     assert [c.args[0] for c in fake.call_args_list] == ids
     assert n == 0  # both successful calls returned None (no change)

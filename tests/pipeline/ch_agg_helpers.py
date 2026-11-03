@@ -43,7 +43,7 @@ def seed_schedule(pg_conn, agency_id: int, trip_ids: list[str]) -> None:
 
 
 def work_tables(ch_client) -> list[str]:
-    """Every aggregate work table in the test database."""
+    """Every aggregate or timetable-archive work table in the test database."""
     rows = ch_client.query(
         "SELECT name FROM system.tables WHERE database = currentDatabase() AND match(name, {pattern:String})",
         parameters={"pattern": ch_aggregates.WORK_TABLE_PATTERN},

@@ -230,9 +230,11 @@ async def test_health_carries_no_run_for_an_agency_no_operator_has_run(app_clien
 
 
 @pytest.fixture
-def runner_env(pg_conn, monkeypatch, tmp_path):
+def runner_env(pg_conn, monkeypatch, tmp_path, ch_client):
     """An agency, an admin, and an umbrella run opened the way the endpoint
-    opens it; the runner reads `DATABASE_URL` from the environment."""
+    opens it; the runner reads `DATABASE_URL` from the environment. A reload
+    archives the outgoing timetable, so the ClickHouse schema is provisioned
+    here rather than by whichever test first asks for a client."""
     monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
     monkeypatch.setattr("pipeline.static_fetcher.DEFAULT_STATIC_DEST", str(tmp_path / "static"))
     with pg_conn.cursor() as cur:
@@ -684,7 +686,7 @@ def test_the_command_line_reload_of_one_agency_fails_when_its_source_fails(runne
     assert "HTTP 500" in error
 
 
-def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_env, pg_conn, caplog):
+def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_env, pg_conn, caplog, ch_client):
     from pipeline.static_fetcher import refresh_all
     from pipeline.strategies.errors import StaticFetchError
 
@@ -706,7 +708,7 @@ def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
-            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [runner_env["agency_id"]])
+            assert refresh_all(conn, runner_env["tmp"], ch_client=ch_client) == (1, 2, [runner_env["agency_id"]])
     finally:
         conn.close()
 
@@ -720,7 +722,7 @@ def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_
     assert loaded == (second, "ok", 2, None)
 
 
-def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn):
+def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn, ch_client):
     """`refresh-static` without `--agency-id` goes through `refresh_all`,
     which records each agency's reload the same way."""
     from pipeline.static_fetcher import refresh_all
@@ -742,7 +744,7 @@ def test_the_command_line_reload_of_every_agency_records_one_static_run_each(run
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
-            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [])
+            assert refresh_all(conn, runner_env["tmp"], ch_client=ch_client) == (1, 2, [])
     finally:
         conn.close()
 

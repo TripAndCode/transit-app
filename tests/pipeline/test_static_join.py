@@ -509,13 +509,13 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path, static_version_id: st
         ),
     ],
 )
-def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
+def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label, ch_client):
     aid = _make_agency(pg_conn, agency_label, feed_url)
-    load_static(str(FIX / zip_name), aid, pg_conn)
+    load_static(str(FIX / zip_name), aid, pg_conn, ch_client=ch_client)
     _run_and_assert(pg_conn, aid, FIX / pb_name, static_version_id=pathlib.Path(zip_name).stem)
 
 
-def test_load_static_geiyo_fixture_row_counts(pg_conn):
+def test_load_static_geiyo_fixture_row_counts(pg_conn, ch_client):
     """geiyo_static.zip is a real vendored GTFS static feed for agency 11
     (Geiyo Bus). Asserts fixed row counts (1682 stops, 64 routes, 1593 trips,
     44152 stop_times) for this checked-in, immutable fixture zip so a future
@@ -529,7 +529,7 @@ def test_load_static_geiyo_fixture_row_counts(pg_conn):
     parse_feed/field_coverage.
     """
     aid = _make_agency(pg_conn, "芸陽バス_test", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin")
-    load_static(str(FIX / "geiyo_static.zip"), aid, pg_conn)
+    load_static(str(FIX / "geiyo_static.zip"), aid, pg_conn, ch_client=ch_client)
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM static_stops WHERE agency_id = %s", (aid,))

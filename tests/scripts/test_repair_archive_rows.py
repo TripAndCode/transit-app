@@ -129,7 +129,12 @@ def _seed_blank_archive_rows(pg_conn, ch_client, agency_id: int, tmp_path) -> di
     """Load today's timetable, parse the RT feed as ingest does now, and seed
     those rows with the timetable fields blanked. Returns what parse_feed
     gave each (trip_id, stop_sequence)."""
-    load_static(_timetable(tmp_path, "gtfs_static_20261014", TODAYS_TRIPS, TODAYS_STOP_TIMES), agency_id, pg_conn)
+    load_static(
+        _timetable(tmp_path, "gtfs_static_20261014", TODAYS_TRIPS, TODAYS_STOP_TIMES),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
     reference = parse_feed(_rt_feed(), "2026-09-10T00:00:15+00:00", ARCHIVE_FILE, agency_id, pg_conn)
     insert_updates(ch_client, agency_id, [_blank(r) for r in reference])
     return {(r[2], r[6]): (r[_SVC], r[_SCHED], r[_SEC], r[_VER]) for r in reference}
@@ -234,7 +239,12 @@ def test_rows_that_already_matched_and_other_strategies_keep_their_fields(
     earlier = "20260911/TripUpdate_000015.pb"
     matched = (earlier, "2026-09-11T00:00:15+00:00", "T2", "旧", "09:00", "R2", 1, 0)
     insert_updates(ch_client, join_agency, [(*matched, None, None, None, None, None, 32400, "gtfs_static_20260101")])
-    load_static(_timetable(tmp_path, "gtfs_static_20261015", TODAYS_TRIPS, TODAYS_STOP_TIMES), regex_agency, pg_conn)
+    load_static(
+        _timetable(tmp_path, "gtfs_static_20261015", TODAYS_TRIPS, TODAYS_STOP_TIMES),
+        regex_agency,
+        pg_conn,
+        ch_client=ch_client,
+    )
     insert_updates(ch_client, regex_agency, [(ARCHIVE_FILE, "2026-09-10T00:00:15+00:00", "T1", None, None, "R1", 1, 0)])
 
     assert _apply() == 0

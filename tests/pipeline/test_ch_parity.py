@@ -61,7 +61,7 @@ def test_parity_on_a_real_feed(pg_conn, ch_client):
         )
         agency_id = cur.fetchone()[0]
     pg_conn.commit()
-    load_static(str(FIXTURES / "hiroden_static.zip"), agency_id, pg_conn)
+    load_static(str(FIXTURES / "hiroden_static.zip"), agency_id, pg_conn, ch_client=ch_client)
     raw = (FIXTURES / "hiroden_tu.bin").read_bytes()
     for i, captured_at in enumerate(("2026-05-09T12:00:00+09:00", "2026-05-09T12:00:30+09:00")):
         rows = static_join.parse_feed(raw, captured_at, f"parity/{i}.bin", agency_id, pg_conn)

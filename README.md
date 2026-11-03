@@ -155,6 +155,12 @@ FastAPI + React SPA  <-------------------------------------------------+
   `static_stop_times`, refreshed when the schedule
   changes. It builds the rest in Postgres. A ClickHouse that predates one of
   those tables needs `make ch-bootstrap` before the next `analyze`.
+- Every timetable an agency loads is kept in ClickHouse's
+  `static_stop_times_archive` under its content hash, and `static_version_map`
+  records which content each version name carried: `load_static` archives the
+  outgoing timetable before it replaces it, and `analyze` archives the loaded
+  one when its content is missing. A ClickHouse that predates them needs
+  `make ch-bootstrap` before the next `load_static` or `analyze`.
 - Each day's planned trips are saved into `planned_trips_daily` while the
   timetable that plans the day is loaded: every `analyze` run saves each day
   before today the loaded timetable covers that has no saved count yet, and

@@ -247,3 +247,29 @@ CREATE TABLE IF NOT EXISTS static_stop_times (
 ) ENGINE = MergeTree
 PARTITION BY agency_id
 ORDER BY (agency_id, trip_id, stop_sequence);
+
+-- Every timetable an agency has loaded, for the aggregates that join a day to
+-- the timetable its rows were ingested against. Keyed by content, not by
+-- version name, so a reload of the same content under a new name adds nothing
+-- here. One partition per agency and content, written whole by a swap.
+CREATE TABLE IF NOT EXISTS static_stop_times_archive (
+    agency_id      Int32,
+    content_hash   LowCardinality(String),
+    trip_id        String,
+    stop_sequence  Int32,
+    stop_id        String,
+    arrival_time   Nullable(String),
+    departure_time Nullable(String)
+) ENGINE = MergeTree
+PARTITION BY (agency_id, content_hash)
+ORDER BY (agency_id, content_hash, trip_id, stop_sequence);
+
+-- The content each loaded version name carried. A name loaded again with
+-- different content gains a row, and the latest archived_at is the one in force.
+CREATE TABLE IF NOT EXISTS static_version_map (
+    agency_id         Int32,
+    static_version_id String,
+    content_hash      String,
+    archived_at       DateTime64(3, 'UTC')
+) ENGINE = MergeTree
+ORDER BY (agency_id, static_version_id, archived_at);
