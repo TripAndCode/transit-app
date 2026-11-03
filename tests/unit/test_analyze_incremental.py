@@ -572,11 +572,8 @@ def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(i
     assert _visit_scans(ch) == []
 
 
-def test_the_seed_versions_name_registered_tables_at_or_below_their_version():
-    """Versions only go up, so the versions at the switch can never exceed a
-    table's registry version, and a name the registry dropped is harmless."""
-    from pipeline import agg_registry
-
-    for name, version in analyze_mod._SEED_VERSIONS.items():
-        if name in agg_registry.TABLES:
-            assert version <= agg_registry.TABLES[name].version, name
+def test_the_seed_versions_stay_frozen_at_the_switch():
+    """Every table stood at version 1 when per-table state replaced the
+    agency-wide fingerprint. Raising an entry here alongside a registry bump
+    would seed the bumped table as current instead of rebuilding it."""
+    assert set(analyze_mod._SEED_VERSIONS.values()) == {1}

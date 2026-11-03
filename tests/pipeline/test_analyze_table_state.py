@@ -156,6 +156,22 @@ def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id
     assert _count(pg_conn, "agg_route_stats", agency_id) == stats_before
 
 
+def test_a_bump_and_changed_dates_rebuild_side_by_side(pg_conn, agency_id, ch_client, caplog, monkeypatch):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        # Mirroring the seed again adds rows to its dates, so the ledger reports them.
+        _analyze(agency_id, pg_conn, ch_client)
+    logged = _scopes_logged(caplog)
+    assert logged["route_delay_counts"] == "every date (fingerprint changed)"
+    assert logged["agg_route_stats"] == "every date (depends on route_delay_counts)"
+    assert logged["agg_route_daily"].endswith("date(s)")
+    assert logged["agg_feed_health"].endswith("date(s)")
+
+
 def test_a_skipped_table_keeps_its_rows(pg_conn, agency_id, ch_client):
     _seed_for_stop_agg(pg_conn, agency_id)
     _seed_route_headway_schedule(pg_conn, agency_id, "R_HW", "WD", "s1", ["08:00:00", "08:10:00", "08:20:00"])
