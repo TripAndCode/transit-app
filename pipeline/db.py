@@ -66,6 +66,7 @@ def build_dedup_ch_sql(
     extra_where: str = "",
     include_captured_at: bool = False,
     include_scheduled_sec: bool = False,
+    include_static_version: bool = False,
     table: str = UPDATES_TABLE,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
@@ -122,9 +123,9 @@ def build_dedup_ch_sql(
     parameter binding.
 
     The SELECT list is `route_code, service_type, scheduled_time, trip_id,
-    date, stop_sequence, dep_delay[, last_captured_at][, scheduled_sec]`.
-    `scheduled_sec`'s position shifts with `include_captured_at`, so a caller
-    wanting it reads the result by column name (e.g.
+    date, stop_sequence, dep_delay[, last_captured_at][, scheduled_sec][, static_version_id]`.
+    The optional columns' positions shift with the flags before them, so a
+    caller wanting one reads the result by column name (e.g.
     `pipeline.reports.filters._ch_rows`).
 
     Departures only: a row with no measured `dep_delay` never reaches the
@@ -149,6 +150,12 @@ def build_dedup_ch_sql(
     time) instead of skipping it for an older poll's schedule, which `argMax`
     does to a NULL argument.
 
+    `include_static_version` adds `static_version_id`, the version name of the
+    timetable the latest poll was ingested against (`''` for none), picked
+    like `dep_delay`. It is never a grouping key: a stop event polled under two
+    names across a timetable reload is still one event. `ifNull` keeps a latest
+    poll with no name, which `argMax` would otherwise skip for an older one.
+
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
     below.
@@ -169,10 +176,15 @@ def build_dedup_ch_sql(
         if include_scheduled_sec
         else ""
     )
+    static_version = (
+        ", argMax(ifNull(u.static_version_id, ''), (u.captured_at, u.file_name)) AS static_version_id"
+        if include_static_version
+        else ""
+    )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
-        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec} "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{static_version} "
         f"FROM {checked_table(table)} AS u "
         f"WHERE {observation_filter_ch(extra_where)} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "

@@ -562,14 +562,15 @@ def work_table(table: str, agency_id: int) -> str:
 
 def _dedup_select(where: str) -> str:
     """The dedup of the agency's `updates` rows matching *where*, with every column a table reads."""
-    return build_dedup_ch_sql(extra_where=where, include_captured_at=True)
+    return build_dedup_ch_sql(extra_where=where, include_captured_at=True, include_static_version=True)
 
 
 def _raw_select(where: str) -> str:
     """The agency's `updates` rows matching *where*, with no dedup: every poll, delay or not."""
     return (
         f"SELECT {service_date_ch('u.captured_at')} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
-        f"u.stop_sequence AS stop_sequence FROM {UPDATES_TABLE} AS u "
+        f"u.stop_sequence AS stop_sequence, ifNull(u.static_version_id, '') AS static_version_id "
+        f"FROM {UPDATES_TABLE} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where})"
     )
 
