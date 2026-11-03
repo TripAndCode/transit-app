@@ -83,9 +83,7 @@ class _Cursor:
         return self._rows
 
     def fetchone(self):
-        if self._sql.startswith("SELECT EXISTS"):
-            return (self._timetable is not None,)
-        return self._timetable
+        return self._timetable or (0, 0)
 
 
 class _Conn:

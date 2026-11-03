@@ -143,6 +143,22 @@ def test_a_build_reports_the_rows_that_joined_the_loaded_timetable(ch_client, ca
     assert "2 rows of versions not archived joined the loaded timetable" in caplog.text
 
 
+def test_a_build_of_some_dates_reads_and_reports_only_their_rows(ch_client, caplog):
+    _archive(ch_client, B, [("T1", 1, "SB")])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, "gtfs_static_19990102"),
+        ],
+    )
+    rebuild = {"agg_stop_daily": ch_aggregates.Rebuild([202606], [date(2026, 6, 2)])}
+    with caplog.at_level(logging.INFO, logger="pipeline.ch_aggregates"):
+        ch_aggregates.build(ch_client, AGENCY, rebuild, join=ScheduleJoin([], [], B))
+    assert "1 rows of versions not archived joined the loaded timetable (gtfs_static_19990102: 1)" in caplog.text
+
+
 def _timetable(tmp_path, name: str, stop: str) -> str:
     """A timetable zip, version-named *name*, whose trip T1 makes its first stop at *stop*."""
     return build_static_zip(

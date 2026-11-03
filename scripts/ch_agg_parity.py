@@ -101,10 +101,8 @@ def differences(ch_rows, pg_rows, dates, *, date_at: int) -> tuple[list, list]:
 def unarchived(ch, conn, agency_id: int) -> tuple[frozenset[str], ScheduleJoin | None]:
     """The static-joined tables to skip, and the join for the rest: none is
     skipped once the agency's loaded timetable is archived."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT EXISTS (SELECT 1 FROM static_stop_times WHERE agency_id = %s)", (agency_id,))
-        has_static = bool(cur.fetchone()[0])
-    key = static_archive.content_hash(static_parts(agency_id, conn, True)) if has_static else None
+    parts = static_parts(agency_id, conn, True)
+    key = static_archive.content_hash(parts) if static_archive.stop_time_count(parts) else None
     archived = False
     if key is not None:
         names = {

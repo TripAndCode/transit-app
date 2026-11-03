@@ -61,9 +61,8 @@ def months_of(dates: Iterable[date]) -> list[int]:
     return sorted({d.year * 100 + d.month for d in dates})
 
 
-def _month_stems(ch, agency_id: int, month: int) -> dict[str, int]:
-    """Each version name among the agency's `updates` rows of *month* ('' for none), with its row count."""
-    where, params = month_where(month)
+def _version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
+    """Each version name among the agency's `updates` rows matching *where* ('' for none), with its row count."""
     rows = ch.query(
         f"SELECT ifNull(u.static_version_id, '') AS stem, count() FROM {UPDATES_TABLE} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where}) GROUP BY stem",
@@ -91,6 +90,14 @@ def month_where(month: int) -> tuple[str, dict]:
         "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64}",
         {"month_start": service_day_start_utc(first), "month_end": service_day_start_utc(following)},
     )
+
+
+def _scope_where(month: int, scopes: Iterable[list[date] | None]) -> tuple[str, dict]:
+    """The predicate for the union of *scopes* within *month*: the whole month when any is None."""
+    scopes = list(scopes)
+    if any(scope is None for scope in scopes):
+        return month_where(month)
+    return days_where(sorted({day for scope in scopes for day in scope or ()}))
 
 
 def days_where(days: list[date]) -> tuple[str, dict]:
@@ -680,9 +687,10 @@ def build(
     dedup table again once every month is built; after a failure the caller's
     `drop_work_tables` clears them.
 
-    A table in STATIC_JOINED_TABLES needs *join*. Each month one rebuilds is
-    first read for its version names, which narrow the archive side of the join
-    to the contents the month's rows join; the rows whose name maps to no
+    A table in STATIC_JOINED_TABLES needs *join*. The rows such tables are
+    rebuilt from each month (the whole month, or only its changed dates) are
+    first read for their version names, which narrow the archive side of the
+    join to the contents those rows join; the rows whose name maps to no
     archived timetable are counted and logged once.
     """
     joined = sorted(table for table in rebuilds if table in STATIC_JOINED_TABLES)
@@ -705,9 +713,10 @@ def build(
             table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
         }
         stems = None
-        if join is not None and any(table in STATIC_JOINED_TABLES for table in days):
+        joined_days = [table_days for table, table_days in days.items() if table in STATIC_JOINED_TABLES]
+        if join is not None and joined_days:
             with step("ClickHouse version names"):
-                counts = _month_stems(ch, agency_id, month)
+                counts = _version_names(ch, agency_id, *_scope_where(month, joined_days))
             stems = list(counts)
             unarchived.update({stem: n for stem, n in counts.items() if stem not in join.stems})
         deduped = {table: table_days for table, table_days in days.items() if not _SPECS[table].raw}
@@ -716,10 +725,7 @@ def build(
             with step(f"{table}: ClickHouse build"):
                 _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
         elif deduped:
-            if any(table_days is None for table_days in deduped.values()):
-                where, params = month_where(month)
-            else:
-                where, params = days_where(sorted({day for table_days in deduped.values() for day in table_days or ()}))
+            where, params = _scope_where(month, deduped.values())
             with step("ClickHouse dedup"):
                 ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
             for table, table_days in deduped.items():

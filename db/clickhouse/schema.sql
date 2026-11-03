@@ -232,10 +232,8 @@ CREATE TABLE IF NOT EXISTS agg_stop_routes (
 PARTITION BY agency_id
 ORDER BY (agency_id, stop_id);
 
--- The agency's Postgres static_stop_times, mirrored for the aggregates that join
--- the schedule. One partition per agency, replaced whole. `fingerprint` is the
--- analyze fingerprint the copy was taken under, which changes whenever the
--- schedule does.
+-- A schedule mirror nothing reads or fills: the stop tables join
+-- static_stop_times_archive instead.
 CREATE TABLE IF NOT EXISTS static_stop_times (
     agency_id      Int32,
     trip_id        String,
