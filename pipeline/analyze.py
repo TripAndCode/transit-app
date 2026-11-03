@@ -1,13 +1,15 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
 Called by `gtfs_pipeline.py analyze` after ingestion. Each run rebuilds
-incrementally: a ledger of per-date source-row counts and a static-schedule
-fingerprint decide which dates changed, and only those dates' rows are purged
-and recomputed in the date-keyed tables. Whole-history tables are rebuilt as a
-unit, or skipped together when nothing changed. Everything happens in one
-transaction, so re-running is idempotent and a crash mid-run rolls back to the
-prior snapshot. The ledger's blind spot (see `_static_fingerprint`) is
-recovered only by a deliberate full rebuild (`analyze --full`).
+incrementally: a ledger of per-date source-row counts decides which dates
+changed, and each table's own fingerprint (agg_table_state, see `_plan`)
+decides when that table is rebuilt in full instead, along with the tables
+computed from it. Only the changed dates' rows are otherwise purged and
+recomputed in the date-keyed tables; whole-history tables are rebuilt as a
+unit when their source changed. Everything happens in one transaction, so
+re-running is idempotent and a crash mid-run rolls back to the prior snapshot.
+The ledger's blind spot (see `_dates_needing_rebuild`) is recovered only by a
+deliberate full rebuild (`analyze --full`).
 
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
@@ -173,10 +175,9 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # on the next reload (db/migrations/0037_agg_static_version_summary.up.sql).
 
 # Aggregates built from the static schedule alone. Every column they read is
-# in _STATIC_DEPENDENCY_COLUMNS, plus constants the fingerprint covers via
-# ANALYZE_LOGIC_VERSION (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC
-# threshold) -- so a run with no changed date, which also means the
-# fingerprint matched, would rebuild them to what already stands.
+# in _STATIC_DEPENDENCY_COLUMNS, plus constants their registry version covers
+# (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC threshold) -- so while
+# their fingerprint matches, a rebuild would produce what already stands.
 _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
 
 # What a run with no changed date may leave standing: a date-scoped table with
@@ -564,13 +565,14 @@ def _stored_fingerprints(conn, agency_id: int, legacy: str, current: dict[str, s
 
 
 def _record_fingerprints(conn, agency_id: int, current: dict[str, str]) -> None:
+    rows = sorted(current.items())
     with conn.cursor() as cur:
-        psycopg2.extras.execute_values(
-            cur,
-            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES %s "
-            "ON CONFLICT (agency_id, table_name) DO UPDATE SET "
+        cur.execute(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES "
+            + ", ".join(["(%s, %s, %s)"] * len(rows))
+            + " ON CONFLICT (agency_id, table_name) DO UPDATE SET "
             "fingerprint = EXCLUDED.fingerprint, built_at = now()",
-            [(agency_id, name, fingerprint) for name, fingerprint in sorted(current.items())],
+            [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)],
         )
 
 
