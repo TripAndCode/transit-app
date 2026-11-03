@@ -47,20 +47,29 @@ def test_a_group_with_no_gaps_is_left_out():
 
 
 def test_the_dominant_content_is_the_one_most_events_carry_across_stops():
-    rows = [("R1", "s1", D1, [600, 1200], ["a", "a"]), ("R1", "s2", D1, [660], ["b"]), ("R2", "s1", D1, [600], ["b"])]
+    rows = [
+        ("R1", "s1", D1, [600, 1200], (["a"], [2])),
+        ("R1", "s2", D1, [660], (["b"], [1])),
+        ("R2", "s1", D1, [600], (["b"], [1])),
+    ]
     assert dominant_contents(rows, lambda stem: stem) == {("R1", D1): "a", ("R2", D1): "b"}
 
 
 def test_a_tie_goes_to_the_lowest_content():
-    rows = [("R1", "s1", D1, [600], ["b"]), ("R1", "s2", D1, [660], ["a"])]
+    rows = [("R1", "s1", D1, [600], (["b"], [1])), ("R1", "s2", D1, [660], (["a"], [1]))]
     assert dominant_contents(rows, lambda stem: stem) == {("R1", D1): "a"}
 
 
 def test_each_events_name_is_mapped_to_its_content_before_counting():
-    rows = [("R1", "s1", D1, [600, 1200, 1800], ["", "old", "x"])]
+    rows = [("R1", "s1", D1, [600, 1200, 1800], (["", "old", "x"], [1, 1, 1]))]
     loaded = {"old": "c_old"}
     assert dominant_contents(rows, lambda stem: loaded.get(stem, "c_loaded")) == {("R1", D1): "c_loaded"}
 
 
 def test_the_pooled_gaps_ignore_the_names_column():
-    assert pool_daily_gaps([("R1", "s1", D1, [600, 1200], ["a", "a"])]) == {("R1", D1): [600]}
+    assert pool_daily_gaps([("R1", "s1", D1, [600, 1200], (["a"], [2]))]) == {("R1", D1): [600]}
+
+
+def test_a_name_counts_as_many_events_as_carry_it():
+    rows = [("R1", "s1", D1, [600, 1200, 1800], (["a", "b"], [1, 2]))]
+    assert dominant_contents(rows, lambda stem: stem) == {("R1", D1): "b"}

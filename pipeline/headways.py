@@ -248,9 +248,10 @@ def count_long_gaps(
 def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], list[float]]:
     """Each (route, service date)'s positive gaps, pooled across the stops it calls at.
 
-    *ch_rows* are ``(route_code, stop_id, svc_date, times)`` with each stop's
-    actual event times; gaps are reconstructed per stop, so a route's gaps never
-    span two stops. Pooling follows agg_route_headway's scheduled side: a
+    *ch_rows* are ``(route_code, stop_id, svc_date, times, ...)`` with each
+    stop's actual event times (any further columns are not read here); gaps
+    are reconstructed per stop, so a route's gaps never span two stops.
+    Pooling follows agg_route_headway's scheduled side: a
     consistently spaced route has a similar gap distribution at every stop it
     serves, so no one stop has to be picked as representative. A zero or
     negative gap (a duplicate or out-of-order observation) is left out rather
@@ -266,13 +267,16 @@ def dominant_contents(ch_rows: Iterable[tuple], content_of: Callable[[str], str]
     """Each (route, service date)'s dominant timetable: the content most of its
     events, across the stops it calls at, were ingested against.
 
-    *ch_rows* are ``(route_code, stop_id, svc_date, times, stems)``; each stem
-    is mapped through *content_of* before counting. A tie goes to the lowest
-    content, so a rebuild of the same rows picks the same one.
+    *ch_rows* are ``(route_code, stop_id, svc_date, times, (stems, events))``:
+    each group's version names with how many of its events carry each. Each
+    name is mapped through *content_of* before its events are counted. A tie
+    goes to the lowest content, so a rebuild of the same rows picks the same one.
     """
     counts: dict[tuple[object, object], Counter[str]] = defaultdict(Counter)
-    for route_code, _stop_id, svc_date, _times, stems in ch_rows:
-        counts[(route_code, svc_date)].update(content_of(stem) for stem in stems)
+    for route_code, _stop_id, svc_date, _times, (stems, events) in ch_rows:
+        tally = counts[(route_code, svc_date)]
+        for stem, n in zip(stems, events, strict=True):
+            tally[content_of(stem)] += n
     return {key: min(tally, key=lambda content: (-tally[content], content)) for key, tally in counts.items()}
 
 

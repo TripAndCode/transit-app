@@ -77,8 +77,6 @@ def _headway_daily() -> list[str]:
         inspect.getsource(headways.pool_daily_gaps),
         inspect.getsource(headways.dominant_contents),
         inspect.getsource(headways.daily_headway_rows),
-        # Each date's threshold: its timetable's medians, kept by pipeline.static_headways.
-        agg_sql.route_headway_sql(all_routes=True),
         inspect.getsource(headways.count_long_gaps),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
     ]
@@ -92,7 +90,15 @@ def _entries() -> list[AggTable]:
         AggTable("agg_feed_health", 1, Kind.DATED, False, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable("agg_service_delivered_daily", 1, Kind.DATED, False, lambda: [agg_sql.service_delivered_ch_sql("")]),
         AggTable("agg_schedule_revision_daily", 1, Kind.DATED, False, lambda: [agg_sql.schedule_revision_ch_sql("")]),
-        AggTable("agg_route_headway", 1, Kind.STATIC_ONLY, True, lambda: [agg_sql.route_headway_sql()]),
+        AggTable(
+            "agg_route_headway",
+            1,
+            Kind.STATIC_ONLY,
+            True,
+            # pipeline.static_headways keeps each timetable's medians under this
+            # version, so the SQL computing them is rendered here too.
+            lambda: [agg_sql.route_headway_sql(), agg_sql.route_headway_sql(all_routes=True)],
+        ),
         AggTable(
             "agg_route_headway_daily",
             1,

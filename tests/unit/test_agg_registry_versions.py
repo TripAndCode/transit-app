@@ -126,3 +126,11 @@ if __name__ == "__main__":
         RECORD.write_text(json.dumps(_current(), indent=2, sort_keys=True) + "\n")
     elif "--print" in sys.argv:
         print(json.dumps(_current()))
+
+
+def test_agg_route_headway_renders_the_medians_its_version_keys():
+    """pipeline.static_headways keeps each timetable's medians under agg_route_headway's
+    version, so a change to the SQL that computes them must reach that version."""
+    from pipeline import agg_sql
+
+    assert agg_sql.route_headway_sql(all_routes=True) in agg_registry.TABLES["agg_route_headway"].render()

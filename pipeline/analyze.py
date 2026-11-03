@@ -564,7 +564,8 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             # The stop tables join the archive, so building them now would drop
             # every row that falls back to the loaded timetable.
             raise RuntimeError(f"agency {agency_id}'s loaded timetable is not archived; run analyze again")
-        if content_key:
+        if content_key and ingest_strategy in RT_INGEST_STRATEGIES:
+            # Only the daily headways read them, and only such an agency builds those.
             static_headways.record_route_headways(conn, agency_id, content_key, static_parts)
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
