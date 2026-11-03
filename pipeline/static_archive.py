@@ -49,8 +49,10 @@ def loaded_stem(conn, agency_id: int) -> str | None:
 def _work_table(agency_id: int, key: str) -> str:
     # Unique per attempt: a load's outgoing archive and an analyze backstop can
     # archive the same content at once, and must not drop each other's table.
-    # It ends like an aggregate work table, so ch_aggregates.WORK_TABLE_PATTERN
-    # also finds one a killed copy left behind.
+    # It ends like an aggregate work table, so the test fixtures' sweep by
+    # ch_aggregates.WORK_TABLE_PATTERN finds one a killed copy left behind.
+    # Nothing reuses the name, so in a store such a table stays until dropped
+    # by hand.
     return f"{ARCHIVE}_{key[:8]}_{secrets.token_hex(4)}__work_a{int(agency_id)}"
 
 
@@ -68,7 +70,9 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
 
     None when no stop times are loaded, or when the timetable changed while it
     was being copied (a concurrent load_static committed): nothing is swapped
-    in then, and the next call archives what is loaded. *parts*, when the
+    in then, and the next call archives what is loaded. A returned key does
+    not promise the mapping: a name read after the timetable changed is left
+    unmapped, for the next call to record. *parts*, when the
     caller already read them, saves reading them again; they must be the
     loaded timetable's.
     """

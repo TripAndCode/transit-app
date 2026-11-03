@@ -546,7 +546,8 @@ def _checked(table: str) -> str:
 
 
 # A ClickHouse regular expression matching every name work_table and dedup_table
-# return; the test fixtures find every agency's scratch tables by it.
+# return, and the timetable archive's work tables; the test fixtures find every
+# agency's scratch tables by it.
 WORK_TABLE_PATTERN = "__work_a[0-9]+$"
 
 
