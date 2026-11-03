@@ -255,3 +255,16 @@ def test_the_join_maps_each_name_to_its_latest_content(ch_client):
         ["gtfs_static_20261001", "gtfs_static_20261101"], ["b" * 32, "c" * 32], "c" * 32
     )
     assert static_archive.schedule_join(ch_client, 7, "c" * 32) == expected
+
+
+def test_analyze_refuses_when_the_loaded_timetable_is_not_archived(pg_conn, agency_id, ch_client, monkeypatch):
+    from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    monkeypatch.setattr(static_archive, "archive_loaded", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="not archived"):
+        _analyze(agency_id, pg_conn, ch_client)
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 0

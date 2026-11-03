@@ -530,11 +530,16 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
     recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
     assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
+    # The stop tables also bind the schedule join: with no timetable loaded, one with nothing to join.
+    no_join = static_archive.ScheduleJoin([], [], "").params()
+    joined = [params for params in recomputed if no_join.keys() <= params.keys()]
+    assert joined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE], **no_join}] * 2
     # stop_route_days reads every `updates` row of the date itself, not the dedup.
-    assert recomputed == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - 1)
+    unjoined = [params for params in recomputed if params not in joined]
+    assert unjoined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - 3)
     raw = f"INSERT INTO {ch_aggregates.ROUTE_STOP_DAYS}__"
     fresh = [params for sql, params in ch.ch_agg_builds if sql.startswith(raw) and "FROM updates" in sql]
-    assert fresh == [{"agency_id": AGENCY_ID, **day}]
+    assert fresh == [{"agency_id": AGENCY_ID, **day, **no_join}]
     assert len([sql for sql, _ in ch.commands if "REPLACE PARTITION (7, 202601)" in sql]) == tables
 
 

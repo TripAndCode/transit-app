@@ -2,13 +2,33 @@
 
 from datetime import date, datetime
 
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 from pipeline.analyze import _mirror_static_stop_times
 from pipeline.clickhouse import insert_updates
 from tests.pipeline.ch_agg_helpers import update_row
 
 AGENCY = 7201
 SEPT = 202609
+# The stop tables' rows carry no version name here, so each joins the loaded timetable, KEY.
+KEY = "c" * 32
+JOIN = static_archive.ScheduleJoin([], [], KEY)
+
+
+def _archive(ch_client, rows: list[tuple[str, int, str]]) -> None:
+    """(trip_id, stop_sequence, stop_id) rows archived for AGENCY as the loaded timetable."""
+    ch_client.insert(
+        static_archive.ARCHIVE,
+        [(AGENCY, KEY, trip, sequence, stop, None, None) for trip, sequence, stop in rows],
+        column_names=[
+            "agency_id",
+            "content_hash",
+            "trip_id",
+            "stop_sequence",
+            "stop_id",
+            "arrival_time",
+            "departure_time",
+        ],
+    )
 
 
 def _seed_schedule(pg_conn, agency_id: int, rows: list[tuple[str, int, str]]) -> None:
@@ -88,16 +108,14 @@ def _stop_daily(ch_client, table: str = "agg_stop_daily") -> list[tuple]:
 
 
 def _build(ch_client, tables: list[str]) -> None:
-    ch_aggregates.build(ch_client, AGENCY, {t: ch_aggregates.Rebuild([SEPT], None) for t in tables})
+    ch_aggregates.build(ch_client, AGENCY, {t: ch_aggregates.Rebuild([SEPT], None) for t in tables}, join=JOIN)
     for table in tables:
         ch_aggregates.swap(ch_client, table, AGENCY, [SEPT])
 
 
 def test_stop_daily_bands_scheduled_times_like_postgres(ch_client):
     day = datetime(2026, 9, 14, 8, 0)
-    ch_aggregates.replace_static_stop_times(
-        ch_client, AGENCY, [(AGENCY, f"t{i}", 1, "S1", None, None) for i in range(7)], "fp"
-    )
+    _archive(ch_client, [(f"t{i}", 1, "S1") for i in range(7)])
     times = ["04:59:59", "05:00:00", "8:59", "23:59:59", "0:05", None, "12:00"]
     insert_updates(ch_client, AGENCY, [update_row(day, f"t{i}", 60, scheduled_time=t) for i, t in enumerate(times)])
     _build(ch_client, ["agg_stop_daily"])
@@ -107,9 +125,7 @@ def test_stop_daily_bands_scheduled_times_like_postgres(ch_client):
 
 def test_stop_daily_joins_on_trip_and_sequence_only(ch_client):
     day = datetime(2026, 9, 14, 8, 0)
-    ch_aggregates.replace_static_stop_times(
-        ch_client, AGENCY, [(AGENCY, "t1", 40000, "BIG", None, None), (AGENCY, "t1", 1, "S1", None, None)], "fp"
-    )
+    _archive(ch_client, [("t1", 40000, "BIG"), ("t1", 1, "S1")])
     insert_updates(
         ch_client,
         AGENCY,
@@ -138,9 +154,7 @@ def _stop_routes(ch_client) -> dict[str, str]:
 def _build_stop_routes(ch_client) -> None:
     """S1 seen on a route with no delay, on one with a delay, and on no route at all."""
     day = datetime(2026, 9, 14, 8, 0)
-    ch_aggregates.replace_static_stop_times(
-        ch_client, AGENCY, [(AGENCY, "t1", 1, "S1", None, None), (AGENCY, "t2", 1, "S1", None, None)], "fp"
-    )
+    _archive(ch_client, [("t1", 1, "S1"), ("t2", 1, "S1")])
     insert_updates(
         ch_client,
         AGENCY,
@@ -150,7 +164,9 @@ def _build_stop_routes(ch_client) -> None:
             update_row(day, "t2", 30, route_code=None),
         ],
     )
-    ch_aggregates.build(ch_client, AGENCY, {ch_aggregates.ROUTE_STOP_DAYS: ch_aggregates.Rebuild([SEPT], None)})
+    ch_aggregates.build(
+        ch_client, AGENCY, {ch_aggregates.ROUTE_STOP_DAYS: ch_aggregates.Rebuild([SEPT], None)}, join=JOIN
+    )
     ch_aggregates.swap(ch_client, ch_aggregates.ROUTE_STOP_DAYS, AGENCY, [SEPT])
     ch_aggregates.build_whole_history(ch_client, AGENCY, ["agg_stop_routes"], {})
     ch_aggregates.swap_whole_history(ch_client, "agg_stop_routes", AGENCY)
@@ -164,5 +180,5 @@ def test_stop_routes_keep_a_route_whose_every_observation_lacks_a_delay(ch_clien
 def test_the_read_only_path_computes_the_stop_routes_in_query(ch_client):
     _build_stop_routes(ch_client)
     sql = ch_aggregates.whole_history_sql("agg_stop_routes")
-    rows = ch_client.query(sql, parameters={"agency_id": AGENCY}).result_rows
+    rows = ch_client.query(sql, parameters={"agency_id": AGENCY, **JOIN.params()}).result_rows
     assert {stop_id: codes for _, stop_id, codes in rows} == _stop_routes(ch_client)

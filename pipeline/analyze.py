@@ -541,6 +541,7 @@ class Plan(NamedTuple):
     legacy: str
     current: dict[str, str]
     scopes: dict[str, list | None]
+    content_key: str | None  # the loaded timetable's archive key, None with none loaded
 
 
 def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: str | None) -> Plan:
@@ -557,10 +558,15 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     """
     static_parts = _static_parts(agency_id, conn, has_static)
     static_archive.require_tables(ch_client)
+    content_key = None
     if has_static:
         # A backstop for a timetable loaded before the archive existed:
         # load_static archives only the timetable it replaces.
-        static_archive.archive_loaded(conn, ch_client, agency_id, static_parts)
+        content_key = static_archive.archive_loaded(conn, ch_client, agency_id, static_parts)
+        if content_key is None and static_archive.stop_time_count(static_parts):
+            # The stop tables join the archive, so building them now would drop
+            # every row that falls back to the loaded timetable.
+            raise RuntimeError(f"agency {agency_id}'s loaded timetable is not archived; run analyze again")
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)
@@ -581,7 +587,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(legacy, current, scopes)
+    return Plan(legacy, current, scopes, content_key)
 
 
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
@@ -903,7 +909,9 @@ def _mirror_static_stop_times(agency_id: int, conn, ch_client, has_static: bool,
     logger.info(f"  static_stop_times: {copied} rows mirrored into ClickHouse")
 
 
-def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> None:
+def _rebuild_ch_aggregates(
+    agency_id: int, conn, ch_client, scopes: dict[str, list | None], content_key: str | None
+) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
     Every build finishes before any swap, so a failed build leaves every table as
@@ -918,6 +926,9 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
     The whole-history tables are finalized from their internal tables after every
     monthly build and before any swap, so they read the months just rebuilt from
     those tables' work tables; an internal table itself is never copied.
+
+    The version map is read only when a static-joined table is rebuilt, so a run
+    that rebuilds none reads nothing of the archive beyond the plan's probes.
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
@@ -932,11 +943,15 @@ def _rebuild_ch_aggregates(agency_id: int, conn, ch_client, scopes: dict[str, li
             for table, changed in monthly.items():
                 months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
         if monthly:
+            join = None
+            if any(table in ch_aggregates.STATIC_JOINED_TABLES for table in monthly):
+                join = static_archive.schedule_join(ch_client, agency_id, content_key)
             ch_aggregates.build(
                 ch_client,
                 agency_id,
                 {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in monthly.items()},
                 _step,
+                join,
             )
         if whole:
             recounted = {t: months[t] for t in ch_aggregates.INTERNAL_TABLES if t in months}
@@ -1365,7 +1380,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Last, so a Postgres builder that fails above leaves ClickHouse
         # untouched too.
         _mirror_static_stop_times(agency_id, conn, ch_client, has_static, plan.legacy)
-        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes)
+        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, plan.content_key)
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.

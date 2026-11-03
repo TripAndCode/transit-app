@@ -138,10 +138,10 @@ def test_a_failed_build_leaves_both_stores_as_they_stood_and_no_work_table(pg_co
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 9, 15, 8, 0), "c", 180)])
     real = ch_aggregates.select_sql
 
-    def select_sql(table, month, days=None, source=None):
+    def select_sql(table, month, days=None, source=None, **kwargs):
         if table == ch_aggregates.TABLES[-1]:
             raise RuntimeError("injected build failure")
-        return real(table, month, days, source)
+        return real(table, month, days, source, **kwargs)
 
     monkeypatch.setattr(ch_aggregates, "select_sql", select_sql)
     with pytest.raises(RuntimeError, match="injected build failure"):
@@ -186,9 +186,9 @@ def test_an_incremental_run_recomputes_only_the_changed_dates(pg_conn, agency_id
     calls = []
     real = ch_aggregates.select_sql
 
-    def select_sql(table, month, days=None, source=None):
+    def select_sql(table, month, days=None, source=None, **kwargs):
         calls.append((table, month, days))
-        return real(table, month, days, source)
+        return real(table, month, days, source, **kwargs)
 
     monkeypatch.setattr(ch_aggregates, "select_sql", select_sql)
     insert_updates(ch_client, agency_id, [update_row(datetime(2026, 10, 3, 8, 0), "c", 180)])

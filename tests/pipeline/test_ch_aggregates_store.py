@@ -9,13 +9,15 @@ from decimal import Decimal
 
 import pytest
 
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 from pipeline.clickhouse import insert_updates
 from tests.pipeline.ch_agg_helpers import edge_rows, update_row, work_tables
 
 AGENCY = 7001
 OTHER = 7002
 AUG = 202608
+# A join for an agency with no archived timetable: the static-joined tables build no rows.
+NO_TIMETABLE = static_archive.ScheduleJoin([], [], "")
 SEPT = 202609
 OCT = 202610
 WORK = ch_aggregates.work_table("agg_hour_daily", AGENCY)
@@ -234,7 +236,7 @@ def _unshared_rows(ch_client, table: str, months: list[int]) -> list[str]:
     """What *table*'s SELECT gives when it dedups `updates` itself, month by month."""
     rows: list = []
     for month in months:
-        sql, params = ch_aggregates.select_sql(table, month)
+        sql, params = ch_aggregates.select_sql(table, month, join=NO_TIMETABLE)
         rows += ch_client.query(sql, parameters={"agency_id": AGENCY, **params}).result_rows
     return sorted(map(str, rows))
 
@@ -248,7 +250,7 @@ def test_one_dedup_per_month_feeds_every_table(ch_client):
     insert_updates(ch_client, AGENCY, [*edge_rows(), update_row(datetime(2026, 10, 2, 8, 0), "x", 120)])
     counting = _Counting(ch_client)
     rebuilds = {table: ch_aggregates.Rebuild([SEPT, OCT], None) for table in ch_aggregates.TABLES}
-    ch_aggregates.build(counting, AGENCY, rebuilds)
+    ch_aggregates.build(counting, AGENCY, rebuilds, join=NO_TIMETABLE)
     assert counting.dedup_inserts == 2
     for table in ch_aggregates.TABLES:
         assert _work_rows(ch_client, table) == _unshared_rows(ch_client, table, [SEPT, OCT]), table
@@ -369,11 +371,11 @@ def test_store_figures_pair_a_clickhouse_and_a_postgres_expression(ch_client):
             ch_aggregates.store_figures(table)
 
 
-def test_the_static_joined_tables_are_those_whose_select_joins_the_schedule_mirror():
+def test_the_static_joined_tables_are_those_whose_select_joins_the_timetable_archive():
     joined = {
         table
         for table in ch_aggregates.MONTHLY_TABLES
-        if ch_aggregates.STATIC_STOP_TIMES in ch_aggregates.select_sql(table, 202609)[0]
+        if static_archive.ARCHIVE in ch_aggregates.select_sql(table, 202609)[0]
     }
     joined |= {t for t in ch_aggregates.WHOLE_HISTORY_TABLES if ch_aggregates.whole_history_source(t) in joined}
     assert joined == ch_aggregates.STATIC_JOINED_TABLES
