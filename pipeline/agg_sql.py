@@ -227,9 +227,27 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
 # after-midnight departure as a plain clock ("00:10:00") would
 # otherwise sort it before the morning's first departure, where
 # GTFS's "24:10:00" sorts after 23:50.
-def route_headway_sql() -> str:
-    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait."""
+def route_headway_sql(all_routes: bool = False) -> str:
+    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait.
+
+    *all_routes* selects instead every route of a dominant service with its
+    median, NULL where the timetable gives none: what pipeline.static_headways
+    keeps per timetable.
+    """
     hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
+    if all_routes:
+        selected = """
+                SELECT ds.route_code, m.scheduled_headway_median_sec
+                FROM dominant_service ds LEFT JOIN medians m USING (route_code)
+            """
+    else:
+        selected = f"""
+                SELECT %(agency_id)s AS agency_id, route_code,
+                       scheduled_headway_median_sec, scheduled_samples,
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
+                       scheduled_wait_mean_sec
+                FROM medians
+            """
     return f"""
                 WITH {dominant_service_ctes("%(agency_id)s")},
                 scheduled_departures AS (
@@ -264,13 +282,7 @@ def route_headway_sql() -> str:
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code
-                )
-                SELECT %(agency_id)s AS agency_id, route_code,
-                       scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
-                       scheduled_wait_mean_sec
-                FROM medians
-            """
+                ){selected}"""
 
 
 # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this

@@ -88,7 +88,7 @@ from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive
+from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, pool_daily_gaps
@@ -564,6 +564,8 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             # The stop tables join the archive, so building them now would drop
             # every row that falls back to the loaded timetable.
             raise RuntimeError(f"agency {agency_id}'s loaded timetable is not archived; run analyze again")
+        if content_key:
+            static_headways.record_route_headways(conn, agency_id, content_key, static_parts)
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)

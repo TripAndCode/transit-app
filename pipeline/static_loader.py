@@ -36,9 +36,10 @@ from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
-from pipeline import static_archive
+from pipeline import static_archive, static_headways
 from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
+from pipeline.static_content import static_parts
 from pipeline.stop_clusters import rebuild_stop_clusters
 
 logger = logging.getLogger(__name__)
@@ -223,7 +224,10 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
         # ingested against it is joined to it after this load. Raising here
         # leaves every table as it was.
         static_archive.require_tables(ch_client)
-        static_archive.archive_loaded(conn, ch_client, agency_id)
+        outgoing = static_parts(agency_id, conn, True)
+        key = static_archive.archive_loaded(conn, ch_client, agency_id, outgoing)
+        if key:
+            static_headways.record_route_headways(conn, agency_id, key, outgoing)
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")
