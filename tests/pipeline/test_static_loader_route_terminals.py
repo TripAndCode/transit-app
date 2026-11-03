@@ -101,8 +101,8 @@ def _terminals(pg_conn, agency_id) -> dict[str, tuple]:
         return {row[0]: tuple(row[1:]) for row in cur.fetchall()}
 
 
-def test_routes_jp_names_every_hiroden_route(pg_conn, agency_id):
-    load_static(str(_HIRODEN_ZIP), agency_id, pg_conn)
+def test_routes_jp_names_every_hiroden_route(pg_conn, agency_id, ch_client):
+    load_static(str(_HIRODEN_ZIP), agency_id, pg_conn, ch_client=ch_client)
     terminals = _terminals(pg_conn, agency_id)
 
     assert terminals["1471981638"] == ("広島バスセンター", None, "あさひが丘下", False, False)
@@ -117,14 +117,14 @@ def test_routes_jp_names_every_hiroden_route(pg_conn, agency_id):
     assert all(origin and destination for origin, _, destination, _, _ in terminals.values())
 
 
-def test_without_routes_jp_each_route_takes_its_dominant_first_and_last_stop(pg_conn, agency_id, tmp_path):
-    load_static(_zip(tmp_path), agency_id, pg_conn)
+def test_without_routes_jp_each_route_takes_its_dominant_first_and_last_stop(pg_conn, agency_id, tmp_path, ch_client):
+    load_static(_zip(tmp_path), agency_id, pg_conn, ch_client=ch_client)
 
     assert _terminals(pg_conn, agency_id) == _FALLBACK
 
 
-def test_routes_jp_wins_and_the_trips_fill_only_the_fields_it_leaves_empty(pg_conn, agency_id, tmp_path):
-    load_static(_zip(tmp_path, routes_jp_rows=_PARTIAL_ROUTES_JP), agency_id, pg_conn)
+def test_routes_jp_wins_and_the_trips_fill_only_the_fields_it_leaves_empty(pg_conn, agency_id, tmp_path, ch_client):
+    load_static(_zip(tmp_path, routes_jp_rows=_PARTIAL_ROUTES_JP), agency_id, pg_conn, ch_client=ch_client)
 
     assert _terminals(pg_conn, agency_id) == {
         **_FALLBACK,
@@ -137,26 +137,28 @@ def test_routes_jp_wins_and_the_trips_fill_only_the_fields_it_leaves_empty(pg_co
     }
 
 
-def test_reloading_recomputes_terminals_from_the_feed_now_loaded(pg_conn, agency_id, tmp_path):
+def test_reloading_recomputes_terminals_from_the_feed_now_loaded(pg_conn, agency_id, tmp_path, ch_client):
     with_jp = _zip(tmp_path, routes_jp_rows=_PARTIAL_ROUTES_JP)
-    load_static(with_jp, agency_id, pg_conn)
+    load_static(with_jp, agency_id, pg_conn, ch_client=ch_client)
     first = _terminals(pg_conn, agency_id)
-    load_static(with_jp, agency_id, pg_conn)
+    load_static(with_jp, agency_id, pg_conn, ch_client=ch_client)
     assert _terminals(pg_conn, agency_id) == first
 
-    load_static(_zip(tmp_path, filename="without_jp_static.zip"), agency_id, pg_conn)
+    load_static(_zip(tmp_path, filename="without_jp_static.zip"), agency_id, pg_conn, ch_client=ch_client)
     assert _terminals(pg_conn, agency_id) == _FALLBACK
 
 
-def test_a_load_without_routes_txt_still_drops_names_its_feed_no_longer_gives(pg_conn, agency_id, tmp_path):
-    load_static(_zip(tmp_path, routes_jp_rows=_PARTIAL_ROUTES_JP), agency_id, pg_conn)
+def test_a_load_without_routes_txt_still_drops_names_its_feed_no_longer_gives(pg_conn, agency_id, tmp_path, ch_client):
+    load_static(_zip(tmp_path, routes_jp_rows=_PARTIAL_ROUTES_JP), agency_id, pg_conn, ch_client=ch_client)
 
-    load_static(_zip(tmp_path, filename="no_routes_static.zip", with_routes=False), agency_id, pg_conn)
+    load_static(
+        _zip(tmp_path, filename="no_routes_static.zip", with_routes=False), agency_id, pg_conn, ch_client=ch_client
+    )
 
     assert _terminals(pg_conn, agency_id) == _FALLBACK
 
 
-def test_an_unreadable_routes_jp_leaves_the_trips_to_name_every_route(pg_conn, agency_id, tmp_path, caplog):
+def test_an_unreadable_routes_jp_leaves_the_trips_to_name_every_route(pg_conn, agency_id, tmp_path, caplog, ch_client):
     zip_path = _zip(tmp_path)
     with zipfile.ZipFile(zip_path, "a") as zf:
         zf.writestr(
@@ -165,7 +167,7 @@ def test_an_unreadable_routes_jp_leaves_the_trips_to_name_every_route(pg_conn, a
         )
 
     with caplog.at_level("WARNING", logger="pipeline.route_terminals"):
-        load_static(zip_path, agency_id, pg_conn)
+        load_static(zip_path, agency_id, pg_conn, ch_client=ch_client)
 
     assert "routes_jp.txt unreadable" in caplog.text
     assert _terminals(pg_conn, agency_id) == _FALLBACK

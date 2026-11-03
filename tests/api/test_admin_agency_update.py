@@ -684,7 +684,7 @@ def test_the_command_line_reload_of_one_agency_fails_when_its_source_fails(runne
     assert "HTTP 500" in error
 
 
-def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_env, pg_conn, caplog):
+def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_env, pg_conn, caplog, ch_client):
     from pipeline.static_fetcher import refresh_all
     from pipeline.strategies.errors import StaticFetchError
 
@@ -706,7 +706,7 @@ def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
-            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [runner_env["agency_id"]])
+            assert refresh_all(conn, runner_env["tmp"], ch_client=ch_client) == (1, 2, [runner_env["agency_id"]])
     finally:
         conn.close()
 
@@ -720,7 +720,7 @@ def test_the_command_line_reload_of_every_agency_reports_a_failed_source(runner_
     assert loaded == (second, "ok", 2, None)
 
 
-def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn):
+def test_the_command_line_reload_of_every_agency_records_one_static_run_each(runner_env, pg_conn, ch_client):
     """`refresh-static` without `--agency-id` goes through `refresh_all`,
     which records each agency's reload the same way."""
     from pipeline.static_fetcher import refresh_all
@@ -742,7 +742,7 @@ def test_the_command_line_reload_of_every_agency_records_one_static_run_each(run
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         with patch("pipeline.strategies.direct_url.fetch", side_effect=_fetch):
-            assert refresh_all(conn, runner_env["tmp"]) == (1, 2, [])
+            assert refresh_all(conn, runner_env["tmp"], ch_client=ch_client) == (1, 2, [])
     finally:
         conn.close()
 

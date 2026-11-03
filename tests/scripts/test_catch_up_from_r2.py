@@ -102,7 +102,12 @@ def world(pg_conn, ch_client, tmp_path):
         agency_id = cur.fetchone()[0]
     pg_conn.commit()
     old = f"gtfs_static_{d - 10 * DAY:%Y%m%d}"
-    load_static(str(_timetable(tmp_path / "loaded" / f"{old}.zip", "07:00:00", d - 10 * DAY)), agency_id, pg_conn)
+    load_static(
+        str(_timetable(tmp_path / "loaded" / f"{old}.zip", "07:00:00", d - 10 * DAY)),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
 
     ingested = _utc(d - 2 * DAY, 3)  # JST D-2 12:00
     insert_updates(

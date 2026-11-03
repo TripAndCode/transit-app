@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_STATIC_DEST = "raw_archives_static"
 
 
-def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool = False) -> Optional[pathlib.Path]:
+def refresh_static(
+    agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool = False, ch_client
+) -> Optional[pathlib.Path]:
     """Refresh static GTFS for one agency. Returns the loaded zip path, or
     None when nothing is newer; the strategy's StaticFetchError propagates.
 
@@ -67,7 +69,7 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path, *, force: bool 
             raise StaticFetchError("the source sent no timetable, though this agency has none loaded")
         return None
 
-    load_static(str(zip_path), agency_id, conn)
+    load_static(str(zip_path), agency_id, conn, ch_client=ch_client)
     day_types.invalidate_day_types()
     route_catalog.invalidate_retired_routes()
     service_hours.invalidate_service_hours()
@@ -92,6 +94,7 @@ def refresh_static_recorded(
     requested_by: int | None = None,
     parent_run_id: int | None = None,
     force: bool = False,
+    ch_client,
 ) -> Optional[pathlib.Path]:
     """:func:`refresh_static`, recorded as a ``static`` run.
 
@@ -104,7 +107,7 @@ def refresh_static_recorded(
     with pipeline_runs.record_run(
         conn, "static", agency_id=agency_id, requested_by=requested_by, parent_run_id=parent_run_id
     ) as run:
-        loaded = refresh_static(agency_id, conn, dest_dir, force=force)
+        loaded = refresh_static(agency_id, conn, dest_dir, force=force, ch_client=ch_client)
         if loaded is None:
             run.status = "unchanged"
         else:
@@ -114,7 +117,7 @@ def refresh_static_recorded(
     return loaded
 
 
-def refresh_all(conn, dest_dir: pathlib.Path, *, force: bool = False) -> tuple[int, int, list[int]]:
+def refresh_all(conn, dest_dir: pathlib.Path, *, force: bool = False, ch_client) -> tuple[int, int, list[int]]:
     """Refresh static for every agency that has both static_url and static_strategy,
     forcing each fetch when ``force`` is set (see :func:`refresh_static`).
 
@@ -139,7 +142,7 @@ def refresh_all(conn, dest_dir: pathlib.Path, *, force: bool = False) -> tuple[i
     failed = []
     for aid in ids:
         try:
-            if refresh_static_recorded(aid, conn, dest_dir, force=force):
+            if refresh_static_recorded(aid, conn, dest_dir, force=force, ch_client=ch_client):
                 n_loaded += 1
         except StaticFetchError as e:
             logger.error(f"[static_fetcher] refresh failed for agency {aid}: {e}")

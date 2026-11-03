@@ -36,6 +36,7 @@ from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
+from pipeline import static_archive
 from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
 from pipeline.stop_clusters import rebuild_stop_clusters
@@ -163,7 +164,7 @@ def _count_calendar_trips(cur, agency_id: int) -> None:
     )
 
 
-def load_static(path: str, agency_id: int, conn) -> None:
+def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     """Load a GTFS static zip into the ``static_*`` tables for ``agency_id``.
 
     Args:
@@ -181,6 +182,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
             failure before the load's commit leaves none of the load in
             place. The saved planned trips stay, and stay right: the
             timetable they came from is still the one loaded.
+        ch_client: A ClickHouse client. The outgoing timetable is archived
+            (pipeline.static_archive) before any table is replaced; if that
+            fails, load_static raises and nothing is replaced. A concurrent
+            load replacing it first is the one exception: that load archives
+            it.
 
     Raises:
         FileNotFoundError: If ``path`` does not resolve to a zip file
@@ -213,6 +219,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
         # now, so a concurrent analyze's capture never waits on this load.
         incoming = _covered_ranges(calendar_rows, read_first.get("calendar_dates.txt", []))
         capture_before_reload(conn, agency_id, incoming)
+        # The outgoing timetable is kept before any table is replaced: a day
+        # ingested against it is joined to it after this load. Raising here
+        # leaves every table as it was.
+        static_archive.require_tables(ch_client)
+        static_archive.archive_loaded(conn, ch_client, agency_id)
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")

@@ -488,8 +488,10 @@ def _refresh_static_step(
     import psycopg2
 
     from pipeline import static_fetcher
+    from pipeline.clickhouse import get_client
 
     conn = psycopg2.connect(db_url)
+    ch = get_client()
     try:
         return static_fetcher.refresh_static_recorded(
             agency_id,
@@ -497,8 +499,10 @@ def _refresh_static_step(
             pathlib.Path(static_fetcher.DEFAULT_STATIC_DEST),
             requested_by=requested_by,
             parent_run_id=parent_run_id,
+            ch_client=ch,
         )
     finally:
+        ch.close()
         conn.close()
 
 

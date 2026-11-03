@@ -631,7 +631,7 @@ def test_refresh_static_records_a_zip_only_once_it_has_loaded(tmp_path, monkeypa
     conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
     monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: _Strategy)
 
-    def failing_load(*_args):
+    def failing_load(*_args, **_kw):
         raise RuntimeError("constraint violated")
 
     monkeypatch.setattr(static_fetcher, "load_static", failing_load)
@@ -640,11 +640,11 @@ def test_refresh_static_records_a_zip_only_once_it_has_loaded(tmp_path, monkeypa
     # than being swallowed here — only record_loaded not being called is not
     # enough to prove that on its own.
     with pytest.raises(RuntimeError):
-        static_fetcher.refresh_static(8, conn, tmp_path)
+        static_fetcher.refresh_static(8, conn, tmp_path, ch_client=None)
     assert _Strategy.recorded == []
 
-    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
-    static_fetcher.refresh_static(8, conn, tmp_path)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args, **_kw: None)
+    static_fetcher.refresh_static(8, conn, tmp_path, ch_client=None)
     assert _Strategy.recorded == ["gtfs_static_20261001.zip"]
 
 
@@ -665,9 +665,9 @@ def test_refresh_static_still_reports_success_when_recording_the_load_fails(tmp_
     conn = MagicMock()
     conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
     monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: _Strategy)
-    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args, **_kw: None)
 
-    result = static_fetcher.refresh_static(8, conn, tmp_path)
+    result = static_fetcher.refresh_static(8, conn, tmp_path, ch_client=None)
     assert result == tmp_path / "gtfs_static_20261001.zip"
 
 
@@ -707,9 +707,9 @@ def test_refresh_static_forces_the_fetch_when_asked_or_when_no_timetable_is_load
     monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
     monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
     loaded: list[str] = []
-    monkeypatch.setattr(static_fetcher, "load_static", lambda path, _agency_id, _conn: loaded.append(path))
+    monkeypatch.setattr(static_fetcher, "load_static", lambda path, _agency_id, _conn, **_kw: loaded.append(path))
 
-    result = static_fetcher.refresh_static(8, conn, tmp_path, force=force)
+    result = static_fetcher.refresh_static(8, conn, tmp_path, force=force, ch_client=None)
 
     assert strategy.forced == [loads]
     assert result == (strategy.zip_path if loads else None)
@@ -727,11 +727,11 @@ def test_refresh_static_forgets_the_cached_calendar_only_after_a_load(tmp_path, 
     conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
     monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
     monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
-    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args, **_kw: None)
     cleared: list[bool] = []
     monkeypatch.setattr(day_types, "invalidate_day_types", lambda: cleared.append(True))
 
-    static_fetcher.refresh_static(8, conn, tmp_path)
+    static_fetcher.refresh_static(8, conn, tmp_path, ch_client=None)
 
     assert cleared == ([] if has_timetable else [True])
 
@@ -747,11 +747,11 @@ def test_refresh_static_forgets_the_cached_service_hours_only_after_a_load(tmp_p
     conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ("https://8.8.8.8/x.zip", "direct_url")
     monkeypatch.setattr(static_fetcher, "get_static_strategy", lambda _name: strategy)
     monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable)
-    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args: None)
+    monkeypatch.setattr(static_fetcher, "load_static", lambda *_args, **_kw: None)
     cleared: list[bool] = []
     monkeypatch.setattr(service_hours, "invalidate_service_hours", lambda: cleared.append(True))
 
-    static_fetcher.refresh_static(8, conn, tmp_path)
+    static_fetcher.refresh_static(8, conn, tmp_path, ch_client=None)
 
     assert cleared == ([] if has_timetable else [True])
 
@@ -788,7 +788,9 @@ def test_refresh_static_fails_when_an_agency_with_no_timetable_still_loads_none(
     monkeypatch.setattr(static_fetcher, "load_static", MagicMock(side_effect=AssertionError("nothing to load")))
 
     with pytest.raises(StaticFetchError) as exc:
-        static_fetcher.refresh_static(8, _agency_conn("https://8.8.8.8/x.zip", "direct_url"), tmp_path, force=force)
+        static_fetcher.refresh_static(
+            8, _agency_conn("https://8.8.8.8/x.zip", "direct_url"), tmp_path, force=force, ch_client=None
+        )
     assert strategy.forced == [True]
     assert exc.value.reason == "the source sent no timetable, though this agency has none loaded"
 
@@ -805,9 +807,9 @@ def test_refresh_static_of_an_agency_with_no_source_fails_only_without_a_timetab
     monkeypatch.setattr(db, "_static_loaded", lambda _conn, _agency_id: has_timetable["value"])
     monkeypatch.setattr(static_fetcher, "get_static_strategy", MagicMock(side_effect=AssertionError("no fetch")))
 
-    assert static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path) is None
+    assert static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path, ch_client=None) is None
 
     has_timetable["value"] = False
     with pytest.raises(StaticFetchError) as exc:
-        static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path)
+        static_fetcher.refresh_static(8, _agency_conn(static_url, static_strategy), tmp_path, ch_client=None)
     assert exc.value.reason == "this agency has no timetable URL or fetch method configured"

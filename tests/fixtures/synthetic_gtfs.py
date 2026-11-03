@@ -127,7 +127,7 @@ class SyntheticPattern:
     expected: dict
 
 
-def load_pattern_static(pattern: SyntheticPattern, tmp_path, agency_id, pg_conn) -> None:
+def load_pattern_static(pattern: SyntheticPattern, tmp_path, agency_id, pg_conn, ch_client) -> None:
     """Build and load *pattern*'s static fragment via ``pipeline.static_loader.load_static``."""
     from pipeline.static_loader import load_static
 
@@ -139,7 +139,7 @@ def load_pattern_static(pattern: SyntheticPattern, tmp_path, agency_id, pg_conn)
         stop_times_rows=pattern.stop_times_rows,
         filename=f"{pattern.name}_static.zip",
     )
-    load_static(zip_path, agency_id, pg_conn)
+    load_static(zip_path, agency_id, pg_conn, ch_client=ch_client)
 
 
 def insert_pattern_updates(pattern: SyntheticPattern, ch_client, agency_id: int) -> int:
@@ -162,7 +162,7 @@ def run_pattern(pattern: SyntheticPattern, tmp_path, pg_conn, agency_id, ch_clie
     """
     from pipeline.analyze import analyze
 
-    load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
+    load_pattern_static(pattern, tmp_path, agency_id, pg_conn, ch_client)
     insert_pattern_updates(pattern, ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
 

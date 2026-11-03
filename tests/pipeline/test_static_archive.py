@@ -123,3 +123,74 @@ def test_missing_tables_fail_closed_with_the_bootstrap_hint(ch_client):
             static_archive.require_tables(ch_client)
     finally:
         apply_schema(ch_client)
+
+
+def _zip(tmp_path, name, departure):
+    from tests.fixtures.synthetic_gtfs import build_static_zip
+
+    return build_static_zip(
+        tmp_path,
+        stops_rows=["S1,A,40.80,140.70", "S2,B,40.81,140.71"],
+        trips_rows=["T1,R1,,"],
+        routes_rows=["R1,1"],
+        stop_times_rows=[f"T1,1,S1,{departure},{departure}", f"T1,2,S2,{departure},{departure}"],
+        filename=f"{name}.zip",
+    )
+
+
+def _stop_times(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT departure_time FROM static_stop_times WHERE agency_id = %s ORDER BY stop_sequence", (agency_id,)
+        )
+        return [r[0] for r in cur.fetchall()]
+
+
+def test_a_load_archives_the_timetable_it_replaces(pg_conn, agency_id, ch_client, tmp_path):
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    outgoing = static_archive.content_hash(static_parts(agency_id, pg_conn, True))
+    load_static(_zip(tmp_path, "gtfs_static_20261028", "09:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    assert _archived(ch_client, agency_id) == [(outgoing, 2)]
+    assert _map(ch_client, agency_id) == [("gtfs_static_20261025", outgoing)]
+    assert _stop_times(pg_conn, agency_id) == ["09:00:00", "09:00:00"]
+
+
+def test_a_first_load_archives_nothing(pg_conn, agency_id, ch_client, tmp_path):
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    assert _archived(ch_client, agency_id) == []
+
+
+def test_a_failed_archive_stops_the_load_before_anything_is_replaced(
+    pg_conn, agency_id, ch_client, tmp_path, monkeypatch
+):
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+
+    def down(*args, **kwargs):
+        raise RuntimeError("archive down")
+
+    monkeypatch.setattr(static_archive, "archive_loaded", down)
+    with pytest.raises(RuntimeError, match="archive down"):
+        load_static(_zip(tmp_path, "gtfs_static_20261028", "09:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    pg_conn.rollback()
+    assert _stop_times(pg_conn, agency_id) == ["08:00:00", "08:00:00"]
+
+
+def test_a_load_without_the_archive_tables_fails_closed(pg_conn, agency_id, ch_client, tmp_path):
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    ch_client.command(f"DROP TABLE IF EXISTS {static_archive.VERSION_MAP}")
+    try:
+        with pytest.raises(RuntimeError, match="make ch-bootstrap"):
+            load_static(_zip(tmp_path, "gtfs_static_20261028", "09:00:00"), agency_id, pg_conn, ch_client=ch_client)
+        pg_conn.rollback()
+        assert _stop_times(pg_conn, agency_id) == ["08:00:00", "08:00:00"]
+    finally:
+        apply_schema(ch_client)

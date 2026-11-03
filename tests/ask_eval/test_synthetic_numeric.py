@@ -124,7 +124,7 @@ async def _ask_about_pattern(
 
     from api.main import app
 
-    load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
+    load_pattern_static(pattern, tmp_path, agency_id, pg_conn, ch_client)
     # `load_static`'s own docstring says "the caller commits" — without this,
     # the running app's separate asyncpg pool never sees these rows (they're
     # invisible under MVCC until committed, then rolled back at fixture
