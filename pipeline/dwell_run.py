@@ -5,9 +5,12 @@ Dwell time is time spent AT a stop: this visit's actual departure minus its
 own actual arrival. Running time is time spent BETWEEN stops: this visit's
 actual arrival minus the PREVIOUS stop visit's actual departure (same trip,
 same service day). Both derive an "actual" timestamp (seconds since the
-service day's midnight) from the static schedule's own arrival_time/
-departure_time (``static_stop_times``) plus the RT feed's `arr_delay`/
-`dep_delay` for that stop visit.
+service day's midnight) from the static schedule's arrival_time/
+departure_time plus the RT feed's `arr_delay`/`dep_delay` for that stop
+visit. Each reader takes the schedule from its own source:
+`agg_route_daily_dwell_run` from the archived timetable the visit's version
+name maps to (`build_stop_visits_ch_sql(join_schedule=True)`),
+`schedule_realism_padding` from the loaded ``static_stop_times``.
 
 The feed reports a stop's arrival and its departure in separate polls, never
 on one row, and a trip's last stop only as an arrival.

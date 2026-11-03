@@ -61,7 +61,7 @@ def months_of(dates: Iterable[date]) -> list[int]:
     return sorted({d.year * 100 + d.month for d in dates})
 
 
-def _version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
+def version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
     """Each version name among the agency's `updates` rows matching *where* ('' for none), with its row count."""
     rows = ch.query(
         f"SELECT ifNull(u.static_version_id, '') AS stem, count() FROM {UPDATES_TABLE} AS u "
@@ -264,19 +264,14 @@ _TIME_BAND = (
 )
 
 
-# Each row's timetable, the archived one its version name maps to, else the
-# loaded one (join_current), computed once per row before the join.
+# Each row's timetable (static_archive.JOIN_CONTENT_SQL), computed once per row before the join.
 def _with_join_content(source: str) -> str:
-    return (
-        "SELECT *, transform(static_version_id, {join_stems:Array(String)}, {join_hashes:Array(String)}, "
-        f"{{join_current:String}}) AS join_content FROM ({source})"
-    )
+    return f"SELECT *, {static_archive.JOIN_CONTENT_SQL} AS join_content FROM ({source})"
 
 
 # The archived stop times of the contents the rows join, on the stop event's trip and sequence.
 _STATIC_JOIN = (
-    f"INNER JOIN (SELECT content_hash, trip_id, stop_sequence, stop_id FROM {static_archive.ARCHIVE} "
-    "WHERE agency_id = {agency_id:UInt16} AND has({join_contents:Array(String)}, content_hash)) AS st "
+    f"INNER JOIN {static_archive.archived_stop_times_sql('content_hash, trip_id, stop_sequence, stop_id')} AS st "
     "ON st.content_hash = d.join_content AND st.trip_id = d.trip_id "
     "AND st.stop_sequence = toInt32(d.stop_sequence)"
 )
@@ -716,7 +711,7 @@ def build(
         joined_days = [table_days for table, table_days in days.items() if table in STATIC_JOINED_TABLES]
         if join is not None and joined_days:
             with step("ClickHouse version names"):
-                counts = _version_names(ch, agency_id, *_scope_where(month, joined_days))
+                counts = version_names(ch, agency_id, *_scope_where(month, joined_days))
             stems = list(counts)
             unarchived.update({stem: n for stem, n in counts.items() if stem not in join.stems})
         deduped = {table: table_days for table, table_days in days.items() if not _SPECS[table].raw}
