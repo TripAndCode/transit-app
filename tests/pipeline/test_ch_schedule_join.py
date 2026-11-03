@@ -1,4 +1,4 @@
-"""The stop tables join each row to the timetable its version name archived."""
+"""The stop tables and the stop visits join each row to the timetable its version name archived."""
 
 import dataclasses
 import logging
@@ -9,6 +9,7 @@ import pytest
 from pipeline import agg_registry, ch_aggregates, static_archive
 from pipeline.analyze import analyze
 from pipeline.clickhouse import UPDATE_COLUMNS, insert_updates
+from pipeline.db import build_stop_visits_ch_sql
 from pipeline.static_archive import ScheduleJoin
 from pipeline.static_loader import load_static
 from tests.fixtures.synthetic_gtfs import build_static_zip
@@ -67,11 +68,14 @@ def test_the_raw_source_keeps_every_rows_version(ch_client):
     assert rows == [("",), ("gtfs_static_20260501",)]
 
 
-def _archive(ch_client, content: str, rows: list[tuple[str, int, str]]) -> None:
-    """(trip_id, stop_sequence, stop_id) rows archived for AGENCY under *content*."""
+def _archive(
+    ch_client, content: str, rows: list[tuple[str, int, str]], times: tuple[str | None, str | None] = (None, None)
+) -> None:
+    """(trip_id, stop_sequence, stop_id) rows archived for AGENCY under *content*, each at *times*
+    (arrival, departure)."""
     ch_client.insert(
         static_archive.ARCHIVE,
-        [(AGENCY, content, trip, seq, stop, None, None) for trip, seq, stop in rows],
+        [(AGENCY, content, trip, seq, stop, *times) for trip, seq, stop in rows],
         column_names=[
             "agency_id",
             "content_hash",
@@ -228,3 +232,86 @@ def test_rows_of_an_archived_version_join_it_with_no_timetable_loaded(tmp_path, 
     pg_conn.commit()
     analyze(agency_id, pg_conn, ch_client)
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]
+
+
+def _visit_poll(
+    captured_at: str, seq: int, *, dep: int | None, arr: int | None, stem: str | None, scheduled_sec: int | None = None
+) -> tuple:
+    """One poll of trip T1's stop *seq*, carrying a departure or an arrival, in insert_updates' order."""
+    values = dict.fromkeys(UPDATE_COLUMNS[1:])
+    values.update(
+        file_name=f"v/{captured_at}/{seq}/{dep}/{arr}",
+        captured_at=captured_at,
+        trip_id="T1",
+        route_code="R1",
+        stop_sequence=seq,
+        dep_delay=dep,
+        arr_delay=arr,
+        scheduled_sec=scheduled_sec,
+        static_version_id=stem,
+    )
+    return tuple(values[column] for column in UPDATE_COLUMNS[1:])
+
+
+def _visit(day: str, seq: int, arrival_stem: str | None, departure_stem: str | None) -> list[tuple]:
+    """A visit's arrival poll, then a later departure poll, on *day*."""
+    return [
+        _visit_poll(f"{day}T00:00:00Z", seq, dep=None, arr=50, stem=arrival_stem),
+        _visit_poll(f"{day}T00:01:00Z", seq, dep=20, arr=None, stem=departure_stem, scheduled_sec=36420),
+    ]
+
+
+def _visits(ch_client, join: ScheduleJoin, columns: str = "sched_arrival_time, sched_departure_time") -> list[tuple]:
+    sql = build_stop_visits_ch_sql(include_scheduled_sec="scheduled_sec" in columns, join_schedule=True)
+    rows = ch_client.query(
+        f"SELECT date, stop_sequence, {columns} FROM ({sql}) ORDER BY date, stop_sequence",
+        parameters={"agency_id": AGENCY, **join.params()},
+    )
+    return rows.result_rows
+
+
+def _two_timetables(ch_client) -> None:
+    _archive(ch_client, A, [("T1", 2, "S2")], ("10:05:00", "10:06:00"))
+    _archive(ch_client, B, [("T1", 2, "S2")], ("10:05:00", "10:07:00"))
+
+
+def test_a_visit_takes_its_scheduled_times_from_its_own_timetable(ch_client):
+    _two_timetables(ch_client)
+    insert_updates(ch_client, AGENCY, [*_visit("2026-06-01", 2, "v_a", "v_a"), *_visit("2026-06-02", 2, "v_b", "v_b")])
+    assert _visits(ch_client, ScheduleJoin(["v_a", "v_b"], [A, B], B)) == [
+        (date(2026, 6, 1), 2, "10:05:00", "10:06:00"),
+        (date(2026, 6, 2), 2, "10:05:00", "10:07:00"),
+    ]
+
+
+def test_a_visit_polled_under_two_versions_takes_its_departures(ch_client):
+    _two_timetables(ch_client)
+    insert_updates(ch_client, AGENCY, _visit("2026-06-01", 2, "v_a", "v_b"))
+    assert _visits(ch_client, ScheduleJoin(["v_a", "v_b"], [A, B], A)) == [
+        (date(2026, 6, 1), 2, "10:05:00", "10:07:00")
+    ]
+
+
+def test_an_unversioned_visit_takes_the_loaded_timetables_times(ch_client):
+    _two_timetables(ch_client)
+    insert_updates(ch_client, AGENCY, _visit("2026-06-01", 2, None, None))
+    assert _visits(ch_client, ScheduleJoin([], [], A)) == [(date(2026, 6, 1), 2, "10:05:00", "10:06:00")]
+
+
+def test_a_visit_with_no_archived_stop_time_keeps_its_row(ch_client):
+    _two_timetables(ch_client)
+    insert_updates(ch_client, AGENCY, _visit("2026-06-01", 9, "v_a", "v_a"))
+    assert _visits(ch_client, ScheduleJoin(["v_a"], [A], A)) == [(date(2026, 6, 1), 9, None, None)]
+
+
+def test_the_join_composes_with_the_scheduled_seconds(ch_client):
+    _two_timetables(ch_client)
+    insert_updates(ch_client, AGENCY, _visit("2026-06-01", 2, "v_b", "v_b"))
+    rows = _visits(ch_client, ScheduleJoin(["v_b"], [B], A), "scheduled_sec, sched_departure_time")
+    assert rows == [(date(2026, 6, 1), 2, 36420, "10:07:00")]
+
+
+def test_the_visits_without_the_join_keep_their_columns():
+    sql = build_stop_visits_ch_sql(include_scheduled_sec=True)
+    assert "sched_arrival_time" not in sql
+    assert "join_" not in sql

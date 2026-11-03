@@ -11,6 +11,7 @@ apart on what "the latest observation" means: they read the ClickHouse
 
 import psycopg2
 
+from pipeline import static_archive
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import service_date_ch
 
@@ -201,6 +202,7 @@ def build_stop_visits_ch_sql(
     *,
     extra_where: str = "",
     include_scheduled_sec: bool = False,
+    join_schedule: bool = False,
     table: str = UPDATES_TABLE,
 ) -> str:
     """Return the SQL body that resolves one row per stop visit (a trip's stop
@@ -261,9 +263,17 @@ def build_stop_visits_ch_sql(
     `scheduled_sec`, when requested, is the latest departure poll's, as in the
     dedup, and NULL for an arrival-only visit.
 
+    `join_schedule` adds each visit's scheduled arrival and departure from the
+    archived timetable its version name maps to, the loaded one when it maps to
+    none (`static_archive.ScheduleJoin`, whose parameters the query then binds).
+    The name is filed like the route and the service: the departure poll's when
+    the visit has one, else the arrival's. A stop with no archived stop time
+    keeps its row, with NULL scheduled times.
+
     Columns, in this order (`pipeline/analyze.py` loads them by position):
     `route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
-    dep_delay[, scheduled_sec], arr_delay, dep_observed`.
+    dep_delay[, scheduled_sec], arr_delay, dep_observed[, sched_arrival_time,
+    sched_departure_time]`.
 
     The inner query's aliases are named apart from every `updates` column, so
     a caller's `extra_where` (applied to raw rows, like the dedup's) can name
@@ -274,18 +284,24 @@ def build_stop_visits_ch_sql(
     dep_ok = _plausible_delay_ch("u.dep_delay")
     arr_ok = _plausible_delay_ch("u.arr_delay")
     latest = "(u.captured_at, u.file_name)"
+    filed = [(2, "route_code"), (3, "service_type"), (4, "scheduled_time")]
     schedule = "u.route_code, u.service_type, u.scheduled_time"
+    if join_schedule:
+        # In the prefix both tuples share, so one index files it either way.
+        schedule += ", ifNull(u.static_version_id, '')"
+        filed.append((5, "static_version_id"))
     sched_sec = ", u.scheduled_sec" if include_scheduled_sec else ""
     extra = f" AND ({extra_where})" if extra_where else ""
     filed_under = ", ".join(
         f"if(tupleElement(visit_dep, 1) IS NOT NULL, tupleElement(visit_dep, {i}), tupleElement(visit_arr, {i})) "
         f"AS {name}"
-        for i, name in ((2, "route_code"), (3, "service_type"), (4, "scheduled_time"))
+        for i, name in filed
     )
-    return (
+    sched_sec_at = len(filed) + 2
+    visits = (
         f"SELECT {filed_under}, visit_trip_id AS trip_id, visit_date AS date, "
         "visit_stop_sequence AS stop_sequence, tupleElement(visit_dep, 1) AS dep_delay"
-        + (", tupleElement(visit_dep, 5) AS scheduled_sec" if include_scheduled_sec else "")
+        + (f", tupleElement(visit_dep, {sched_sec_at}) AS scheduled_sec" if include_scheduled_sec else "")
         + ", tupleElement(visit_arr, 1) AS arr_delay, "
         "if(tupleElement(visit_dep, 1) IS NOT NULL AND tupleElement(visit_arr, 1) IS NOT NULL, "
         "toBool(visit_dep_key >= visit_first_arr_key), NULL) AS dep_observed "
@@ -300,6 +316,22 @@ def build_stop_visits_ch_sql(
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
         f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
         ")"
+    )
+    if not join_schedule:
+        return visits
+    columns = ["route_code", "service_type", "scheduled_time", "trip_id", "date", "stop_sequence", "dep_delay"]
+    columns += ["scheduled_sec"] if include_scheduled_sec else []
+    columns += ["arr_delay", "dep_observed"]
+    archived = static_archive.archived_stop_times_sql(
+        "content_hash, trip_id, stop_sequence, arrival_time, departure_time"
+    )
+    return (
+        f"SELECT {', '.join(f'v.{column}' for column in columns)}, "
+        "st.arrival_time AS sched_arrival_time, st.departure_time AS sched_departure_time "
+        f"FROM (SELECT *, {static_archive.JOIN_CONTENT_SQL} AS join_content FROM ({visits})) AS v "
+        f"LEFT JOIN {archived} AS st "
+        "ON st.content_hash = v.join_content AND st.trip_id = v.trip_id "
+        "AND st.stop_sequence = toInt32(v.stop_sequence)"
     )
 
 
