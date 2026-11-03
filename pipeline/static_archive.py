@@ -11,7 +11,9 @@ version map says which content each name carried.
 import hashlib
 import logging
 import secrets
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from pipeline.static_content import static_parts
 
@@ -56,7 +58,8 @@ def _work_table(agency_id: int, key: str) -> str:
     return f"{ARCHIVE}_{key[:8]}_{secrets.token_hex(4)}__work_a{int(agency_id)}"
 
 
-def _stop_time_count(parts: list[str]) -> int:
+def stop_time_count(parts: list[str]) -> int:
+    """How many stop times the timetable whose content parts are *parts* holds."""
     for part in parts:
         table, count, _ = part.split(":")
         if table == "static_stop_times":
@@ -78,7 +81,7 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     """
     if parts is None:
         parts = static_parts(agency_id, conn, True)
-    expected = _stop_time_count(parts)
+    expected = stop_time_count(parts)
     if expected == 0:
         return None
     key = content_hash(parts)
@@ -150,3 +153,40 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
         [(agency_id, stem, key, datetime.now(timezone.utc))],
         column_names=["agency_id", "static_version_id", "content_hash", "archived_at"],
     )
+
+
+class ScheduleJoin(NamedTuple):
+    """Which archived timetable each version name joins, and the loaded one every other row joins.
+
+    *current* is the loaded timetable's key, or "" with none loaded: then only
+    rows of a mapped name join anything.
+    """
+
+    stems: list[str]
+    hashes: list[str]
+    current: str
+
+    def params(self, present: Iterable[str] | None = None) -> dict:
+        """The join's bound parameters. *present*, the version names of the rows
+        being joined, narrows the archive side to the contents they join."""
+        mapped = dict(zip(self.stems, self.hashes, strict=True))
+        if present is None:
+            contents = {*self.hashes, self.current}
+        else:
+            contents = {mapped.get(stem, self.current) for stem in present}
+        return {
+            "join_stems": self.stems,
+            "join_hashes": self.hashes,
+            "join_current": self.current,
+            "join_contents": sorted(contents - {""}),
+        }
+
+
+def schedule_join(ch, agency_id: int, current: str | None) -> ScheduleJoin:
+    """The agency's version map, each name at its latest content, with *current* the loaded timetable's key."""
+    rows = ch.query(
+        f"SELECT static_version_id, argMax(content_hash, archived_at) FROM {VERSION_MAP} "
+        "WHERE agency_id = {agency:Int32} GROUP BY static_version_id ORDER BY static_version_id",
+        parameters={"agency": agency_id},
+    ).result_rows
+    return ScheduleJoin([row[0] for row in rows], [row[1] for row in rows], current or "")
