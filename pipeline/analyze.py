@@ -88,7 +88,7 @@ from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates
+from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, pool_daily_gaps
@@ -556,6 +556,11 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     rebuild the tables that read it, the safe direction.
     """
     static_parts = _static_parts(agency_id, conn, has_static)
+    static_archive.require_tables(ch_client)
+    if has_static:
+        # A backstop for a timetable loaded before the archive existed:
+        # load_static archives only the timetable it replaces.
+        static_archive.archive_loaded(conn, ch_client, agency_id, static_parts)
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)

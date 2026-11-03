@@ -194,3 +194,26 @@ def test_a_load_without_the_archive_tables_fails_closed(pg_conn, agency_id, ch_c
         assert _stop_times(pg_conn, agency_id) == ["08:00:00", "08:00:00"]
     finally:
         apply_schema(ch_client)
+
+
+def test_analyze_archives_the_loaded_timetable(pg_conn, agency_id, ch_client):
+    from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    key = static_archive.content_hash(static_parts(agency_id, pg_conn, True))
+    assert [h for h, _ in _archived(ch_client, agency_id)] == [key]
+
+
+def test_analyze_refuses_without_the_archive_tables(pg_conn, agency_id, ch_client):
+    from db.clickhouse.bootstrap import apply_schema
+    from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    ch_client.command(f"DROP TABLE IF EXISTS {static_archive.ARCHIVE}")
+    try:
+        with pytest.raises(RuntimeError, match="make ch-bootstrap"):
+            _analyze(agency_id, pg_conn, ch_client)
+    finally:
+        pg_conn.rollback()
+        apply_schema(ch_client)

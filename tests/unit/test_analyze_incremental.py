@@ -13,13 +13,15 @@ import pytest
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 from pipeline.analyze import analyze
 from pipeline.service_day import service_date_ch, service_day_start_utc
 
 AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
 LEDGER_SAMPLES = 41
+# Every ClickHouse table analyze needs to find before it runs.
+_STORE_TABLES = (*ch_aggregates.ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
 
 
 class _FakeResult:
@@ -41,7 +43,7 @@ class _EmptyStream:
 
 
 class FakeClickHouse:
-    def __init__(self, ledger, *, totals=(0, 0, 0), tables=ch_aggregates.ALL_TABLES):
+    def __init__(self, ledger, *, totals=(0, 0, 0), tables=_STORE_TABLES):
         self._ledger = ledger
         self._totals = totals
         self._tables = tables
@@ -197,7 +199,7 @@ def _run(
     ingest_strategy=None,
     has_static=False,
     pg_totals=(0, 0, 0),
-    ch_tables=ch_aggregates.ALL_TABLES,
+    ch_tables=_STORE_TABLES,
 ):
     """Run `analyze`, returning the fakes.
 

@@ -2,7 +2,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from pipeline.strategies._time import parse_departure_time
@@ -2202,7 +2202,12 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     ledger = [s for s in recording.queries if "raw_samples" in s and "clamp_count" not in s]
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
-    aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
+    # The timetable archive is probed for the loaded content and its version
+    # name, both narrowed to one partition or one name.
+    aggregate_reads = tuple(
+        f"FROM {table} "
+        for table in (*ch_aggregates.TABLES, "system.tables", static_archive.ARCHIVE, static_archive.VERSION_MAP)
+    )
     # The internal tables hold a row per delay value, or per observed pair, of every
     # date, so they and the tables finalized from them may be read only by store
     # checks' probes: a table's totals, or an internal table's reference figure.
