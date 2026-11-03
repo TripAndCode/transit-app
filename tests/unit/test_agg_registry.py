@@ -1,5 +1,7 @@
 """The aggregate registry names every table analyze builds, and only those."""
 
+from datetime import date
+
 import pytest
 
 from pipeline import agg_registry, ch_aggregates
@@ -70,3 +72,61 @@ def test_every_render_is_non_empty_text():
     for table in agg_registry.TABLES.values():
         parts = table.render()
         assert parts and all(isinstance(p, str) and p for p in parts), table.name
+
+
+D = date(2026, 10, 1)
+
+
+def _current() -> dict[str, str]:
+    return {name: f"fp-{name}" for name in agg_registry.TABLES}
+
+
+def test_without_a_ledger_every_table_is_rebuilt_in_full():
+    scopes, reasons = agg_registry.table_scopes(_current(), _current(), None)
+    assert set(scopes.values()) == {None}
+    assert set(reasons.values()) == {"no ledger"}
+
+
+def test_with_every_table_current_each_kind_takes_its_own_scope():
+    scopes, reasons = agg_registry.table_scopes(_current(), _current(), [D])
+    assert scopes["agg_route_daily"] == [D]
+    assert scopes["agg_route_headway"] == []
+    assert scopes["agg_route_stats"] is None and reasons["agg_route_stats"] == "source changed"
+
+
+def test_nothing_changed_leaves_every_table_standing():
+    scopes, reasons = agg_registry.table_scopes(_current(), _current(), [])
+    assert all(scope == [] for scope in scopes.values())
+    assert reasons == {}
+
+
+def test_a_new_table_is_rebuilt_in_full():
+    stored = _current()
+    del stored["agg_hour_daily"]
+    scopes, reasons = agg_registry.table_scopes(_current(), stored, [])
+    assert scopes["agg_hour_daily"] is None and reasons["agg_hour_daily"] == "new"
+    assert scopes["agg_route_daily"] == []
+
+
+def test_a_changed_fingerprint_rebuilds_the_table_and_its_dependents():
+    stored = _current() | {"route_delay_counts": "old"}
+    scopes, reasons = agg_registry.table_scopes(_current(), stored, [])
+    assert reasons["route_delay_counts"] == "fingerprint changed"
+    for dependent in ("agg_route_stats", "agg_route_hour", "agg_route_hour_dow"):
+        assert scopes[dependent] is None and reasons[dependent] == "depends on route_delay_counts"
+    assert scopes["agg_route_daily"] == []
+
+
+def test_the_scheduled_medians_carry_the_daily_headways():
+    stored = _current() | {"agg_route_headway": "old"}
+    scopes, reasons = agg_registry.table_scopes(_current(), stored, [D])
+    assert scopes["agg_route_headway"] is None
+    assert scopes["agg_route_headway_daily"] is None
+    assert reasons["agg_route_headway_daily"] == "depends on agg_route_headway"
+    assert scopes["agg_feed_health"] == [D]
+
+
+def test_stop_route_days_carry_the_stop_routes():
+    stored = _current() | {"stop_route_days": "old"}
+    scopes, _ = agg_registry.table_scopes(_current(), stored, [])
+    assert scopes["agg_stop_routes"] is None
