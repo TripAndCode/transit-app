@@ -412,16 +412,6 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
     assert not [s for s in conn.executed if "DELETE FROM agg_feed_health" in s]
 
 
-def test_the_timetable_copy_keeps_its_tag_across_the_switch(monkeypatch):
-    """The ClickHouse copy of the timetable is tagged with the agency-wide
-    fingerprint it was mirrored under, so keeping that value avoids
-    re-mirroring every agency's timetable on the first run."""
-    tags = []
-    monkeypatch.setattr(analyze_mod, "_mirror_static_stop_times", lambda *a: tags.append(a[-1]))
-    conn, _ = _noop_run(has_static=True)
-    assert tags == [conn._fingerprint]
-
-
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():
     _, ch = _noop_run()
     ledger_sql = next(sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql)

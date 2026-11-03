@@ -151,9 +151,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   `COPIED_TABLES` in ClickHouse, stores them there and copies them into
   Postgres; the whole-history ones are finalized from ClickHouse-only tables
   of delay counts and of the stop-route pairs each date observed. Those that
-  join the static schedule read `analyze`'s ClickHouse copy of it,
-  `static_stop_times`, refreshed when the schedule
-  changes. It builds the rest in Postgres. A ClickHouse that predates one of
+  join the static schedule join the timetable archive below, each row to the
+  timetable its version name maps to, or the loaded one when it maps to none.
+  It builds the rest in Postgres. A ClickHouse that predates one of
   those tables needs `make ch-bootstrap` before the next `analyze`.
 - Every timetable an agency loads is kept in ClickHouse's
   `static_stop_times_archive` under its content hash, and `static_version_map`

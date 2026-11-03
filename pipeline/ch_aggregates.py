@@ -52,9 +52,8 @@ from pipeline.static_archive import ScheduleJoin
 
 logger = logging.getLogger(__name__)
 
-# The agency's Postgres static_stop_times, mirrored for the aggregates that join the schedule.
+# A schedule mirror nothing reads or fills: schema.sql still creates it, and the test fixtures drop it.
 STATIC_STOP_TIMES = "static_stop_times"
-_STATIC_STOP_TIMES_COLUMNS = ("agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time")
 
 
 def months_of(dates: Iterable[date]) -> list[int]:
@@ -907,53 +906,8 @@ def drop_work_tables(ch, agency_id: int) -> None:
     for name in (
         *(work_table(table, agency_id) for table in ALL_TABLES),
         dedup_table(agency_id),
-        _static_work(agency_id),
     ):
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
-
-
-def _static_work(agency_id: int) -> str:
-    return f"{STATIC_STOP_TIMES}__work_a{int(agency_id)}"
-
-
-def static_mirror_fingerprint(ch, agency_id: int) -> str | None:
-    """The fingerprint the agency's mirrored schedule was copied under, or None when it has none."""
-    rows = ch.query(
-        f"SELECT fingerprint FROM {STATIC_STOP_TIMES} WHERE agency_id = {{agency_id:Int32}} LIMIT 1",
-        parameters={"agency_id": agency_id},
-    ).result_rows
-    return rows[0][0] if rows else None
-
-
-def replace_static_stop_times(ch, agency_id: int, rows: Iterable[tuple], fingerprint: str) -> int:
-    """Replace the agency's mirrored schedule with *rows*, tagged *fingerprint*; return how many.
-
-    Built in a work table and swapped in whole, so a join never sees half a schedule.
-    No rows drops the agency's partition.
-    """
-    work = _static_work(agency_id)
-    columns = [*_STATIC_STOP_TIMES_COLUMNS, "fingerprint"]
-    ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-    ch.command(f"CREATE TABLE {work} AS {STATIC_STOP_TIMES}")
-    copied = 0
-    try:
-        batch: list[tuple] = []
-        for row in rows:
-            batch.append((*row, fingerprint))
-            if len(batch) == 50_000:
-                ch.insert(work, batch, column_names=columns)
-                copied += len(batch)
-                batch = []
-        if batch:
-            ch.insert(work, batch, column_names=columns)
-            copied += len(batch)
-        if copied:
-            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} REPLACE PARTITION {int(agency_id)} FROM {work}")
-        else:
-            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} DROP PARTITION {int(agency_id)}")
-    finally:
-        ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-    return copied
 
 
 def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:
