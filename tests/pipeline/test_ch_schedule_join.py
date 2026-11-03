@@ -1,13 +1,17 @@
 """The stop tables join each row to the timetable its version name archived."""
 
+import dataclasses
 import logging
 from datetime import date
 
 import pytest
 
-from pipeline import ch_aggregates, static_archive
+from pipeline import agg_registry, ch_aggregates, static_archive
+from pipeline.analyze import analyze
 from pipeline.clickhouse import UPDATE_COLUMNS, insert_updates
 from pipeline.static_archive import ScheduleJoin
+from pipeline.static_loader import load_static
+from tests.fixtures.synthetic_gtfs import build_static_zip
 
 AGENCY = 7
 A, B = "a" * 32, "b" * 32
@@ -137,3 +141,74 @@ def test_a_build_reports_the_rows_that_joined_the_loaded_timetable(ch_client, ca
     ).result_rows
     assert stops == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB"), (date(2026, 6, 3), "SB")]
     assert "2 rows of versions not archived joined the loaded timetable" in caplog.text
+
+
+def _timetable(tmp_path, name: str, stop: str) -> str:
+    """A timetable zip, version-named *name*, whose trip T1 makes its first stop at *stop*."""
+    return build_static_zip(
+        tmp_path,
+        stops_rows=["SA,Stop A,34.39,132.45", "SB,Stop B,34.40,132.46"],
+        routes_rows=["R1,1"],
+        trips_rows=["T1,R1,,"],
+        stop_times_rows=[f"T1,1,{stop},08:00:00,08:00:00"],
+        filename=f"{name}.zip",
+    )
+
+
+def _stop_days(pg_conn, agency_id: int) -> list[tuple]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, stop_id FROM agg_stop_daily WHERE agency_id = %s ORDER BY date, stop_id", (agency_id,)
+        )
+        return cur.fetchall()
+
+
+def test_a_reload_rebuilds_each_date_against_its_own_timetable(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch, caplog
+):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
+    analyze(agency_id, pg_conn, ch_client)
+    load_static(_timetable(tmp_path, "timetable_b", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-02T00:00:00Z", "T1", 1, 30, "timetable_b")])
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    # The reload rebuilt 2026-06-01 too, and it joined the timetable its rows were ingested against.
+    assert "scope agg_stop_daily: every date" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
+
+    table = agg_registry.TABLES["agg_stop_daily"]
+    monkeypatch.setitem(agg_registry.TABLES, "agg_stop_daily", dataclasses.replace(table, version=table.version + 1))
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_stop_daily: every date" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
+
+
+def test_rows_with_no_or_an_unknown_version_join_the_loaded_timetable(tmp_path, pg_conn, agency_id, ch_client, caplog):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, None),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+        ],
+    )
+    with caplog.at_level(logging.INFO, logger="pipeline.ch_aggregates"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SA")]
+    assert "2 rows of versions not archived joined the loaded timetable" in caplog.text
+
+
+def test_rows_of_an_archived_version_join_it_with_no_timetable_loaded(tmp_path, pg_conn, agency_id, ch_client):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        for table in ("static_stop_times", "static_trips", "static_routes", "static_stops"):
+            cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]
