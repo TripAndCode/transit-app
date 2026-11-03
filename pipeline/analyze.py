@@ -103,9 +103,38 @@ logger = logging.getLogger(__name__)
 # agg_meta.static_fingerprint before each table had its own (agg_table_state).
 # An agency's first run under per-table state compares it there to seed the
 # states without a rebuild; every run then clears that column, so the
-# comparison can match only once. It also still tags the ClickHouse copy of
-# the timetable, which is mirrored again only when this value changes.
+# comparison can match only once. The whole legacy fingerprint also still
+# tags the ClickHouse copy of the timetable, which is mirrored again whenever
+# that fingerprint changes.
 _LEGACY_LOGIC_VERSION = 7
+
+# Each table's registry version when per-table state replaced the agency-wide
+# fingerprint: what a legacy match vouches for. Seeding records these, so a
+# table bumped since, or registered since, still rebuilds on the agency's first
+# run under per-table state. Frozen; never update it with a bump.
+_SEED_VERSIONS: dict[str, int] = dict.fromkeys(
+    (
+        "agg_daily_trend",
+        "agg_feed_health",
+        "agg_hour_daily",
+        "agg_route_daily",
+        "agg_route_daily_dist",
+        "agg_route_daily_dwell_run",
+        "agg_route_headway",
+        "agg_route_headway_daily",
+        "agg_route_hour",
+        "agg_route_hour_dow",
+        "agg_route_stats",
+        "agg_route_stop_daily",
+        "agg_schedule_revision_daily",
+        "agg_service_delivered_daily",
+        "agg_stop_daily",
+        "agg_stop_routes",
+        "route_delay_counts",
+        "stop_route_days",
+    ),
+    1,
+)
 
 # The service date of an observation, by which _ledger_counts groups raw
 # `updates` rows (`pipeline.service_day`).
@@ -182,8 +211,9 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # their fingerprint matches, a rebuild would produce what already stands.
 _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
 
-# What a run with no changed date may leave standing: a date-scoped table with
-# no date to rebuild, or a static-only table whose whole input is unchanged.
+# What a table whose scope is [] may leave standing: a date-scoped table with
+# no date of its own to rebuild, or a static-only table whose fingerprint, and
+# so its whole input, is unchanged.
 _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
@@ -432,7 +462,12 @@ def _legacy_fingerprint(ingest_strategy: str | None, static_parts: list[str]) ->
     )
 
 
-def table_fingerprints(ingest_strategy: str | None, has_static: bool, static_parts: list[str]) -> dict[str, str]:
+def table_fingerprints(
+    ingest_strategy: str | None,
+    has_static: bool,
+    static_parts: list[str],
+    versions: dict[str, int] | None = None,
+) -> dict[str, str]:
     """Each registered table's fingerprint.
 
     Its registry version stands for its builder; the plausibility clamp for the
@@ -441,11 +476,17 @@ def table_fingerprints(ingest_strategy: str | None, has_static: bool, static_par
     aggregates are built at all. A table that reads the timetable also carries
     the timetable loaded now, "none" without one, so gaining or losing a
     schedule crosses it in either direction.
+
+    *versions*, when given, replaces each table's registry version, and a table
+    it does not name is left out.
     """
     timetable = "|".join(static_parts) if has_static else "none"
     fingerprints = {}
     for name, table in agg_registry.TABLES.items():
-        fingerprint = f"v{table.version}|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:{ingest_strategy}"
+        if versions is not None and name not in versions:
+            continue
+        version = table.version if versions is None else versions[name]
+        fingerprint = f"v{version}|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:{ingest_strategy}"
         fingerprints[name] = f"{fingerprint}|static:{timetable}" if table.reads_static else fingerprint
     return fingerprints
 
@@ -473,8 +514,8 @@ def _ledger_counts(agency_id: int, ch_client) -> dict:
 def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     """The service dates whose aggregates no longer match their sources.
 
-    ``None`` means every date, which is what a first run, a missing ledger, or
-    a static schedule that changed since the last build resolves to.
+    ``None`` means every date, which is what a first run or a missing ledger
+    resolves to.
 
     A row's service date (:mod:`pipeline.service_day`) is fixed by the
     observation itself, so a date's aggregates can only go stale when rows land
@@ -496,7 +537,7 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     ledger: an ingest made up entirely of delay-less rows leaves
     ``raw_samples`` unmoved while changing exactly those tables. A stored row
     whose ``total_rows`` is NULL predates that column and resolves to a full
-    rebuild, the same way a missing fingerprint does.
+    rebuild, the same way a missing ledger does.
 
     A changed builder or timetable is not the ledger's business: each table's
     own fingerprint covers it (agg_table_state, :func:`table_fingerprints`).
@@ -544,14 +585,16 @@ def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
     conn.commit()
 
 
-def _stored_fingerprints(conn, agency_id: int, legacy: str, current: dict[str, str]) -> dict[str, str]:
+def _stored_fingerprints(conn, agency_id: int, legacy: str, seed: dict[str, str]) -> dict[str, str]:
     """The fingerprints the agency's tables were last built under.
 
     An agency last analyzed under the retired agency-wide fingerprint has none
     here. When its agg_meta still records the fingerprint that scheme would
-    compute now, every table was built by the builders running now, so each is
-    seeded as current rather than rebuilt. A run under per-table state clears
-    that column, so an agency that loses its states afterwards rebuilds.
+    compute now, its tables were built by the builders of the switch, so each
+    is seeded with *seed*, its fingerprint at the switch (_SEED_VERSIONS); a
+    table bumped since then still differs and rebuilds. A run under per-table
+    state clears that column, so an agency that loses its states afterwards
+    rebuilds.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
@@ -561,8 +604,8 @@ def _stored_fingerprints(conn, agency_id: int, legacy: str, current: dict[str, s
         cur.execute("SELECT static_fingerprint FROM agg_meta WHERE agency_id = %s", (agency_id,))
         meta = cur.fetchone()
     if meta is not None and meta[0] == legacy:
-        logger.info("  table state: seeded from the agency-wide fingerprint; nothing to rebuild for it")
-        return dict(current)
+        logger.info("  table state: seeded from the agency-wide fingerprint")
+        return dict(seed)
     return {}
 
 
@@ -573,7 +616,7 @@ def _record_fingerprints(conn, agency_id: int, current: dict[str, str]) -> None:
             "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES "
             + ", ".join(["(%s, %s, %s)"] * len(rows))
             + " ON CONFLICT (agency_id, table_name) DO UPDATE SET "
-            "fingerprint = EXCLUDED.fingerprint, built_at = now()",
+            "fingerprint = EXCLUDED.fingerprint, built_at = clock_timestamp()",
             [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)],
         )
 
@@ -589,12 +632,18 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
 
     Read before the transaction opens: the ledger and the stored fingerprints
     must describe the aggregates that survived the last run, so a rollback of
-    this one leaves the next run reaching the same answer.
+    this one leaves the next run reaching the same answer. The timetable is read
+    once, here, and the fingerprints recorded at the end reuse it: load_static
+    is not under the agency lock (pipeline/locks.py), so a second read could
+    describe a timetable the run never built against. Reading once, first, can
+    only err toward recording an older timetable, which makes the next run
+    rebuild the tables that read it, the safe direction.
     """
     static_parts = _static_parts(agency_id, conn, has_static)
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
-    stored = _stored_fingerprints(conn, agency_id, legacy, current)
+    seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)
+    stored = _stored_fingerprints(conn, agency_id, legacy, seed)
     # With no table's fingerprint matching, every table goes in full whatever
     # the ledger says, so its full-history scan is skipped.
     if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):

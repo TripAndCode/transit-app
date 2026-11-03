@@ -392,6 +392,23 @@ def test_a_run_that_rebuilds_every_table_skips_the_ledger_scan():
     assert _ledger_scans(ch) == []
 
 
+def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
+    """An agency still on the agency-wide fingerprint was built by the
+    builders of the switch. A table bumped since must rebuild on its first
+    run, not be seeded as current."""
+    import dataclasses
+
+    from pipeline import agg_registry
+
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    conn, ch = _noop_run()
+    assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
+        sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
+    ]
+    assert not [s for s in conn.executed if "DELETE FROM agg_feed_health" in s]
+
+
 def test_the_timetable_copy_keeps_its_tag_across_the_switch(monkeypatch):
     """The ClickHouse copy of the timetable is tagged with the agency-wide
     fingerprint it was mirrored under, so keeping that value avoids
@@ -553,3 +570,13 @@ def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(i
     both an arrival-carrying feed and a schedule never pays for the scan."""
     _, ch = _changed_run(ingest_strategy=ingest_strategy, has_static=has_static)
     assert _visit_scans(ch) == []
+
+
+def test_the_seed_versions_name_registered_tables_at_or_below_their_version():
+    """Versions only go up, so the versions at the switch can never exceed a
+    table's registry version, and a name the registry dropped is harmless."""
+    from pipeline import agg_registry
+
+    for name, version in analyze_mod._SEED_VERSIONS.items():
+        if name in agg_registry.TABLES:
+            assert version <= agg_registry.TABLES[name].version, name

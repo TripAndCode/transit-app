@@ -11,6 +11,6 @@ CREATE TABLE IF NOT EXISTS agg_table_state (
     agency_id   INT         NOT NULL REFERENCES agencies(agency_id) ON DELETE CASCADE,
     table_name  TEXT        NOT NULL,
     fingerprint TEXT        NOT NULL,
-    built_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    built_at    TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (agency_id, table_name)
 );
