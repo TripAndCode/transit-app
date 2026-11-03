@@ -153,7 +153,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   of delay counts and of the stop-route pairs each date observed. Those that
   join the static schedule join the timetable archive below, each row to the
   timetable its version name maps to, or the loaded one when it maps to none.
-  It builds the rest in Postgres. A ClickHouse that predates one of
+  It builds the rest in Postgres; of those, dwell and running time take each
+  stop visit's scheduled times from the same archive, through the ClickHouse
+  scan that pairs its arrival with its departure. A ClickHouse that predates one of
   those tables needs `make ch-bootstrap` before the next `analyze`.
 - Every timetable an agency loads is kept in ClickHouse's
   `static_stop_times_archive` under its content hash, and `static_version_map`

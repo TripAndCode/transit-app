@@ -889,8 +889,9 @@ def _rebuild_ch_aggregates(
     monthly build and before any swap, so they read the months just rebuilt from
     those tables' work tables; an internal table itself is never copied.
 
-    *join* is the run's schedule join, which the static-joined tables need;
-    None when none of them is rebuilt.
+    *join* is the run's schedule join, which the static-joined tables need: set
+    whenever one of them is rebuilt (and also when only the stop visits needed
+    it), None only when nothing in the run joins the archive.
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
