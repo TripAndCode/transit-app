@@ -8,7 +8,8 @@ ClickHouse statements keep their `{name:Type}` parameters for the server; they
 are concatenated rather than f-strings so those braces never need escaping.
 
 A change to what any of these statements produces is a builder change: bump
-`pipeline.analyze.ANALYZE_LOGIC_VERSION` in the same commit.
+`pipeline.analyze.ANALYZE_LOGIC_VERSION` and the table's version in
+`pipeline/agg_registry.py` in the same commit.
 """
 
 from pipeline.db import hms_to_sec_sql
@@ -395,4 +396,16 @@ STATIC_VERSION_SUMMARY_UPSERT_SQL = (
     "ON CONFLICT (agency_id, static_version_id) DO UPDATE SET "
     "trip_count = EXCLUDED.trip_count, vehicle_km = EXCLUDED.vehicle_km, "
     "computed_at = EXCLUDED.computed_at"
+)
+
+
+# ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
+# order string_agg(... ORDER BY route_code) gave: the database collation's.
+# A list with no comma has nothing to order, and string_to_array splits ''
+# into no element at all, which would write NULL. Splitting on commas is
+# sound because a route code holds none: the API's `routes` filter splits on them too.
+STOP_ROUTES_ORDER_SQL = (
+    "UPDATE agg_stop_routes SET route_codes = "
+    "(SELECT string_agg(r, ',' ORDER BY r) FROM unnest(string_to_array(route_codes, ',')) AS r) "
+    "WHERE agency_id = %s AND strpos(route_codes, ',') > 0"
 )

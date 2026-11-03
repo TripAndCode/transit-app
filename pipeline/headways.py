@@ -41,6 +41,8 @@ classified high-frequency.
 
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Iterable
 from itertools import pairwise
 from statistics import median as _median
 from typing import Sequence
@@ -241,6 +243,47 @@ def count_long_gaps(
         return 0
     threshold = multiplier * scheduled_headway_sec
     return sum(1 for g in gaps if g > threshold)
+
+
+def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], list[float]]:
+    """Each (route, service date)'s positive gaps, pooled across the stops it calls at.
+
+    *ch_rows* are ``(route_code, stop_id, svc_date, times)`` with each stop's
+    actual event times; gaps are reconstructed per stop, so a route's gaps never
+    span two stops. Pooling follows agg_route_headway's scheduled side: a
+    consistently spaced route has a similar gap distribution at every stop it
+    serves, so no one stop has to be picked as representative. A zero or
+    negative gap (a duplicate or out-of-order observation) is left out rather
+    than counted as a real zero headway.
+    """
+    pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
+    for route_code, _stop_id, svc_date, times in ch_rows:
+        pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
+    return pooled
+
+
+def daily_headway_rows(
+    agency_id: int,
+    pooled: dict[tuple[object, object], list[float]],
+    scheduled_median_by_route: dict,
+) -> list[tuple]:
+    """agg_route_headway_daily rows: per (route, date), the actual median, count, sum
+    and sum of squares, and the long gaps measured against the route's scheduled
+    median. A route the schedule gives no median counts no long gaps."""
+    return [
+        (
+            agency_id,
+            route_code,
+            svc_date,
+            _median(gaps),
+            len(gaps),
+            sum(gaps),
+            sum(g * g for g in gaps),
+            count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
+        )
+        for (route_code, svc_date), gaps in pooled.items()
+        if gaps
+    ]
 
 
 def long_gap_rate(

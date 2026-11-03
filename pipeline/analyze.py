@@ -79,18 +79,16 @@ lateness contribution instead of counting it.
 import io
 import logging
 import time
-from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from statistics import median
 
 import psycopg2.extras
 
 from pipeline import agg_sql, ch_aggregates
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
-from pipeline.headways import count_long_gaps, reconstruct_headways
+from pipeline.headways import daily_headway_rows, pool_daily_gaps
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
@@ -98,14 +96,14 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
-# The generation of the builders in this module, and of the SQL they run from
-# pipeline.agg_sql. Nothing observes a change to a
+# The generation of the builders in this module, and of the SQL and Python they
+# run from pipeline.agg_sql and pipeline.headways. Nothing observes a change to a
 # builder's SQL, a bucket width, or a threshold, so this number is how such a
 # change tells the incremental path that every already-built date is stale:
 # it is folded into the fingerprint recorded with each build
 # (:func:`_static_fingerprint`), and a run finding a different one rebuilds
 # every date. Bump it in the same commit as any change to what a builder
-# produces.
+# produces, together with the table's version in pipeline/agg_registry.py.
 ANALYZE_LOGIC_VERSION = 7
 
 # The service date of an observation, by which _ledger_counts groups raw
@@ -825,18 +823,8 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
             load_label=f"{table}: COPY into Postgres",
         )
     if table == "agg_stop_routes":
-        # ClickHouse sorts each stop's routes by bytes. The Postgres copy keeps the
-        # order string_agg(... ORDER BY route_code) gave: the database collation's.
-        # A list with no comma has nothing to order, and string_to_array splits ''
-        # into no element at all, which would write NULL. Splitting on commas is
-        # sound because a route code holds none: the API's `routes` filter splits on them too.
         with _step(f"{table}: order route lists"), conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agg_stop_routes SET route_codes = "
-                "(SELECT string_agg(r, ',' ORDER BY r) FROM unnest(string_to_array(route_codes, ',')) AS r) "
-                "WHERE agency_id = %s AND strpos(route_codes, ',') > 0",
-                (agency_id,),
-            )
+            cur.execute(agg_sql.STOP_ROUTES_ORDER_SQL, (agency_id,))
     with _step(f"{table}: verify copy"):
         expected = ch_aggregates.totals(ch_client, table, agency_id, scope)
         actual = _pg_totals(conn, table, agency_id, scope)
@@ -1251,21 +1239,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                 },
             )
-            # Pool every stop's reconstructed gaps for the same (route_code,
-            # date) together -- same rationale as agg_route_headway's static
-            # side: a consistently-spaced route has a similar gap
-            # distribution at every stop it serves, and pooling avoids
-            # having to justify picking one "representative" stop.
-            # Zero/negative gaps (a duplicate or out-of-order observation)
-            # are excluded, not counted as a real zero-headway event.
-            pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
             # Timed apart from the ClickHouse scan above: this is the one
             # aggregate whose build is partly Python, so moving it would mean
             # expressing reconstruct_headways in SQL, not just relocating a
             # GROUP BY. Knowing how much of its cost is here decides that.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                for route_code, _stop_id, svc_date, times in ch_headway.result_rows:
-                    pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
+                pooled = pool_daily_gaps(ch_headway.result_rows)
             # Scheduled median per route, read back from agg_route_headway
             # (already INSERTed earlier in this SAME transaction, above) --
             # used only to threshold "long" gaps. A route with no
@@ -1283,20 +1262,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # Same label as the pooling above — `_step` accumulates, so the
             # summary reports one figure for this aggregate's Python build.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                headway_rows = [
-                    (
-                        agency_id,
-                        route_code,
-                        svc_date,
-                        median(gaps),
-                        len(gaps),
-                        sum(gaps),
-                        sum(g * g for g in gaps),
-                        count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
-                    )
-                    for (route_code, svc_date), gaps in pooled.items()
-                    if gaps
-                ]
+                headway_rows = daily_headway_rows(agency_id, pooled, scheduled_median_by_route)
             _insert_agg(
                 "agg_route_headway_daily",
                 [

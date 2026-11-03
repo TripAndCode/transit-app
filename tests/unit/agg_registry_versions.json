@@ -1,0 +1,74 @@
+{
+  "agg_daily_trend": {
+    "hash": "b00fcb3e75b2da2151190c4d6da2741fad895bf2d0bb27db7688f2aab8c956a5",
+    "version": 1
+  },
+  "agg_feed_health": {
+    "hash": "5202cfd738868cdca41c9d2bbdb3c6a33d9aeb38b63a521019de2e073166f4e0",
+    "version": 1
+  },
+  "agg_hour_daily": {
+    "hash": "836241fbc9fca97f039f5ad106d2bcfdb4fd5c15dffd7aed91edf9f3df2f61db",
+    "version": 1
+  },
+  "agg_route_daily": {
+    "hash": "161b300f2e2594e25f71b10e6077d754068d3689a794245a952df5f36b179187",
+    "version": 1
+  },
+  "agg_route_daily_dist": {
+    "hash": "a9bff5f88a2075c231149488ba584a59d2a60d2d363d1eae996fc2113b607a88",
+    "version": 1
+  },
+  "agg_route_daily_dwell_run": {
+    "hash": "51a4e87addb889525f02b2e0fb870d8186002acdf979cab8728ddf3f0509c9cd",
+    "version": 1
+  },
+  "agg_route_headway": {
+    "hash": "cdfa3cd7f31f5baf586c281abe4643ecc17f785aa66c7f70a0859e1d5267dfb1",
+    "version": 1
+  },
+  "agg_route_headway_daily": {
+    "hash": "b78e0875741641c27f33188ecbda04b94b52752f10c28f5973017882e15c6936",
+    "version": 1
+  },
+  "agg_route_hour": {
+    "hash": "8f5b906265ed09924e58e308e60d7c1f01d9458f7cff7f3d3b2b0abb2bba5dfc",
+    "version": 1
+  },
+  "agg_route_hour_dow": {
+    "hash": "9679630c8df017ea8334348a0a165abd7e2d1976ea2fe65aca5ccc83d8c368dd",
+    "version": 1
+  },
+  "agg_route_stats": {
+    "hash": "341de7b40b3e2013ff710d7c08141874d4b17e51877def86fc469ffedee16fe5",
+    "version": 1
+  },
+  "agg_route_stop_daily": {
+    "hash": "c7827abe36de458b9bc69f7c71dd97e6ed3e99220aa9b0541178e7c49cc6f070",
+    "version": 1
+  },
+  "agg_schedule_revision_daily": {
+    "hash": "2d6ac8580a6c26c0fe6738fc6a57a3707d116b6c9e984eb1bef650fe0ce19f1e",
+    "version": 1
+  },
+  "agg_service_delivered_daily": {
+    "hash": "51d1ed3f0578ce2c16cd9d4e994434256af2200e205d2c5c46ef9d0b639f2bbf",
+    "version": 1
+  },
+  "agg_stop_daily": {
+    "hash": "3d653dd8c0449a3b66033e92861f62d3cfc086eb8357c243159d9b9f30d2c546",
+    "version": 1
+  },
+  "agg_stop_routes": {
+    "hash": "faed603a23df22d14d83396ac1ad227198d667c95b434a489bec83edfdcd1138",
+    "version": 1
+  },
+  "route_delay_counts": {
+    "hash": "c84015fb932a9ad7f301245bfb6fb60537fbc0a0b1c9f50cfbd31cb8931cad21",
+    "version": 1
+  },
+  "stop_route_days": {
+    "hash": "6f3b0887c506d8353f272adf8ac05bfcb5930b2a7c86c98f78839e58f1e867f7",
+    "version": 1
+  }
+}
