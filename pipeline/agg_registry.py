@@ -75,7 +75,10 @@ def _headway_daily() -> list[str]:
         _clamp(),
         inspect.getsource(headways.reconstruct_headways),
         inspect.getsource(headways.pool_daily_gaps),
+        inspect.getsource(headways.dominant_contents),
         inspect.getsource(headways.daily_headway_rows),
+        # Each date's threshold: its timetable's medians, kept by pipeline.static_headways.
+        agg_sql.route_headway_sql(all_routes=True),
         inspect.getsource(headways.count_long_gaps),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
     ]

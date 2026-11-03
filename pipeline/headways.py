@@ -41,8 +41,8 @@ classified high-frequency.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable
+from collections import Counter, defaultdict
+from collections.abc import Callable, Iterable
 from itertools import pairwise
 from statistics import median as _median
 from typing import Sequence
@@ -257,19 +257,34 @@ def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], lis
     than counted as a real zero headway.
     """
     pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
-    for route_code, _stop_id, svc_date, times in ch_rows:
+    for route_code, _stop_id, svc_date, times, *_ in ch_rows:
         pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
     return pooled
+
+
+def dominant_contents(ch_rows: Iterable[tuple], content_of: Callable[[str], str]) -> dict[tuple[object, object], str]:
+    """Each (route, service date)'s dominant timetable: the content most of its
+    events, across the stops it calls at, were ingested against.
+
+    *ch_rows* are ``(route_code, stop_id, svc_date, times, stems)``; each stem
+    is mapped through *content_of* before counting. A tie goes to the lowest
+    content, so a rebuild of the same rows picks the same one.
+    """
+    counts: dict[tuple[object, object], Counter[str]] = defaultdict(Counter)
+    for route_code, _stop_id, svc_date, _times, stems in ch_rows:
+        counts[(route_code, svc_date)].update(content_of(stem) for stem in stems)
+    return {key: min(tally, key=lambda content: (-tally[content], content)) for key, tally in counts.items()}
 
 
 def daily_headway_rows(
     agency_id: int,
     pooled: dict[tuple[object, object], list[float]],
-    scheduled_median_by_route: dict,
+    median_of: Callable[[object, object], float | None],
 ) -> list[tuple]:
     """agg_route_headway_daily rows: per (route, date), the actual median, count, sum
-    and sum of squares, and the long gaps measured against the route's scheduled
-    median. A route the schedule gives no median counts no long gaps."""
+    and sum of squares, and the long gaps measured against *median_of(route,
+    date)*, the scheduled median of the timetable that date's events were
+    ingested against. A route the schedule gives no median counts no long gaps."""
     return [
         (
             agency_id,
@@ -279,7 +294,7 @@ def daily_headway_rows(
             len(gaps),
             sum(gaps),
             sum(g * g for g in gaps),
-            count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
+            count_long_gaps(gaps, median_of(route_code, svc_date)),
         )
         for (route_code, svc_date), gaps in pooled.items()
         if gaps

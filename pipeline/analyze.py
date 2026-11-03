@@ -91,7 +91,7 @@ import psycopg2.extras
 from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
-from pipeline.headways import daily_headway_rows, pool_daily_gaps
+from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
@@ -1020,12 +1020,20 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         dwell_scope = scopes["agg_route_daily_dwell_run"]
         _, dwell_params = _date_filter(dwell_scope, agency_id)
         scans_visits = builds_dwell_run and dwell_scope != []
-        # The version map, read once and only when something joins the archive:
-        # the visits scan, or a monthly static-joined ClickHouse table. A run
-        # that rebuilds neither reads nothing of the archive beyond the plan's probes.
-        joins_schedule = scans_visits or any(
-            table in ch_aggregates.MONTHLY_TABLES and table in ch_aggregates.STATIC_JOINED_TABLES and scope != []
-            for table, scope in ch_scopes.items()
+        scans_headways = ingest_strategy in RT_INGEST_STRATEGIES and not _nothing_to_rebuild(
+            "agg_route_headway_daily", scopes["agg_route_headway_daily"]
+        )
+        # The version map, read once and only when something reads it: the
+        # visits scan, the daily headways, or a monthly static-joined ClickHouse
+        # table. A run that rebuilds none reads nothing of the archive beyond
+        # the plan's probes.
+        joins_schedule = (
+            scans_visits
+            or scans_headways
+            or any(
+                table in ch_aggregates.MONTHLY_TABLES and table in ch_aggregates.STATIC_JOINED_TABLES and scope != []
+                for table, scope in ch_scopes.items()
+            )
         )
         join = static_archive.schedule_join(ch_client, agency_id, plan.content_key) if joins_schedule else None
         visits_params = dwell_params
@@ -1268,24 +1276,32 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # GROUP BY. Knowing how much of its cost is here decides that.
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 pooled = pool_daily_gaps(ch_headway.result_rows)
-            # Scheduled median per route, read back from agg_route_headway
-            # (already INSERTed earlier in this SAME transaction, above) --
-            # used only to threshold "long" gaps. A route with no
-            # resolvable scheduled median (never classified/high-frequency)
-            # gets long_gap_count=0 via count_long_gaps' own None handling;
-            # such a route is never surfaced by the query-time report
-            # anyway (see pipeline.reports.headway_quality), so 0 vs. NULL
-            # here is not user-visible.
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT route_code, scheduled_headway_median_sec FROM agg_route_headway WHERE agency_id = %s",
-                    (agency_id,),
+            # Each (route, date) is measured against the scheduled median of its
+            # dominant timetable (the one most of its events were ingested
+            # against), kept per archived timetable by pipeline.static_headways.
+            # A timetable with no kept medians falls back to the loaded one's;
+            # a route with no median counts no long gaps (count_long_gaps).
+            assert join is not None  # scans_headways put the map in joins_schedule
+            mapped = dict(zip(join.stems, join.hashes, strict=True))
+            with _step("agg_route_headway_daily: reconstruct in Python"):
+                dominant = dominant_contents(ch_headway.result_rows, lambda stem: mapped.get(stem, join.current))
+            medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
+            kept = {content for content, _route in medians}
+            fell_back = sum(1 for content in dominant.values() if content not in kept)
+            if fell_back:
+                logger.info(
+                    f"  agg_route_headway_daily: {fell_back} route-day(s) measured against the loaded timetable's "
+                    "medians, their own timetable having none kept"
                 )
-                scheduled_median_by_route = dict(cur.fetchall())
+
+            def median_of(route_code, svc_date):
+                content = dominant.get((route_code, svc_date), join.current)
+                return medians.get((content if content in kept else join.current, route_code))
+
             # Same label as the pooling above — `_step` accumulates, so the
             # summary reports one figure for this aggregate's Python build.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                headway_rows = daily_headway_rows(agency_id, pooled, scheduled_median_by_route)
+                headway_rows = daily_headway_rows(agency_id, pooled, median_of)
             _insert_agg(
                 "agg_route_headway_daily",
                 [

@@ -155,7 +155,9 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 # because an unqualified name matching a SELECT alias in WHERE is
 # replaced by that alias's aggregate (see build_dedup_ch_sql).
 def route_headway_daily_ch_sql(date_where: str) -> str:
-    """Per (route, stop, service date), the array of actual event times."""
+    """Per (route, stop, service date), the array of actual event times and of
+    the version names they were ingested against ('' for none), each event's
+    from its latest poll like its delay."""
     return (
         """
                 WITH per_event AS (
@@ -164,7 +166,8 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
         + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                           argMax(u.scheduled_sec, (u.captured_at, u.file_name)) AS scheduled_sec
+                           argMax(u.scheduled_sec, (u.captured_at, u.file_name)) AS scheduled_sec,
+                           argMax(ifNull(u.static_version_id, ''), (u.captured_at, u.file_name)) AS stem
                     FROM updates AS u
                     WHERE u.agency_id = {agency_id:UInt16}
                       AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL
@@ -178,7 +181,8 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
                 SELECT route_code, stop_id, svc_date,
                        groupArray(toInt64("""
         + service_day_offset_ch("scheduled_sec")
-        + """) + toInt64(dep_delay)) AS times
+        + """) + toInt64(dep_delay)) AS times,
+                       groupArray(stem) AS stems
                 FROM per_event
                 GROUP BY route_code, stop_id, svc_date
                 """
