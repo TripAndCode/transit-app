@@ -1,0 +1,160 @@
+"""analyze records a fingerprint per aggregate table and rebuilds each by its own."""
+
+import dataclasses
+import logging
+
+import pytest
+
+from pipeline import agg_registry
+from pipeline.analyze import analyze
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg, _seed_route_headway_schedule
+
+
+def test_the_legacy_fingerprint_is_the_retired_one_byte_for_byte():
+    from pipeline.analyze import _legacy_fingerprint
+
+    parts = ["static_stop_times:3:42", "static_trips:1:7", "static_routes:1:9"]
+    assert _legacy_fingerprint("static_join", parts) == (
+        f"logic:7|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:static_join|" + "|".join(parts)
+    )
+    assert _legacy_fingerprint(None, []) == f"logic:7|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:None"
+
+
+def test_only_the_timetable_readers_carry_the_timetable():
+    from pipeline.analyze import table_fingerprints
+
+    with_one = table_fingerprints("static_join", True, ["static_trips:1:7"])
+    with_other = table_fingerprints("static_join", True, ["static_trips:1:8"])
+    moved = {name for name in with_one if with_one[name] != with_other[name]}
+    assert moved == {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+
+
+# Runs after a test's first call analyze() directly: the _analyze helper mirrors
+# the Postgres `updates` seed into ClickHouse again, which would add rows.
+
+
+def _scopes_logged(caplog) -> dict[str, str]:
+    lines = [r.getMessage().strip() for r in caplog.records if r.getMessage().strip().startswith("scope ")]
+    return {line.split()[1].rstrip(":"): line.split(":", 1)[1].strip() for line in lines}
+
+
+def _states(pg_conn, agency_id) -> dict[str, str]:
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        return dict(cur.fetchall())
+
+
+def _count(pg_conn, table, agency_id) -> int:
+    with pg_conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {table} WHERE agency_id = %s", (agency_id,))
+        return cur.fetchone()[0]
+
+
+def test_a_run_records_every_tables_fingerprint(pg_conn, agency_id, ch_client):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    assert set(_states(pg_conn, agency_id)) == set(agg_registry.TABLES)
+
+
+def test_a_run_with_nothing_new_rebuilds_nothing(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+
+
+def test_deploy_seeds_the_states_without_a_rebuild(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert any("seeded" in r.getMessage() for r in caplog.records)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    assert set(_states(pg_conn, agency_id)) == set(agg_registry.TABLES)
+
+
+def test_without_a_matching_legacy_fingerprint_every_table_rebuilds(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        cur.execute("UPDATE agg_meta SET static_fingerprint = NULL WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"every date (new)"}
+
+
+def test_a_changed_timetable_rebuilds_only_the_tables_that_read_it(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    logged = _scopes_logged(caplog)
+    readers = {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+    assert {n for n, s in logged.items() if s != "unchanged"} == readers
+
+
+def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id, ch_client, caplog, monkeypatch):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    stats_before = _count(pg_conn, "agg_route_stats", agency_id)
+    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    rebuilt = {n for n, s in _scopes_logged(caplog).items() if s != "unchanged"}
+    assert rebuilt == {"route_delay_counts", "agg_route_stats", "agg_route_hour", "agg_route_hour_dow"}
+    assert stats_before > 0
+    assert _count(pg_conn, "agg_route_stats", agency_id) == stats_before
+
+
+def test_a_skipped_table_keeps_its_rows(pg_conn, agency_id, ch_client):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _seed_route_headway_schedule(pg_conn, agency_id, "R_HW", "WD", "s1", ["08:00:00", "08:10:00", "08:20:00"])
+    _analyze(agency_id, pg_conn, ch_client)
+    before = {t: _count(pg_conn, t, agency_id) for t in ("agg_route_headway", "agg_feed_health", "agg_stop_daily")}
+    assert all(before.values()), before
+    analyze(agency_id, pg_conn, ch_client)
+    assert {t: _count(pg_conn, t, agency_id) for t in before} == before
+
+
+def test_a_failed_run_leaves_the_states_it_found(pg_conn, agency_id, ch_client, monkeypatch):
+    import pipeline.analyze as analyze_module
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _states(pg_conn, agency_id)
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=9)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("stop before commit")
+
+    monkeypatch.setattr(analyze_module, "ch_max_captured_at", boom)
+    with pytest.raises(RuntimeError, match="stop before commit"):
+        analyze(agency_id, pg_conn, ch_client)
+    pg_conn.rollback()
+    assert _states(pg_conn, agency_id) == before
+
+
+def test_marking_for_full_rebuild_clears_the_states(pg_conn, agency_id, ch_client):
+    from pipeline.analyze import mark_for_full_rebuild
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    mark_for_full_rebuild(pg_conn, [agency_id])
+    assert _states(pg_conn, agency_id) == {}
