@@ -37,8 +37,8 @@ def static_parts(agency_id: int, conn, has_static: bool) -> list[str]:
     rows wholesale for the agency, so a new timetable changes what a past date
     of such a table should aggregate to while every per-date count stands
     still. The tables that read the timetable fold these parts into their
-    fingerprint (:func:`table_fingerprints`), so a changed timetable rebuilds
-    them in full.
+    fingerprint (:func:`pipeline.analyze.table_fingerprints`), so a changed
+    timetable rebuilds them in full.
 
     An order-independent sum of per-row hashes plus a row count, not an ordered
     digest: the sum is one sequential scan of tables holding at most a few
@@ -68,9 +68,10 @@ def static_parts(agency_id: int, conn, has_static: bool) -> list[str]:
     cannot hold it.
 
     Without a loaded schedule there are no parts: every aggregate that reads
-    the static tables is inside a ``has_static`` branch of :func:`analyze`, and
-    querying those tables anyway would turn the missing-``static_*``-tables
-    case ``_static_loaded`` deliberately tolerates into a hard failure.
+    the static tables is inside a ``has_static`` branch of
+    :func:`pipeline.analyze.analyze`, and querying those tables anyway would
+    turn the missing-``static_*``-tables case analyze's ``_static_loaded``
+    deliberately tolerates into a hard failure.
     """
     if not has_static:
         return []

@@ -230,9 +230,11 @@ async def test_health_carries_no_run_for_an_agency_no_operator_has_run(app_clien
 
 
 @pytest.fixture
-def runner_env(pg_conn, monkeypatch, tmp_path):
+def runner_env(pg_conn, monkeypatch, tmp_path, ch_client):
     """An agency, an admin, and an umbrella run opened the way the endpoint
-    opens it; the runner reads `DATABASE_URL` from the environment."""
+    opens it; the runner reads `DATABASE_URL` from the environment. A reload
+    archives the outgoing timetable, so the ClickHouse schema is provisioned
+    here rather than by whichever test first asks for a client."""
     monkeypatch.setenv("DATABASE_URL", os.environ["DATABASE_URL"])
     monkeypatch.setattr("pipeline.static_fetcher.DEFAULT_STATIC_DEST", str(tmp_path / "static"))
     with pg_conn.cursor() as cur:

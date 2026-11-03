@@ -2202,19 +2202,19 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     ledger = [s for s in recording.queries if "raw_samples" in s and "clamp_count" not in s]
     assert len(ledger) == 1
     others = [s for s in recording.queries if s not in ledger]
-    # The timetable archive is probed for the loaded content and its version
-    # name, both narrowed to one partition or one name.
-    aggregate_reads = tuple(
-        f"FROM {table} "
-        for table in (*ch_aggregates.TABLES, "system.tables", static_archive.ARCHIVE, static_archive.VERSION_MAP)
-    )
+    aggregate_reads = tuple(f"FROM {table} " for table in (*ch_aggregates.TABLES, "system.tables"))
     # The internal tables hold a row per delay value, or per observed pair, of every
     # date, so they and the tables finalized from them may be read only by store
     # checks' probes: a table's totals, or an internal table's reference figure.
     totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
     probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
+    archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.VERSION_MAP} ")
     assert all(
         s.rstrip().endswith("LIMIT 1")
+        or (
+            any(r in s for r in archive_reads)
+            and ("AND content_hash = {key:String}" in s or "AND static_version_id = {stem:String}" in s)
+        )
         or any(r in s for r in aggregate_reads)
         or (any(r in s for r in totals_reads) and s.startswith(probes))
         for s in others

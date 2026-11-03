@@ -82,7 +82,7 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     ).result_rows
     if not (present and present[0][0]) and not _copy(conn, ch, agency_id, key, parts, expected):
         return None
-    _map(conn, ch, agency_id, key)
+    _map(conn, ch, agency_id, key, parts)
     return key
 
 
@@ -122,7 +122,7 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], expected: int) -
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
-def _map(conn, ch, agency_id: int, key: str) -> None:
+def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
     """Record that the loaded version name carries *key*, unless that is already its latest mapping."""
     stem = loaded_stem(conn, agency_id)
     if stem is None:
@@ -133,6 +133,11 @@ def _map(conn, ch, agency_id: int, key: str) -> None:
         parameters={"agency": agency_id, "stem": stem},
     ).result_rows
     if latest and latest[0][0] == key:
+        return
+    # A load replaces the name and the content in one commit, so content read
+    # after the name still matching *parts* means the name read was *key*'s.
+    if static_parts(agency_id, conn, True) != parts:
+        logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed before its name was mapped")
         return
     ch.insert(
         VERSION_MAP,

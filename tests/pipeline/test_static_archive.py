@@ -217,3 +217,17 @@ def test_analyze_refuses_without_the_archive_tables(pg_conn, agency_id, ch_clien
     finally:
         pg_conn.rollback()
         apply_schema(ch_client)
+
+
+def test_a_stem_read_after_a_concurrent_load_is_not_mapped_to_the_old_content(
+    pg_conn, agency_id, ch_client, monkeypatch
+):
+    """A load that commits a new name and content between the key and the
+    name read must not leave the new name pointing at the old content."""
+    _seed(pg_conn, agency_id)
+    parts = static_parts(agency_id, pg_conn, True)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id, parts)
+    monkeypatch.setattr(static_archive, "loaded_stem", lambda conn, agency: "gtfs_static_20261101")
+    monkeypatch.setattr(static_archive, "static_parts", lambda agency, conn, has_static: [*parts, "static_routes:9:9"])
+    assert static_archive.archive_loaded(pg_conn, ch_client, agency_id, parts) == key
+    assert ("gtfs_static_20261101", key) not in _map(ch_client, agency_id)

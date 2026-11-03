@@ -490,9 +490,11 @@ def _refresh_static_step(
     from pipeline import static_fetcher
     from pipeline.clickhouse import get_client
 
-    conn = psycopg2.connect(db_url)
-    ch = get_client()
+    conn = None
+    ch = None
     try:
+        conn = psycopg2.connect(db_url)
+        ch = get_client()
         return static_fetcher.refresh_static_recorded(
             agency_id,
             conn,
@@ -502,8 +504,13 @@ def _refresh_static_step(
             ch_client=ch,
         )
     finally:
-        ch.close()
-        conn.close()
+        # Nested, so neither close skips the other inside this long-lived process.
+        try:
+            if ch is not None:
+                ch.close()
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def _run_agency_update(
