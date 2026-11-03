@@ -142,8 +142,8 @@ _SERVICE_DATE = service_date_ch()
 
 # The stop visits of the dates being rebuilt are materialised into a Postgres
 # TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run, the
-# Postgres builder that pairs RT arrivals and departures with the static
-# schedule, and only for an agency that builder runs for. The visits are resolved in ClickHouse
+# Postgres builder that pairs RT arrivals and departures with each visit's
+# own archived timetable, and only for an agency that builder runs for. The visits are resolved in ClickHouse
 # (build_stop_visits_ch_sql, the `updates` fact table's home) and streamed into
 # the temp table, so no builder here reads `updates` row by row. They carry
 # arrival-only visits, so they are not the departure dedup: the departure-derived
@@ -872,7 +872,7 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
 
 
 def _rebuild_ch_aggregates(
-    agency_id: int, conn, ch_client, scopes: dict[str, list | None], content_key: str | None
+    agency_id: int, conn, ch_client, scopes: dict[str, list | None], join: static_archive.ScheduleJoin | None
 ) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
@@ -889,8 +889,8 @@ def _rebuild_ch_aggregates(
     monthly build and before any swap, so they read the months just rebuilt from
     those tables' work tables; an internal table itself is never copied.
 
-    The version map is read only when a static-joined table is rebuilt, so a run
-    that rebuilds none reads nothing of the archive beyond the plan's probes.
+    *join* is the run's schedule join, which the static-joined tables need;
+    None when none of them is rebuilt.
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
@@ -905,9 +905,6 @@ def _rebuild_ch_aggregates(
             for table, changed in monthly.items():
                 months[table] = ch_aggregates.months_for(ch_client, table, agency_id, changed)
         if monthly:
-            join = None
-            if any(table in ch_aggregates.STATIC_JOINED_TABLES for table in monthly):
-                join = static_archive.schedule_join(ch_client, agency_id, content_key)
             ch_aggregates.build(
                 ch_client,
                 agency_id,
@@ -1019,27 +1016,45 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
         dwell_scope = scopes["agg_route_daily_dwell_run"]
         _, dwell_params = _date_filter(dwell_scope, agency_id)
+        scans_visits = builds_dwell_run and dwell_scope != []
+        # The version map, read once and only when something joins the archive:
+        # the visits scan, or a monthly static-joined ClickHouse table. A run
+        # that rebuilds neither reads nothing of the archive beyond the plan's probes.
+        joins_schedule = scans_visits or any(
+            table in ch_aggregates.MONTHLY_TABLES and table in ch_aggregates.STATIC_JOINED_TABLES and scope != []
+            for table, scope in ch_scopes.items()
+        )
+        join = static_archive.schedule_join(ch_client, agency_id, plan.content_key) if joins_schedule else None
+        visits_params = dwell_params
+        if scans_visits and join is not None:
+            # A range on captured_at, which prunes on the sort key; the visits
+            # scan's own service-date test selects the same rows.
+            where, params = ch_aggregates.days_where(dwell_scope) if dwell_scope is not None else ("1", {})
+            stems = ch_aggregates.version_names(ch_client, agency_id, where, params)
+            visits_params = {**dwell_params, **join.params(stems)}
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
                 ch_client,
                 # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
                 # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, arr_delay, dep_observed.
+                # stop_sequence, dep_delay, arr_delay, dep_observed,
+                # sched_arrival_time, sched_departure_time.
                 table="_analyze_visits",
                 columns=(
                     "route_code text, service_type text, scheduled_time time, "
                     "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
-                    "dep_observed boolean"
+                    "dep_observed boolean, sched_arrival_time text, sched_departure_time text"
                 ),
                 ch_sql=build_stop_visits_ch_sql(
                     extra_where=_date_predicate(dwell_scope, "u.captured_at"),
+                    join_schedule=True,
                 ),
-                parameters=dwell_params,
+                parameters=visits_params,
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
                 # changed is the common one.
-                load=builds_dwell_run and dwell_scope != [],
+                load=scans_visits,
                 label="visits",
             )
 
@@ -1341,7 +1356,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # Last, so a Postgres builder that fails above leaves ClickHouse
         # untouched too.
-        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, plan.content_key)
+        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join)
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.

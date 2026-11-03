@@ -103,7 +103,7 @@ def _entries() -> list[AggTable]:
             1,
             Kind.DATED,
             True,
-            lambda: [agg_sql.dwell_run_sql(), build_stop_visits_ch_sql(extra_where="")],
+            lambda: [agg_sql.dwell_run_sql(), build_stop_visits_ch_sql(extra_where="", join_schedule=True)],
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:

@@ -95,8 +95,8 @@ def test_dwell_run_buckets_with_the_shared_histogram_bounds():
 
 def test_dwell_run_places_scheduled_times_on_the_service_day():
     sql = agg_sql.dwell_run_sql()
-    assert service_day_seconds_sql(hms_to_sec_sql("sst.arrival_time")) + " AS sched_arr_sec" in sql
-    assert service_day_seconds_sql(hms_to_sec_sql("sst.departure_time")) + " AS sched_dep_sec" in sql
+    assert service_day_seconds_sql(hms_to_sec_sql("d.sched_arrival_time")) + " AS sched_arr_sec" in sql
+    assert service_day_seconds_sql(hms_to_sec_sql("d.sched_departure_time")) + " AS sched_dep_sec" in sql
 
 
 def test_static_version_summary_upsert_keeps_its_positional_parameters():

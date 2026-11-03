@@ -279,9 +279,11 @@ def route_headway_sql() -> str:
 # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
 # the stop visits _analyze_locked materialises once into _analyze_visits
 # before this runs: one row per trip, service day and stop, pairing the arrival and the
-# departure the feed reports in separate polls. A visit reported only
-# as an arrival (every trip's terminus) has a NULL dep_delay; one
-# reported only as a departure, a NULL arr_delay.
+# departure the feed reports in separate polls, with the scheduled times of
+# the archived timetable the visit's version name maps to (the loaded one
+# when it maps to none). A visit reported only as an arrival (every trip's
+# terminus) has a NULL dep_delay; one reported only as a departure, a NULL
+# arr_delay.
 def dwell_run_sql() -> str:
     """Per (date, route, service), dwell and running-time sample counts, sums and histograms."""
     dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
@@ -291,8 +293,8 @@ def dwell_run_sql() -> str:
     # On the service day's axis, so a run from 23:58 to a stop the
     # timetable writes as "00:03:00" is five minutes forward, as it is
     # to GTFS's "24:03:00".
-    sched_arr_expr = service_day_seconds_sql(hms_to_sec_sql("sst.arrival_time"))
-    sched_dep_expr = service_day_seconds_sql(hms_to_sec_sql("sst.departure_time"))
+    sched_arr_expr = service_day_seconds_sql(hms_to_sec_sql("d.sched_arrival_time"))
+    sched_dep_expr = service_day_seconds_sql(hms_to_sec_sql("d.sched_departure_time"))
     return f"""
                 WITH visits AS (
                     SELECT
@@ -301,14 +303,10 @@ def dwell_run_sql() -> str:
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
                     FROM _analyze_visits d
-                    LEFT JOIN static_stop_times sst
-                      ON sst.agency_id = %(agency_id)s
-                     AND sst.trip_id = d.trip_id
-                     AND sst.stop_sequence = d.stop_sequence
                 ),
                 actuals AS (
-                    -- A stop lacking a static schedule row (LEFT JOIN found no
-                    -- match) or lacking arrival_time/departure_time within one
+                    -- A stop with no archived stop time (the visits scan's
+                    -- archive join found none) or lacking arrival_time/departure_time within one
                     -- yields NULL sched_dep_sec/sched_arr_sec here -- every
                     -- such visit is still KEPT (not filtered out) so the
                     -- LAG() window below sees every stop_sequence in order;

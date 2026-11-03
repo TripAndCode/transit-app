@@ -315,3 +315,56 @@ def test_the_visits_without_the_join_keep_their_columns():
     sql = build_stop_visits_ch_sql(include_scheduled_sec=True)
     assert "sched_arrival_time" not in sql
     assert "join_" not in sql
+
+
+def _dwell_timetable(tmp_path, name: str, stop_2_departure: str) -> str:
+    """Trip T1 leaves stop 1 at 10:00 and calls at stop 2 from 10:05 until *stop_2_departure*."""
+    return build_static_zip(
+        tmp_path,
+        stops_rows=["S1,Stop 1,34.39,132.45", "S2,Stop 2,34.40,132.46"],
+        routes_rows=["R1,1"],
+        trips_rows=["T1,R1,,"],
+        stop_times_rows=["T1,1,S1,10:00:00,10:00:00", f"T1,2,S2,10:05:00,{stop_2_departure}"],
+        filename=f"{name}.zip",
+    )
+
+
+def _dwell_polls(day: str, stem: str | None) -> list[tuple]:
+    """Stop 1's departure, then stop 2's arrival (50 s late) and later departure (20 s late)."""
+    return [_visit_poll(f"{day}T00:00:00Z", 1, dep=30, arr=None, stem=stem), *_visit(day, 2, stem, stem)]
+
+
+def _dwell_sums(pg_conn, agency_id: int) -> list[tuple]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, dwell_sum_sec FROM agg_route_daily_dwell_run "
+            "WHERE agency_id = %s AND route_code = 'R1' ORDER BY date",
+            (agency_id,),
+        )
+        return cur.fetchall()
+
+
+def test_dwell_follows_each_dates_timetable_across_a_reload(tmp_path, pg_conn, agency_id, ch_client, caplog):
+    """Stop 2's dwell is (scheduled departure + 20) - (10:05 + 50): 30 s under A's 10:06, 90 s under B's 10:07."""
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_dwell_timetable(tmp_path, "dwell_a", "10:06:00"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, _dwell_polls("2026-06-01", "dwell_a"))
+    analyze(agency_id, pg_conn, ch_client)
+    load_static(_dwell_timetable(tmp_path, "dwell_b", "10:07:00"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, _dwell_polls("2026-06-02", "dwell_b"))
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_route_daily_dwell_run: every date" in caplog.text
+    assert _dwell_sums(pg_conn, agency_id) == [(date(2026, 6, 1), 30), (date(2026, 6, 2), 90)]
+
+
+def test_dwell_of_an_unversioned_visit_uses_the_loaded_timetable(tmp_path, pg_conn, agency_id, ch_client):
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_dwell_timetable(tmp_path, "dwell_b", "10:07:00"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, _dwell_polls("2026-06-01", None))
+    analyze(agency_id, pg_conn, ch_client)
+    assert _dwell_sums(pg_conn, agency_id) == [(date(2026, 6, 1), 90)]
