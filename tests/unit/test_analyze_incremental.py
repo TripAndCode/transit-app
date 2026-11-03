@@ -138,6 +138,7 @@ class FakeConn:
     def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False, pg_totals=(0, 0, 0)):
         self.executed: list[str] = []
         self._fingerprint: str | None = None
+        self._states: dict[str, str] = {}
         self._ledger_rows = ledger_rows
         self._ingest_strategy = ingest_strategy
         self._has_static = has_static
@@ -175,6 +176,8 @@ class FakeConn:
             return (0, 0), []
         if "static_fingerprint FROM agg_meta" in sql:
             return (self._fingerprint,), []
+        if "FROM agg_table_state" in sql:
+            return None, list(self._states.items())
         if "SELECT date, raw_samples, total_rows FROM agg_feed_health" in sql:
             return None, self._ledger_rows
         if "SUM(clamp_count)" in sql:
@@ -209,8 +212,9 @@ def _run(
         has_static=has_static,
         pg_totals=pg_totals,
     )
-    conn._fingerprint = analyze_mod._static_fingerprint(
-        AGENCY_ID, conn, has_static=has_static, ingest_strategy=ingest_strategy
+    # The agency-wide fingerprint the last build recorded, so its tables seed as current.
+    conn._fingerprint = analyze_mod._legacy_fingerprint(
+        ingest_strategy, analyze_mod._static_parts(AGENCY_ID, conn, has_static)
     )
     ch = FakeClickHouse(ledger, tables=ch_tables)
     analyze(AGENCY_ID, conn, ch)
@@ -299,8 +303,19 @@ def test_a_noop_run_neither_purges_nor_rebuilds_the_scheduled_headway():
     assert not [s for s in conn.executed if _HEADWAY_MEDIAN in s]
 
 
-def test_a_run_with_a_changed_date_rebuilds_the_scheduled_headway_whole():
+def test_a_run_with_a_changed_date_leaves_the_scheduled_headway_standing():
+    """It reads the timetable alone, so a date gaining rows changes nothing in it."""
     conn, _ = _changed_run(has_static=True)
+    assert not [s for s in conn.executed if "DELETE FROM agg_route_headway WHERE" in s]
+    assert not [s for s in conn.executed if _HEADWAY_MEDIAN in s]
+
+
+def test_a_changed_timetable_rebuilds_the_scheduled_headway_whole():
+    ledger = [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)]
+    conn = FakeConn(ledger_rows=ledger, has_static=True)
+    current = analyze_mod.table_fingerprints(None, True, analyze_mod._static_parts(AGENCY_ID, conn, True))
+    conn._states = current | {"agg_route_headway": "built under another timetable"}
+    analyze(AGENCY_ID, conn, FakeClickHouse(ledger))
     assert [s for s in conn.executed if "DELETE FROM agg_route_headway WHERE agency_id = %s" in s]
     assert [s for s in conn.executed if _HEADWAY_MEDIAN in s]
 
@@ -363,6 +378,47 @@ def test_a_ledger_without_total_rows_rebuilds_every_date():
     ]
 
 
+def _ledger_scans(ch) -> list[str]:
+    return [sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql]
+
+
+def test_a_run_that_rebuilds_every_table_skips_the_ledger_scan():
+    """With no table's fingerprint matching, every table goes in full whatever
+    the ledger says, so the full-history count would be thrown away."""
+    ledger = [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)]
+    conn = FakeConn(ledger_rows=ledger)
+    ch = FakeClickHouse(ledger)
+    analyze(AGENCY_ID, conn, ch)
+    assert _ledger_scans(ch) == []
+
+
+def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
+    """An agency still on the agency-wide fingerprint was built by the
+    builders of the switch. A table bumped since must rebuild on its first
+    run, not be seeded as current."""
+    import dataclasses
+
+    from pipeline import agg_registry
+
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    conn, ch = _noop_run()
+    assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
+        sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
+    ]
+    assert not [s for s in conn.executed if "DELETE FROM agg_feed_health" in s]
+
+
+def test_the_timetable_copy_keeps_its_tag_across_the_switch(monkeypatch):
+    """The ClickHouse copy of the timetable is tagged with the agency-wide
+    fingerprint it was mirrored under, so keeping that value avoids
+    re-mirroring every agency's timetable on the first run."""
+    tags = []
+    monkeypatch.setattr(analyze_mod, "_mirror_static_stop_times", lambda *a: tags.append(a[-1]))
+    conn, _ = _noop_run(has_static=True)
+    assert tags == [conn._fingerprint]
+
+
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():
     _, ch = _noop_run()
     ledger_sql = next(sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql)
@@ -387,31 +443,43 @@ def test_a_noop_run_still_records_this_build_in_agg_meta():
     assert [s for s in conn.executed if "INSERT INTO agg_meta" in s]
 
 
-# ── The fingerprint that decides whether a date may be trusted ───────────
+# ── The fingerprints that decide whether a table's dates may be trusted ──
 
 
-def test_the_fingerprint_changes_when_the_plausibility_clamp_changes(monkeypatch):
+def _fingerprints(**kw) -> dict[str, str]:
+    return analyze_mod.table_fingerprints(kw.get("ingest_strategy"), False, [])
+
+
+def test_every_tables_fingerprint_changes_when_the_plausibility_clamp_changes(monkeypatch):
     """The clamp decides which rows reach every aggregate, so moving it makes
     every already-built date wrong while no row anywhere changed."""
-    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None)
+    before = _fingerprints()
     monkeypatch.setattr(analyze_mod, "MAX_PLAUSIBLE_DELAY_SEC", analyze_mod.MAX_PLAUSIBLE_DELAY_SEC + 1)
+    after = _fingerprints()
 
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != before
-
-
-def test_the_fingerprint_changes_when_the_builder_logic_version_changes(monkeypatch):
-    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None)
-    monkeypatch.setattr(analyze_mod, "ANALYZE_LOGIC_VERSION", analyze_mod.ANALYZE_LOGIC_VERSION + 1)
-
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != before
+    assert all(after[name] != before[name] for name in before)
 
 
-def test_the_fingerprint_changes_when_the_ingest_strategy_changes():
+def test_a_version_bump_changes_that_tables_fingerprint_alone(monkeypatch):
+    import dataclasses
+
+    from pipeline import agg_registry
+
+    before = _fingerprints()
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    after = _fingerprints()
+
+    assert {name for name in before if after[name] != before[name]} == {"agg_hour_daily"}
+
+
+def test_every_tables_fingerprint_changes_when_the_ingest_strategy_changes():
     """The strategy decides whether the RT-field aggregates are built at all,
     so an agency moving off static_join must not keep its old dates' rows."""
-    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy="static_join")
+    before = _fingerprints(ingest_strategy="static_join")
+    after = _fingerprints(ingest_strategy="gtfs_rt")
 
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy="gtfs_rt") != before
+    assert all(after[name] != before[name] for name in before)
 
 
 def test_a_strategy_change_alone_rebuilds_every_date():
@@ -419,9 +487,7 @@ def test_a_strategy_change_alone_rebuilds_every_date():
     strategy: the old dates' service-delivered rows must not survive."""
     ledger = [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)]
     conn = FakeConn(ledger_rows=ledger, ingest_strategy="gtfs_rt")
-    conn._fingerprint = analyze_mod._static_fingerprint(
-        AGENCY_ID, conn, has_static=False, ingest_strategy="static_join"
-    )
+    conn._fingerprint = analyze_mod._legacy_fingerprint("static_join", [])
     ch = FakeClickHouse(ledger)
     analyze(AGENCY_ID, conn, ch)
 
@@ -434,10 +500,10 @@ def test_a_strategy_change_alone_rebuilds_every_date():
     ]
 
 
-def test_the_fingerprint_is_never_empty_without_a_static_schedule():
+def test_no_fingerprint_is_empty_without_a_static_schedule():
     """An agency with no schedule still has a clamp and a builder version to
     invalidate against; an empty value would leave it with neither."""
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != ""
+    assert all(_fingerprints().values())
 
 
 # ── The ClickHouse-computed aggregates ───────────────────────────────────
@@ -504,3 +570,10 @@ def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(i
     both an arrival-carrying feed and a schedule never pays for the scan."""
     _, ch = _changed_run(ingest_strategy=ingest_strategy, has_static=has_static)
     assert _visit_scans(ch) == []
+
+
+def test_the_seed_versions_stay_frozen_at_the_switch():
+    """Every table stood at version 1 when per-table state replaced the
+    agency-wide fingerprint. Raising an entry here alongside a registry bump
+    would seed the bumped table as current instead of rebuilding it."""
+    assert set(analyze_mod._SEED_VERSIONS.values()) == {1}

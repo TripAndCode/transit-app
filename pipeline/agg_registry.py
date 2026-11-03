@@ -3,9 +3,10 @@ the loaded timetable, and the tables it is computed from.
 
 A table's version declares the generation of its builder. Bump it in the same
 commit as any change to what the builder produces: its SQL, a threshold, a
-bucket width, or the Python that shapes its rows. Bump
-pipeline.analyze.ANALYZE_LOGIC_VERSION with it, which is what makes analyze
-rebuild already-built dates. `render()` returns exactly that text, and
+bucket width, or the Python that shapes its rows. analyze records each
+table's fingerprint, which folds in this version, in agg_table_state, and
+rebuilds the table in full, with the tables computed from it, when the
+fingerprint changes. `render()` returns exactly that text, and
 tests/unit/test_agg_registry_versions.py fails when it changes while the
 version does not.
 """
@@ -135,3 +136,51 @@ def _index(entries: list[AggTable]) -> dict[str, AggTable]:
 
 
 TABLES: dict[str, AggTable] = _index(_entries())
+
+
+def table_scopes(
+    current: dict[str, str], stored: dict[str, str], ledger_dates: list | None
+) -> tuple[dict[str, list | None], dict[str, str]]:
+    """Each table's rebuild scope, and why each table rebuilt in full is.
+
+    A scope is None for every date (the whole table, for one with no date), a
+    list of the dates to rebuild, or [] for nothing. A table goes in full when
+    there is no ledger, when it has no stored fingerprint or a different one,
+    or when a table it is computed from goes in full. A dated table otherwise
+    takes the ledger's changed dates; a whole-history table is rebuilt when its
+    source rebuilds any date; a table built from the timetable alone stands.
+    """
+    reasons: dict[str, str] = {}
+    for name in TABLES:
+        if ledger_dates is None:
+            reasons[name] = "no ledger"
+        elif name not in stored:
+            reasons[name] = "new"
+        elif stored[name] != current[name]:
+            reasons[name] = "fingerprint changed"
+    grew = True
+    while grew:
+        grew = False
+        for name, table in TABLES.items():
+            if name in reasons:
+                continue
+            upstream = next((d for d in table.depends_on if d in reasons), None)
+            if upstream is not None:
+                reasons[name] = f"depends on {upstream}"
+                grew = True
+    scopes: dict[str, list | None] = {}
+    for name, table in TABLES.items():
+        if name in reasons:
+            scopes[name] = None
+        elif table.kind is Kind.DATED:
+            scopes[name] = list(ledger_dates or [])
+        elif table.kind is Kind.STATIC_ONLY:
+            scopes[name] = []
+    for name, table in TABLES.items():
+        if table.kind is Kind.WHOLE and name not in scopes:
+            if any(scopes[source] != [] for source in table.depends_on):
+                scopes[name] = None
+                reasons[name] = "source changed"
+            else:
+                scopes[name] = []
+    return scopes, reasons

@@ -735,7 +735,7 @@ def test_delayless_rows_arriving_on_a_built_date_update_stop_route_coverage(pg_c
     )
     from pipeline.analyze import _dates_needing_rebuild
 
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [when.date()]
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [when.date()]
     analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id = %s AND stop_id = 's1'", (agency_id,))
@@ -1026,7 +1026,7 @@ def test_service_delivered_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_
     )
     from pipeline.analyze import _dates_needing_rebuild
 
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [day2.date()]
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [day2.date()]
     analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -2108,18 +2108,15 @@ def _agg_snapshot(pg_conn, agency_id):
 
 
 def _fingerprint(pg_conn, agency_id):
-    """What analyze() would record for this agency right now.
+    """The loaded timetable's content as analyze() would fold it in right now.
 
     Resolves `has_static` the same way analyze() does rather than asserting a
     value for it, so a fixture with no static schedule exercises the same
     branch production would.
     """
-    from pipeline.analyze import _static_fingerprint, _static_loaded
+    from pipeline.analyze import _static_loaded, _static_parts
 
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
-        (strategy,) = cur.fetchone()
-    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id), strategy)
+    return "|".join(_static_parts(agency_id, pg_conn, _static_loaded(pg_conn, agency_id)))
 
 
 def _feed_health(pg_conn, agency_id):
@@ -2135,7 +2132,7 @@ def test_dates_needing_rebuild_is_everything_without_a_ledger(pg_conn, agency_id
     """No agg_feed_health rows means nothing is known, so nothing is assumed."""
     from pipeline.analyze import _dates_needing_rebuild
 
-    assert _dates_needing_rebuild(agency_id, pg_conn, None, "") is None
+    assert _dates_needing_rebuild(agency_id, pg_conn, None) is None
 
 
 def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_client):
@@ -2143,7 +2140,7 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
 
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == []
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
 
     # The ledger is the only thing consulted, so editing it is the same signal
     # a newly ingested row would produce.
@@ -2157,7 +2154,7 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
         moved = cur.fetchone()[0]
     pg_conn.commit()
 
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [moved]
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved]
 
 
 class _RecordingCH:
@@ -2241,7 +2238,7 @@ def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, c
         )
     pg_conn.commit()
 
-    assert date(2099, 1, 1) in _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id))
+    assert date(2099, 1, 1) in _dates_needing_rebuild(agency_id, pg_conn, ch_client)
     analyze(agency_id, pg_conn, ch_client)
     assert _agg_snapshot(pg_conn, agency_id) == before
 
@@ -2298,28 +2295,33 @@ def test_every_incremental_table_can_purge_by_date_from_an_index(pg_conn):
     )
 
 
-def test_a_changed_static_schedule_needs_every_date(pg_conn, agency_id, ch_client):
+def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(pg_conn, agency_id, ch_client):
     """The ledger counts ClickHouse rows, so it cannot see a static reload.
 
     Several per-date aggregates join the static schedule, which is replaced
-    wholesale for the agency — no per-date version — so a new schedule changes
-    what every past date should aggregate to while every per-date row count
-    stands still.
+    wholesale for the agency, so a new schedule changes what every past date of
+    those tables should aggregate to while every per-date row count stands
+    still. Their fingerprint carries the schedule; the other tables' does not.
     """
-    from pipeline.analyze import _dates_needing_rebuild
+    from pipeline import agg_registry
+    from pipeline.analyze import _dates_needing_rebuild, _plan, _static_loaded
 
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == []
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
 
     with pg_conn.cursor() as cur:
         cur.execute(
             "UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s",
             (agency_id,),
         )
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        (strategy,) = cur.fetchone()
     pg_conn.commit()
 
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) is None
+    plan = _plan(agency_id, pg_conn, ch_client, _static_loaded(pg_conn, agency_id), strategy)
+    readers = {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+    assert {n for n, scope in plan.scopes.items() if scope is None} == readers
 
 
 def test_a_changed_static_schedule_repairs_a_past_date(pg_conn, agency_id, ch_client):

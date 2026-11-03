@@ -103,14 +103,15 @@ def test_keeps_the_old_rows_aside_and_every_row(ch_client):
 def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_id):
     """A restamp moves rows between service dates, and the per-date count
     ledger misses a date whose moves in and out cancel; marking the agency
-    makes its next analyze rebuild every date instead of trusting the ledger."""
-    from pipeline.analyze import _dates_needing_rebuild, mark_for_full_rebuild
+    makes its next analyze rebuild every table in full instead of trusting the ledger."""
+    from pipeline.analyze import _dates_needing_rebuild, _legacy_fingerprint, _plan, mark_for_full_rebuild
 
     row = _row("20260905/TripUpdate_054355.pb", "2026-09-05T05:43:55+00:00", "t", None)
     insert_updates(ch_client, agency_id, [row])
     with pg_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agg_meta (agency_id, analyzed_at, static_fingerprint) VALUES (%s, now(), 'fp')", (agency_id,)
+            "INSERT INTO agg_meta (agency_id, analyzed_at, static_fingerprint) VALUES (%s, now(), %s)",
+            (agency_id, _legacy_fingerprint(None, [])),
         )
         cur.execute(
             "INSERT INTO agg_feed_health (agency_id, date, raw_samples, total_rows, clamp_count) "
@@ -118,10 +119,11 @@ def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_
             (agency_id,),
         )
     pg_conn.commit()
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, "fp") == []
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
+    assert all(scope == [] for scope in _plan(agency_id, pg_conn, ch_client, False, None).scopes.values())
 
     mark_for_full_rebuild(pg_conn, [agency_id])
-    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, "fp") is None
+    assert all(scope is None for scope in _plan(agency_id, pg_conn, ch_client, False, None).scopes.values())
 
 
 class _WritesDuringSwap:
