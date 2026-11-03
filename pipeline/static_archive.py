@@ -25,6 +25,22 @@ _COLUMNS = ["agency_id", "content_hash", "trip_id", "stop_sequence", "stop_id", 
 _BATCH = 50_000
 
 
+# A row's join content: the archived timetable its version name maps to, else
+# the loaded one. Bound parameters only (ScheduleJoin.params), so the SQL text
+# never depends on data.
+JOIN_CONTENT_SQL = (
+    "transform(static_version_id, {join_stems:Array(String)}, {join_hashes:Array(String)}, {join_current:String})"
+)
+
+
+def archived_stop_times_sql(columns: str) -> str:
+    """The archived stop times of the contents a join binds (join_contents), as a subquery."""
+    return (
+        f"(SELECT {columns} FROM {ARCHIVE} "
+        "WHERE agency_id = {agency_id:UInt16} AND has({join_contents:Array(String)}, content_hash))"
+    )
+
+
 def content_hash(parts: list[str]) -> str:
     """The archive key for a timetable whose content parts are *parts*."""
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
