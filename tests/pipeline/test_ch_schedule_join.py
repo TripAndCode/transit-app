@@ -1,0 +1,230 @@
+"""The stop tables join each row to the timetable its version name archived."""
+
+import dataclasses
+import logging
+from datetime import date
+
+import pytest
+
+from pipeline import agg_registry, ch_aggregates, static_archive
+from pipeline.analyze import analyze
+from pipeline.clickhouse import UPDATE_COLUMNS, insert_updates
+from pipeline.static_archive import ScheduleJoin
+from pipeline.static_loader import load_static
+from tests.fixtures.synthetic_gtfs import build_static_zip
+
+AGENCY = 7
+A, B = "a" * 32, "b" * 32
+
+
+def _row(captured_at: str, trip: str, seq: int, delay: int | None, stem: str | None, route: str = "R1") -> tuple:
+    """One `updates` row in insert_updates' order (agency_id excluded)."""
+    values = dict.fromkeys(UPDATE_COLUMNS[1:])
+    values.update(
+        file_name=f"f/{captured_at}/{trip}/{seq}",
+        captured_at=captured_at,
+        trip_id=trip,
+        stop_sequence=seq,
+        dep_delay=delay,
+        route_code=route,
+        static_version_id=stem,
+    )
+    return tuple(values[column] for column in UPDATE_COLUMNS[1:])
+
+
+def test_the_dedup_keeps_one_event_with_its_latest_polls_version(ch_client):
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, "gtfs_static_20260501"),
+            _row("2026-06-01T00:05:00Z", "T1", 1, 60, "gtfs_static_20260601"),
+            _row("2026-06-01T00:00:00Z", "T2", 1, 10, None),
+        ],
+    )
+    where, params = ch_aggregates.month_where(202606)
+    rows = ch_client.query(
+        f"SELECT trip_id, dep_delay, static_version_id FROM ({ch_aggregates._dedup_select(where)}) ORDER BY trip_id",
+        parameters={"agency_id": AGENCY, **params},
+    ).result_rows
+    assert rows == [("T1", 60, "gtfs_static_20260601"), ("T2", 10, "")]
+
+
+def test_the_raw_source_keeps_every_rows_version(ch_client):
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, "gtfs_static_20260501"),
+            _row("2026-06-01T00:05:00Z", "T1", 1, None, None),
+        ],
+    )
+    where, params = ch_aggregates.month_where(202606)
+    rows = ch_client.query(
+        f"SELECT static_version_id FROM ({ch_aggregates._raw_select(where)}) ORDER BY static_version_id",
+        parameters={"agency_id": AGENCY, **params},
+    ).result_rows
+    assert rows == [("",), ("gtfs_static_20260501",)]
+
+
+def _archive(ch_client, content: str, rows: list[tuple[str, int, str]]) -> None:
+    """(trip_id, stop_sequence, stop_id) rows archived for AGENCY under *content*."""
+    ch_client.insert(
+        static_archive.ARCHIVE,
+        [(AGENCY, content, trip, seq, stop, None, None) for trip, seq, stop in rows],
+        column_names=[
+            "agency_id",
+            "content_hash",
+            "trip_id",
+            "stop_sequence",
+            "stop_id",
+            "arrival_time",
+            "departure_time",
+        ],
+    )
+
+
+def _stops_by_date(ch_client, join: ScheduleJoin) -> set[tuple]:
+    sql, params = ch_aggregates.select_sql("agg_stop_daily", 202606, join=join)
+    rows = ch_client.query(f"SELECT date, stop_id FROM ({sql})", parameters={"agency_id": AGENCY, **params})
+    return set(rows.result_rows)
+
+
+def test_rows_join_the_timetable_their_version_archived(ch_client):
+    _archive(ch_client, A, [("T1", 1, "SA")])
+    _archive(ch_client, B, [("T1", 1, "SB")])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "v_a"), _row("2026-06-02T00:00:00Z", "T1", 1, 30, "v_b")],
+    )
+    join = ScheduleJoin(["v_a", "v_b"], [A, B], B)
+    assert _stops_by_date(ch_client, join) == {(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")}
+
+
+def test_unmapped_and_unstamped_rows_join_the_loaded_timetable(ch_client):
+    _archive(ch_client, B, [("T1", 1, "SB")])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, None),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+        ],
+    )
+    assert _stops_by_date(ch_client, ScheduleJoin([], [], B)) == {(date(2026, 6, 1), "SB"), (date(2026, 6, 2), "SB")}
+
+
+def test_a_static_joined_build_without_a_join_is_refused(ch_client):
+    with pytest.raises(ValueError, match="ScheduleJoin"):
+        ch_aggregates.build(ch_client, AGENCY, {"agg_stop_daily": ch_aggregates.Rebuild([202606], None)})
+
+
+def test_a_build_reports_the_rows_that_joined_the_loaded_timetable(ch_client, caplog):
+    _archive(ch_client, A, [("T1", 1, "SA")])
+    _archive(ch_client, B, [("T1", 1, "SB")])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, "v_a"),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, None),
+            _row("2026-06-03T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+        ],
+    )
+    join = ScheduleJoin(["v_a"], [A], B)
+    with caplog.at_level(logging.INFO, logger="pipeline.ch_aggregates"):
+        ch_aggregates.build(ch_client, AGENCY, {"agg_stop_daily": ch_aggregates.Rebuild([202606], None)}, join=join)
+    ch_aggregates.swap(ch_client, "agg_stop_daily", AGENCY, [202606])
+    stops = ch_client.query(
+        "SELECT date, stop_id FROM agg_stop_daily WHERE agency_id = {a:Int32} ORDER BY date", parameters={"a": AGENCY}
+    ).result_rows
+    assert stops == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB"), (date(2026, 6, 3), "SB")]
+    assert "2 rows of versions not archived joined the loaded timetable" in caplog.text
+
+
+def test_a_build_of_some_dates_reads_and_reports_only_their_rows(ch_client, caplog):
+    _archive(ch_client, B, [("T1", 1, "SB")])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, "gtfs_static_19990102"),
+        ],
+    )
+    rebuild = {"agg_stop_daily": ch_aggregates.Rebuild([202606], [date(2026, 6, 2)])}
+    with caplog.at_level(logging.INFO, logger="pipeline.ch_aggregates"):
+        ch_aggregates.build(ch_client, AGENCY, rebuild, join=ScheduleJoin([], [], B))
+    assert "1 rows of versions not archived joined the loaded timetable (gtfs_static_19990102: 1)" in caplog.text
+
+
+def _timetable(tmp_path, name: str, stop: str) -> str:
+    """A timetable zip, version-named *name*, whose trip T1 makes its first stop at *stop*."""
+    return build_static_zip(
+        tmp_path,
+        stops_rows=["SA,Stop A,34.39,132.45", "SB,Stop B,34.40,132.46"],
+        routes_rows=["R1,1"],
+        trips_rows=["T1,R1,,"],
+        stop_times_rows=[f"T1,1,{stop},08:00:00,08:00:00"],
+        filename=f"{name}.zip",
+    )
+
+
+def _stop_days(pg_conn, agency_id: int) -> list[tuple]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, stop_id FROM agg_stop_daily WHERE agency_id = %s ORDER BY date, stop_id", (agency_id,)
+        )
+        return cur.fetchall()
+
+
+def test_a_reload_rebuilds_each_date_against_its_own_timetable(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch, caplog
+):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
+    analyze(agency_id, pg_conn, ch_client)
+    load_static(_timetable(tmp_path, "timetable_b", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-02T00:00:00Z", "T1", 1, 30, "timetable_b")])
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    # The reload rebuilt 2026-06-01 too, and it joined the timetable its rows were ingested against.
+    assert "scope agg_stop_daily: every date" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
+
+    table = agg_registry.TABLES["agg_stop_daily"]
+    monkeypatch.setitem(agg_registry.TABLES, "agg_stop_daily", dataclasses.replace(table, version=table.version + 1))
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_stop_daily: every date" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
+
+
+def test_rows_with_no_or_an_unknown_version_join_the_loaded_timetable(tmp_path, pg_conn, agency_id, ch_client, caplog):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            _row("2026-06-01T00:00:00Z", "T1", 1, 30, None),
+            _row("2026-06-02T00:00:00Z", "T1", 1, 30, "gtfs_static_19990101"),
+        ],
+    )
+    with caplog.at_level(logging.INFO, logger="pipeline.ch_aggregates"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SA")]
+    assert "2 rows of versions not archived joined the loaded timetable" in caplog.text
+
+
+def test_rows_of_an_archived_version_join_it_with_no_timetable_loaded(tmp_path, pg_conn, agency_id, ch_client):
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        for table in ("static_stop_times", "static_trips", "static_routes", "static_stops"):
+            cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]

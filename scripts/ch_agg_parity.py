@@ -21,9 +21,10 @@ table needs is built straight from `updates`. A raw table reads `updates`
 without the dedup either way.
 
 Neither mode reads a ClickHouse aggregate table, so both run before the schema
-that adds them is applied. The static-joined tables join ClickHouse's
-static_stop_times, the schedule mirror that schema adds and only an analyze
-fills, so both modes skip them until it holds the agency's schedule. Both
+that adds them is applied. The static-joined tables join the timetable archive
+(pipeline.static_archive) by each row's version, falling back to the loaded
+timetable, so both modes skip them until an analyze has archived the agency's
+loaded timetable, which they find in Postgres as analyze does. Both
 connections are read-only: ClickHouse with readonly=1, Postgres in a read-only
 session.
 """
@@ -44,10 +45,12 @@ sys.path.insert(0, str(ROOT))
 import clickhouse_connect  # noqa: E402  (sys.path injection above)
 import psycopg2  # noqa: E402
 
-from pipeline import ch_aggregates  # noqa: E402
+from pipeline import ch_aggregates, static_archive  # noqa: E402
 from pipeline.analyze import _ledger_counts  # noqa: E402
 from pipeline.clickhouse import ch_conn_kwargs  # noqa: E402
 from pipeline.db import build_dedup_ch_sql  # noqa: E402
+from pipeline.static_archive import ScheduleJoin  # noqa: E402
+from pipeline.static_content import static_parts  # noqa: E402
 
 _TIMEOUT_SEC = 3600
 
@@ -95,16 +98,28 @@ def differences(ch_rows, pg_rows, dates, *, date_at: int) -> tuple[list, list]:
     return sorted(ch - pg, key=str), sorted(pg - ch, key=str)
 
 
-def unmirrored(ch, agency_id: int) -> frozenset[str]:
-    """The static-joined tables while ClickHouse holds no schedule for the agency, else none."""
-    mirror = ch.query(
-        "SELECT 1 FROM system.tables WHERE database = currentDatabase() AND name = {name:String}",
-        parameters={"name": ch_aggregates.STATIC_STOP_TIMES},
-    ).result_rows
-    if mirror and ch_aggregates.static_mirror_fingerprint(ch, agency_id) is not None:
-        return frozenset()
-    print(f"{', '.join(sorted(ch_aggregates.STATIC_JOINED_TABLES))}: skipped; no schedule mirror until an analyze")
-    return ch_aggregates.STATIC_JOINED_TABLES
+def unarchived(ch, conn, agency_id: int) -> tuple[frozenset[str], ScheduleJoin | None]:
+    """The static-joined tables to skip, and the join for the rest: none is
+    skipped once the agency's loaded timetable is archived."""
+    parts = static_parts(agency_id, conn, True)
+    key = static_archive.content_hash(parts) if static_archive.stop_time_count(parts) else None
+    archived = False
+    if key is not None:
+        names = {
+            row[0] for row in ch.query("SELECT name FROM system.tables WHERE database = currentDatabase()").result_rows
+        }
+        archived = {static_archive.ARCHIVE, static_archive.VERSION_MAP} <= names and bool(
+            ch.query(
+                f"SELECT count() FROM {static_archive.ARCHIVE} "
+                "WHERE agency_id = {agency:Int32} AND content_hash = {key:String}",
+                parameters={"agency": agency_id, "key": key},
+            ).result_rows[0][0]
+        )
+    if not archived:
+        tables = ", ".join(sorted(ch_aggregates.STATIC_JOINED_TABLES))
+        print(f"{tables}: skipped; the loaded timetable is not archived until an analyze")
+        return ch_aggregates.STATIC_JOINED_TABLES, None
+    return frozenset(), static_archive.schedule_join(ch, agency_id, key)
 
 
 def _pg_month(conn, table: str, agency_id: int, month: int) -> list:
@@ -128,7 +143,7 @@ def parity(ch, conn, agency_id: int) -> int:
     if not dates:
         print("parity: nothing to compare: no ledger date matches ClickHouse's counts")
         return 1
-    skipped = unmirrored(ch, agency_id)
+    skipped, join = unarchived(ch, conn, agency_id)
     failures = 0
     for table in ch_aggregates.TABLES:
         if table in skipped:
@@ -136,7 +151,7 @@ def parity(ch, conn, agency_id: int) -> int:
         compared = 0
         date_at = ch_aggregates.COLUMNS[table].index("date")
         for month in ch_aggregates.months_of(dates):
-            sql, params = ch_aggregates.select_sql(table, month)
+            sql, params = ch_aggregates.select_sql(table, month, join=join)
             ch_rows = ch.query(sql, parameters={"agency_id": agency_id, **params}).result_rows
             pg_rows = _pg_month(conn, table, agency_id, month)
             only_ch, only_pg = differences(ch_rows, pg_rows, dates, date_at=date_at)
@@ -152,7 +167,10 @@ def parity(ch, conn, agency_id: int) -> int:
         if not whole_history_current(stored, live):
             print(f"{table}: skipped; a whole-history row spans every date, and not every date is current")
             continue
-        ch_rows = ch.query(ch_aggregates.whole_history_sql(table), parameters={"agency_id": agency_id}).result_rows
+        params = join.params() if join is not None and table in ch_aggregates.STATIC_JOINED_TABLES else {}
+        ch_rows = ch.query(
+            ch_aggregates.whole_history_sql(table), parameters={"agency_id": agency_id, **params}
+        ).result_rows
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT {', '.join(ch_aggregates.COLUMNS[table])} FROM {table} WHERE agency_id = %s", (agency_id,)
@@ -177,10 +195,10 @@ def _timed(ch, sql: str, params: dict) -> float:
     return time.perf_counter() - start
 
 
-def timing(ch, agency_id: int) -> int:
+def timing(ch, conn, agency_id: int) -> int:
     months = ch_aggregates.source_months(ch, agency_id)
     print(f"agency {agency_id}: {len(months)} months")
-    skipped = unmirrored(ch, agency_id)
+    skipped, join = unarchived(ch, conn, agency_id)
     tables = [table for table in ch_aggregates.MONTHLY_TABLES if table not in skipped]
     totals = dict.fromkeys(["dedup", *tables], 0.0)
     for month in months:
@@ -191,7 +209,7 @@ def timing(ch, agency_id: int) -> int:
             )
         }
         for table in tables:
-            sql, month_params = ch_aggregates.select_sql(table, month)
+            sql, month_params = ch_aggregates.select_sql(table, month, join=join)
             line[table] = _timed(ch, sql, {"agency_id": agency_id, **month_params})
         for key, seconds in line.items():
             totals[key] += seconds
@@ -206,11 +224,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--time-only", action="store_true")
     args = parser.parse_args(argv)
     ch = clickhouse_connect.get_client(**ch_conn_kwargs(), settings={"readonly": 1}, send_receive_timeout=_TIMEOUT_SEC)
-    if args.time_only:
-        return timing(ch, args.agency)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         conn.set_session(readonly=True)
+        if args.time_only:
+            return timing(ch, conn, args.agency)
         return parity(ch, conn, args.agency)
     finally:
         conn.close()

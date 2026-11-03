@@ -1,8 +1,9 @@
 """Aggregates computed and stored in ClickHouse.
 
 Three kinds of table live here. The date-keyed aggregates (TABLES) are built
-from `updates` by a ClickHouse GROUP BY; STATIC_JOINED_TABLES also join
-STATIC_STOP_TIMES, a copy of the agency's Postgres schedule. INTERNAL_TABLES,
+from `updates` by a ClickHouse GROUP BY; STATIC_JOINED_TABLES also join each
+row to the archived timetable its version name maps to (`ScheduleJoin`), the
+loaded one when it maps to none. INTERNAL_TABLES,
 also date-keyed and built the same way, exist only in ClickHouse: COUNTS holds
 the exact delay distribution, ROUTE_STOP_DAYS the (stop, route) pairs each date
 observed. The whole-history aggregates (WHOLE_HISTORY_TABLES) are finalized
@@ -27,12 +28,15 @@ Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
 """
 
+import logging
+from collections import Counter
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
 from api.range import TIME_BAND_RANGES
+from pipeline import static_archive
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
 from pipeline.histogram import (
@@ -44,15 +48,27 @@ from pipeline.histogram import (
     WIDTH,
 )
 from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.static_archive import ScheduleJoin
 
-# The agency's Postgres static_stop_times, mirrored for the aggregates that join the schedule.
+logger = logging.getLogger(__name__)
+
+# A schedule mirror nothing reads or fills: schema.sql still creates it, and the test fixtures drop it.
 STATIC_STOP_TIMES = "static_stop_times"
-_STATIC_STOP_TIMES_COLUMNS = ("agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time")
 
 
 def months_of(dates: Iterable[date]) -> list[int]:
     """The months holding *dates*, as ascending YYYYMM integers (`toYYYYMM`'s form)."""
     return sorted({d.year * 100 + d.month for d in dates})
+
+
+def _version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
+    """Each version name among the agency's `updates` rows matching *where* ('' for none), with its row count."""
+    rows = ch.query(
+        f"SELECT ifNull(u.static_version_id, '') AS stem, count() FROM {UPDATES_TABLE} AS u "
+        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where}) GROUP BY stem",
+        parameters={"agency_id": agency_id, **params},
+    ).result_rows
+    return dict(rows)
 
 
 def month_bounds(month: int) -> tuple[date, date]:
@@ -74,6 +90,14 @@ def month_where(month: int) -> tuple[str, dict]:
         "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64}",
         {"month_start": service_day_start_utc(first), "month_end": service_day_start_utc(following)},
     )
+
+
+def _scope_where(month: int, scopes: Iterable[list[date] | None]) -> tuple[str, dict]:
+    """The predicate for the union of *scopes* within *month*: the whole month when any is None."""
+    scopes = list(scopes)
+    if any(scope is None for scope in scopes):
+        return month_where(month)
+    return days_where(sorted({day for scope in scopes for day in scope or ()}))
 
 
 def days_where(days: list[date]) -> tuple[str, dict]:
@@ -239,11 +263,22 @@ _TIME_BAND = (
     + ", 'none')"
 )
 
-# The agency's mirrored schedule, joined on the stop event's trip and sequence.
+
+# Each row's timetable, the archived one its version name maps to, else the
+# loaded one (join_current), computed once per row before the join.
+def _with_join_content(source: str) -> str:
+    return (
+        "SELECT *, transform(static_version_id, {join_stems:Array(String)}, {join_hashes:Array(String)}, "
+        f"{{join_current:String}}) AS join_content FROM ({source})"
+    )
+
+
+# The archived stop times of the contents the rows join, on the stop event's trip and sequence.
 _STATIC_JOIN = (
-    f"INNER JOIN (SELECT trip_id, stop_sequence, stop_id FROM {STATIC_STOP_TIMES} "
-    "WHERE agency_id = {agency_id:UInt16}) AS st "
-    "ON st.trip_id = d.trip_id AND st.stop_sequence = toInt32(d.stop_sequence)"
+    f"INNER JOIN (SELECT content_hash, trip_id, stop_sequence, stop_id FROM {static_archive.ARCHIVE} "
+    "WHERE agency_id = {agency_id:UInt16} AND has({join_contents:Array(String)}, content_hash)) AS st "
+    "ON st.content_hash = d.join_content AND st.trip_id = d.trip_id "
+    "AND st.stop_sequence = toInt32(d.stop_sequence)"
 )
 
 
@@ -254,7 +289,7 @@ def _stop_daily(source: str) -> str:
         FROM (
             SELECT st.stop_id AS stop_id, d.date AS date, ifNull(d.service_type, '') AS service_type,
                    {_TIME_BAND} AS time_band, sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
-            FROM ({source}) AS d
+            FROM ({_with_join_content(source)}) AS d
             {_STATIC_JOIN}
             GROUP BY stop_id, date, service_type, time_band
         )
@@ -269,7 +304,7 @@ def _route_stop_daily(source: str) -> str:
             SELECT assumeNotNull(d.route_code) AS route_code, st.stop_id AS stop_id, d.date AS date,
                    ifNull(d.service_type, '') AS service_type, {_TIME_BAND} AS time_band,
                    sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
-            FROM ({source}) AS d
+            FROM ({_with_join_content(source)}) AS d
             {_STATIC_JOIN}
             WHERE d.route_code IS NOT NULL
             GROUP BY route_code, stop_id, date, service_type, time_band
@@ -281,7 +316,7 @@ def _stop_route_days(source: str) -> str:
     return f"""
         SELECT DISTINCT toInt32({{agency_id:UInt16}}) AS agency_id, d.date AS date, st.stop_id AS stop_id,
                assumeNotNull(d.route_code) AS route_code
-        FROM ({source}) AS d
+        FROM ({_with_join_content(source)}) AS d
         {_STATIC_JOIN}
         WHERE d.route_code IS NOT NULL
     """
@@ -480,7 +515,7 @@ INTERNAL_TABLES: tuple[str, ...] = (COUNTS, ROUTE_STOP_DAYS)
 # The date-keyed tables copied into Postgres; `build` fills these and INTERNAL_TABLES month by month.
 TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name not in INTERNAL_TABLES)
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, *INTERNAL_TABLES)
-# The tables whose rows join the agency's mirrored schedule, so an agency has none until analyze mirrors it.
+# The tables whose rows join the timetable archive by each row's version, so a build of one needs a ScheduleJoin.
 STATIC_JOINED_TABLES: frozenset[str] = frozenset(
     {"agg_stop_daily", "agg_route_stop_daily", ROUTE_STOP_DAYS, "agg_stop_routes"}
 )
@@ -562,19 +597,28 @@ def work_table(table: str, agency_id: int) -> str:
 
 def _dedup_select(where: str) -> str:
     """The dedup of the agency's `updates` rows matching *where*, with every column a table reads."""
-    return build_dedup_ch_sql(extra_where=where, include_captured_at=True)
+    return build_dedup_ch_sql(extra_where=where, include_captured_at=True, include_static_version=True)
 
 
 def _raw_select(where: str) -> str:
     """The agency's `updates` rows matching *where*, with no dedup: every poll, delay or not."""
     return (
         f"SELECT {service_date_ch('u.captured_at')} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
-        f"u.stop_sequence AS stop_sequence FROM {UPDATES_TABLE} AS u "
+        f"u.stop_sequence AS stop_sequence, ifNull(u.static_version_id, '') AS static_version_id "
+        f"FROM {UPDATES_TABLE} AS u "
         f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where})"
     )
 
 
-def select_sql(table: str, month: int, days: list[date] | None = None, source: str | None = None) -> tuple[str, dict]:
+def select_sql(
+    table: str,
+    month: int,
+    days: list[date] | None = None,
+    source: str | None = None,
+    *,
+    join: ScheduleJoin | None = None,
+    present: Iterable[str] | None = None,
+) -> tuple[str, dict]:
     """The SELECT computing *table*'s rows for the agency bound as `agency_id`:
     those of one month, or of only *days* within it.
 
@@ -583,6 +627,9 @@ def select_sql(table: str, month: int, days: list[date] | None = None, source: s
     month only one table needs. *source* names a table already holding the
     month's dedup (`build`'s dedup table), which it reads instead. A raw table
     reads `updates` without the dedup, so it takes no *source*.
+
+    A table in STATIC_JOINED_TABLES also binds *join*'s parameters, narrowed to
+    the contents the version names in *present* join (`ScheduleJoin.params`).
     """
     if _checked(table) not in _SPECS:
         raise ValueError(f"{table!r} is not built by month")
@@ -596,6 +643,8 @@ def select_sql(table: str, month: int, days: list[date] | None = None, source: s
         rows, params = f"SELECT * FROM {source}", {}
     else:
         rows, params = f"SELECT * FROM {source} WHERE has({{days:Array(Date)}}, date)", {"days": days}
+    if join is not None and table in STATIC_JOINED_TABLES:
+        params = {**params, **join.params(present)}
     return spec.select(rows), params
 
 
@@ -617,7 +666,11 @@ def _untimed(label: str) -> AbstractContextManager:
 
 
 def build(
-    ch, agency_id: int, rebuilds: dict[str, Rebuild], step: Callable[[str], AbstractContextManager] = _untimed
+    ch,
+    agency_id: int,
+    rebuilds: dict[str, Rebuild],
+    step: Callable[[str], AbstractContextManager] = _untimed,
+    join: ScheduleJoin | None = None,
 ) -> None:
     """Compute each of *rebuilds* into its table's work table.
 
@@ -633,7 +686,17 @@ def build(
     are dropped first, which also clears ones a dead run left behind, and the
     dedup table again once every month is built; after a failure the caller's
     `drop_work_tables` clears them.
+
+    A table in STATIC_JOINED_TABLES needs *join*. The rows such tables are
+    rebuilt from each month (the whole month, or only its changed dates) are
+    first read for their version names, which narrow the archive side of the
+    join to the contents those rows join; the rows whose name maps to no
+    archived timetable are counted and logged once.
     """
+    joined = sorted(table for table in rebuilds if table in STATIC_JOINED_TABLES)
+    if joined and join is None:
+        raise ValueError(f"{joined[0]!r} joins the timetable archive; build it with a ScheduleJoin")
+    unarchived: Counter[str] = Counter()
     dedup = dedup_table(agency_id)
     with step("ClickHouse build setup"):
         for table in rebuilds:
@@ -649,29 +712,39 @@ def build(
         days = {
             table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
         }
+        stems = None
+        joined_days = [table_days for table, table_days in days.items() if table in STATIC_JOINED_TABLES]
+        if join is not None and joined_days:
+            with step("ClickHouse version names"):
+                counts = _version_names(ch, agency_id, *_scope_where(month, joined_days))
+            stems = list(counts)
+            unarchived.update({stem: n for stem, n in counts.items() if stem not in join.stems})
         deduped = {table: table_days for table, table_days in days.items() if not _SPECS[table].raw}
         if len(deduped) == 1:
             ((table, table_days),) = deduped.items()
             with step(f"{table}: ClickHouse build"):
-                _build_month(ch, table, agency_id, month, table_days, source=None)
+                _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
         elif deduped:
-            if any(table_days is None for table_days in deduped.values()):
-                where, params = month_where(month)
-            else:
-                where, params = days_where(sorted({day for table_days in deduped.values() for day in table_days or ()}))
+            where, params = _scope_where(month, deduped.values())
             with step("ClickHouse dedup"):
                 ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
             for table, table_days in deduped.items():
                 with step(f"{table}: ClickHouse build"):
-                    _build_month(ch, table, agency_id, month, table_days, source=dedup)
+                    _build_month(ch, table, agency_id, month, table_days, source=dedup, join=join, present=stems)
             with step("ClickHouse build setup"):
                 ch.command(f"TRUNCATE TABLE {dedup}")
         for table, table_days in days.items():
             if _SPECS[table].raw:
                 with step(f"{table}: ClickHouse build"):
-                    _build_month(ch, table, agency_id, month, table_days, source=None)
+                    _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
     with step("ClickHouse build setup"):
         ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
+    if unarchived and join is not None:
+        joined_to = "joined the loaded timetable" if join.current else "had no timetable to join"
+        detail = ", ".join(f"{stem or '(none)'}: {n:,}" for stem, n in unarchived.most_common(5))
+        logger.info(
+            f"  schedule join: {sum(unarchived.values()):,} rows of versions not archived {joined_to} ({detail})"
+        )
 
 
 def _days_in(changed: list[date] | None, month: int) -> list[date] | None:
@@ -681,7 +754,16 @@ def _days_in(changed: list[date] | None, month: int) -> list[date] | None:
     return [day for day in changed if day.year * 100 + day.month == month] or None
 
 
-def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | None, source: str | None) -> None:
+def _build_month(
+    ch,
+    table: str,
+    agency_id: int,
+    month: int,
+    days: list[date] | None,
+    source: str | None,
+    join: ScheduleJoin | None = None,
+    present: list[str] | None = None,
+) -> None:
     work = work_table(table, agency_id)
     columns = ", ".join(COLUMNS[table])
     if days is not None:
@@ -691,7 +773,7 @@ def _build_month(ch, table: str, agency_id: int, month: int, days: list[date] | 
             "AND NOT has({days:Array(Date)}, date)",
             parameters={"agency_id": agency_id, "month": month, "days": days},
         )
-    sql, params = select_sql(table, month, days, source=source)
+    sql, params = select_sql(table, month, days, source=source, join=join, present=present)
     ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 
@@ -719,7 +801,8 @@ def whole_history_sql(table: str, source: str | None = None) -> str:
 
     *source* yields the agency's rows of the table's internal table. Without it
     those are computed in the query from the agency's whole history: what a
-    read-only session runs.
+    read-only session runs. Computed so, a table in STATIC_JOINED_TABLES binds
+    a ScheduleJoin's parameters (`ScheduleJoin.params`).
     """
     if table not in _WHOLE_SPECS:
         raise ValueError(f"{table!r} is not a whole-history aggregate")
@@ -829,53 +912,8 @@ def drop_work_tables(ch, agency_id: int) -> None:
     for name in (
         *(work_table(table, agency_id) for table in ALL_TABLES),
         dedup_table(agency_id),
-        _static_work(agency_id),
     ):
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
-
-
-def _static_work(agency_id: int) -> str:
-    return f"{STATIC_STOP_TIMES}__work_a{int(agency_id)}"
-
-
-def static_mirror_fingerprint(ch, agency_id: int) -> str | None:
-    """The fingerprint the agency's mirrored schedule was copied under, or None when it has none."""
-    rows = ch.query(
-        f"SELECT fingerprint FROM {STATIC_STOP_TIMES} WHERE agency_id = {{agency_id:Int32}} LIMIT 1",
-        parameters={"agency_id": agency_id},
-    ).result_rows
-    return rows[0][0] if rows else None
-
-
-def replace_static_stop_times(ch, agency_id: int, rows: Iterable[tuple], fingerprint: str) -> int:
-    """Replace the agency's mirrored schedule with *rows*, tagged *fingerprint*; return how many.
-
-    Built in a work table and swapped in whole, so a join never sees half a schedule.
-    No rows drops the agency's partition.
-    """
-    work = _static_work(agency_id)
-    columns = [*_STATIC_STOP_TIMES_COLUMNS, "fingerprint"]
-    ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-    ch.command(f"CREATE TABLE {work} AS {STATIC_STOP_TIMES}")
-    copied = 0
-    try:
-        batch: list[tuple] = []
-        for row in rows:
-            batch.append((*row, fingerprint))
-            if len(batch) == 50_000:
-                ch.insert(work, batch, column_names=columns)
-                copied += len(batch)
-                batch = []
-        if batch:
-            ch.insert(work, batch, column_names=columns)
-            copied += len(batch)
-        if copied:
-            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} REPLACE PARTITION {int(agency_id)} FROM {work}")
-        else:
-            ch.command(f"ALTER TABLE {STATIC_STOP_TIMES} DROP PARTITION {int(agency_id)}")
-    finally:
-        ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
-    return copied
 
 
 def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:

@@ -1,6 +1,6 @@
-"""The archive's content key."""
+"""The archive's content key and the schedule join's parameters."""
 
-from pipeline.static_archive import content_hash
+from pipeline.static_archive import ScheduleJoin, content_hash
 
 
 def test_the_key_is_stable_for_the_same_parts():
@@ -11,3 +11,23 @@ def test_the_key_is_stable_for_the_same_parts():
 
 def test_a_changed_part_changes_the_key():
     assert content_hash(["static_stop_times:3:42"]) != content_hash(["static_stop_times:3:43"])
+
+
+def test_a_join_binds_every_mapped_content_and_the_loaded_one():
+    join = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc")
+    assert join.params() == {
+        "join_stems": ["s0", "s1"],
+        "join_hashes": ["h0", "h1"],
+        "join_current": "hc",
+        "join_contents": ["h0", "h1", "hc"],
+    }
+
+
+def test_a_month_binds_only_the_contents_its_stems_join():
+    join = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc")
+    assert join.params(["s1"])["join_contents"] == ["h1"]
+    assert join.params(["s1", "", "gtfs_static_19990101"])["join_contents"] == ["h1", "hc"]
+
+
+def test_with_no_loaded_timetable_unmapped_rows_join_nothing():
+    assert ScheduleJoin(["s0"], ["h0"], "").params([""])["join_contents"] == []
