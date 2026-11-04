@@ -31,3 +31,8 @@ def test_a_month_binds_only_the_contents_its_stems_join():
 
 def test_with_no_loaded_timetable_unmapped_rows_join_nothing():
     assert ScheduleJoin(["s0"], ["h0"], "").params([""])["join_contents"] == []
+
+
+def test_a_name_joins_its_mapped_content_else_the_loaded_one():
+    content_of = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc").content_of()
+    assert [content_of(stem) for stem in ("s1", "", "gtfs_static_19990101")] == ["h1", "hc", "hc"]

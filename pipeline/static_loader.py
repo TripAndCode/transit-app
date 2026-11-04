@@ -174,15 +174,16 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
             ``*static*.zip`` inside it is picked.
         agency_id: The agency id rows are scoped to.
         conn: A psycopg2 connection. load_static first commits the
-            outgoing timetable's planned trips, then commits the load as one
-            transaction, then runs ANALYZE and commits again, before
-            returning; any uncommitted work the caller already had open on
-            ``conn`` is committed with the first of these, so it cannot be
-            rolled back alongside the load. It never rolls back: if it
-            raises, the caller rolls back before reusing ``conn``, and a
-            failure before the load's commit leaves none of the load in
-            place. The saved planned trips stay, and stay right: the
-            timetable they came from is still the one loaded.
+            outgoing timetable's planned trips, then its route headway
+            medians when they were not yet kept (pipeline.static_headways),
+            then commits the load as one transaction, then runs ANALYZE and
+            commits again, before returning; any uncommitted work the caller
+            already had open on ``conn`` is committed with the first of
+            these, so it cannot be rolled back alongside the load. It never
+            rolls back: if it raises, the caller rolls back before reusing
+            ``conn``, and a failure before the load's commit leaves none of
+            the load in place. The saved planned trips and medians stay, and
+            stay right: the timetable they came from is still the one loaded.
         ch_client: A ClickHouse client. The outgoing timetable is archived
             (pipeline.static_archive) before any table is replaced; if that
             fails, load_static raises and nothing is replaced. A concurrent

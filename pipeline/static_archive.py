@@ -11,7 +11,7 @@ version map says which content each name carried.
 import hashlib
 import logging
 import secrets
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from typing import NamedTuple
 
@@ -181,6 +181,11 @@ class ScheduleJoin(NamedTuple):
     stems: list[str]
     hashes: list[str]
     current: str
+
+    def content_of(self) -> Callable[[str], str]:
+        """The content each version name joins: its mapped one, else the loaded one."""
+        mapped = dict(zip(self.stems, self.hashes, strict=True))
+        return lambda stem: mapped.get(stem, self.current)
 
     def params(self, present: Iterable[str] | None = None) -> dict:
         """The join's bound parameters. *present*, the version names of the rows

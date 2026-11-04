@@ -1289,9 +1289,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # A timetable with no kept medians falls back to the loaded one's;
             # a route with no median counts no long gaps (count_long_gaps).
             assert join is not None  # scans_headways put the map in joins_schedule
-            mapped = dict(zip(join.stems, join.hashes, strict=True))
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                dominant = dominant_contents(ch_headway.result_rows, lambda stem: mapped.get(stem, join.current))
+                dominant = dominant_contents(ch_headway.result_rows, join.content_of())
             medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
             fell_back = sum(1 for content in dominant.values() if content not in {c for c, _route in medians})
             if fell_back:
