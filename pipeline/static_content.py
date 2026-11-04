@@ -20,8 +20,9 @@ each timetable it keeps by it."""
 #     route_code comes from; route_short_name has no reader here.
 #
 # agg_route_headway is skipped on a run with no changed date on the strength
-# of these columns alone, and agg_route_headway_daily reads its median back to
-# threshold its long gaps, so the median's inputs have to be covered for both.
+# of these columns alone, and pipeline.static_headways computes each
+# timetable's long-gap medians from the same inputs, keyed by the content these
+# parts hash to, so the median's inputs have to be covered for both.
 STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
     "static_stop_times": ("trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"),
     "static_trips": ("trip_id", "route_id", "service_id"),

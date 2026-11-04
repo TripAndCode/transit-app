@@ -36,9 +36,10 @@ from datetime import date, datetime
 
 from psycopg2.extras import execute_values
 
-from pipeline import static_archive
+from pipeline import static_archive, static_headways
 from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
+from pipeline.static_content import static_parts
 from pipeline.stop_clusters import rebuild_stop_clusters
 
 logger = logging.getLogger(__name__)
@@ -173,15 +174,16 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
             ``*static*.zip`` inside it is picked.
         agency_id: The agency id rows are scoped to.
         conn: A psycopg2 connection. load_static first commits the
-            outgoing timetable's planned trips, then commits the load as one
-            transaction, then runs ANALYZE and commits again, before
-            returning; any uncommitted work the caller already had open on
-            ``conn`` is committed with the first of these, so it cannot be
-            rolled back alongside the load. It never rolls back: if it
-            raises, the caller rolls back before reusing ``conn``, and a
-            failure before the load's commit leaves none of the load in
-            place. The saved planned trips stay, and stay right: the
-            timetable they came from is still the one loaded.
+            outgoing timetable's planned trips, then its route headway
+            medians when they were not yet kept (pipeline.static_headways),
+            then commits the load as one transaction, then runs ANALYZE and
+            commits again, before returning; any uncommitted work the caller
+            already had open on ``conn`` is committed with the first of
+            these, so it cannot be rolled back alongside the load. It never
+            rolls back: if it raises, the caller rolls back before reusing
+            ``conn``, and a failure before the load's commit leaves none of
+            the load in place. The saved planned trips and medians stay, and
+            stay right: the timetable they came from is still the one loaded.
         ch_client: A ClickHouse client. The outgoing timetable is archived
             (pipeline.static_archive) before any table is replaced; if that
             fails, load_static raises and nothing is replaced. A concurrent
@@ -223,7 +225,13 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
         # ingested against it is joined to it after this load. Raising here
         # leaves every table as it was.
         static_archive.require_tables(ch_client)
-        static_archive.archive_loaded(conn, ch_client, agency_id)
+        outgoing = static_parts(agency_id, conn, True)
+        key = static_archive.archive_loaded(conn, ch_client, agency_id, outgoing)
+        if key and static_headways.record_route_headways(conn, agency_id, key, outgoing):
+            # Committed now, like the capture above: the medians belong to the
+            # outgoing timetable, and held through the reload their row locks
+            # would make a concurrent analyze recording the same one wait.
+            conn.commit()
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")

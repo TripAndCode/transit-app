@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from pipeline import agg_sql, ch_aggregates, db, headways
+from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways
 from pipeline.db import build_stop_visits_ch_sql
 
 # Versions of the tables built in the loops below, which default to 1. A bump
@@ -75,6 +75,10 @@ def _headway_daily() -> list[str]:
         _clamp(),
         inspect.getsource(headways.reconstruct_headways),
         inspect.getsource(headways.pool_daily_gaps),
+        inspect.getsource(headways.dominant_contents),
+        inspect.getsource(static_archive.ScheduleJoin.content_of),
+        inspect.getsource(headways.thresholds),
+        inspect.getsource(static_headways.route_medians),
         inspect.getsource(headways.daily_headway_rows),
         inspect.getsource(headways.count_long_gaps),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
@@ -89,7 +93,15 @@ def _entries() -> list[AggTable]:
         AggTable("agg_feed_health", 1, Kind.DATED, False, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable("agg_service_delivered_daily", 1, Kind.DATED, False, lambda: [agg_sql.service_delivered_ch_sql("")]),
         AggTable("agg_schedule_revision_daily", 1, Kind.DATED, False, lambda: [agg_sql.schedule_revision_ch_sql("")]),
-        AggTable("agg_route_headway", 1, Kind.STATIC_ONLY, True, lambda: [agg_sql.route_headway_sql()]),
+        AggTable(
+            "agg_route_headway",
+            1,
+            Kind.STATIC_ONLY,
+            True,
+            # pipeline.static_headways keeps each timetable's medians under this
+            # version, so the SQL computing them is rendered here too.
+            lambda: [agg_sql.route_headway_sql(), agg_sql.route_headway_sql(all_routes=True)],
+        ),
         AggTable(
             "agg_route_headway_daily",
             1,

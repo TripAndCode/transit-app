@@ -24,11 +24,11 @@
     "version": 1
   },
   "agg_route_headway": {
-    "hash": "cdfa3cd7f31f5baf586c281abe4643ecc17f785aa66c7f70a0859e1d5267dfb1",
+    "hash": "b9d0e6901e97a5d09dc69914a7a39208554774967d13e7733531cd0c74f1888f",
     "version": 1
   },
   "agg_route_headway_daily": {
-    "hash": "b78e0875741641c27f33188ecbda04b94b52752f10c28f5973017882e15c6936",
+    "hash": "32183baceba839b5b4eb955a78ab2b19f58e9f2c922bef17daac55205321c1d7",
     "version": 1
   },
   "agg_route_hour": {

@@ -155,7 +155,10 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 # because an unqualified name matching a SELECT alias in WHERE is
 # replaced by that alias's aggregate (see build_dedup_ch_sql).
 def route_headway_daily_ch_sql(date_where: str) -> str:
-    """Per (route, stop, service date), the array of actual event times."""
+    """Per (route, stop, service date), the array of actual event times, and the
+    version names its events were ingested against ('' for none) with how many
+    events carry each (a sumMap tally, so the result grows with the names, not
+    the events). Each event's delay, schedule and name come from its latest poll."""
     return (
         """
                 WITH per_event AS (
@@ -163,8 +166,10 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
                            stop_sequence,
-                           argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
-                           argMax(u.scheduled_sec, (u.captured_at, u.file_name)) AS scheduled_sec
+                           argMax(
+                               tuple(u.dep_delay, u.scheduled_sec, ifNull(u.static_version_id, '')),
+                               (u.captured_at, u.file_name)
+                           ) AS latest
                     FROM updates AS u
                     WHERE u.agency_id = {agency_id:UInt16}
                       AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL
@@ -177,8 +182,9 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
                 )
                 SELECT route_code, stop_id, svc_date,
                        groupArray(toInt64("""
-        + service_day_offset_ch("scheduled_sec")
-        + """) + toInt64(dep_delay)) AS times
+        + service_day_offset_ch("tupleElement(latest, 2)")
+        + """) + toInt64(tupleElement(latest, 1))) AS times,
+                       sumMap([tupleElement(latest, 3)], [toUInt64(1)]) AS stems
                 FROM per_event
                 GROUP BY route_code, stop_id, svc_date
                 """
@@ -227,9 +233,27 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
 # after-midnight departure as a plain clock ("00:10:00") would
 # otherwise sort it before the morning's first departure, where
 # GTFS's "24:10:00" sorts after 23:50.
-def route_headway_sql() -> str:
-    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait."""
+def route_headway_sql(all_routes: bool = False) -> str:
+    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait.
+
+    *all_routes* selects instead every route of a dominant service with its
+    median, NULL where the timetable gives none: what pipeline.static_headways
+    keeps per timetable.
+    """
     hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
+    if all_routes:
+        selected = """
+                SELECT ds.route_code, m.scheduled_headway_median_sec
+                FROM dominant_service ds LEFT JOIN medians m USING (route_code)
+            """
+    else:
+        selected = f"""
+                SELECT %(agency_id)s AS agency_id, route_code,
+                       scheduled_headway_median_sec, scheduled_samples,
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
+                       scheduled_wait_mean_sec
+                FROM medians
+            """
     return f"""
                 WITH {dominant_service_ctes("%(agency_id)s")},
                 scheduled_departures AS (
@@ -264,13 +288,7 @@ def route_headway_sql() -> str:
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code
-                )
-                SELECT %(agency_id)s AS agency_id, route_code,
-                       scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
-                       scheduled_wait_mean_sec
-                FROM medians
-            """
+                ){selected}"""
 
 
 # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
