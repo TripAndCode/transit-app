@@ -268,3 +268,81 @@ def test_analyze_refuses_when_the_loaded_timetable_is_not_archived(pg_conn, agen
     with pg_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agg_table_state WHERE agency_id = %s", (agency_id,))
         assert cur.fetchone()[0] == 0
+
+
+def _give_every_table_a_state(pg_conn, agency_id):
+    from pipeline import agg_registry
+
+    with pg_conn.cursor() as cur:
+        for name in agg_registry.TABLES:
+            cur.execute(
+                "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES (%s, %s, 'x')",
+                (agency_id, name),
+            )
+    pg_conn.commit()
+
+
+def _state_names(pg_conn, agency_id):
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT table_name FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        return {row[0] for row in cur.fetchall()}
+
+
+def _change_the_content(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE static_stop_times SET departure_time = '09:00:00' "
+            "WHERE agency_id = %s AND trip_id = (SELECT min(trip_id) FROM static_stop_times WHERE agency_id = %s)",
+            (agency_id, agency_id),
+        )
+    pg_conn.commit()
+
+
+def _archive_joined():
+    from pipeline import agg_registry
+    from pipeline.agg_registry import Timetable
+
+    return {name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED}
+
+
+def test_a_name_remapped_to_new_content_clears_the_archive_joined_states(pg_conn, agency_id, ch_client):
+    from pipeline import agg_registry
+
+    _seed(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _give_every_table_a_state(pg_conn, agency_id)
+    _change_the_content(pg_conn, agency_id)
+    second = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _state_names(pg_conn, agency_id) == set(agg_registry.TABLES) - _archive_joined()
+    assert _map(ch_client, agency_id)[-1] == ("gtfs_static_20261025", second)
+
+
+def test_a_first_mapping_clears_nothing(pg_conn, agency_id, ch_client):
+    from pipeline import agg_registry
+
+    _seed(pg_conn, agency_id)
+    _give_every_table_a_state(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _state_names(pg_conn, agency_id) == set(agg_registry.TABLES)
+
+
+def test_the_states_are_cleared_before_the_name_is_remapped(pg_conn, agency_id, ch_client, monkeypatch):
+    """So a process that dies before the map row lands still rebuilds the archive-joined tables."""
+    from pipeline import agg_registry
+
+    _seed(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _give_every_table_a_state(pg_conn, agency_id)
+    _change_the_content(pg_conn, agency_id)
+    real_insert = ch_client.insert
+
+    def insert(table, *args, **kwargs):
+        if table == static_archive.VERSION_MAP:
+            raise RuntimeError("injected failure before the map row")
+        return real_insert(table, *args, **kwargs)
+
+    monkeypatch.setattr(ch_client, "insert", insert)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _state_names(pg_conn, agency_id) == set(agg_registry.TABLES) - _archive_joined()

@@ -61,6 +61,11 @@ _MISS_WARN_MIN_ROWS = 20
 # ingest strategy is ever confirmed.
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
 
+# The strategies whose rows carry the static_version_id of the timetable
+# they were ingested against (static_join's lookup in static_trips);
+# aomori_regex writes none, so its rows join whatever timetable is loaded.
+VERSION_STAMPING_STRATEGIES = frozenset({"static_join"})
+
 # The RT-optional per-stop_time_update fields whose population is verified
 # per agency. An agency counts as confirmed only with a live, affirmative
 # verdict for EVERY one of them: the readers behind this gate (service

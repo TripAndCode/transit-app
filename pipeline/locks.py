@@ -165,7 +165,10 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     single-argument lock, which no holder of this key waits on. The restamp is
     the one holder of several keys: it takes them in ascending agency_id while
     holding that single-argument lock, so no other holder of a key can be
-    running and no cycle can form.
+    running and no cycle can form. A load_static that remaps a timetable
+    version name takes one agency's key to clear its archive-joined tables'
+    states (pipeline.static_archive), holding no other lock and no open
+    transaction, so it only waits out that agency's analyze.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))

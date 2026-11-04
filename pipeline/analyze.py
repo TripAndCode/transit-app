@@ -89,6 +89,7 @@ from typing import NamedTuple
 import psycopg2.extras
 
 from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
+from pipeline.agg_registry import Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
@@ -96,7 +97,7 @@ from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
 from pipeline.static_content import static_parts as _static_parts
-from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
+from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
@@ -387,22 +388,80 @@ def table_fingerprints(
     Its registry version stands for its builder; the plausibility clamp for the
     rows each date was aggregated from, since moving it changes them without
     adding or removing a row; the ingest strategy for whether the RT-field
-    aggregates are built at all. A table that reads the timetable also carries
-    the timetable loaded now, "none" without one, so gaining or losing a
-    schedule crosses it in either direction.
+    aggregates are built at all; each of its `versions_from` tables' version.
+
+    A table built from the loaded timetable (Timetable.LOADED) carries that
+    timetable's content, "none" without one, so gaining, losing or replacing a
+    schedule crosses it. An archive-joined table (Timetable.ARCHIVED) carries
+    only whether one is loaded: each row joins its own timetable, so a new one
+    changes no built row, while a first one still reaches the dates ingested
+    before it. Where the ingest stamps no version, its rows all join the loaded
+    timetable, so the archive-joined tables carry its content too.
 
     *versions*, when given, replaces each table's registry version, and a table
     it does not name is left out.
     """
-    timetable = "|".join(static_parts) if has_static else "none"
+    content = "|".join(static_parts) if has_static else "none"
+    stamped = ingest_strategy in VERSION_STAMPING_STRATEGIES
     fingerprints = {}
     for name, table in agg_registry.TABLES.items():
         if versions is not None and name not in versions:
             continue
         version = table.version if versions is None else versions[name]
         fingerprint = f"v{version}|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:{ingest_strategy}"
-        fingerprints[name] = f"{fingerprint}|static:{timetable}" if table.reads_static else fingerprint
+        for source in table.versions_from:
+            source_version = agg_registry.TABLES[source].version
+            if versions is not None and source in versions:
+                source_version = versions[source]
+            fingerprint += f"|{source}:v{source_version}"
+        if table.timetable is Timetable.LOADED or (table.timetable is Timetable.ARCHIVED and not stamped):
+            fingerprint += f"|static:{content}"
+        elif table.timetable is Timetable.ARCHIVED:
+            fingerprint += f"|static:{'loaded' if has_static else 'none'}"
+        fingerprints[name] = fingerprint
     return fingerprints
+
+
+# The tables whose fingerprint carried the loaded timetable's content before
+# the archive-joined tables stopped reading it, and that format: a stored
+# fingerprint equal to it with today's timetable is current, so the change of
+# format rebuilds nothing. Frozen; removable once no agg_table_state row
+# still holds a fingerprint in this format.
+_PARTS_FINGERPRINT_TABLES = frozenset(
+    {
+        "agg_route_headway",
+        "agg_route_headway_daily",
+        "agg_route_daily_dwell_run",
+        "agg_stop_daily",
+        "agg_route_stop_daily",
+        "stop_route_days",
+        "agg_stop_routes",
+    }
+)
+
+
+def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_parts: list[str]) -> dict[str, str]:
+    """Each table's fingerprint in the format _PARTS_FINGERPRINT_TABLES were stored under."""
+    timetable = "|".join(static_parts) if has_static else "none"
+    return {
+        name: f"v{table.version}|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:{ingest_strategy}"
+        + (f"|static:{timetable}" if name in _PARTS_FINGERPRINT_TABLES else "")
+        for name, table in agg_registry.TABLES.items()
+    }
+
+
+def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list[str]) -> list:
+    """The service dates holding any of the agency's rows whose version name is
+    none of *stems*, the names the archive maps: those rows join the loaded
+    timetable (static_archive.JOIN_CONTENT_SQL)."""
+    result = _ch_query(
+        "plan: dates following the loaded timetable",
+        ch_client,
+        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) ORDER BY date",
+        {"agency_id": agency_id, "stems": stems},
+    )
+    return [row[0] for row in result.result_rows]
 
 
 def _ledger_counts(agency_id: int, ch_client) -> dict:
@@ -548,7 +607,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     must describe the aggregates that survived the last run, so a rollback of
     this one leaves the next run reaching the same answer. The timetable is read
     once, here, and the fingerprints recorded at the end reuse it: load_static
-    is not under the agency lock (pipeline/locks.py), so a second read could
+    swaps it outside the agency lock (pipeline/locks.py), so a second read could
     describe a timetable the run never built against. Reading once, first, can
     only err toward recording an older timetable, which makes the next run
     rebuild the tables that read it, the safe direction.
@@ -577,13 +636,42 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)
     stored = _stored_fingerprints(conn, agency_id, legacy, seed)
+    previous = _parts_fingerprints(ingest_strategy, has_static, static_parts)
+    carried = [name for name in current if stored.get(name) == previous[name] != current[name]]
+    if carried:
+        stored.update({name: current[name] for name in carried})
+        logger.info(f"  table state: {len(carried)} fingerprint(s) carried over to the archive-joined format")
     # With no table's fingerprint matching, every table goes in full whatever
     # the ledger says, so its full-history scan is skipped.
     if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):
         ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
     else:
         ledger = []
-    scopes, reasons = agg_registry.table_scopes(current, stored, ledger)
+    extra = None
+    archived = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
+    loaded_moved = any(
+        stored.get(name) != current[name]
+        for name, table in agg_registry.TABLES.items()
+        if table.timetable is Timetable.LOADED
+    )
+    if (
+        ledger is not None
+        and ingest_strategy in VERSION_STAMPING_STRATEGIES
+        and loaded_moved
+        # One rebuilt in full takes every date anyway.
+        and any(stored.get(name) == current[name] for name in archived)
+    ):
+        # A row whose version name the archive does not map (none was stamped,
+        # its trip not being in the timetable loaded then, or its timetable was
+        # replaced before the archive kept it) joins the loaded timetable, so a
+        # new one rebuilds its date in the archive-joined tables, as every date
+        # was before they joined the archive.
+        stems = static_archive.schedule_join(ch_client, agency_id, content_key).stems
+        following = _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
+        if following:
+            logger.info(f"  {len(following)} date(s) with rows of no archived timetable follow the new loaded one")
+            extra = dict.fromkeys(archived, following)
+    scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
         if scope is None:

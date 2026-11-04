@@ -186,6 +186,8 @@ def _stop_days(pg_conn, agency_id: int) -> list[tuple]:
 def test_a_reload_rebuilds_each_date_against_its_own_timetable(
     tmp_path, pg_conn, agency_id, ch_client, monkeypatch, caplog
 ):
+    # The agency_id fixture's ingest stamps no version, so its reload still
+    # rebuilds every date of the archive-joined tables.
     load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
     insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
     analyze(agency_id, pg_conn, ch_client)
@@ -203,6 +205,22 @@ def test_a_reload_rebuilds_each_date_against_its_own_timetable(
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert "scope agg_stop_daily: every date" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
+
+
+def test_a_stamping_agencys_reload_rebuilds_only_the_changed_date(tmp_path, pg_conn, agency_id, ch_client, caplog):
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, "timetable_a")])
+    analyze(agency_id, pg_conn, ch_client)
+    load_static(_timetable(tmp_path, "timetable_b", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-02T00:00:00Z", "T1", 1, 30, "timetable_b")])
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_route_headway: every date" in caplog.text
+    assert "scope agg_stop_daily: 1 date(s)" in caplog.text
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
 
 
@@ -344,8 +362,11 @@ def _dwell_sums(pg_conn, agency_id: int) -> list[tuple]:
         return cur.fetchall()
 
 
-def test_dwell_follows_each_dates_timetable_across_a_reload(tmp_path, pg_conn, agency_id, ch_client, caplog):
-    """Stop 2's dwell is (scheduled departure + 20) - (10:05 + 50): 30 s under A's 10:06, 90 s under B's 10:07."""
+def test_dwell_follows_each_dates_timetable_across_a_reload(
+    tmp_path, pg_conn, agency_id, ch_client, caplog, monkeypatch
+):
+    """Stop 2's dwell is (scheduled departure + 20) - (10:05 + 50): 30 s under A's 10:06, 90 s under B's 10:07.
+    The reload rebuilds only the new date; a full rebuild keeps each date on its own timetable."""
     from tests.pipeline.test_analyze import _set_ingest_strategy
 
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
@@ -354,6 +375,14 @@ def test_dwell_follows_each_dates_timetable_across_a_reload(tmp_path, pg_conn, a
     analyze(agency_id, pg_conn, ch_client)
     load_static(_dwell_timetable(tmp_path, "dwell_b", "10:07:00"), agency_id, pg_conn, ch_client=ch_client)
     insert_updates(ch_client, agency_id, _dwell_polls("2026-06-02", "dwell_b"))
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_route_daily_dwell_run: 1 date(s)" in caplog.text
+    assert _dwell_sums(pg_conn, agency_id) == [(date(2026, 6, 1), 30), (date(2026, 6, 2), 90)]
+
+    table = agg_registry.TABLES["agg_route_daily_dwell_run"]
+    monkeypatch.setitem(agg_registry.TABLES, table.name, dataclasses.replace(table, version=table.version + 1))
+    caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert "scope agg_route_daily_dwell_run: every date" in caplog.text
@@ -368,3 +397,47 @@ def test_dwell_of_an_unversioned_visit_uses_the_loaded_timetable(tmp_path, pg_co
     insert_updates(ch_client, agency_id, _dwell_polls("2026-06-01", None))
     analyze(agency_id, pg_conn, ch_client)
     assert _dwell_sums(pg_conn, agency_id) == [(date(2026, 6, 1), 90)]
+
+
+@pytest.mark.parametrize("stem", [None, "gtfs_static_19990101"])
+def test_a_reload_rebuilds_the_dates_of_rows_of_no_archived_version(
+    tmp_path, pg_conn, agency_id, ch_client, caplog, stem
+):
+    """A row ingested with no version (its trip was not in the timetable loaded
+    then), or with one whose timetable the archive never kept, joins the loaded
+    timetable, so a new one rebuilds its date."""
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [_row("2026-06-01T00:00:00Z", "T1", 1, 30, stem), _row("2026-06-02T00:00:00Z", "T1", 1, 30, "timetable_a")],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SA")]
+    load_static(_timetable(tmp_path, "timetable_b", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_stop_daily: 1 date(s)" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SB"), (date(2026, 6, 2), "SA")]
+
+
+def test_a_full_rebuild_reads_no_dates_following_the_loaded_timetable(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch
+):
+    """With every archive-joined table rebuilt in full, those dates add nothing,
+    so their scan of the agency's whole history is skipped."""
+    from pipeline import analyze as analyze_module
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    def _unexpected(*_args):
+        raise AssertionError("read the dates following the loaded timetable")
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, None)])
+    monkeypatch.setattr(analyze_module, "_dates_following_the_loaded_timetable", _unexpected)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]

@@ -37,9 +37,11 @@ def static_parts(agency_id: int, conn, has_static: bool) -> list[str]:
     several aggregates also read the Postgres timetable. A load replaces those
     rows wholesale for the agency, so a new timetable changes what a past date
     of such a table should aggregate to while every per-date count stands
-    still. The tables that read the timetable fold these parts into their
-    fingerprint (:func:`pipeline.analyze.table_fingerprints`), so a changed
-    timetable rebuilds them in full.
+    still. These parts are agg_route_headway's fingerprint (it is built from
+    the loaded timetable), the archive-joined tables' too for an agency whose
+    ingest stamps no version (:func:`pipeline.analyze.table_fingerprints`), the
+    key each archived timetable is kept under (pipeline.static_archive), and
+    the inputs of its kept headway medians (pipeline.static_headways).
 
     An order-independent sum of per-row hashes plus a row count, not an ordered
     digest: the sum is one sequential scan of tables holding at most a few

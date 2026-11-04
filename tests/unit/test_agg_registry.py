@@ -5,14 +5,10 @@ from datetime import date
 import pytest
 
 from pipeline import agg_registry, ch_aggregates
-from pipeline.agg_registry import Kind
+from pipeline.agg_registry import Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
-TIMETABLE_READERS = set(ch_aggregates.STATIC_JOINED_TABLES) | {
-    "agg_route_headway",
-    "agg_route_headway_daily",
-    "agg_route_daily_dwell_run",
-}
+ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {"agg_route_headway_daily", "agg_route_daily_dwell_run"}
 
 
 def test_every_table_analyze_builds_is_registered_and_nothing_else():
@@ -38,17 +34,23 @@ def test_static_only_tables_match_analyze():
     assert {n for n, t in agg_registry.TABLES.items() if t.kind is Kind.STATIC_ONLY} == set(_STATIC_ONLY_AGG_TABLES)
 
 
-def test_exactly_the_timetable_readers_say_they_read_it():
-    assert {n for n, t in agg_registry.TABLES.items() if t.reads_static} == TIMETABLE_READERS
+def test_only_agg_route_headway_is_built_from_the_loaded_timetable():
+    assert {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED} == {"agg_route_headway"}
+
+
+def test_the_archive_joined_tables_are_the_stop_tables_dwell_and_the_daily_headways():
+    assert {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED} == ARCHIVE_JOINED
+
+
+def test_the_daily_headways_take_agg_route_headways_version_not_its_rows():
+    table = agg_registry.TABLES["agg_route_headway_daily"]
+    assert table.depends_on == ()
+    assert table.versions_from == ("agg_route_headway",)
 
 
 def test_dependencies_name_registered_tables():
     for table in agg_registry.TABLES.values():
         assert set(table.depends_on) <= set(agg_registry.TABLES), table.name
-
-
-def test_daily_headways_depend_on_the_scheduled_medians():
-    assert agg_registry.TABLES["agg_route_headway_daily"].depends_on == ("agg_route_headway",)
 
 
 def test_a_version_override_reaches_a_table_built_in_the_loop(monkeypatch):
@@ -117,12 +119,12 @@ def test_a_changed_fingerprint_rebuilds_the_table_and_its_dependents():
     assert scopes["agg_route_daily"] == []
 
 
-def test_the_scheduled_medians_carry_the_daily_headways():
+def test_the_scheduled_medians_rebuilding_leaves_the_daily_headways_to_their_dates():
+    """The daily headways read the medians kept per timetable, not agg_route_headway's rows."""
     stored = _current() | {"agg_route_headway": "old"}
-    scopes, reasons = agg_registry.table_scopes(_current(), stored, [D])
+    scopes, _ = agg_registry.table_scopes(_current(), stored, [D])
     assert scopes["agg_route_headway"] is None
-    assert scopes["agg_route_headway_daily"] is None
-    assert reasons["agg_route_headway_daily"] == "depends on agg_route_headway"
+    assert scopes["agg_route_headway_daily"] == [D]
     assert scopes["agg_feed_health"] == [D]
 
 

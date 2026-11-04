@@ -156,7 +156,9 @@ def _two_timetables(pg_conn, agency_id, ch_client):
     return key_a, key_b
 
 
-def test_each_dates_long_gaps_follow_its_own_timetable(pg_conn, agency_id, ch_client, caplog):
+def test_each_dates_long_gaps_follow_its_own_timetable(pg_conn, agency_id, ch_client, caplog, monkeypatch):
+    """The reload rebuilds only the new date; a bump of the medians' SQL rebuilds
+    every date, each still against its own timetable."""
     key_a, key_b = _two_timetables(pg_conn, agency_id, ch_client)
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
@@ -164,17 +166,28 @@ def test_each_dates_long_gaps_follow_its_own_timetable(pg_conn, agency_id, ch_cl
         (key_a, "R1"): 600.0,
         (key_b, "R1"): 1200.0,
     }
+    assert "scope agg_route_headway_daily: 1 date(s)" in caplog.text
+    assert _long_gaps(pg_conn, agency_id) == [(date(2026, 6, 1), 1), (date(2026, 6, 2), 0)]
+
+    table = agg_registry.TABLES["agg_route_headway"]
+    monkeypatch.setitem(agg_registry.TABLES, table.name, dataclasses.replace(table, version=table.version + 1))
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
     assert "scope agg_route_headway_daily: every date" in caplog.text
     assert _long_gaps(pg_conn, agency_id) == [(date(2026, 6, 1), 1), (date(2026, 6, 2), 0)]
 
 
-def test_a_timetable_without_medians_measures_against_the_loaded_one(pg_conn, agency_id, ch_client):
+def test_a_timetable_without_medians_measures_against_the_loaded_one(pg_conn, agency_id, ch_client, monkeypatch):
     key_a, _ = _two_timetables(pg_conn, agency_id, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "DELETE FROM route_headway_by_content WHERE agency_id = %s AND content_hash = %s", (agency_id, key_a)
         )
     pg_conn.commit()
+    # A full rebuild, so day 1 is measured again.
+    table = agg_registry.TABLES["agg_route_headway_daily"]
+    monkeypatch.setitem(agg_registry.TABLES, table.name, dataclasses.replace(table, version=table.version + 1))
     analyze(agency_id, pg_conn, ch_client)
     assert _long_gaps(pg_conn, agency_id) == [(date(2026, 6, 1), 0), (date(2026, 6, 2), 0)]
 
