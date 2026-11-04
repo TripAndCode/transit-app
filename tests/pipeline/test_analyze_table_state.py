@@ -6,6 +6,7 @@ import logging
 import pytest
 
 from pipeline import agg_registry
+from pipeline.agg_registry import Timetable
 from pipeline.analyze import analyze
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg, _seed_route_headway_schedule
@@ -21,13 +22,13 @@ def test_the_legacy_fingerprint_is_the_retired_one_byte_for_byte():
     assert _legacy_fingerprint(None, []) == f"logic:7|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:None"
 
 
-def test_only_the_timetable_readers_carry_the_timetable():
+def test_a_stamping_agencys_new_timetable_moves_only_what_the_loaded_one_builds():
     from pipeline.analyze import table_fingerprints
 
     with_one = table_fingerprints("static_join", True, ["static_trips:1:7"])
     with_other = table_fingerprints("static_join", True, ["static_trips:1:8"])
     moved = {name for name in with_one if with_one[name] != with_other[name]}
-    assert moved == {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+    assert moved == {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED}
 
 
 # Runs after a test's first call analyze() directly: the _analyze helper mirrors
@@ -128,6 +129,8 @@ def test_without_a_matching_legacy_fingerprint_every_table_rebuilds(pg_conn, age
 
 
 def test_a_changed_timetable_rebuilds_only_the_tables_that_read_it(pg_conn, agency_id, ch_client, caplog):
+    """The agency_id fixture's ingest stamps no version, so its archive-joined
+    tables join the loaded timetable and rebuild with it."""
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
@@ -137,8 +140,28 @@ def test_a_changed_timetable_rebuilds_only_the_tables_that_read_it(pg_conn, agen
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     logged = _scopes_logged(caplog)
-    readers = {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
     assert {n for n, s in logged.items() if s != "unchanged"} == readers
+
+
+def test_a_stamping_agencys_changed_timetable_rebuilds_only_what_the_loaded_one_builds(
+    pg_conn, agency_id, ch_client, caplog
+):
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    logged = _scopes_logged(caplog)
+    assert {n for n, s in logged.items() if s != "unchanged"} == {
+        n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED
+    }
 
 
 def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id, ch_client, caplog, monkeypatch):

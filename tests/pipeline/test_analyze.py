@@ -2309,6 +2309,7 @@ def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(p
     still. Their fingerprint carries the schedule; the other tables' does not.
     """
     from pipeline import agg_registry
+    from pipeline.agg_registry import Timetable
     from pipeline.analyze import _dates_needing_rebuild, _plan, _static_loaded
 
     _seed_for_stop_agg(pg_conn, agency_id)
@@ -2325,7 +2326,8 @@ def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(p
     pg_conn.commit()
 
     plan = _plan(agency_id, pg_conn, ch_client, _static_loaded(pg_conn, agency_id), strategy)
-    readers = {n for n, t in agg_registry.TABLES.items() if t.reads_static}
+    # The agency_id fixture's ingest stamps no version, so every timetable reader rebuilds.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
     assert {n for n, scope in plan.scopes.items() if scope is None} == readers
 
 

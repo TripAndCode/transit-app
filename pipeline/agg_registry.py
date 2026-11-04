@@ -1,5 +1,5 @@
-"""Every aggregate analyze builds: its logic version, its kind, whether it reads
-the loaded timetable, and the tables it is computed from.
+"""Every aggregate analyze builds: its logic version, its kind, which timetable
+it reads, and the tables it is computed from.
 
 A table's version declares the generation of its builder. Bump it in the same
 commit as any change to what the builder produces: its SQL, a threshold, a
@@ -34,14 +34,30 @@ class Kind(str, Enum):
     STATIC_ONLY = "static_only"  # built from the loaded timetable alone
 
 
+class Timetable(str, Enum):
+    """Which timetable a table's rows are built from, which decides what of it
+    the table's fingerprint carries (pipeline.analyze.table_fingerprints)."""
+
+    NONE = "none"  # no timetable
+    LOADED = "loaded"  # the timetable loaded now: a new one rebuilds the table
+    # Each row's own archived timetable (pipeline.static_archive): a new loaded
+    # timetable changes no built row, except where the ingest stamps no version
+    # and every row falls back to the loaded one.
+    ARCHIVED = "archived"
+
+
 @dataclass(frozen=True)
 class AggTable:
     name: str
     version: int
     kind: Kind
-    reads_static: bool
+    timetable: Timetable
     render: Callable[[], list[str]]
     depends_on: tuple[str, ...] = ()
+    # Tables whose logic version this one's rows depend on without being
+    # computed from their rows: folded into its fingerprint, so their bump
+    # rebuilds it, and nothing else of theirs does.
+    versions_from: tuple[str, ...] = ()
 
 
 def _monthly(name: str) -> Callable[[], list[str]]:
@@ -85,19 +101,27 @@ def _headway_daily() -> list[str]:
     ]
 
 
+def _timetable_of(name: str) -> Timetable:
+    return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
+
+
 def _entries() -> list[AggTable]:
     unknown = set(_VERSIONS) - {*ch_aggregates.MONTHLY_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES}
     if unknown:
         raise ValueError(f"_VERSIONS names tables not built in its loops: {', '.join(sorted(unknown))}")
     entries = [
-        AggTable("agg_feed_health", 1, Kind.DATED, False, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
-        AggTable("agg_service_delivered_daily", 1, Kind.DATED, False, lambda: [agg_sql.service_delivered_ch_sql("")]),
-        AggTable("agg_schedule_revision_daily", 1, Kind.DATED, False, lambda: [agg_sql.schedule_revision_ch_sql("")]),
+        AggTable("agg_feed_health", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
+        AggTable(
+            "agg_service_delivered_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
+        ),
+        AggTable(
+            "agg_schedule_revision_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.schedule_revision_ch_sql("")]
+        ),
         AggTable(
             "agg_route_headway",
             1,
             Kind.STATIC_ONLY,
-            True,
+            Timetable.LOADED,
             # pipeline.static_headways keeps each timetable's medians under this
             # version, so the SQL computing them is rendered here too.
             lambda: [agg_sql.route_headway_sql(), agg_sql.route_headway_sql(all_routes=True)],
@@ -106,31 +130,29 @@ def _entries() -> list[AggTable]:
             "agg_route_headway_daily",
             1,
             Kind.DATED,
-            True,
+            Timetable.ARCHIVED,
             _headway_daily,
-            depends_on=("agg_route_headway",),
+            # Its thresholds are the medians agg_route_headway's SQL keeps per
+            # timetable, keyed by that table's version, not its rows.
+            versions_from=("agg_route_headway",),
         ),
         AggTable(
             "agg_route_daily_dwell_run",
             1,
             Kind.DATED,
-            True,
+            Timetable.ARCHIVED,
             lambda: [agg_sql.dwell_run_sql(), build_stop_visits_ch_sql(extra_where="", join_schedule=True)],
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
-        entries.append(
-            AggTable(
-                name, _VERSIONS.get(name, 1), Kind.DATED, name in ch_aggregates.STATIC_JOINED_TABLES, _monthly(name)
-            )
-        )
+        entries.append(AggTable(name, _VERSIONS.get(name, 1), Kind.DATED, _timetable_of(name), _monthly(name)))
     for name in ch_aggregates.WHOLE_HISTORY_TABLES:
         entries.append(
             AggTable(
                 name,
                 _VERSIONS.get(name, 1),
                 Kind.WHOLE,
-                name in ch_aggregates.STATIC_JOINED_TABLES,
+                _timetable_of(name),
                 _whole(name),
                 depends_on=(ch_aggregates.whole_history_source(name),),
             )
