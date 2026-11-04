@@ -147,8 +147,24 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], expected: int) -
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
+def _clear_archive_joined_states(conn, agency_id: int) -> None:
+    # agg_registry imports ch_aggregates, which imports this module: imported here, at call time.
+    from pipeline import agg_registry
+    from pipeline.agg_registry import Timetable
+
+    names = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s AND table_name = ANY(%s)", (agency_id, names))
+    conn.commit()
+
+
 def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
-    """Record that the loaded version name carries *key*, unless that is already its latest mapping."""
+    """Record that the loaded version name carries *key*, unless that is already its latest mapping.
+
+    A name already mapped to other content (a timetable refetched under the
+    same name) leaves the dates ingested under it built against the other one,
+    so the archive-joined tables' states are cleared and they rebuild in full.
+    """
     stem = loaded_stem(conn, agency_id)
     if stem is None:
         return
@@ -157,13 +173,23 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
         "WHERE agency_id = {agency:Int32} AND static_version_id = {stem:String}",
         parameters={"agency": agency_id, "stem": stem},
     ).result_rows
-    if latest and latest[0][0] == key:
+    # argMax over no rows is '', which no content is.
+    previous = latest[0][0] if latest else ""
+    if previous == key:
         return
     # A load replaces the name and the content in one commit, so content read
     # after the name still matching *parts* means the name read was *key*'s.
     if static_parts(agency_id, conn, True) != parts:
         logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed before its name was mapped")
         return
+    if previous:
+        logger.warning(
+            f"  timetable archive: agency {agency_id}'s {stem} now carries {key}, not {previous}; "
+            "the archive-joined tables rebuild in full"
+        )
+        # Cleared and committed before the map row lands, so a process that
+        # dies in between still rebuilds them; clearing again is harmless.
+        _clear_archive_joined_states(conn, agency_id)
     ch.insert(
         VERSION_MAP,
         [(agency_id, stem, key, datetime.now(timezone.utc))],
