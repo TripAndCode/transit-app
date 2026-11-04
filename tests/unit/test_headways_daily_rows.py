@@ -3,7 +3,13 @@
 from datetime import date
 from statistics import median
 
-from pipeline.headways import count_long_gaps, daily_headway_rows, dominant_contents, pool_daily_gaps
+from pipeline.headways import (
+    count_long_gaps,
+    daily_headway_rows,
+    dominant_contents,
+    pool_daily_gaps,
+    thresholds,
+)
 
 D1 = date(2026, 4, 1)
 D2 = date(2026, 4, 2)
@@ -73,3 +79,18 @@ def test_the_pooled_gaps_ignore_the_names_column():
 def test_a_name_counts_as_many_events_as_carry_it():
     rows = [("R1", "s1", D1, [600, 1200, 1800], (["a", "b"], [1, 2]))]
     assert dominant_contents(rows, lambda stem: stem) == {("R1", D1): "b"}
+
+
+def test_a_threshold_is_the_dominant_timetables_median():
+    median_of = thresholds({("R1", D1): "a"}, {("a", "R1"): 600.0, ("loaded", "R1"): 1200.0}, "loaded")
+    assert median_of("R1", D1) == 600.0
+
+
+def test_a_timetable_with_no_kept_medians_takes_the_loaded_ones():
+    median_of = thresholds({("R1", D1): "old"}, {("loaded", "R1"): 1200.0}, "loaded")
+    assert median_of("R1", D1) == 1200.0
+
+
+def test_a_route_its_timetable_gives_no_median_has_none():
+    median_of = thresholds({("R1", D1): "a"}, {("a", "R2"): 600.0}, "loaded")
+    assert median_of("R1", D1) is None

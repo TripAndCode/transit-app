@@ -3,8 +3,11 @@
 agg_route_headway_daily measures each (route, date)'s long gaps against the
 median of the timetable that date's rows were ingested against. A timetable
 can be read from Postgres only while it is loaded, so its medians are taken
-wherever the archive is filled (load_static, analyze's backstop), by
-agg_route_headway's own SQL at its registry version, and never deleted.
+wherever the archive is filled, by agg_route_headway's own SQL at its
+registry version, and never deleted. load_static records every agency's
+outgoing timetable, its last chance before the wipe, whatever the agency
+ingests today; analyze's backstop only an agency whose daily headways it
+builds.
 """
 
 import logging

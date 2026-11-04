@@ -91,7 +91,7 @@ import psycopg2.extras
 from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
-from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps
+from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
@@ -566,7 +566,13 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             raise RuntimeError(f"agency {agency_id}'s loaded timetable is not archived; run analyze again")
         if content_key and ingest_strategy in RT_INGEST_STRATEGIES:
             # Only the daily headways read them, and only such an agency builds those.
-            static_headways.record_route_headways(conn, agency_id, content_key, static_parts)
+            if static_headways.record_route_headways(conn, agency_id, content_key, static_parts):
+                # Committed now, as a property of the timetable rather than of
+                # this run: held open through the run, their row locks would
+                # make a concurrent load_static recording the same timetable
+                # wait for the whole analyze. The agency lock is session-level,
+                # so this commit keeps it.
+                conn.commit()
     legacy = _legacy_fingerprint(ingest_strategy, static_parts)
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)
@@ -1287,22 +1293,17 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 dominant = dominant_contents(ch_headway.result_rows, lambda stem: mapped.get(stem, join.current))
             medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
-            kept = {content for content, _route in medians}
-            fell_back = sum(1 for content in dominant.values() if content not in kept)
+            fell_back = sum(1 for content in dominant.values() if content not in {c for c, _route in medians})
             if fell_back:
                 logger.info(
                     f"  agg_route_headway_daily: {fell_back} route-day(s) measured against the loaded timetable's "
                     "medians, their own timetable having none kept"
                 )
 
-            def median_of(route_code, svc_date):
-                content = dominant.get((route_code, svc_date), join.current)
-                return medians.get((content if content in kept else join.current, route_code))
-
             # Same label as the pooling above — `_step` accumulates, so the
             # summary reports one figure for this aggregate's Python build.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                headway_rows = daily_headway_rows(agency_id, pooled, median_of)
+                headway_rows = daily_headway_rows(agency_id, pooled, thresholds(dominant, medians, join.current))
             _insert_agg(
                 "agg_route_headway_daily",
                 [

@@ -280,6 +280,21 @@ def dominant_contents(ch_rows: Iterable[tuple], content_of: Callable[[str], str]
     return {key: min(tally, key=lambda content: (-tally[content], content)) for key, tally in counts.items()}
 
 
+def thresholds(
+    dominant: dict[tuple[object, object], str], medians: dict[tuple[str, str], float | None], loaded: str
+) -> Callable[[object, object], float | None]:
+    """Each (route, date)'s long-gap threshold: its dominant timetable's median,
+    or the loaded timetable's when its own timetable has no medians kept.
+    *medians* are keyed (content, route); *loaded* is the loaded timetable's content."""
+    kept = {content for content, _route in medians}
+
+    def median_of(route_code, svc_date) -> float | None:
+        content = dominant.get((route_code, svc_date), loaded)
+        return medians.get((content if content in kept else loaded, route_code))
+
+    return median_of
+
+
 def daily_headway_rows(
     agency_id: int,
     pooled: dict[tuple[object, object], list[float]],

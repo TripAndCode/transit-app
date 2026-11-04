@@ -4,6 +4,8 @@ import dataclasses
 import logging
 from datetime import date
 
+import pytest
+
 from pipeline import agg_registry, static_archive, static_headways
 from pipeline.analyze import analyze
 from pipeline.clickhouse import UPDATE_COLUMNS, insert_updates
@@ -194,3 +196,46 @@ def test_analyze_keeps_no_medians_for_an_agency_that_builds_no_daily_headways(pg
     _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
     analyze(agency_id, pg_conn, ch_client)  # the agency_id fixture leaves ingest_strategy NULL
     assert _rows(pg_conn, agency_id) == []
+
+
+def _rows_seen_afresh(pg_conn, agency_id):
+    pg_conn.rollback()
+    return _rows(pg_conn, agency_id)
+
+
+def test_the_backstops_medians_outlive_a_failed_run(pg_conn, agency_id, ch_client, monkeypatch):
+    """They belong to the timetable, so the run's rollback leaves them, and its long
+    transaction never holds them against a concurrent load recording the same one."""
+    from pipeline import analyze as analyze_mod
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    key, _ = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected failure after the plan")
+
+    monkeypatch.setattr(analyze_mod, "_rebuild_ch_aggregates", fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert [row[0] for row in _rows_seen_afresh(pg_conn, agency_id)] == [key]
+
+
+def test_the_outgoing_timetables_medians_outlive_a_failed_load(tmp_path, pg_conn, agency_id, ch_client, monkeypatch):
+    key, _ = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected failure mid-load")
+
+    monkeypatch.setattr("pipeline.static_loader.rebuild_stop_clusters", fail)
+    incoming = build_static_zip(
+        tmp_path,
+        stops_rows=["s1,Stop 1,34.39,132.45"],
+        routes_rows=["R1,1"],
+        trips_rows=["T1,R1,,"],
+        stop_times_rows=["T1,1,s1,09:00:00,09:00:00"],
+        filename="timetable_b.zip",
+    )
+    with pytest.raises(RuntimeError, match="injected failure"):
+        load_static(incoming, agency_id, pg_conn, ch_client=ch_client)
+    assert [row[0] for row in _rows_seen_afresh(pg_conn, agency_id)] == [key]

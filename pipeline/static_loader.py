@@ -226,8 +226,11 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
         static_archive.require_tables(ch_client)
         outgoing = static_parts(agency_id, conn, True)
         key = static_archive.archive_loaded(conn, ch_client, agency_id, outgoing)
-        if key:
-            static_headways.record_route_headways(conn, agency_id, key, outgoing)
+        if key and static_headways.record_route_headways(conn, agency_id, key, outgoing):
+            # Committed now, like the capture above: the medians belong to the
+            # outgoing timetable, and held through the reload their row locks
+            # would make a concurrent analyze recording the same one wait.
+            conn.commit()
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")

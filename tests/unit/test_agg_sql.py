@@ -52,7 +52,8 @@ def test_service_date_is_the_shared_service_day_expression(name):
 
 def test_headway_daily_places_the_schedule_on_the_service_day_before_the_delay():
     sql = agg_sql.route_headway_daily_ch_sql("")
-    assert "groupArray(toInt64(" + service_day_offset_ch("scheduled_sec") + ") + toInt64(dep_delay))" in sql
+    schedule = service_day_offset_ch("tupleElement(latest, 2)")
+    assert "groupArray(toInt64(" + schedule + ") + toInt64(tupleElement(latest, 1)))" in sql
 
 
 def test_feed_health_counts_clamped_rows_with_the_server_side_bound():

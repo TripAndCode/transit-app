@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from pipeline import agg_sql, ch_aggregates, db, headways
+from pipeline import agg_sql, ch_aggregates, db, headways, static_headways
 from pipeline.db import build_stop_visits_ch_sql
 
 # Versions of the tables built in the loops below, which default to 1. A bump
@@ -76,6 +76,8 @@ def _headway_daily() -> list[str]:
         inspect.getsource(headways.reconstruct_headways),
         inspect.getsource(headways.pool_daily_gaps),
         inspect.getsource(headways.dominant_contents),
+        inspect.getsource(headways.thresholds),
+        inspect.getsource(static_headways.route_medians),
         inspect.getsource(headways.daily_headway_rows),
         inspect.getsource(headways.count_long_gaps),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
