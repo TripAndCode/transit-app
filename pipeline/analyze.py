@@ -425,7 +425,8 @@ def table_fingerprints(
 # The tables whose fingerprint carried the loaded timetable's content before
 # the archive-joined tables stopped reading it, and that format: a stored
 # fingerprint equal to it with today's timetable is current, so the change of
-# format rebuilds nothing. Frozen; removable once every agency has run since.
+# format rebuilds nothing. Frozen; removable once no agg_table_state row
+# still holds a fingerprint in this format.
 _PARTS_FINGERPRINT_TABLES = frozenset(
     {
         "agg_route_headway",
@@ -447,6 +448,18 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
         + (f"|static:{timetable}" if name in _PARTS_FINGERPRINT_TABLES else "")
         for name, table in agg_registry.TABLES.items()
     }
+
+
+def _unversioned_dates(agency_id: int, ch_client) -> list:
+    """The service dates holding any of the agency's rows that carry no timetable version."""
+    result = _ch_query(
+        "plan: unversioned dates",
+        ch_client,
+        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "AND ifNull(static_version_id, '') = '' ORDER BY date",
+        {"agency_id": agency_id},
+    )
+    return [row[0] for row in result.result_rows]
 
 
 def _ledger_counts(agency_id: int, ch_client) -> dict:
@@ -632,7 +645,22 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
     else:
         ledger = []
-    scopes, reasons = agg_registry.table_scopes(current, stored, ledger)
+    extra = None
+    loaded_moved = any(
+        stored.get(name) != current[name]
+        for name, table in agg_registry.TABLES.items()
+        if table.timetable is Timetable.LOADED
+    )
+    if ledger is not None and ingest_strategy in VERSION_STAMPING_STRATEGIES and loaded_moved:
+        # A row ingested with no version (its trip was not in the timetable
+        # loaded then) joins the loaded timetable, so a new one rebuilds its
+        # date in the archive-joined tables, as every date was before they
+        # joined the archive.
+        unversioned = _unversioned_dates(agency_id, ch_client)
+        if unversioned:
+            logger.info(f"  {len(unversioned)} date(s) with unversioned rows follow the new loaded timetable")
+            extra = {n: unversioned for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
+    scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
         if scope is None:

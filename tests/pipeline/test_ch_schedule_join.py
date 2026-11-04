@@ -397,3 +397,24 @@ def test_dwell_of_an_unversioned_visit_uses_the_loaded_timetable(tmp_path, pg_co
     insert_updates(ch_client, agency_id, _dwell_polls("2026-06-01", None))
     analyze(agency_id, pg_conn, ch_client)
     assert _dwell_sums(pg_conn, agency_id) == [(date(2026, 6, 1), 90)]
+
+
+def test_a_reload_rebuilds_the_dates_of_rows_with_no_version(tmp_path, pg_conn, agency_id, ch_client, caplog):
+    """A row ingested with no version (its trip was not in the timetable loaded
+    then) joins the loaded timetable, so a new one rebuilds its date."""
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [_row("2026-06-01T00:00:00Z", "T1", 1, 30, None), _row("2026-06-02T00:00:00Z", "T1", 1, 30, "timetable_a")],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SA")]
+    load_static(_timetable(tmp_path, "timetable_b", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert "scope agg_stop_daily: 1 date(s)" in caplog.text
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SB"), (date(2026, 6, 2), "SA")]

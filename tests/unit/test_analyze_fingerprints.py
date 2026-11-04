@@ -58,3 +58,14 @@ def test_a_new_loaded_timetable_does_not_cascade_to_the_daily_headways():
     scopes, _ = agg_registry.table_scopes(current, stored, ledger)
     assert scopes["agg_route_headway"] is None
     assert scopes["agg_route_headway_daily"] == ledger
+
+
+def test_extra_dates_reach_a_dated_table_and_its_whole_history_table():
+    ledger = ["2026-06-02"]
+    current = table_fingerprints("static_join", True, ONE)
+    extra = {"stop_route_days": ["2026-06-01"], "agg_stop_daily": ["2026-06-01"]}
+    scopes, _ = agg_registry.table_scopes(current, dict(current), ledger, extra)
+    assert scopes["agg_stop_daily"] == ["2026-06-01", "2026-06-02"]
+    assert scopes["stop_route_days"] == ["2026-06-01", "2026-06-02"]
+    assert scopes["agg_stop_routes"] is None
+    assert scopes["agg_feed_health"] == ledger

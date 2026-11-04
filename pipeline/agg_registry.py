@@ -173,7 +173,10 @@ TABLES: dict[str, AggTable] = _index(_entries())
 
 
 def table_scopes(
-    current: dict[str, str], stored: dict[str, str], ledger_dates: list | None
+    current: dict[str, str],
+    stored: dict[str, str],
+    ledger_dates: list | None,
+    extra_dates: dict[str, list] | None = None,
 ) -> tuple[dict[str, list | None], dict[str, str]]:
     """Each table's rebuild scope, and why each table rebuilt in full is.
 
@@ -181,8 +184,9 @@ def table_scopes(
     list of the dates to rebuild, or [] for nothing. A table goes in full when
     there is no ledger, when it has no stored fingerprint or a different one,
     or when a table it is computed from goes in full. A dated table otherwise
-    takes the ledger's changed dates; a whole-history table is rebuilt when its
-    source rebuilds any date; a table built from the timetable alone stands.
+    takes the ledger's changed dates, and *extra_dates*' for it; a
+    whole-history table is rebuilt when its source rebuilds any date; a table
+    built from the timetable alone stands.
     """
     reasons: dict[str, str] = {}
     for name in TABLES:
@@ -207,7 +211,7 @@ def table_scopes(
         if name in reasons:
             scopes[name] = None
         elif table.kind is Kind.DATED:
-            scopes[name] = list(ledger_dates or [])
+            scopes[name] = sorted({*(ledger_dates or []), *(extra_dates or {}).get(name, [])})
         elif table.kind is Kind.STATIC_ONLY:
             scopes[name] = []
     for name, table in TABLES.items():

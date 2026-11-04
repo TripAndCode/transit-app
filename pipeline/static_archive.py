@@ -151,11 +151,16 @@ def _clear_archive_joined_states(conn, agency_id: int) -> None:
     # agg_registry imports ch_aggregates, which imports this module: imported here, at call time.
     from pipeline import agg_registry
     from pipeline.agg_registry import Timetable
+    from pipeline.locks import agency_ingest_lock
 
     names = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s AND table_name = ANY(%s)", (agency_id, names))
-    conn.commit()
+    # Under the agency lock: an analyze in flight would otherwise record these
+    # states again at its end, as built, and the rebuild would be lost. Within
+    # analyze itself the lock is the session's own, taken again.
+    with agency_ingest_lock(conn, agency_id):
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM agg_table_state WHERE agency_id = %s AND table_name = ANY(%s)", (agency_id, names))
+        conn.commit()
 
 
 def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:

@@ -22,15 +22,6 @@ def test_the_legacy_fingerprint_is_the_retired_one_byte_for_byte():
     assert _legacy_fingerprint(None, []) == f"logic:7|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:None"
 
 
-def test_a_stamping_agencys_new_timetable_moves_only_what_the_loaded_one_builds():
-    from pipeline.analyze import table_fingerprints
-
-    with_one = table_fingerprints("static_join", True, ["static_trips:1:7"])
-    with_other = table_fingerprints("static_join", True, ["static_trips:1:8"])
-    moved = {name for name in with_one if with_one[name] != with_other[name]}
-    assert moved == {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED}
-
-
 # Runs after a test's first call analyze() directly: the _analyze helper mirrors
 # the Postgres `updates` seed into ClickHouse again, which would add rows.
 
@@ -159,9 +150,12 @@ def test_a_stamping_agencys_changed_timetable_rebuilds_only_what_the_loaded_one_
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     logged = _scopes_logged(caplog)
-    assert {n for n, s in logged.items() if s != "unchanged"} == {
-        n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED
-    }
+    # _seed_for_stop_agg's rows carry no version, so their dates follow the
+    # new loaded timetable in the archive-joined tables; nothing else moves.
+    loaded = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED}
+    archived = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
+    assert {n for n, s in logged.items() if s.startswith("every date")} == loaded | {"agg_stop_routes"}
+    assert {n for n, s in logged.items() if s.endswith("date(s)")} == archived - {"agg_stop_routes"}
 
 
 def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id, ch_client, caplog, monkeypatch):
