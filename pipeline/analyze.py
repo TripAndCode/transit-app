@@ -422,6 +422,33 @@ def table_fingerprints(
     return fingerprints
 
 
+# The tables whose fingerprint carried the loaded timetable's content before
+# the archive-joined tables stopped reading it, and that format: a stored
+# fingerprint equal to it with today's timetable is current, so the change of
+# format rebuilds nothing. Frozen; removable once every agency has run since.
+_PARTS_FINGERPRINT_TABLES = frozenset(
+    {
+        "agg_route_headway",
+        "agg_route_headway_daily",
+        "agg_route_daily_dwell_run",
+        "agg_stop_daily",
+        "agg_route_stop_daily",
+        "stop_route_days",
+        "agg_stop_routes",
+    }
+)
+
+
+def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_parts: list[str]) -> dict[str, str]:
+    """Each table's fingerprint in the format _PARTS_FINGERPRINT_TABLES were stored under."""
+    timetable = "|".join(static_parts) if has_static else "none"
+    return {
+        name: f"v{table.version}|clamp:{MAX_PLAUSIBLE_DELAY_SEC}|strategy:{ingest_strategy}"
+        + (f"|static:{timetable}" if name in _PARTS_FINGERPRINT_TABLES else "")
+        for name, table in agg_registry.TABLES.items()
+    }
+
+
 def _ledger_counts(agency_id: int, ch_client) -> dict:
     """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
     live = _ch_query(
@@ -594,6 +621,11 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     current = table_fingerprints(ingest_strategy, has_static, static_parts)
     seed = table_fingerprints(ingest_strategy, has_static, static_parts, _SEED_VERSIONS)
     stored = _stored_fingerprints(conn, agency_id, legacy, seed)
+    previous = _parts_fingerprints(ingest_strategy, has_static, static_parts)
+    carried = [name for name in current if stored.get(name) == previous[name] != current[name]]
+    if carried:
+        stored.update({name: current[name] for name in carried})
+        logger.info(f"  table state: {len(carried)} fingerprint(s) carried over to the archive-joined format")
     # With no table's fingerprint matching, every table goes in full whatever
     # the ledger says, so its full-history scan is skipped.
     if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):

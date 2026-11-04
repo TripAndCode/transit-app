@@ -233,3 +233,55 @@ def test_marking_for_full_rebuild_clears_the_states(pg_conn, agency_id, ch_clien
     _analyze(agency_id, pg_conn, ch_client)
     mark_for_full_rebuild(pg_conn, [agency_id])
     assert _states(pg_conn, agency_id) == {}
+
+
+def _rewrite_to_the_parts_format(pg_conn, agency_id, strategy):
+    """Rewrite the agency's states to the fingerprints its tables carried before
+    the archive-joined tables stopped carrying the loaded timetable."""
+    from pipeline.analyze import _parts_fingerprints
+    from pipeline.static_content import static_parts
+
+    previous = _parts_fingerprints(strategy, True, static_parts(agency_id, pg_conn, True))
+    with pg_conn.cursor() as cur:
+        for name, fingerprint in previous.items():
+            cur.execute(
+                "UPDATE agg_table_state SET fingerprint = %s WHERE agency_id = %s AND table_name = %s",
+                (fingerprint, agency_id, name),
+            )
+    pg_conn.commit()
+
+
+def test_fingerprints_recorded_before_the_archive_joins_carry_over_without_a_rebuild(
+    pg_conn, agency_id, ch_client, caplog
+):
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    current = _states(pg_conn, agency_id)
+    _rewrite_to_the_parts_format(pg_conn, agency_id, "static_join")
+    assert _states(pg_conn, agency_id) != current
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    assert _states(pg_conn, agency_id) == current
+
+
+def test_a_carried_fingerprint_whose_timetable_changed_still_rebuilds(pg_conn, agency_id, ch_client, caplog):
+    from pipeline.analyze import _PARTS_FINGERPRINT_TABLES
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    _rewrite_to_the_parts_format(pg_conn, agency_id, "static_join")
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    rebuilt = {name for name, scope in _scopes_logged(caplog).items() if scope.startswith("every date")}
+    assert rebuilt == set(_PARTS_FINGERPRINT_TABLES)
