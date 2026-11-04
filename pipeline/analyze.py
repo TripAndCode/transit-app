@@ -450,14 +450,16 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
     }
 
 
-def _unversioned_dates(agency_id: int, ch_client) -> list:
-    """The service dates holding any of the agency's rows that carry no timetable version."""
+def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list[str]) -> list:
+    """The service dates holding any of the agency's rows whose version name is
+    none of *stems*, the names the archive maps: those rows join the loaded
+    timetable (static_archive.JOIN_CONTENT_SQL)."""
     result = _ch_query(
-        "plan: unversioned dates",
+        "plan: dates following the loaded timetable",
         ch_client,
         "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "AND ifNull(static_version_id, '') = '' ORDER BY date",
-        {"agency_id": agency_id},
+        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) ORDER BY date",
+        {"agency_id": agency_id, "stems": stems},
     )
     return [row[0] for row in result.result_rows]
 
@@ -605,7 +607,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     must describe the aggregates that survived the last run, so a rollback of
     this one leaves the next run reaching the same answer. The timetable is read
     once, here, and the fingerprints recorded at the end reuse it: load_static
-    is not under the agency lock (pipeline/locks.py), so a second read could
+    swaps it outside the agency lock (pipeline/locks.py), so a second read could
     describe a timetable the run never built against. Reading once, first, can
     only err toward recording an older timetable, which makes the next run
     rebuild the tables that read it, the safe direction.
@@ -652,14 +654,16 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         if table.timetable is Timetable.LOADED
     )
     if ledger is not None and ingest_strategy in VERSION_STAMPING_STRATEGIES and loaded_moved:
-        # A row ingested with no version (its trip was not in the timetable
-        # loaded then) joins the loaded timetable, so a new one rebuilds its
-        # date in the archive-joined tables, as every date was before they
-        # joined the archive.
-        unversioned = _unversioned_dates(agency_id, ch_client)
-        if unversioned:
-            logger.info(f"  {len(unversioned)} date(s) with unversioned rows follow the new loaded timetable")
-            extra = {n: unversioned for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
+        # A row whose version name the archive does not map (none was stamped,
+        # its trip not being in the timetable loaded then, or its timetable was
+        # replaced before the archive kept it) joins the loaded timetable, so a
+        # new one rebuilds its date in the archive-joined tables, as every date
+        # was before they joined the archive.
+        stems = static_archive.schedule_join(ch_client, agency_id, content_key).stems
+        following = _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
+        if following:
+            logger.info(f"  {len(following)} date(s) with rows of no archived timetable follow the new loaded one")
+            extra = {n: following for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
