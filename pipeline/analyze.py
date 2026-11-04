@@ -648,12 +648,19 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     else:
         ledger = []
     extra = None
+    archived = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
     loaded_moved = any(
         stored.get(name) != current[name]
         for name, table in agg_registry.TABLES.items()
         if table.timetable is Timetable.LOADED
     )
-    if ledger is not None and ingest_strategy in VERSION_STAMPING_STRATEGIES and loaded_moved:
+    if (
+        ledger is not None
+        and ingest_strategy in VERSION_STAMPING_STRATEGIES
+        and loaded_moved
+        # One rebuilt in full takes every date anyway.
+        and any(stored.get(name) == current[name] for name in archived)
+    ):
         # A row whose version name the archive does not map (none was stamped,
         # its trip not being in the timetable loaded then, or its timetable was
         # replaced before the archive kept it) joins the loaded timetable, so a
@@ -663,7 +670,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         following = _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
         if following:
             logger.info(f"  {len(following)} date(s) with rows of no archived timetable follow the new loaded one")
-            extra = {n: following for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
+            extra = dict.fromkeys(archived, following)
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]

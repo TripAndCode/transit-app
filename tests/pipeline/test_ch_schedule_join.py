@@ -422,3 +422,22 @@ def test_a_reload_rebuilds_the_dates_of_rows_of_no_archived_version(
         analyze(agency_id, pg_conn, ch_client)
     assert "scope agg_stop_daily: 1 date(s)" in caplog.text
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SB"), (date(2026, 6, 2), "SA")]
+
+
+def test_a_full_rebuild_reads_no_dates_following_the_loaded_timetable(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch
+):
+    """With every archive-joined table rebuilt in full, those dates add nothing,
+    so their scan of the agency's whole history is skipped."""
+    from pipeline import analyze as analyze_module
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    def _unexpected(*_args):
+        raise AssertionError("read the dates following the loaded timetable")
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
+    insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, None)])
+    monkeypatch.setattr(analyze_module, "_dates_following_the_loaded_timetable", _unexpected)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]
