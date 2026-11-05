@@ -41,6 +41,29 @@ def archived_stop_times_sql(columns: str) -> str:
     )
 
 
+# One archived stop-time row, NULL told apart from '': the dwell join reads both times.
+_STOP_TIME_ROW_HASH = (
+    "cityHash64(stop_sequence, stop_id, arrival_time IS NULL, ifNull(arrival_time, ''), "
+    "departure_time IS NULL, ifNull(departure_time, ''))"
+)
+
+
+def changed_trips_sql() -> str:
+    """The trip_ids whose archived stop times differ between the agency's contents
+    {before} and {after}, or that only one of them has, as a subquery.
+
+    Per trip and content, an order-independent sum of row hashes plus a row
+    count, as pipeline.static_content keys a whole timetable. *before* and
+    *after* must differ: one content alone reads as every trip changing.
+    """
+    return (
+        f"(SELECT trip_id FROM (SELECT trip_id, content_hash, sum({_STOP_TIME_ROW_HASH}) AS h, count() AS n "
+        f"FROM {ARCHIVE} WHERE agency_id = {{agency_id:UInt16}} "
+        "AND content_hash IN ({before:String}, {after:String}) GROUP BY trip_id, content_hash) "
+        "GROUP BY trip_id HAVING count() = 1 OR uniqExact(h, n) = 2)"
+    )
+
+
 def content_hash(parts: list[str]) -> str:
     """The archive key for a timetable whose content parts are *parts*."""
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
@@ -83,6 +106,15 @@ def stop_time_count(parts: list[str]) -> int:
     return 0
 
 
+def is_archived(ch, agency_id: int, key: str) -> bool:
+    """Whether the archive holds stop times of the agency's content *key*."""
+    rows = ch.query(
+        f"SELECT count() FROM {ARCHIVE} WHERE agency_id = {{agency:Int32}} AND content_hash = {{key:String}}",
+        parameters={"agency": agency_id, "key": key},
+    ).result_rows
+    return bool(rows and rows[0][0])
+
+
 def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> str | None:
     """Archive the agency's loaded timetable unless its content is already kept,
     map its version name to that content, and return the content's key.
@@ -101,11 +133,7 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     if expected == 0:
         return None
     key = content_hash(parts)
-    present = ch.query(
-        f"SELECT count() FROM {ARCHIVE} WHERE agency_id = {{agency:Int32}} AND content_hash = {{key:String}}",
-        parameters={"agency": agency_id, "key": key},
-    ).result_rows
-    if not (present and present[0][0]) and not _copy(conn, ch, agency_id, key, parts, expected):
+    if not is_archived(ch, agency_id, key) and not _copy(conn, ch, agency_id, key, parts, expected):
         return None
     _map(conn, ch, agency_id, key, parts)
     return key
