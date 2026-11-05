@@ -438,7 +438,7 @@ def test_a_full_rebuild_reads_no_dates_following_the_loaded_timetable(
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     load_static(_timetable(tmp_path, "timetable_a", "SA"), agency_id, pg_conn, ch_client=ch_client)
     insert_updates(ch_client, agency_id, [_row("2026-06-01T00:00:00Z", "T1", 1, 30, None)])
-    monkeypatch.setattr(analyze_module, "_dates_following_the_loaded_timetable", _unexpected)
+    monkeypatch.setattr(analyze_module, "_dates_the_move_reaches", _unexpected)
     analyze(agency_id, pg_conn, ch_client)
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]
 

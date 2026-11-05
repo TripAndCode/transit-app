@@ -89,7 +89,7 @@ from typing import NamedTuple
 import psycopg2.extras
 
 from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
-from pipeline.agg_registry import Timetable
+from pipeline.agg_registry import ArchivedInput, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
@@ -464,6 +464,51 @@ def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list
     return [row[0] for row in result.result_rows]
 
 
+def _loaded_content_of(fingerprint: str | None) -> str | None:
+    """The archive key of the timetable a LOADED table's *fingerprint* was
+    recorded with: table_fingerprints carries its parts after `|static:`, the
+    archive keys them by static_archive.content_hash. None for no timetable or
+    no fingerprint."""
+    if fingerprint is None or "|static:" not in fingerprint:
+        return None
+    parts = fingerprint.split("|static:", 1)[1]
+    return None if parts == "none" else static_archive.content_hash(parts.split("|"))
+
+
+def _dates_of_changed_trips(agency_id: int, ch_client, stems: list[str], before: str, after: str) -> list:
+    """The service dates holding any of the agency's rows that follow the loaded
+    timetable (a version name none of *stems*) on a trip whose archived stop
+    times differ between *before* and *after*."""
+    result = _ch_query(
+        "plan: dates of changed trips",
+        ch_client,
+        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) "
+        "AND trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
+        {"agency_id": agency_id, "stems": stems, "before": before, "after": after},
+    )
+    return [row[0] for row in result.result_rows]
+
+
+def _dates_the_move_reaches(
+    agency_id: int, conn, ch_client, join: static_archive.ScheduleJoin, before: str | None
+) -> dict[ArchivedInput, list]:
+    """By what each archive-joined table reads, the dates whose rows follow the
+    loaded timetable (join.current) and read something of it that differs from
+    *before*, the timetable they were last built against. Where *before*
+    cannot be compared, every date holding such a row."""
+    after = join.current
+    if before == after:
+        return {archived_input: [] for archived_input in ArchivedInput}
+    if before is not None and static_archive.is_archived(ch_client, agency_id, before):
+        stop_times = _dates_of_changed_trips(agency_id, ch_client, join.stems, before, after)
+    else:
+        logger.info("  the timetable last built against is not archived: every following date rebuilds")
+        stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
+    medians = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
+    return {ArchivedInput.STOP_TIMES: stop_times, ArchivedInput.MEDIANS: medians}
+
+
 def _ledger_counts(agency_id: int, ch_client) -> dict:
     """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
     live = _ch_query(
@@ -648,12 +693,9 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     else:
         ledger = []
     extra = None
+    loaded = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.LOADED]
     archived = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
-    loaded_moved = any(
-        stored.get(name) != current[name]
-        for name, table in agg_registry.TABLES.items()
-        if table.timetable is Timetable.LOADED
-    )
+    loaded_moved = any(stored.get(name) != current[name] for name in loaded)
     if (
         ledger is not None
         and ingest_strategy in VERSION_STAMPING_STRATEGIES
@@ -664,13 +706,21 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         # A row whose version name the archive does not map (none was stamped,
         # its trip not being in the timetable loaded then, or its timetable was
         # replaced before the archive kept it) joins the loaded timetable, so a
-        # new one rebuilds its date in the archive-joined tables, as every date
-        # was before they joined the archive.
-        stems = static_archive.schedule_join(ch_client, agency_id, content_key).stems
-        following = _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
-        if following:
-            logger.info(f"  {len(following)} date(s) with rows of no archived timetable follow the new loaded one")
-            extra = dict.fromkeys(archived, following)
+        # new one rebuilds its date where what the row reads of it changed.
+        join = static_archive.schedule_join(ch_client, agency_id, content_key)
+        before = _loaded_content_of(next((stored[name] for name in loaded if name in stored), None))
+        reached = _dates_the_move_reaches(agency_id, conn, ch_client, join, before)
+        for archived_input, dates in reached.items():
+            if dates:
+                logger.info(
+                    f"  {len(dates)} date(s) of rows following the loaded timetable read its changed "
+                    f"{archived_input.value}"
+                )
+        extra = {
+            name: reached[table.archived_input]
+            for name, table in agg_registry.TABLES.items()
+            if table.archived_input is not None
+        }
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
