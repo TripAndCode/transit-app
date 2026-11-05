@@ -232,20 +232,6 @@ CREATE TABLE IF NOT EXISTS agg_stop_routes (
 PARTITION BY agency_id
 ORDER BY (agency_id, stop_id);
 
--- A schedule mirror nothing reads or fills: the stop tables join
--- static_stop_times_archive instead.
-CREATE TABLE IF NOT EXISTS static_stop_times (
-    agency_id      Int32,
-    trip_id        String,
-    stop_sequence  Int32,
-    stop_id        String,
-    arrival_time   Nullable(String),
-    departure_time Nullable(String),
-    fingerprint    LowCardinality(String)
-) ENGINE = MergeTree
-PARTITION BY agency_id
-ORDER BY (agency_id, trip_id, stop_sequence);
-
 -- Every timetable an agency has loaded, for the aggregates that join a day to
 -- the timetable its rows were ingested against. Keyed by content, not by
 -- version name, so a reload of the same content under a new name adds nothing
