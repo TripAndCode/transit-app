@@ -223,11 +223,12 @@ def test_a_branch_changing_only_a_checked_non_python_path_is_not_waved_through(f
     assert "nothing differs from" in result.stderr
 
 
-@pytest.mark.parametrize("changed", ["db/migrations/0050_x.up.sql", "scripts/tool.sh", "Makefile"])
-def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(fake_repo, changed):
-    """The safety net above only refuses a misdirected gate; the gate itself
-    must also treat such a path as a reason to run the backend checks, or a
-    correctly directed push of it verifies nothing."""
+def _push_a_backend_change(
+    fake_repo, changed: str, extra_env: dict[str, str], files: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Push a branch changing *changed*, plus *files* (path to an executable's
+    body), through the gate, with a stub virtualenv and docker so no real
+    tool runs."""
     venv = fake_repo.parent / "venv"
     (venv / "bin").mkdir(parents=True)
     for tool in ("pytest", "mypy"):
@@ -237,28 +238,71 @@ def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(f
     shims.mkdir()
     (shims / "poetry").write_text(f'#!/bin/sh\n[ "$1 $2" = "env info" ] && echo {venv}\nexit 0\n')
     (shims / "poetry").chmod(0o755)
+    (shims / "docker").write_text("#!/bin/sh\nexit 0\n")
+    (shims / "docker").chmod(0o755)
 
     _git("branch", "feature", cwd=fake_repo)
     worktree = fake_repo.parent / "feature-worktree"
     _git("worktree", "add", "-q", str(worktree), "feature", cwd=fake_repo)
-    target = worktree / changed
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("x\n")
-    _git("add", changed, cwd=worktree)
+    for path, body in {changed: "x\n", **(files or {})}.items():
+        target = worktree / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+        target.chmod(0o755)
+        _git("add", path, cwd=worktree)
     _git("commit", "-q", "-m", "change", cwd=worktree)
 
+    # The gate reads its PUSH_GATE_* switches from its own environment, so the
+    # runner's must not reach it: each test sets the ones it means.
     env = {
-        **os.environ,
+        **{key: value for key, value in os.environ.items() if not key.startswith("PUSH_GATE_")},
         "CLAUDE_PROJECT_DIR": str(fake_repo),
         "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
-        "PUSH_GATE_SKIP_TESTS": "1",
+        **extra_env,
     }
     payload = json.dumps({"tool_input": {"command": f"git -C {worktree} push origin feature"}, "cwd": ""})
-    result = subprocess.run(
+    return subprocess.run(
         ["bash", str(HOOK_PATH)], input=payload, capture_output=True, text=True, timeout=60, env=env, cwd=fake_repo
     )
+
+
+@pytest.mark.parametrize("changed", ["db/migrations/0050_x.up.sql", "scripts/tool.sh", "Makefile"])
+def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(fake_repo, changed):
+    """The safety net above only refuses a misdirected gate; the gate itself
+    must also treat such a path as a reason to run the backend checks, or a
+    correctly directed push of it verifies nothing."""
+    result = _push_a_backend_change(fake_repo, changed, {})
     assert result.returncode == 0, result.stderr
-    assert "skipping the backend suite" in result.stderr
+    assert "backend suite is left to CI" in result.stderr
+
+
+@pytest.mark.parametrize("asked", [True, False])
+def test_the_backend_suite_runs_in_the_gate_only_when_asked(fake_repo, asked):
+    """CI runs the backend suite on every push to an open PR and a merge needs it green, so
+    the gate leaves it there unless PUSH_GATE_FULL_SUITE=1 asks for it here."""
+    marker = fake_repo.parent / "suite-ran"
+    result = _push_a_backend_change(
+        fake_repo,
+        "scripts/tool.sh",
+        {"PUSH_GATE_FULL_SUITE": "1", "SUITE_MARKER": str(marker)} if asked else {"SUITE_MARKER": str(marker)},
+        {"scripts/run_full_ci.sh": '#!/bin/sh\necho ran > "$SUITE_MARKER"\n'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert marker.exists() is asked
+    assert ("backend suite is left to CI" in result.stderr) is not asked
+
+
+def test_a_failing_backend_suite_asked_for_still_blocks(fake_repo):
+    result = _push_a_backend_change(
+        fake_repo,
+        "scripts/tool.sh",
+        {"PUSH_GATE_FULL_SUITE": "1"},
+        {"scripts/run_full_ci.sh": "#!/bin/sh\nexit 1\n"},
+    )
+    assert result.returncode == 2
+    # The suite's own step failed, not the Docker check before it.
+    assert "run_full_ci.sh" in result.stderr
+    assert "Docker is not reachable" not in result.stderr
 
 
 def _run_hook_unscoped(command: str, *, cwd: str = "") -> subprocess.CompletedProcess:

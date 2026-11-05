@@ -110,13 +110,21 @@ tier routing, the high-risk overlay and the fix cap.
   `frontend/scripts/ts6-for-eslint.cjs` explains the compiler split and when it can
   go.
 - Run the smallest relevant check while iterating, and the complete required set once
-  before completion.
+  before completion. For the backend suite, that complete run is CI's (below).
   - Verify by running the real command in the real environment. `make -n`, warm
     caches and mocks can each hide a defect.
   - Capture verbose output to a file and surface only the summary or failure tail.
-- Claude Code's pre-push hook runs most of these checks on the pushed worktree; its
-  header lists what it leaves out. Other agents run them before pushing. Either way,
-  CI sees only the tip that triggered it, so local verification stays mandatory.
+- The full backend suite is CI's. CI runs it sharded on every push to an open PR,
+  and a merge needs it green on the PR's head (Git and pull requests).
+  - Locally, run the tests that cover the changed code, through `run_full_ci.sh`
+    when they need the databases.
+  - Run the whole suite locally only for a change whose reach no file list bounds:
+    `tests/conftest.py`, shared fixtures, migrations or schema, or test
+    infrastructure. Also run it to reproduce a CI failure.
+- Claude Code's pre-push hook runs the static checks and the frontend checks on the
+  pushed worktree, and leaves the backend suite to CI unless `PUSH_GATE_FULL_SUITE=1`;
+  its header lists what it leaves out. Other agents run the same checks before
+  pushing. CI sees only the tip that triggered it, so those checks stay mandatory.
 - After analyze changes, rebuilding aggregates (`make analyze-all`) writes `agg_*` in
   both Postgres and ClickHouse, so an agent runs it only against the throwaway pair
   (`make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
