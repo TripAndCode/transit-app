@@ -31,13 +31,17 @@ def scratch_url():
         cur.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     url = urlunsplit(parts._replace(path=f"/{name}"))
-    conn = psycopg2.connect(url)
-    migrate_up(conn)
-    conn.close()
-    yield url
-    with admin.cursor() as cur:
-        cur.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
-    admin.close()
+    try:
+        conn = psycopg2.connect(url)
+        try:
+            migrate_up(conn)
+        finally:
+            conn.close()
+        yield url
+    finally:
+        with admin.cursor() as cur:
+            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+        admin.close()
 
 
 def _timetable(folder, name: str, stop: str) -> str:
@@ -204,3 +208,18 @@ def test_the_medians_kept_in_the_scratch_reach_the_target(pg_conn, agency_id, sc
             (agency_id,),
         )
         assert cur.fetchall() == [("R1", 600.0)]
+
+
+def test_a_failed_median_copy_leaves_the_name_for_a_rerun(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, monkeypatch
+):
+    """The map row takes a name out of every later run's candidates, so it lands last."""
+    static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
+
+    def the_target_went_away(*args, **kwargs):
+        raise RuntimeError("the target went away")
+
+    monkeypatch.setattr(backfill, "copy_medians", the_target_went_away)
+    with pytest.raises(RuntimeError):
+        _run(agency_id, scratch_url, static_dir, "--apply")
+    assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems

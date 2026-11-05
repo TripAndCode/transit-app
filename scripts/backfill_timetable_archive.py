@@ -26,11 +26,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+import clickhouse_connect
 import psycopg2
 import psycopg2.extras
 
 from pipeline import static_archive, static_headways
-from pipeline.clickhouse import UPDATES_TABLE, get_client
+from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, get_client
 from pipeline.service_day import service_date_ch
 from pipeline.static_content import static_parts
 from pipeline.static_fetcher import DEFAULT_STATIC_DEST
@@ -128,16 +129,16 @@ def copy_medians(scratch_conn, target_conn, agency_id: int, key: str) -> int:
     if not rows:
         return 0
     with target_conn.cursor() as cur:
-        psycopg2.extras.execute_values(
+        inserted = psycopg2.extras.execute_values(
             cur,
             f"INSERT INTO {static_headways.TABLE} "
             "(agency_id, content_hash, route_code, logic_version, scheduled_headway_median_sec) "
-            "VALUES %s ON CONFLICT DO NOTHING",
+            "VALUES %s ON CONFLICT DO NOTHING RETURNING 1",
             [(agency_id, key, *row) for row in rows],
+            fetch=True,
         )
-        inserted = cur.rowcount
     target_conn.commit()
-    return inserted
+    return len(inserted)
 
 
 def _backfill(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Candidate]) -> list[tuple[str, str]]:
@@ -149,12 +150,16 @@ def _backfill(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Candid
             assert candidate.zip is not None
             load_static(str(candidate.zip), agency_id, scratch_conn, ch_client=ch)
             parts = static_parts(agency_id, scratch_conn, True)
-            key = static_archive.archive_loaded(scratch_conn, ch, agency_id, parts)
-            if key is None:
+            if not static_archive.stop_time_count(parts):
                 raise Refusal(f"{candidate.zip} loaded no stop times")
+            key = static_archive.content_hash(parts)
+            # The medians first: archive_loaded's map row takes the name out of
+            # every later run's candidates, so it lands last.
             static_headways.record_route_headways(scratch_conn, agency_id, key, parts)
             scratch_conn.commit()
             copy_medians(scratch_conn, target_conn, agency_id, key)
+            if static_archive.archive_loaded(scratch_conn, ch, agency_id, parts) != key:
+                raise Refusal(f"{candidate.stem} was not archived")
             done.append((candidate.stem, key))
             print(f"archived {candidate.stem} as {key}")
     finally:
@@ -176,9 +181,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not url:
             raise Refusal("DATABASE_URL is not set")
-        ch = get_client()
+        # The dry run only reads, and its sessions say so.
+        ch = get_client() if args.apply else clickhouse_connect.get_client(**ch_conn_kwargs(), settings={"readonly": 1})
         target_conn = psycopg2.connect(url)
         scratch_conn = psycopg2.connect(args.scratch_database_url)
+        if not args.apply:
+            target_conn.set_session(readonly=True)
+            scratch_conn.set_session(readonly=True)
         try:
             row = _check_scratch(target_conn, scratch_conn, args.agency)
             mapped = set(static_archive.schedule_join(ch, args.agency, None).stems)
