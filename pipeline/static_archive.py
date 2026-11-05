@@ -175,7 +175,8 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], expected: int) -
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
-def _clear_archive_joined_states(conn, agency_id: int) -> None:
+def clear_archive_joined_states(conn, agency_id: int) -> None:
+    """Clear the agency's archive-joined tables' states, so its next analyze rebuilds them in full."""
     # agg_registry imports ch_aggregates, which imports this module: imported here, at call time.
     from pipeline import agg_registry
     from pipeline.agg_registry import Timetable
@@ -222,7 +223,7 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
         )
         # Cleared and committed before the map row lands, so a process that
         # dies in between still rebuilds them; clearing again is harmless.
-        _clear_archive_joined_states(conn, agency_id)
+        clear_archive_joined_states(conn, agency_id)
     ch.insert(
         VERSION_MAP,
         [(agency_id, stem, key, datetime.now(timezone.utc))],
