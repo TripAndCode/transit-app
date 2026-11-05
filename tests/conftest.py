@@ -19,7 +19,6 @@ from tests.sharding import assign_shards, shard_from_env
 # and emptied between tests.
 _CH_STORE_TABLES = (
     *ch_aggregates.ALL_TABLES,
-    ch_aggregates.STATIC_STOP_TIMES,
     static_archive.ARCHIVE,
     static_archive.VERSION_MAP,
 )

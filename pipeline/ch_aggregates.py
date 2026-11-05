@@ -52,9 +52,6 @@ from pipeline.static_archive import ScheduleJoin
 
 logger = logging.getLogger(__name__)
 
-# A schedule mirror nothing reads or fills: schema.sql still creates it, and the test fixtures drop it.
-STATIC_STOP_TIMES = "static_stop_times"
-
 
 def months_of(dates: Iterable[date]) -> list[int]:
     """The months holding *dates*, as ascending YYYYMM integers (`toYYYYMM`'s form)."""
