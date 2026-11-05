@@ -193,3 +193,25 @@ def test_pooled_forms_return_none_rather_than_raise_on_null_sufficient_stats():
     # degrade to None, not raise TypeError on arithmetic against None.
     assert mean_wait_from_pooled(2, None, None) is None
     assert coefficient_of_variation_from_pooled(2, None, None) is None
+
+
+def test_a_route_changes_when_its_median_differs_or_one_timetable_lacks_it():
+    from pipeline.static_headways import changed_routes
+
+    medians = {
+        ("a", "R1"): 600.0,
+        ("b", "R1"): 1200.0,
+        ("a", "R2"): 600.0,
+        ("b", "R2"): 600.0,
+        ("a", "R3"): None,
+        ("b", "R3"): 600.0,
+        ("a", "R4"): 600.0,
+        ("c", "R5"): 300.0,
+    }
+    assert changed_routes(medians, "a", "b") == ["R1", "R3", "R4"]
+
+
+def test_no_route_changes_between_equal_medians():
+    from pipeline.static_headways import changed_routes
+
+    assert changed_routes({("a", "R1"): None, ("b", "R1"): None}, "a", "b") == []
