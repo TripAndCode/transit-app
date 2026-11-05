@@ -1,5 +1,6 @@
-"""A reload rebuilds a date holding rows that follow the loaded timetable only
-where what those rows read of it changed."""
+"""A reload rebuilds a date of the stop tables and dwell holding rows that follow
+the loaded timetable only where those rows' trips' stop times changed (the daily
+headways' medians: test_static_headways)."""
 
 import dataclasses
 import logging

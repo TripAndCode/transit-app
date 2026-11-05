@@ -450,6 +450,11 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
     }
 
 
+# A row that joins the loaded timetable: its version name, NULL read as '', is
+# none of {stems}, the names the archive maps (static_archive.JOIN_CONTENT_SQL).
+_FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, ifNull(static_version_id, ''))"
+
+
 def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list[str]) -> list:
     """The service dates holding any of the agency's rows whose version name is
     none of *stems*, the names the archive maps: those rows join the loaded
@@ -458,7 +463,7 @@ def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list
         "plan: dates following the loaded timetable",
         ch_client,
         "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) ORDER BY date",
+        "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " ORDER BY date",
         {"agency_id": agency_id, "stems": stems},
     )
     return [row[0] for row in result.result_rows]
@@ -483,7 +488,7 @@ def _dates_of_changed_trips(agency_id: int, ch_client, stems: list[str], before:
         "plan: dates of changed trips",
         ch_client,
         "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) "
+        "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
         "AND trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
         {"agency_id": agency_id, "stems": stems, "before": before, "after": after},
     )
@@ -514,7 +519,7 @@ def _dates_of_changed_medians(
         "plan: dates of changed medians",
         ch_client,
         "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) "
+        "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
         "AND route_code IN {routes:Array(String)} ORDER BY date",
         {"agency_id": agency_id, "stems": stems, "routes": routes},
     )
@@ -736,8 +741,9 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     ):
         # A row whose version name the archive does not map (none was stamped,
         # its trip not being in the timetable loaded then, or its timetable was
-        # replaced before the archive kept it) joins the loaded timetable, so a
-        # new one rebuilds its date where what the row reads of it changed.
+        # replaced before the archive kept it) joins the loaded timetable, as
+        # does, for the daily headways' threshold, a row whose content keeps no
+        # medians; a new one rebuilds its date where what the row reads changed.
         join = static_archive.schedule_join(ch_client, agency_id, content_key)
         before = _loaded_content_of(next((stored[name] for name in loaded if name in stored), None))
         reached = _dates_the_move_reaches(agency_id, conn, ch_client, join, before)
