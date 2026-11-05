@@ -33,7 +33,7 @@ import psycopg2.extras
 from pipeline import static_archive, static_headways
 from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, get_client
 from pipeline.service_day import service_date_ch
-from pipeline.static_content import static_parts
+from pipeline.static_content import STATIC_DEPENDENCY_COLUMNS, static_parts
 from pipeline.static_fetcher import DEFAULT_STATIC_DEST
 from pipeline.static_loader import load_static
 
@@ -141,13 +141,25 @@ def copy_medians(scratch_conn, target_conn, agency_id: int, key: str) -> int:
     return len(inserted)
 
 
+def _empty_scratch_timetable(scratch_conn, agency_id: int) -> None:
+    """Remove the scratch's loaded timetable for the agency. load_static archives the timetable it
+    replaces into the target, so a timetable left by an earlier, failed run would be mapped there without
+    its medians."""
+    with scratch_conn.cursor() as cur:
+        for table in STATIC_DEPENDENCY_COLUMNS:
+            cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
+    scratch_conn.commit()
+
+
 def _backfill(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Candidate]) -> list[tuple[str, str]]:
-    """Archive and map each of *chosen*; then clear the states, also when a later zip fails, so the dates
-    of every name already mapped rebuild."""
+    """Archive and map each of *chosen*; then clear the states, also when a later step fails, so the dates
+    of every name mapped rebuild."""
     done: list[tuple[str, str]] = []
+    mapping = False
     try:
         for candidate in chosen:
             assert candidate.zip is not None
+            _empty_scratch_timetable(scratch_conn, agency_id)
             load_static(str(candidate.zip), agency_id, scratch_conn, ch_client=ch)
             parts = static_parts(agency_id, scratch_conn, True)
             if not static_archive.stop_time_count(parts):
@@ -158,12 +170,14 @@ def _backfill(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Candid
             static_headways.record_route_headways(scratch_conn, agency_id, key, parts)
             scratch_conn.commit()
             copy_medians(scratch_conn, target_conn, agency_id, key)
+            mapping = True
             if static_archive.archive_loaded(scratch_conn, ch, agency_id, parts) != key:
                 raise Refusal(f"{candidate.stem} was not archived")
             done.append((candidate.stem, key))
             print(f"archived {candidate.stem} as {key}")
     finally:
-        if done:
+        # From the first map write on, even one whose call then failed; clearing again is harmless.
+        if mapping:
             static_archive.clear_archive_joined_states(target_conn, agency_id)
     return done
 

@@ -220,6 +220,8 @@ def test_a_failed_median_copy_leaves_the_name_for_a_rerun(
         raise RuntimeError("the target went away")
 
     monkeypatch.setattr(backfill, "copy_medians", the_target_went_away)
-    with pytest.raises(RuntimeError):
-        _run(agency_id, scratch_url, static_dir, "--apply")
-    assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
+    # Twice on one scratch: the second run's load must not archive the first's leftover timetable.
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            _run(agency_id, scratch_url, static_dir, "--apply")
+        assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
