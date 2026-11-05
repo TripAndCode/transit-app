@@ -10,18 +10,14 @@ import pytest
 from psycopg2 import sql
 
 from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
-from pipeline import ch_aggregates, static_archive
+from pipeline import ch_aggregates
 from pipeline.db import DEFAULT_DATABASE_URL
 from tests.postgres_ports import candidate_ports
 from tests.sharding import assign_shards, shard_from_env
 
 # The ClickHouse tables analyze writes besides `updates`: dropped at session start
 # and emptied between tests.
-_CH_STORE_TABLES = (
-    *ch_aggregates.ALL_TABLES,
-    static_archive.ARCHIVE,
-    static_archive.VERSION_MAP,
-)
+_CH_STORE_TABLES = ch_aggregates.STORE_TABLES
 
 
 def _dev_ports() -> frozenset[int]:

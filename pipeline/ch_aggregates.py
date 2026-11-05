@@ -562,6 +562,10 @@ _WHOLE_SPECS: dict[str, _WholeSpec] = {
 WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
 COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
 ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
+# Every persistent ClickHouse table besides the observation ones (`updates`,
+# `updates_live`): what analyze builds and the timetable archive. db/clickhouse/schema.sql
+# creates exactly these and the observation tables.
+STORE_TABLES: tuple[str, ...] = (*ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
 _ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
 COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}
 
