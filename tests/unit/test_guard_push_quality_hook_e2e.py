@@ -278,7 +278,7 @@ def test_a_branch_changing_only_a_backend_covered_path_runs_the_backend_checks(f
 
 @pytest.mark.parametrize("asked", [True, False])
 def test_the_backend_suite_runs_in_the_gate_only_when_asked(fake_repo, asked):
-    """CI runs the backend suite on every push and a merge needs it green, so
+    """CI runs the backend suite on every push to an open PR and a merge needs it green, so
     the gate leaves it there unless PUSH_GATE_FULL_SUITE=1 asks for it here."""
     marker = fake_repo.parent / "suite-ran"
     result = _push_a_backend_change(
@@ -300,7 +300,9 @@ def test_a_failing_backend_suite_asked_for_still_blocks(fake_repo):
         {"scripts/run_full_ci.sh": "#!/bin/sh\nexit 1\n"},
     )
     assert result.returncode == 2
-    assert "backend suite" in result.stderr
+    # The suite's own step failed, not the Docker check before it.
+    assert "run_full_ci.sh" in result.stderr
+    assert "Docker is not reachable" not in result.stderr
 
 
 def _run_hook_unscoped(command: str, *, cwd: str = "") -> subprocess.CompletedProcess:

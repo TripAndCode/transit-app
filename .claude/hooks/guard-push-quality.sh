@@ -734,8 +734,9 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
   } >>"$LOG" 2>&1
 fi
 
-# Fail fast on the cheap checks before paying for the full backend + frontend
-# suites — a one-line format nit shouldn't cost a multi-minute double run.
+# Fail fast on the cheap checks before paying for the frontend suite, and the
+# backend suite too when PUSH_GATE_FULL_SUITE=1 asks for it — a one-line
+# format nit shouldn't cost a multi-minute run.
 if [ "$FAIL" -ne 0 ]; then
   block_with_log "ruff format/lint or mypy failed (skipping tests)"
 fi
