@@ -75,3 +75,14 @@ def route_medians(conn, agency_id: int, contents: Iterable[str]) -> dict[tuple[s
             (agency_id, sorted(set(contents)), agency_id),
         )
         return {(content, route): median for content, route, median in cur.fetchall()}
+
+
+def changed_routes(medians: dict[tuple[str, str], float | None], before: str, after: str) -> list[str]:
+    """The routes whose kept median differs between contents *before* and
+    *after*: another value, NULL against a value, or kept for one only."""
+
+    def kept(content: str, route: str) -> tuple[bool, float | None]:
+        return (content, route) in medians, medians.get((content, route))
+
+    routes = {route for content, route in medians if content in (before, after)}
+    return sorted(route for route in routes if kept(before, route) != kept(after, route))

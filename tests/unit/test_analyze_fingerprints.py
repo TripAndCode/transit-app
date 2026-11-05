@@ -69,3 +69,23 @@ def test_extra_dates_reach_a_dated_table_and_its_whole_history_table():
     assert scopes["stop_route_days"] == ["2026-06-01", "2026-06-02"]
     assert scopes["agg_stop_routes"] is None
     assert scopes["agg_feed_health"] == ledger
+
+
+TWO = ["static_trips:1:7", "static_stop_times:2:9"]
+
+
+def test_a_loaded_fingerprint_names_the_content_it_was_built_against():
+    from pipeline.analyze import _loaded_content_of
+    from pipeline.static_archive import content_hash
+
+    assert _loaded_content_of(table_fingerprints("static_join", True, TWO)["agg_route_headway"]) == content_hash(TWO)
+    bumped = table_fingerprints("static_join", True, TWO, {"agg_route_headway": 9})["agg_route_headway"]
+    assert _loaded_content_of(bumped) == content_hash(TWO)
+
+
+def test_no_content_is_read_from_no_timetable_or_no_fingerprint():
+    from pipeline.analyze import _loaded_content_of
+
+    assert _loaded_content_of(table_fingerprints("static_join", False, [])["agg_route_headway"]) is None
+    assert _loaded_content_of(None) is None
+    assert _loaded_content_of("v1|clamp:7200|strategy:static_join") is None

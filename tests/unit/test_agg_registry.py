@@ -1,11 +1,12 @@
 """The aggregate registry names every table analyze builds, and only those."""
 
+import dataclasses
 from datetime import date
 
 import pytest
 
 from pipeline import agg_registry, ch_aggregates
-from pipeline.agg_registry import Kind, Timetable
+from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
 ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {"agg_route_headway_daily", "agg_route_daily_dwell_run"}
@@ -132,3 +133,19 @@ def test_stop_route_days_carry_the_stop_routes():
     stored = _current() | {"stop_route_days": "old"}
     scopes, _ = agg_registry.table_scopes(_current(), stored, [])
     assert scopes["agg_stop_routes"] is None
+
+
+def test_each_archive_joined_table_names_what_it_reads_of_its_timetable():
+    inputs = {n: t.archived_input for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
+    assert inputs == {
+        **dict.fromkeys(ch_aggregates.STATIC_JOINED_TABLES, ArchivedInput.STOP_TIMES),
+        "agg_route_daily_dwell_run": ArchivedInput.STOP_TIMES,
+        "agg_route_headway_daily": ArchivedInput.MEDIANS,
+    }
+    assert all(t.archived_input is None for t in agg_registry.TABLES.values() if t.timetable is not Timetable.ARCHIVED)
+
+
+def test_an_archive_joined_table_without_its_input_is_refused():
+    table = agg_registry.TABLES["agg_route_daily_dwell_run"]
+    with pytest.raises(ValueError, match="agg_route_daily_dwell_run"):
+        agg_registry._index([dataclasses.replace(table, archived_input=None)])
