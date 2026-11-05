@@ -106,14 +106,14 @@ def test_analyze_records_the_loaded_timetables_medians(pg_conn, agency_id, ch_cl
     assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
-def _departure(captured_at: str, trip: str, scheduled_sec: int, stem: str) -> tuple:
-    """One departure poll at stop s1 of route R1, on time, in insert_updates' order."""
+def _departure(captured_at: str, trip: str, scheduled_sec: int, stem: str | None, route: str = "R1") -> tuple:
+    """One departure poll at stop s1 of *route*, on time, in insert_updates' order."""
     values = dict.fromkeys(UPDATE_COLUMNS[1:])
     values.update(
-        file_name=f"h/{captured_at}/{trip}",
+        file_name=f"h/{captured_at}/{trip}/{route}",
         captured_at=captured_at,
         trip_id=trip,
-        route_code="R1",
+        route_code=route,
         stop_sequence=1,
         stop_id="s1",
         dep_delay=0,
@@ -123,9 +123,12 @@ def _departure(captured_at: str, trip: str, scheduled_sec: int, stem: str) -> tu
     return tuple(values[column] for column in UPDATE_COLUMNS[1:])
 
 
-def _a_long_gap(day: str, stem: str) -> list[tuple]:
+def _a_long_gap(day: str, stem: str | None, route: str = "R1") -> list[tuple]:
     """Two departures 1500 s apart: long against a 600 s median (1.75 x 600 = 1050), not a 1200 s one."""
-    return [_departure(f"{day}T00:00:00Z", "T0", 28800, stem), _departure(f"{day}T00:30:00Z", "T1", 30300, stem)]
+    return [
+        _departure(f"{day}T00:00:00Z", "T0", 28800, stem, route),
+        _departure(f"{day}T00:30:00Z", "T1", 30300, stem, route),
+    ]
 
 
 def _replace_timetable(pg_conn, agency_id, departures, stem):
@@ -252,3 +255,43 @@ def test_the_outgoing_timetables_medians_outlive_a_failed_load(tmp_path, pg_conn
     with pytest.raises(RuntimeError, match="injected failure"):
         load_static(incoming, agency_id, pg_conn, ch_client=ch_client)
     assert [row[0] for row in _rows_seen_afresh(pg_conn, agency_id)] == [key]
+
+
+def _following_on_two_routes(pg_conn, agency_id, ch_client):
+    """Rows following the loaded timetable: on R1 (median 600 s under A) on 6/3,
+    on R9 (no median kept anywhere) on 6/4. Returns A's key."""
+    from tests.pipeline.test_analyze import _set_ingest_strategy
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    key_a, _ = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"], "timetable_a")
+    insert_updates(ch_client, agency_id, [*_a_long_gap("2026-06-03", None), *_a_long_gap("2026-06-04", None, "R9")])
+    analyze(agency_id, pg_conn, ch_client)
+    assert (date(2026, 6, 3), 1) in _long_gaps(pg_conn, agency_id)
+    return key_a
+
+
+def _reload_to_a_20_minute_timetable(pg_conn, agency_id, ch_client, caplog):
+    _replace_timetable(pg_conn, agency_id, ["08:00:00", "08:20:00", "08:40:00"], "timetable_b")
+    insert_updates(ch_client, agency_id, _a_long_gap("2026-06-02", "timetable_b"))
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+
+
+def test_a_reload_rebuilds_the_following_dates_of_routes_whose_median_changed(pg_conn, agency_id, ch_client, caplog):
+    _following_on_two_routes(pg_conn, agency_id, ch_client)
+    _reload_to_a_20_minute_timetable(pg_conn, agency_id, ch_client, caplog)
+    # The new 6/2 and R1's 6/3; R9's 6/4 reads no median that changed.
+    assert "scope agg_route_headway_daily: 2 date(s)" in caplog.text
+    assert (date(2026, 6, 3), 0) in _long_gaps(pg_conn, agency_id)
+
+
+def test_a_reload_from_a_timetable_without_medians_rebuilds_every_following_date(pg_conn, agency_id, ch_client, caplog):
+    key_a = _following_on_two_routes(pg_conn, agency_id, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM route_headway_by_content WHERE agency_id = %s AND content_hash = %s", (agency_id, key_a)
+        )
+    pg_conn.commit()
+    _reload_to_a_20_minute_timetable(pg_conn, agency_id, ch_client, caplog)
+    assert "keeps no medians" in caplog.text
+    assert "scope agg_route_headway_daily: 3 date(s)" in caplog.text

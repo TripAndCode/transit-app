@@ -490,6 +490,37 @@ def _dates_of_changed_trips(agency_id: int, ch_client, stems: list[str], before:
     return [row[0] for row in result.result_rows]
 
 
+def _dates_of_changed_medians(
+    agency_id: int, conn, ch_client, join: static_archive.ScheduleJoin, before: str | None
+) -> list:
+    """The service dates holding any of the agency's rows whose long-gap
+    threshold can come from the loaded timetable (headways.thresholds: a
+    version name mapping to no content with kept medians) on a route whose
+    median differs between *before* and the loaded timetable; every such date
+    when either keeps no medians."""
+    after = join.current
+    contents = {*join.hashes, after, *([before] if before else [])} - {""}
+    medians = static_headways.route_medians(conn, agency_id, contents)
+    kept = {content for content, _route in medians}
+    stems = [stem for stem, content in zip(join.stems, join.hashes, strict=True) if content in kept]
+    if before not in kept or after not in kept:
+        logger.info("  a timetable keeps no medians: every following date rebuilds its daily headways")
+        return _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
+    routes = static_headways.changed_routes(medians, before, after)
+    logger.info(f"  {len(routes)} route(s) changed their median")
+    if not routes:
+        return []
+    result = _ch_query(
+        "plan: dates of changed medians",
+        ch_client,
+        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "AND NOT has({stems:Array(String)}, ifNull(static_version_id, '')) "
+        "AND route_code IN {routes:Array(String)} ORDER BY date",
+        {"agency_id": agency_id, "stems": stems, "routes": routes},
+    )
+    return [row[0] for row in result.result_rows]
+
+
 def _dates_the_move_reaches(
     agency_id: int, conn, ch_client, join: static_archive.ScheduleJoin, before: str | None
 ) -> dict[ArchivedInput, list]:
@@ -505,7 +536,7 @@ def _dates_the_move_reaches(
     else:
         logger.info("  the timetable last built against is not archived: every following date rebuilds")
         stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
-    medians = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
+    medians = _dates_of_changed_medians(agency_id, conn, ch_client, join, before)
     return {ArchivedInput.STOP_TIMES: stop_times, ArchivedInput.MEDIANS: medians}
 
 
