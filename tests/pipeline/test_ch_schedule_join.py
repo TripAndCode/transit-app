@@ -441,3 +441,33 @@ def test_a_full_rebuild_reads_no_dates_following_the_loaded_timetable(
     monkeypatch.setattr(analyze_module, "_dates_following_the_loaded_timetable", _unexpected)
     analyze(agency_id, pg_conn, ch_client)
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA")]
+
+
+def _changed_trips(ch_client, before: str, after: str) -> list[str]:
+    return [
+        row[0]
+        for row in ch_client.query(
+            f"SELECT trip_id FROM {static_archive.changed_trips_sql()} ORDER BY trip_id",
+            parameters={"agency_id": AGENCY, "before": before, "after": after},
+        ).result_rows
+    ]
+
+
+def test_a_trip_changes_when_its_stop_times_differ_or_only_one_timetable_has_it(ch_client):
+    at_8 = ("08:00:00", "08:00:00")
+    _archive(ch_client, A, [("T1", 1, "SA"), ("T1", 2, "SB"), ("T2", 1, "SA"), ("T3", 1, "SA")], at_8)
+    _archive(ch_client, B, [("T1", 2, "SB"), ("T1", 1, "SA"), ("T4", 1, "SA")], at_8)
+    _archive(ch_client, B, [("T2", 1, "SA")], ("08:01:00", "08:01:00"))
+    assert _changed_trips(ch_client, A, B) == ["T2", "T3", "T4"]
+
+
+def test_against_a_timetable_with_no_stop_times_every_trip_changes(ch_client):
+    _archive(ch_client, A, [("T1", 1, "SA"), ("T2", 1, "SA")])
+    assert _changed_trips(ch_client, A, "") == ["T1", "T2"]
+
+
+def test_is_archived_reads_the_agencys_own_contents(ch_client):
+    _archive(ch_client, A, [("T1", 1, "SA")])
+    assert static_archive.is_archived(ch_client, AGENCY, A)
+    assert not static_archive.is_archived(ch_client, AGENCY, B)
+    assert not static_archive.is_archived(ch_client, AGENCY + 1, A)
