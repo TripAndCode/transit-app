@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Reproducible "full CI" run for one worktree or job (the pre-push gate's
-# backend suite runs through it): builds and starts a
+# backend suite, when PUSH_GATE_FULL_SUITE=1 asks for it, runs through it):
+# builds and starts a
 # dedicated, uniquely-named/-ported Postgres + ClickHouse pair, applies
 # schema, runs the same lint/type/test gate as
 # .github/workflows/ci.yml's `backend-static` and `test` jobs, the suite
