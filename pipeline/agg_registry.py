@@ -46,6 +46,15 @@ class Timetable(str, Enum):
     ARCHIVED = "archived"
 
 
+class ArchivedInput(str, Enum):
+    """What an archive-joined table reads of the timetable each of its rows
+    joins, which decides the dates a new loaded timetable reaches
+    (pipeline.analyze._dates_the_move_reaches)."""
+
+    STOP_TIMES = "stop_times"  # its trip's archived stop times
+    MEDIANS = "medians"  # its route's kept scheduled headway median (pipeline.static_headways)
+
+
 @dataclass(frozen=True)
 class AggTable:
     name: str
@@ -58,6 +67,7 @@ class AggTable:
     # computed from their rows: folded into its fingerprint, so their bump
     # rebuilds it, and nothing else of theirs does.
     versions_from: tuple[str, ...] = ()
+    archived_input: ArchivedInput | None = None
 
 
 def _monthly(name: str) -> Callable[[], list[str]]:
@@ -105,6 +115,10 @@ def _timetable_of(name: str) -> Timetable:
     return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
 
 
+def _input_of(name: str) -> ArchivedInput | None:
+    return ArchivedInput.STOP_TIMES if name in ch_aggregates.STATIC_JOINED_TABLES else None
+
+
 def _entries() -> list[AggTable]:
     unknown = set(_VERSIONS) - {*ch_aggregates.MONTHLY_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES}
     if unknown:
@@ -135,6 +149,7 @@ def _entries() -> list[AggTable]:
             # Its thresholds are the medians agg_route_headway's SQL keeps per
             # timetable, keyed by that table's version, not its rows.
             versions_from=("agg_route_headway",),
+            archived_input=ArchivedInput.MEDIANS,
         ),
         AggTable(
             "agg_route_daily_dwell_run",
@@ -142,10 +157,20 @@ def _entries() -> list[AggTable]:
             Kind.DATED,
             Timetable.ARCHIVED,
             lambda: [agg_sql.dwell_run_sql(), build_stop_visits_ch_sql(extra_where="", join_schedule=True)],
+            archived_input=ArchivedInput.STOP_TIMES,
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
-        entries.append(AggTable(name, _VERSIONS.get(name, 1), Kind.DATED, _timetable_of(name), _monthly(name)))
+        entries.append(
+            AggTable(
+                name,
+                _VERSIONS.get(name, 1),
+                Kind.DATED,
+                _timetable_of(name),
+                _monthly(name),
+                archived_input=_input_of(name),
+            )
+        )
     for name in ch_aggregates.WHOLE_HISTORY_TABLES:
         entries.append(
             AggTable(
@@ -155,6 +180,7 @@ def _entries() -> list[AggTable]:
                 _timetable_of(name),
                 _whole(name),
                 depends_on=(ch_aggregates.whole_history_source(name),),
+                archived_input=_input_of(name),
             )
         )
     return entries
@@ -165,6 +191,8 @@ def _index(entries: list[AggTable]) -> dict[str, AggTable]:
     for entry in entries:
         if entry.name in tables:
             raise ValueError(f"{entry.name} is registered twice")
+        if (entry.timetable is Timetable.ARCHIVED) != (entry.archived_input is not None):
+            raise ValueError(f"{entry.name} must name what it reads of its timetable exactly when it joins the archive")
         tables[entry.name] = entry
     return tables
 
