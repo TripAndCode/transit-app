@@ -252,8 +252,10 @@ def _push_a_backend_change(
         _git("add", path, cwd=worktree)
     _git("commit", "-q", "-m", "change", cwd=worktree)
 
+    # The gate reads its PUSH_GATE_* switches from its own environment, so the
+    # runner's must not reach it: each test sets the ones it means.
     env = {
-        **os.environ,
+        **{key: value for key, value in os.environ.items() if not key.startswith("PUSH_GATE_")},
         "CLAUDE_PROJECT_DIR": str(fake_repo),
         "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
         **extra_env,
@@ -287,6 +289,18 @@ def test_the_backend_suite_runs_in_the_gate_only_when_asked(fake_repo, asked):
     )
     assert result.returncode == 0, result.stderr
     assert marker.exists() is asked
+    assert ("backend suite is left to CI" in result.stderr) is not asked
+
+
+def test_a_failing_backend_suite_asked_for_still_blocks(fake_repo):
+    result = _push_a_backend_change(
+        fake_repo,
+        "scripts/tool.sh",
+        {"PUSH_GATE_FULL_SUITE": "1"},
+        {"scripts/run_full_ci.sh": "#!/bin/sh\nexit 1\n"},
+    )
+    assert result.returncode == 2
+    assert "backend suite" in result.stderr
 
 
 def _run_hook_unscoped(command: str, *, cwd: str = "") -> subprocess.CompletedProcess:

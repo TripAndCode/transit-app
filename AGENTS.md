@@ -110,14 +110,14 @@ tier routing, the high-risk overlay and the fix cap.
   `frontend/scripts/ts6-for-eslint.cjs` explains the compiler split and when it can
   go.
 - Run the smallest relevant check while iterating, and the complete required set once
-  before completion.
+  before completion. For the backend suite, that complete run is CI's (below).
   - Verify by running the real command in the real environment. `make -n`, warm
     caches and mocks can each hide a defect.
   - Capture verbose output to a file and surface only the summary or failure tail.
-- The full backend suite is CI's. CI runs it sharded on every push, and a merge needs
-  it green on the PR's head (Git and pull requests).
-  - Locally, run the test files the change touches, through `run_full_ci.sh` when
-    they need the databases.
+- The full backend suite is CI's. CI runs it sharded on every push to an open PR,
+  and a merge needs it green on the PR's head (Git and pull requests).
+  - Locally, run the tests that cover the changed code, through `run_full_ci.sh`
+    when they need the databases.
   - Run the whole suite locally only for a change whose reach no file list bounds:
     `tests/conftest.py`, shared fixtures, migrations or schema, or test
     infrastructure. Also run it to reproduce a CI failure.

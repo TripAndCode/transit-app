@@ -20,11 +20,9 @@
 # `poetry` shim routes `poetry run` to its virtualenv, and its node_modules is
 # linked in for the duration of the run when the worktree has none. A branch
 # that changes the dependencies themselves must bring its own, since the main
-# checkout's would not reflect the change. The backend suite runs through
-# scripts/run_full_ci.sh, which starts a Postgres + ClickHouse pair of its own
-# on free ports, so concurrent pushes from several sessions never share a
-# database. Not covered locally: CI's frontend coverage thresholds (this gate
-# runs `npm run test`, not `test:coverage`) and the Docker image build.
+# checkout's would not reflect the change. Not covered locally: the backend
+# suite unless PUSH_GATE_FULL_SUITE=1, CI's frontend coverage thresholds (this
+# gate runs `npm run test`, not `test:coverage`) and the Docker image build.
 #
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
@@ -559,16 +557,17 @@ block_with_log() {
 }
 
 # SCOPE_OK=0 means we couldn't determine what changed (no resolvable base
-# ref). That degrades file-scoped ruff to skipped, but backend/frontend
+# ref). That degrades file-scoped ruff to skipped, but mypy and the frontend
 # checks run unconditionally, whole-project, rather than also skipping —
-# fail-closed instead of the gate silently doing nothing.
+# fail-closed instead of the gate silently doing nothing. The backend suite
+# still follows PUSH_GATE_FULL_SUITE.
 SCOPE_OK=1
 BASE_REF=main
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
   BASE_REF=origin/main
 fi
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-  echo "WARNING: could not resolve 'main' or 'origin/main' — skipping file-scoped ruff; running the full backend + frontend suites unconditionally instead." >&2
+  echo "WARNING: could not resolve 'main' or 'origin/main' — skipping file-scoped ruff; running mypy and the frontend checks unconditionally instead." >&2
   BASE_REF=""
   SCOPE_OK=0
 fi
@@ -741,10 +740,11 @@ if [ "$FAIL" -ne 0 ]; then
   block_with_log "ruff format/lint or mypy failed (skipping tests)"
 fi
 
-# The backend suite is CI's: it runs sharded on every push and a merge needs
-# it green, so running it here too only doubled each push's wait (and on a
-# loaded host outran its ceiling). PUSH_GATE_FULL_SUITE=1, read from the
-# Claude Code session environment like the opt-outs, runs it here as well.
+# The backend suite is CI's: it runs sharded on every push to an open PR and
+# a merge needs it green, so running it here too would double each push's
+# wait, and on a loaded host can outrun its ceiling. PUSH_GATE_FULL_SUITE=1,
+# read from the Claude Code session environment like the opt-outs, runs it
+# here as well.
 # It then runs through scripts/run_full_ci.sh rather than against the
 # long-lived :5544/:8124 pair: that pair is shared by every session on the
 # host, and two suites running against it at once reset each other's tables
@@ -753,7 +753,7 @@ fi
 # PUSH_GATE_SKIP_TESTS=1 is the explicit, visible opt-out.
 if [ "$RUN_BACKEND" -eq 1 ]; then
   if [ "${PUSH_GATE_FULL_SUITE:-0}" != "1" ]; then
-    echo "NOTE: the backend suite is left to CI, which runs it on every push and must be green before a merge; set PUSH_GATE_FULL_SUITE=1 in the Claude Code session environment to run it here too." >&2
+    echo "NOTE: the backend suite is left to CI, which runs it on every push to an open PR and must be green before a merge; set PUSH_GATE_FULL_SUITE=1 in the Claude Code session environment to run it here too." >&2
   elif [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
     echo "WARNING: PUSH_GATE_SKIP_TESTS=1 set — skipping the backend suite for this push (deliberate opt-out; CI still runs it)." >&2
   elif ! run_with_timeout 30 docker info >/dev/null 2>&1; then
