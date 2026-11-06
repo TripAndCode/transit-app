@@ -91,9 +91,9 @@ figure's measured width (`StopChart`'s `width`), so nothing scrolls sideways.
 ## i18n
 
 Hero strings live under `landing.hero.*`
-(`frontend/src/i18n/locales/{ja,en}.json`): `title_now` and `title_where`
-(the headline's two lines, rendered as separate spans so it never breaks
-mid-phrase), `subtitle`, and `open_dashboard` (the signed-in CTA). The
+(`frontend/src/i18n/locales/{ja,en}.json`): `title_question` and `title_scope`
+(the headline's two lines: the period question the dashboard opens on, and
+its scope, rendered as separate spans so it never breaks mid-phrase), `subtitle`, and `open_dashboard` (the signed-in CTA). The
 sign-in CTA reuses `common.login`; the rail link is `nav.about`. Text drawn
 on the hero canvas lives under `landing.hero_map.*`, its playback control
 under `landing.hero_map.playback_control.*`; the narrative's heading/body

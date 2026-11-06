@@ -80,9 +80,9 @@
   },
   "landing": {
     "hero": {
-      "title_now": "What's happening right now —",
-      "title_where": "and where it's happening.",
-      "subtitle": "See which trips are running late right now and by how much, and which routes and times of day tend to run late.",
+      "title_question": "Did the buses run as planned?",
+      "title_scope": "Route by route, hour by hour.",
+      "subtitle": "Check how late each route ran over a period, from the operators' own open data, with the definition and the amount of data behind every figure. Today's trips are there too.",
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
       "login_note": "<login>Sign in</login> to keep your saved views and Ask investigations with your account."

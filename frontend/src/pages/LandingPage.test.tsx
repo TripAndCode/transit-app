@@ -38,15 +38,15 @@ describe("LandingPage", () => {
     mockUseConfig.mockReturnValue({ data: OPEN });
   });
 
-  it("says in plain words what the app covers and what it answers", () => {
+  it("asks the period question the dashboard opens on, in plain words", () => {
     renderLanding();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "What's happening right now — and where it's happening.",
+      "Did the buses run as planned? Route by route, hour by hour.",
     );
     expect(screen.getByText("Buses in Hiroshima and Aomori")).toBeTruthy();
     expect(
       screen.getByText(
-        "See which trips are running late right now and by how much, and which routes and times of day tend to run late.",
+        "Check how late each route ran over a period, from the operators' own open data, with the definition and the amount of data behind every figure. Today's trips are there too.",
       ),
     ).toBeTruthy();
   });
@@ -56,7 +56,12 @@ describe("LandingPage", () => {
       await i18n.changeLanguage("ja");
       const { container } = renderLanding();
       expect(screen.getByText("広島・青森のバス")).toBeTruthy();
-      expect(screen.getByText("いまどの便が何分遅れているか、どの路線・時間帯で遅れやすいかを確認できます。")).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("バスは計画どおりに走ったか。 路線ごと、時間帯ごとに。");
+      expect(
+        screen.getByText(
+          "事業者が公開しているデータから、期間中に路線ごとにどれだけ遅れたかを、数字の定義と元になったデータの量とともに確かめられます。今日走っている便も見られます。",
+        ),
+      ).toBeTruthy();
       expect(screen.getByRole("link", { name: "ダッシュボードを見る（ログイン不要）" })).toHaveAttribute("href", "/");
       const hero = container.querySelector(".landing-hero__content")!;
       expect(hero.textContent).not.toMatch(/最新報告停留所|リアルタイム × 時刻表/);
