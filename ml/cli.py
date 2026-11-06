@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -25,7 +26,7 @@ from ml.cells import Cell
 from ml.compare import DEFAULT_BASELINE, FITS, compare, render_markdown, variant_name
 from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from ml.model_result import DEFAULT_POINT, POINTS, result_from_json, result_to_json
-from ml.r2 import upload_dir, upload_file
+from ml.r2 import download_dir, download_file, list_keys, upload_dir, upload_file
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -441,6 +442,69 @@ def _publish_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def _live_score(args: argparse.Namespace) -> int:
+    """Score every published forecast in the window against what ran (ml.live_score), and write live.json.
+    Read-only: the replica's runs, and the forecasts and model versions R2 holds."""
+    import pandas as pd
+
+    from ml.dataset import load_runs
+    from ml.live_score import Scorecard, counterfactual_frame, score_origin, to_json, window_origins
+    from ml.model_store import load_model_set, load_routes, read_meta
+    from ml.models import point_forecast, predict
+
+    # The default AWS pair reads transit-archives only; the store's pair reads transit-ml.
+    bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
+    _use_store_credentials()
+
+    run_date = args.run_date or _today_jst()
+    final_through = run_date - timedelta(days=2)
+    origins = window_origins(list_keys(bucket, "forecasts/", endpoint, capture=_capture), run_date)
+    card = Scorecard()
+    if origins:
+        client = get_client()
+        # Each forecast's history reaches window_days before its origin.
+        since = origins[0] - timedelta(days=28)
+        runs = load_runs(client, args.agency or agencies_with_data(client), since=since)
+        with tempfile.TemporaryDirectory() as tmp:
+            models: dict[str, tuple] = {}
+            for origin in origins:
+                prefix = f"forecasts/{origin.isoformat()}"
+                forecast_path, manifest_path = Path(tmp) / "forecast.parquet", Path(tmp) / "manifest.json"
+                download_file(bucket, f"{prefix}/forecast.parquet", forecast_path, endpoint, run=_run)
+                download_file(bucket, f"{prefix}/manifest.json", manifest_path, endpoint, run=_run)
+                forecast = pd.read_parquet(forecast_path)
+                if args.agency:
+                    forecast = forecast[forecast["agency_id"].isin(args.agency)]
+                if forecast.empty:
+                    continue
+                version = str(forecast["model_version"].iloc[0])
+                if version not in models:
+                    model_dir = Path(tmp) / "models" / version
+                    download_dir(bucket, f"models/{version}/", model_dir, endpoint, run=_run)
+                    models[version] = (load_model_set(model_dir), read_meta(model_dir), load_routes(model_dir))
+                model_set, meta, routes = models[version]
+                frame = counterfactual_frame(runs, routes, origin, meta)
+                if frame.empty:
+                    continue
+                preds = predict(model_set, frame)
+                withheld = len(json.loads(manifest_path.read_text()).get("withheld", []))
+                score_origin(
+                    card,
+                    origin,
+                    version,
+                    forecast,
+                    frame,
+                    preds,
+                    point_forecast(preds, meta.get("point", "mean")),
+                    final_through,
+                    withheld,
+                )
+    document = to_json(card, run_date=run_date, generated_at=datetime.now(ZoneInfo("Asia/Tokyo")))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(document, indent=1, allow_nan=False))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ml.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -515,6 +579,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_eval.add_argument("--model-meta", type=Path)
     p_eval.add_argument("--run-date", type=date.fromisoformat)
     p_eval.set_defaults(handler=_publish_eval)
+
+    p_live = sub.add_parser("live-score", help="Score the published live forecasts against what ran")
+    p_live.add_argument("--out", type=Path, required=True)
+    p_live.add_argument("--run-date", type=date.fromisoformat)
+    p_live.add_argument("--agency", type=int, action="append")
+    p_live.set_defaults(handler=_live_score)
 
     args = parser.parse_args(argv)
     return int(args.handler(args))
