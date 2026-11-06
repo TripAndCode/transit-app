@@ -214,3 +214,26 @@ heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Fla
 and marks them as the ML model's: each forecast cell shows its `q10`–`q90` range
 as the span about 8 runs in 10 fall in, and a cell the latest publish does not
 forecast shows its past average with a mark.
+
+### Live scorecard
+
+`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N]...` scores every forecast
+published in the last 28 days against what actually ran, on the target days the replica holds as final
+(from day + 2). Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model
+version that made it (`models/<version>/`) from R2, and builds the counterfactual: the same model given
+the target days' actual runs instead of the template, from the history the 11:00 predict could see. Like
+predict, it loads each agency's whole run history, because a service's weekend share counts every day
+before the origin.
+
+- Only the cells the forecast published that actually ran are scored. A cell with no B0 history is
+  counted in the published share but not paired.
+- Each scored cell is compared three ways, run-weighted: the published point, the counterfactual's, and
+  B0 as of the forecast's own origin. Skill is `1 − MAE / MAE_B0` on the same cells.
+- Live minus counterfactual is what templating costs. Counterfactual against B0 is the model's own skill.
+- Interval coverage is per run: the published cell interval (`live_slot`), the counterfactual's per-run
+  and cell intervals, and B0's slot interval.
+
+The document (`live.json`, schema 1) breaks the scores down overall, by lead day, by agency (with the
+first origin in the window that published each agency) and by origin (with its withheld days). An origin
+counts once both its files are in R2: predict uploads the manifest last. It is read-only on the replica
+and writes only `--out`.

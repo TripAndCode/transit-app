@@ -22,11 +22,11 @@ def take(preds: Predictions, index: np.ndarray) -> Predictions:
 
 def add_intervals(model: IntervalStats, baseline: IntervalStats, frame: pd.DataFrame, preds: Predictions) -> None:
     y = frame["delay_min"].to_numpy(dtype=float)
-    _add(model, y, preds.q10, preds.q90, {"0.1": preds.q10, "0.5": preds.q50, "0.9": preds.q90})
+    add_interval(model, y, preds.q10, preds.q90, {"0.1": preds.q10, "0.5": preds.q50, "0.9": preds.q90})
     has_b0 = frame["slot_p10"].notna().to_numpy() & frame["slot_p90"].notna().to_numpy()
     p10 = frame["slot_p10"].to_numpy(dtype=float)[has_b0]
     p90 = frame["slot_p90"].to_numpy(dtype=float)[has_b0]
-    _add(baseline, y[has_b0], p10, p90, {"0.1": p10, "0.9": p90})
+    add_interval(baseline, y[has_b0], p10, p90, {"0.1": p10, "0.9": p90})
 
 
 def add_slot_intervals(stats: IntervalStats, frame: pd.DataFrame, preds: Predictions) -> None:
@@ -35,10 +35,12 @@ def add_slot_intervals(stats: IntervalStats, frame: pd.DataFrame, preds: Predict
     bounds = frame[CELL].assign(q10=preds.q10, q90=preds.q90).groupby(CELL, observed=True)
     lo = bounds["q10"].transform("mean").to_numpy(dtype=float)
     hi = bounds["q90"].transform("mean").to_numpy(dtype=float)
-    _add(stats, frame["delay_min"].to_numpy(dtype=float), lo, hi, {})
+    add_interval(stats, frame["delay_min"].to_numpy(dtype=float), lo, hi, {})
 
 
-def _add(stats: IntervalStats, y: np.ndarray, lo: np.ndarray, hi: np.ndarray, quantiles: dict[str, np.ndarray]) -> None:
+def add_interval(
+    stats: IntervalStats, y: np.ndarray, lo: np.ndarray, hi: np.ndarray, quantiles: dict[str, np.ndarray]
+) -> None:
     stats.runs += len(y)
     stats.covered += int(((y >= lo) & (y <= hi)).sum())
     stats.width += float((hi - lo).sum())
