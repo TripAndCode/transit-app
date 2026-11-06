@@ -293,17 +293,12 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       filter is applied here at all; each consumer applies its own in Python
       off each row's ``date`` (:func:`_dow_matches`).
     * The date windows differ (``ctx`` / ``cur_ctx`` / ``base_ctx``), so the
-      grain spans their union and each consumer re-filters. Under a time band
-      the union bound is ``[ctx.from_date - ctx.days, ctx.to_date]``
-      (:func:`_grain_lookback_days`); under a routes filter alone only the hour
-      profiles read the grain, inside ``ctx``, so it starts at
-      ``ctx.from_date``. ``cur_ctx = [ctx.from_date, anchor]``, where ``anchor`` is either a date
-      inside ``ctx`` or ``ctx.to_date`` itself, so ``cur_ctx`` ends no later
-      than ``ctx.to_date`` and is at most ``ctx.days`` wide; ``base_ctx`` is
-      the same width immediately before ``ctx.from_date``, so it starts at most
-      ``ctx.days`` before it. Because this bound needs no knowledge of
-      ``anchor``, ``_latest_data_date`` — which computes ``anchor`` — can be
-      served from the grain too, instead of costing its own round trip.
+      grain spans their union, ``[ctx.from_date - _grain_lookback_days(ctx),
+      ctx.to_date]``, and each consumer re-filters. :func:`_baseline_reach_days`
+      and :func:`_grain_lookback_days` give the bound and why it holds. Because
+      the bound needs no knowledge of ``anchor``, ``_latest_data_date`` — which
+      computes ``anchor`` — can be served from the grain too, instead of costing
+      its own round trip.
 
     One consumer, :func:`_route_weekly_history`, asks for a window this bound
     does NOT guarantee: ``weeks_back * 7`` days back from ``cur_ctx.to_date``,
@@ -531,8 +526,8 @@ async def _route_weekly_history(
 
     Slow path prefers the shared grain (:func:`_fetch_grain`) when it reaches
     far enough back, and only falls back to its own live ``updates``
-    (ClickHouse) scan when it doesn't. Under a time band the grain reaches one
-    period's width before the payload's period (:func:`_grain_lookback_days`) while this
+    (ClickHouse) scan when it doesn't. The grain reaches
+    :func:`_grain_lookback_days` before the payload's period, while this
     function needs ``[ctx.to_date - (7 * weeks_back - 1), ctx.to_date]``, so
     for the default ``weeks_back=4`` the grain covers it whenever the period is
     at least two weeks wide and its data runs to its last day — i.e. every
@@ -628,7 +623,8 @@ async def _route_weekly_history(
         return out
 
     # Live ClickHouse path (reached only when the grain doesn't reach back far
-    # enough — a period narrower than about two weeks): one dedup CTE over the
+    # enough — a period narrower than two weeks, or one whose data stops before
+    # its end): one dedup CTE over the
     # whole [ctx.to_date - weeks_back*7 + 1, ctx.to_date] span, bucketed into
     # weeks_back week-index groups via `intDiv(dateDiff('day', date, to_date),
     # 7)` — 0 is the most recent 7-day bucket ending at ctx.to_date,
@@ -1149,7 +1145,7 @@ async def _movers(
             "delta_min": dm,
             "delta_pct": dp,
             # Absolute averages for both windows so the UI can show
-            # "X min before → Y min now" instead of a bare Δ%.
+            # "X min before → Y min in the period" instead of a bare Δ%.
             "current_avg_min": float(_round1(cur[code][0])),
             "previous_avg_min": float(_round1(prv[code][0])),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
