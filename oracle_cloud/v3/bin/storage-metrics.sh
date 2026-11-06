@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build one operations-status document (component "r2", see scripts/ops_status.py
 # in the main repo checkout for the contract) reporting this VM's own
-# filesystem usage and Cloudflare R2's object count/bytes split by the rt/ and
-# static/ prefixes, and write it atomically to disk.
+# filesystem usage and Cloudflare R2's object count/bytes split by the rt/,
+# static/ and vp/ (VehiclePositions) prefixes, and write it atomically to disk.
 #
 # Like status-snapshot.sh, this is a pure report, never a check: crossing a
 # warning/critical threshold is a normal, valid THING TO REPORT (state=degraded/
@@ -24,11 +24,11 @@
 # that has not yet been given R2 credentials (or one where this check is
 # intentionally disabled) is not thereby "broken".
 #
-# Once credentials ARE present, a listing failure (partial -- one of rt/static
-# failed while the other succeeded -- or total) is reported as r2_state=failed
+# Once credentials ARE present, a listing failure (partial -- one prefix
+# failed while the others succeeded -- or total) is reported as r2_state=failed
 # regardless of any byte-threshold math, since a listing this script could not
 # complete cannot be trusted to say "usage is fine". Its `last_success_at` for
-# that case comes from SUCCESS_MARKER (updated only when both prefixes list
+# that case comes from SUCCESS_MARKER (updated only when every prefix lists
 # successfully), never from the failing run's own timestamp -- mirroring
 # verify-r2.sh's SUCCESS_MARKER/RESULT_MARKER split for exactly the same
 # reason. Whichever prefix DID list successfully still reports its own real
@@ -54,7 +54,7 @@ SUCCESS_MARKER="${STORAGE_METRICS_SUCCESS_MARKER:-$BASE_DIR/.storage-metrics.las
 # Percent-of-filesystem-used thresholds.
 DISK_WARN_PCT="${DISK_WARN_PCT-80}"
 DISK_CRIT_PCT="${DISK_CRIT_PCT-90}"
-# Whole-bucket byte-total thresholds (rt + static combined). Defaults are a
+# Whole-bucket byte-total thresholds (rt + static + vp combined). Defaults are a
 # starting point for a small collector, not a measurement of any real
 # deployment's actual usage -- override in /etc/environment once real volume
 # is known.
@@ -137,7 +137,7 @@ if df_line=$(df -Pk "$BASE_DIR" 2>/dev/null | awk 'NR==2 {print $4, $5}'); then
     esac
 fi
 
-# --- R2 object count/bytes, split by rt/ and static/ ---
+# --- R2 object count/bytes, split by rt/, static/ and vp/ ---
 r2_configured=false
 r2_state=not_applicable
 r2_listing_result=unknown
@@ -145,6 +145,8 @@ rt_object_count=""
 rt_bytes=""
 static_object_count=""
 static_bytes=""
+vp_object_count=""
+vp_bytes=""
 r2_bytes_total=""
 r2_epoch=""
 
@@ -154,15 +156,19 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     export AWS_ACCESS_KEY_ID="$OBJECT_STORE_ACCESS_KEY_ID"
     export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 
-    # r2_list_prefix <prefix> -- prints "<count>\t<bytes>" and returns 0 on a
-    # successful listing; returns 1 if `aws s3 ls` itself exits nonzero, with
-    # the captured `aws` stderr text (not the "<count>\t<bytes>" format) as
-    # this function's own stdout, so the caller can report the real failure
-    # reason. `aws s3 ls --recursive` paginates the whole prefix internally,
-    # so one call always sees the complete listing or fails outright -- there
-    # is no partial-page case to guard against here.
+    # r2_list_prefix <prefix> [empty-ok] -- prints "<count>\t<bytes>" and
+    # returns 0 on a successful listing; returns 1 if `aws s3 ls` itself exits
+    # nonzero, with the captured `aws` stderr text (not the "<count>\t<bytes>"
+    # format) as this function's own stdout, so the caller can report the
+    # real failure reason. `aws s3 ls --recursive` paginates the whole prefix
+    # internally, so one call always sees the complete listing or fails
+    # outright -- there is no partial-page case to guard against here.
+    # With empty-ok, exit 1 with nothing on stdout or stderr is a listing of
+    # zero objects: that is how the CLI answers a prefix holding none, and
+    # vp/ holds none until a VehiclePositions day is first uploaded (or ever,
+    # on a collector without a VP feed). A real error still prints its reason.
     r2_list_prefix() {
-        local prefix="$1" listing count=0 bytes=0 size rc stdout_file
+        local prefix="$1" empty_ok="${2:-}" listing count=0 bytes=0 size rc stdout_file
         stdout_file=$(mktemp) || { printf 'mktemp failed'; return 1; }
         # Swap fds so `listing` captures stderr while the actual object
         # listing lands in stdout_file -- lets a failure report the real
@@ -170,6 +176,9 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
         listing=$("$AWS" s3 ls --recursive --endpoint-url "$OBJECT_STORE_ENDPOINT" \
             "s3://$OBJECT_STORE_BUCKET/$prefix" 2>&1 >"$stdout_file")
         rc=$?
+        if [ "$rc" -eq 1 ] && [ -n "$empty_ok" ] && [ -z "$listing" ] && [ ! -s "$stdout_file" ]; then
+            rc=0
+        fi
         if [ "$rc" -ne 0 ]; then
             rm -f "$stdout_file"
             printf '%s' "$listing"
@@ -191,6 +200,8 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     rt_ok=$?
     static_result=$(r2_list_prefix "static/")
     static_ok=$?
+    vp_result=$(r2_list_prefix "vp/" empty-ok)
+    vp_ok=$?
 
     if [ "$rt_ok" -eq 0 ]; then
         IFS=$'\t' read -r rt_object_count rt_bytes <<< "$rt_result"
@@ -198,10 +209,13 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     if [ "$static_ok" -eq 0 ]; then
         IFS=$'\t' read -r static_object_count static_bytes <<< "$static_result"
     fi
+    if [ "$vp_ok" -eq 0 ]; then
+        IFS=$'\t' read -r vp_object_count vp_bytes <<< "$vp_result"
+    fi
 
-    if [ "$rt_ok" -eq 0 ] && [ "$static_ok" -eq 0 ]; then
+    if [ "$rt_ok" -eq 0 ] && [ "$static_ok" -eq 0 ] && [ "$vp_ok" -eq 0 ]; then
         r2_listing_result=ok
-        r2_bytes_total=$(( rt_bytes + static_bytes ))
+        r2_bytes_total=$(( rt_bytes + static_bytes + vp_bytes ))
         r2_state=$(classify_threshold "$r2_bytes_total" "$R2_BYTES_WARN_THRESHOLD" "$R2_BYTES_CRIT_THRESHOLD")
         r2_epoch="$NOW"
         tmp_marker=$(mktemp "$SUCCESS_MARKER.XXXXXX" 2>/dev/null) && {
@@ -213,6 +227,7 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
         r2_state=failed
         [ "$rt_ok" -eq 0 ] || echo "storage-metrics: listing rt/ failed: $(printf '%s' "$rt_result" | tail -c 500)" >&2
         [ "$static_ok" -eq 0 ] || echo "storage-metrics: listing static/ failed: $(printf '%s' "$static_result" | tail -c 500)" >&2
+        [ "$vp_ok" -eq 0 ] || echo "storage-metrics: listing vp/ failed: $(printf '%s' "$vp_result" | tail -c 500)" >&2
         if [ -f "$SUCCESS_MARKER" ]; then
             marker_ts=$(cat "$SUCCESS_MARKER" 2>/dev/null || true)
             r2_epoch=$(date -u -d "$marker_ts" +%s 2>/dev/null \
@@ -251,7 +266,7 @@ fi
 num_or_null() { [ -n "${1:-}" ] && echo "$1" || echo null; }
 
 DETAILS=$(cat <<JSON
-{"disk_used_pct":$(num_or_null "$disk_used_pct"),"disk_free_bytes":$(num_or_null "$disk_free_bytes"),"disk_state":"$disk_state","r2_configured":$r2_configured,"r2_state":"$r2_state","r2_listing_result":"$r2_listing_result","rt_object_count":$(num_or_null "$rt_object_count"),"rt_bytes":$(num_or_null "$rt_bytes"),"static_object_count":$(num_or_null "$static_object_count"),"static_bytes":$(num_or_null "$static_bytes"),"r2_bytes_total":$(num_or_null "$r2_bytes_total")}
+{"disk_used_pct":$(num_or_null "$disk_used_pct"),"disk_free_bytes":$(num_or_null "$disk_free_bytes"),"disk_state":"$disk_state","r2_configured":$r2_configured,"r2_state":"$r2_state","r2_listing_result":"$r2_listing_result","rt_object_count":$(num_or_null "$rt_object_count"),"rt_bytes":$(num_or_null "$rt_bytes"),"static_object_count":$(num_or_null "$static_object_count"),"static_bytes":$(num_or_null "$static_bytes"),"vp_object_count":$(num_or_null "$vp_object_count"),"vp_bytes":$(num_or_null "$vp_bytes"),"r2_bytes_total":$(num_or_null "$r2_bytes_total")}
 JSON
 )
 

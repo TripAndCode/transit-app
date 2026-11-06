@@ -1,0 +1,16 @@
+# VehiclePositions feeds to archive, one vp-poller@<id> unit per row; an
+# agency without a row runs no VP poller. Every id must also be an
+# agencies.tsv row: reconcile-r2.sh reports a vp/<id>/ archive of any other
+# id as an orphan.
+# The collection is a bounded validation window: the feeds' predicted delays
+# (TripUpdates) are compared with where the buses actually were. Nothing in
+# the app ingests these samples. When the window ends, disable the units and
+# delete the rows (MIGRATION.md, "VehiclePositions validation window").
+# 20s, not the 60s TripUpdate poll: a stop passage is reconstructed from
+# positions near the stop, so its time is only as fine as the poll interval,
+# and a window of days keeps the extra volume bounded.
+# The mcapps.jp file is vehicle_position.bin, singular.
+# id	name	interval	url
+8	hiroden	20	https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/vehicle_position.bin
+9	hirobus	20	https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/vehicle_position.bin
+10	hiroko	20	https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/vehicle_position.bin

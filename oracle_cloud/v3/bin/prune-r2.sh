@@ -5,6 +5,10 @@
 # defaults are generous: they exist only to bound storage growth/cost the way
 # an R2 lifecycle rule would, not to churn data on local prune.sh's cadence.
 #   RT tarballs:  delete rt/<id>/*.tar.gz objects older than R2_RT_RETENTION_DAYS.
+#   VP tarballs:  the same for vp/<id>/*.tar.gz (VehiclePositions days), for
+#                 every agency in agencies.tsv: a VP row is removed from
+#                 vehicle_positions.tsv when its window ends, long before
+#                 any of its archive is old enough to prune.
 #   Static zips:  delete static/<id>/gtfs_static_*.zip objects older than
 #                 R2_STATIC_RETENTION_DAYS, EXCEPT the object matching each
 #                 agency's current local latest.zip target (mirrors local
@@ -131,6 +135,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
     static="$agency_static_url"
 
     prune_prefix "rt/$id/" "$R2_RT_RETENTION_DAYS" ""
+    prune_prefix "vp/$id/" "$R2_RT_RETENTION_DAYS" ""
 
     [ -n "${static:-}" ] || continue
     keep=$(readlink "$BASE_DIR/data/$id/static/latest.zip" 2>/dev/null || true)

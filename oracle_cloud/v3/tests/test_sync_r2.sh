@@ -211,3 +211,42 @@ fi
     && fail "success marker was written despite processing zero agencies"
 rm -rf "$EMPTY_BASE"
 pass "an empty COLLECTOR_BASE exits nonzero and never writes the success marker"
+
+# VehiclePositions days sync under their own vp/<id> prefix, as RT days sync
+# under rt/<id>: same tarball filter, same staging, and nothing from the live
+# vp day directory. An agency with no vp/ directory gets no vp/ sync.
+VP_BASE=$(mktemp -d)
+mkdir -p "$VP_BASE/data/1/rt" "$VP_BASE/data/8/rt" "$VP_BASE/data/8/vp/20261024"
+printf 'TAR-1-1022' > "$VP_BASE/data/1/rt/20261022.tar.gz"
+printf 'TAR-8-1022' > "$VP_BASE/data/8/rt/20261022.tar.gz"
+printf 'VPTAR-8-1022' > "$VP_BASE/data/8/vp/20261022.tar.gz"
+printf 'partial' > "$VP_BASE/data/8/vp/20261023.tar.gz.part"
+printf 'sample' > "$VP_BASE/data/8/vp/20261024/VehiclePosition_001633.pb"
+printf 'partial' > "$VP_BASE/data/8/vp/20261024/VehiclePosition_001653.pb.part"
+: > "$AWS_LOG"; : > "$AWS_STAGE_LOG"; : > "$AWS_SRC_LOG"
+COLLECTOR_BASE="$VP_BASE" ../bin/sync-r2.sh > "$TEST_BASE/out.log" 2>&1 \
+    || fail "a run with a vp/ directory should succeed: $(cat "$TEST_BASE/out.log")"
+grep -q "s3 sync [^ ]* s3://test-bucket/vp/8 " "$AWS_LOG" \
+    || fail "agency 8 vp not synced to vp/8: $(cat "$AWS_LOG")"
+grep -q "s3://test-bucket/vp/1" "$AWS_LOG" && fail "agency 1 has no vp/ dir but got a vp/ sync"
+grep "s3://test-bucket/vp/8 " "$AWS_LOG" | grep -q -- "--include \*.tar.gz" \
+    || fail "vp sync missing the tar.gz include filter"
+expected_stage="s3://test-bucket/rt/1 20261022.tar.gz=TAR-1-1022
+s3://test-bucket/rt/8 20261022.tar.gz=TAR-8-1022
+s3://test-bucket/vp/8 20261022.tar.gz=VPTAR-8-1022"
+[ "$(sort "$AWS_STAGE_LOG")" = "$expected_stage" ] \
+    || fail "aws saw more than the archives (or not them): $(cat "$AWS_STAGE_LOG")"
+[ -f "$VP_BASE/.sync-r2.last-ok" ] || fail "success marker not written after a run that synced vp/"
+pass "VehiclePositions days sync to vp/<id> beside rt/<id>"
+
+# A failed vp/ sync is a failed run: the marker prune.sh and spool-cleanup
+# trust is withheld, so no VP day is deleted locally before R2 holds it.
+rm -f "$VP_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"
+if COLLECTOR_BASE="$VP_BASE" AWS_FAIL_MATCH="vp/8" ../bin/sync-r2.sh >/dev/null 2>&1; then
+    fail "sync-r2.sh should exit nonzero when a vp/ sync failed"
+fi
+grep -q "s3 sync [^ ]* s3://test-bucket/rt/1 " "$AWS_LOG" || fail "rt sync skipped around the vp failure"
+[ -f "$VP_BASE/.sync-r2.last-ok" ] && fail "marker written despite a failed vp/ sync"
+rm -rf "$VP_BASE"
+pass "a failed vp/ sync fails the run and withholds the success marker"

@@ -14,6 +14,12 @@
 #                MIN_RT_OBJECT_BYTES, and (when the same file is still on
 #                local disk, i.e. not yet pruned) matches its local byte size
 #                exactly.
+#   * VP       — the same checks against vp/<id>/*.tar.gz, with the same
+#                thresholds, for each feed in etc/vehicle_positions.tsv. No
+#                such file means no VehiclePositions feed and no vp/ listing.
+#                Only listed feeds are checked: a row is removed when its
+#                validation window ends, so its archive stops being expected
+#                to stay fresh.
 #   * static   — at least one static/<id>/gtfs_static_*.zip object exists,
 #                the one matching this agency's current local latest.zip
 #                target is actually present in R2, is at least
@@ -67,6 +73,7 @@ export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
+VP_TSV="${VEHICLE_POSITIONS_TSV:-$BASE_DIR/etc/vehicle_positions.tsv}"
 AWS="${AWS_CLI:-aws}"
 RESULT_MARKER="${VERIFY_R2_RESULT_MARKER:-$BASE_DIR/.verify-r2.last-result}"
 SUCCESS_MARKER="${VERIFY_R2_SUCCESS_MARKER:-$BASE_DIR/.verify-r2.last-success}"
@@ -201,6 +208,38 @@ fi
 
 NOW=$(date -u +%s)
 
+# check_day_archives <kind> <label> <id> <name>
+# Reports a problem if R2 holds no object under <kind>/<id>/, or if the newest
+# one is older than R2_RT_MAX_STALE_DAYS, smaller than MIN_RT_OBJECT_BYTES, or
+# a different size from the same file still in data/<id>/<kind>/.
+check_day_archives() {
+    local kind="$1" label="$2" id="$3" name="$4"
+    local lines newest day_epoch day_size day_key day_age day_max local_day local_size
+    lines=$(r2_list "$kind/$id/")
+    total_objects=$(( total_objects + $(count_lines "$lines") ))
+    if [ -z "$lines" ]; then
+        problem "a$id ($name): no $label objects in R2 under $kind/$id/"
+        return
+    fi
+    newest=$(printf '%s\n' "$lines" | tail -1)
+    IFS=$'\t' read -r day_epoch day_size day_key <<< "$newest"
+    day_age=$(( NOW - day_epoch ))
+    day_max=$(( R2_RT_MAX_STALE_DAYS * 86400 ))
+    if [ "$day_age" -gt "$day_max" ]; then
+        problem "a$id ($name): newest R2 $label object $day_key is $(( day_age / 86400 ))d old (limit ${R2_RT_MAX_STALE_DAYS}d)"
+    fi
+    if [ "$day_size" -lt "$MIN_RT_OBJECT_BYTES" ]; then
+        problem "a$id ($name): newest R2 $label object $day_key is $day_size bytes (minimum $MIN_RT_OBJECT_BYTES)"
+    fi
+    local_day="$BASE_DIR/data/$id/$kind/$(basename "$day_key")"
+    if [ -f "$local_day" ]; then
+        local_size=$(wc -c < "$local_day" | tr -d ' ')
+        if [ "$local_size" != "$day_size" ]; then
+            problem "a$id ($name): R2 $label object $day_key is $day_size bytes but local $local_day is $local_size bytes — integrity check failed"
+        fi
+    fi
+}
+
 # `|| [ -n "$row" ]` processes a final row lacking a trailing newline, matching
 # the other agencies.tsv readers.
 while IFS= read -r row || [ -n "${row:-}" ]; do
@@ -211,29 +250,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
     name="$agency_name"
     static="$agency_static_url"
 
-    rt_lines=$(r2_list "rt/$id/")
-    total_objects=$(( total_objects + $(count_lines "$rt_lines") ))
-    if [ -z "$rt_lines" ]; then
-        problem "a$id ($name): no RT objects in R2 under rt/$id/"
-    else
-        newest=$(printf '%s\n' "$rt_lines" | tail -1)
-        IFS=$'\t' read -r rt_epoch rt_size rt_key <<< "$newest"
-        rt_age=$(( NOW - rt_epoch ))
-        rt_max=$(( R2_RT_MAX_STALE_DAYS * 86400 ))
-        if [ "$rt_age" -gt "$rt_max" ]; then
-            problem "a$id ($name): newest R2 RT object $rt_key is $(( rt_age / 86400 ))d old (limit ${R2_RT_MAX_STALE_DAYS}d)"
-        fi
-        if [ "$rt_size" -lt "$MIN_RT_OBJECT_BYTES" ]; then
-            problem "a$id ($name): newest R2 RT object $rt_key is $rt_size bytes (minimum $MIN_RT_OBJECT_BYTES)"
-        fi
-        local_rt="$BASE_DIR/data/$id/rt/$(basename "$rt_key")"
-        if [ -f "$local_rt" ]; then
-            local_size=$(wc -c < "$local_rt" | tr -d ' ')
-            if [ "$local_size" != "$rt_size" ]; then
-                problem "a$id ($name): R2 RT object $rt_key is $rt_size bytes but local $local_rt is $local_size bytes — integrity check failed"
-            fi
-        fi
-    fi
+    check_day_archives rt RT "$id" "$name"
 
     # An empty static_url is a real configuration (that agency's static GTFS
     # is collected off-VM), not a missing one.
@@ -278,6 +295,14 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
         fi
     fi
 done < "$TSV"
+
+if [ -f "$VP_TSV" ]; then
+    while IFS= read -r row || [ -n "${row:-}" ]; do
+        agency_row_is_data "$row" || continue
+        split_vp_row "$row"
+        check_day_archives vp VP "$vp_id" "$vp_name"
+    done < "$VP_TSV"
+fi
 
 if [ "$agencies" -eq 0 ]; then
     echo "verify-r2.sh: no agencies configured in $TSV — nothing to verify" >&2

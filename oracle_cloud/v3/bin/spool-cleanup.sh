@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Idempotent local disk reclamation for the collector's spool of RT/static
-# archives.
+# Idempotent local disk reclamation for the collector's spool of RT, VP
+# (VehiclePositions) and static archives.
 #
 # prune.sh already deletes local archives, but only once two conditions both
 # hold: RETENTION_DAYS (default 90) has passed, AND sync-r2.sh's global
@@ -11,8 +11,8 @@
 # re-derives, the same way verify-r2.sh does (an actual R2 listing, byte-size
 # compared against the local copy), whether each specific archive is
 # confirmed uploaded, and reclaims its disk the moment that is true --
-# independent of prune.sh's much longer retention window. Each rt/$id/ or
-# static/$id/ prefix is listed once per run and that listing is reused for
+# independent of prune.sh's much longer retention window. Each rt/$id/,
+# vp/$id/ or static/$id/ prefix is listed once per run and that listing is reused for
 # every local file under it (matching verify-r2.sh's own r2_list), rather
 # than re-listing per file. A failed or partially uploaded archive (missing
 # from R2, or present with a mismatched size) is left in place for the next
@@ -33,7 +33,7 @@
 # keep-latest exception exists to prevent.
 #
 # Bounded by an explicit disk budget (SPOOL_DISK_BUDGET_BYTES, required): once
-# every confirmed-uploaded archive has been reclaimed, whatever RT/static
+# every confirmed-uploaded archive has been reclaimed, whatever RT/VP/static
 # archive bytes remain on local disk are measured and compared against this
 # budget. Exceeding it is reported as a failure, never as a further deletion
 # -- anything still on disk at that point is by definition not yet a
@@ -151,20 +151,25 @@ reclaim_or_keep() {
 }
 
 # Discovers directories the same way sync-r2.sh/prune.sh do -- globbing what
-# actually exists on disk, not the agencies roster -- so a directory whose
-# agency ID has fallen out of (or was never in) agencies.tsv still gets its
-# bytes measured and reclaimed, matching this script's own budget guarantee.
-for rt in "$BASE_DIR"/data/*/rt; do
-    [ -d "$rt" ] || continue
-    id=$(basename "$(dirname "$rt")")
-    rt_files=$(find "$rt" -maxdepth 1 -name '*.tar.gz' -type f)
-    if [ -n "$rt_files" ]; then
-        rt_listing=$(r2_list "rt/$id/")
-        while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            reclaim_or_keep "$f" "$rt_listing" "rt/$id/"
-        done <<< "$rt_files"
-    fi
+# actually exists on disk, not either roster -- so a directory whose agency
+# ID has fallen out of (or was never in) agencies.tsv, or a vp/ directory
+# whose row has left vehicle_positions.tsv, still gets its bytes measured and
+# reclaimed, matching this script's own budget guarantee.
+# An agency's rt/ and vp/ tarballs for one day share a basename, so each kind
+# is checked against its own prefix's listing, never the other's.
+for kind in rt vp; do
+    for kind_dir in "$BASE_DIR"/data/*/"$kind"; do
+        [ -d "$kind_dir" ] || continue
+        id=$(basename "$(dirname "$kind_dir")")
+        day_files=$(find "$kind_dir" -maxdepth 1 -name '*.tar.gz' -type f)
+        if [ -n "$day_files" ]; then
+            day_listing=$(r2_list "$kind/$id/")
+            while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                reclaim_or_keep "$f" "$day_listing" "$kind/$id/"
+            done <<< "$day_files"
+        fi
+    done
 done
 
 for sdir in "$BASE_DIR"/data/*/static; do

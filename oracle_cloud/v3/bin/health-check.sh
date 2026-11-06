@@ -27,6 +27,11 @@
 #   * static not empty   — the latest.zip target is at least MIN_STATIC_BYTES;
 #                          an upstream error page served as 200 is tiny, and
 #                          curl -f cannot see that it is not a GTFS zip.
+# Per VehiclePositions feed in etc/vehicle_positions.tsv (no such file, no
+# check): the same two RT checks on its VehiclePosition_*.pb samples, against
+# interval * VP_STALE_FACTOR, so a VP poller that dies does not silently waste
+# its validation window. A row is removed when the window ends, and with it
+# the check.
 # Once globally:
 #   * R2 mirror fresh    — sync-r2.sh's .sync-r2.last-ok marker exists and is
 #                          younger than SYNC_R2_MAX_STALE_DAYS. Deliberately
@@ -45,6 +50,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
+VP_TSV="${VEHICLE_POSITIONS_TSV:-$BASE_DIR/etc/vehicle_positions.tsv}"
 OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 SYNC_R2_MAX_STALE_DAYS="${SYNC_R2_MAX_STALE_DAYS-3}"
 STATIC_MAX_STALE_DAYS="${STATIC_MAX_STALE_DAYS-3}"
@@ -53,6 +59,11 @@ STATIC_MAX_STALE_DAYS="${STATIC_MAX_STALE_DAYS-3}"
 # alert, short enough that a dead poller is caught inside half an hour even at
 # the slowest configured 60s interval.
 RT_STALE_FACTOR="${RT_STALE_FACTOR-20}"
+# VehiclePositions poll at a third of the TripUpdate interval, so RT's 20
+# intervals would page a 20s VP feed after under 7 minutes, where one failed
+# fetch round (four attempts plus backoff) alone spans about a minute. 60
+# intervals give a 20s VP feed the same 20-minute grace as a 60s RT feed.
+VP_STALE_FACTOR="${VP_STALE_FACTOR-60}"
 # A GTFS-RT FeedMessage with nothing but a header is still tens of bytes, so
 # only a truly zero-byte sample is unambiguously broken. Overnight feeds do
 # legitimately shrink to header-only, which is why a larger floor is opt-in
@@ -61,7 +72,7 @@ MIN_RT_BYTES="${MIN_RT_BYTES-1}"
 MIN_STATIC_BYTES="${MIN_STATIC_BYTES-1024}"
 
 for var in SYNC_R2_MAX_STALE_DAYS STATIC_MAX_STALE_DAYS RT_STALE_FACTOR \
-    MIN_RT_BYTES MIN_STATIC_BYTES; do
+    VP_STALE_FACTOR MIN_RT_BYTES MIN_STATIC_BYTES; do
     value="${!var}"
     case "$value" in
         ''|*[!0-9]*)
@@ -107,6 +118,48 @@ if [ ! -f "$TSV" ]; then
     exit 64
 fi
 
+# check_samples <kind> <label> <roster> <sample-prefix> <stale-factor> <id> <name> <interval>
+# Reports a problem if data/<id>/<kind>/ is missing or holds no
+# <sample-prefix>_*.pb, or if the newest one is older than
+# interval * stale-factor seconds or smaller than MIN_RT_BYTES.
+check_samples() {
+    local kind="$1" label="$2" roster="$3" sample="$4" factor="$5" id="$6" name="$7" interval="$8"
+    local sample_dir newest age max size
+    sample_dir="$BASE_DIR/data/$id/$kind"
+    newest=$(ls -1d "$sample_dir"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/"$sample"_*.pb \
+        2>/dev/null | sort | tail -1)
+    if [ ! -d "$sample_dir" ]; then
+        problem "a$id ($name): configured in $roster but has no $label directory ($sample_dir) — its poller has never run"
+        return
+    fi
+    if [ -z "$newest" ]; then
+        problem "a$id ($name): no $label samples on disk under $sample_dir — its poller has stopped writing"
+        return
+    fi
+    # Day dirs are YYYYMMDD and samples <prefix>_HHMMSS.pb, both UTC and both
+    # fixed-width, so the lexicographically last path is the newest.
+    case "$interval" in
+        ''|*[!0-9]*|0)
+            problem "a$id ($name): invalid poll interval '$interval' in $roster — $label freshness cannot be checked"
+            ;;
+        *)
+            age=$(file_age "$newest")
+            max=$(( interval * factor ))
+            if [ -z "$age" ]; then
+                problem "a$id ($name): could not read the mtime of $newest"
+            elif [ "$age" -gt "$max" ]; then
+                problem "a$id ($name): newest $label sample is ${age}s old (limit ${max}s = ${interval}s interval x $factor)"
+            fi
+            ;;
+    esac
+    size=$(file_size "$newest")
+    if [ -z "$size" ]; then
+        problem "a$id ($name): could not read the size of $newest"
+    elif [ "$size" -lt "$MIN_RT_BYTES" ]; then
+        problem "a$id ($name): newest $label sample $(basename "$newest") is ${size} bytes (minimum $MIN_RT_BYTES) — the feed is answering with nothing"
+    fi
+}
+
 agencies=0
 # `|| [ -n "$row" ]` processes a final row lacking a trailing newline, matching
 # static-fetch.sh's reader.
@@ -119,37 +172,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
     interval="$agency_interval"
     static="$agency_static_url"
 
-    rt_dir="$BASE_DIR/data/$id/rt"
-    newest_rt=$(ls -1d "$rt_dir"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/TripUpdate_*.pb \
-        2>/dev/null | sort | tail -1)
-    if [ ! -d "$rt_dir" ]; then
-        problem "a$id ($name): configured in agencies.tsv but has no RT directory ($rt_dir) — its poller has never run"
-    elif [ -z "$newest_rt" ]; then
-        problem "a$id ($name): no RT samples on disk under $rt_dir — its poller has stopped writing"
-    else
-        # Day dirs are YYYYMMDD and samples TripUpdate_HHMMSS.pb, both UTC and
-        # both fixed-width, so the lexicographically last path is the newest.
-        case "$interval" in
-            ''|*[!0-9]*|0)
-                problem "a$id ($name): invalid poll interval '$interval' in agencies.tsv — RT freshness cannot be checked"
-                ;;
-            *)
-                rt_age=$(file_age "$newest_rt")
-                rt_max=$(( interval * RT_STALE_FACTOR ))
-                if [ -z "$rt_age" ]; then
-                    problem "a$id ($name): could not read the mtime of $newest_rt"
-                elif [ "$rt_age" -gt "$rt_max" ]; then
-                    problem "a$id ($name): newest RT sample is ${rt_age}s old (limit ${rt_max}s = ${interval}s interval x $RT_STALE_FACTOR)"
-                fi
-                ;;
-        esac
-        rt_size=$(file_size "$newest_rt")
-        if [ -z "$rt_size" ]; then
-            problem "a$id ($name): could not read the size of $newest_rt"
-        elif [ "$rt_size" -lt "$MIN_RT_BYTES" ]; then
-            problem "a$id ($name): newest RT sample $(basename "$newest_rt") is ${rt_size} bytes (minimum $MIN_RT_BYTES) — the feed is answering with nothing"
-        fi
-    fi
+    check_samples rt RT agencies.tsv TripUpdate "$RT_STALE_FACTOR" "$id" "$name" "$interval"
 
     # An empty static_url is a real configuration (agency 1's static GTFS is
     # collected off-VM, see MIGRATION.md), not a missing one: checking it here
@@ -188,6 +211,17 @@ if [ "$agencies" -eq 0 ]; then
     problem "no agencies are configured in $TSV — the collector is running but collecting nothing"
 fi
 
+vp_feeds=0
+if [ -f "$VP_TSV" ]; then
+    while IFS= read -r row || [ -n "${row:-}" ]; do
+        agency_row_is_data "$row" || continue
+        split_vp_row "$row"
+        vp_feeds=$((vp_feeds + 1))
+        check_samples vp VP vehicle_positions.tsv VehiclePosition "$VP_STALE_FACTOR" \
+            "$vp_id" "$vp_name" "$vp_interval"
+    done < "$VP_TSV"
+fi
+
 if [ ! -f "$OK_MARKER" ]; then
     problem "R2 sync has never completed a fully-successful run (no $OK_MARKER) — prune.sh is refusing to run and local disk will keep growing"
 else
@@ -206,8 +240,10 @@ if [ "$problem_count" -gt 0 ]; then
     exit 1
 fi
 
-echo "health-check: OK — $agencies agencies, RT + static + R2 sync all fresh"
-if ! alert_report ok "collector health OK on $HOST: $agencies agencies, RT + static + R2 sync all fresh"; then
+vp_note=""
+[ "$vp_feeds" -eq 0 ] || vp_note=" + $vp_feeds VehiclePositions feed(s)"
+echo "health-check: OK — $agencies agencies$vp_note, RT + static + R2 sync all fresh"
+if ! alert_report ok "collector health OK on $HOST: $agencies agencies$vp_note, RT + static + R2 sync all fresh"; then
     # The collector is fine but the all-clear did not land. Exiting nonzero
     # keeps that visible in cron.log; the endpoint's own period/grace alarm is
     # what actually catches a run of these.

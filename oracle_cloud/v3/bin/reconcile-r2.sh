@@ -2,7 +2,12 @@
 # Reconciles Cloudflare R2's actual object inventory against the crawler
 # manifest (etc/agencies.tsv) and the naming rules the rest of bin/ writes:
 #   rt/<id>/<YYYYMMDD>.tar.gz             (sync-r2.sh, from rotate-day.sh)
+#   vp/<id>/<YYYYMMDD>.tar.gz             (sync-r2.sh, from rotate-day.sh)
 #   static/<id>/gtfs_static_<YYYYMMDD>.zip (sync-r2.sh, from static-fetch.sh)
+# A vp/<id>/ object is expected for any agency in agencies.tsv, not only one
+# with a row in etc/vehicle_positions.tsv: VehiclePositions are collected for
+# a bounded window and the row is removed when it ends, while the archive it
+# produced is kept.
 # prune-r2.sh already bounds storage by AGE, but only for agency ids it reads
 # out of the CURRENT agencies.tsv: drop a row (an agency retired, its id
 # renumbered, a roster typo fixed) and prune-r2.sh stops looking at that
@@ -16,8 +21,9 @@
 # roster.
 #
 # This script lists the ENTIRE bucket once and classifies every object as
-# either "expected" (rt/<id>/ or static/<id>/, id present in agencies.tsv,
-# filename matching that prefix's naming rule) or "orphan" (everything else).
+# either "expected" (rt/<id>/, vp/<id>/ or static/<id>/, id present in
+# agencies.tsv, filename matching that prefix's naming rule) or "orphan"
+# (everything else).
 #
 # Dry-run by default: with no --execute, it only ever REPORTS orphans, never
 # deletes. Deleting requires --execute (or RECONCILE_R2_EXECUTE=1, for cron
@@ -158,10 +164,11 @@ is_known_id() {
 
 # classify <key> -- prints "expected" or "orphan: <reason>" for one object key.
 classify() {
-    local key="$1" rest id name
+    local key="$1" kind rest id name
     case "$key" in
-        rt/*/*)
-            rest="${key#rt/}"
+        rt/*/*|vp/*/*)
+            kind="${key%%/*}"
+            rest="${key#*/}"
             id="${rest%%/*}"
             name="${rest#*/}"
             if ! is_known_id "$id"; then
@@ -170,7 +177,7 @@ classify() {
             fi
             case "$name" in
                 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].tar.gz) echo "expected" ;;
-                *) echo "orphan: rt filename '$name' does not match <YYYYMMDD>.tar.gz" ;;
+                *) echo "orphan: $kind filename '$name' does not match <YYYYMMDD>.tar.gz" ;;
             esac
             ;;
         static/*/*)
@@ -187,7 +194,7 @@ classify() {
             esac
             ;;
         *)
-            echo "orphan: key does not live under the rt/<id>/ or static/<id>/ layout"
+            echo "orphan: key does not live under the rt/<id>/, vp/<id>/ or static/<id>/ layout"
             ;;
     esac
 }
