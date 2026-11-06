@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
+import * as isAdmin from "../api/useIsAdmin";
 import { BAND_ORDER } from "../api/timeBands";
 import { type ForecastDay, type ForecastOverview } from "../api/types";
 import { delayRampVar } from "../styles/tokens";
@@ -425,13 +426,26 @@ describe("RouteForecastSection", () => {
     expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
   });
 
-  it("links the ML mark to the model evaluation page, carrying the agency it was opened from", () => {
+  describe("for an admin", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("links the ML mark to the model evaluation page, carrying the agency it was opened from", () => {
+      vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(true);
+      const ml = heatmap();
+      ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
+      renderSection(overview(), "100", ml);
+      const link = within(screen.getByTestId("fc-ml-chip")).getByRole("link", { name: "How accurate is it? →" });
+      expect(link).toHaveAttribute("href", "/model?from=1");
+      expect(link).toHaveClass("fc-ml-link");
+    });
+  });
+
+  it("marks the ML forecast without a link to the model page for a visitor who is not an admin", () => {
     const ml = heatmap();
     ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
     renderSection(overview(), "100", ml);
-    const link = within(screen.getByTestId("fc-ml-chip")).getByRole("link", { name: "How accurate is it? →" });
-    expect(link).toHaveAttribute("href", "/model?from=1");
-    expect(link).toHaveClass("fc-ml-link");
+    expect(screen.getByTestId("fc-ml-chip")).toHaveTextContent("ML forecast");
+    expect(within(screen.getByTestId("fc-ml-chip")).queryByRole("link")).toBeNull();
   });
 
   it("pools a band's hours by their past observations, a forecast hour and a past one alike", () => {

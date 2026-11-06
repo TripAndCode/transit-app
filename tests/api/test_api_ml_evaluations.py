@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 from api.range import jst_today
 from pipeline import flags
+from tests.fixtures.users import seed_session
 
 _FORECAST_COLUMNS = (
     "agency_id, route_code, service_date, hour, mean_min, q10, q50, q90, model_version, origin_date, generated_at"
@@ -62,8 +63,18 @@ async def _seed_fresh_forecast(aconn, agency_id: int) -> None:
     )
 
 
-async def test_no_evaluation_yet_is_an_empty_answer_not_an_error(client):
-    response = await client.get("/api/ml/evaluations")
+async def _admin(aconn) -> dict[str, str]:
+    """The page is an admin page, so its endpoint answers an admin session only."""
+    return {"sid": (await seed_session(aconn, role="admin")).sid}
+
+
+async def test_a_signed_in_user_who_is_not_an_admin_is_refused(client, aconn):
+    sid = (await seed_session(aconn, role="user")).sid
+    assert (await client.get("/api/ml/evaluations", cookies={"sid": sid})).status_code == 403
+
+
+async def test_no_evaluation_yet_is_an_empty_answer_not_an_error(client, aconn):
+    response = await client.get("/api/ml/evaluations", cookies=await _admin(aconn))
     assert response.status_code == 200
     body = response.json()
     assert body["latest"] is None and body["history"] == [] and body["live"] is None
@@ -76,7 +87,7 @@ async def test_the_newest_week_and_the_history_are_served(client, aconn, aagency
     await _seed_week(aconn, date(2026, 10, 25), False, 0.046, aagency_id)
     await _seed_fresh_forecast(aconn, aagency_id)
 
-    body = (await client.get("/api/ml/evaluations")).json()
+    body = (await client.get("/api/ml/evaluations", cookies=await _admin(aconn))).json()
 
     latest = body["latest"]
     assert latest["run_date"] == "2026-10-25"
@@ -95,7 +106,7 @@ async def test_with_the_flag_off_nothing_is_live(client, aconn, aagency_id, monk
     await _seed_week(aconn, date(2026, 10, 25), True, 0.051, aagency_id)
     await _seed_fresh_forecast(aconn, aagency_id)
 
-    body = (await client.get("/api/ml/evaluations")).json()
+    body = (await client.get("/api/ml/evaluations", cookies=await _admin(aconn))).json()
     assert body["forecast_in_use"] is False
     assert body["latest"]["agencies"][0]["forecast_live"] is False
 
@@ -113,7 +124,7 @@ async def test_a_stale_forecast_is_not_live(client, aconn, aagency_id, monkeypat
         stale_origin,
     )
 
-    body = (await client.get("/api/ml/evaluations")).json()
+    body = (await client.get("/api/ml/evaluations", cookies=await _admin(aconn))).json()
     assert body["latest"]["agencies"][0]["forecast_live"] is False
 
 
@@ -136,7 +147,7 @@ async def test_the_newest_live_scorecard_is_served(client, aconn, aagency_id):
             json.dumps(document),
         )
 
-    live = (await client.get("/api/ml/evaluations")).json()["live"]
+    live = (await client.get("/api/ml/evaluations", cookies=await _admin(aconn))).json()["live"]
     assert (live["skill_live"], live["skill_counterfactual"]) == (0.012, 0.061)  # the newest week's
     assert (live["origins"], live["target_days"]) == (26, 25)
     assert (live["live_slot_coverage"], live["published_share"]) == (0.77, 0.93)

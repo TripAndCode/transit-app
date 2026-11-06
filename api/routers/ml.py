@@ -1,6 +1,6 @@
-"""The ML forecast model's weekly evaluation, for the model page: the newest
-week's verdict and figures, the history of past weeks, whether each agency's
-ML forecast is live on the heatmap now, and the newest live scorecard."""
+"""The ML forecast model's weekly evaluation, for the admin model page: the
+newest week's verdict and figures, the history of past weeks, whether each
+agency's ML forecast is live on the heatmap now, and the newest live scorecard."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.routers.reports import fetch_live_ml_agencies
+from api.security import User, require_admin
 from pipeline.flags import aflag
 from pipeline.reports.ml_evaluation import shape_history, shape_latest, shape_live
 
@@ -103,7 +104,9 @@ class MlEvaluationsResponse(BaseModel):
 
 @router.get("/evaluations", response_model=MlEvaluationsResponse)
 @limiter.limit(tier_limit)
-async def ml_evaluations(request: Request, conn: asyncpg.Connection = Depends(get_conn)) -> dict[str, Any]:
+async def ml_evaluations(
+    request: Request, conn: asyncpg.Connection = Depends(get_conn), _admin: User = Depends(require_admin)
+) -> dict[str, Any]:
     """Every week the workbench evaluated, newest first, with the newest
     week's detail. `forecast_live` uses the heatmap's own freshness rule, so
     it says whether that agency's heatmap shows ML values right now."""

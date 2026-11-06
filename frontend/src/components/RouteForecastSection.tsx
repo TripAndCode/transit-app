@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useScope } from "../api/scope";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
 import { RouteLabel } from "./RouteLabel";
@@ -609,15 +610,19 @@ function RoutePicker({
 }
 
 /** Marks a forecast whose values come from the ML model rather than the
- *  seasonal baseline; rendered once per view, never per cell. */
+ *  seasonal baseline; rendered once per view, never per cell. The model
+ *  evaluation page is an admin page, so only an admin gets the link to it. */
 function MlForecastChip({ aid }: { aid: number }) {
   const { t } = useTranslation();
+  const isAdmin = useIsAdmin();
   return (
     <p className="fc-ml-note" data-testid="fc-ml-chip">
       <span className="caveat-badge">{t("forecast.ml_source")}</span>
-      <Link to={`/model?from=${aid}`} className="fc-ml-link">
-        {t("forecast.ml_accuracy_link")}
-      </Link>
+      {isAdmin && (
+        <Link to={`/model?from=${aid}`} className="fc-ml-link">
+          {t("forecast.ml_accuracy_link")}
+        </Link>
+      )}
     </p>
   );
 }
