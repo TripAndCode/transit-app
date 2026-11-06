@@ -440,10 +440,6 @@ async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_asy
 
     mirror_updates_to_ch(ch_client, a)
     mirror_updates_to_ch(ch_client, b)
-    # A, the latest-running, last by name: none of the three can be ranked,
-    # so they list in name order, whatever their delay or id.
-    async with pool.acquire() as c:
-        await c.execute("UPDATE agencies SET agency_name = 'Zeta' WHERE agency_id = $1", a)
 
     async with pool.acquire() as conn:
         rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
@@ -469,7 +465,8 @@ async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_asy
     assert (by[a]["comparable"], by[a]["comparable_reason"]) == (False, "coverage_unknown")
     assert (by[b]["comparable"], by[b]["comparable_reason"]) == (False, "coverage_unknown")
     assert (by[cc]["comparable"], by[cc]["comparable_reason"]) == (False, "no_data")
-    assert [r["agency_id"] for r in rows] == [b, cc, a]
+    # None can be ranked, so they come in agency_id order; the board names them.
+    assert [r["agency_id"] for r in rows] == [a, b, cc]
 
 
 async def test_compute_network_summary_falls_back_to_latest_completed_day_when_today_has_rows(
@@ -792,7 +789,8 @@ async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, 
     """A dense static_join agency is ranked; a sparse one (few trips, so a
     wide interval) and a thinly observed one (low coverage) are not. The
     ranked agency comes first although it runs earliest, and the unranked
-    ones follow in name order, never by delay or id."""
+    ones follow in agency_id order, never by delay or by the server's idea of
+    name order: the board sorts them by name in its own collation."""
     pool, a, b, cc = net_pool
     # 900 of 1,000 planned trips observed, 90% on time over 20,000 stop events.
     await _seed_gated_agency(
@@ -818,7 +816,7 @@ async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, 
         observed=45,
         samples=900,
         on_time=450,
-        delay_min=10,
+        delay_min=5,
     )
     # Dense and on time, but the feed reported only 400 of 1,000 planned trips.
     await _seed_gated_agency(
@@ -830,7 +828,7 @@ async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, 
         observed=400,
         samples=20000,
         on_time=18000,
-        delay_min=5,
+        delay_min=10,
     )
 
     async with pool.acquire() as conn:
@@ -845,7 +843,7 @@ async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, 
     assert by[b]["ci_high"] - by[b]["ci_low"] > 2 * 3.0
     assert (by[cc]["comparable"], by[cc]["comparable_reason"]) == (False, "coverage_low")
     assert by[cc]["coverage_pct"] == 40.0
-    assert [r["agency_id"] for r in rows] == [a, cc, b]
+    assert [r["agency_id"] for r in rows] == [a, b, cc]
 
 
 async def test_coverage_over_100_stays_visible_and_still_ranks(net_pool, ch_async_client):
@@ -910,7 +908,7 @@ async def test_a_feed_whose_trips_cannot_be_matched_to_the_timetable_is_unranked
     assert (by[a]["ci_low"], by[a]["ci_high"]) == (None, None)
     assert by[a]["on_time_pct"] == 90.0
     assert by[b]["comparable"] is True
-    assert [r["agency_id"] for r in rows] == [b, cc, a]
+    assert [r["agency_id"] for r in rows] == [b, a, cc]
 
 
 async def _seed_two_day_agency(pool, aid, *, name, observed_days):
@@ -924,23 +922,25 @@ async def _seed_two_day_agency(pool, aid, *, name, observed_days):
     await _seed(pool, aid, dist=[(d, 20000, 20000 * 60, 18000) for d in observed_days], feed=("2026-04-01", 1000, 0))
 
 
-async def test_a_day_no_agency_has_observations_for_yet_counts_against_none(net_pool, ch_async_client):
+async def test_a_day_no_agency_has_observations_for_yet_counts_against_none(net_client):
     """The period's last day has a plan, but no agency's aggregates have
     reached it: a lag they share, not trips each feed missed. Coverage stops
-    at the newest observed day; the planned figure still spans the period."""
-    pool, a, b, _cc = net_pool
+    at the newest observed day, which the summary names once; the planned
+    figure still spans the period."""
+    client, pool, a, b, _cc = net_client
     await _seed_two_day_agency(pool, a, name="A", observed_days=["2026-04-01"])
     await _seed_two_day_agency(pool, b, name="B", observed_days=["2026-04-01"])
 
-    async with pool.acquire() as conn:
-        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 2))
-
-    by = {r["agency_id"]: r for r in rows}
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-02"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coverage_through"] == "2026-04-01"
+    by = {x["agency_id"]: x for x in body["agencies"]}
     for aid in (a, b):
         assert by[aid]["planned_trips"] == 2000
         assert (by[aid]["observed_trips"], by[aid]["coverage_planned_trips"]) == (900, 1000)
-        assert (by[aid]["coverage_pct"], by[aid]["coverage_through"]) == (90.0, "2026-04-01")
-        assert by[aid]["comparable"] is True
+        assert (by[aid]["coverage_pct"], by[aid]["comparable"]) == (90.0, True)
+        assert "coverage_through" not in by[aid]
 
 
 async def test_a_day_one_feed_missed_counts_against_that_feed(net_pool, ch_async_client):
@@ -1009,8 +1009,9 @@ async def test_network_summary_endpoint_carries_the_gate_and_its_thresholds(net_
     assert r.status_code == 200
     body = r.json()
     assert body["comparability"] == {"min_coverage_pct": 70.0, "max_ci_half_width_pp": 3.0, "max_clamp_pct": 5.0}
+    assert body["coverage_through"] == "2026-04-01"
     rows = body["agencies"]
-    assert [x["agency_id"] for x in rows] == [a, cc, b]
+    assert [x["agency_id"] for x in rows] == [a, b, cc]
     dense = rows[0]
     assert {k: dense[k] for k in ("coverage_pct", "observed_trips", "ci_low", "ci_high", "comparable")} == {
         "coverage_pct": 90.0,
@@ -1020,4 +1021,4 @@ async def test_network_summary_endpoint_carries_the_gate_and_its_thresholds(net_
         "comparable": True,
     }
     assert dense["comparable_reason"] is None
-    assert (rows[2]["comparable"], rows[2]["comparable_reason"]) == (False, "ci_wide")
+    assert (rows[1]["comparable"], rows[1]["comparable_reason"]) == (False, "ci_wide")

@@ -1149,15 +1149,10 @@ export type NetworkAgencyRow = {
   /** Why service_delivered_pct is null, or null beside a rate:
    *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
   delivered_missing: DeliveredMissing | null;
-  /** Trips the feed reported, and trips planned, on the days a timetable
-   *  plans through `coverage_through` (the newest day any agency has
-   *  observations for, the same on every row); coverage_pct is the first as
-   *  a share of the second, not capped at 100. Both counts are null for a
-   *  feed whose trips can't be matched to the timetable, or an unreadable
-   *  plan; coverage_planned_trips is 0 with no plan. */
+  /** Observation coverage and its two counts; docs/features/network-tab.md
+   *  ("Comparability gate") defines them and when each is null. */
   observed_trips: number | null;
   coverage_planned_trips: number | null;
-  coverage_through: string | null;
   coverage_pct: number | null;
   /** Whether the board ranks this agency; otherwise the first check it fails. */
   comparable: boolean;
@@ -1195,9 +1190,13 @@ export type NetworkSummary = {
   scope_applied?: ScopeApplied;
   from: string;
   to: string;
-  /** Comparable agencies first, worst delay first; then the rest by name. */
+  /** Comparable agencies first, worst delay first; then the rest in
+   *  agency_id order, which the board re-sorts by name. */
   agencies: NetworkAgencyRow[];
   comparability: ComparabilityThresholds;
+  /** The newest day any agency has observations for: where every row's
+   *  observation coverage stops. Null when none has any. */
+  coverage_through: string | null;
   definition: DefinitionMeta;
 };
 

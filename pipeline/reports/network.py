@@ -5,16 +5,16 @@ list. Range-scoped (date window only — whole-agency comparison, so service/
 time_band/dow/routes are not applied). Reuses the pure freshness rule.
 
 Only the agencies whose data supports a comparison are ranked:
-`pipeline.reports.comparability` decides ``comparable`` and the first
-``comparable_reason`` it fails from ``coverage_pct`` (``observed_trips`` of
-``coverage_planned_trips``), the on-time interval ``ci_low``/``ci_high``,
-``clamp_pct`` and the agency's ingest strategy. Comparable rows come first,
-worst ``avg_delay_min`` first; the rest follow in name order, never by a
-figure the data cannot support. Coverage counts the planned days up to
-``coverage_through``, the newest day any agency has observations for in the
-range: a later day is one the aggregates have not reached for anyone yet,
-which is no one feed's missing trips, while a gap inside that span counts
-against the feed that has it.
+`pipeline.reports.comparability.assess` gives ``comparable`` and the first
+``comparable_reason`` it fails, with the figures it judged: ``coverage_pct``
+(``observed_trips`` of ``coverage_planned_trips``), the on-time interval
+``ci_low``/``ci_high`` and ``clamp_pct``. Comparable rows come first, worst
+``avg_delay_min`` first; the rest follow in agency_id order, never by a figure
+the data cannot support, and the board orders those by name. Coverage counts
+the planned days up to :func:`coverage_through`, the newest day any agency has
+observations for in the range: a later day is one the aggregates have not
+reached for anyone yet, which is no one feed's missing trips, while a gap
+inside that span counts against the feed that has it.
 
 ``samples`` is the deduped observation count (from agg_route_daily_dist);
 ``raw_samples``/``clamp_count`` are raw poll counts (from agg_feed_health) —
@@ -28,8 +28,8 @@ read `None` ("not available") for an agency whose feed doesn't populate
 `schedule_relationship_trip`, or has reported no cancellation in it.
 ``covered_days`` of ``window_days`` is how many of the range's days a
 timetable plans (a day's saved count, or the loaded timetable's); all three
-count only those, so a row whose ``covered_days`` falls short is comparable
-to its neighbours only with that note beside it.
+count only those, so a row whose ``covered_days`` falls short counts fewer
+days than its neighbours and reads against them only with that note beside it.
 When those figures cannot be read at all, every agency reads as one with no
 plan (0 planned trips and covered days, ``None`` rates) whose
 ``delivered_missing`` is ``"unreadable"``, so the board never prints that 0 as
@@ -52,6 +52,7 @@ figure or the executed/planned trip ratio isn't available for this agency.
 """
 
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -59,12 +60,7 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
-from pipeline.reports.comparability import (
-    COMPARABLE_INGEST_STRATEGIES,
-    assess,
-    observation_coverage,
-    on_time_interval,
-)
+from pipeline.reports.comparability import assess
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
@@ -92,10 +88,16 @@ _FEED_SQL = """
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
 
+def coverage_through(last_days: Iterable[date | None]) -> date | None:
+    """Where observation coverage stops for every agency on the board: the
+    newest of the agencies' last observed days in the range."""
+    return max((d for d in last_days if d is not None), default=None)
+
+
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
     """Per-agency rollups over [from_date, to_date]: the comparable agencies
-    worst-avg-delay first, then the rest by name.
+    worst-avg-delay first, then the rest in agency_id order.
 
     The planned and delivered figures are one column of the board, not the
     board: a failure reading them, such as a schema behind its migrations,
@@ -139,14 +141,15 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
     }
 
+    through = coverage_through(perf[a["agency_id"]]["data_to"] for a in agencies if a["agency_id"] in perf)
     # planned_trips reads the saved and loaded plans; executed_trips and
     # service_delivered_pct also read the precomputed non-executed aggregate
-    # (agg_service_delivered_daily). No ClickHouse scan on this request path;
-    # see compute_service_delivered_by_agency.
-    coverage_through = max((perf[a["agency_id"]]["data_to"] for a in agencies if a["agency_id"] in perf), default=None)
+    # (agg_service_delivered_daily), and observed_trips agg_route_daily. No
+    # ClickHouse scan on this request path; see
+    # compute_service_delivered_by_agency.
     try:
         delivered = await compute_service_delivered_by_agency(
-            conn, [a["agency_id"] for a in agencies], from_date, to_date, observed_through=coverage_through
+            conn, [a["agency_id"] for a in agencies], from_date, to_date, observed_through=through
         )
     except Exception:
         _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
@@ -182,20 +185,13 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         d = delivered[aid]
-        strategy = a["ingest_strategy"]
-        # A count of trip_ids the timetable doesn't name is no count of its trips.
-        matchable = strategy in COMPARABLE_INGEST_STRATEGIES
-        observed_trips = d["observed_trips"] if matchable else None
-        coverage_planned_trips = d["coverage_planned_trips"] if matchable else None
-        coverage_pct = observation_coverage(strategy, observed_trips, coverage_planned_trips)
-        ci_low, ci_high = on_time_interval(on_time_count, n, observed_trips)
-        comparable, comparable_reason = assess(
-            ingest_strategy=strategy,
-            coverage_pct=coverage_pct,
-            ci_low=ci_low,
-            ci_high=ci_high,
-            clamp_pct=clamp_pct,
+        gate = assess(
+            ingest_strategy=a["ingest_strategy"],
+            observed_trips=d["observed_trips"],
+            coverage_planned_trips=d["coverage_planned_trips"],
+            on_time_count=on_time_count,
             samples=n,
+            clamp_pct=clamp_pct,
         )
         s = supply.get(
             aid,
@@ -213,8 +209,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "agency_name": a["agency_name"],
                 "avg_delay_min": avg_delay_min,
                 "on_time_pct": on_time_pct,
-                "ci_low": ci_low,
-                "ci_high": ci_high,
+                "ci_low": gate.ci_low,
+                "ci_high": gate.ci_high,
                 "samples": n,
                 "raw_samples": raw,
                 "clamp_count": clamp,
@@ -228,12 +224,11 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "covered_days": d["covered_days"],
                 "window_days": d["window_days"],
                 "delivered_missing": d["delivered_missing"],
-                "observed_trips": observed_trips,
-                "coverage_planned_trips": coverage_planned_trips,
-                "coverage_through": coverage_through.isoformat() if coverage_through else None,
-                "coverage_pct": coverage_pct,
-                "comparable": comparable,
-                "comparable_reason": comparable_reason,
+                "observed_trips": gate.observed_trips,
+                "coverage_planned_trips": gate.coverage_planned_trips,
+                "coverage_pct": gate.coverage_pct,
+                "comparable": gate.comparable,
+                "comparable_reason": gate.comparable_reason,
                 # has_ridership_weights distinguishes "not configured for
                 # this agency" (weighted_on_time_pct is meaningless, hide any
                 # toggle) from "configured, but None because there were no
@@ -247,16 +242,12 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "vehicle_km_delivered_pct": s["vehicle_km_delivered_pct"],
             }
         )
-    # Ranked: worst delay first, None (which a comparable row never has) last.
-    # Ties keep agency_id order: `rows` is built 1:1 from `agencies`, which
-    # the query orders by agency_id, and Python's sort() is stable.
-    ranked = sorted(
-        (r for r in rows if r["comparable"]),
-        key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)),
-    )
-    # Unranked: by name, so no figure the gate refused implies an order.
-    unranked = sorted((r for r in rows if not r["comparable"]), key=lambda r: (r["agency_name"], r["agency_id"]))
-    return ranked + unranked
+    # Ranked: worst delay first. Ties, and the unranked rows, keep agency_id
+    # order: `rows` is built 1:1 from `agencies`, which the query orders by
+    # agency_id, and Python's sort() is stable. The unranked rows are never
+    # ordered by a figure the gate refused to compare; the board sorts them by name.
+    ranked = sorted((r for r in rows if r["comparable"]), key=lambda r: -r["avg_delay_min"])
+    return ranked + [r for r in rows if not r["comparable"]]
 
 
 def invalidate_network_summary() -> None:

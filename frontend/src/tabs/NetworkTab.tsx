@@ -354,7 +354,8 @@ export function NetworkTab() {
 
   const newest = data ? newestDataTo(data.agencies) : null;
   // Only the agencies the data can compare are ranked. The rest follow by
-  // name, so no figure the gate refused to compare implies an order.
+  // name, so no figure the gate refused to compare implies an order; the
+  // server leaves them in agency_id order for this.
   const ranked = (data?.agencies ?? [])
     .filter((a) => a.comparable)
     .sort((a, b) => dataRank(a, newest) - dataRank(b, newest) || byDelayDescending(a, b));
@@ -362,8 +363,6 @@ export function NetworkTab() {
     .filter((a) => !a.comparable)
     .sort((a, b) => byAgencyName(a, b) || a.agency_id - b.agency_id);
   const ordered = [...ranked, ...unranked];
-  // The newest day any agency has observations for, the same on every row.
-  const coverageThrough = data?.agencies.find((a) => a.coverage_through != null)?.coverage_through ?? null;
   // Every agency's figure, not only the shown ones, so "show more" never
   // rescales the bars already on screen.
   const axisMax = delayAxisMax(data?.agencies.map((a) => a.avg_delay_min) ?? []);
@@ -494,10 +493,12 @@ export function NetworkTab() {
                 {t("network.plan_coverage_footnote")}
               </p>
             )}
-            {coverageThrough != null && coverageThrough < summary.to && (
+            {summary.coverage_through != null && summary.coverage_through < summary.to && (
               <p className="network-footnote" data-testid="network-coverage-through-footnote">
                 {t("network.coverage_through_footnote", {
-                  date: formatDate(coverageThrough, { year: coverageThrough.slice(0, 4) !== summary.to.slice(0, 4) }),
+                  date: formatDate(summary.coverage_through, {
+                    year: summary.coverage_through.slice(0, 4) !== summary.to.slice(0, 4),
+                  }),
                 })}
               </p>
             )}

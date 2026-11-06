@@ -19,7 +19,7 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
     covered_days: 7, window_days: 7, delivered_missing: null,
-    observed_trips: 110, coverage_planned_trips: 120, coverage_through: "2026-04-07", coverage_pct: 91.7,
+    observed_trips: 110, coverage_planned_trips: 120, coverage_pct: 91.7,
     comparable: true, comparable_reason: null,
     has_ridership_weights: false, weighted_on_time_pct: null,
     static_version_id: null, planned_trip_count: null, planned_vehicle_km: null,
@@ -606,18 +606,46 @@ describe("NetworkTab", () => {
     expect(card("Aomori")).toHaveTextContent("Observation coverage —");
   });
 
-  it("says when observation coverage stops short of the period's end", () => {
+  it("says when observation coverage stops short of the period's end, and only then", () => {
+    const summary = (through: string | null) => ({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability, coverage_through: through,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    });
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue(summary("2026-04-05") as never);
+    const { unmount } = renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/network"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("network-coverage-through-footnote")).toHaveTextContent(
+      "Observation coverage counts the planned trips through Apr 5, the newest day any agency has observations for.",
+    );
+    unmount();
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue(summary("2026-04-07") as never);
+    renderTab();
+    expect(screen.queryByTestId("network-coverage-through-footnote")).not.toBeInTheDocument();
+  });
+
+  it("never prints an implausible share at or under the limit beside a clamp_high reason", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition, comparability,
-        agencies: [row({ agency_id: 1, agency_name: "Hiroden", coverage_through: "2026-04-05" })],
+        agencies: [
+          // The gate fails 5.05 because the board prints it as 5.1%.
+          row({ agency_id: 1, agency_name: "Noisy", comparable: false, comparable_reason: "clamp_high", clamp_pct: 5.05 }),
+        ],
       },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.getByTestId("network-coverage-through-footnote")).toHaveTextContent(
-      "Observation coverage counts the planned trips through Apr 5, the newest day any agency has observations for.",
-    );
+    const card = screen.getByText("Noisy").closest(".network-row");
+    expect(card).toHaveTextContent("Implausible readings 5.1% (above 5%)");
+    expect(card).not.toHaveTextContent(/Implausible readings (?:[0-4]\.\d|5\.0)%/);
   });
 
   it("writes the divider and the reasons in Japanese", async () => {

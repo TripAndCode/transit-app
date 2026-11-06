@@ -40,7 +40,8 @@ What the user sees/does:
   `h3` divider ("Not ranked: the data does not support a comparison" /
   「順位を付けない事業者（データが比較に足りません）」) that states the
   gate's thresholds once, the other agencies in name order (`byAgencyName`,
-  the agency picker's Japanese collation; never by delay), each with its
+  the agency picker's Japanese collation; the API returns them in
+  `agency_id` order and never by delay), each with its
   `comparable_reason` in words beside the figure and threshold it missed,
   such as "Observation coverage 41.0% (below 70%)". The divider is left out
   when every agency is ranked. "Stopped" is the agency picker's rule
@@ -103,11 +104,14 @@ What the user sees/does:
 
 ## Comparability gate
 
-`pipeline/reports/comparability.py` decides, per agency and period, whether
-the board may rank it (`comparable`) and otherwise the first check it fails
-(`comparable_reason`). The thresholds are constants there, each inclusive,
-and the response serves them as `comparability`, so the UI quotes the
-figures the server applied. The checks run in a fixed order:
+`pipeline/reports/comparability.py: assess()` decides, per agency and
+period, whether the board may rank it (`comparable`) and otherwise the first
+check it fails (`comparable_reason`), and returns the figures it judged. It is
+the gate's one entry: it drops the trip counts of a strategy whose trip_ids
+cannot be matched to the timetable before computing anything from them. The
+thresholds are constants there, each inclusive, and the response serves them
+as `comparability`, so the UI quotes the figures the server applied. The
+checks run in a fixed order:
 
 | Order | Reason | Fails when | Why |
 |---|---|---|---|
@@ -115,13 +119,15 @@ figures the server applied. The checks run in a fixed order:
 | 2 | `coverage_unknown` | the ingest strategy's trip_ids cannot be matched to the timetable's (only `static_join` can; `aomori_regex` parses its own), or no timetable plans the days observed, or the plan could not be read | coverage cannot be measured, so nothing shows the figures rest on most of the service |
 | 3 | `coverage_low` | observation coverage below `MIN_COVERAGE_PCT` (70%) | the feed's gaps could hide any delay pattern, and their bias differs feed by feed |
 | 4 | `ci_wide` | the on-time interval's half-width above `MAX_CI_HALF_WIDTH_PP` (3 points) | the interval then spans more than the gap between many neighbouring agencies' rates, so ranking them would order noise |
-| 5 | `clamp_high` | `clamp_pct` above `MAX_CLAMP_PCT` (5%) | a feed producing that many implausible readings makes the readings it kept suspect too |
+| 5 | `clamp_high` | `clamp_pct`, to a tenth as printed, above `MAX_CLAMP_PCT` (5%) | a feed producing that many implausible readings makes the readings it kept suspect too |
 
 Each check reads the figure the row prints, rounded as printed, so an
 operator can work out from the row itself why it is unranked: the reason line
 names the figure and the threshold, and the figures behind it (coverage with
 its observed and planned trips, the interval, the implausible share) sit in
-the same row.
+the same row. The board prints a share to a tenth, ties away from zero
+(`roundTo` in `frontend/src/utils/format.ts`), so the gate rounds `clamp_pct`
+the same way: 5.04% prints 5.0% and passes, 5.05% prints 5.1% and fails.
 
 - **Observation coverage** (`coverage_pct`) is `observed_trips` ÷
   `coverage_planned_trips` × 100, to one decimal and not capped: over 100%
@@ -129,15 +135,20 @@ the same row.
   visible. `observed_trips` sums `agg_route_daily.trips_observed` over the
   days a timetable plans (the same `planned_days` the planned figure counts,
   in `pipeline/reports/service_delivered.py`), and `coverage_planned_trips`
-  sums the plan over the same days. Both stop at `coverage_through`, the
-  newest day any agency on the board has observations for in the period: a
-  later day is one the aggregates have not reached for anyone yet, as the
-  period's last day is until its promotion and analyze run, and counting it
-  would lower every feed's coverage alike. A gap inside that span counts
+  sums the plan over the same days. Both stop at `coverage_through`, served
+  once on the summary beside `comparability` (`coverage_through()` in
+  `pipeline/reports/network.py`): the newest day any agency on the board has
+  observations for in the period. A later day is one the aggregates have not
+  reached for anyone yet, as the period's last day is until its promotion and
+  analyze run, and counting it would lower every feed's coverage alike. A gap inside that span counts
   against the feed that has it, and so do an agency's own trailing days when
   its figures fall behind the others'. A footnote under the list names the
   day when it is before the period's end. `planned_trips` itself still spans
-  the whole period.
+  the whole period. `observed_trips` and `coverage_planned_trips` are `None`
+  for a feed whose trip_ids cannot be matched to the timetable and for a plan
+  that could not be read; with no plan through `coverage_through`,
+  `coverage_planned_trips` is 0 and `observed_trips` `None`. `coverage_pct` is
+  `None` in each of those cases.
 - **On-time interval** (`ci_low`/`ci_high`) is the 95% Wilson interval of
   `on_time_pct` with the stop-event share as the proportion and
   `observed_trips` as the sample size, because the stops of one trip run late
@@ -183,7 +194,7 @@ default order is still by delay among the comparable agencies.
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips per day from Postgres `planned_trips_daily` where a day's count was saved, else from the loaded `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); `covered_days`/`window_days` say how many of the range's days have a plan, saved or from the loaded timetable, the only days all three count; `executed_trips`/`service_delivered_pct` read `None` for an agency without a live, complete RT field-coverage verdict (`rt_field_coverage_confirmed_agencies()` in `pipeline/strategies/static_join.py`, which also requires `ingest_strategy` `static_join`), or that has no static schedule loaded, and `delivered_missing` says which (`no_plan`, `feed_cannot_report`, `feed_unverified`, or `unreadable` when the read itself failed). `observed_trips`/`coverage_planned_trips` come from the same `compute_service_delivered_by_agency()` read (`agg_route_daily` over its planned days, through `coverage_through`), and `coverage_pct`/`ci_low`/`ci_high`/`comparable`/`comparable_reason` from `pipeline/reports/comparability.py` (see [Comparability gate](#comparability-gate)); the gate's thresholds are the response's top-level `comparability`. `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
+| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips per day from Postgres `planned_trips_daily` where a day's count was saved, else from the loaded `static_calendar`/`static_calendar_dates`/`static_trips` (each service's weekly running days plus its per-date additions, minus its removals), non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); `covered_days`/`window_days` say how many of the range's days have a plan, saved or from the loaded timetable, the only days all three count; `executed_trips`/`service_delivered_pct` read `None` for an agency without a live, complete RT field-coverage verdict (`rt_field_coverage_confirmed_agencies()` in `pipeline/strategies/static_join.py`, which also requires `ingest_strategy` `static_join`), or that has no static schedule loaded, and `delivered_missing` says which (`no_plan`, `feed_cannot_report`, `feed_unverified`, or `unreadable` when the read itself failed). `observed_trips`/`coverage_planned_trips` come from the same `compute_service_delivered_by_agency()` read (`agg_route_daily` over its planned days, through the summary's `coverage_through`), and `coverage_pct`/`ci_low`/`ci_high`/`comparable`/`comparable_reason` from `pipeline/reports/comparability.py` (see [Comparability gate](#comparability-gate)); the gate's thresholds are the response's top-level `comparability`. `has_ridership_weights`/`weighted_on_time_pct` come from `pipeline/reports/ridership.py: compute_ridership_weighted_on_time_by_agency()` — reads the manually-populated Postgres `ridership_weights` table joined against `agg_route_daily_dist`'s per-route `on_time_count`/`samples`; both fields are `False`/`None` for an agency with no rows in `ridership_weights` at all. |
 
 ## Key files
 

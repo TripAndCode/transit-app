@@ -87,7 +87,8 @@ _SERVICE_SQL = (
         WHERE NOT EXISTS (SELECT 1 FROM saved s WHERE s.agency_id = tp.agency_id AND s.day = tp.day)
     ),
     plan AS (
-        SELECT agency_id, SUM(planned) AS planned, COUNT(*) AS covered_days
+        SELECT agency_id, SUM(planned) AS planned, COUNT(*) AS covered_days,
+               SUM(planned) FILTER (WHERE day <= $5::date) AS coverage_planned
         FROM planned_days
         GROUP BY agency_id
     ),
@@ -103,19 +104,13 @@ _SERVICE_SQL = (
         JOIN planned_days p ON p.agency_id = r.agency_id AND p.day = r.date
         WHERE r.agency_id = ANY($1::int[]) AND r.date BETWEEN $2::date AND $5::date
         GROUP BY r.agency_id
-    ),
-    coverage_plan AS (
-        SELECT agency_id, SUM(planned) AS planned
-        FROM planned_days
-        WHERE day <= $5::date
-        GROUP BY agency_id
     )
     SELECT a.agency_id,
            COALESCE(p.planned, 0) AS planned,
            COALESCE(p.covered_days, 0) AS covered_days,
            COALESCE(m.non_executed, 0) AS non_executed,
            COALESCE(o.observed, 0) AS observed,
-           COALESCE(cp.planned, 0) AS coverage_planned,
+           COALESCE(p.coverage_planned, 0) AS coverage_planned,
            g.ingest_strategy,
            EXISTS (
                SELECT 1 FROM agg_service_delivered_daily r
@@ -127,7 +122,6 @@ _SERVICE_SQL = (
     LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
     LEFT JOIN observed o USING (agency_id)
-    LEFT JOIN coverage_plan cp USING (agency_id)
     LEFT JOIN agencies g USING (agency_id)
 """
 )
@@ -177,10 +171,10 @@ async def compute_service_delivered_by_agency(
     whenever the ratio isn't computable for this agency/range (see module
     docstring) — never silently 0 canceled / 100% delivered — and
     ``delivered_missing`` then says why (:data:`DeliveredMissing`); it is
-    ``None`` beside a rate. One query reads
-    the saved and loaded plans and a precomputed aggregate in Postgres, which
-    also answers whether the feed reports cancellations at all — no
-    ClickHouse access on this read path.
+    ``None`` beside a rate. One query reads the saved and loaded plans and
+    two precomputed aggregates in Postgres, ``agg_service_delivered_daily``,
+    which also answers whether the feed reports cancellations at all, and
+    ``agg_route_daily`` — no ClickHouse access on this read path.
     """
     if not agency_ids:
         return {}
