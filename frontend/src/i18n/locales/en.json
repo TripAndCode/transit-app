@@ -268,7 +268,7 @@
     "help": "Average delay — lower is better",
     "howto_title": "How to read this",
     "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
-    "help_on_time": "Share of readings within the on-time threshold.",
+    "help_on_time": "Share of readings within the on-time threshold. The range shown with it is its 95% interval, counted over trips rather than readings, since the stops of one trip run late together.",
     "help_delivered": "Share of planned trips that ran without being reported cancelled. Shown only for agencies whose feed a check has confirmed can carry cancellations and that reported at least one in the period or the 90 days up to its end; otherwise \"—\" with the reason.",
     "help_samples": "Number of delay observations behind the figures.",
     "help_feed": "Percent of readings dropped as implausible — high means a stuck or frozen feed.",
@@ -302,7 +302,30 @@
       "feed_unverified": "the feed is not yet checked for cancellations",
       "feed_reports_no_cancellations": "this feed doesn't report cancellations"
     },
-    "vehicle_km_no_shapes": "— (no route shapes loaded)"
+    "vehicle_km_no_shapes": "— (no route shapes loaded)",
+    "col_observed_coverage": "Observation coverage",
+    "help_observed_coverage": "Trips the feed reported as a share of the trips the timetable planned, on the days it plans up to the newest day any agency has observations for. Over 100% means the feed reported trips the timetable doesn't name.",
+    "observed_coverage": "Observation coverage {{pct}}% ({{observed}} of {{planned}} planned trips)",
+    "observed_coverage_missing": "Observation coverage —",
+    "on_time_ci": "({{low}}–{{high}})",
+    "col_ranking": "Ranking",
+    "help_ranking": "Only the agencies whose data supports a comparison are ranked: observation coverage of at least {{coverage}}%, an on-time % interval within ±{{ci}} points, and implausible readings of at most {{clamp}}%. The rest follow by name, each with the first check it fails. Early departures count as on time, and neither how densely a feed reports nor where a timetable puts its slack is corrected for.",
+    "unranked_heading": "Not ranked: the data does not support a comparison",
+    "unranked_criteria": "Ranked only where observation coverage is at least {{coverage}}%, the on-time % interval is within ±{{ci}} points and implausible readings are at most {{clamp}}%. These are listed by name.",
+    "unranked_reason": {
+      "no_data": "No observations in the period",
+      "coverage_unknown": "Observation coverage can't be measured: {{why}}",
+      "coverage_low": "Observation coverage {{pct}}% (below {{min}}%)",
+      "ci_wide": "On-time % interval ±{{half}} points (wider than ±{{max}})",
+      "clamp_high": "Implausible readings {{pct}}% (above {{max}}%)"
+    },
+    "coverage_unknown_why": {
+      "unmatched": "this feed's trips can't be matched to the timetable",
+      "no_plan": "no timetable plans this period",
+      "no_plan_observed": "no timetable plans the days observed",
+      "unreadable": "the plan could not be read"
+    },
+    "coverage_through_footnote": "* Observation coverage counts the planned trips through {{date}}, the newest day any agency has observations for. A later day no agency's figures have reached yet counts against none of them."
   },
   "definitionMeta": {
     "summary": "How this is calculated",

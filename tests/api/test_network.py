@@ -167,6 +167,47 @@ async def _seed_service_delivered_daily(pool, aid, rows):
             )
 
 
+async def _seed_saved_plan(pool, aid, rows):
+    """rows: list of (date_iso, planned_trips) saved in planned_trips_daily."""
+    async with pool.acquire() as c:
+        for d, n in rows:
+            await c.execute(
+                "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES ($1,$2,$3)",
+                aid,
+                date.fromisoformat(d),
+                n,
+            )
+
+
+async def _seed_observed_trips(pool, aid, rows):
+    """rows: list of (date_iso, trips_observed) as agg_route_daily rows on route R1."""
+    async with pool.acquire() as c:
+        for d, trips in rows:
+            await c.execute(
+                "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
+                "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+                "VALUES ($1,$2,'R1','平日',60,60,$3,$3,now(),$3 * 60)",
+                aid,
+                date.fromisoformat(d),
+                trips,
+            )
+
+
+async def _seed_gated_agency(pool, aid, *, name, strategy, planned, observed, samples, on_time, delay_min, clamp=0):
+    """One agency on 2026-04-01 with every figure the comparability gate reads."""
+    async with pool.acquire() as c:
+        await c.execute("UPDATE agencies SET agency_name = $1 WHERE agency_id = $2", name, aid)
+    await _set_ingest_strategy(pool, aid, strategy)
+    await _seed_saved_plan(pool, aid, [("2026-04-01", planned)])
+    await _seed_observed_trips(pool, aid, [("2026-04-01", observed)])
+    await _seed(
+        pool,
+        aid,
+        dist=[("2026-04-01", samples, samples * delay_min * 60, on_time)],
+        feed=("2026-04-01", samples, clamp),
+    )
+
+
 async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client):
     """The read path sums agg_service_delivered_daily over the range and
     divides against the static schedule's planned count -- no ClickHouse
@@ -420,8 +461,12 @@ async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_asy
     assert by[cc]["clamp_pct"] is None
     assert by[cc]["data_from"] is None
     assert by[cc]["data_to"] is None
-    order = [r["agency_id"] for r in rows]
-    assert order.index(a) < order.index(b) < order.index(cc)
+    # No timetable and no ingest strategy: nothing to measure coverage against.
+    assert (by[a]["comparable"], by[a]["comparable_reason"]) == (False, "coverage_unknown")
+    assert (by[b]["comparable"], by[b]["comparable_reason"]) == (False, "coverage_unknown")
+    assert (by[cc]["comparable"], by[cc]["comparable_reason"]) == (False, "no_data")
+    # None can be ranked, so they come in agency_id order; the board names them.
+    assert [r["agency_id"] for r in rows] == [a, b, cc]
 
 
 async def test_compute_network_summary_falls_back_to_latest_completed_day_when_today_has_rows(
@@ -571,6 +616,9 @@ async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_
         # Not a plan of nothing: the board must not print 0 planned trips for a read that failed.
         assert by[aid]["delivered_missing"] == "unreadable"
         assert (by[aid]["covered_days"], by[aid]["window_days"], by[aid]["vehicle_km_delivered_pct"]) == (0, 7, None)
+        assert (by[aid]["observed_trips"], by[aid]["coverage_pct"], by[aid]["comparable"]) == (None, None, False)
+    assert by[a]["comparable_reason"] == "coverage_unknown"
+    assert by[b]["comparable_reason"] == "no_data"
 
 
 async def test_network_summary_includes_definition_metadata(net_client):
@@ -735,3 +783,242 @@ async def test_the_board_shows_an_agency_edit_on_its_next_load(net_client, aconn
     after = (await client.get("/api/network/summary", params=params)).json()["agencies"]
     assert b not in {row["agency_id"] for row in after}
     assert next(row for row in after if row["agency_id"] == a)["has_ridership_weights"] is True
+
+
+async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, ch_async_client):
+    """A dense static_join agency is ranked; a sparse one (few trips, so a
+    wide interval) and a thinly observed one (low coverage) are not. The
+    ranked agency comes first although it runs earliest, and the unranked
+    ones follow in agency_id order, never by delay or by the server's idea of
+    name order: the board sorts them by name in its own collation."""
+    pool, a, b, cc = net_pool
+    # 900 of 1,000 planned trips observed, 90% on time over 20,000 stop events.
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Dense",
+        strategy="static_join",
+        planned=1000,
+        observed=900,
+        samples=20000,
+        on_time=18000,
+        delay_min=1,
+    )
+    # A day no plan covers: its trips are not observed trips of the plan.
+    await _seed_observed_trips(pool, a, [("2026-04-02", 500)])
+    # 45 of 50 trips observed, but 45 trips cannot pin a 50% rate to +-3 points.
+    await _seed_gated_agency(
+        pool,
+        b,
+        name="Zeta sparse",
+        strategy="static_join",
+        planned=50,
+        observed=45,
+        samples=900,
+        on_time=450,
+        delay_min=5,
+    )
+    # Dense and on time, but the feed reported only 400 of 1,000 planned trips.
+    await _seed_gated_agency(
+        pool,
+        cc,
+        name="Mid coverage",
+        strategy="static_join",
+        planned=1000,
+        observed=400,
+        samples=20000,
+        on_time=18000,
+        delay_min=10,
+    )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 2))
+
+    by = {r["agency_id"]: r for r in rows}
+    assert (by[a]["comparable"], by[a]["comparable_reason"]) == (True, None)
+    assert (by[a]["observed_trips"], by[a]["coverage_planned_trips"], by[a]["coverage_pct"]) == (900, 1000, 90.0)
+    assert (by[a]["ci_low"], by[a]["ci_high"]) == (87.8, 91.8)
+    assert (by[b]["comparable"], by[b]["comparable_reason"]) == (False, "ci_wide")
+    assert by[b]["coverage_pct"] == 90.0
+    assert by[b]["ci_high"] - by[b]["ci_low"] > 2 * 3.0
+    assert (by[cc]["comparable"], by[cc]["comparable_reason"]) == (False, "coverage_low")
+    assert by[cc]["coverage_pct"] == 40.0
+    assert [r["agency_id"] for r in rows] == [a, b, cc]
+
+
+async def test_coverage_over_100_stays_visible_and_still_ranks(net_pool, ch_async_client):
+    """More trips observed than planned means the feed reported trips the
+    plan doesn't name. The figure is not capped, and it is not too little
+    data."""
+    pool, a, _b, _cc = net_pool
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Extra",
+        strategy="static_join",
+        planned=400,
+        observed=520,
+        samples=10000,
+        on_time=9000,
+        delay_min=2,
+    )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert (row["observed_trips"], row["coverage_pct"]) == (520, 130.0)
+    assert (row["comparable"], row["comparable_reason"]) == (True, None)
+
+
+async def test_a_feed_whose_trips_cannot_be_matched_to_the_timetable_is_unranked(net_pool, ch_async_client):
+    """aomori_regex parses its trip_ids from the feed's text, so they don't
+    match the timetable's and its coverage cannot be measured, however dense
+    its data. Nothing bounds its interval either, so none is printed."""
+    pool, a, b, cc = net_pool
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Regex",
+        strategy="aomori_regex",
+        planned=1000,
+        observed=900,
+        samples=20000,
+        on_time=18000,
+        delay_min=9,
+    )
+    await _seed_gated_agency(
+        pool,
+        b,
+        name="Joined",
+        strategy="static_join",
+        planned=1000,
+        observed=900,
+        samples=20000,
+        on_time=18000,
+        delay_min=1,
+    )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    by = {r["agency_id"]: r for r in rows}
+    assert (by[a]["comparable"], by[a]["comparable_reason"]) == (False, "coverage_unknown")
+    assert (by[a]["observed_trips"], by[a]["coverage_planned_trips"], by[a]["coverage_pct"]) == (None, None, None)
+    assert (by[a]["ci_low"], by[a]["ci_high"]) == (None, None)
+    assert by[a]["on_time_pct"] == 90.0
+    assert by[b]["comparable"] is True
+    assert [r["agency_id"] for r in rows] == [b, a, cc]
+
+
+async def _seed_two_day_agency(pool, aid, *, name, observed_days):
+    """A dense static_join agency planning 1,000 trips on each of 2026-04-01
+    and 04-02, observed (900 trips, 90% on time) on ``observed_days`` only."""
+    async with pool.acquire() as c:
+        await c.execute("UPDATE agencies SET agency_name = $1 WHERE agency_id = $2", name, aid)
+    await _set_ingest_strategy(pool, aid, "static_join")
+    await _seed_saved_plan(pool, aid, [("2026-04-01", 1000), ("2026-04-02", 1000)])
+    await _seed_observed_trips(pool, aid, [(d, 900) for d in observed_days])
+    await _seed(pool, aid, dist=[(d, 20000, 20000 * 60, 18000) for d in observed_days], feed=("2026-04-01", 1000, 0))
+
+
+async def test_a_day_no_agency_has_observations_for_yet_counts_against_none(net_client):
+    """The period's last day has a plan, but no agency's aggregates have
+    reached it: a lag they share, not trips each feed missed. Coverage stops
+    at the newest observed day, which the summary names once; the planned
+    figure still spans the period."""
+    client, pool, a, b, _cc = net_client
+    await _seed_two_day_agency(pool, a, name="A", observed_days=["2026-04-01"])
+    await _seed_two_day_agency(pool, b, name="B", observed_days=["2026-04-01"])
+
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-02"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coverage_through"] == "2026-04-01"
+    by = {x["agency_id"]: x for x in body["agencies"]}
+    for aid in (a, b):
+        assert by[aid]["planned_trips"] == 2000
+        assert (by[aid]["observed_trips"], by[aid]["coverage_planned_trips"]) == (900, 1000)
+        assert (by[aid]["coverage_pct"], by[aid]["comparable"]) == (90.0, True)
+        assert "coverage_through" not in by[aid]
+
+
+async def test_a_day_one_feed_missed_counts_against_that_feed(net_pool, ch_async_client):
+    pool, a, b, _cc = net_pool
+    await _seed_two_day_agency(pool, a, name="A", observed_days=["2026-04-01", "2026-04-02"])
+    await _seed_two_day_agency(pool, b, name="B", observed_days=["2026-04-01"])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 2))
+
+    by = {r["agency_id"]: r for r in rows}
+    assert (by[a]["coverage_pct"], by[a]["comparable"]) == (90.0, True)
+    assert (by[b]["observed_trips"], by[b]["coverage_planned_trips"]) == (900, 2000)
+    assert (by[b]["coverage_pct"], by[b]["comparable_reason"]) == (45.0, "coverage_low")
+
+
+async def test_a_high_implausible_share_is_unranked(net_pool, ch_async_client):
+    pool, a, _b, _cc = net_pool
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Noisy",
+        strategy="static_join",
+        planned=1000,
+        observed=900,
+        samples=20000,
+        on_time=18000,
+        delay_min=1,
+        clamp=2000,
+    )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["clamp_pct"] == 10.0
+    assert (row["comparable"], row["comparable_reason"]) == (False, "clamp_high")
+
+
+async def test_network_summary_endpoint_carries_the_gate_and_its_thresholds(net_client):
+    client, pool, a, b, cc = net_client
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Dense",
+        strategy="static_join",
+        planned=1000,
+        observed=900,
+        samples=20000,
+        on_time=18000,
+        delay_min=1,
+    )
+    await _seed_gated_agency(
+        pool,
+        b,
+        name="Sparse",
+        strategy="static_join",
+        planned=50,
+        observed=45,
+        samples=900,
+        on_time=450,
+        delay_min=10,
+    )
+
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-01"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["comparability"] == {"min_coverage_pct": 70.0, "max_ci_half_width_pp": 3.0, "max_clamp_pct": 5.0}
+    assert body["coverage_through"] == "2026-04-01"
+    rows = body["agencies"]
+    assert [x["agency_id"] for x in rows] == [a, b, cc]
+    dense = rows[0]
+    assert {k: dense[k] for k in ("coverage_pct", "observed_trips", "ci_low", "ci_high", "comparable")} == {
+        "coverage_pct": 90.0,
+        "observed_trips": 900,
+        "ci_low": 87.8,
+        "ci_high": 91.8,
+        "comparable": True,
+    }
+    assert dense["comparable_reason"] is None
+    assert (rows[1]["comparable"], rows[1]["comparable_reason"]) == (False, "ci_wide")
