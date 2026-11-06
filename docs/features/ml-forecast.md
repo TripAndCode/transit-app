@@ -244,3 +244,8 @@ first origin in the window that published each agency) and by origin (with its w
 counts once both its files are in R2: predict uploads the manifest last. It is read-only on the replica
 and writes `--out`; with `--publish` it also uploads the document to `evaluations/<run_date>/live.json`,
 beside that week's `summary.json`.
+
+`GET /api/ml/evaluations` serves the newest ingested scorecard as `live` (null until one exists): its
+window, the published and counterfactual skills, the published slot interval's coverage, the published
+share and the skills by lead day. The model page shows them in a "Published forecasts" card. The gap
+between the two skills is printed as what copying a recent day's trips costs.

@@ -66,7 +66,7 @@ async def test_no_evaluation_yet_is_an_empty_answer_not_an_error(client):
     response = await client.get("/api/ml/evaluations")
     assert response.status_code == 200
     body = response.json()
-    assert body["latest"] is None and body["history"] == []
+    assert body["latest"] is None and body["history"] == [] and body["live"] is None
 
 
 async def test_the_newest_week_and_the_history_are_served(client, aconn, aagency_id, monkeypatch):
@@ -115,3 +115,30 @@ async def test_a_stale_forecast_is_not_live(client, aconn, aagency_id, monkeypat
 
     body = (await client.get("/api/ml/evaluations")).json()
     assert body["latest"]["agencies"][0]["forecast_live"] is False
+
+
+async def test_the_newest_live_scorecard_is_served(client, aconn, aagency_id):
+    await _seed_week(aconn, date(2026, 11, 8), True, 0.06, aagency_id)
+    for run_date, skill in ((date(2026, 11, 1), 0.004), (date(2026, 11, 8), 0.012)):
+        document = {
+            "schema": 1,
+            "run_date": run_date.isoformat(),
+            "window": {"first_origin": "2026-10-11", "last_origin": "2026-11-05", "origins": 26, "target_days": 25},
+            "overall": {"live": {"mae": 1.2, "rmse": 2.3, "runs": 41000}},
+            "skill": {"live": skill, "counterfactual": 0.061},
+            "interval": {"live_slot": {"coverage": 0.77, "mean_width": 3.1}},
+            "published_share": 0.93,
+            "by_lead": [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}],
+        }
+        await aconn.execute(
+            "INSERT INTO ml_live_evaluations (run_date, schema_version, document) VALUES ($1, 1, $2::jsonb)",
+            run_date,
+            json.dumps(document),
+        )
+
+    live = (await client.get("/api/ml/evaluations")).json()["live"]
+    assert live["run_date"] == "2026-11-08"
+    assert (live["skill_live"], live["skill_counterfactual"]) == (0.012, 0.061)
+    assert (live["origins"], live["target_days"], live["runs"]) == (26, 25, 41000)
+    assert (live["live_slot_coverage"], live["published_share"]) == (0.77, 0.93)
+    assert live["by_lead"] == [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}]

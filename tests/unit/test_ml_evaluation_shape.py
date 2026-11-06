@@ -4,7 +4,7 @@ flags joined in, and nothing that a newer or older summary lacks crashes."""
 
 from datetime import date
 
-from pipeline.reports.ml_evaluation import shape_history, shape_latest
+from pipeline.reports.ml_evaluation import shape_history, shape_latest, shape_live
 
 _SUMMARY = {
     "schema": 1,
@@ -96,3 +96,44 @@ async def test_the_live_agency_lookup_degrades_to_none_rather_than_failing():
 def test_an_explicit_null_point_metric_reads_as_the_mean_like_the_history_does():
     latest = shape_latest({**_SUMMARY, "point_metric": None}, date(2026, 10, 25), {}, set())
     assert latest["point_metric"] == "mean"
+
+
+_LIVE = {
+    "schema": 1,
+    "run_date": "2026-11-08",
+    "generated_at": "2026-11-08T05:10:00+09:00",
+    "window": {"first_origin": "2026-10-11", "last_origin": "2026-11-05", "origins": 26, "target_days": 25},
+    "overall": {"live": {"mae": 1.2, "rmse": 2.3, "runs": 41000}, "B0": {"mae": 1.21, "rmse": 2.4, "runs": 41000}},
+    "skill": {"live": 0.012, "counterfactual": 0.061},
+    "interval": {"live_slot": {"coverage": 0.77, "mean_width": 3.1}, "B0": {"coverage": 0.63, "mean_width": 2.8}},
+    "published_share": 0.93,
+    "by_lead": [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}],
+    "agencies": [{"agency_id": 8, "skill_live": 0.02, "runs": 20000}],
+    "origins": [{"origin": "2026-10-11", "model_version": "2026-10-10", "runs": 1500, "withheld_days": 0}],
+}
+
+
+def test_the_live_scorecard_keeps_the_fields_the_card_reads():
+    live = shape_live(_LIVE, date(2026, 11, 8))
+    assert live == {
+        "run_date": date(2026, 11, 8),
+        "first_origin": "2026-10-11",
+        "last_origin": "2026-11-05",
+        "origins": 26,
+        "target_days": 25,
+        "runs": 41000,
+        "skill_live": 0.012,
+        "skill_counterfactual": 0.061,
+        "live_slot_coverage": 0.77,
+        "published_share": 0.93,
+        "by_lead": [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}],
+    }
+
+
+def test_a_scorecard_with_nothing_scored_is_shaped_without_crashing():
+    live = shape_live(
+        {"schema": 1, "run_date": "2026-11-08", "window": {"origins": 0, "target_days": 0}}, date(2026, 11, 8)
+    )
+    assert live["origins"] == 0 and live["runs"] == 0
+    assert live["skill_live"] is None and live["first_origin"] is None
+    assert live["by_lead"] == []

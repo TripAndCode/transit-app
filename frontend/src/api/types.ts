@@ -1230,8 +1230,32 @@ export interface MlEvaluationWeek {
   point_metric: string;
 }
 
+export interface MlLiveLead {
+  lead: number;
+  skill_live: number | null;
+  skill_counterfactual: number | null;
+  runs: number;
+}
+
+/** How the published forecasts did against what ran, beside the same model
+ *  given the trips that ran (the counterfactual). */
+export interface MlLiveScorecard {
+  run_date: string;
+  first_origin: string | null;
+  last_origin: string | null;
+  origins: number;
+  target_days: number;
+  runs: number;
+  skill_live: number | null;
+  skill_counterfactual: number | null;
+  live_slot_coverage: number | null;
+  published_share: number | null;
+  by_lead: MlLiveLead[];
+}
+
 export interface MlEvaluations {
   latest: MlEvaluationLatest | null;
   history: MlEvaluationWeek[];
   forecast_in_use: boolean;
+  live: MlLiveScorecard | null;
 }

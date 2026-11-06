@@ -4,7 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAgencies, useMlEvaluations } from "../api/hooks";
 import { readLastAgency } from "../api/lastAgency";
-import type { MlAgencyEvaluation, MlEvaluationLatest, MlEvaluationWeek, MlFailure } from "../api/types";
+import type {
+  MlAgencyEvaluation,
+  MlEvaluationLatest,
+  MlEvaluationWeek,
+  MlFailure,
+  MlLiveLead,
+  MlLiveScorecard,
+} from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { Card } from "../components/ui/Card";
@@ -185,6 +192,114 @@ function Headline({ latest }: { latest: MlEvaluationLatest }) {
   );
 }
 
+/** What copying a recent day's trips costs the published forecast, in
+ *  percentage points between the two skills as printed, so the cost agrees
+ *  with them. A forecast that did as well as the counterfactual costs nothing. */
+function templateCostText(t: TFunction, live: number | null, counterfactual: number | null): string | null {
+  if (live == null || counterfactual == null) return null;
+  const points = roundTenth(roundTenth(counterfactual * 100) - roundTenth(live * 100));
+  return points > 0 ? t("model.live_cost", { points: fixedTenth(points) }) : t("model.live_cost_none");
+}
+
+function LiveLeads({ leads }: { leads: MlLiveLead[] }) {
+  const { t } = useTranslation();
+  const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  if (compact) {
+    return (
+      <ul className="model-cards" data-testid="model-live-leads">
+        {leads.map((l) => (
+          <li key={l.lead} className="model-card">
+            <div className="model-card__head">
+              <span className="model-card__title">{t("model.live_lead", { count: l.lead })}</span>
+            </div>
+            <p className="model-card__meta">
+              <span>
+                <span className="model-card__label">{t("model.live_col_published")}</span> <SkillText skill={l.skill_live} />
+              </span>
+              <span>
+                <span className="model-card__label">{t("model.live_col_counterfactual")}</span>{" "}
+                <SkillText skill={l.skill_counterfactual} />
+              </span>
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <table data-testid="model-live-leads" style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          <th style={cell}>{t("model.live_col_lead")}</th>
+          <th style={cell}>{t("model.live_col_published")}</th>
+          <th style={cell}>{t("model.live_col_counterfactual")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {leads.map((l) => (
+          <tr key={l.lead}>
+            <td style={cell}>{t("model.live_lead", { count: l.lead })}</td>
+            <td style={cell}>
+              <SkillText skill={l.skill_live} />
+            </td>
+            <td style={cell}>
+              <SkillText skill={l.skill_counterfactual} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** How the forecasts the app actually showed did against what ran, beside the
+ *  same model given the trips that ran: the gap between them is what guessing
+ *  the days ahead from a recent day costs. */
+function LiveForecast({ live }: { live: MlLiveScorecard }) {
+  const { t } = useTranslation();
+  const cost = templateCostText(t, live.skill_live, live.skill_counterfactual);
+  return (
+    <Card data-testid="model-live">
+      <h2 style={{ fontSize: 16, marginTop: 0 }}>{t("model.live_title")}</h2>
+      {live.first_origin && live.last_origin && (
+        <div style={muted}>
+          {t("model.live_window", {
+            origins: live.origins,
+            first: live.first_origin,
+            last: live.last_origin,
+            days: live.target_days,
+          })}
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
+        <div>
+          <div style={muted}>{t("model.skill_label")}</div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>
+            <SkillText skill={live.skill_live} />
+          </div>
+        </div>
+        <div>
+          <div style={muted}>{t("model.live_counterfactual_label")}</div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>
+            <SkillText skill={live.skill_counterfactual} />
+          </div>
+        </div>
+      </div>
+      {cost && <p style={{ ...muted, marginBottom: 0 }}>{cost}</p>}
+      <div style={muted}>
+        {live.live_slot_coverage != null && <div>{t("model.live_coverage", { value: fmtRatioPct(live.live_slot_coverage) })}</div>}
+        {live.published_share != null && <div>{t("model.live_share", { value: fmtRatioPct(live.published_share) })}</div>}
+      </div>
+      {live.by_lead.length > 0 && (
+        <>
+          <h3 style={{ fontSize: 14, marginBottom: 4 }}>{t("model.live_leads_title")}</h3>
+          <LiveLeads leads={live.by_lead} />
+        </>
+      )}
+    </Card>
+  );
+}
+
 function AgencyRow({ a }: { a: MlAgencyEvaluation }) {
   const { t } = useTranslation();
   return (
@@ -341,6 +456,7 @@ export function ModelPage() {
           {!data.forecast_in_use && <p style={muted}>{t("model.flag_off")}</p>}
           <Verdict latest={data.latest} />
           <Headline latest={data.latest} />
+          {data.live && <LiveForecast live={data.live} />}
           <Agencies agencies={data.latest.agencies} />
           <Card>
             <h2 style={{ fontSize: 16, marginTop: 0 }}>{t("model.history_title")}</h2>
