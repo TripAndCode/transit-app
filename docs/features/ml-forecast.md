@@ -217,11 +217,13 @@ forecast shows its past average with a mark.
 
 ### Live scorecard
 
-`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD]` scores every forecast published in the
-last 28 days against what actually ran, on the target days the replica holds as final (from day + 2).
-Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model version that
-made it (`models/<version>/`) from R2, and builds the counterfactual: the same model given the target
-days' actual runs instead of the template, from the history the 11:00 predict could see.
+`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N ...]` scores every forecast
+published in the last 28 days against what actually ran, on the target days the replica holds as final
+(from day + 2). Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model
+version that made it (`models/<version>/`) from R2, and builds the counterfactual: the same model given
+the target days' actual runs instead of the template, from the history the 11:00 predict could see. Like
+predict, it loads each agency's whole run history, because a service's weekend share counts every day
+before the origin.
 
 - Only the cells the forecast published that actually ran are scored. A cell with no B0 history is
   counted in the published share but not paired.

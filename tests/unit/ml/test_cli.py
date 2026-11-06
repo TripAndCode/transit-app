@@ -755,11 +755,11 @@ def test_a_model_published_without_point_or_clip_predicts_its_mean_unclipped(tmp
     assert not np.allclose(pd.read_parquet(legacy)["mean_min"], pd.read_parquet(legacy)["q50"])
 
 
-def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monkeypatch):
-    raw = _runs()
+def _publish_live(tmp_path, monkeypatch, raw, origin):
+    """Predict's forecast for *origin* published to a stubbed R2, with `raw` as the replica's runs.
+    Returns the forecast's model version and its published directory."""
     model_dir = tmp_path / "model"
     _publish_model(raw, model_dir)
-    origin = START + timedelta(days=DAYS - 10)
     _stub_predict(monkeypatch, raw[raw["service_date"] <= pd.Timestamp(origin)], origin)
     published = tmp_path / "published"
     assert (
@@ -783,7 +783,14 @@ def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monke
             shutil.copy(sources[source], dest)
 
     monkeypatch.setattr("ml.cli._run", fake_run)
-    monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids, since=None: raw)
+    monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
+    return version, published
+
+
+def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monkeypatch):
+    raw = _runs()
+    origin = START + timedelta(days=DAYS - 10)
+    version, _ = _publish_live(tmp_path, monkeypatch, raw, origin)
 
     out = tmp_path / "live.json"
     run_date = origin + timedelta(days=9)
@@ -794,3 +801,49 @@ def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monke
     assert [row["lead"] for row in doc["by_lead"]] == list(range(1, 8))
     assert doc["origins"][0]["model_version"] == version
     assert 0 < doc["published_share"] <= 1
+
+
+def test_live_score_gives_the_counterfactual_the_weekend_share_predict_saw(tmp_path, monkeypatch):
+    # Four weeks of weekday-only service before the daily one: the service's weekend share over the whole
+    # history differs from the share over the model's window alone.
+    raw = _runs()
+    origin = START + timedelta(days=DAYS - 10)
+    earlier = raw[raw["service_date"] < pd.Timestamp(START + timedelta(days=28))].copy()
+    earlier["service_date"] -= pd.Timedelta(days=28)
+    raw = pd.concat([earlier[earlier["service_date"].dt.dayofweek < 5], raw], ignore_index=True)
+    _publish_live(tmp_path, monkeypatch, raw, origin)
+
+    import ml.live_score
+
+    frames = []
+    real = ml.live_score.counterfactual_frame
+
+    def spy(*args, **kwargs):
+        frames.append(real(*args, **kwargs))
+        return frames[-1]
+
+    monkeypatch.setattr(ml.live_score, "counterfactual_frame", spy)
+    run_date = origin + timedelta(days=9)
+    out = tmp_path / "live.json"
+    assert main(["live-score", "--out", str(out), "--run-date", run_date.isoformat(), "--agency", "8"]) == 0
+
+    days = raw.loc[raw["service_date"] < pd.Timestamp(origin), "service_date"].drop_duplicates()
+    assert frames[0]["service_weekend_share"].unique().tolist() == [pytest.approx((days.dt.dayofweek >= 5).mean())]
+
+
+def test_live_score_counts_only_the_scored_agencies_withheld_days(tmp_path, monkeypatch):
+    raw = _runs()
+    origin = START + timedelta(days=DAYS - 10)
+    _, published = _publish_live(tmp_path, monkeypatch, raw, origin)
+    manifest = published / "manifest.json"
+    withheld = [
+        {"agency_id": 8, "service_date": (origin + timedelta(days=3)).isoformat(), "missing_share": 0.2},
+        {"agency_id": 9, "service_date": (origin + timedelta(days=3)).isoformat(), "missing_share": 0.4},
+        {"agency_id": 9, "service_date": (origin + timedelta(days=4)).isoformat(), "missing_share": 0.4},
+    ]
+    manifest.write_text(json.dumps({**json.loads(manifest.read_text()), "withheld": withheld}))
+
+    out = tmp_path / "live.json"
+    run_date = origin + timedelta(days=9)
+    assert main(["live-score", "--out", str(out), "--run-date", run_date.isoformat(), "--agency", "8"]) == 0
+    assert json.loads(out.read_text())["origins"][0]["withheld_days"] == 1

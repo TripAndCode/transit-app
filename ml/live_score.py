@@ -14,10 +14,10 @@ import pandas as pd
 
 from ml.features import build_frame, with_route_ids
 from ml.metrics import ErrorStats
+from ml.model_metrics import add_interval
 from ml.model_result import IntervalStats
 from ml.models import Predictions
 from ml.training import HORIZON_DAYS
-from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
 
 SCHEMA = 1
 KEY = ["agency_id", "route_code", "service_date", "hour"]
@@ -69,19 +69,21 @@ def window_origins(keys: list[str], run_date: date, *, days: int = 28) -> list[d
     return sorted(origin for origin in origins if first <= origin <= last)
 
 
-def counterfactual_frame(runs: pd.DataFrame, routes: pd.DataFrame, origin: date, meta: dict) -> pd.DataFrame:
+def counterfactual_frame(
+    runs: pd.DataFrame, routes: pd.DataFrame, origin: date, meta: dict, days: pd.DataFrame
+) -> pd.DataFrame:
     """The frame the published model scores when given the target days' actual runs: built as of *origin*,
-    from the history the 11:00 predict could see. Origin − 1's after-midnight runs (an hour past 24, or
-    below the service day's cutover) were not synced by then, so they are left out."""
-    hour = runs["hour"]
-    late = (runs["service_date"] == pd.Timestamp(origin - timedelta(days=1))) & (
-        (hour >= 24) | (hour < SERVICE_DAY_CUTOVER_HOURS)
-    )
+    from the history the 11:00 predict could see. Origin − 1's after-midnight runs (past hour 24) were not
+    synced by then, so they are left out. *runs* is the whole history, as predict loads it, and *days* is
+    weekend_days() on it: a service's weekend share counts every day before the origin, not only the
+    model's window."""
+    late = (runs["service_date"] == pd.Timestamp(origin - timedelta(days=1))) & (runs["hour"] >= 24)
     return build_frame(
         with_route_ids(runs[~late], routes),
         origin,
         window_days=meta["window_days"],
         horizon_days=HORIZON_DAYS,
+        precomputed_weekend_days=days,
         clip_quantile=meta.get("clip_quantile"),
     )
 
@@ -227,10 +229,7 @@ def _agency(card: Scorecard, agency_id: int) -> dict:
 
 
 def _cover(stats: IntervalStats, y: np.ndarray, lo, hi) -> None:
-    lo, hi = np.asarray(lo, dtype=float), np.asarray(hi, dtype=float)
-    stats.runs += len(y)
-    stats.covered += int(((y >= lo) & (y <= hi)).sum())
-    stats.width += float((hi - lo).sum())
+    add_interval(stats, y, np.asarray(lo, dtype=float), np.asarray(hi, dtype=float), {})
 
 
 def _errors(stats: ErrorStats) -> dict:

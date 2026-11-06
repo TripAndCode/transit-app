@@ -49,9 +49,9 @@ def _capture(cmd: Sequence[str]) -> str:
 def _use_store_credentials() -> None:
     # `sync` reads this same EnvironmentFile and must keep using the read-only
     # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
-    # each job that writes the transit-ml bucket swaps in its read-write pair
-    # only for its own (separate, short-lived) process, from distinctly named
-    # variables.
+    # each job that reads or writes the transit-ml bucket swaps in its
+    # read-write pair only for its own (separate, short-lived) process, from
+    # distinctly named variables.
     access_key, secret_key = os.environ["ML_STORE_ACCESS_KEY_ID"], os.environ["ML_STORE_SECRET_ACCESS_KEY"]
     # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=` --
     # env.example ships exactly that, so a `KeyError` alone would not catch
@@ -448,6 +448,7 @@ def _live_score(args: argparse.Namespace) -> int:
     import pandas as pd
 
     from ml.dataset import load_runs
+    from ml.features import weekend_days
     from ml.live_score import Scorecard, counterfactual_frame, score_origin, to_json, window_origins
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import point_forecast, predict
@@ -462,10 +463,13 @@ def _live_score(args: argparse.Namespace) -> int:
     card = Scorecard()
     if origins:
         client = get_client()
-        # Each forecast's history reaches window_days before its origin.
-        since = origins[0] - timedelta(days=28)
-        runs = load_runs(client, args.agency or agencies_with_data(client), since=since)
+        # The whole history, as predict loads it: a service's weekend share counts every day before the
+        # origin.
+        runs = load_runs(client, args.agency or agencies_with_data(client))
+        days = weekend_days(runs)
         with tempfile.TemporaryDirectory() as tmp:
+            # Origins run in date order and a published version only ever moves forward, so one model is
+            # held at a time.
             models: dict[str, tuple] = {}
             for origin in origins:
                 prefix = f"forecasts/{origin.isoformat()}"
@@ -479,15 +483,25 @@ def _live_score(args: argparse.Namespace) -> int:
                     continue
                 version = str(forecast["model_version"].iloc[0])
                 if version not in models:
-                    model_dir = Path(tmp) / "models" / version
+                    models.clear()
+                    model_dir = Path(tmp) / "model"
+                    shutil.rmtree(model_dir, ignore_errors=True)
                     download_dir(bucket, f"models/{version}/", model_dir, endpoint, run=_run)
                     models[version] = (load_model_set(model_dir), read_meta(model_dir), load_routes(model_dir))
                 model_set, meta, routes = models[version]
-                frame = counterfactual_frame(runs, routes, origin, meta)
+                frame = counterfactual_frame(runs, routes, origin, meta, days)
+                frame = frame[
+                    (frame["service_date"] <= pd.Timestamp(final_through))
+                    & frame["agency_id"].isin(forecast["agency_id"].unique())
+                ]
                 if frame.empty:
                     continue
                 preds = predict(model_set, frame)
-                withheld = len(json.loads(manifest_path.read_text()).get("withheld", []))
+                withheld = [
+                    day
+                    for day in json.loads(manifest_path.read_text()).get("withheld", [])
+                    if not args.agency or day["agency_id"] in args.agency
+                ]
                 score_origin(
                     card,
                     origin,
@@ -497,7 +511,7 @@ def _live_score(args: argparse.Namespace) -> int:
                     preds,
                     point_forecast(preds, meta.get("point", "mean")),
                     final_through,
-                    withheld,
+                    len(withheld),
                 )
     document = to_json(card, run_date=run_date, generated_at=datetime.now(ZoneInfo("Asia/Tokyo")))
     args.out.parent.mkdir(parents=True, exist_ok=True)

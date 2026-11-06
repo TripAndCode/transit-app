@@ -8,7 +8,7 @@ from tests.unit.ml.ml_group import require
 pd = require("pandas")
 np = require("numpy")
 
-from ml.features import route_ids  # noqa: E402
+from ml.features import route_ids, weekend_days  # noqa: E402
 from ml.live_score import (  # noqa: E402
     Scorecard,
     counterfactual_frame,
@@ -187,7 +187,7 @@ def test_the_counterfactual_frame_reads_no_target_day_into_b0():
             "span_min": "float32",
         }
     )
-    frame = counterfactual_frame(runs, route_ids(runs), ORIGIN, {"window_days": 28})
+    frame = counterfactual_frame(runs, route_ids(runs), ORIGIN, {"window_days": 28}, weekend_days(runs))
     target = frame[frame["service_date"] == pd.Timestamp(ORIGIN + timedelta(days=1))]
     assert len(target) == 1
     assert float(target["b0"].iloc[0]) == 1.0
