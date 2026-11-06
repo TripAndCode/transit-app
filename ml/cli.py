@@ -453,7 +453,8 @@ def _live_score(args: argparse.Namespace) -> int:
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import point_forecast, predict
 
-    # The default AWS pair reads transit-archives only; the store's pair reads transit-ml.
+    # The default AWS pair reads transit-archives only; the store's pair reads transit-ml and, with
+    # --publish, writes live.json to it.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
     _use_store_credentials()
 
