@@ -79,7 +79,7 @@ Next to it, “Analyzed through …” shows the last service day the reports in
 
 ### On a phone
 
-On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu.
+On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu; an administrator also sees Model evaluation there.
 
 ### Notices at the top
 

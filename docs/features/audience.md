@@ -79,8 +79,8 @@ Admins also see the admin pages and **Model evaluation**.
 
 ## Knowing whether it works
 
-Nobody outside the owner is known to use the app yet. The cheapest signal is to count
-who signed in over the last 30 days, monthly, against production:
+The cheapest signal is to count, monthly against production, the distinct users who
+made a signed-in request (by session or by API key) over the last 30 days:
 
 ```sql
 SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily WHERE day > now() - interval '30 days';
