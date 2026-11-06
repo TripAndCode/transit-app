@@ -172,8 +172,8 @@ def template_future_runs(
 
 # The timetable a day ran under plans every trip it ran, so a template whose
 # trips the target day's plan lacks ran under another timetable: forecasting it
-# would forecast trips that no longer run. The margin absorbs a trip or two
-# that a timetable drops without being replaced.
+# would forecast trips that no longer run. Below the share, the template's trips
+# are still overwhelmingly the plan's own.
 WITHHOLD_MISSING_SHARE = 0.05
 
 

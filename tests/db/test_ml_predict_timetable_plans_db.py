@@ -26,7 +26,12 @@ async def _seed_weekday_service(aconn, agency_id: int) -> None:
     )
 
 
+async def _stamping(aconn, agency_id: int) -> None:
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+
+
 async def test_each_covered_day_lists_its_planned_trips(aconn, aagency_id):
+    await _stamping(aconn, aagency_id)
     await _seed_weekday_service(aconn, aagency_id)
     planned, _ = await _read_timetable_plans(aconn, [aagency_id], date(2026, 10, 30), date(2026, 11, 4))
     assert planned[(aagency_id, date(2026, 11, 2))] == frozenset({"T1", "T2"})
@@ -37,9 +42,11 @@ async def test_each_covered_day_lists_its_planned_trips(aconn, aagency_id):
     assert (aagency_id, date(2026, 10, 31)) not in planned
 
 
-async def test_only_a_version_stamping_agency_is_named(aconn, aagency_id):
-    _, stamping = await _read_timetable_plans(aconn, [aagency_id], date(2026, 11, 1), date(2026, 11, 2))
-    assert stamping == set()
-    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
-    _, stamping = await _read_timetable_plans(aconn, [aagency_id], date(2026, 11, 1), date(2026, 11, 2))
+async def test_only_a_version_stamping_agency_is_named_and_planned(aconn, aagency_id):
+    await _seed_weekday_service(aconn, aagency_id)
+    planned, stamping = await _read_timetable_plans(aconn, [aagency_id], date(2026, 11, 1), date(2026, 11, 2))
+    assert (planned, stamping) == ({}, set())
+    await _stamping(aconn, aagency_id)
+    planned, stamping = await _read_timetable_plans(aconn, [aagency_id], date(2026, 11, 1), date(2026, 11, 2))
     assert stamping == {aagency_id}
+    assert planned[(aagency_id, date(2026, 11, 2))] == frozenset({"T1", "T2"})

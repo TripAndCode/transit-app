@@ -9,10 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -283,33 +283,35 @@ async def _read_timetable_plans(
         sorted(VERSION_STAMPING_STRATEGIES),
     )
     stamping = {row["agency_id"] for row in rows}
-    if await conn.fetchval("SELECT to_regclass('static_calendar')") is None:
+    if not stamping or await conn.fetchval("SELECT to_regclass('static_calendar')") is None:
         return {}, stamping
-    return await planned_trip_ids(conn, agency_ids, first, last), stamping
+    return await planned_trip_ids(conn, sorted(stamping), first, last), stamping
+
+
+_T = TypeVar("_T")
+
+
+def _on_replica(database_url: str, read: Callable[[Any], Awaitable[_T]]) -> _T:
+    """*read* run on one connection to the replica's Postgres."""
+
+    async def run() -> _T:
+        conn = await asyncpg.connect(database_url)
+        try:
+            return await read(conn)
+        finally:
+            await conn.close()
+
+    return asyncio.run(run())
 
 
 def _timetable_plans(
     database_url: str, agency_ids: Sequence[int], first: date, last: date
 ) -> tuple[dict[tuple[int, date], frozenset[str]], set[int]]:
-    async def read() -> tuple[dict[tuple[int, date], frozenset[str]], set[int]]:
-        conn = await asyncpg.connect(database_url)
-        try:
-            return await _read_timetable_plans(conn, agency_ids, first, last)
-        finally:
-            await conn.close()
-
-    return asyncio.run(read())
+    return _on_replica(database_url, lambda conn: _read_timetable_plans(conn, agency_ids, first, last))
 
 
 def _calendar_day_types(database_url: str, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
-    async def read() -> dict[int, DayTypes]:
-        conn = await asyncpg.connect(database_url)
-        try:
-            return await _read_day_types(conn, agency_ids, first, last)
-        finally:
-            await conn.close()
-
-    return asyncio.run(read())
+    return _on_replica(database_url, lambda conn: _read_day_types(conn, agency_ids, first, last))
 
 
 def _predict(args: argparse.Namespace) -> int:
