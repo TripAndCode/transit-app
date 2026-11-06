@@ -4,7 +4,7 @@ Needs the optional `ml` dependency group."""
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -26,12 +26,15 @@ RUN_COLUMNS = [
 ]
 
 
-def fetch_runs(client: Client, agency_id: int, *, chunk_days: int = 7) -> pd.DataFrame:
-    """An agency's runs a week at a time, the same way fetch_cells reads its cells."""
+def fetch_runs(client: Client, agency_id: int, *, chunk_days: int = 7, since: date | None = None) -> pd.DataFrame:
+    """An agency's runs a week at a time, the same way fetch_cells reads its cells. `since` skips the
+    earlier days, so a caller that needs only the recent end does not pay for the whole history."""
     span = date_span(client, agency_id)
     chunks: list[pd.DataFrame] = []
     if span is not None:
         start, last = span
+        if since is not None:
+            start = max(start, since)
         while start <= last:
             end = min(start + timedelta(days=chunk_days - 1), last)
             parameters = {"agency_id": agency_id, "start": start, "end": end}
@@ -44,11 +47,11 @@ def fetch_runs(client: Client, agency_id: int, *, chunk_days: int = 7) -> pd.Dat
     return _typed(frame)
 
 
-def load_runs(client: Client, agency_ids: Iterable[int]) -> pd.DataFrame:
+def load_runs(client: Client, agency_ids: Iterable[int], *, since: date | None = None) -> pd.DataFrame:
     agency_ids = list(agency_ids)
     if not agency_ids:
         return _typed(pd.DataFrame({column: [] for column in RUN_COLUMNS}))
-    return pd.concat([fetch_runs(client, agency_id) for agency_id in agency_ids], ignore_index=True)
+    return pd.concat([fetch_runs(client, agency_id, since=since) for agency_id in agency_ids], ignore_index=True)
 
 
 def write_runs(runs: pd.DataFrame, path: Path) -> None:
