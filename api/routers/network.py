@@ -34,7 +34,7 @@ class NetworkAgencyRow(BaseModel):
     on_time_pct: float | None
     # on_time_pct's 95% interval in percent, counting trips rather than stop
     # events; None without a trip count to count. See
-    # pipeline.reports.comparability.on_time_interval.
+    # pipeline.reports.comparability.assess.
     ci_low: float | None
     ci_high: float | None
     samples: int

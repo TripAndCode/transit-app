@@ -268,7 +268,7 @@
     "help": "Average delay — lower is better",
     "howto_title": "How to read this",
     "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
-    "help_on_time": "Share of readings within the on-time threshold. The range beside it is its 95% interval, counted over trips rather than readings, since the stops of one trip run late together.",
+    "help_on_time": "Share of readings within the on-time threshold. The range shown with it is its 95% interval, counted over trips rather than readings, since the stops of one trip run late together.",
     "help_delivered": "Share of planned trips that ran without being reported cancelled. Shown only for agencies whose feed a check has confirmed can carry cancellations and that reported at least one in the period or the 90 days up to its end; otherwise \"—\" with the reason.",
     "help_samples": "Number of delay observations behind the figures.",
     "help_feed": "Percent of readings dropped as implausible — high means a stuck or frozen feed.",
