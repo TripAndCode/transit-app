@@ -27,25 +27,13 @@ function plannedIsWider({ ctx, scope_applied: applied, delivered_scope_applied: 
 }
 
 /** The comparison tile: whether the agencies board would rank this agency,
- *  and otherwise the first check it fails, in the board's own words. Null
- *  for a response that carries no verdict. */
+ *  and otherwise the first check it fails, in the board's own words, read
+ *  from the verdict's own figures only. Null for a response that carries no
+ *  verdict. */
 function comparisonFigure(report: CouncilReport, agencyWide: boolean, t: ReturnType<typeof useTranslation>["t"]) {
   const gate = report.comparability;
   if (!gate) return null;
-  const reason = unrankedReason(
-    {
-      comparable_reason: gate.reason,
-      coverage_pct: gate.coverage_pct,
-      coverage_planned_trips: gate.coverage_planned_trips,
-      ci_low: gate.ci_low,
-      ci_high: gate.ci_high,
-      clamp_pct: gate.clamp_pct,
-      delivered_missing: report.delivered_missing ?? null,
-      planned_trips: report.rows[0][3],
-    },
-    gate.thresholds,
-    t,
-  );
+  const reason = unrankedReason({ ...gate, comparable_reason: gate.reason }, gate.thresholds, t);
   return {
     label: agencyWide ? t("reports.council.comparison_agency_wide") : t("reports.council.comparison"),
     value: gate.comparable ? t("reports.council.comparable") : t("reports.council.not_comparable"),

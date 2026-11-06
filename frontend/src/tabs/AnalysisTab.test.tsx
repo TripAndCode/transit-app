@@ -807,6 +807,8 @@ describe("AnalysisTab council report", () => {
     ci_low: 87.8,
     ci_high: 91.8,
     clamp_pct: 0.2,
+    planned_trips: 1000,
+    delivered_missing: null,
     thresholds: { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 },
   };
   const COMPARISON = "Comparison with other operators";
@@ -838,8 +840,11 @@ describe("AnalysisTab council report", () => {
       coverage_planned_trips: null,
       ci_low: null,
       ci_high: null,
+      delivered_missing: "feed_cannot_report",
     };
-    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_cannot_report" });
+    // The verdict's reason reads only the verdict's own plan figures, the
+    // board's: the report's own fresh ones here say the plan was unreadable.
+    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 0, null, null]], delivered_missing: "unreadable" });
     expect(value(COMPARISON)).toBe("Not comparable");
     expect(figure(COMPARISON)).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
   });
@@ -851,6 +856,10 @@ describe("AnalysisTab council report", () => {
 
   it("shows no comparison tile for a response that carries no verdict", () => {
     showCouncil();
+    expect(within(screen.getByRole("list", { name: "Headline figures" })).queryByText(COMPARISON)).toBeNull();
+    cleanup();
+    // The board could not be built, or does not list the agency yet.
+    showCouncil([], { comparability: null });
     expect(within(screen.getByRole("list", { name: "Headline figures" })).queryByText(COMPARISON)).toBeNull();
   });
 

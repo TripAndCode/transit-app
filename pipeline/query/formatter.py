@@ -549,27 +549,28 @@ def _threshold(value: float) -> str:
     return f"{value:g}"
 
 
-def _coverage_unknown_why(payload: dict, comparability: dict) -> str:
-    """Why coverage cannot be measured, read as the board reads it from the
-    same fields. A failed read nulls the planned count too, so it is told
-    apart first. Otherwise a null coverage plan (the plan through the
-    coverage bound) is ``unmatched``, a feed whose trip_ids aren't the
-    timetable's; a zero coverage plan beside a nonzero whole-period plan is
+def _coverage_unknown_why(comparability: dict) -> str:
+    """Why coverage cannot be measured, read as the board reads it, from the
+    verdict's own plan figures only, so one verdict's reason comes from one
+    read. A failed read nulls the planned count too, so it is told apart
+    first. Otherwise a null coverage plan (the plan through the coverage
+    bound) is ``unmatched``, a feed whose trip_ids aren't the timetable's; a
+    zero coverage plan beside a nonzero whole-period plan is
     ``no_plan_observed``; and zero for both is ``no_plan``."""
-    if payload.get("delivered_missing") == "unreadable":
+    if comparability.get("delivered_missing") == "unreadable":
         return "unreadable"
     if comparability.get("coverage_planned_trips") is None:
         return "unmatched"
-    return "no_plan_observed" if payload.get("planned_trips") else "no_plan"
+    return "no_plan_observed" if comparability.get("planned_trips") else "no_plan"
 
 
-def _comparison_reason(payload: dict, comparability: dict, locale: str) -> str:
+def _comparison_reason(comparability: dict, locale: str) -> str:
     """The first check the gate fails, in the board's words, with the figure
     and the threshold it missed."""
     reason = comparability["reason"]
     key = f"council_not_comparable_{reason}"
     if reason == "coverage_unknown":
-        why = _t(f"council_coverage_unknown_{_coverage_unknown_why(payload, comparability)}", locale)
+        why = _t(f"council_coverage_unknown_{_coverage_unknown_why(comparability)}", locale)
         return _t(key, locale, why=why)
     if reason == "coverage_low":
         return _t(key, locale, pct=_tenth(comparability["coverage_pct"]), min=_threshold(MIN_COVERAGE_PCT))
@@ -598,7 +599,7 @@ def _comparison_lines(definition: DefinitionMeta, payload: dict, locale: str) ->
             high=_tenth(comparability["ci_high"]),
         )
     else:
-        line = _t("council_not_comparable", locale, reason=_comparison_reason(payload, comparability, locale))
+        line = _t("council_not_comparable", locale, reason=_comparison_reason(comparability, locale))
     lines = [line]
     tolerance = (definition.early_tolerance_sec, definition.late_tolerance_sec)
     if tolerance != (BOARD_ON_TIME_DEFINITION.early_tolerance_sec, BOARD_ON_TIME_DEFINITION.late_tolerance_sec):

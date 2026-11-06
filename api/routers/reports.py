@@ -382,6 +382,10 @@ class CouncilComparability(BaseModel):
     ci_low: float | None
     ci_high: float | None
     clamp_pct: float | None
+    # The board's own plan figures for the agency, which say why coverage
+    # could not be measured, so a verdict's reason comes from one read.
+    planned_trips: int
+    delivered_missing: DeliveredMissing | None
     thresholds: ComparabilityThresholds
 
 
@@ -412,8 +416,8 @@ class ReportResponse(BaseModel):
     window_days: int | None = None
     delivered_missing: DeliveredMissing | None = None
     # council_summary only (None elsewhere, and while the cached agencies
-    # board does not list the agency yet): whether the board ranks this
-    # agency over the same dates.
+    # board does not list the agency yet or the board cannot be built):
+    # whether the board ranks this agency over the same dates.
     comparability: CouncilComparability | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking

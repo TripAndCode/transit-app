@@ -534,8 +534,8 @@ type ReportEnvelope<T extends ReportType, Row> = {
   window_days?: number | null;
   delivered_missing?: DeliveredMissing | null;
   /** council_summary only: whether the agencies board ranks this agency over
-   *  the same dates. Null for every other report, and while the board's
-   *  cached result does not list the agency yet. */
+   *  the same dates. Null for every other report, while the board's cached
+   *  result does not list the agency yet, and when the board cannot be built. */
   comparability?: CouncilComparability | null;
   report_type: T;
   rendered_at: string;
@@ -1204,6 +1204,10 @@ type CouncilComparability = {
   ci_low: number | null;
   ci_high: number | null;
   clamp_pct: number | null;
+  /** The board's own plan figures for the agency, which say why coverage
+   *  could not be measured, so a verdict's reason comes from one read. */
+  planned_trips: number;
+  delivered_missing: DeliveredMissing | null;
   thresholds: ComparabilityThresholds;
 };
 

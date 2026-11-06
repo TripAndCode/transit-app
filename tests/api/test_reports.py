@@ -38,12 +38,13 @@ async def reports_app(apply_schema):
     invalidate_network_summary()
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() declares ch=Depends(get_ch) alongside conn
-    # (compare_ranking's time_band-filtered live-fallback) — every report type
-    # resolves the dependency regardless of whether it's used, so something
-    # must be present at app.state.ch_client. None of this file's tests pass
-    # a time_band filter (all exercise the agg-table fast path), so None is
-    # a safe default here.
+    # get_report() declares ch=Depends(get_ch) alongside conn, and every
+    # report type resolves it, so something must be present at
+    # app.state.ch_client. None is safe because every ClickHouse read these
+    # tests reach degrades a failed or unavailable probe to None rather than
+    # raising: the council report's and the agencies board's freshness probes
+    # (api.clickhouse.max_captured_at_before_by_agency). No test here passes
+    # a time_band filter, the one path that needs a real client.
     app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -2478,6 +2479,8 @@ async def test_council_summary_says_a_comparable_agency_meets_the_boards_conditi
             "ci_low": 87.8,
             "ci_high": 91.8,
             "clamp_pct": 0.0,
+            "planned_trips": 1000,
+            "delivered_missing": "feed_unverified",
             "thresholds": _THRESHOLDS,
         }
         assert line in body["text"].split("\n")
@@ -2609,6 +2612,61 @@ async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_d
 
 
 @pytest.mark.asyncio
+async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be_built(reports_client, monkeypatch):
+    """The board reads every agency's figures, so a failure building it, for
+    any agency, leaves the council report without a verdict rather than
+    failing a report whose own figures never needed it. Freshness and the
+    quality share then come from the report's own reads."""
+    import csv
+    import io
+
+    from pipeline.reports import council
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, clamp=300, **_DENSE)
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure reading another agency's ridership weights")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+
+    resp = await client.get(_council_url(agency_id))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    lines = body["text"].split("\n")
+    assert not any(line.startswith("※他事業者との比較") for line in lines)
+    assert "※データ品質: 観測値の1.5%が異常値として除外されています。" in lines
+
+    csv_resp = await client.get(_council_url(agency_id, extra="&format=csv"))
+    assert csv_resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_resp.text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[6:] == ["", "", "", "", ""]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_prints_one_implausible_share_for_its_quality_note_and_its_verdict(reports_client):
+    """The quality note and a clamp_high verdict both print the share the
+    board's row holds, so a change the cached board has not picked up yet
+    never leaves the report with two different shares."""
+    import re
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Noisy", strategy="static_join", delay_min=1, clamp=2000, **_DENSE)
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    # An analyze run rewrites the day's feed health after the board was read.
+    await pool.execute("UPDATE agg_feed_health SET clamp_count = 3000 WHERE agency_id = $1", agency_id)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"]["reason"] == "clamp_high"
+    shares = set(re.findall(r"観測値の([0-9.]+)%|異常値 ([0-9.]+)%", body["text"]))
+    printed = {float(share) for pair in shares for share in pair if share}
+    assert printed == {10.0}
+
+
+@pytest.mark.asyncio
 async def test_council_summary_judges_an_agency_exactly_as_the_agencies_board_does(reports_client):
     from pipeline.reports.network import compute_network_summary
 
@@ -2626,6 +2684,7 @@ async def test_council_summary_judges_an_agency_exactly_as_the_agencies_board_do
     rows = {r["agency_id"]: r for r in board["agencies"]}
     assert board["comparability"] == _THRESHOLDS
     figures = ("coverage_pct", "observed_trips", "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct")
+    figures += ("planned_trips", "delivered_missing")
     for aid in (agency_id, sparse, thin, regex):
         gate = (await client.get(_council_url(aid))).json()["comparability"]
         row = rows[aid]

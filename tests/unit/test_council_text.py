@@ -191,6 +191,8 @@ def _comparability(**overrides):
         "ci_low": 83.9,
         "ci_high": 86.4,
         "clamp_pct": 0.2,
+        "planned_trips": 1000,
+        "delivered_missing": None,
     }
     comparability.update(overrides)
     return comparability
@@ -275,6 +277,9 @@ def test_a_not_comparable_footnote_gives_the_reason_in_the_agencies_board_words(
     ],
 )
 def test_a_coverage_unknown_footnote_says_why_coverage_cannot_be_measured(locale, why, state, coverage_planned_trips):
+    """The reason reads only the verdict's own plan figures, the board's, so
+    one verdict's "why" comes from one read: the report's own planned figures
+    here say otherwise and are not consulted."""
     comparability = _comparability(
         comparable=False,
         reason="coverage_unknown",
@@ -283,8 +288,14 @@ def test_a_coverage_unknown_footnote_says_why_coverage_cannot_be_measured(locale
         coverage_planned_trips=coverage_planned_trips,
         ci_low=None,
         ci_high=None,
+        **state,
     )
-    payload = _payload(comparability=comparability, **state)
+    elsewhere = (
+        {"planned_trips": 1000, "delivered_missing": None}
+        if why == "unreadable"
+        else {"planned_trips": 0, "delivered_missing": "unreadable"}
+    )
+    payload = _payload(comparability=comparability, **elsewhere)
     words = _board_words(
         locale,
         _BOARD[locale]["unranked_reason"]["coverage_unknown"],

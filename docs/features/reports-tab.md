@@ -138,10 +138,15 @@ reports.
     report and the board read one result and cannot disagree, even in the
     minutes after an analyze run before the board's cache expires. Coverage
     therefore stops at the board's `coverage_through` (see network-tab.md),
-    never at this agency's own last day. While the cached board does not list
-    the agency yet (one added without the agencies API, which invalidates
-    the board), `comparability` is null, and the tile, the footnote and the
-    CSV columns are left out or blank rather than guessed.
+    never at this agency's own last day. The staleness note and the
+    data-quality share come from the same row, so the quality note and a
+    `clamp_high` verdict print one share.
+  - While the cached board does not list the agency yet (one added without
+    the agencies API, which invalidates the board), or the board cannot be
+    built (a failure reading any agency's figures), `comparability` is null.
+    The tile, the footnote and the CSV columns are then left out or blank
+    rather than guessed, and the report reads its staleness and quality share
+    for its own agency.
   - The verdict reads the board's figures: the whole agency, every day of the
     period and the board's on-time definition. A route, day, service or
     time-band filter, or another tolerance, changes the on-time figures but
@@ -151,7 +156,9 @@ reports.
   - The response carries it as `comparability`: `comparable`, `reason` (the
     board's `comparable_reason` codes), `coverage_pct` with its
     `observed_trips`/`coverage_planned_trips`, `ci_low`/`ci_high`,
-    `clamp_pct` and the gate's `thresholds`.
+    `clamp_pct`, the board row's `planned_trips`/`delivered_missing` (which
+    say why coverage could not be measured, so the reason comes from the
+    same read as the verdict) and the gate's `thresholds`.
   - The tile 他事業者との比較 / "Comparison with other operators" reads
     比較できます / "Comparable" or 比較できません / "Not comparable". Under
     "Not comparable" it gives the reason in the board's words
