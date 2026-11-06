@@ -757,7 +757,7 @@ def test_a_model_published_without_point_or_clip_predicts_its_mean_unclipped(tmp
 
 def _publish_live(tmp_path, monkeypatch, raw, origin):
     """Predict's forecast for *origin* published to a stubbed R2, with `raw` as the replica's runs.
-    Returns the forecast's model version and its published directory."""
+    Returns the forecast's model version, its published directory, and the uploads live-score makes."""
     model_dir = tmp_path / "model"
     _publish_model(raw, model_dir)
     _stub_predict(monkeypatch, raw[raw["service_date"] <= pd.Timestamp(origin)], origin)
@@ -775,22 +775,26 @@ def _publish_live(tmp_path, monkeypatch, raw, origin):
         f"s3://transit-ml/{prefix}/manifest.json": published / "manifest.json",
     }
 
+    uploads = []
+
     def fake_run(cmd):
         source, dest = cmd[3], Path(cmd[4])
-        if source == f"s3://transit-ml/models/{version}/":
+        if not source.startswith("s3://"):
+            uploads.append((json.loads(Path(source).read_text()), cmd[4]))
+        elif source == f"s3://transit-ml/models/{version}/":
             shutil.copytree(model_dir, dest)
         else:
             shutil.copy(sources[source], dest)
 
     monkeypatch.setattr("ml.cli._run", fake_run)
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
-    return version, published
+    return version, published, uploads
 
 
 def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monkeypatch):
     raw = _runs()
     origin = START + timedelta(days=DAYS - 10)
-    version, _ = _publish_live(tmp_path, monkeypatch, raw, origin)
+    version, _, uploads = _publish_live(tmp_path, monkeypatch, raw, origin)
 
     out = tmp_path / "live.json"
     run_date = origin + timedelta(days=9)
@@ -801,6 +805,19 @@ def test_live_score_scores_a_published_forecast_against_what_ran(tmp_path, monke
     assert [row["lead"] for row in doc["by_lead"]] == list(range(1, 8))
     assert doc["origins"][0]["model_version"] == version
     assert 0 < doc["published_share"] <= 1
+    assert uploads == []
+
+
+def test_live_score_publishes_its_document_under_the_run_date(tmp_path, monkeypatch):
+    raw = _runs()
+    origin = START + timedelta(days=DAYS - 10)
+    _, _, uploads = _publish_live(tmp_path, monkeypatch, raw, origin)
+
+    out = tmp_path / "live.json"
+    run_date = origin + timedelta(days=9)
+    argv = ["live-score", "--out", str(out), "--run-date", run_date.isoformat(), "--agency", "8", "--publish"]
+    assert main(argv) == 0
+    assert uploads == [(json.loads(out.read_text()), f"s3://transit-ml/evaluations/{run_date.isoformat()}/live.json")]
 
 
 def test_live_score_gives_the_counterfactual_the_weekend_share_predict_saw(tmp_path, monkeypatch):
@@ -834,7 +851,7 @@ def test_live_score_gives_the_counterfactual_the_weekend_share_predict_saw(tmp_p
 def test_live_score_counts_only_the_scored_agencies_withheld_days(tmp_path, monkeypatch):
     raw = _runs()
     origin = START + timedelta(days=DAYS - 10)
-    _, published = _publish_live(tmp_path, monkeypatch, raw, origin)
+    _, published, _ = _publish_live(tmp_path, monkeypatch, raw, origin)
     manifest = published / "manifest.json"
     withheld = [
         {"agency_id": 8, "service_date": (origin + timedelta(days=3)).isoformat(), "missing_share": 0.2},

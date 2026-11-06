@@ -444,7 +444,7 @@ def _publish_eval(args: argparse.Namespace) -> int:
 
 def _live_score(args: argparse.Namespace) -> int:
     """Score every published forecast in the window against what ran (ml.live_score), and write live.json.
-    Read-only: the replica's runs, and the forecasts and model versions R2 holds."""
+    Read-only on the replica; on R2 it writes only the published live.json, and only with --publish."""
     import pandas as pd
 
     from ml.dataset import load_runs
@@ -453,7 +453,8 @@ def _live_score(args: argparse.Namespace) -> int:
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import point_forecast, predict
 
-    # The default AWS pair reads transit-archives only; the store's pair reads transit-ml.
+    # The default AWS pair reads transit-archives only; the store's pair reads transit-ml and, with
+    # --publish, writes live.json to it.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
     _use_store_credentials()
 
@@ -516,6 +517,8 @@ def _live_score(args: argparse.Namespace) -> int:
     document = to_json(card, run_date=run_date, generated_at=datetime.now(ZoneInfo("Asia/Tokyo")))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(document, indent=1, allow_nan=False))
+    if args.publish:
+        upload_file(args.out, bucket, f"evaluations/{run_date.isoformat()}/live.json", endpoint, run=_run)
     return 0
 
 
@@ -598,6 +601,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_live.add_argument("--out", type=Path, required=True)
     p_live.add_argument("--run-date", type=date.fromisoformat)
     p_live.add_argument("--agency", type=int, action="append")
+    p_live.add_argument("--publish", action="store_true", help="Also upload it to evaluations/<run date>/live.json")
     p_live.set_defaults(handler=_live_score)
 
     args = parser.parse_args(argv)
