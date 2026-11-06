@@ -22,7 +22,7 @@ from ml.training import HORIZON_DAYS
 SCHEMA = 1
 KEY = ["agency_id", "route_code", "service_date", "hour"]
 INTERVALS = ("live_slot", "counterfactual", "counterfactual_slot", "B0")
-_FORECAST_KEY = re.compile(r"^forecasts/(\d{4}-\d{2}-\d{2})/forecast\.parquet$")
+_PUBLISHED_KEY = re.compile(r"^forecasts/(\d{4}-\d{2}-\d{2})/(forecast\.parquet|manifest\.json)$")
 
 
 @dataclass
@@ -63,10 +63,14 @@ class Scorecard:
 
 
 def window_origins(keys: list[str], run_date: date, *, days: int = 28) -> list[date]:
-    """The published origins in the last *days* whose first target day is final (from day + 2)."""
+    """The published origins in the last *days* whose first target day is final (from day + 2). predict
+    uploads an origin's manifest after its forecast, so an origin without both did not finish publishing."""
     first, last = run_date - timedelta(days=days), run_date - timedelta(days=3)
-    origins = {date.fromisoformat(match[1]) for key in keys if (match := _FORECAST_KEY.match(key))}
-    return sorted(origin for origin in origins if first <= origin <= last)
+    files: dict[date, set[str]] = {}
+    for key in keys:
+        if match := _PUBLISHED_KEY.match(key):
+            files.setdefault(date.fromisoformat(match[1]), set()).add(match[2])
+    return sorted(origin for origin, names in files.items() if len(names) == 2 and first <= origin <= last)
 
 
 def counterfactual_frame(

@@ -217,7 +217,7 @@ forecast shows its past average with a mark.
 
 ### Live scorecard
 
-`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N ...]` scores every forecast
+`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N]...` scores every forecast
 published in the last 28 days against what actually ran, on the target days the replica holds as final
 (from day + 2). Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model
 version that made it (`models/<version>/`) from R2, and builds the counterfactual: the same model given
@@ -234,5 +234,6 @@ before the origin.
   and cell intervals, and B0's slot interval.
 
 The document (`live.json`, schema 1) breaks the scores down overall, by lead day, by agency (with the
-first origin each agency was published) and by origin (with its withheld days). It is read-only on the
-replica and writes only `--out`.
+first origin in the window that published each agency) and by origin (with its withheld days). An origin
+counts once both its files are in R2: predict uploads the manifest last. It is read-only on the replica
+and writes only `--out`.

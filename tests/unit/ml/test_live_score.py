@@ -146,9 +146,16 @@ def test_interval_coverage_counts_each_run_inside_its_bounds():
 
 def test_window_origins_are_the_published_origins_with_a_final_target_day():
     # run_date 11/8: the window is 10/11 (28 days back) .. 11/5 (its first target day, 11/6, is final).
-    keys = [f"forecasts/{d}/forecast.parquet" for d in ("2026-10-10", "2026-10-11", "2026-11-05", "2026-11-06")]
-    keys.append("forecasts/2026-11-05/manifest.json")
+    days = ("2026-10-10", "2026-10-11", "2026-11-05", "2026-11-06")
+    keys = [f"forecasts/{d}/{name}" for d in days for name in ("forecast.parquet", "manifest.json")]
     assert window_origins(keys, date(2026, 11, 8)) == [date(2026, 10, 11), date(2026, 11, 5)]
+
+
+def test_an_origin_whose_manifest_never_landed_is_not_scored():
+    # predict uploads the manifest after the forecast: without it, the publish did not finish.
+    keys = ["forecasts/2026-11-01/forecast.parquet", "forecasts/2026-11-01/manifest.json"]
+    keys.append("forecasts/2026-11-02/forecast.parquet")
+    assert window_origins(keys, date(2026, 11, 8)) == [date(2026, 11, 1)]
 
 
 def test_the_counterfactual_frame_reads_no_target_day_into_b0():
