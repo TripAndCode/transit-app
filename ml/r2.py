@@ -29,3 +29,32 @@ def upload_dir(directory: Path, bucket: str, prefix: str, endpoint: str, *, run:
             "--only-show-errors",
         ]
     )
+
+
+Capture = Callable[[Sequence[str]], str]
+
+
+def list_keys(bucket: str, prefix: str, endpoint: str, *, capture: Capture) -> list[str]:
+    """Every key under *prefix*: `aws s3 ls --recursive` prints date, time, size and key."""
+    output = capture(["aws", "s3", "ls", f"s3://{bucket}/{prefix}", "--recursive", "--endpoint-url", endpoint])
+    return [parts[3] for line in output.splitlines() if len(parts := line.split(None, 3)) == 4]
+
+
+def download_file(bucket: str, key: str, dest: Path, endpoint: str, *, run: Runner) -> None:
+    run(["aws", "s3", "cp", f"s3://{bucket}/{key}", str(dest), "--endpoint-url", endpoint, "--only-show-errors"])
+
+
+def download_dir(bucket: str, prefix: str, dest: Path, endpoint: str, *, run: Runner) -> None:
+    run(
+        [
+            "aws",
+            "s3",
+            "cp",
+            f"s3://{bucket}/{prefix}",
+            str(dest),
+            "--recursive",
+            "--endpoint-url",
+            endpoint,
+            "--only-show-errors",
+        ]
+    )
