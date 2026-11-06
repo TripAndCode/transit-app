@@ -13,8 +13,7 @@ function fakeT(key: string, opts?: Record<string, unknown>) {
   return opts ? `${key}:${JSON.stringify(opts)}` : key;
 }
 
-/** A seven-day comparison window, the headline's usual one, over a 2.9-minute
- *  window before it. */
+/** A seven-day comparison window over a 2.9-minute window before it. */
 function h(delta_min: number | null, delta_pct: number | null, baseline = 2.9) {
   return {
     avg_min: delta_min == null ? baseline : baseline + delta_min,

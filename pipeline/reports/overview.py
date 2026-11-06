@@ -72,33 +72,36 @@ from pipeline.route_catalog import left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
 
-# How many days before ``ctx.from_date`` the shared grain has to reach.
-# ``compute_overview_summary`` builds its two comparison windows inline as
-# ``cur_from = max(anchor - 6, ctx.from_date)`` and
-# ``base_from = cur_from - cur_ctx.days``, where ``cur_ctx.days`` is
-# ``cur_ctx``'s own width (at most 7, and exactly 7 whenever the
-# ``max(..., ctx.from_date)`` clamp doesn't bite). So the earliest date any
-# consumer can ask for is ``ctx.from_date - 7`` in the unclamped case — 7
-# is a safe (if slightly conservative for a clamped/narrow ctx)
-# worst case, not a heuristic. See :func:`_fetch_grain`, and note that
-# :func:`_grain_window` enforces the resulting bound at runtime.
-_GRAIN_LOOKBACK_DAYS = 7
-
 # How many weekly buckets ``_movers`` draws each route's sparkline from
 # (:func:`_route_weekly_history`), ending at the current window's last day.
 _MOVER_HISTORY_WEEKS = 4
 
-# How far before ``ctx.from_date`` the payload reads: the grain and base_ctx
-# reach _GRAIN_LOOKBACK_DAYS back, and the movers' sparkline
-# _MOVER_HISTORY_WEEKS weeks back from a current window that ends inside ctx.
-# The day types are resolved once over that whole span (api.range.ServiceDates),
-# so the service filter and the day-type split always agree.
-_CALENDAR_LOOKBACK_DAYS = max(_GRAIN_LOOKBACK_DAYS, 7 * _MOVER_HISTORY_WEEKS - 1)
+
+def _grain_lookback_days(ctx: RangeCtx) -> int:
+    """How many days before ``ctx.from_date`` the shared grain has to reach:
+    ``ctx``'s own width.
+
+    :func:`compute_overview_summary` compares ``cur_ctx = [ctx.from_date,
+    anchor]`` against ``base_ctx``, the same width immediately before it.
+    ``anchor`` lies inside ``ctx``, so ``cur_ctx`` is at most ``ctx.days`` wide
+    and ``base_ctx`` starts at most ``ctx.days`` before ``ctx.from_date``: the
+    exact worst case, reached whenever the data runs to ``ctx.to_date``. See
+    :func:`_fetch_grain`; :func:`_grain_window` enforces the bound at runtime.
+    """
+    return ctx.days
 
 
 def _calendar_from(ctx: RangeCtx) -> date:
-    """The first day of the span the overview resolves its day types over."""
-    return ctx.from_date - timedelta(days=_CALENDAR_LOOKBACK_DAYS)
+    """The first day of the span the overview resolves its day types over.
+
+    The payload reads before ``ctx.from_date`` twice: ``base_ctx`` reaches
+    :func:`_grain_lookback_days` back, and the movers' sparkline
+    ``_MOVER_HISTORY_WEEKS`` weeks back from a current window that ends inside
+    ``ctx``. The day types are resolved once over the whole span
+    (api.range.ServiceDates), so the service filter and the day-type split
+    always agree.
+    """
+    return ctx.from_date - timedelta(days=max(_grain_lookback_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1))
 
 
 def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> list:
@@ -138,9 +141,9 @@ class _Grain:
 
     ``rows`` is the dedup output pre-aggregated to
     ``(date, route_code, service_type, hour)`` over ``[from_date, to_date]``
-    with ``agency_id`` + ``service`` + ``routes`` + ``time_band`` already
-    applied, but deliberately WITHOUT any day-of-week filter — see
-    :func:`_fetch_grain`.
+    (``hour`` NULL for the days before the request's period) with
+    ``agency_id`` + ``service`` + ``routes`` + ``time_band`` already applied,
+    but deliberately WITHOUT any day-of-week filter — see :func:`_fetch_grain`.
     """
 
     rows: tuple[_GrainRow, ...]
@@ -192,10 +195,11 @@ def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
 def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
     """Fail loudly if a consumer asks for a window the grain never fetched.
 
-    The grain spans ``[ctx.from_date - _GRAIN_LOOKBACK_DAYS, ctx.to_date]``,
-    which is derived from how :func:`compute_overview_summary` builds
-    ``cur_ctx`` / ``base_ctx``. If that construction ever drifts — an off-by-one
-    in the clamp, a wider baseline — the Python filters here would happily
+    The grain spans ``[ctx.from_date - ctx.days, ctx.to_date]``
+    (:func:`_grain_lookback_days`), which is derived from how
+    :func:`compute_overview_summary` builds ``cur_ctx`` / ``base_ctx``. If that
+    construction ever drifts — an off-by-one in a window's bounds, a baseline
+    wider than the current window — the Python filters here would happily
     aggregate over a TRUNCATED window and return a plausible-looking but wrong
     user-facing average, with nothing to notice. Raising turns that class of
     regression into a visible failure instead of a quiet data bug.
@@ -279,41 +283,40 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       off each row's ``date`` (:func:`_dow_matches`).
     * The date windows differ (``ctx`` / ``cur_ctx`` / ``base_ctx``), so the
       grain spans their union and each consumer re-filters. The union bound is
-      ``[ctx.from_date - 7, ctx.to_date]``:
-      ``cur_ctx.from_date = max(anchor - 6, ctx.from_date) >= ctx.from_date``
-      and ``base_ctx.from_date = cur_ctx.from_date - cur_ctx.days`` where
-      ``cur_ctx.days`` (``cur_ctx``'s own width) is at most 7, so no
-      consumer ever reaches further back than 7 days before
-      ``ctx.from_date`` — reached only when ``cur_ctx`` is the full 7 days;
-      a narrower ``cur_ctx`` (clamped ``ctx``) gives an even shallower
-      ``base_ctx``, still inside this bound; and ``anchor`` is either a date
-      inside ``ctx`` or ``ctx.to_date`` itself, so
-      ``cur_ctx.to_date = anchor <= ctx.to_date`` bounds the far end. Because
-      this bound needs no knowledge of ``anchor``, ``_latest_data_date`` —
-      which computes ``anchor`` — can be served from the grain too, instead of
-      costing its own round trip.
+      ``[ctx.from_date - ctx.days, ctx.to_date]`` (:func:`_grain_lookback_days`):
+      ``cur_ctx = [ctx.from_date, anchor]``, where ``anchor`` is either a date
+      inside ``ctx`` or ``ctx.to_date`` itself, so ``cur_ctx`` ends no later
+      than ``ctx.to_date`` and is at most ``ctx.days`` wide; ``base_ctx`` is
+      the same width immediately before ``ctx.from_date``, so it starts at most
+      ``ctx.days`` before it. Because this bound needs no knowledge of
+      ``anchor``, ``_latest_data_date`` — which computes ``anchor`` — can be
+      served from the grain too, instead of costing its own round trip.
 
     One consumer, :func:`_route_weekly_history`, asks for a window this bound
     does NOT guarantee: ``weeks_back * 7`` days back from ``cur_ctx.to_date``,
     which for the default ``weeks_back=4`` reaches ``anchor - 27``. The grain
-    covers that whenever ``anchor - ctx.from_date >= 20`` — true for a default
-    30-day request, false for a narrow one — so that helper checks coverage with
-    :func:`_grain_covers` and keeps its own live scan for the uncovered case.
-    Widening the grain to always cover it was rejected: it would add ~3 weeks of
-    scan to EVERY slow-path request to save a scan on the minority of requests
-    that are too narrow to be covered.
+    covers that whenever ``(anchor - ctx.from_date) + ctx.days >= 27`` — every
+    request at least two weeks wide whose data runs to its last day, including
+    every default 30-day request, but not a narrow one — so that helper checks
+    coverage with :func:`_grain_covers` and keeps its own live scan for the
+    uncovered case. Widening the grain to always cover it was rejected: it would
+    add up to three weeks of scan to every narrow slow-path request to save a
+    scan on the minority that find movers.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
     fetched separately for ``_peak_hour_by_dow``: adding it to the existing
     group-by costs nothing extra (the cost is all in the scan, not the
-    group-by cardinality), whereas a second query genuinely doubles it. Even
-    a full-365-day window stays under ``get_ch_client``'s 200 k-row
-    ``max_result_rows`` cap, though not with so much headroom that adding
-    another group-by dimension or widening the window further is free to do
-    without rechecking against the cap. A routes filter alone fetches all 24
-    hours for just those routes; were that ever to pass the cap, the client
-    raises rather than truncating, and the caller degrades the hour profiles
-    to null.
+    group-by cardinality), whereas a second query genuinely doubles it. Only
+    the hour profiles read ``hour``, and only inside ``ctx``, so a row dated
+    before ``ctx.from_date`` (read only by ``base_ctx`` and the movers'
+    sparkline) is grouped with a NULL hour: the lookback adds one row per date,
+    route and service type, not one per hour as well. That keeps a full
+    365-day window under ``get_ch_client``'s 200 k-row ``max_result_rows`` cap,
+    though not with so much headroom that adding another group-by dimension or
+    widening the window further is free to do without rechecking against the
+    cap. A routes filter alone fetches all 24 hours for just those routes; were
+    that ever to pass the cap, the client raises rather than truncating, and
+    the caller degrades the hour profiles to null.
 
     The hour is read off ``scheduled_time``'s first two characters: it is a
     zero-padded ``'HH:MM[:SS]'``
@@ -329,7 +332,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     failing the one query the whole payload depends on.
     """
     span_ctx = RangeCtx(
-        from_date=ctx.from_date - timedelta(days=_GRAIN_LOOKBACK_DAYS),
+        from_date=ctx.from_date - timedelta(days=_grain_lookback_days(ctx)),
         to_date=ctx.to_date,
         dow="all",  # applied per-consumer in Python; see the docstring
         time_band=ctx.time_band,
@@ -338,7 +341,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
         service_dates=ctx.service_dates,
     )
     cte_sql, ch_params = _dedup_cte_ch(span_ctx)
-    hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
+    hour_expr = "if(date >= {grain_hour_from:Date}, toUInt8OrNull(substring(scheduled_time, 1, 2)), NULL)"
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT date,\n"
@@ -350,7 +353,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
         "       sum(greatest(dep_delay, 0)) AS sum_late\n"
         "FROM deduped\n"
         f"GROUP BY date, route_code, service_type, {hour_expr}",
-        parameters={"agency_id": agency_id, **ch_params},
+        parameters={"agency_id": agency_id, "grain_hour_from": ctx.from_date, **ch_params},
     )
     rows: tuple[_GrainRow, ...] = tuple(
         (d, route_code, service_type, hour, int(samples), int(sum_delay or 0), int(sum_late or 0))
@@ -362,11 +365,9 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> date | None:
     """Most recent date inside ctx that has any samples.
 
-    Used to anchor the headline's current/baseline windows (up to 7 days
-    wide, narrower only when the user's selected range itself is narrower)
-    to where data actually exists. Keeps the "this week vs last week"
-    semantics meaningful when ingest is lagging or the user selects a wide
-    historical range.
+    Ends the headline's current window, and so sizes its same-width baseline,
+    where data actually exists: when ingest lags behind ``ctx.to_date``, the
+    empty trailing days count toward neither window's width.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` for
     sub-millisecond response. Slow path (any other time band) reads the shared
@@ -517,14 +518,15 @@ async def _route_weekly_history(
 
     Slow path prefers the shared grain (:func:`_fetch_grain`) when it reaches
     far enough back, and only falls back to its own live ``updates``
-    (ClickHouse) scan when it doesn't. The grain spans
-    ``[ctx.from_date - _GRAIN_LOOKBACK_DAYS, ctx.to_date]`` while this function
-    needs ``[ctx.to_date - (7 * weeks_back - 1), ctx.to_date]``, so for the
-    default ``weeks_back=4`` the grain covers it whenever ``ctx`` is at least
-    ~21 days wide — i.e. every default 30-day request, which is the common
-    case. That matters because this was the second ClickHouse round trip of an
-    otherwise one-round-trip slow path, on top of the grain's own scan cost,
-    and it fires whenever ``_movers`` has any candidate routes at all.
+    (ClickHouse) scan when it doesn't. The grain reaches one period's width
+    before the payload's period (:func:`_grain_lookback_days`) while this
+    function needs ``[ctx.to_date - (7 * weeks_back - 1), ctx.to_date]``, so
+    for the default ``weeks_back=4`` the grain covers it whenever the period is
+    at least two weeks wide and its data runs to its last day — i.e. every
+    default 30-day request, which is the common case. That matters because
+    this was the second ClickHouse round trip of an otherwise one-round-trip
+    slow path, on top of the grain's own scan cost, and it fires whenever
+    ``_movers`` has any candidate routes at all.
 
     The live fallback (narrow ``ctx`` only) is ONE dedup scan over the full
     ``weeks_back * 7``-day span, bucketed by week index, rather than
@@ -613,7 +615,7 @@ async def _route_weekly_history(
         return out
 
     # Live ClickHouse path (reached only when the grain doesn't reach back far
-    # enough — a `ctx` window narrower than ~3 weeks): one dedup CTE over the
+    # enough — a period narrower than about two weeks): one dedup CTE over the
     # whole [ctx.to_date - weeks_back*7 + 1, ctx.to_date] span, bucketed into
     # weeks_back week-index groups via `intDiv(dateDiff('day', date, to_date),
     # 7)` — 0 is the most recent 7-day bucket ending at ctx.to_date,
@@ -823,10 +825,9 @@ async def _top_delayed_routes(
     ``MOVER_MIN_SAMPLES`` observations there. The movers list only the routes
     that moved most, so it cannot supply a change for every listed route.
 
-    Uses cur_ctx (the same current-window — up to 7 days, narrower only when
-    ctx itself is narrower — compute_overview_summary already builds for the
-    headline), not the full ctx, so the KPI row's three stats and the routes
-    list all describe the same snapshot.
+    Uses cur_ctx, the current window compute_overview_summary builds for the
+    headline (the period up to its last day with data), so the KPI row's
+    stats and the routes list all describe the same days.
 
     Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
     each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
@@ -1062,10 +1063,9 @@ async def _movers(
     """Top-10 worsened + top-10 improved routes by signed delta_min, among
     the routes :func:`_listable` keeps.
 
-    Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
-    ``compute_overview_summary`` as same-width current/baseline windows,
-    up to 7 days, narrower only when the user's selected range itself is
-    narrower). Requires
+    Compares ``cur_ctx`` against ``base_ctx``, both built upstream by
+    ``compute_overview_summary``: the period up to its last day with data,
+    and the same number of days immediately before it. Requires
     >= :data:`MOVER_MIN_SAMPLES` samples in BOTH windows for a route to enter
     the ranking — a route with a handful of obs can swing a huge delta_pct
     and would otherwise dominate top-3 with low statistical confidence.
@@ -1136,7 +1136,7 @@ async def _movers(
             "delta_min": dm,
             "delta_pct": dp,
             # Absolute averages for both windows so the UI can show
-            # "last week X min → this week Y min" instead of a bare Δ%.
+            # "X min before → Y min now" instead of a bare Δ%.
             "current_avg_min": float(_round1(cur[code][0])),
             "previous_avg_min": float(_round1(prv[code][0])),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
@@ -1268,16 +1268,15 @@ async def compute_overview_summary(
 ) -> dict:
     """Build the 概況 payload for one agency over ``ctx``.
 
-    Headline math uses the LAST UP-TO-7 days of ``ctx`` (``cur_ctx``) and
-    compares against a window of the SAME WIDTH immediately prior
-    (``base_ctx``), so the "vs. the period before it" copy stays honest
-    both when the user has widened the ctx range (both windows are a full
-    7 days, unaffected by the widening) and when they have narrowed it
-    below 7 days (both windows shrink to match, rather than comparing a
-    genuine N-day average against an always-7-day one and manufacturing a
-    delta from day-of-week composition alone). Concentration / peak /
-    service_split / sparkline still aggregate over the full ctx to surface
-    broader patterns.
+    The headline covers the scope period itself (``cur_ctx``: ``ctx`` up to
+    its last day with data), so the hero row and the scope sentence describe
+    the same period, and compares it against a window of the SAME WIDTH
+    immediately before it (``base_ctx``). Equal widths keep the "vs. the
+    period before it" copy honest: two windows of different lengths differ in
+    day-of-week composition, which alone can manufacture a delta. The movers
+    and the routes-to-check list rank over the same two windows;
+    concentration / peak / service_split / sparkline aggregate over the full
+    ctx.
 
     When ``pool`` is supplied (non-None), the stage queries are dispatched
     as concurrent asyncio tasks, each acquiring its own pooled connection,
@@ -1340,9 +1339,8 @@ async def compute_overview_summary(
                     )
                     peaks_unavailable = True
 
-    # The route lists leave out one set of codes, judged over the period:
-    # the 7-day windows two of them rank over are too short to tell a retired
-    # code from a quiet one.
+    # The route lists leave out one set of codes, judged once over the period,
+    # so every list leaves out the same codes whichever window it ranks over.
     async with perf.timed_block("overview.latest_date"):
         if pool is None:
             latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
@@ -1355,31 +1353,21 @@ async def compute_overview_summary(
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
 
-    # Build current + baseline windows anchored at `anchor`, but clamped
-    # inside ctx.
-    cur_to = anchor
-    cur_from = max(cur_to - timedelta(days=6), ctx.from_date)
+    # The current window is the scope period up to its last day with data, so
+    # the headline describes the period the scope sentence names.
     cur_ctx = RangeCtx(
-        from_date=cur_from,
-        to_date=cur_to,
+        from_date=ctx.from_date,
+        to_date=anchor,
         dow=ctx.dow,
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it — not
-    # always a fixed 7 days. cur_ctx is 7 days wide whenever ctx reaches at
-    # least 7 days back from anchor, but the `max(..., ctx.from_date)` clamp
-    # above narrows it for a tighter ctx (e.g. a custom 3-day range). An
-    # always-7-day baseline would then compare a genuine N-day average
-    # against a genuine 7-day average — two windows with different
-    # day-of-week composition — and could manufacture a delta that is an
-    # artifact of window width, not a real trend change. Matching widths
-    # keeps every comparison "this window vs. the same-length one before
-    # it" honest, and is a no-op for the common (ctx >= 7 days) case, since
-    # cur_ctx.days is always 7 there.
-    base_to = cur_from - timedelta(days=1)
+    # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it (see the
+    # docstring). It lies wholly before ctx, which is why the grain and the day
+    # types reach back (:func:`_grain_lookback_days`, :func:`_calendar_from`).
+    base_to = cur_ctx.from_date - timedelta(days=1)
     base_from = base_to - timedelta(days=cur_ctx.days - 1)
     base_ctx = RangeCtx(
         from_date=base_from,

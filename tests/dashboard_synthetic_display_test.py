@@ -39,13 +39,14 @@ target here:
   — ALL THREE synthetic patterns (0.5 / 0.88 / 1.0 min) fall under 1.5,
   so this list always renders empty for this fixture regardless of
   correctness. Not a usable check target.
-- The headline's delta-vs-prior-week (`hasBaseline` in `OverviewHeroRow.tsx`)
-  needs a second 7-day window of data this single-day fixture doesn't have,
-  so it always renders "no baseline" — also not usable. The headline's raw
+- The headline's delta against the window before it (`hasBaseline` in
+  `OverviewHeroRow.tsx`) needs data in the same-width window just before the
+  period, which this single-day fixture doesn't have, so it always renders
+  "no baseline" — also not usable. The headline's raw
   `avg_min` value (`ov-kpi-value`, rendered regardless of baseline) IS used
   below: with `from=to=<the fixture's one date>`, `compute_overview_summary`
-  anchors its current-window date range at the latest data date
-  (`pipeline/reports/overview.py`'s `anchor`/`cur_from`/`cur_to`), which
+  ends its current window at the latest data date
+  (`pipeline/reports/overview.py`'s `anchor`/`cur_ctx`), which
   collapses to exactly that one day for a freshly-seeded, single-day agency
   — so `_headline_stats` (`SUM(avg_min*samples)/SUM(samples)` over
   `agg_daily_trend`) reduces to that agency's one route's own `avg_min`.

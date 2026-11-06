@@ -325,29 +325,29 @@ _LOCALES: dict[tuple[str, str], str] = {
     # model, so these templates must not introduce a placeholder the payload
     # cannot fill (see pipeline.query.copilot_templates).
     ("copilot_overview_top_delay", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です。"
-        "全路線の今週の平均は {avg} 分、基準の {baseline} 分から {delta}% {direction}しています"
-        "（現在 {delayed_count} 路線が遅延）。"
+        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です。"
+        "全路線の平均は {avg} 分で、その前の同じ日数の {baseline} 分から {delta}% {direction}しています"
+        "（{delayed_count} 路線が遅延）。"
     ),
     ("copilot_overview_top_delay", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min. "
-        "Across all routes the average is {avg} min this week, {direction} {delta}% "
-        "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
+        "Route {name} ran the longest average delay over this period, at {top_avg} min. "
+        "Across all routes the average is {avg} min, {direction} {delta}% "
+        "from {baseline} min over the same number of days before it ({delayed_count} routes delayed)."
     ),
     ("copilot_overview_top_delay_no_baseline", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
+        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（{delayed_count} 路線が遅延）。"
         "比べられる前の期間のデータはまだありません。"
     ),
     ("copilot_overview_top_delay_no_baseline", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min "
-        "({delayed_count} routes currently delayed). There is no earlier period to compare it with yet."
+        "Route {name} ran the longest average delay over this period, at {top_avg} min "
+        "({delayed_count} routes delayed). There is no earlier period to compare it with yet."
     ),
     ("copilot_overview_top_route", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
+        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（{delayed_count} 路線が遅延）。"
     ),
     ("copilot_overview_top_route", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min "
-        "({delayed_count} routes currently delayed)."
+        "Route {name} ran the longest average delay over this period, at {top_avg} min "
+        "({delayed_count} routes delayed)."
     ),
     ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
     ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
