@@ -411,8 +411,9 @@ class ReportResponse(BaseModel):
     covered_days: int | None = None
     window_days: int | None = None
     delivered_missing: DeliveredMissing | None = None
-    # council_summary only (None elsewhere): whether the agencies board would
-    # rank this agency over the same dates.
+    # council_summary only (None elsewhere, and while the cached agencies
+    # board does not list the agency yet): whether the board ranks this
+    # agency over the same dates.
     comparability: CouncilComparability | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking
@@ -1547,9 +1548,12 @@ async def get_report(
             # docstring), matching format_definition_csv_line's existing
             # convention -- unlike the JSON `text` body below, which honors
             # the request's locale. The verdict's reason stays its code, which
-            # the caveat rows put in words.
-            verdict = ("はい" if gate["comparable"] else "いいえ", gate["reason"] or "")
-            csv_row = (*row, *verdict, gate["coverage_pct"], gate["ci_low"], gate["ci_high"])
+            # the caveat rows put in words; no verdict leaves its columns blank.
+            verdict = ("", "", "", "", "")
+            if gate:
+                comparable = "はい" if gate["comparable"] else "いいえ"
+                verdict = (comparable, gate["reason"] or "", gate["coverage_pct"], gate["ci_low"], gate["ci_high"])
+            csv_row = (*row, *verdict)
             footnotes = format_council_summary_footnotes(definition, payload, locale="ja")
             return _csv_response(report_type, [csv_row], ctx, definition, extra_footnotes=footnotes, credit=credit)
         text = format_council_summary_text(payload, definition, agency_name, ctx.from_date, ctx.to_date, locale=locale)
@@ -1565,7 +1569,7 @@ async def get_report(
             covered_days=payload["covered_days"],
             window_days=payload["window_days"],
             delivered_missing=payload["delivered_missing"],
-            comparability=CouncilComparability(**gate, thresholds=COMPARABILITY_THRESHOLDS),
+            comparability=CouncilComparability(**gate, thresholds=COMPARABILITY_THRESHOLDS) if gate else None,
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec

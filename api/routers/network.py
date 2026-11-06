@@ -12,12 +12,13 @@ from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
 from pipeline.reports.comparability import (
+    BOARD_ON_TIME_DEFINITION,
     MAX_CI_HALF_WIDTH_PP,
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
     ComparableReason,
 )
-from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
+from pipeline.reports.definition import DefinitionMeta
 from pipeline.reports.network import compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import DeliveredMissing
 
@@ -152,6 +153,6 @@ async def network_summary(
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
         comparability=COMPARABILITY_THRESHOLDS,
         coverage_through=through.isoformat() if through else None,
-        definition=resolve_definition_meta("on_time", None, None),
+        definition=BOARD_ON_TIME_DEFINITION,
         scope_applied=_NETWORK_SCOPE,
     )

@@ -161,10 +161,9 @@ the same way: 5.04% prints 5.0% and passes, 5.05% prints 5.1% and fails.
   writes that table in the same run as the delay figures, so its absence says
   nothing about the feed.
 
-The council report applies the same gate to its one agency, through the same
-code (`read_board_figures()` and `assess_agency()` in
-`pipeline/reports/network.py`) and the same `coverage_through`; see
-`docs/features/reports-tab.md`.
+The council report gives its one agency's verdict from this board's own
+cached result for the same dates (its row of `compute_network_summary`), so
+the two never disagree; see `docs/features/reports-tab.md`.
 
 ### What the board does and does not correct for
 
@@ -219,7 +218,7 @@ default order is still by delay among the comparable agencies.
 | File | Role |
 |---|---|
 | `api/routers/network.py` | `GET /api/network/summary` |
-| `pipeline/reports/network.py` | `compute_network_summary()`; `read_board_figures()`/`assess_agency()`, the per-agency figures and verdict the council report shares |
+| `pipeline/reports/network.py` | `compute_network_summary()`, whose cached rows also give the council report its verdict |
 | `pipeline/reports/comparability.py` | The comparability gate: thresholds, observation coverage, the trip-counted on-time interval, `assess()` |
 | `pipeline/reports/service_delivered.py` | `compute_service_delivered_by_agency()` — planned-vs-executed trip counts |
 | `pipeline/planned_trips.py` | The per-day planned-trip rule, and the capture that saves each day's count into `planned_trips_daily` |

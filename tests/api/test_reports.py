@@ -7,6 +7,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.reports.network import invalidate_network_summary
 from tests.api.test_network import (
     _seed_gated_agency,
     _seed_route_dist,
@@ -31,6 +32,10 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
+    # council_summary reads its verdict from the agencies board's cache, which
+    # is keyed on the date range only, so a board another test cached for the
+    # same dates would answer with that test's agencies.
+    invalidate_network_summary()
     pool = await _test_pool()
     app.state.pool = pool
     # get_report() declares ch=Depends(get_ch) alongside conn
@@ -2540,15 +2545,67 @@ async def test_council_summary_counts_its_own_missing_last_day_once_another_agen
     assert (alone["observed_trips"], alone["coverage_planned_trips"], alone["coverage_pct"]) == (900, 1000, 90.0)
     assert alone["comparable"] is True
 
+    # Seeded straight into the tables, past the agencies API that would
+    # invalidate the cached board.
     other = await _add_agency(pool, "Current")
     await _seed_two_day_agency(pool, other, name="Current", observed_days=["2026-04-01", "2026-04-02"])
+    invalidate_network_summary()
     behind = (await client.get(url)).json()["comparability"]
     assert (behind["observed_trips"], behind["coverage_planned_trips"], behind["coverage_pct"]) == (900, 2000, 45.0)
     assert (behind["comparable"], behind["reason"]) == (False, "coverage_low")
 
     # A deleted agency is off the board, so its days bound no one's coverage.
     await pool.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", other)
+    invalidate_network_summary()
     assert (await client.get(url)).json()["comparability"]["coverage_pct"] == 90.0
+
+
+@pytest.mark.asyncio
+async def test_council_summary_reads_the_boards_cached_verdict_so_the_two_never_disagree(reports_client):
+    """The council report takes its agency's verdict from the agencies
+    board's cached result for the same dates, so a change the board has not
+    picked up yet changes neither, and both change together once it has."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    board_url = "/api/network/summary"
+    params = {"from": _GATE_DAY, "to": _GATE_DAY}
+
+    def row_of(board):
+        return next(r for r in board["agencies"] if r["agency_id"] == agency_id)
+
+    cached = row_of((await client.get(board_url, params=params)).json())
+    # An analyze run rewrites the day's observed trips after the board was read.
+    await pool.execute("UPDATE agg_route_daily SET trips_observed = 400 WHERE agency_id = $1", agency_id)
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    assert (gate["comparable"], gate["coverage_pct"]) == (cached["comparable"], cached["coverage_pct"]) == (True, 90.0)
+
+    invalidate_network_summary()
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    fresh = row_of((await client.get(board_url, params=params)).json())
+    assert (gate["reason"], gate["coverage_pct"]) == (fresh["comparable_reason"], fresh["coverage_pct"])
+    assert (gate["reason"], gate["coverage_pct"]) == ("coverage_low", 40.0)
+
+
+@pytest.mark.asyncio
+async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_does_not_list(reports_client):
+    """An agency added past the agencies API, which would invalidate the
+    board, is missing from a board cached before it. Its report then says
+    nothing about a comparison rather than guessing one."""
+    import csv
+    import io
+
+    client, _agency_id, pool = reports_client
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    late = await _add_agency(pool, "Late")
+    await _seed_gated_agency(pool, late, name="Late", strategy="static_join", delay_min=1, **_DENSE)
+
+    body = (await client.get(_council_url(late))).json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    assert not any(line.startswith("※他事業者との比較") for line in body["text"].split("\n"))
+    rows = list(csv.reader(io.StringIO((await client.get(_council_url(late, extra="&format=csv"))).text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[6:] == ["", "", "", "", ""]
 
 
 @pytest.mark.asyncio

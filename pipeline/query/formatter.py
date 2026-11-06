@@ -17,13 +17,14 @@ from typing import Any
 
 from pipeline.query.labels import day_group_label, dow_label
 from pipeline.reports.comparability import (
+    BOARD_ON_TIME_DEFINITION,
     MAX_CI_HALF_WIDTH_PP,
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
     ci_half_width_as_printed,
     tenth_as_printed,
 )
-from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes, resolve_definition_meta
+from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -537,11 +538,6 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
     return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
 
 
-# The on-time definition the agencies board, and so the comparability gate,
-# counts every agency by: no tolerance override.
-_BOARD_DEFINITION = resolve_definition_meta("on_time", None, None)
-
-
 def _tenth(value: float | None) -> str:
     """A share to a tenth as the agencies board prints it
     (:func:`pipeline.reports.comparability.tenth_as_printed`), or a dash."""
@@ -555,9 +551,11 @@ def _threshold(value: float) -> str:
 
 def _coverage_unknown_why(payload: dict, comparability: dict) -> str:
     """Why coverage cannot be measured, read as the board reads it from the
-    same fields: a failed read nulls the planned count too, so it is told
-    apart first; a null planned count is then a feed whose trip_ids aren't
-    the timetable's, and a zero one a plan that misses the days observed."""
+    same fields. A failed read nulls the planned count too, so it is told
+    apart first. Otherwise a null coverage plan (the plan through the
+    coverage bound) is ``unmatched``, a feed whose trip_ids aren't the
+    timetable's; a zero coverage plan beside a nonzero whole-period plan is
+    ``no_plan_observed``; and zero for both is ``no_plan``."""
     if payload.get("delivered_missing") == "unreadable":
         return "unreadable"
     if comparability.get("coverage_planned_trips") is None:
@@ -603,7 +601,7 @@ def _comparison_lines(definition: DefinitionMeta, payload: dict, locale: str) ->
         line = _t("council_not_comparable", locale, reason=_comparison_reason(payload, comparability, locale))
     lines = [line]
     tolerance = (definition.early_tolerance_sec, definition.late_tolerance_sec)
-    if tolerance != (_BOARD_DEFINITION.early_tolerance_sec, _BOARD_DEFINITION.late_tolerance_sec):
+    if tolerance != (BOARD_ON_TIME_DEFINITION.early_tolerance_sec, BOARD_ON_TIME_DEFINITION.late_tolerance_sec):
         lines.append(_t("council_comparison_definition", locale))
     return lines
 

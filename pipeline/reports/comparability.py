@@ -25,6 +25,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from pipeline.reports.definition import resolve_definition_meta
 from pipeline.stats import wilson_interval
 
 ComparableReason = Literal["no_data", "coverage_unknown", "coverage_low", "ci_wide", "clamp_high"]
@@ -48,6 +49,10 @@ MAX_CLAMP_PCT = 5.0
 #: is a claim about trip matching, separate from which strategies can carry
 #: cancellations, though both hold only for ``static_join`` today.
 COMPARABLE_INGEST_STRATEGIES = frozenset({"static_join"})
+
+#: The on-time definition the board counts every agency by, and so the one
+#: the gate judges: the ``on_time`` default, with no tolerance override.
+BOARD_ON_TIME_DEFINITION = resolve_definition_meta("on_time", None, None)
 
 
 @dataclass(frozen=True)

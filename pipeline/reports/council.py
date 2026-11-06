@@ -54,7 +54,7 @@ from pipeline.histogram import (
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
-from pipeline.reports.network import assess_agency, read_board_figures
+from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
@@ -159,6 +159,11 @@ DELIVERED_HONOURS: tuple[str, ...] = ("from", "to")
 _ON_TIME_ONLY = tuple(f for f in ON_TIME_HONOURS if f not in DELIVERED_HONOURS)
 
 
+# The figures the board's comparability gate judged, carried from its row as
+# they are.
+_BOARD_GATE_FIGURES = ("coverage_pct", "observed_trips", "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct")
+
+
 def on_time_filter_narrows(ctx: RangeCtx) -> bool:
     """Whether ``ctx`` sets a field that narrows the council summary's
     on-time figures but not its agency-wide ones. A field added to
@@ -205,30 +210,25 @@ async def compute_council_summary(
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
 
-    ``comparability`` is whether the agencies board would rank this agency
-    over the same dates (:func:`pipeline.reports.network.assess_agency`):
-    ``{"comparable", "reason", "coverage_pct", "observed_trips",
-    "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct"}``. It judges
-    the board's figures, the whole agency on the board's on-time definition,
-    so no filter or tolerance here changes it, and its coverage stops where
-    the board's does, at the newest day any agency has observations for.
+    ``comparability`` is whether the agencies board ranks this agency over
+    the same dates, ``{"comparable", "reason", "coverage_pct",
+    "observed_trips", "coverage_planned_trips", "ci_low", "ci_high",
+    "clamp_pct"}``, read from this agency's row of the board's own cached
+    result (:func:`pipeline.reports.network.compute_network_summary`), so
+    the two can never disagree. It therefore judges the board's figures, the
+    whole agency on the board's on-time definition, whatever filter or
+    tolerance narrows the figures above. ``None`` when the cached board
+    does not list the agency yet, rather than a verdict of its own.
     """
     on_time_pct, avg_delay_min, samples = await _agency_on_time_pooled(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
     )
 
-    board = await read_board_figures(conn, ctx.from_date, ctx.to_date)
-    figures = board.of(agency_id)
-
     # A failed read of the planned figures leaves the on-time figures
     # standing and says the plan could not be read, as the agencies board
     # does, rather than failing the whole report.
     try:
-        d = (
-            await compute_service_delivered_by_agency(
-                conn, [agency_id], ctx.from_date, ctx.to_date, observed_through=board.coverage_through
-            )
-        )[agency_id]
+        d = (await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date))[agency_id]
     except Exception:
         _log.warning("council summary: service-delivered figures unavailable for agency %s", agency_id, exc_info=True)
         d = unreadable_service_delivered(ctx.from_date, ctx.to_date)
@@ -253,8 +253,19 @@ async def compute_council_summary(
     live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
     agency_is_stale = is_stale(agg_max_day, live_max_day)
 
-    agency = board.agencies.get(agency_id)
-    gate = assess_agency(agency["ingest_strategy"] if agency else None, figures, d)
+    feed_row = await conn.fetchrow(
+        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
+        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
+        agency_id,
+        ctx.from_date,
+        ctx.to_date,
+    )
+    raw = int(feed_row["raw"]) if feed_row else 0
+    clamp = int(feed_row["clamp"]) if feed_row else 0
+    clamp_pct = round(clamp / raw * 100, 2) if raw else None
+
+    board = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
+    row = next((r for r in board if r["agency_id"] == agency_id), None)
 
     return {
         "on_time_pct": on_time_pct,
@@ -267,17 +278,14 @@ async def compute_council_summary(
         "window_days": d["window_days"],
         "delivered_missing": d["delivered_missing"],
         "is_stale": agency_is_stale,
-        "clamp_pct": figures.clamp_pct,
+        "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),
-        "comparability": {
-            "comparable": gate.comparable,
-            "reason": gate.comparable_reason,
-            "coverage_pct": gate.coverage_pct,
-            "observed_trips": gate.observed_trips,
-            "coverage_planned_trips": gate.coverage_planned_trips,
-            "ci_low": gate.ci_low,
-            "ci_high": gate.ci_high,
-            "clamp_pct": figures.clamp_pct,
+        "comparability": None
+        if row is None
+        else {
+            "comparable": row["comparable"],
+            "reason": row["comparable_reason"],
+            **{k: row[k] for k in _BOARD_GATE_FIGURES},
         },
     }
 

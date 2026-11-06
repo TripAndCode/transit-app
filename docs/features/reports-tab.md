@@ -133,11 +133,15 @@ reports.
 - The council document says whether the agency's figures meet the agencies
   board's comparability conditions, as defined in
   [network-tab.md's Comparability gate](network-tab.md#comparability-gate).
-  - `compute_council_summary` judges its one agency with the board's own
-    path: `read_board_figures()` and `assess_agency()` in
-    `pipeline/reports/network.py`. Its coverage stops at the board's
-    `coverage_through` (see network-tab.md), never at this agency's own last
-    day.
+  - `compute_council_summary` takes its agency's row from the board's own
+    cached `compute_network_summary` for the same dates, so the council
+    report and the board read one result and cannot disagree, even in the
+    minutes after an analyze run before the board's cache expires. Coverage
+    therefore stops at the board's `coverage_through` (see network-tab.md),
+    never at this agency's own last day. While the cached board does not list
+    the agency yet (one added without the agencies API, which invalidates
+    the board), `comparability` is null, and the tile, the footnote and the
+    CSV columns are left out or blank rather than guessed.
   - The verdict reads the board's figures: the whole agency, every day of the
     period and the board's on-time definition. A route, day, service or
     time-band filter, or another tolerance, changes the on-time figures but
@@ -160,8 +164,9 @@ reports.
     この事業者の数字を他事業者と順位付けて比べないでください。」. The reasons use
     the board's words and its printed rounding.
   - The CSV appends 他事業者と比較できる (はい/いいえ), 比較できない理由 (the reason
-    code), 観測カバー率(%) and the interval's 下限/上限 after the six existing
-    columns. The Japanese footnote rows put the reason in words.
+    code), 観測カバー率(%) and the interval's 下限/上限 after the six on-time and
+    delivery columns (定時率 through 運行実績率). The Japanese footnote rows put
+    the reason in words.
 - The document is called 協議会向け報告 / "Council report" wherever it is
   named: its tab, its subtitle, the report list and the printed header.
 - Every printout of an agency page ends with the credit for the open data

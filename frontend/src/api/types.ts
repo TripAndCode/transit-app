@@ -533,8 +533,9 @@ type ReportEnvelope<T extends ReportType, Row> = {
   covered_days?: number | null;
   window_days?: number | null;
   delivered_missing?: DeliveredMissing | null;
-  /** council_summary only: whether the agencies board would rank this agency
-   *  over the same dates. Null for every other report. */
+  /** council_summary only: whether the agencies board ranks this agency over
+   *  the same dates. Null for every other report, and while the board's
+   *  cached result does not list the agency yet. */
   comparability?: CouncilComparability | null;
   report_type: T;
   rendered_at: string;
