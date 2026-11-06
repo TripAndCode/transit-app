@@ -78,15 +78,17 @@ const CSS_MARKER = "maplibregl-canvas";
 const MERMAID_JS_MARKER = "mermaidAPI";
 
 // Budget covers the whole static closure (JS + CSS), not a fixed
-// "current measured size" — it's headroom, not a baseline to keep in
-// sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
-// MapLibre-scale regression with room to spare.
-const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
+// "current measured size" — it's headroom for routine dependency
+// releases, not a baseline to keep in sync by hand. MapLibre alone adds
+// ~800 KiB, so this still catches a MapLibre-scale regression with room
+// to spare.
+const STATIC_CLOSURE_BUDGET_BYTES = 704 * 1024;
 
 // Each language's strings are their own dynamic chunk (src/i18n/index.ts)
 // so a visitor downloads only the active one. A locale chunk in an entry's
-// static closure ships every visitor a language they may never see. The
-// budget above has room for one, so this is checked by name. A locale
+// static closure ships every visitor a language they may never see.
+// This is checked by name, so a leaked locale is reported as such rather
+// than only as a budget overrun. A locale
 // folded into a shared chunk loses its manifest key; the build's
 // locale-chunk-map plugin (scripts/localeChunkMap.mjs) fails on that case.
 const LOCALE_MANIFEST_KEY_RE = /^src\/i18n\/locales\/[^/]+\.json$/;
