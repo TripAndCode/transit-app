@@ -154,7 +154,7 @@ const router = createBrowserRouter([
       { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
       { path: "me", element: <AccountPage /> },
       { path: "help", element: <HelpPage /> },
-      { path: "model", element: <ModelPage /> },
+      { path: "model", element: <RequireAdmin><ModelPage /></RequireAdmin> },
       {
         path: "admin",
         element: <RequireAdmin><AdminLayout /></RequireAdmin>,
