@@ -247,5 +247,5 @@ beside that week's `summary.json`.
 
 `GET /api/ml/evaluations` serves the newest ingested scorecard as `live` (null until one exists): its
 window, the published and counterfactual skills, the published slot interval's coverage, the published
-share and the skills by lead day. The model page shows them in a "Published forecasts" card. The gap
+share and the skills by lead day. The model evaluation page, an admin page, shows them in a "Published forecasts" card. The gap
 between the two skills is printed as what copying a recent day's trips costs.

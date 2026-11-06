@@ -5,6 +5,10 @@ reports, maps, and a bilingual React dashboard. FastAPI serves the API and the
 SPA from one origin. Raw realtime events live in ClickHouse; static schedules,
 aggregates, and application data live in Postgres/PostGIS.
 
+It is an independent service-quality audit instrument for the transport-policy
+staff who prepare 地域公共交通協議会 material; [Audience and job](docs/features/audience.md)
+says who it is for and what each screen answers.
+
 ## Start Here
 
 ### Requirements

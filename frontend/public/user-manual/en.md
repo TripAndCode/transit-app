@@ -63,7 +63,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Ask** | Ready-made questions, answered as tables and charts |
 
-Under **Other** are **Model evaluation** (chapter 12), **Help** (this manual) and **About this app**. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
+Under **Other** are **Help** (this manual) and **About this app**; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
 The account menu at the bottom of the sidebar (your name, or **Guest**) holds sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
 
@@ -79,7 +79,7 @@ Next to it, “Analyzed through …” shows the last service day the reports in
 
 ### On a phone
 
-On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Model evaluation, Help and the account menu.
+On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu.
 
 ### Notices at the top
 
@@ -259,7 +259,7 @@ Each route’s average delay (“Avg (min)”, with “Samples”) on the days t
 
 When routes tend to run late, by day of week and time of day. “Day × time of day (all routes)” shows the agency as a whole, and “Routes that ran late” lists the routes. Click one, or pick it from the “Route” list, for that route’s breakdown.
 
-- Where the machine-learning model forecasts, the dates it forecasts and “ML forecast” appear at the top; “How accurate is it?” opens the model evaluation page. A forecast figure combines the forecasts for the trips that run in that hour.
+- Where the machine-learning model forecasts, the dates it forecasts and “ML forecast” appear at the top; for an administrator, “How accurate is it?” opens the model evaluation page. A forecast figure combines the forecasts for the trips that run in that hour.
 - A route’s headline names the hour it is likely to run latest (such as “Fri 10/30 18:00”), then the time band that runs latest. When that hour is a forecast, it also gives the range about 8 trips in 10 fall in (“8 runs in 10 within 3.0–17.2 min late”). Only an hour’s forecast has a range; a band or an all-routes figure does not.
 - A band’s figure averages its hours (on the all-routes grid, each route’s hours), weighted by how often each was observed before, using the forecast where there is one and the past average otherwise.
 - On a screen with forecasts, a cell that shows a past average because the model has no forecast for it carries a small ring, shown in the legend as “No forecast: past average”.
@@ -420,7 +420,7 @@ If you are not sure which report to open, picking a question on Ask is often the
 
 ## 12. Model evaluation — how the forecast model is checked
 
-**Model evaluation**, under **Other** in the sidebar, shows how the ML model behind the route forecast on **Time** (6-3) is checked each week; its heading is “ML forecast model evaluation”. It opens without choosing an agency, and “← Back to (agency)” at the top returns to the Pulse of the agency you were viewing.
+**Model evaluation**, under **Other** in the sidebar and shown to administrators only, shows how the ML model behind the route forecast on **Time** (6-3) is checked each week; its heading is “ML forecast model evaluation”. It opens without choosing an agency, and “← Back to (agency)” at the top returns to the Pulse of the agency you were viewing.
 
 - The verdict: whether the latest evaluation was “Adopted” or “Not adopted (the previous model stays in use)”, when it was evaluated, and the model in use. When it was not adopted, “Why it was not adopted” lists the reasons.
 - “Against the usual estimate”: how much less error the model’s forecast has than the usual estimate, which is the average delay at the same weekday and hour over the past 4 weeks. It also shows whether the “Adoption bar” was reached and how the gain varied by test day.

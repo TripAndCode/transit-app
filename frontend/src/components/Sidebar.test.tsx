@@ -116,16 +116,10 @@ describe("Sidebar", () => {
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
-  it("lists the model evaluation page under Other, carrying the agency it was opened from", () => {
+  it("does not list the model evaluation page for a visitor who is not an admin", () => {
     renderSidebar();
     const other = screen.getByRole("navigation", { name: "Other" });
-    expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model?from=1");
-  });
-
-  it("links the model evaluation page bare when no agency is known", () => {
-    renderSidebar("/help");
-    const other = screen.getByRole("navigation", { name: "Other" });
-    expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model");
+    expect(within(other).queryByRole("link", { name: "Model evaluation" })).toBeNull();
   });
 
   it("links the welcome page under Other, for signed-in and signed-out visitors alike", () => {
@@ -137,15 +131,33 @@ describe("Sidebar", () => {
   describe("with an admin session", () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it("lists Admin under Other", () => {
+    function asAdmin() {
       vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
       vi.spyOn(auth, "useSession").mockReturnValue({
         data: { email: "admin@example.test", name: "", role: "admin" },
         isLoading: false,
       } as never);
+    }
+
+    it("lists Admin under Other", () => {
+      asAdmin();
       renderSidebar();
       const other = screen.getByRole("navigation", { name: "Other" });
       expect(within(other).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    });
+
+    it("lists the model evaluation page under Other, carrying the agency it was opened from", () => {
+      asAdmin();
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model?from=1");
+    });
+
+    it("links the model evaluation page bare when no agency is known", () => {
+      asAdmin();
+      renderSidebar("/help");
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).getByRole("link", { name: "Model evaluation" })).toHaveAttribute("href", "/model");
     });
   });
 
