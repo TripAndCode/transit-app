@@ -118,8 +118,8 @@ reports.
   stay uncounted: the reload that replaced their timetable had already erased
   their plan.
 - The council document's tiles are 定時率, 平均遅延, 観測データ数（停留所単位）
-  (one reading per trip per stop, so far larger than the planned trips), 計画便数
-  and 運行率 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
+  (one reading per trip per stop, so far larger than the planned trips), 計画便数,
+  運行率 and 他事業者との比較 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
   missing 運行率 shows 「—」 with the response's `delivered_missing` reason in
   the agencies board's words (`network.delivered_missing.*`), and the server's
   footnote (`format_council_summary_footnotes`) gives the same reason. A feed
@@ -130,6 +130,50 @@ reports.
   から1分以内の遅れ（早発も定時として数えます）」, not its preset name; the CSV
   preamble keeps the preset for comparing exports. Each figure keeps to one
   line (`white-space: nowrap`), so a phone never breaks a number in two.
+- The council document says whether the agency's figures meet the agencies
+  board's comparability conditions, as defined in
+  [network-tab.md's Comparability gate](network-tab.md#comparability-gate).
+  - `compute_council_summary` takes its agency's row from the board's own
+    cached `compute_network_summary` for the same dates, so the council
+    report and the board read one result and cannot disagree, even in the
+    minutes after an analyze run before the board's cache expires. Coverage
+    therefore stops at the board's `coverage_through` (see network-tab.md),
+    never at this agency's own last day. The staleness note and the
+    data-quality share come from the same row, so the quality note and a
+    `clamp_high` verdict print one share.
+  - While the cached board does not list the agency yet (one added without
+    the agencies API, which invalidates the board), or the board cannot be
+    built (a failure reading any agency's figures), `comparability` is null.
+    The tile, the footnote and the CSV columns are then left out or blank
+    rather than guessed, and the report reads its staleness and quality share
+    for its own agency.
+  - The verdict reads the board's figures: the whole agency, every day of the
+    period and the board's on-time definition. A route, day, service or
+    time-band filter, or another tolerance, changes the on-time figures but
+    never the verdict. The agency-wide footnote lists the comparison among the
+    whole-agency figures, and under another tolerance a footnote says the
+    comparison keeps the definition shared by every operator.
+  - The response carries it as `comparability`: `comparable`, `reason` (the
+    board's `comparable_reason` codes), `coverage_pct` with its
+    `observed_trips`/`coverage_planned_trips`, `ci_low`/`ci_high`,
+    `clamp_pct`, the board row's `planned_trips`/`delivered_missing` (which
+    say why coverage could not be measured, so the reason comes from the
+    same read as the verdict) and the gate's `thresholds`.
+  - The tile 他事業者との比較 / "Comparison with other operators" reads
+    比較できます / "Comparable" or 比較できません / "Not comparable". Under
+    "Not comparable" it gives the reason in the board's words
+    (`unrankedReason` in `frontend/src/components/comparabilityReason.ts`,
+    shared with the board).
+  - The server footnote states the same verdict
+    (`format_council_summary_footnotes`): 「※他事業者との比較: 比較の条件を満たします
+    （観測カバー率 90.0%、定時率の95%信頼区間 87.8–91.8%）」. When the agency
+    fails a check, it reads 「…条件を満たしません。観測カバー率 41.0%（70%未満）。
+    この事業者の数字を他事業者と順位付けて比べないでください。」. The reasons use
+    the board's words and its printed rounding.
+  - The CSV appends 他事業者と比較できる (はい/いいえ), 比較できない理由 (the reason
+    code), 観測カバー率(%) and the interval's 下限/上限 after the six on-time and
+    delivery columns (定時率 through 運行実績率). The Japanese footnote rows put
+    the reason in words.
 - The document is called 協議会向け報告 / "Council report" wherever it is
   named: its tab, its subtitle, the report list and the printed header.
 - Every printout of an agency page ends with the credit for the open data

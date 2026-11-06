@@ -54,6 +54,7 @@ from pipeline.histogram import (
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
@@ -158,6 +159,21 @@ DELIVERED_HONOURS: tuple[str, ...] = ("from", "to")
 _ON_TIME_ONLY = tuple(f for f in ON_TIME_HONOURS if f not in DELIVERED_HONOURS)
 
 
+# The figures the board's comparability gate judged, carried from its row as
+# they are, with the plan figures that say why coverage could not be
+# measured, so one verdict's reason comes from one read.
+_BOARD_GATE_FIGURES = (
+    "coverage_pct",
+    "observed_trips",
+    "coverage_planned_trips",
+    "ci_low",
+    "ci_high",
+    "clamp_pct",
+    "planned_trips",
+    "delivered_missing",
+)
+
+
 def on_time_filter_narrows(ctx: RangeCtx) -> bool:
     """Whether ``ctx`` sets a field that narrows the council summary's
     on-time figures but not its agency-wide ones. A field added to
@@ -171,6 +187,36 @@ def on_time_filter_narrows(ctx: RangeCtx) -> bool:
         "routes": bool(ctx.routes),
     }
     return any(is_set[field] for field in _ON_TIME_ONLY)
+
+
+async def _freshness_and_quality(agency_id: int, ctx: RangeCtx, conn, ch) -> tuple[bool, float | None]:
+    """``(is_stale, clamp_pct)`` for one agency over ``ctx``'s dates, read the
+    way the agencies board reads them for every agency, for a report the
+    board's cached result does not cover."""
+    agg_max_row = await conn.fetchrow("SELECT MAX(date) AS d FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+    agg_max_day: date | None = agg_max_row["d"] if agg_max_row else None
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
+    # This probe backs ONLY is_stale -- clamp_pct comes from Postgres.
+    # `max_captured_at_before_by_agency` already degrades a failing probe to
+    # None rather than raising (is_stale(agg_day, None) is "not stale": no
+    # completed day / can't determine -> nothing owed), the same shared
+    # degrade shape pipeline.reports.network.compute_network_summary relies
+    # on for its own per-agency probes.
+    live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
+    live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
+
+    feed_row = await conn.fetchrow(
+        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
+        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
+        agency_id,
+        ctx.from_date,
+        ctx.to_date,
+    )
+    raw = int(feed_row["raw"]) if feed_row else 0
+    clamp = int(feed_row["clamp"]) if feed_row else 0
+    return is_stale(agg_max_day, live_max_day), (round(clamp / raw * 100, 2) if raw else None)
 
 
 async def compute_council_summary(
@@ -192,7 +238,7 @@ async def compute_council_summary(
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
-    "delivered_missing", "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    "delivered_missing", "is_stale", "clamp_pct", "filtered", "comparability"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
@@ -203,6 +249,19 @@ async def compute_council_summary(
     says so (see that module), and ``delivered_missing`` then says why. ``clamp_pct`` is ``None`` when this agency has
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
+
+    ``comparability`` is whether the agencies board ranks this agency over
+    the same dates, ``{"comparable", "reason", "coverage_pct",
+    "observed_trips", "coverage_planned_trips", "ci_low", "ci_high",
+    "clamp_pct", "planned_trips", "delivered_missing"}``, read from this
+    agency's row of the board's own cached result
+    (:func:`pipeline.reports.network.compute_network_summary`), so the two
+    can never disagree. It therefore judges the board's figures, the whole
+    agency on the board's on-time definition, whatever filter or tolerance
+    narrows the figures above. ``is_stale`` and ``clamp_pct`` come from the
+    same row. ``comparability`` is ``None`` when the cached board does not
+    list the agency yet or cannot be built, rather than a verdict of its
+    own; ``is_stale`` and ``clamp_pct`` are then read for this agency alone.
     """
     on_time_pct, avg_delay_min, samples = await _agency_on_time_pooled(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
@@ -217,36 +276,24 @@ async def compute_council_summary(
         _log.warning("council summary: service-delivered figures unavailable for agency %s", agency_id, exc_info=True)
         d = unreadable_service_delivered(ctx.from_date, ctx.to_date)
 
-    # Freshness (agg-lag) + quality (implausible-reading share), scoped to
-    # THIS agency's ctx.from_date/to_date range -- the same two signals
-    # pipeline.reports.network.compute_network_summary already exposes
-    # network-wide, computed here for one agency instead of every agency at
-    # once.
-    agg_max_row = await conn.fetchrow("SELECT MAX(date) AS d FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
-    agg_max_day: date | None = agg_max_row["d"] if agg_max_row else None
-    today_jst_midnight_utc = (
-        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    )
-    # This probe backs ONLY is_stale below -- every other field here comes
-    # from Postgres. `max_captured_at_before_by_agency` already degrades a
-    # failing probe to None rather than raising (is_stale(agg_day, None) is
-    # "not stale": no completed day / can't determine -> nothing owed), the
-    # same shared degrade shape pipeline.reports.network.compute_network_summary
-    # relies on for its own per-agency probes.
-    live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
-    live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
-    agency_is_stale = is_stale(agg_max_day, live_max_day)
+    # The verdict is the agencies board's own, from its cached result for the
+    # same dates. Building the board reads every agency's figures, so a
+    # failure anywhere in it leaves this report without a verdict rather than
+    # failing a report whose own figures never needed it.
+    try:
+        board = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
+    except Exception:
+        _log.warning("council summary: agencies board unavailable for agency %s", agency_id, exc_info=True)
+        board = []
+    row = next((r for r in board if r["agency_id"] == agency_id), None)
 
-    feed_row = await conn.fetchrow(
-        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
-        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
-    )
-    raw = int(feed_row["raw"]) if feed_row else 0
-    clamp = int(feed_row["clamp"]) if feed_row else 0
-    clamp_pct = round(clamp / raw * 100, 2) if raw else None
+    # Freshness and the implausible-reading share come from the board's row,
+    # so the quality note and the verdict print one share. Without a row they
+    # are read for this agency alone.
+    if row is not None:
+        agency_is_stale, clamp_pct = row["is_stale"], row["clamp_pct"]
+    else:
+        agency_is_stale, clamp_pct = await _freshness_and_quality(agency_id, ctx, conn, ch)
 
     return {
         "on_time_pct": on_time_pct,
@@ -261,6 +308,13 @@ async def compute_council_summary(
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),
+        "comparability": None
+        if row is None
+        else {
+            "comparable": row["comparable"],
+            "reason": row["comparable_reason"],
+            **{k: row[k] for k in _BOARD_GATE_FIGURES},
+        },
     }
 
 

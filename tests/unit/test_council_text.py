@@ -162,3 +162,194 @@ def test_footnotes_say_how_much_of_the_period_the_timetable_covers(locale, note)
         _DEFINITION, _payload(planned_trips=0, service_delivered_pct=None, covered_days=0, window_days=30), locale
     )
     assert note.replace("16", "0") not in no_plan
+
+
+_BOARD = {
+    locale: json.loads(
+        (Path(__file__).resolve().parents[2] / f"frontend/src/i18n/locales/{locale}.json").read_text("utf-8")
+    )["network"]
+    for locale in ("ja", "en")
+}
+
+_NOT_COMPARABLE_LEAD = {
+    "ja": "他事業者との比較: 条件を満たしません。",
+    "en": "Comparison with other operators: does not meet the conditions. ",
+}
+_NOT_COMPARABLE_TAIL = {
+    "ja": "。この事業者の数字を他事業者と順位付けて比べないでください。",
+    "en": ". Do not rank this operator's figures against other operators'.",
+}
+
+
+def _comparability(**overrides):
+    comparability = {
+        "comparable": True,
+        "reason": None,
+        "coverage_pct": 86.3,
+        "observed_trips": 863,
+        "coverage_planned_trips": 1000,
+        "ci_low": 83.9,
+        "ci_high": 86.4,
+        "clamp_pct": 0.2,
+        "planned_trips": 1000,
+        "delivered_missing": None,
+    }
+    comparability.update(overrides)
+    return comparability
+
+
+def _board_words(locale, template, **values):
+    """The agencies board's own wording for a reason, filled in as the board
+    fills it."""
+    for name, value in values.items():
+        template = template.replace("{{" + name + "}}", value)
+    return template
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        ("ja", "※他事業者との比較: 比較の条件を満たします（観測カバー率 86.3%、定時率の95%信頼区間 83.9–86.4%）"),
+        (
+            "en",
+            "* Comparison with other operators: meets the conditions for a comparison "
+            "(observation coverage 86.3%, on-time % 95% interval 83.9–86.4%)",
+        ),
+    ],
+)
+def test_a_comparable_agency_is_footnoted_with_the_figures_the_gate_judged(locale, line):
+    payload = _payload(comparability=_comparability())
+    text = format_council_summary_text(payload, _DEFINITION, "青森市バス", "2026-08-12", "2026-09-10", locale=locale)
+    assert line in text.split("\n")
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        (
+            "ja",
+            "他事業者との比較: 条件を満たしません。観測カバー率 41.0%（70%未満）。"
+            "この事業者の数字を他事業者と順位付けて比べないでください。",
+        ),
+        (
+            "en",
+            "Comparison with other operators: does not meet the conditions. Observation coverage 41.0% "
+            "(below 70%). Do not rank this operator's figures against other operators'.",
+        ),
+    ],
+)
+def test_an_agency_the_board_would_not_rank_is_footnoted_not_to_be_ranked(locale, line):
+    payload = _payload(comparability=_comparability(comparable=False, reason="coverage_low", coverage_pct=41.0))
+    assert line in format_council_summary_footnotes(_DEFINITION, payload, locale)
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+@pytest.mark.parametrize(
+    ("reason", "figures", "values"),
+    [
+        ("no_data", {"coverage_pct": None, "ci_low": None, "ci_high": None, "clamp_pct": None}, {}),
+        ("coverage_low", {"coverage_pct": 41.0}, {"pct": "41.0", "min": "70"}),
+        # Half of 6.1 is 3.05, which prints rounded up, never at the limit.
+        ("ci_wide", {"ci_low": 80.0, "ci_high": 86.1}, {"half": "3.1", "max": "3"}),
+        ("ci_wide", {"ci_low": None, "ci_high": None}, {"half": "—", "max": "3"}),
+        # 5.05 prints 5.1, as the board prints it.
+        ("clamp_high", {"clamp_pct": 5.05}, {"pct": "5.1", "max": "5"}),
+    ],
+)
+def test_a_not_comparable_footnote_gives_the_reason_in_the_agencies_board_words(locale, reason, figures, values):
+    payload = _payload(comparability=_comparability(comparable=False, reason=reason, **figures))
+    words = _board_words(locale, _BOARD[locale]["unranked_reason"][reason], **values)
+    expected = _NOT_COMPARABLE_LEAD[locale] + words + _NOT_COMPARABLE_TAIL[locale]
+    assert expected in format_council_summary_footnotes(_DEFINITION, payload, locale)
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+@pytest.mark.parametrize(
+    ("why", "state", "coverage_planned_trips"),
+    [
+        # A feed whose trip_ids are not the timetable's: the gate drops the planned count.
+        ("unmatched", {"planned_trips": 1000, "delivered_missing": "feed_cannot_report"}, None),
+        ("no_plan", {"planned_trips": 0, "delivered_missing": "no_plan"}, 0),
+        # A plan only for days after any agency's observations reach.
+        ("no_plan_observed", {"planned_trips": 1000, "delivered_missing": None}, 0),
+        # A failed read nulls the planned count too, so it is told apart first.
+        ("unreadable", {"planned_trips": 0, "delivered_missing": "unreadable"}, None),
+    ],
+)
+def test_a_coverage_unknown_footnote_says_why_coverage_cannot_be_measured(locale, why, state, coverage_planned_trips):
+    """The reason reads only the verdict's own plan figures, the board's, so
+    one verdict's "why" comes from one read: the report's own planned figures
+    here say otherwise and are not consulted."""
+    comparability = _comparability(
+        comparable=False,
+        reason="coverage_unknown",
+        coverage_pct=None,
+        observed_trips=None,
+        coverage_planned_trips=coverage_planned_trips,
+        ci_low=None,
+        ci_high=None,
+        **state,
+    )
+    elsewhere = (
+        {"planned_trips": 1000, "delivered_missing": None}
+        if why == "unreadable"
+        else {"planned_trips": 0, "delivered_missing": "unreadable"}
+    )
+    payload = _payload(comparability=comparability, **elsewhere)
+    words = _board_words(
+        locale,
+        _BOARD[locale]["unranked_reason"]["coverage_unknown"],
+        why=_BOARD[locale]["coverage_unknown_why"][why],
+    )
+    expected = _NOT_COMPARABLE_LEAD[locale] + words + _NOT_COMPARABLE_TAIL[locale]
+    assert expected in format_council_summary_footnotes(_DEFINITION, payload, locale)
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+def test_a_payload_without_the_gate_says_nothing_about_a_comparison(locale):
+    lines = format_council_summary_footnotes(_DEFINITION, _payload(), locale)
+    assert not any(line.startswith(("他事業者との比較", "Comparison with other operators")) for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("locale", "note"),
+    [
+        (
+            "ja",
+            "計画便数・運行便数・運行率・データ品質と他事業者との比較は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
+            "この期間の事業者全体の値です。",
+        ),
+        (
+            "en",
+            "Planned and executed trips, Service delivered %, data quality and the comparison with other operators "
+            "cover the whole agency for the period; the route, day, service and time-band filters apply to the "
+            "on-time figures only.",
+        ),
+    ],
+)
+def test_the_agency_wide_note_counts_the_comparison_among_the_whole_agency_figures(locale, note):
+    payload = _payload(filtered=True, comparability=_comparability())
+    assert note in format_council_summary_footnotes(_DEFINITION, payload, locale)
+
+
+_SAME_DEFINITION_NOTE = {
+    "ja": "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定しています。",
+    "en": "The comparison with other operators judges every operator by one shared on-time definition, "
+    "not the tolerance chosen here.",
+}
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+def test_a_custom_tolerance_says_the_comparison_keeps_the_shared_definition(locale):
+    """The gate reads the board's figures, which count on time by one
+    definition for every agency, so a report counted with another tolerance
+    says its interval is not the headline's."""
+    payload = _payload(comparability=_comparability())
+    custom = resolve_definition_meta("council_summary", 45, 90)
+    assert _SAME_DEFINITION_NOTE[locale] in format_council_summary_footnotes(custom, payload, locale)
+    assert _SAME_DEFINITION_NOTE[locale] not in format_council_summary_footnotes(_DEFINITION, payload, locale)
+    # A tolerance spelled out as the default one is still the shared definition.
+    spelled_out = resolve_definition_meta("council_summary", None, 60)
+    assert _SAME_DEFINITION_NOTE[locale] not in format_council_summary_footnotes(spelled_out, payload, locale)
+    without_gate = format_council_summary_footnotes(custom, _payload(), locale)
+    assert _SAME_DEFINITION_NOTE[locale] not in without_gate

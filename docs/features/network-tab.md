@@ -161,6 +161,10 @@ the same way: 5.04% prints 5.0% and passes, 5.05% prints 5.1% and fails.
   writes that table in the same run as the delay figures, so its absence says
   nothing about the feed.
 
+The council report gives its one agency's verdict from this board's own
+cached result for the same dates (its row of `compute_network_summary`), so
+the two never disagree; see `docs/features/reports-tab.md`.
+
 ### What the board does and does not correct for
 
 An operator contesting a figure should know what it is and is not adjusted
@@ -203,6 +207,7 @@ default order is still by delay among the comparable agencies.
 | File | Role |
 |---|---|
 | `frontend/src/tabs/NetworkTab.tsx` | Network tab: date pickers, ranked card list rendering |
+| `frontend/src/components/comparabilityReason.ts` | `unrankedReason()` — an unranked agency's reason in words, shared with the council report's comparison tile |
 | `frontend/src/tabs/CompareTab.tsx` | Compare screen: the `by` switch between this board and `compare_ranking` |
 | `frontend/src/routes/networkRedirect.tsx` | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |
 | `frontend/src/styles/tokens.ts` | `delayColor()` — shared warm-ramp coloring used by the delay bar |
@@ -213,7 +218,7 @@ default order is still by delay among the comparable agencies.
 | File | Role |
 |---|---|
 | `api/routers/network.py` | `GET /api/network/summary` |
-| `pipeline/reports/network.py` | `compute_network_summary()` |
+| `pipeline/reports/network.py` | `compute_network_summary()`, whose cached rows also give the council report its verdict |
 | `pipeline/reports/comparability.py` | The comparability gate: thresholds, observation coverage, the trip-counted on-time interval, `assess()` |
 | `pipeline/reports/service_delivered.py` | `compute_service_delivered_by_agency()` — planned-vs-executed trip counts |
 | `pipeline/planned_trips.py` | The per-day planned-trip rule, and the capture that saves each day's count into `planned_trips_daily` |

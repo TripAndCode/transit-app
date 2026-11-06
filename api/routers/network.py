@@ -12,12 +12,13 @@ from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
 from pipeline.reports.comparability import (
+    BOARD_ON_TIME_DEFINITION,
     MAX_CI_HALF_WIDTH_PP,
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
     ComparableReason,
 )
-from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
+from pipeline.reports.definition import DefinitionMeta
 from pipeline.reports.network import compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import DeliveredMissing
 
@@ -99,6 +100,13 @@ class ComparabilityThresholds(BaseModel):
     max_clamp_pct: float
 
 
+COMPARABILITY_THRESHOLDS = ComparabilityThresholds(
+    min_coverage_pct=MIN_COVERAGE_PCT,
+    max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
+    max_clamp_pct=MAX_CLAMP_PCT,
+)
+
+
 class NetworkSummary(BaseModel):
     from_: str = Field(serialization_alias="from")
     to: str
@@ -143,12 +151,8 @@ async def network_summary(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
-        comparability=ComparabilityThresholds(
-            min_coverage_pct=MIN_COVERAGE_PCT,
-            max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
-            max_clamp_pct=MAX_CLAMP_PCT,
-        ),
+        comparability=COMPARABILITY_THRESHOLDS,
         coverage_through=through.isoformat() if through else None,
-        definition=resolve_definition_meta("on_time", None, None),
+        definition=BOARD_ON_TIME_DEFINITION,
         scope_applied=_NETWORK_SCOPE,
     )

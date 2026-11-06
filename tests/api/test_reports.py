@@ -7,7 +7,15 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
+from pipeline.reports.network import invalidate_network_summary
+from tests.api.test_network import (
+    _seed_gated_agency,
+    _seed_route_dist,
+    _seed_service_delivered_daily,
+    _seed_static_schedule,
+    _seed_two_day_agency,
+    _set_ingest_strategy,
+)
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 from tests.fixtures.observed_route import seed_observed_route
 
@@ -24,14 +32,16 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
+    # council_summary reads its verdict from the agencies board's cache, which
+    # is keyed on the date range only, so a board another test cached for the
+    # same dates would answer with that test's agencies.
+    invalidate_network_summary()
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() declares ch=Depends(get_ch) alongside conn
-    # (compare_ranking's time_band-filtered live-fallback) — every report type
-    # resolves the dependency regardless of whether it's used, so something
-    # must be present at app.state.ch_client. None of this file's tests pass
-    # a time_band filter (all exercise the agg-table fast path), so None is
-    # a safe default here.
+    # Every report type resolves get_report()'s ch=Depends(get_ch). None is safe:
+    # every ClickHouse read these tests reach degrades a failed probe to None
+    # (api.clickhouse.max_captured_at_before_by_agency). No test here passes
+    # time_band, the one path that needs a real client.
     app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -2371,11 +2381,12 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
 
     csv_resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&routes=R1&format=csv")
     rows = list(csv.reader(io.StringIO(csv_resp.text)))
-    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    header_idx = rows.index(_COUNCIL_CSV_HEADER)
     assert any("事業者全体の値です" in r[0] for r in rows[1:header_idx])
 
     other = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()
     assert other["delivered_scope_applied"] is None
+    assert other["comparability"] is None
     assert (other["delivered_missing"], other["covered_days"], other["window_days"]) == (None, None, None)
 
 
@@ -2396,12 +2407,340 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     # column header row, matched by locating it rather than a fixed index --
     # the number of footnote rows (freshness/quality/service-delivered
     # caveats) can legitimately vary by scenario.
-    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    header_idx = rows.index(_COUNCIL_CSV_HEADER)
     assert header_idx >= 1
     footnote_cells = [r[0] for r in rows[1:header_idx]]
     assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
+
+
+_COUNCIL_CSV_HEADER = [
+    "定時率(%)",
+    "平均遅延(分)",
+    "観測数",
+    "計画本数",
+    "運行本数",
+    "運行実績率(%)",
+    "他事業者と比較できる",
+    "比較できない理由",
+    "観測カバー率(%)",
+    "定時率95%信頼区間下限(%)",
+    "定時率95%信頼区間上限(%)",
+]
+
+# The council report's gate figures, on the day tests/api/test_network.py's
+# _seed_gated_agency seeds.
+_GATE_DAY = "2026-04-01"
+_THRESHOLDS = {"min_coverage_pct": 70.0, "max_ci_half_width_pp": 3.0, "max_clamp_pct": 5.0}
+_DENSE = {"planned": 1000, "observed": 900, "samples": 20000, "on_time": 18000}
+# 45 trips cannot pin a 50% on-time rate to within 3 points.
+_SPARSE = {"planned": 50, "observed": 45, "samples": 900, "on_time": 450}
+
+
+async def _add_agency(pool, name):
+    row = await pool.fetchrow(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
+        name,
+        f"http://{name.lower()}.example.com",
+    )
+    return row["agency_id"]
+
+
+def _council_url(agency_id, day_from=_GATE_DAY, day_to=_GATE_DAY, extra=""):
+    return f"/api/{agency_id}/reports/council_summary?from={day_from}&to={day_to}{extra}"
+
+
+@pytest.mark.asyncio
+async def test_council_summary_says_a_comparable_agency_meets_the_boards_conditions(reports_client):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        ("ja", "※他事業者との比較: 比較の条件を満たします（観測カバー率 90.0%、定時率の95%信頼区間 87.8–91.8%）"),
+        (
+            "en",
+            "* Comparison with other operators: meets the conditions for a comparison "
+            "(observation coverage 90.0%, on-time % 95% interval 87.8–91.8%)",
+        ),
+    ):
+        resp = await client.get(_council_url(agency_id), headers={"Accept-Language": locale})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["comparability"] == {
+            "comparable": True,
+            "reason": None,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "ci_low": 87.8,
+            "ci_high": 91.8,
+            "clamp_pct": 0.0,
+            "planned_trips": 1000,
+            "delivered_missing": "feed_unverified",
+            "thresholds": _THRESHOLDS,
+        }
+        assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("seed", "reason", "words"),
+    [
+        (_SPARSE, "ci_wide", "定時率の95%信頼区間 ±"),
+        # Dense, but the feed reported 400 of 1,000 planned trips.
+        ({**_DENSE, "observed": 400}, "coverage_low", "観測カバー率 40.0%（70%未満）"),
+    ],
+)
+async def test_council_summary_says_a_sparse_agency_is_not_to_be_ranked(reports_client, seed, reason, words):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Sparse", strategy="static_join", delay_min=5, **seed)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert (body["comparability"]["comparable"], body["comparability"]["reason"]) == (False, reason)
+    line = next(line for line in body["text"].split("\n") if line.startswith("※他事業者との比較"))
+    assert line.startswith("※他事業者との比較: 条件を満たしません。" + words)
+    assert line.endswith("。この事業者の数字を他事業者と順位付けて比べないでください。")
+
+
+@pytest.mark.asyncio
+async def test_council_summary_cannot_measure_coverage_for_a_feed_whose_trips_are_not_the_timetables(reports_client):
+    """aomori_regex parses its trip_ids from the feed's own text, so however
+    dense its data, its coverage cannot be measured and the report says why."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        (
+            "ja",
+            "※他事業者との比較: 条件を満たしません。観測カバー率を測れません："
+            "この配信の便は時刻表の便と照合できません。この事業者の数字を他事業者と順位付けて比べないでください。",
+        ),
+        (
+            "en",
+            "* Comparison with other operators: does not meet the conditions. Observation coverage can't be "
+            "measured: this feed's trips can't be matched to the timetable. Do not rank this operator's figures "
+            "against other operators'.",
+        ),
+    ):
+        body = (await client.get(_council_url(agency_id), headers={"Accept-Language": locale})).json()
+        gate = body["comparability"]
+        assert (gate["comparable"], gate["reason"]) == (False, "coverage_unknown")
+        assert (gate["coverage_pct"], gate["observed_trips"], gate["coverage_planned_trips"]) == (None, None, None)
+        assert (gate["ci_low"], gate["ci_high"]) == (None, None)
+        assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_council_summary_counts_its_own_missing_last_day_once_another_agency_has_reached_it(reports_client):
+    """Coverage stops where the agencies board stops it: the newest day ANY
+    agency has observations for. A day no one has reached yet is a lag every
+    agency shares; once another agency has reached it, this agency's own
+    missing day counts against it, as it does on the board."""
+    client, agency_id, pool = reports_client
+    url = _council_url(agency_id, "2026-04-01", "2026-04-02")
+    await _seed_two_day_agency(pool, agency_id, name="Behind", observed_days=["2026-04-01"])
+
+    alone = (await client.get(url)).json()["comparability"]
+    assert (alone["observed_trips"], alone["coverage_planned_trips"], alone["coverage_pct"]) == (900, 1000, 90.0)
+    assert alone["comparable"] is True
+
+    # Seeded straight into the tables, past the agencies API that would
+    # invalidate the cached board.
+    other = await _add_agency(pool, "Current")
+    await _seed_two_day_agency(pool, other, name="Current", observed_days=["2026-04-01", "2026-04-02"])
+    invalidate_network_summary()
+    behind = (await client.get(url)).json()["comparability"]
+    assert (behind["observed_trips"], behind["coverage_planned_trips"], behind["coverage_pct"]) == (900, 2000, 45.0)
+    assert (behind["comparable"], behind["reason"]) == (False, "coverage_low")
+
+    # A deleted agency is off the board, so its days bound no one's coverage.
+    await pool.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", other)
+    invalidate_network_summary()
+    assert (await client.get(url)).json()["comparability"]["coverage_pct"] == 90.0
+
+
+@pytest.mark.asyncio
+async def test_council_summary_reads_the_boards_cached_verdict_so_the_two_never_disagree(reports_client):
+    """The council report takes its agency's verdict from the agencies
+    board's cached result for the same dates, so a change the board has not
+    picked up yet changes neither, and both change together once it has."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    board_url = "/api/network/summary"
+    params = {"from": _GATE_DAY, "to": _GATE_DAY}
+
+    def row_of(board):
+        return next(r for r in board["agencies"] if r["agency_id"] == agency_id)
+
+    cached = row_of((await client.get(board_url, params=params)).json())
+    # An analyze run rewrites the day's observed trips after the board was read.
+    await pool.execute("UPDATE agg_route_daily SET trips_observed = 400 WHERE agency_id = $1", agency_id)
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    assert (gate["comparable"], gate["coverage_pct"]) == (cached["comparable"], cached["coverage_pct"]) == (True, 90.0)
+
+    invalidate_network_summary()
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    fresh = row_of((await client.get(board_url, params=params)).json())
+    assert (gate["reason"], gate["coverage_pct"]) == (fresh["comparable_reason"], fresh["coverage_pct"])
+    assert (gate["reason"], gate["coverage_pct"]) == ("coverage_low", 40.0)
+
+
+@pytest.mark.asyncio
+async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_does_not_list(reports_client):
+    """An agency added past the agencies API, which would invalidate the
+    board, is missing from a board cached before it. Its report then says
+    nothing about a comparison rather than guessing one."""
+    import csv
+    import io
+
+    client, _agency_id, pool = reports_client
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    late = await _add_agency(pool, "Late")
+    await _seed_gated_agency(pool, late, name="Late", strategy="static_join", delay_min=1, **_DENSE)
+
+    body = (await client.get(_council_url(late))).json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    assert not any(line.startswith("※他事業者との比較") for line in body["text"].split("\n"))
+    rows = list(csv.reader(io.StringIO((await client.get(_council_url(late, extra="&format=csv"))).text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[6:] == ["", "", "", "", ""]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be_built(reports_client, monkeypatch):
+    """The board reads every agency's figures, so a failure building it, for
+    any agency, leaves the council report without a verdict rather than
+    failing a report whose own figures never needed it. Freshness and the
+    quality share then come from the report's own reads."""
+    import csv
+    import io
+
+    from pipeline.reports import council
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, clamp=300, **_DENSE)
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure reading another agency's ridership weights")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+
+    resp = await client.get(_council_url(agency_id))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    lines = body["text"].split("\n")
+    assert not any(line.startswith("※他事業者との比較") for line in lines)
+    assert "※データ品質: 観測値の1.5%が異常値として除外されています。" in lines
+
+    csv_resp = await client.get(_council_url(agency_id, extra="&format=csv"))
+    assert csv_resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_resp.text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[6:] == ["", "", "", "", ""]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_prints_one_implausible_share_for_its_quality_note_and_its_verdict(reports_client):
+    """The quality note and a clamp_high verdict both print the share the
+    board's row holds, so a change the cached board has not picked up yet
+    never leaves the report with two different shares."""
+    import re
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Noisy", strategy="static_join", delay_min=1, clamp=2000, **_DENSE)
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    # An analyze run rewrites the day's feed health after the board was read.
+    await pool.execute("UPDATE agg_feed_health SET clamp_count = 3000 WHERE agency_id = $1", agency_id)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"]["reason"] == "clamp_high"
+    shares = set(re.findall(r"観測値の([0-9.]+)%|異常値 ([0-9.]+)%", body["text"]))
+    printed = {float(share) for pair in shares for share in pair if share}
+    assert printed == {10.0}
+
+
+@pytest.mark.asyncio
+async def test_council_summary_judges_an_agency_exactly_as_the_agencies_board_does(reports_client):
+    from pipeline.reports.network import compute_network_summary
+
+    client, agency_id, pool = reports_client
+    sparse, thin, regex = [await _add_agency(pool, n) for n in ("Sparse", "Thin", "Regex")]
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    await _seed_gated_agency(pool, sparse, name="Sparse", strategy="static_join", delay_min=5, **_SPARSE)
+    await _seed_gated_agency(
+        pool, thin, name="Thin", strategy="static_join", delay_min=2, clamp=300, **{**_DENSE, "observed": 400}
+    )
+    await _seed_gated_agency(pool, regex, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+    compute_network_summary.cache_clear()
+    board = (await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})).json()
+    rows = {r["agency_id"]: r for r in board["agencies"]}
+    assert board["comparability"] == _THRESHOLDS
+    figures = ("coverage_pct", "observed_trips", "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct")
+    figures += ("planned_trips", "delivered_missing")
+    for aid in (agency_id, sparse, thin, regex):
+        gate = (await client.get(_council_url(aid))).json()["comparability"]
+        row = rows[aid]
+        assert gate == {
+            "comparable": row["comparable"],
+            "reason": row["comparable_reason"],
+            **{k: row[k] for k in figures},
+            "thresholds": board["comparability"],
+        }
+    assert {rows[aid]["comparable_reason"] for aid in rows} == {None, "ci_wide", "coverage_low", "coverage_unknown"}
+
+
+@pytest.mark.asyncio
+async def test_council_summary_judges_the_whole_agency_whatever_narrows_its_on_time_figures(reports_client):
+    """The gate reads the board's figures: every route, every day of the
+    period and the board's on-time definition. A route filter or another
+    tolerance narrows the on-time figures, never the verdict, and the notes
+    say so."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    # A second route, late every time, that a filter to R1 leaves out.
+    await _seed_route_dist(pool, agency_id, "R2", [(_GATE_DAY, 1000, 1000 * 600, 0)])
+
+    unfiltered = (await client.get(_council_url(agency_id))).json()
+    by_route = (await client.get(_council_url(agency_id, extra="&routes=R1"))).json()
+    custom = "&early_tolerance_sec=45&late_tolerance_sec=90"
+    tolerance = (await client.get(_council_url(agency_id, extra=custom))).json()
+
+    assert by_route["rows"][0][0] != unfiltered["rows"][0][0]
+    assert by_route["comparability"] == tolerance["comparability"] == unfiltered["comparability"]
+    assert unfiltered["comparability"]["comparable"] is True
+    assert "他事業者との比較は、系統" not in unfiltered["text"]
+    assert "データ品質と他事業者との比較は" in by_route["text"]
+    same_definition = "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定"
+    assert same_definition in tolerance["text"]
+    assert same_definition not in unfiltered["text"]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_csv_carries_the_comparability_columns(reports_client):
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Sparse")
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    await _seed_gated_agency(pool, other, name="Sparse", strategy="static_join", delay_min=5, **_SPARSE)
+
+    for aid, status in ((agency_id, ["はい", "", "90.0", "87.8", "91.8"]), (other, ["いいえ", "ci_wide", "90.0"])):
+        resp = await client.get(_council_url(aid, extra="&format=csv"))
+        assert resp.status_code == 200
+        rows = list(csv.reader(io.StringIO(resp.text)))
+        header_idx = rows.index(_COUNCIL_CSV_HEADER)
+        data_row = rows[header_idx + 1]
+        assert len(data_row) == len(_COUNCIL_CSV_HEADER)
+        assert data_row[6 : 6 + len(status)] == status
+        assert any(r[0].startswith("他事業者との比較: ") for r in rows[1:header_idx])
+    gate = (await client.get(_council_url(other))).json()["comparability"]
+    assert data_row[9:] == [str(gate["ci_low"]), str(gate["ci_high"])]
 
 
 _CERT_CSV_HEADER = [

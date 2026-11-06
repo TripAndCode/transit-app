@@ -1374,7 +1374,11 @@
       "observations": "観測データ数（停留所単位）",
       "plan_coverage": "※時刻表に計画がある{{covered}}/{{window}}日分",
       "delivered": "運行率",
-      "delivered_agency_wide": "運行率（事業者全体）"
+      "delivered_agency_wide": "運行率（事業者全体）",
+      "comparison": "他事業者との比較",
+      "comparison_agency_wide": "他事業者との比較（事業者全体）",
+      "comparable": "比較できます",
+      "not_comparable": "比較できません"
     },
     "print": "印刷 / PDFで保存",
     "certificate": {
