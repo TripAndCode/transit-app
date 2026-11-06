@@ -200,8 +200,11 @@ evaluation summary under `evaluations/` into `ml_evaluations`
 skipping by name any document that is not JSON, uses a schema other than 1, is
 missing a field, names a run date other than its key's, or holds a non-finite
 number; a week whose document is unchanged is left as it is. A summary that
-cannot be fetched at all is a read failure, not a skipped document. Each of the two steps is guarded on its
-own, so one failing never skips the other.
+cannot be fetched at all is a read failure, not a skipped document. Every weekly
+live scorecard (`evaluations/<run_date>/live.json`, see Live scorecard) goes the
+same way into `ml_live_evaluations`, its own table because a live week can exist
+without a summary, under the same checks bar the summary's own fields. Each of the
+three steps is guarded on its own, so one failing never skips the others.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
 forecast and every evaluation summary into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`

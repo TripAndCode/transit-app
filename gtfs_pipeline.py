@@ -940,7 +940,8 @@ def cmd_reprobe_rt_coverage(args):
 
 
 def cmd_ingest_ml(args):
-    """Pull the ML workbench's latest published forecast and its weekly evaluation summaries from R2 into Postgres.
+    """Pull the ML workbench's latest published forecast and its weekly evaluation summaries and live scorecards
+    from R2 into Postgres.
 
     Operator-run, so it fails loudly: the cron sweep's copy of this step logs
     and carries on, which would turn a wrong token into a silent "0 rows"."""
@@ -955,6 +956,7 @@ def cmd_ingest_ml(args):
     try:
         forecast = ml_forecast_ingest.load_forecast(conn, s3, bucket)
         evaluations = ml_evaluation_ingest.load_evaluations(conn, s3, bucket)
+        live = ml_evaluation_ingest.load_live_evaluations(conn, s3, bucket)
     except (
         ml_forecast_ingest.ForecastReadError,
         ml_forecast_ingest.ForecastWriteError,
@@ -975,6 +977,12 @@ def cmd_ingest_ml(args):
         logger.info(f"ingest_ml: upserted {evaluations.upserted} evaluation summary(ies)")
     if evaluations.skipped:
         logger.warning(f"ingest_ml: skipped unreadable or unsupported summaries: {', '.join(evaluations.skipped)}")
+    if live.listed == 0:
+        logger.info("ingest_ml: no live scorecard has been published yet")
+    else:
+        logger.info(f"ingest_ml: upserted {live.upserted} live scorecard(s)")
+    if live.skipped:
+        logger.warning(f"ingest_ml: skipped unreadable or unsupported live scorecards: {', '.join(live.skipped)}")
 
 
 def main():

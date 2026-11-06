@@ -18,7 +18,7 @@ from pipeline.ml_forecast_ingest import ForecastIngest, ForecastReadError, Forec
 _NO_SUMMARIES = EvaluationIngest(listed=0, upserted=0, skipped=())
 
 
-def _run(*, load_result=None, load_error=None, eval_result=_NO_SUMMARIES, eval_error=None):
+def _run(*, load_result=None, load_error=None, eval_result=_NO_SUMMARIES, eval_error=None, live_result=_NO_SUMMARIES):
     """Runs the command against a fake connection, and checks it is closed
     whether the ingest succeeds or not. A real connection's behavior is
     covered in tests/db/test_ml_forecast_ingest_db.py."""
@@ -39,6 +39,7 @@ def _run(*, load_result=None, load_error=None, eval_result=_NO_SUMMARIES, eval_e
         patch.object(ml_forecast_ingest, "s3_client_from_env", return_value=(object(), "transit-ml")),
         patch.object(ml_forecast_ingest, "load_forecast", side_effect=fake_load),
         patch.object(ml_evaluation_ingest, "load_evaluations", side_effect=fake_evaluations),
+        patch.object(ml_evaluation_ingest, "load_live_evaluations", return_value=live_result),
     ):
         try:
             gtfs_pipeline.cmd_ingest_ml(Namespace())
@@ -107,3 +108,17 @@ def test_says_no_summary_is_published_rather_than_zero_summaries(caplog):
         _run(load_result=ForecastIngest(prefix=None, rows=0))
     assert "no evaluation summary has been published yet" in caplog.text
     assert "upserted 0 evaluation" not in caplog.text
+
+
+def test_reports_the_live_scorecards_it_ingested_and_names_the_skipped(caplog):
+    scorecards = EvaluationIngest(listed=3, upserted=2, skipped=("evaluations/2026-11-08/live.json",))
+    with caplog.at_level(logging.INFO):
+        _run(load_result=ForecastIngest(prefix=None, rows=0), live_result=scorecards)
+    assert "upserted 2 live scorecard(s)" in caplog.text
+    assert "evaluations/2026-11-08/live.json" in caplog.text
+
+
+def test_says_no_live_scorecard_is_published_rather_than_zero(caplog):
+    with caplog.at_level(logging.INFO):
+        _run(load_result=ForecastIngest(prefix=None, rows=0))
+    assert "no live scorecard has been published yet" in caplog.text

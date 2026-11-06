@@ -4,7 +4,7 @@ replaces its row, and the stored document round-trips."""
 import json
 from datetime import date
 
-from pipeline.ml_evaluation_ingest import EvaluationIngest, load_evaluations
+from pipeline.ml_evaluation_ingest import EvaluationIngest, load_evaluations, load_live_evaluations
 
 
 class _FakeS3:
@@ -68,3 +68,36 @@ def test_an_unchanged_week_is_left_alone_so_ingested_at_means_when_it_last_chang
     with pg_conn.cursor() as cur:
         cur.execute("SELECT ingested_at::date FROM ml_evaluations")
         assert cur.fetchone()[0] != date(2026, 1, 1)
+
+
+def _live_store(**weeks):
+    return _FakeS3(
+        {
+            f"evaluations/{run}/live.json": json.dumps(
+                {"schema": 1, "run_date": run, "skill": {"live": skill}}
+            ).encode()
+            for run, skill in weeks.items()
+        }
+    )
+
+
+def test_every_live_scorecard_lands_and_only_a_changed_one_is_rewritten(pg_conn):
+    store = _live_store(**{"2026-11-08": 0.012, "2026-11-15": 0.031})
+    assert load_live_evaluations(pg_conn, store, "transit-ml") == EvaluationIngest(listed=2, upserted=2, skipped=())
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE ml_live_evaluations SET ingested_at = '2026-01-01T00:00:00Z'")
+    pg_conn.commit()
+
+    assert load_live_evaluations(pg_conn, store, "transit-ml").upserted == 0
+    republished = _live_store(**{"2026-11-08": 0.012, "2026-11-15": 0.029})
+    assert load_live_evaluations(pg_conn, republished, "transit-ml").upserted == 1
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT run_date, schema_version, document, ingested_at::date = '2026-01-01' "
+            "FROM ml_live_evaluations ORDER BY run_date"
+        )
+        rows = cur.fetchall()
+    assert [(r[0], r[1], r[2]["skill"]["live"], r[3]) for r in rows] == [
+        (date(2026, 11, 8), 1, 0.012, True),
+        (date(2026, 11, 15), 1, 0.029, False),
+    ]
