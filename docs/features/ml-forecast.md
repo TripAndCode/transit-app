@@ -15,6 +15,7 @@ After that, each nightly run adds only the archives that have become final.
 |---|---|---|
 | daily 10:30 | `python -m ml.cli sync` | R2 archives replayed into the replica in timeline order; done-set in `/var/lib/transit-ml/sync-state.json` |
 | Sundays 04:00 | `backtest` → `train-eval` → `report` → `train` → `publish-eval`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models); `publish-eval` uploads `evaluations/<run_date>/summary.json` to the `transit-ml` bucket whatever the verdict |
+| after the Sunday chain, whatever its outcome | `python -m ml.cli live-score --publish` (`transit-ml-live-score.service`, started by the chain's `OnSuccess=`/`OnFailure=`; no timer of its own) | `/var/lib/transit-ml/backtests/live.json`, uploaded to `evaluations/<run_date>/live.json` (see Live scorecard) |
 | daily 11:00 | `python -m ml.cli predict` | `/var/lib/transit-ml/forecast/forecast.parquet`, uploaded to R2 as the latest published forecast |
 
 `train` runs after the report so a model-publish failure can never suppress the
@@ -22,7 +23,8 @@ report, and `publish-eval` runs last so a failed summary upload can never stop a
 adopted model going out (`train` exits 0 on a rejected week, so the summary is
 still published). Each job reports to healthchecks.io through
 `deploy/vps/run-with-ping.sh` (`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`,
-`HC_PING_URL_PREDICT`).
+`HC_PING_URL_PREDICT`, `HC_PING_URL_LIVE_SCORE`). The live scorecard has its own
+check, so its failure never reads as the weekly job's.
 
 The evaluation summary is the web app's copy of that week's verdict: `adopted`,
 the `failures` as codes with their measured values (worded by the app, not the
@@ -40,7 +42,7 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 ## Setup
 
-1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict`/`publish-eval` publish to). Each of those jobs swaps `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for its own short-lived process, so the read-only pair is never exposed to a process that writes.
+1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict`/`publish-eval`/`live-score` publish to). Each of those jobs swaps `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for its own short-lived process, so the read-only pair is never exposed to a process that writes.
 2. `bash deploy/vps/bootstrap.sh` from `/root/transit-app`. It is safe to re-run.
 
 ## Operating it
@@ -220,9 +222,9 @@ forecast shows its past average with a mark.
 
 ### Live scorecard
 
-`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N]...` scores every forecast
-published in the last 28 days against what actually ran, on the target days the replica holds as final
-(from day + 2). Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model
+`python -m ml.cli live-score --out <file> [--run-date YYYY-MM-DD] [--agency N]... [--publish]` scores
+every forecast published in the last 28 days against what actually ran, on the target days the replica
+holds as final (from day + 2). Per forecast it reads that origin's `forecast.parquet` and `manifest.json` and the model
 version that made it (`models/<version>/`) from R2, and builds the counterfactual: the same model given
 the target days' actual runs instead of the template, from the history the 11:00 predict could see. Like
 predict, it loads each agency's whole run history, because a service's weekend share counts every day
@@ -239,4 +241,5 @@ before the origin.
 The document (`live.json`, schema 1) breaks the scores down overall, by lead day, by agency (with the
 first origin in the window that published each agency) and by origin (with its withheld days). An origin
 counts once both its files are in R2: predict uploads the manifest last. It is read-only on the replica
-and writes only `--out`.
+and writes `--out`; with `--publish` it also uploads the document to `evaluations/<run_date>/live.json`,
+beside that week's `summary.json`.
