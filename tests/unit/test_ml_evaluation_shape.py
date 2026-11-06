@@ -114,26 +114,21 @@ _LIVE = {
 
 
 def test_the_live_scorecard_keeps_the_fields_the_card_reads():
-    live = shape_live(_LIVE, date(2026, 11, 8))
-    assert live == {
-        "run_date": date(2026, 11, 8),
+    assert shape_live(_LIVE) == {
         "first_origin": "2026-10-11",
         "last_origin": "2026-11-05",
         "origins": 26,
         "target_days": 25,
-        "runs": 41000,
         "skill_live": 0.012,
         "skill_counterfactual": 0.061,
         "live_slot_coverage": 0.77,
         "published_share": 0.93,
-        "by_lead": [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}],
+        "by_lead": [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05}],
     }
 
 
 def test_a_scorecard_with_nothing_scored_is_shaped_without_crashing():
-    live = shape_live(
-        {"schema": 1, "run_date": "2026-11-08", "window": {"origins": 0, "target_days": 0}}, date(2026, 11, 8)
-    )
-    assert live["origins"] == 0 and live["runs"] == 0
+    live = shape_live({"schema": 1, "run_date": "2026-11-08", "window": {"origins": 0, "target_days": 0}})
+    assert live["origins"] == 0 and live["target_days"] == 0
     assert live["skill_live"] is None and live["first_origin"] is None
     assert live["by_lead"] == []

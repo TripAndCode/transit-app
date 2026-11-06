@@ -63,20 +63,17 @@ def shape_history(rows: Sequence[tuple[date, bool, float | None, str]]) -> list[
     ]
 
 
-def shape_live(document: Mapping[str, Any], run_date: date) -> dict[str, Any]:
+def shape_live(document: Mapping[str, Any]) -> dict[str, Any]:
     """The live scorecard's fields the page's card reads. The scorecard leaves
     out a bucket that scored no runs, so each field falls back to empty."""
     window = document.get("window") or {}
     skill = document.get("skill") or {}
-    live_overall = (document.get("overall") or {}).get("live") or {}
     live_slot = (document.get("interval") or {}).get("live_slot") or {}
     return {
-        "run_date": run_date,
         "first_origin": window.get("first_origin"),
         "last_origin": window.get("last_origin"),
         "origins": window.get("origins", 0),
         "target_days": window.get("target_days", 0),
-        "runs": live_overall.get("runs", 0),
         "skill_live": skill.get("live"),
         "skill_counterfactual": skill.get("counterfactual"),
         "live_slot_coverage": live_slot.get("coverage"),
@@ -86,7 +83,6 @@ def shape_live(document: Mapping[str, Any], run_date: date) -> dict[str, Any]:
                 "lead": row["lead"],
                 "skill_live": row.get("skill_live"),
                 "skill_counterfactual": row.get("skill_counterfactual"),
-                "runs": row.get("runs", 0),
             }
             for row in document.get("by_lead") or []
         ],

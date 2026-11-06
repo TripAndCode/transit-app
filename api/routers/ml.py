@@ -77,19 +77,16 @@ class MlLiveLead(BaseModel):
     lead: int
     skill_live: float | None
     skill_counterfactual: float | None
-    runs: int
 
 
 class MlLiveScorecard(BaseModel):
     """How the published forecasts did against what ran, beside the same model
     given the trips that ran (the counterfactual)."""
 
-    run_date: date
     first_origin: date | None
     last_origin: date | None
     origins: int
     target_days: int
-    runs: int
     skill_live: float | None
     skill_counterfactual: float | None
     live_slot_coverage: float | None
@@ -115,10 +112,8 @@ async def ml_evaluations(request: Request, conn: asyncpg.Connection = Depends(ge
         "FROM ml_evaluations ORDER BY run_date DESC"
     )
     forecast_in_use = await aflag("ml_forecast")
-    newest_live = await conn.fetchrow(
-        "SELECT run_date, document FROM ml_live_evaluations ORDER BY run_date DESC LIMIT 1"
-    )
-    live = shape_live(json.loads(newest_live["document"]), newest_live["run_date"]) if newest_live else None
+    newest_live = await conn.fetchval("SELECT document FROM ml_live_evaluations ORDER BY run_date DESC LIMIT 1")
+    live = shape_live(json.loads(newest_live)) if newest_live else None
     if not weeks:
         return {"latest": None, "history": [], "forecast_in_use": forecast_in_use, "live": live}
     newest = weeks[0]["run_date"]

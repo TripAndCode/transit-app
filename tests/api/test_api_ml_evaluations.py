@@ -137,8 +137,7 @@ async def test_the_newest_live_scorecard_is_served(client, aconn, aagency_id):
         )
 
     live = (await client.get("/api/ml/evaluations")).json()["live"]
-    assert live["run_date"] == "2026-11-08"
-    assert (live["skill_live"], live["skill_counterfactual"]) == (0.012, 0.061)
-    assert (live["origins"], live["target_days"], live["runs"]) == (26, 25, 41000)
+    assert (live["skill_live"], live["skill_counterfactual"]) == (0.012, 0.061)  # the newest week's
+    assert (live["origins"], live["target_days"]) == (26, 25)
     assert (live["live_slot_coverage"], live["published_share"]) == (0.77, 0.93)
-    assert live["by_lead"] == [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05, "runs": 6000}]
+    assert live["by_lead"] == [{"lead": 1, "skill_live": -0.01, "skill_counterfactual": 0.05}]

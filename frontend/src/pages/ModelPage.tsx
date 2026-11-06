@@ -194,11 +194,13 @@ function Headline({ latest }: { latest: MlEvaluationLatest }) {
 
 /** What copying a recent day's trips costs the published forecast, in
  *  percentage points between the two skills as printed, so the cost agrees
- *  with them. A forecast that did as well as the counterfactual costs nothing. */
+ *  with them. A published forecast can also come out ahead of the
+ *  counterfactual in a given window, and is then said to. */
 function templateCostText(t: TFunction, live: number | null, counterfactual: number | null): string | null {
   if (live == null || counterfactual == null) return null;
   const points = roundTenth(roundTenth(counterfactual * 100) - roundTenth(live * 100));
-  return points > 0 ? t("model.live_cost", { points: fixedTenth(points) }) : t("model.live_cost_none");
+  if (points === 0) return t("model.live_cost_none");
+  return t(points > 0 ? "model.live_cost" : "model.live_cost_ahead", { points: fixedTenth(Math.abs(points)) });
 }
 
 function LiveLeads({ leads }: { leads: MlLiveLead[] }) {
@@ -264,10 +266,10 @@ function LiveForecast({ live }: { live: MlLiveScorecard }) {
       {live.first_origin && live.last_origin && (
         <div style={muted}>
           {t("model.live_window", {
-            origins: live.origins,
+            forecasts: t("model.live_forecasts", { count: live.origins }),
             first: live.first_origin,
             last: live.last_origin,
-            days: live.target_days,
+            days: t("model.live_days", { count: live.target_days }),
           })}
         </div>
       )}
@@ -451,6 +453,7 @@ export function ModelPage() {
       {isPending && <Skeleton height={200} />}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && !data.latest && <p style={muted}>{t("model.empty")}</p>}
+      {data && !data.latest && data.live && <LiveForecast live={data.live} />}
       {data?.latest && (
         <>
           {!data.forecast_in_use && <p style={muted}>{t("model.flag_off")}</p>}

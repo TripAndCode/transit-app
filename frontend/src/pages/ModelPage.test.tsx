@@ -37,19 +37,17 @@ function evaluations(partial: Partial<MlEvaluations> = {}): MlEvaluations {
 }
 
 const LIVE: NonNullable<MlEvaluations["live"]> = {
-  run_date: "2026-11-08",
   first_origin: "2026-10-11",
   last_origin: "2026-11-05",
   origins: 26,
   target_days: 25,
-  runs: 41000,
   skill_live: 0.012,
   skill_counterfactual: 0.061,
   live_slot_coverage: 0.772,
   published_share: 0.931,
   by_lead: [
-    { lead: 1, skill_live: -0.01, skill_counterfactual: 0.05, runs: 6000 },
-    { lead: 2, skill_live: 0.02, skill_counterfactual: null, runs: 5800 },
+    { lead: 1, skill_live: -0.01, skill_counterfactual: 0.05 },
+    { lead: 2, skill_live: 0.02, skill_counterfactual: null },
   ],
 };
 
@@ -126,6 +124,25 @@ describe("ModelPage", () => {
     expect(screen.getByTestId("model-live")).toHaveTextContent(
       "Copying a recent day's trips for the days ahead costs nothing measurable",
     );
+  });
+
+  it("says so when the published forecast came out ahead of the counterfactual", () => {
+    renderPage(evaluations({ live: { ...LIVE, skill_live: 0.07 } }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent(
+      "The published forecasts came out 0.9 points ahead of the same model given the trips that ran",
+    );
+  });
+
+  it("counts a single forecast and day in the singular", () => {
+    renderPage(evaluations({ live: { ...LIVE, origins: 1, target_days: 1, last_origin: "2026-10-11" } }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent(
+      "1 forecast made 2026-10-11 to 2026-10-11, checked against 1 day that ran",
+    );
+  });
+
+  it("shows a published scorecard before the first weekly evaluation is in", () => {
+    renderPage(evaluations({ latest: null, history: [], live: LIVE }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent("1.2% less error");
   });
 
   it("shows no live card until a scorecard is published", () => {
