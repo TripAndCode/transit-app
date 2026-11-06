@@ -296,6 +296,7 @@ def _stub_predict(monkeypatch, raw, origin):
     monkeypatch.setattr("ml.dataset.load_runs", lambda client, agency_ids: raw)
     monkeypatch.setattr("ml.cli.get_client", lambda: object())
     monkeypatch.setattr("ml.cli._calendar_day_types", lambda database_url, agency_ids, first, last: {})
+    monkeypatch.setattr("ml.cli._timetable_plans", lambda database_url, agency_ids, first, last: ({}, set()))
     monkeypatch.setattr("ml.cli._today_jst", lambda: origin)
     calls = []
     monkeypatch.setattr("ml.cli._run", calls.append)
@@ -355,6 +356,32 @@ def test_predict_publishes_nothing_for_an_agency_whose_data_stopped(tmp_path, mo
     out = tmp_path / "forecast.parquet"
     assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8", "--agency", "9"]) == 0
     assert set(pd.read_parquet(out)["agency_id"]) == {8}
+
+
+def test_predict_withholds_the_days_a_new_timetable_plans_other_trips_for(tmp_path, monkeypatch):
+    """The old and new timetables differ in trips from day D: a forecast made before D withholds the days
+    from D on, and the manifest names them."""
+    raw = _runs()
+    model_dir = tmp_path / "model"
+    _publish_model(raw, model_dir)
+    origin = START + timedelta(days=DAYS)
+    change = origin + timedelta(days=4)
+    _stub_predict(monkeypatch, raw, origin)
+    old = frozenset(raw["trip_id"])
+    plans = {}
+    for offset in range(1, 8):
+        day = origin + timedelta(days=offset)
+        plans[(8, day)] = old if day < change else frozenset({"NEW1", "NEW2"})
+    monkeypatch.setattr("ml.cli._timetable_plans", lambda database_url, agency_ids, first, last: (plans, {8}))
+
+    out = tmp_path / "forecast.parquet"
+    assert main(["predict", "--model", str(model_dir), "--out", str(out), "--agency", "8"]) == 0
+    days = set(pd.read_parquet(out)["service_date"].dt.date)
+    assert days == {origin + timedelta(days=offset) for offset in range(1, 4)}
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert [day["service_date"] for day in manifest["withheld"]] == [
+        (change + timedelta(days=offset)).isoformat() for offset in range(4)
+    ]
 
 
 @pytest.mark.parametrize("database_url", [None, ""])

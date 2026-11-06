@@ -29,7 +29,7 @@ reconstructed: the reload that replaced their timetable erased them.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import date, datetime, timedelta, timezone
 
 from api.range import MAX_RANGE_DAYS
@@ -114,6 +114,30 @@ def plan_ctes(agency_ids: str, from_date: str, to_date: str) -> str:
         LEFT JOIN trip_counts t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
         GROUP BY cv.agency_id, cv.day
     )"""
+
+
+_TRIP_IDS_SQL = (
+    "WITH"
+    + plan_ctes("$1::int[]", "$2::date", "$3::date")
+    + """
+    SELECT cv.agency_id, cv.day, array_remove(array_agg(t.trip_id), NULL) AS trips
+    FROM covered cv
+    LEFT JOIN running r ON r.agency_id = cv.agency_id AND r.day = cv.day
+    LEFT JOIN static_trips t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
+    GROUP BY cv.agency_id, cv.day
+    """
+)
+
+
+async def planned_trip_ids(
+    conn, agency_ids: Sequence[int], first: date, last: date
+) -> dict[tuple[int, date], frozenset[str]]:
+    """The trip_ids the loaded timetable plans on each day of [first, last] it
+    covers, keyed (agency, day): none on a covered day nothing runs, under the
+    running rule :func:`plan_ctes` counts by. A day it says nothing about is
+    absent. *conn* is an asyncpg connection."""
+    rows = await conn.fetch(_TRIP_IDS_SQL, list(agency_ids), first, last)
+    return {(row["agency_id"], row["day"]): frozenset(row["trips"]) for row in rows}
 
 
 def running_trip_join(agency_id: str, trip_id: str, day: str) -> str:

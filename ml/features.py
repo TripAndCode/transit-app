@@ -170,6 +170,45 @@ def template_future_runs(
     return pd.concat(frames, ignore_index=True) if frames else runs.iloc[0:0].copy()
 
 
+# The timetable a day ran under plans every trip it ran, so a template whose
+# trips the target day's plan lacks ran under another timetable: forecasting it
+# would forecast trips that no longer run. The margin absorbs a trip or two
+# that a timetable drops without being replaced.
+WITHHOLD_MISSING_SHARE = 0.05
+
+
+def withhold_changed_timetable(
+    template: pd.DataFrame, planned: Mapping[tuple[int, date], frozenset[str]], stamping: set[int]
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Drop each templated (agency, target day) whose template ran under another
+    timetable than the one *planned* gives for that day: at least
+    WITHHOLD_MISSING_SHARE of the template's trips are not planned that day,
+    every trip on a covered day nothing runs. Only for the agencies in
+    *stamping*, whose trip_ids are the timetable's own; a day the loaded
+    timetable says nothing about keeps its template. Returns the kept template
+    and one record per withheld day."""
+    if template.empty:
+        return template, []
+    keep = pd.Series(True, index=template.index)
+    withheld = []
+    for (agency_id, day), rows in template.groupby(["agency_id", "service_date"]):
+        plan = planned.get((int(agency_id), day.date()))
+        if int(agency_id) not in stamping or plan is None:
+            continue
+        trips = set(rows["trip_id"].dropna())
+        missing = len(trips - plan) / len(trips) if trips else 0.0
+        if missing >= WITHHOLD_MISSING_SHARE:
+            keep[rows.index] = False
+            withheld.append(
+                {
+                    "agency_id": int(agency_id),
+                    "service_date": day.date().isoformat(),
+                    "missing_share": round(missing, 3),
+                }
+            )
+    return template[keep], withheld
+
+
 def _guessed(day: date, types: DayTypes, holidays: frozenset[date]) -> bool:
     year_end = (day.month == 12 and day.day >= 29) or (day.month == 1 and day.day <= 3)
     return day not in types.from_calendar and (day in holidays or year_end)

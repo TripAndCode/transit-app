@@ -155,6 +155,21 @@ Saturday, or Sunday-and-holiday), in `ml.features.template_future_runs`:
   ingested every closed JST day, so a current feed's newest day is the day
   before; the second day absorbs one sync or archive upload that has not landed
   by 11:00.
+- **A day a new timetable governs is withheld** (`withhold_changed_timetable`).
+  For an agency whose ingest takes its trip_ids from the timetable (`static_join`),
+  each target day the replica's loaded timetable covers is checked: when 5% or
+  more of the template's trips are not among the trips that timetable plans for
+  the day, the template ran under another timetable (the one a day ran under
+  plans every trip it ran), so the day would forecast trips that no longer run.
+  It is not forecast, the app shows its past average, and the upload's
+  `manifest.json` lists it under `withheld` with the missing share. A covered day
+  the timetable runs nothing on is withheld too; a day the loaded timetable says
+  nothing about keeps its template. This catches a revision that adds, removes or
+  renames trips, from the sync that loads it: forecasts made before its start
+  withhold the days from its start on, and the days after it until a day of each
+  type has run under it that the partial-day rule accepts as a template. A revision that keeps a trip's id but moves its times is
+  not caught. Agency 1's regex trip_ids are not the timetable's, so it keeps its
+  templates.
 
 The backtest and training never template. They score and learn from the runs
 that actually happened on each target day. The backtest therefore measures the

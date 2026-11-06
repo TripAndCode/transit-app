@@ -15,6 +15,7 @@ from ml.features import (  # noqa: E402
     template_span,
     weekend_days,
     with_route_ids,
+    withhold_changed_timetable,
 )
 from pipeline.day_types import WeeklyService, fallback_day_type, resolve_day_types  # noqa: E402
 
@@ -522,3 +523,51 @@ def test_an_agency_with_no_history_gets_no_cap_rather_than_a_crash():
 def test_a_clip_quantile_must_name_an_upper_tail(quantile):
     with pytest.raises(ValueError, match="clip_quantile"):
         build_frame(_outlier_history(), ORIGIN, clip_quantile=quantile)
+
+
+def _template(days: dict[str, list[str]], agency_id: int = 8):
+    """Templated target-day rows: each day with its template's trip_ids."""
+    rows = [
+        {"agency_id": agency_id, "service_date": pd.Timestamp(day), "trip_id": trip}
+        for day, trips in days.items()
+        for trip in trips
+    ]
+    return pd.DataFrame(rows).astype({"agency_id": "int16", "trip_id": "string"})
+
+
+def test_a_target_day_whose_plan_lacks_the_templates_trips_is_withheld():
+    trips = [f"T{n}" for n in range(4)]
+    template = _template({"2026-03-02": trips, "2026-03-03": trips})
+    planned = {(8, date(2026, 3, 2)): frozenset(trips), (8, date(2026, 3, 3)): frozenset({"N1", "N2"})}
+    kept, withheld = withhold_changed_timetable(template, planned, {8})
+    assert set(kept["service_date"]) == {pd.Timestamp("2026-03-02")}
+    assert withheld == [{"agency_id": 8, "service_date": "2026-03-03", "missing_share": 1.0}]
+
+
+def test_a_few_trips_the_plan_lacks_keep_the_template():
+    trips = [f"T{n}" for n in range(40)]
+    template = _template({"2026-03-02": trips})
+    kept, withheld = withhold_changed_timetable(template, {(8, date(2026, 3, 2)): frozenset(trips[1:])}, {8})
+    assert len(kept) == 40
+    assert withheld == []
+
+
+def test_a_covered_day_the_timetable_runs_nothing_on_is_withheld():
+    template = _template({"2026-03-02": ["T1"]})
+    kept, withheld = withhold_changed_timetable(template, {(8, date(2026, 3, 2)): frozenset()}, {8})
+    assert kept.empty
+    assert withheld[0]["missing_share"] == 1.0
+
+
+def test_a_day_the_timetable_says_nothing_about_keeps_the_template():
+    template = _template({"2026-03-02": ["T1"]})
+    kept, withheld = withhold_changed_timetable(template, {}, {8})
+    assert len(kept) == 1
+    assert withheld == []
+
+
+def test_an_agency_whose_trip_ids_are_not_the_timetables_keeps_the_template():
+    template = _template({"2026-03-02": ["T1"]}, agency_id=1)
+    kept, withheld = withhold_changed_timetable(template, {(1, date(2026, 3, 2)): frozenset({"N1"})}, {8})
+    assert len(kept) == 1
+    assert withheld == []
