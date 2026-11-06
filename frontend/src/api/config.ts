@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "./client";
 
-type AppConfig = { auth_enabled: boolean; local_admin_enabled: boolean; login_required?: boolean };
+type AppConfig = {
+  auth_enabled: boolean;
+  local_admin_enabled: boolean;
+  login_required?: boolean;
+  feedback_url?: string | null;
+};
 
 /** Public client config from ``GET /api/config``. ``auth_enabled`` hides the
  *  Google/GitHub buttons when SSO is unconfigured; ``local_admin_enabled``
@@ -14,7 +19,8 @@ type AppConfig = { auth_enabled: boolean; local_admin_enabled: boolean; login_re
  *  `LoginPage` renders a retry fallback on `isError` instead.
  *  `login_required` says whether the API currently refuses signed-out
  *  callers; a backend that does not send it has no login gate, so its
- *  absence reads as off. */
+ *  absence reads as off. `feedback_url` is the deployment's feedback address
+ *  (https or mailto), or null when it names none. */
 export function useConfig() {
   return useQuery({
     queryKey: ["config"],

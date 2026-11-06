@@ -422,6 +422,17 @@ class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
     login_required: bool
+    feedback_url: str | None
+
+
+# The SPA renders the feedback address as a link, so only these schemes leave the API.
+_FEEDBACK_SCHEMES = ("https://", "mailto:")
+
+
+def feedback_url() -> str | None:
+    """The deployment's feedback address (``FEEDBACK_URL``), or None when it names none the SPA should link to."""
+    url = os.environ.get("FEEDBACK_URL", "").strip()
+    return url if url.startswith(_FEEDBACK_SCHEMES) else None
 
 
 @app.get("/health", response_model=HealthStatus)
@@ -433,13 +444,15 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    show/hide the break-glass local-admin password form, and send signed-out
-    visitors to sign in while ``login_required`` says the API refuses them."""
+    show/hide the break-glass local-admin password form, send signed-out
+    visitors to sign in while ``login_required`` says the API refuses them, and
+    link to the deployment's feedback address when it has one."""
     enabled, _ = auth_status()
     return {
         "auth_enabled": enabled,
         "local_admin_enabled": local_admin_enabled(),
         "login_required": await enforcement_active(),
+        "feedback_url": feedback_url(),
     }
 
 
