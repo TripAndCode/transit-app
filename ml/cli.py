@@ -9,10 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -267,15 +267,51 @@ async def _read_day_types(conn, agency_ids: Sequence[int], first: date, last: da
     return {agency_id: await load_day_types(conn, agency_id, first, last) for agency_id in agency_ids}
 
 
-def _calendar_day_types(database_url: str, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
-    async def read() -> dict[int, DayTypes]:
+async def _read_timetable_plans(
+    conn, agency_ids: Sequence[int], first: date, last: date
+) -> tuple[dict[tuple[int, date], frozenset[str]], set[int]]:
+    """The trip_ids the replica's loaded timetable plans on each day of
+    [first, last] it covers, and the agencies whose ingest takes its trip_ids
+    from that timetable, so its plan can be held against their runs. A replica
+    whose migrations predate the calendar table plans no day."""
+    from pipeline.planned_trips import planned_trip_ids
+    from pipeline.strategies.static_join import VERSION_STAMPING_STRATEGIES
+
+    rows = await conn.fetch(
+        "SELECT agency_id FROM agencies WHERE agency_id = ANY($1::int[]) AND ingest_strategy = ANY($2::text[])",
+        list(agency_ids),
+        sorted(VERSION_STAMPING_STRATEGIES),
+    )
+    stamping = {row["agency_id"] for row in rows}
+    if not stamping or await conn.fetchval("SELECT to_regclass('static_calendar')") is None:
+        return {}, stamping
+    return await planned_trip_ids(conn, sorted(stamping), first, last), stamping
+
+
+_T = TypeVar("_T")
+
+
+def _on_replica(database_url: str, read: Callable[[Any], Awaitable[_T]]) -> _T:
+    """*read* run on one connection to the replica's Postgres."""
+
+    async def run() -> _T:
         conn = await asyncpg.connect(database_url)
         try:
-            return await _read_day_types(conn, agency_ids, first, last)
+            return await read(conn)
         finally:
             await conn.close()
 
-    return asyncio.run(read())
+    return asyncio.run(run())
+
+
+def _timetable_plans(
+    database_url: str, agency_ids: Sequence[int], first: date, last: date
+) -> tuple[dict[tuple[int, date], frozenset[str]], set[int]]:
+    return _on_replica(database_url, lambda conn: _read_timetable_plans(conn, agency_ids, first, last))
+
+
+def _calendar_day_types(database_url: str, agency_ids: Sequence[int], first: date, last: date) -> dict[int, DayTypes]:
+    return _on_replica(database_url, lambda conn: _read_day_types(conn, agency_ids, first, last))
 
 
 def _predict(args: argparse.Namespace) -> int:
@@ -297,7 +333,13 @@ def _predict(args: argparse.Namespace) -> int:
     import pandas as pd
 
     from ml.dataset import load_runs
-    from ml.features import build_frame, template_future_runs, template_span, with_route_ids
+    from ml.features import (
+        build_frame,
+        template_future_runs,
+        template_span,
+        with_route_ids,
+        withhold_changed_timetable,
+    )
     from ml.model_result import MIN_MODEL_DAYS
     from ml.model_store import load_model_set, load_routes, read_meta
     from ml.models import point_forecast, predict
@@ -318,6 +360,16 @@ def _predict(args: argparse.Namespace) -> int:
     agency_ids = sorted(int(agency) for agency in runs["agency_id"].unique())
     day_types = _calendar_day_types(database_url, agency_ids, first, last)
     template = template_future_runs(runs, origin, horizon_days=HORIZON_DAYS, day_types=day_types)
+    # A template that ran under another timetable than the one loaded for its
+    # target day would forecast trips that no longer run: that day is withheld
+    # (the app shows its past average), and the manifest names it.
+    planned, stamping = _timetable_plans(database_url, agency_ids, origin + timedelta(days=1), last)
+    template, withheld = withhold_changed_timetable(template, planned, stamping)
+    for day in withheld:
+        sys.stderr.write(
+            f"withheld agency {day['agency_id']} {day['service_date']}: {day['missing_share']:.0%} of its "
+            "template's trips are not in the loaded timetable's plan\n"
+        )
     # A meta with no clip_quantile or point belongs to a model fit on unclipped
     # features that shows its mean.
     frame = build_frame(
@@ -351,7 +403,7 @@ def _predict(args: argparse.Namespace) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     forecast.to_parquet(args.out)
     manifest = args.out.parent / "manifest.json"
-    manifest.write_text(json.dumps({"rows": len(forecast), "origin_date": origin.isoformat()}))
+    manifest.write_text(json.dumps({"rows": len(forecast), "origin_date": origin.isoformat(), "withheld": withheld}))
 
     prefix = f"forecasts/{origin.isoformat()}"
     upload_file(args.out, bucket, f"{prefix}/forecast.parquet", endpoint, run=_run)
