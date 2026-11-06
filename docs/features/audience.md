@@ -83,5 +83,6 @@ The cheapest signal is to count, monthly against production, the distinct users 
 made a signed-in request (by session or by API key) over the last 30 days:
 
 ```sql
-SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily WHERE day > now() - interval '30 days';
+SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily
+WHERE day > (now() AT TIME ZONE 'Asia/Tokyo')::date - interval '30 days';
 ```
