@@ -11,9 +11,11 @@ file through `CLAUDE.md`; local Codex reads it directly. Claude's hooks live in
 trusted. Agents in sessions without active hooks must apply the same rules by hand.
 
 Longer reference notes live in `.claude/skills/*/SKILL.md`; `.agents/skills/` links
-the three below to the same files for Codex discovery. They are plain Markdown any
+the four below to the same files for Codex discovery. They are plain Markdown any
 agent can read:
 - `transit-app-gotchas`: test databases, i18n parity, worktrees, CI trailer mechanics;
+- `gtfs-rt-semantics`: what an observation is, service day and clocks, dedup, clamp,
+  timetable versions, the on-time definition;
 - `postgres-perf`: query and aggregate performance traps;
 - `maplibre-map`: Map tab conventions.
 
@@ -40,8 +42,26 @@ tier routing, the high-risk overlay and the fix cap.
   Several agents can share this clone. Don't force-push a branch you didn't create,
   and don't touch another session's worktree. Never `git stash pop`/`drop`/`clear`:
   the stash stack is shared by every worktree. To set work aside, make a WIP commit.
+  - `.claude/hooks/guard_git_shared.py` refuses the three outright for Claude Code
+    and Codex: a push that lands on `main`, a force-push spelled `--force`, `-f` or
+    `+refspec` (only `--force-with-lease` on its own passes), and
+    `stash pop`/`drop`/`clear`.
 - **Never commit secrets.** `.env`, keys and tokens stay untracked. `make hooks`
   installs the gitleaks pre-commit hook; CI's `secrets-scan.yml` is the backstop.
+
+## Product direction
+
+- `docs/features/audience.md` names the user (交通政策担当者 preparing
+  地域公共交通協議会 material), the one job the app does for them, what each screen
+  answers, and who is deliberately not served. Read it before proposing, building or
+  reviewing anything a user sees. A user-facing change names the audience job it
+  serves on the PR template's **Serves:** line; a change that serves none of them is
+  a question for the user before it is a branch.
+- A figure shown or exported carries its basis: definition, period and how much data
+  it rests on, through `DefinitionMeta` and the scope sentence, never a bare value.
+  What an observation is and the invariants every figure rests on are in
+  `gtfs-rt-semantics`; read it before changing ingest, analyze, an aggregate, a
+  report metric or date handling.
 
 ## Architecture pointers
 
@@ -146,6 +166,12 @@ tier routing, the high-risk overlay and the fix cap.
   integration evidence.
 - Put pure logic tests under `tests/unit/`; that directory bypasses DB fixtures.
   Mock the ML embedder unless a test is explicitly slow.
+- A defect in ingest, analyze, an aggregate or a report metric gets its regression
+  through the synthetic fixture (`tests/fixtures/synthetic_gtfs.py`, run end to end by
+  `tests/pipeline/test_synthetic_agg_e2e.py`) with a hand-computed expected value,
+  beside any unit test. Those defects are whole-operation shapes (a trip across
+  midnight, a timetable change inside the window, a cancelled trip, one stop event
+  seen by several polls), and a unit test of one function does not see them.
 
 ## Frontend and user-facing text
 

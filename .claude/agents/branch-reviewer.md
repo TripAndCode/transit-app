@@ -2,7 +2,7 @@
 name: branch-reviewer
 description: Focused read-only review of one or more named dimensions using a prepared branch diff.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 ---
 
 Review only the dimensions named by the caller. The prompt supplies a JSON manifest,
@@ -19,7 +19,10 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
 
 - **bugs** — correctness, edge cases, error handling, idempotency, and graceful
   degradation when one optional sub-check fails.
-- **logic** — whether the implementation actually satisfies the stated objective.
+- **logic** — whether the implementation actually satisfies the stated objective, and,
+  when the objective changes what a user sees, whether it serves the audience job the
+  caller names from `docs/features/audience.md`. An objective that serves none of the
+  jobs there is a Major finding, not a style note.
 - **consistency** — renamed or changed contracts reach every consumer: API/Pydantic
   fields and frontend types, aggregate columns and queries, both locale files, and
   exact-string tests.
@@ -87,7 +90,13 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   `frontend/src/i18n/locales/{ja,en}.json` (intentional source-language exceptions
   carry `i18n-ignore`), and server-side strings in `_LOCALES`
   update both languages and their exact-string tests together; new pages stay
-  lazy-loaded and MapLibre stays out of the entry chunk.
+  lazy-loaded and MapLibre stays out of the entry chunk. From `gtfs-rt-semantics`: an
+  observation's delay is the feed's prediction, it is filed by service day
+  (`pipeline/service_day.py`) in Japan time, and a metric reads `updates` through the
+  dedup in `pipeline/db.py`, so a figure labelled as measured, a date bucketed on
+  `toDate(captured_at)`, an hour parsed from `scheduled_time`, or an aggregate reading
+  raw polls is a `bugs` finding; an on-time or late figure shown without its
+  `DefinitionMeta` is a `consistency` finding.
 - Report findings that affect correctness, security, performance, enforcement, or
   the objective, plus whatever an assigned dimension or brief names as its own
   subject (a stale or non-durable comment, avoidable complexity, a simpler
