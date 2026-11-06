@@ -241,3 +241,18 @@ def test_the_weekly_job_publishes_its_evaluation_last_whatever_the_verdict():
         " --out /var/lib/transit-ml/backtests/summary.json"
         " --model-meta /var/lib/transit-ml/model/meta.json"
     )
+
+
+def test_the_live_score_runs_after_the_weekly_job_whether_it_succeeds_or_fails():
+    """It scores the forecasts already published, so a failed or rejected week does not stop it, and its
+    own ping keeps its failure apart from the weekly job's."""
+    backtest = _unit("transit-ml-backtest.service")
+    unit = backtest[: backtest.index("[Service]")]
+    assert "OnSuccess=transit-ml-live-score.service" in unit.splitlines()
+    assert "OnFailure=transit-ml-live-score.service" in unit.splitlines()
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-live-score.service"), re.MULTILINE)[1]
+    assert "deploy/vps/run-with-ping.sh LIVE_SCORE" in exec_start
+    assert "-m ml.cli live-score" in exec_start and "--publish" in exec_start
+    assert not (VPS / "systemd" / "transit-ml-live-score.timer").exists()
+    lines = [line for line in (VPS / "env.example").read_text().splitlines() if line and not line.startswith("#")]
+    assert "HC_PING_URL_LIVE_SCORE" in dict(line.split("=", 1) for line in lines)
