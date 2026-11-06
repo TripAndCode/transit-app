@@ -30,7 +30,10 @@ async def test_config_carries_no_feedback_address_unless_the_deployment_sets_one
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("url", ["https://forms.example.test/feedback", "mailto:feedback@example.test"])
+@pytest.mark.parametrize(
+    "url",
+    ["https://forms.example.test/feedback", "mailto:feedback@example.test", "HTTPS://forms.example.test/feedback"],
+)
 async def test_config_hands_the_spa_an_https_or_mailto_feedback_address(client, monkeypatch, url):
     monkeypatch.setenv("FEEDBACK_URL", url)
     assert (await client.get("/api/config")).json()["feedback_url"] == url

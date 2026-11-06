@@ -425,14 +425,15 @@ class ClientConfig(BaseModel):
     feedback_url: str | None
 
 
-# The SPA renders the feedback address as a link, so only these schemes leave the API.
+# The SPA renders the feedback address as a link, so only these schemes leave the API
+# (compared case-insensitively, as URI schemes are).
 _FEEDBACK_SCHEMES = ("https://", "mailto:")
 
 
 def feedback_url() -> str | None:
     """The deployment's feedback address (``FEEDBACK_URL``), or None when it names none the SPA should link to."""
     url = os.environ.get("FEEDBACK_URL", "").strip()
-    return url if url.startswith(_FEEDBACK_SCHEMES) else None
+    return url if url.lower().startswith(_FEEDBACK_SCHEMES) else None
 
 
 @app.get("/health", response_model=HealthStatus)
