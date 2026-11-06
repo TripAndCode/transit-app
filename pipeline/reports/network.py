@@ -53,14 +53,16 @@ figure or the executed/planned trip ratio isn't available for this agency.
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
-from pipeline.reports.comparability import assess
+from pipeline.reports.comparability import Assessment, assess
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
@@ -87,11 +89,100 @@ _FEED_SQL = """
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
+_AGENCIES_SQL = (
+    "SELECT agency_id, agency_name, ingest_strategy FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+)
+
 
 def coverage_through(last_days: Iterable[date | None]) -> date | None:
     """Where observation coverage stops for every agency on the board: the
     newest of the agencies' last observed days in the range."""
     return max((d for d in last_days if d is not None), default=None)
+
+
+@dataclass(frozen=True)
+class AgencyFigures:
+    """One agency's figures over a range as the board reads them: the whole
+    agency, every day of the range, and the exact ``legacy_60s`` on-time
+    count, whatever filter or tolerance a per-agency report applies to its
+    own figures. All zero for an agency with no rows in range."""
+
+    samples: int = 0
+    sum_delay_sec: Decimal | int = 0
+    on_time_count: int = 0
+    data_from: date | None = None
+    data_to: date | None = None
+    raw_samples: int = 0
+    clamp_count: int = 0
+
+    @property
+    def avg_delay_min(self) -> float | None:
+        return round(float(self.sum_delay_sec) / self.samples / 60, 1) if self.samples else None
+
+    @property
+    def on_time_pct(self) -> float | None:
+        return round(self.on_time_count / self.samples * 100, 1) if self.samples else None
+
+    @property
+    def clamp_pct(self) -> float | None:
+        """The implausible-reading share; ``None`` without a feed-health row
+        in range, which is not a measured 0%."""
+        return round(self.clamp_count / self.raw_samples * 100, 2) if self.raw_samples else None
+
+
+@dataclass(frozen=True)
+class BoardFigures:
+    """What the board reads for every agency on it over one range:
+    ``agencies`` (the non-deleted ones, by agency_id, with each one's
+    ingest strategy), ``figures`` by agency_id, and :func:`coverage_through`
+    over all of them."""
+
+    agencies: dict[int, Any]
+    figures: dict[int, AgencyFigures]
+    coverage_through: date | None
+
+    def of(self, agency_id: int) -> AgencyFigures:
+        return self.figures.get(agency_id, AgencyFigures())
+
+
+async def read_board_figures(conn, from_date: date, to_date: date) -> BoardFigures:
+    """The board's per-agency figures over ``[from_date, to_date]``, and
+    where observation coverage stops for all of them. A single-agency report
+    that judges its agency as the board does reads them here, so the bound
+    is the board's, never its own agency's last day, which would excuse that
+    agency's own missing trailing days."""
+    agencies = {r["agency_id"]: r for r in await conn.fetch(_AGENCIES_SQL)}
+    perf = {r["agency_id"]: r for r in await conn.fetch(_PERF_SQL, from_date, to_date)}
+    feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
+    figures: dict[int, AgencyFigures] = {}
+    for aid in perf.keys() | feed.keys():
+        p, f = perf.get(aid), feed.get(aid)
+        figures[aid] = AgencyFigures(
+            samples=int(p["n"]) if p and p["n"] else 0,
+            sum_delay_sec=p["sd"] if p and p["sd"] else 0,
+            on_time_count=int(p["ot"]) if p and p["ot"] else 0,
+            data_from=p["data_from"] if p else None,
+            data_to=p["data_to"] if p else None,
+            raw_samples=int(f["raw"]) if f and f["raw"] else 0,
+            clamp_count=int(f["clamp"]) if f and f["clamp"] else 0,
+        )
+    through = coverage_through(figures[aid].data_to for aid in agencies if aid in figures)
+    return BoardFigures(agencies=agencies, figures=figures, coverage_through=through)
+
+
+def assess_agency(ingest_strategy: str | None, figures: AgencyFigures, delivered: dict[str, Any]) -> Assessment:
+    """The comparability gate over one agency's board figures and its
+    planned and observed trips
+    (:func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`,
+    read with ``observed_through`` at :attr:`BoardFigures.coverage_through`)."""
+    return assess(
+        ingest_strategy=ingest_strategy,
+        observed_trips=delivered["observed_trips"],
+        coverage_planned_trips=delivered["coverage_planned_trips"],
+        on_time_count=figures.on_time_count,
+        samples=figures.samples,
+        clamp_pct=figures.clamp_pct,
+    )
 
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
@@ -105,11 +196,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     probe's degrade leaves it not stale, rather than failing the delay
     figures too.
     """
-    agencies = await conn.fetch(
-        "SELECT agency_id, agency_name, ingest_strategy FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
-    )
-    perf = {r["agency_id"]: r for r in await conn.fetch(_PERF_SQL, from_date, to_date)}
-    feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
+    board = await read_board_figures(conn, from_date, to_date)
+    agencies = list(board.agencies.values())
     agg_max = {r["agency_id"]: r["d"] for r in await conn.fetch(_AGG_MAX_SQL)}
 
     today_jst_midnight_utc = (
@@ -141,7 +229,6 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
     }
 
-    through = coverage_through(perf[a["agency_id"]]["data_to"] for a in agencies if a["agency_id"] in perf)
     # planned_trips reads the saved and loaded plans; executed_trips and
     # service_delivered_pct also read the precomputed non-executed aggregate
     # (agg_service_delivered_daily), and observed_trips agg_route_daily. No
@@ -149,7 +236,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # compute_service_delivered_by_agency.
     try:
         delivered = await compute_service_delivered_by_agency(
-            conn, [a["agency_id"] for a in agencies], from_date, to_date, observed_through=through
+            conn, [a["agency_id"] for a in agencies], from_date, to_date, observed_through=board.coverage_through
         )
     except Exception:
         _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
@@ -173,26 +260,9 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     rows: list[dict[str, Any]] = []
     for a in agencies:
         aid = a["agency_id"]
-        p = perf.get(aid)
-        n = int(p["n"]) if p and p["n"] else 0
-        avg_delay_min = round(float(p["sd"]) / n / 60, 1) if (p and n) else None
-        on_time_count = int(p["ot"]) if p and p["ot"] else 0
-        on_time_pct = round(on_time_count / n * 100, 1) if n else None
-        f = feed.get(aid)
-        raw = int(f["raw"]) if f and f["raw"] else 0
-        clamp = int(f["clamp"]) if f and f["clamp"] else 0
-        clamp_pct = round(clamp / raw * 100, 2) if raw else None
-        data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
-        data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
+        fig = board.of(aid)
         d = delivered[aid]
-        gate = assess(
-            ingest_strategy=a["ingest_strategy"],
-            observed_trips=d["observed_trips"],
-            coverage_planned_trips=d["coverage_planned_trips"],
-            on_time_count=on_time_count,
-            samples=n,
-            clamp_pct=clamp_pct,
-        )
+        gate = assess_agency(a["ingest_strategy"], fig, d)
         s = supply.get(
             aid,
             {
@@ -207,17 +277,17 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
             {
                 "agency_id": aid,
                 "agency_name": a["agency_name"],
-                "avg_delay_min": avg_delay_min,
-                "on_time_pct": on_time_pct,
+                "avg_delay_min": fig.avg_delay_min,
+                "on_time_pct": fig.on_time_pct,
                 "ci_low": gate.ci_low,
                 "ci_high": gate.ci_high,
-                "samples": n,
-                "raw_samples": raw,
-                "clamp_count": clamp,
-                "clamp_pct": clamp_pct,
+                "samples": fig.samples,
+                "raw_samples": fig.raw_samples,
+                "clamp_count": fig.clamp_count,
+                "clamp_pct": fig.clamp_pct,
                 "is_stale": is_stale(agg_max.get(aid), live_max.get(aid)),
-                "data_from": data_from,
-                "data_to": data_to,
+                "data_from": fig.data_from.isoformat() if fig.data_from else None,
+                "data_to": fig.data_to.isoformat() if fig.data_to else None,
                 "planned_trips": d["planned_trips"],
                 "executed_trips": d["executed_trips"],
                 "service_delivered_pct": d["service_delivered_pct"],

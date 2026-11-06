@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.routers.network import COMPARABILITY_THRESHOLDS, ComparabilityThresholds
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.data_sources import credit_line
 from pipeline.day_types import DayType
@@ -66,6 +67,7 @@ from pipeline.reports import (
     simulation_disclaimer,
     sort_route_table,
 )
+from pipeline.reports.comparability import ComparableReason
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
 from pipeline.reports.delay_record import compute_record_stops, compute_record_trips
@@ -364,6 +366,25 @@ class ReportCtx(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CouncilComparability(BaseModel):
+    """Whether the agencies board would rank this agency over the report's
+    dates, with the figures the gate judged and its thresholds; see
+    pipeline.reports.comparability and docs/features/network-tab.md. It
+    judges the board's figures (the whole agency, on the board's on-time
+    definition), so no filter or tolerance on the report changes it."""
+
+    comparable: bool
+    # The first check the gate fails, or None beside comparable.
+    reason: ComparableReason | None
+    coverage_pct: float | None
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    ci_low: float | None
+    ci_high: float | None
+    clamp_pct: float | None
+    thresholds: ComparabilityThresholds
+
+
 class ReportResponse(BaseModel):
     """Payload returned by ``GET /reports/{report_type}`` in JSON mode."""
 
@@ -390,6 +411,9 @@ class ReportResponse(BaseModel):
     covered_days: int | None = None
     window_days: int | None = None
     delivered_missing: DeliveredMissing | None = None
+    # council_summary only (None elsewhere): whether the agencies board would
+    # rank this agency over the same dates.
+    comparability: CouncilComparability | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking
     # and delay_certificate; None elsewhere), and, for route_table, ranking and
@@ -1080,7 +1104,19 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "dow_weekday": ["系統コード", "種別", "日種別", "平均遅延(分)", "観測数"],
     "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
     "dwell_run": ["系統コード", "種別", "滞留観測数", "滞留平均(秒)", "走行観測数", "走行平均(秒)"],
-    "council_summary": ["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"],
+    "council_summary": [
+        "定時率(%)",
+        "平均遅延(分)",
+        "観測数",
+        "計画本数",
+        "運行本数",
+        "運行実績率(%)",
+        "他事業者と比較できる",
+        "比較できない理由",
+        "観測カバー率(%)",
+        "定時率95%信頼区間下限(%)",
+        "定時率95%信頼区間上限(%)",
+    ],
     "delay_certificate": [
         "事業者名",
         "系統コード",
@@ -1505,13 +1541,17 @@ async def get_report(
             payload["executed_trips"],
             payload["service_delivered_pct"],
         )
+        gate = payload["comparability"]
         if format == "csv":
             # The CSV's caveat rows stay Japanese-only (see _csv_response's own
             # docstring), matching format_definition_csv_line's existing
             # convention -- unlike the JSON `text` body below, which honors
-            # the request's locale.
+            # the request's locale. The verdict's reason stays its code, which
+            # the caveat rows put in words.
+            verdict = ("はい" if gate["comparable"] else "いいえ", gate["reason"] or "")
+            csv_row = (*row, *verdict, gate["coverage_pct"], gate["ci_low"], gate["ci_high"])
             footnotes = format_council_summary_footnotes(definition, payload, locale="ja")
-            return _csv_response(report_type, [row], ctx, definition, extra_footnotes=footnotes, credit=credit)
+            return _csv_response(report_type, [csv_row], ctx, definition, extra_footnotes=footnotes, credit=credit)
         text = format_council_summary_text(payload, definition, agency_name, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
@@ -1525,6 +1565,7 @@ async def get_report(
             covered_days=payload["covered_days"],
             window_days=payload["window_days"],
             delivered_missing=payload["delivered_missing"],
+            comparability=CouncilComparability(**gate, thresholds=COMPARABILITY_THRESHOLDS),
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec

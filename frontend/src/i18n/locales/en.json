@@ -1374,7 +1374,11 @@
       "observations": "Observations (stop level)",
       "plan_coverage": "* {{covered}}/{{window}} days a timetable plans",
       "delivered": "Service delivered %",
-      "delivered_agency_wide": "Service delivered % (whole agency)"
+      "delivered_agency_wide": "Service delivered % (whole agency)",
+      "comparison": "Comparison with other operators",
+      "comparison_agency_wide": "Comparison with other operators (whole agency)",
+      "comparable": "Comparable",
+      "not_comparable": "Not comparable"
     },
     "print": "Print / Save as PDF",
     "certificate": {

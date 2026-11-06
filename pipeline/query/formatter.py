@@ -16,7 +16,14 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import day_group_label, dow_label
-from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
+from pipeline.reports.comparability import (
+    MAX_CI_HALF_WIDTH_PP,
+    MAX_CLAMP_PCT,
+    MIN_COVERAGE_PCT,
+    ci_half_width_as_printed,
+    tenth_as_printed,
+)
+from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes, resolve_definition_meta
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -145,12 +152,13 @@ _LOCALES: dict[tuple[str, str], str] = {
         "Planned and executed trips and Service delivered % count only the {covered}/{window} days a timetable plans."
     ),
     ("council_agency_wide_caveat", "ja"): (
-        "計画便数・運行便数・運行率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
+        "計画便数・運行便数・運行率・データ品質と他事業者との比較は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
         "この期間の事業者全体の値です。"
     ),
     ("council_agency_wide_caveat", "en"): (
-        "Planned and executed trips, Service delivered % and data quality cover the whole agency "
-        "for the period; the route, day, service and time-band filters apply to the on-time figures only."
+        "Planned and executed trips, Service delivered %, data quality and the comparison with other operators "
+        "cover the whole agency for the period; the route, day, service and time-band filters apply to the "
+        "on-time figures only."
     ),
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
     ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
@@ -173,6 +181,49 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_delivered_missing_feed_reports_no_cancellations", "en"): "this feed doesn't report cancellations",
     ("council_delivered_missing_unreadable", "ja"): "計画を読み込めませんでした",
     ("council_delivered_missing_unreadable", "en"): "the plan could not be read",
+    # Whether the agencies board would rank this agency
+    # (pipeline.reports.comparability). A reason is given in the words the
+    # board shows beside an unranked agency (frontend network.unranked_reason
+    # and network.coverage_unknown_why), one per ComparableReason value.
+    ("council_comparable", "ja"): (
+        "他事業者との比較: 比較の条件を満たします（観測カバー率 {coverage}%、定時率の95%信頼区間 {low}–{high}%）"
+    ),
+    ("council_comparable", "en"): (
+        "Comparison with other operators: meets the conditions for a comparison "
+        "(observation coverage {coverage}%, on-time % 95% interval {low}–{high}%)"
+    ),
+    ("council_not_comparable", "ja"): (
+        "他事業者との比較: 条件を満たしません。{reason}。この事業者の数字を他事業者と順位付けて比べないでください。"
+    ),
+    ("council_not_comparable", "en"): (
+        "Comparison with other operators: does not meet the conditions. {reason}. "
+        "Do not rank this operator's figures against other operators'."
+    ),
+    ("council_comparison_definition", "ja"): (
+        "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定しています。"
+    ),
+    ("council_comparison_definition", "en"): (
+        "The comparison with other operators judges every operator by one shared on-time definition, "
+        "not the tolerance chosen here."
+    ),
+    ("council_not_comparable_no_data", "ja"): "期間内の観測なし",
+    ("council_not_comparable_no_data", "en"): "No observations in the period",
+    ("council_not_comparable_coverage_unknown", "ja"): "観測カバー率を測れません：{why}",
+    ("council_not_comparable_coverage_unknown", "en"): "Observation coverage can't be measured: {why}",
+    ("council_not_comparable_coverage_low", "ja"): "観測カバー率 {pct}%（{min}%未満）",
+    ("council_not_comparable_coverage_low", "en"): "Observation coverage {pct}% (below {min}%)",
+    ("council_not_comparable_ci_wide", "ja"): "定時率の95%信頼区間 ±{half}ポイント（±{max}ポイント超）",
+    ("council_not_comparable_ci_wide", "en"): "On-time % interval ±{half} points (wider than ±{max})",
+    ("council_not_comparable_clamp_high", "ja"): "異常値 {pct}%（{max}%超）",
+    ("council_not_comparable_clamp_high", "en"): "Implausible readings {pct}% (above {max}%)",
+    ("council_coverage_unknown_unmatched", "ja"): "この配信の便は時刻表の便と照合できません",
+    ("council_coverage_unknown_unmatched", "en"): "this feed's trips can't be matched to the timetable",
+    ("council_coverage_unknown_no_plan", "ja"): "期間に時刻表の計画なし",
+    ("council_coverage_unknown_no_plan", "en"): "no timetable plans this period",
+    ("council_coverage_unknown_no_plan_observed", "ja"): "観測した日に時刻表の計画なし",
+    ("council_coverage_unknown_no_plan_observed", "en"): "no timetable plans the days observed",
+    ("council_coverage_unknown_unreadable", "ja"): "計画を読み込めませんでした",
+    ("council_coverage_unknown_unreadable", "en"): "the plan could not be read",
     ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",
     ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
@@ -486,12 +537,84 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
     return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
 
 
+# The on-time definition the agencies board, and so the comparability gate,
+# counts every agency by: no tolerance override.
+_BOARD_DEFINITION = resolve_definition_meta("on_time", None, None)
+
+
+def _tenth(value: float | None) -> str:
+    """A share to a tenth as the agencies board prints it
+    (:func:`pipeline.reports.comparability.tenth_as_printed`), or a dash."""
+    return "—" if value is None else f"{tenth_as_printed(value):.1f}"
+
+
+def _threshold(value: float) -> str:
+    """A gate threshold as the board quotes it: 70, not 70.0."""
+    return f"{value:g}"
+
+
+def _coverage_unknown_why(payload: dict, comparability: dict) -> str:
+    """Why coverage cannot be measured, read as the board reads it from the
+    same fields: a failed read nulls the planned count too, so it is told
+    apart first; a null planned count is then a feed whose trip_ids aren't
+    the timetable's, and a zero one a plan that misses the days observed."""
+    if payload.get("delivered_missing") == "unreadable":
+        return "unreadable"
+    if comparability.get("coverage_planned_trips") is None:
+        return "unmatched"
+    return "no_plan_observed" if payload.get("planned_trips") else "no_plan"
+
+
+def _comparison_reason(payload: dict, comparability: dict, locale: str) -> str:
+    """The first check the gate fails, in the board's words, with the figure
+    and the threshold it missed."""
+    reason = comparability["reason"]
+    key = f"council_not_comparable_{reason}"
+    if reason == "coverage_unknown":
+        why = _t(f"council_coverage_unknown_{_coverage_unknown_why(payload, comparability)}", locale)
+        return _t(key, locale, why=why)
+    if reason == "coverage_low":
+        return _t(key, locale, pct=_tenth(comparability["coverage_pct"]), min=_threshold(MIN_COVERAGE_PCT))
+    if reason == "ci_wide":
+        low, high = comparability["ci_low"], comparability["ci_high"]
+        half = "—" if low is None or high is None else f"{ci_half_width_as_printed(low, high):.1f}"
+        return _t(key, locale, half=half, max=_threshold(MAX_CI_HALF_WIDTH_PP))
+    if reason == "clamp_high":
+        return _t(key, locale, pct=_tenth(comparability["clamp_pct"]), max=_threshold(MAX_CLAMP_PCT))
+    return _t(key, locale)
+
+
+def _comparison_lines(definition: DefinitionMeta, payload: dict, locale: str) -> list[str]:
+    """Whether the agencies board would rank this agency, and, under a
+    tolerance other than the board's, that the verdict still reads the
+    board's definition, so its interval is not the headline figure's."""
+    comparability = payload.get("comparability")
+    if not comparability:
+        return []
+    if comparability["comparable"]:
+        line = _t(
+            "council_comparable",
+            locale,
+            coverage=_tenth(comparability["coverage_pct"]),
+            low=_tenth(comparability["ci_low"]),
+            high=_tenth(comparability["ci_high"]),
+        )
+    else:
+        line = _t("council_not_comparable", locale, reason=_comparison_reason(payload, comparability, locale))
+    lines = [line]
+    tolerance = (definition.early_tolerance_sec, definition.late_tolerance_sec)
+    if tolerance != (_BOARD_DEFINITION.early_tolerance_sec, _BOARD_DEFINITION.late_tolerance_sec):
+        lines.append(_t("council_comparison_definition", locale))
+    return lines
+
+
 def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, locale: str = "ja") -> list[str]:
     """Footnote lines for the monthly/annual council report template:
     the definition metadata
     (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
     the scope, freshness and quality caveats a council audience needs before
-    trusting the numbers next to them. Every line is derived from *definition*/*payload*'s
+    trusting the numbers next to them, and whether the agencies board would
+    rank this agency against the others. Every line is derived from *definition*/*payload*'s
     own fields, never a fixed string, so a non-default tolerance/definition,
     a genuinely stale aggregate, or a low-quality feed each change the
     rendered footnotes to match -- the same guarantee
@@ -516,6 +639,7 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
     covered, window = payload.get("covered_days"), payload.get("window_days")
     if payload.get("planned_trips") and covered is not None and window and covered < window:
         lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))
+    lines.extend(_comparison_lines(definition, payload, locale))
     return lines
 
 

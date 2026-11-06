@@ -798,6 +798,62 @@ describe("AnalysisTab council report", () => {
     expect(figure("Planned trips")).toHaveTextContent("2,130");
   });
 
+  const COMPARABLE = {
+    comparable: true,
+    reason: null,
+    coverage_pct: 90.0,
+    observed_trips: 900,
+    coverage_planned_trips: 1000,
+    ci_low: 87.8,
+    ci_high: 91.8,
+    clamp_pct: 0.2,
+    thresholds: { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 },
+  };
+  const COMPARISON = "Comparison with other operators";
+
+  function value(label: string) {
+    return figure(label).querySelector(".council-report__value")?.textContent;
+  }
+
+  it("says the agency can be compared with other operators when the agencies board would rank it", () => {
+    showCouncil([], { comparability: COMPARABLE });
+    expect(value(COMPARISON)).toBe("Comparable");
+    expect(figure(COMPARISON).querySelector(".council-report__note")).toBeNull();
+  });
+
+  it("says why an agency can't be compared, in the agencies board's words", () => {
+    showCouncil([], { comparability: { ...COMPARABLE, comparable: false, reason: "coverage_low", coverage_pct: 41.0 } });
+    expect(value(COMPARISON)).toBe("Not comparable");
+    expect(figure(COMPARISON)).toHaveTextContent("Observation coverage 41.0% (below 70%)");
+    cleanup();
+    showCouncil([], { comparability: { ...COMPARABLE, comparable: false, reason: "ci_wide", ci_low: 80.0, ci_high: 86.1 } });
+    expect(figure(COMPARISON)).toHaveTextContent("On-time % interval ±3.1 points (wider than ±3)");
+    cleanup();
+    const unmatched = {
+      ...COMPARABLE,
+      comparable: false,
+      reason: "coverage_unknown",
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      ci_low: null,
+      ci_high: null,
+    };
+    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_cannot_report" });
+    expect(value(COMPARISON)).toBe("Not comparable");
+    expect(figure(COMPARISON)).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
+  });
+
+  it("labels the comparison as the whole agency's when a filter narrows the on-time figures", () => {
+    showCouncil(["R1"], { comparability: COMPARABLE });
+    expect(value(`${COMPARISON} (whole agency)`)).toBe("Comparable");
+  });
+
+  it("shows no comparison tile for a response that carries no verdict", () => {
+    showCouncil();
+    expect(within(screen.getByRole("list", { name: "Headline figures" })).queryByText(COMPARISON)).toBeNull();
+  });
+
   it("keeps each figure on one line in a tile wide enough to hold it, so a phone never breaks a number in two", () => {
     const css = readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8");
     expect(decl(ruleBody(css, ".council-report__value"), "white-space")).toBe("nowrap");

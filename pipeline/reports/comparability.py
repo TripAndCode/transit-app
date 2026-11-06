@@ -140,7 +140,7 @@ def _on_time_interval(
     return (math.floor(round(low * 1000, 9)) / 10, math.ceil(round(high * 1000, 9)) / 10)
 
 
-def _tenth_as_printed(value: float) -> float:
+def tenth_as_printed(value: float) -> float:
     """``value`` to a tenth as the board prints it (``roundTo`` in
     frontend/src/utils/format.ts): the binary value times ten, rounded to the
     nearest whole number with ties away from zero. Python's ``round`` would
@@ -150,6 +150,14 @@ def _tenth_as_printed(value: float) -> float:
     if scaled - whole >= 0.5:
         whole += 1
     return math.copysign(whole / 10, value) if whole else 0.0
+
+
+def ci_half_width_as_printed(ci_low: float, ci_high: float) -> float:
+    """Half the interval's width as the board prints it (``ciHalfWidth`` in
+    frontend/src/components/comparabilityReason.ts): rounded up to a tenth,
+    so an interval the gate found wider than its limit never prints at the
+    limit. The inner round drops float noise from the subtraction."""
+    return math.ceil(round((ci_high - ci_low) / 2 * 1000) / 100) / 10
 
 
 def _first_failure(
@@ -178,6 +186,6 @@ def _first_failure(
     # binary noise in the subtraction never flips a boundary case.
     if ci_low is None or ci_high is None or round((ci_high - ci_low) / 2, 2) > MAX_CI_HALF_WIDTH_PP:
         return "ci_wide"
-    if clamp_pct is not None and _tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT:
+    if clamp_pct is not None and tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT:
         return "clamp_high"
     return None

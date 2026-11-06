@@ -54,6 +54,7 @@ from pipeline.histogram import (
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.network import assess_agency, read_board_figures
 from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
@@ -192,7 +193,7 @@ async def compute_council_summary(
 
     Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
-    "delivered_missing", "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    "delivered_missing", "is_stale", "clamp_pct", "filtered", "comparability"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
@@ -203,16 +204,31 @@ async def compute_council_summary(
     says so (see that module), and ``delivered_missing`` then says why. ``clamp_pct`` is ``None`` when this agency has
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
+
+    ``comparability`` is whether the agencies board would rank this agency
+    over the same dates (:func:`pipeline.reports.network.assess_agency`):
+    ``{"comparable", "reason", "coverage_pct", "observed_trips",
+    "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct"}``. It judges
+    the board's figures, the whole agency on the board's on-time definition,
+    so no filter or tolerance here changes it, and its coverage stops where
+    the board's does, at the newest day any agency has observations for.
     """
     on_time_pct, avg_delay_min, samples = await _agency_on_time_pooled(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
     )
 
+    board = await read_board_figures(conn, ctx.from_date, ctx.to_date)
+    figures = board.of(agency_id)
+
     # A failed read of the planned figures leaves the on-time figures
     # standing and says the plan could not be read, as the agencies board
     # does, rather than failing the whole report.
     try:
-        d = (await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date))[agency_id]
+        d = (
+            await compute_service_delivered_by_agency(
+                conn, [agency_id], ctx.from_date, ctx.to_date, observed_through=board.coverage_through
+            )
+        )[agency_id]
     except Exception:
         _log.warning("council summary: service-delivered figures unavailable for agency %s", agency_id, exc_info=True)
         d = unreadable_service_delivered(ctx.from_date, ctx.to_date)
@@ -237,16 +253,8 @@ async def compute_council_summary(
     live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
     agency_is_stale = is_stale(agg_max_day, live_max_day)
 
-    feed_row = await conn.fetchrow(
-        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
-        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
-    )
-    raw = int(feed_row["raw"]) if feed_row else 0
-    clamp = int(feed_row["clamp"]) if feed_row else 0
-    clamp_pct = round(clamp / raw * 100, 2) if raw else None
+    agency = board.agencies.get(agency_id)
+    gate = assess_agency(agency["ingest_strategy"] if agency else None, figures, d)
 
     return {
         "on_time_pct": on_time_pct,
@@ -259,8 +267,18 @@ async def compute_council_summary(
         "window_days": d["window_days"],
         "delivered_missing": d["delivered_missing"],
         "is_stale": agency_is_stale,
-        "clamp_pct": clamp_pct,
+        "clamp_pct": figures.clamp_pct,
         "filtered": on_time_filter_narrows(ctx),
+        "comparability": {
+            "comparable": gate.comparable,
+            "reason": gate.comparable_reason,
+            "coverage_pct": gate.coverage_pct,
+            "observed_trips": gate.observed_trips,
+            "coverage_planned_trips": gate.coverage_planned_trips,
+            "ci_low": gate.ci_low,
+            "ci_high": gate.ci_high,
+            "clamp_pct": figures.clamp_pct,
+        },
     }
 
 

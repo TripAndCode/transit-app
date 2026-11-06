@@ -99,6 +99,13 @@ class ComparabilityThresholds(BaseModel):
     max_clamp_pct: float
 
 
+COMPARABILITY_THRESHOLDS = ComparabilityThresholds(
+    min_coverage_pct=MIN_COVERAGE_PCT,
+    max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
+    max_clamp_pct=MAX_CLAMP_PCT,
+)
+
+
 class NetworkSummary(BaseModel):
     from_: str = Field(serialization_alias="from")
     to: str
@@ -143,11 +150,7 @@ async def network_summary(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
-        comparability=ComparabilityThresholds(
-            min_coverage_pct=MIN_COVERAGE_PCT,
-            max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
-            max_clamp_pct=MAX_CLAMP_PCT,
-        ),
+        comparability=COMPARABILITY_THRESHOLDS,
         coverage_through=through.isoformat() if through else None,
         definition=resolve_definition_meta("on_time", None, None),
         scope_applied=_NETWORK_SCOPE,

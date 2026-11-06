@@ -9,8 +9,9 @@ from pipeline.reports.comparability import (
     _coverage_pct,
     _first_failure,
     _on_time_interval,
-    _tenth_as_printed,
     assess,
+    ci_half_width_as_printed,
+    tenth_as_printed,
 )
 
 # Every check passes with these; each test changes one input.
@@ -114,7 +115,18 @@ def test_no_clamp_share_passes():
 def test_a_tenth_rounds_half_away_from_zero_as_the_board_prints_it(value, printed):
     """frontend/src/utils/format.ts roundTo: Math.round of the binary value
     times ten, ties away from zero; Python's round() would take 2.35 to 2.3."""
-    assert _tenth_as_printed(value) == printed
+    assert tenth_as_printed(value) == printed
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "printed"),
+    [(80.0, 86.1, 3.1), (80.0, 86.2, 3.1), (2.3, 8.3, 3.0), (58.4, 64.4, 3.0), (40.0, 60.0, 10.0), (84.9, 87.5, 1.3)],
+)
+def test_an_interval_half_width_prints_rounded_up_as_the_board_prints_it(low, high, printed):
+    """frontend/src/components/comparabilityReason.ts ciHalfWidth: half the printed bounds'
+    difference, rounded up to a tenth, so an interval the gate found wider
+    than its limit never prints at the limit."""
+    assert ci_half_width_as_printed(low, high) == printed
 
 
 def test_coverage_is_observed_over_planned_to_one_decimal():

@@ -352,13 +352,14 @@ The analyses you saved with **Save analysis** on a route’s page. Click one to 
 
 The list on the left holds **Council report** and **Delay record (for reference)**.
 
-**Council report** is the period’s service, summarised for the council: five headline figures (“On time”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”), a written summary with its notes, and **Print / Save as PDF**.
+**Council report** is the period’s service, summarised for the council: six headline figures (“On time”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”, “Comparison with other operators”), a written summary with its notes, and **Print / Save as PDF**.
 
 - “Observations (stop level)” counts records of a trip leaving a stop (13-1). One trip counts once per stop, so the figure is far larger than the planned trips.
 - When a timetable plans only some of the period’s days, the planned trips say so, such as “* 16/30 days a timetable plans”. Service delivered % counts the same days.
 - When Service delivered % cannot be shown, “—” is followed by the reason, in the same words as Compare agencies (such as “the feed is not yet checked for cancellations”).
 - The notes’ “On-time definition” gives the on-time tolerance used, such as “no more than 1 min late (early departures count as on time)”.
 - Planned trips, Service delivered % and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tiles and the summary say “whole agency”.
+- “Comparison with other operators” says whether this agency’s figures meet the conditions **Compare agencies** ranks by (8-2): “Comparable” or “Not comparable”. Under “Not comparable” it gives the first condition missed, in the same words as Compare agencies (such as “Observation coverage 41.0% (below 70%)”), and the notes say not to rank this agency’s figures against other operators’. The verdict always reads the whole agency for the period and the on-time definition every operator is judged by, whatever conditions or on-time tolerance the report uses.
 
 **Delay record (for reference)** gives a passenger a record of how late their trip left the stop where they boarded. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
 

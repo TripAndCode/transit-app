@@ -533,6 +533,9 @@ type ReportEnvelope<T extends ReportType, Row> = {
   covered_days?: number | null;
   window_days?: number | null;
   delivered_missing?: DeliveredMissing | null;
+  /** council_summary only: whether the agencies board would rank this agency
+   *  over the same dates. Null for every other report. */
+  comparability?: CouncilComparability | null;
   report_type: T;
   rendered_at: string;
   text: string;
@@ -1184,6 +1187,23 @@ export type ComparabilityThresholds = {
   min_coverage_pct: number;
   max_ci_half_width_pp: number;
   max_clamp_pct: number;
+};
+
+/** The council report's verdict: whether the agencies board would rank this
+ *  agency over the report's dates, with the figures the gate judged. It
+ *  reads the board's figures (the whole agency, on the board's on-time
+ *  definition), so no filter or tolerance on the report changes it. */
+type CouncilComparability = {
+  comparable: boolean;
+  /** The first check the gate fails; null beside `comparable`. */
+  reason: ComparableReason | null;
+  coverage_pct: number | null;
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  clamp_pct: number | null;
+  thresholds: ComparabilityThresholds;
 };
 
 export type NetworkSummary = {
