@@ -77,13 +77,14 @@ async def _all_time_left_out(conn: asyncpg.Connection, agency_id: int) -> dict[s
 
 
 class Headline(BaseModel):
-    """Last-7-day avg + prior-7-day baseline + signed delta.
+    """The period's avg + the same-width window before it as the baseline +
+    signed delta.
 
-    ``window_from`` / ``window_to`` are the ISO dates of the 7-day window
-    the headline covers (always a 7-day slice anchored at ``ctx.to_date``,
-    even when the user has widened the filter to a longer range). Surfaces
-    them so the frontend eyebrow can show the actual headline window
-    instead of the full ctx range, which would be misleading.
+    ``window_from`` / ``window_to`` are the ISO dates of the window the
+    headline covers: the requested period up to its last day with data, so
+    the hero row and the scope sentence describe the same period. The
+    baseline is the same number of days immediately before it. Surfaced so the
+    frontend labels the headline by the days it actually averages.
     """
 
     avg_min: float | None
@@ -137,7 +138,7 @@ class Concentration(BaseModel):
 
 
 class TopDelayedRoute(BaseModel):
-    """One route's absolute avg delay in the current 7-day window, and its
+    """One route's absolute avg delay in the headline's window, and its
     change (minutes) from the same-width window before; ``delta_min`` is None
     when the route was too thinly observed there to compare."""
 

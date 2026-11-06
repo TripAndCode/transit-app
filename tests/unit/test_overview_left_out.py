@@ -54,10 +54,10 @@ async def test_nothing_left_out_keeps_every_route():
 
 
 async def test_a_left_out_route_never_moves(monkeypatch):
-    """A day-of-week filter can anchor the current window before a renumbering,
-    so a retired code can reach both windows; it is still not a mover."""
-    cur_ctx = RangeCtx(date(2026, 10, 10), date(2026, 10, 16))
-    base_ctx = RangeCtx(date(2026, 10, 3), date(2026, 10, 9))
+    """A code retired during the period still ran early in it and in the
+    window before it, so it reaches both windows; it is still not a mover."""
+    cur_ctx = _CTX
+    base_ctx = RangeCtx(date(2026, 8, 25), date(2026, 9, 23))
     averages = {
         cur_ctx: {"C1": (5.0, 50), "OLD": (9.0, 50), "C2": (1.0, 50)},
         base_ctx: {"C1": (3.0, 50), "OLD": (2.0, 50), "C2": (4.0, 50)},

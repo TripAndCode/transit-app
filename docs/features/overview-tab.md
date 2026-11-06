@@ -37,12 +37,15 @@ What the user sees/does:
   `peak_hour` are left out of that check — see the inline comments in
   `OverviewTab.tsx` for why).
 - **Hero row** — `frontend/src/components/OverviewHeroRow.tsx`: the headline
-  avg-delay delta vs. a prior-week baseline, delayed-route count, and a
-  sparkline. Every fact value, the delayed-route count included, prints in
-  ink; the list below carries the delay colours.
+  avg-delay over the scope period (through its last day with data) and its
+  delta vs. the same number of days just before it, delayed-route count, and
+  a sparkline, so the hero and the scope sentence describe the same period.
+  Every fact value, the delayed-route count included, prints in ink; the list
+  below carries the delay colours.
 - **Routes to check** — `frontend/src/components/RoutesToCheckList.tsx`: the
-  top-5 routes by absolute avg delay over the same 7-day window as the
-  headline. Each bar takes the shared delay ramp (`delayRampVar`, see
+  top-5 routes by absolute avg delay over the same window as the headline,
+  each with its change from the window before. The movers compare the same
+  two windows. Each bar takes the shared delay ramp (`delayRampVar`, see
   `design-palette.md`) and `DelayScaleLegend` labels it, since the list's
   bands (1.5/3/5 min, `routesToCheckBands.ts`) and the ramp's steps differ and
   one band can hold two colours.
@@ -80,9 +83,10 @@ What the user sees/does:
     timetable is split 平日 / 土日祝, every other 平日 / 土曜 / 日祝; a day type
     under 3 days or 1,000 samples is flagged `insufficient` and left out of the
     comparison. The day types are resolved once per payload, over the range
-    plus the four weeks before it that the movers and baseline read, and the
-    service filter uses the same resolution, so where a feed changes its
-    weekend timetables that whole span decides the split.
+    plus the days before it that the baseline (as wide as the range) and the
+    movers' four-week sparkline read, and the service filter uses the same
+    resolution, so where a feed changes its weekend timetables that whole span
+    decides the split.
 
 ## Request path
 

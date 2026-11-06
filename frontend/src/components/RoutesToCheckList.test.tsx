@@ -31,10 +31,15 @@ function listedBands(rs: OverviewTopDelayedRoute[]): OverviewBandCounts {
   };
 }
 
-type ListOptions = { routeCount?: number; windowFrom?: string; search?: string };
+type ListOptions = { routeCount?: number; windowFrom?: string; range?: string; search?: string };
 
 function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs), options: ListOptions = {}) {
-  const { routeCount = rs.length, windowFrom = "2026-09-24", search = "?from=2026-09-01&to=2026-09-30" } = options;
+  const {
+    routeCount = rs.length,
+    windowFrom = "2026-09-24",
+    range = "Sep 24 – Sep 30",
+    search = "?from=2026-09-01&to=2026-09-30",
+  } = options;
   return (
     <MemoryRouter initialEntries={[`/agencies/1/pulse${search}`]}>
       <Routes>
@@ -48,7 +53,7 @@ function list(rs: OverviewTopDelayedRoute[], bandCounts = listedBands(rs), optio
               minSamples={100}
               windowFrom={windowFrom}
               windowTo="2026-09-30"
-              range="Sep 24 – Sep 30"
+              range={range}
             />
           }
         />
@@ -68,8 +73,8 @@ describe("RoutesToCheckList", () => {
 
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
-    // The list counts the headline's window, not the whole period.
-    expect(screen.getByText("Routes to check (last 7 days, Sep 24 – Sep 30)")).toBeInTheDocument();
+    // The list counts the headline's window.
+    expect(screen.getByText("Routes to check (7 days, Sep 24 – Sep 30)")).toBeInTheDocument();
     const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
     expect(headers).toEqual(["2 routes averaging 5 min or more late", "1 route averaging 1.5–3 min late"]);
   });
@@ -266,7 +271,16 @@ describe("RoutesToCheckList", () => {
   it("compares a shorter window with the same number of days before it", () => {
     renderList([{ ...route("UP", 8.84), delta_min: 1.81 }], undefined, { windowFrom: "2026-09-28" });
     expect(screen.getByText("+1.8 min vs the 3 days before")).toBeInTheDocument();
-    expect(screen.getByText("Routes to check (last 3 days, Sep 24 – Sep 30)")).toBeInTheDocument();
+    expect(screen.getByText("Routes to check (3 days, Sep 24 – Sep 30)")).toBeInTheDocument();
+  });
+
+  it("compares a whole 30-day period with the 30 days before it", () => {
+    renderList([{ ...route("UP", 8.84), delta_min: 1.81 }], undefined, {
+      windowFrom: "2026-09-01",
+      range: "Sep 1 – Sep 30",
+    });
+    expect(screen.getByText("+1.8 min vs the 30 days before")).toBeInTheDocument();
+    expect(screen.getByText("Routes to check (30 days, Sep 1 – Sep 30)")).toBeInTheDocument();
   });
 
   it("links to every route it ranks, as the Routes table over its own days, worst average first", () => {

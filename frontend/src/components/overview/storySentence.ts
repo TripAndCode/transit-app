@@ -8,7 +8,7 @@ import { fixedTenth } from "../../utils/format";
 export const FLAT_MAX_DELTA_MIN = 0.1;
 /** A change under this share (percent) of the window before is about the
  *  same, whatever its minutes: an agency averaging nine minutes moves by more
- *  than 0.1 min from one week to the next without anything having changed. */
+ *  than 0.1 min from one period to the next without anything having changed. */
 export const FLAT_MAX_DELTA_PCT = 5;
 
 type StoryBranch = "behind" | "ahead" | "flat";

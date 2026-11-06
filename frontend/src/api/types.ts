@@ -982,12 +982,11 @@ export type OverviewHeadline = {
   delta_min: number | null;
   delta_pct: number | null;
   samples: number;
-  /** ISO date of the start of the 7-day window the headline covers
-   *  (always anchored at ctx.to and 7 days wide, regardless of the
-   *  full ctx range). Use this for the eyebrow label. */
+  /** ISO date of the start of the window the headline covers: the period's
+   *  first day. The baseline is the same number of days just before it. */
   window_from: string;
-  /** ISO date of the end of the headline 7-day window (anchored at the
-   *  latest date that has data inside ctx, not necessarily ctx.to). */
+  /** ISO date of the end of the headline's window: the latest date that has
+   *  data inside the period, not necessarily its last day. */
   window_to: string;
 };
 
@@ -998,9 +997,9 @@ type OverviewMover = {
   /** Null when the previous-window average is too close to zero for a
    *  percentage change to be a meaningful figure (see backend). */
   delta_pct: number | null;
-  /** Avg delay (min) in the current 7-day window. */
+  /** Avg delay (min) in the headline's window. */
   current_avg_min: number;
-  /** Avg delay (min) in the prior 7-day window. */
+  /** Avg delay (min) in the same number of days just before it. */
   previous_avg_min: number;
   streak_weeks: number;
   sparkline_points: number[];

@@ -81,9 +81,9 @@
   },
   "landing": {
     "hero": {
-      "title_now": "What's happening right now —",
-      "title_where": "and where it's happening.",
-      "subtitle": "See which trips are running late right now and by how much, and which routes and times of day tend to run late.",
+      "title_question": "Did the buses run as planned?",
+      "title_scope": "Route by route, hour by hour.",
+      "subtitle": "Check how late each route ran over a period, from the operators' own open data, with the definition and the amount of data behind every figure. Today's trips are there too.",
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
       "login_note": "<login>Sign in</login> to keep your saved views and Ask investigations with your account."
@@ -344,8 +344,8 @@
     "peak_hour_callout": "Peak {{range}} ({{avg}} min average)",
     "section_service_split": "By service day",
     "hero_row": {
-      "avg_delay_label_one": "Average delay, last day ({{range}})",
-      "avg_delay_label_other": "Average delay, last {{count}} days ({{range}})",
+      "avg_delay_label_one": "Average delay over one day ({{range}})",
+      "avg_delay_label_other": "Average delay over {{count}} days ({{range}})",
       "baseline_hint_title": "About the comparison",
       "baseline_hint_body": "Compares the average delay over {{range}} with the same number of days just before them.",
       "avg_delay_no_baseline": "No comparison data",
@@ -370,12 +370,12 @@
       "state_ahead_other": "−{{delta}} min on the {{count}} days before",
       "state_flat_one": "About the same as the day before",
       "state_flat_other": "About the same as the {{count}} days before",
-      "behind_one": "The last day averaged {{current}} min, {{change}} longer than the day before ({{previous}} min).",
-      "behind_other": "The last {{count}} days averaged {{current}} min, {{change}} longer than the {{count}} days before ({{previous}} min).",
-      "ahead_one": "The last day averaged {{current}} min, {{change}} shorter than the day before ({{previous}} min).",
-      "ahead_other": "The last {{count}} days averaged {{current}} min, {{change}} shorter than the {{count}} days before ({{previous}} min).",
-      "flat_one": "The last day averaged {{current}} min, about the same as the day before ({{previous}} min).",
-      "flat_other": "The last {{count}} days averaged {{current}} min, about the same as the {{count}} days before ({{previous}} min).",
+      "behind_one": "This day averaged {{current}} min, {{change}} longer than the day before ({{previous}} min).",
+      "behind_other": "These {{count}} days averaged {{current}} min, {{change}} longer than the {{count}} days before ({{previous}} min).",
+      "ahead_one": "This day averaged {{current}} min, {{change}} shorter than the day before ({{previous}} min).",
+      "ahead_other": "These {{count}} days averaged {{current}} min, {{change}} shorter than the {{count}} days before ({{previous}} min).",
+      "flat_one": "This day averaged {{current}} min, about the same as the day before ({{previous}} min).",
+      "flat_other": "These {{count}} days averaged {{current}} min, about the same as the {{count}} days before ({{previous}} min).",
       "change_pct": "{{delta}} min ({{pct}}%)",
       "change": "{{delta}} min",
       "latest_day_1": "The latest day, {{date}}, averaged {{avg}} min: the slowest of the {{days}} days observed in {{range}}.",
@@ -383,8 +383,8 @@
       "latest_day_3": "The latest day, {{date}}, averaged {{avg}} min: the third slowest of the {{days}} days observed in {{range}}."
     },
     "routes_to_check": {
-      "title_one": "Routes to check (last day, {{range}})",
-      "title_other": "Routes to check (last {{count}} days, {{range}})",
+      "title_one": "Routes to check (one day, {{range}})",
+      "title_other": "Routes to check ({{count}} days, {{range}})",
       "scope_one": "Covers the {{count}} route observed {{min}} or more times.",
       "scope_other": "Covers the {{count}} routes observed {{min}} or more times.",
       "empty": "No routes need attention",

@@ -24,8 +24,8 @@ type Props = {
    *  in its window. */
   routeCount: number;
   minSamples: number;
-  /** The days the list counts, as ISO dates: the headline's window, not the
-   *  whole period. */
+  /** The days the list counts, as ISO dates: the headline's window, the
+   *  period up to its last day with data. */
   windowFrom: string;
   windowTo: string;
   /** Those days as text. */
