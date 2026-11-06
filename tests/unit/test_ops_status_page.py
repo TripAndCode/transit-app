@@ -443,13 +443,30 @@ def test_highlight_for_r2_shows_placeholder_when_metrics_are_null():
                 "disk_used_pct": None,
                 "rt_bytes": None,
                 "static_bytes": None,
+                "vp_bytes": None,
                 "r2_bytes_total": None,
             }
         },
     )
     highlight = ops_status_page.highlight_for(doc)
     assert "None" not in highlight
-    assert highlight == "disk=?% rt_bytes=? static_bytes=? total_bytes=?"
+    assert highlight == "disk=?% rt_bytes=? static_bytes=? vp_bytes=? total_bytes=?"
+
+
+def test_highlight_for_r2_shows_vp_bytes_that_the_total_includes():
+    doc = make_component(
+        "r2",
+        state_kwargs={
+            "details": {
+                "disk_used_pct": 40,
+                "rt_bytes": 100,
+                "static_bytes": 200,
+                "vp_bytes": 70,
+                "r2_bytes_total": 370,
+            }
+        },
+    )
+    assert ops_status_page.highlight_for(doc) == "disk=40% rt_bytes=100 static_bytes=200 vp_bytes=70 total_bytes=370"
 
 
 def test_reason_for_r2_shows_placeholder_when_disk_used_pct_is_null():

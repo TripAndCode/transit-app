@@ -211,7 +211,7 @@ pass "a non-numeric threshold is rejected with exit 64"
 
 # --- VehiclePositions ---------------------------------------------------------
 # Each feed in etc/vehicle_positions.tsv is checked like RT: its newest
-# VehiclePosition_*.pb must be younger than interval x RT_STALE_FACTOR and
+# VehiclePosition_*.pb must be younger than interval x VP_STALE_FACTOR and
 # not empty. No such file means no VP check at all (the runs above).
 seed_vp() {
     seed_healthy
@@ -235,15 +235,34 @@ grep -q "a8 (hiroden): configured in vehicle_positions.tsv but has no VP directo
     || fail "never-ran VP reason absent: $(cat "$TEST_BASE/hc.out")"
 pass "a configured VP feed whose poller never ran alerts"
 
+# A 20s VP poll gets the same 20-minute grace as a 60s RT feed (20s x 60),
+# not RT_STALE_FACTOR's 20 intervals: a 10-minute gap is an upstream hiccup,
+# 25 minutes is a poller or feed that stopped.
 seed_vp
-vp_stale_ts=$(date -v-10M +%Y%m%d%H%M 2>/dev/null || date -d "10 minutes ago" +%Y%m%d%H%M)
+vp_gap_ts=$(date -v-10M +%Y%m%d%H%M 2>/dev/null || date -d "10 minutes ago" +%Y%m%d%H%M)
+touch -t "$vp_gap_ts" "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"
+run_hc
+[ "$rc" -eq 0 ] || fail "a 10-minute-old VP sample at a 20s interval must not alert: $(cat "$TEST_BASE/hc.out")"
+pass "a VP feed 10 minutes behind stays healthy"
+
+seed_vp
+vp_stale_ts=$(date -v-25M +%Y%m%d%H%M 2>/dev/null || date -d "25 minutes ago" +%Y%m%d%H%M)
 touch -t "$vp_stale_ts" "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"
 run_hc
-[ "$rc" -eq 1 ] || fail "a 10-minute-old sample at a 20s interval (limit 400s) should exit 1, got $rc"
-grep -q "a8 (hiroden): newest VP sample is" "$TEST_BASE/hc.out" \
+[ "$rc" -eq 1 ] || fail "a 25-minute-old VP sample at a 20s interval should exit 1, got $rc"
+grep -q "a8 (hiroden): newest VP sample is .*s old (limit 1200s = 20s interval x 60)" "$TEST_BASE/hc.out" \
     || fail "stale-VP reason absent: $(cat "$TEST_BASE/hc.out")"
 grep -q "newest RT sample" "$TEST_BASE/hc.out" && fail "a stale VP feed was reported as stale RT"
-pass "a VP feed that stopped producing samples alerts"
+pass "a VP feed 25 minutes behind alerts"
+
+# VP_STALE_FACTOR is validated like the other thresholds.
+seed_vp
+set +e
+VP_STALE_FACTOR=soon ../bin/health-check.sh > "$TEST_BASE/hc.out" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "a non-numeric VP_STALE_FACTOR should exit 64, got $rc"
+pass "a non-numeric VP_STALE_FACTOR is rejected with exit 64"
 
 seed_vp
 : > "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"

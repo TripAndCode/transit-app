@@ -306,8 +306,10 @@ What each job does with them:
   `sync-r2.sh` like a failed `rt/` one, which withholds `.sync-r2.last-ok`
   and pauses `prune.sh` until a later run succeeds.
 - `health-check.sh` and `verify-r2.sh` check only the feeds listed in
-  `etc/vehicle_positions.tsv`, with the RT thresholds: a sample younger than
-  interval × `RT_STALE_FACTOR`, and a fresh, size-matched day in `vp/<id>/`.
+  `etc/vehicle_positions.tsv`: a sample younger than interval ×
+  `VP_STALE_FACTOR` (default 60, so 20 minutes at 20 s, the grace a 60 s RT
+  feed gets from `RT_STALE_FACTOR`), and a fresh, size-matched day in
+  `vp/<id>/` on the RT thresholds.
 - `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected, on the RT
   retention, for any id in `agencies.tsv`, so ending the window never turns
   the archive into orphans.

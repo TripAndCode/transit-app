@@ -209,8 +209,9 @@ fi
 NOW=$(date -u +%s)
 
 # check_day_archives <kind> <label> <id> <name>
-# The RT/VP checks from the header, on the <YYYYMMDD>.tar.gz day archives
-# under R2's <kind>/<id>/ prefix against local data/<id>/<kind>/.
+# Reports a problem if R2 holds no object under <kind>/<id>/, or if the newest
+# one is older than R2_RT_MAX_STALE_DAYS, smaller than MIN_RT_OBJECT_BYTES, or
+# a different size from the same file still in data/<id>/<kind>/.
 check_day_archives() {
     local kind="$1" label="$2" id="$3" name="$4"
     local lines newest day_epoch day_size day_key day_age day_max local_day local_size
