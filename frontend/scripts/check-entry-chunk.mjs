@@ -79,9 +79,11 @@ const MERMAID_JS_MARKER = "mermaidAPI";
 
 // Budget covers the whole static closure (JS + CSS), not a fixed
 // "current measured size" — it's headroom, not a baseline to keep in
-// sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
-// MapLibre-scale regression with room to spare.
-const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
+// sync by hand. It sits about a tenth above the closure, so routine
+// dependency releases pass while MapLibre (which alone adds ~800 KiB)
+// still fails it with room to spare. When ordinary growth eats that
+// headroom, raise it again only after checking which chunk grew.
+const STATIC_CLOSURE_BUDGET_BYTES = 704 * 1024;
 
 // Each language's strings are their own dynamic chunk (src/i18n/index.ts)
 // so a visitor downloads only the active one. A locale chunk in an entry's
