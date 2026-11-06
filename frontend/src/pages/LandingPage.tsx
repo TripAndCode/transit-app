@@ -41,11 +41,12 @@ export function LandingPage() {
         <div className="landing-hero__content">
           <div className="landing-hero__brand">{t("header.app_title")}</div>
           <span className="landing-hero__eyebrow">{t("header.app_tagline")}</span>
-          {/* Two spans so the headline always breaks between its two questions,
-              never mid-phrase; the space keeps the accessible name one sentence. */}
+          {/* Two spans so the headline always breaks between its question and
+              its scope, never mid-phrase; the space keeps the accessible name
+              one sentence. */}
           <h1 className="landing-hero__title">
-            <span className="landing-hero__title-line">{t("landing.hero.title_now")}</span>{" "}
-            <span className="landing-hero__title-line">{t("landing.hero.title_where")}</span>
+            <span className="landing-hero__title-line">{t("landing.hero.title_question")}</span>{" "}
+            <span className="landing-hero__title-line">{t("landing.hero.title_scope")}</span>
           </h1>
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
           {session ? (
