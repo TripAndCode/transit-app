@@ -19,6 +19,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=agencies-lib.sh
 . "$SCRIPT_DIR/agencies-lib.sh"
+# shellcheck source=poll-lib.sh
+. "$SCRIPT_DIR/poll-lib.sh"
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 AGENCY_ID="${1:?usage: rt-poller.sh <agency_id>}"
@@ -55,18 +57,7 @@ while true; do
     mkdir -p "$dir"
     f="$dir/TripUpdate_$(date -u +%H%M%S).pb"
 
-    ok=0 attempt=1 backoff=2
-    while [ "$attempt" -le 4 ]; do
-        if curl -sf --max-time 8 --output "$f.part" "$FEED_URL"; then
-            ok=1
-            break
-        fi
-        sleep "$backoff"
-        backoff=$(( backoff * 2 ))
-        attempt=$(( attempt + 1 ))
-    done
-
-    if [ "$ok" -eq 1 ]; then
+    if fetch_with_retry "$FEED_URL" "$f.part"; then
         mv "$f.part" "$f"
         echo "OK $(basename "$f") ($(wc -c < "$f" | tr -d ' ') bytes)"
         if [ -n "${COLLECTOR_INGEST_URL:-}" ] && [ -n "${COLLECTOR_INGEST_SECRET:-}" ] && [ $(( i % PUSH_EVERY )) -eq 0 ]; then

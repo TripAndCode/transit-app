@@ -208,3 +208,49 @@ rc=$?
 set -e
 [ "$rc" -eq 64 ] || fail "a non-numeric RT_STALE_FACTOR should exit 64, got $rc"
 pass "a non-numeric threshold is rejected with exit 64"
+
+# --- VehiclePositions ---------------------------------------------------------
+# Each feed in etc/vehicle_positions.tsv is checked like RT: its newest
+# VehiclePosition_*.pb must be younger than interval x RT_STALE_FACTOR and
+# not empty. No such file means no VP check at all (the runs above).
+seed_vp() {
+    seed_healthy
+    printf '# id\tname\tinterval\turl\n8\thiroden\t20\thttp://feed.test/8/vehicle_position.bin\n' \
+        > "$COLLECTOR_BASE/etc/vehicle_positions.tsv"
+    mkdir -p "$COLLECTOR_BASE/data/8/vp/$day"
+    printf 'PBDATA-vp' > "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"
+}
+
+seed_vp
+run_hc
+[ "$rc" -eq 0 ] || fail "a fresh VP feed should be healthy: $(cat "$TEST_BASE/hc.out")"
+grep -q "OK — 2 agencies" "$TEST_BASE/hc.out" || fail "a VP feed changed the agency count: $(cat "$TEST_BASE/hc.out")"
+pass "a configured VP feed producing fresh samples is healthy"
+
+seed_vp
+rm -rf "$COLLECTOR_BASE/data/8/vp"
+run_hc
+[ "$rc" -eq 1 ] || fail "a configured VP feed with no vp/ dir should exit 1, got $rc"
+grep -q "a8 (hiroden): configured in vehicle_positions.tsv but has no VP directory" "$TEST_BASE/hc.out" \
+    || fail "never-ran VP reason absent: $(cat "$TEST_BASE/hc.out")"
+pass "a configured VP feed whose poller never ran alerts"
+
+seed_vp
+vp_stale_ts=$(date -v-10M +%Y%m%d%H%M 2>/dev/null || date -d "10 minutes ago" +%Y%m%d%H%M)
+touch -t "$vp_stale_ts" "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"
+run_hc
+[ "$rc" -eq 1 ] || fail "a 10-minute-old sample at a 20s interval (limit 400s) should exit 1, got $rc"
+grep -q "a8 (hiroden): newest VP sample is" "$TEST_BASE/hc.out" \
+    || fail "stale-VP reason absent: $(cat "$TEST_BASE/hc.out")"
+grep -q "newest RT sample" "$TEST_BASE/hc.out" && fail "a stale VP feed was reported as stale RT"
+pass "a VP feed that stopped producing samples alerts"
+
+seed_vp
+: > "$COLLECTOR_BASE/data/8/vp/$day/VehiclePosition_010203.pb"
+run_hc
+[ "$rc" -eq 1 ] || fail "a zero-byte VP sample should exit 1, got $rc"
+grep -q "newest VP sample VehiclePosition_010203.pb is 0 bytes" "$TEST_BASE/hc.out" \
+    || fail "empty-VP reason absent: $(cat "$TEST_BASE/hc.out")"
+pass "a zero-byte VP sample alerts"
+
+rm -f "$COLLECTOR_BASE/etc/vehicle_positions.tsv"

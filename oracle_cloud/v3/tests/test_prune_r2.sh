@@ -211,3 +211,29 @@ if ../bin/prune-r2.sh 2>/dev/null; then
     fail "prune-r2.sh should refuse to run without an agencies roster"
 fi
 pass "prune-r2.sh exits nonzero when the agencies roster is missing"
+
+# VehiclePositions objects follow R2_RT_RETENTION_DAYS under vp/<id>/, for
+# every agency in agencies.tsv: their window's row in vehicle_positions.tsv is
+# gone by the time any of them is old enough to prune.
+printf '1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
+    > "$COLLECTOR_BASE/etc/agencies.tsv"
+printf '8\thiroden\t60\thttp://feed.test/tu8.pb\thttp://feed.test/s8.zip\thttp://ping.test/8\n' \
+    >> "$COLLECTOR_BASE/etc/agencies.tsv"
+rm -f "$COLLECTOR_BASE/etc/vehicle_positions.tsv"
+seed_lists
+export LS_vp_8_="$old_ts 300 vp/8/20200101.tar.gz
+$new_ts 300 vp/8/20260901.tar.gz
+"
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"
+R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=1 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1 \
+    || fail "prune-r2.sh with vp/ objects should exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q "s3 rm s3://test-bucket/vp/8/20200101.tar.gz" "$AWS_LOG" \
+    || fail "an old vp/ object was not pruned: $(cat "$AWS_LOG")"
+grep -q "s3 rm s3://test-bucket/vp/8/20260901.tar.gz" "$AWS_LOG" \
+    && fail "a young vp/ object was pruned"
+: > "$AWS_LOG"
+../bin/prune-r2.sh >/dev/null
+grep -q "s3 rm" "$AWS_LOG" && fail "default retention pruned a vp/ object"
+unset LS_vp_8_
+pass "vp/<id>/ objects are pruned on R2_RT_RETENTION_DAYS, without a VP roster"

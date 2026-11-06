@@ -362,3 +362,31 @@ if command -v flock >/dev/null 2>&1; then
 else
     echo "SKIP: flock not installed on this platform, overlap-guard behavior not exercised"
 fi
+
+# --- VehiclePositions archives ------------------------------------------------
+# vp/<id>/<YYYYMMDD>.tar.gz is expected for any agency in agencies.tsv, with
+# or without a vehicle_positions.tsv row: the archive outlives the window that
+# collected it, so ending the window must not turn it into orphans. A
+# misnamed vp/ object, or one under an id the roster does not know, still is.
+rm -f "$COLLECTOR_BASE/etc/vehicle_positions.tsv"
+export LS_ALL="2026-11-08 00:00:00 700 vp/8/20261108.tar.gz
+2026-11-08 00:00:00 701 vp/8/notes.txt
+2026-11-08 00:00:00 702 vp/77/20261108.tar.gz
+2026-11-08 00:00:00 703 rt/8/20261108.tar.gz"
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+run
+[ "$rc" -eq 1 ] || fail "dry run with vp/ orphans should exit 1, got $rc: $(cat "$TEST_BASE/out.log")"
+grep -q "ORPHAN vp/8/20261108.tar.gz" "$TEST_BASE/out.log" \
+    && fail "a correctly-named vp/ object for a known agency was flagged: $(cat "$TEST_BASE/out.log")"
+grep -q "ORPHAN vp/8/notes.txt" "$TEST_BASE/out.log" \
+    || fail "a vp/ filename not matching <YYYYMMDD>.tar.gz was not flagged"
+grep -q "ORPHAN vp/77/20261108.tar.gz" "$TEST_BASE/out.log" \
+    || fail "a vp/ object under an agency id absent from the roster was not flagged"
+grep -q "ORPHAN rt/8/20261108.tar.gz" "$TEST_BASE/out.log" \
+    && fail "a correctly-named rt/ object was flagged beside the vp/ ones"
+pass "vp/<id>/<YYYYMMDD>.tar.gz is expected for a known agency, without a VP roster"
+
+run --execute
+grep -q "^vp/8/20261108.tar.gz$" "$RM_LOG" && fail "--execute deleted a VehiclePositions day archive"
+grep -q "^vp/8/notes.txt$" "$RM_LOG" || fail "--execute kept a misnamed vp/ object"
+pass "--execute never deletes a correctly-named VehiclePositions archive"

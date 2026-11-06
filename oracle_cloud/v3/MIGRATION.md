@@ -91,7 +91,7 @@ confirm the marker is from this morning:
 
 ## 9b. Direct-to-R2 sync
 `bin/sync-r2.sh` runs daily in cron (see `crontab.snippet`), mirroring
-this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 as prune's
+this VM's own `data/<id>/{rt,vp,static}` straight to Cloudflare R2 as prune's
 parity gate. `prune.sh` refuses to run (exit 65) unless sync-r2.sh's
 `.sync-r2.last-ok` marker is fresh, so the parity gate is enforced in code,
 not just documented here.
@@ -111,7 +111,8 @@ longer than `prune.sh`'s local ones. Both are wrapped by `cron-wrap.sh` like
 that age-based sweep cannot: it lists the ENTIRE bucket and flags any object
 under an agency id no longer in `agencies.tsv` (a retired agency, a renumbered
 or corrected id), or one whose filename doesn't match the naming rule at all
-(`rt/<id>/<YYYYMMDD>.tar.gz`, `static/<id>/gtfs_static_<YYYYMMDD>.zip`) --
+(`rt/<id>/<YYYYMMDD>.tar.gz`, `vp/<id>/<YYYYMMDD>.tar.gz`,
+`static/<id>/gtfs_static_<YYYYMMDD>.zip`) --
 neither case is ever pruned by `prune-r2.sh`, since it only ever looks at
 prefixes for ids still in the current roster. It is dry-run by default (a
 nonzero exit when it finds orphans, so `cron-wrap.sh` pages on it, but nothing
@@ -122,7 +123,7 @@ right before its own delete.
 
 `bin/spool-cleanup.sh` runs daily right after `verify-r2.sh` and reclaims
 local disk file by file, the moment its own R2 listing confirms (byte-size
-match) that specific RT/static archive is uploaded — well before
+match) that specific RT, VP or static archive is uploaded — well before
 `prune.sh`'s much longer age-based window. A failed or partially uploaded
 archive is left in place for `sync-r2.sh` to retry; local spool bytes
 remaining after that reclaim are checked against the required
@@ -247,7 +248,9 @@ line succeeding.
 `bin/storage-metrics.sh` (cron, every 30 min, offset from status-snapshot.sh)
 builds a second operations-status document, component `"r2"`, reporting this
 VM's own filesystem usage (`df` on `COLLECTOR_BASE`) and Cloudflare R2's
-object count/bytes split by the `rt/` and `static/` prefixes, each classified
+object count/bytes split by the `rt/`, `static/` and `vp/` prefixes (`vp/`
+is empty until a VehiclePositions day is uploaded, which reads as zero
+objects, not a failed listing), each classified
 against configurable warning/critical thresholds
 (`DISK_WARN_PCT`/`DISK_CRIT_PCT`, default 80/90; `R2_BYTES_WARN_THRESHOLD`/
 `R2_BYTES_CRIT_THRESHOLD`, default 50/100 GiB). Unlike `status-snapshot.sh`,
@@ -276,6 +279,95 @@ script. `.github/workflows/r2-storage-heartbeat-listener.yml` and
 structurally identical to the oracle_crawler channel's own
 `oracle-heartbeat-listener.yml`/`collect_oracle_status.py` but keyed on
 component `"r2"` and their own independent replay watermark.
+
+## 14. VehiclePositions validation window
+Every delay figure in the app is a feed's TripUpdates *prediction*
+(`dep_delay`), never an observed departure. To measure how far those
+predictions are from what the buses did, the collector can archive GTFS-RT
+VehiclePositions for a bounded window (7–14 days), from which observed stop
+passages are later reconstructed from positions near each stop. The analysis
+is tracked in issue #1503. Nothing in the app ingests these samples: the
+workstation's `make fetch` copies only `rt/` and `static/` from the VM, and
+`ml/sync.py` and `scripts/catch_up_from_r2.py` list only the `rt/` and
+`static/` prefixes in R2.
+
+Where the samples land:
+- On the VM: `data/<id>/vp/<UTCDAY>/VehiclePosition_HHMMSS.pb`, one raw
+  FeedMessage per poll, written by `bin/vp-poller.sh` (systemd
+  `vp-poller@<id>`). It never pushes to the app.
+- `rotate-day.sh` tars each closed UTC day to `data/<id>/vp/<YYYYMMDD>.tar.gz`
+  (holding `<YYYYMMDD>/VehiclePosition_*.pb`), exactly as it does `rt/`.
+- In R2: `vp/<id>/<YYYYMMDD>.tar.gz`, beside `rt/<id>/`.
+
+What each job does with them:
+- `rotate-day.sh`, `sync-r2.sh`, `spool-cleanup.sh` and `prune.sh` act on
+  every `data/*/vp` directory on disk, the way they act on `rt/`, so the
+  last day still reaches R2 after the window ends. A failed `vp/` upload fails
+  `sync-r2.sh` like a failed `rt/` one, which withholds `.sync-r2.last-ok`
+  and pauses `prune.sh` until a later run succeeds.
+- `health-check.sh` and `verify-r2.sh` check only the feeds listed in
+  `etc/vehicle_positions.tsv`, with the RT thresholds: a sample younger than
+  interval × `RT_STALE_FACTOR`, and a fresh, size-matched day in `vp/<id>/`.
+- `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected, on the RT
+  retention, for any id in `agencies.tsv`, so ending the window never turns
+  the archive into orphans.
+- `storage-metrics.sh` reports `vp_object_count`/`vp_bytes` and counts them in
+  `r2_bytes_total`. `status-snapshot.sh` leaves VP out.
+
+### Enable
+`etc/vehicle_positions.tsv` lists the feeds (`id, name, interval, url`,
+tab-separated); every id must also be an `agencies.tsv` row. An agency
+without a row runs no VP poller, and with no file at all nothing above
+changes. Deploy `bin/` and the files outside 09:00–09:45 JST, while no
+daily cron job is running from `bin/`, then install the unit:
+
+    # from workstation repo root (KEY/VM as in step 1):
+    scp -i $KEY oracle_cloud/v3/bin/* $VM:/home/opc/collector/bin/
+    scp -i $KEY oracle_cloud/v3/etc/vehicle_positions.tsv.example $VM:/home/opc/collector/etc/vehicle_positions.tsv
+    scp -i $KEY oracle_cloud/v3/vp-poller@.service $VM:/home/opc/
+    ssh -i $KEY $VM 'chmod +x /home/opc/collector/bin/*.sh'
+
+    # on VM: TABs survived, and each url answers 200 with a nonzero body.
+    # Delete any row that does not before enabling its unit.
+    awk -F'\t' '!/^#/ && NF!=4 {print "BAD ROW: " $0}' /home/opc/collector/etc/vehicle_positions.tsv
+    for u in $(awk -F'\t' '!/^#/ && NF==4 {print $4}' /home/opc/collector/etc/vehicle_positions.tsv); do
+        curl -s -o /dev/null -w "%{http_code} %{size_download} $u\n" "$u"
+    done
+
+    sudo cp /home/opc/vp-poller@.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now vp-poller@8 vp-poller@9 vp-poller@10
+    journalctl -u vp-poller@8 -n 5    # expect "OK VehiclePosition_HHMMSS.pb" lines
+
+    # The new bin/rt-poller.sh fetches through bin/poll-lib.sh, with the same
+    # behaviour; restart the RT pollers so it runs now rather than at the next reboot.
+    sudo systemctl restart 'rt-poller@*'
+    journalctl -u rt-poller@8 -n 5
+
+Enable a unit in the same sitting as its row: `health-check.sh` pages on a
+listed feed with no `vp/` directory. Avoid 09:00–09:15 JST, when no closed VP
+day exists yet for `verify-r2.sh`'s 09:15 run to find. The next morning,
+`cron.log` should show `rotated .../vp/<day>.tar.gz` and `[a8] vp synced`.
+
+### Stop
+When the window ends, stop the pollers and delete the rows (or the whole
+`etc/vehicle_positions.tsv`) right away, before `health-check.sh` pages on
+the stopped feeds:
+
+    sudo systemctl disable --now vp-poller@8 vp-poller@9 vp-poller@10
+    rm /home/opc/collector/etc/vehicle_positions.tsv
+
+The next morning's cron run tars the last partial day, uploads it to
+`vp/<id>/` and reclaims the local copies once R2 confirms them. Once
+`data/<id>/vp/` is empty, remove those directories, or `sync-r2.sh` keeps
+syncing them daily and a transient failure there still withholds its success
+marker. `rmdir` refuses a directory that still holds an unconfirmed day:
+
+    rmdir /home/opc/collector/data/8/vp /home/opc/collector/data/9/vp /home/opc/collector/data/10/vp
+
+The archive stays in R2:
+
+    aws s3 ls "s3://$OBJECT_STORE_BUCKET/vp/" --recursive --endpoint-url "$OBJECT_STORE_ENDPOINT"
 
 ## Rollback (any point before step 10)
     sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10'

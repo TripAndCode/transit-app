@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Enforce the rolling retention window.
-#   RT tarballs:  delete *.tar.gz older than RETENTION_DAYS (default 90).
+#   RT and VP tarballs: delete rt/ and vp/ *.tar.gz older than RETENTION_DAYS
+#                 (default 90).
 #   Static zips:  delete gtfs_static_*.zip older than STATIC_RETENTION_DAYS
 #                 (default 365) EXCEPT the current latest.zip target.
 # Live day dirs are never touched (only *.tar.gz files are matched).
@@ -50,9 +51,9 @@ if [ $(( $(date -u +%s) - marker_epoch )) -gt "$stale_after" ]; then
     exit 65
 fi
 
-for rt in "$BASE_DIR"/data/*/rt; do
-    [ -d "$rt" ] || continue
-    find "$rt" -maxdepth 1 -name '*.tar.gz' -type f -mtime "+$RETENTION_DAYS" -print -delete \
+for kind_dir in "$BASE_DIR"/data/*/rt "$BASE_DIR"/data/*/vp; do
+    [ -d "$kind_dir" ] || continue
+    find "$kind_dir" -maxdepth 1 -name '*.tar.gz' -type f -mtime "+$RETENTION_DAYS" -print -delete \
         | sed 's/^/pruned /'
 done
 

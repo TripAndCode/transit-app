@@ -1,4 +1,4 @@
-"""15 Oracle-collector bash test suites under oracle_cloud/v3/tests/ have no
+"""The Oracle-collector bash test suites under oracle_cloud/v3/tests/ have no
 runner: nothing in the Makefile or CI invokes them, so a regression there is
 silent. `make oracle-tests` runs every suite with a pass/fail summary, and
 the nightly workflow wires it into CI so a broken suite is eventually caught.
@@ -99,7 +99,7 @@ def test_runner_fails_when_the_directory_holds_no_suites(tmp_path):
 
 def test_oracle_tests_target_covers_every_suite_on_disk():
     suites = _oracle_test_suite_names()
-    assert len(suites) == 15, f"expected 15 oracle bash suites, found {len(suites)}: {suites}"
+    assert len(suites) == 16, f"expected 16 oracle bash suites, found {len(suites)}: {suites}"
 
 
 def test_nightly_workflow_references_oracle_tests():
