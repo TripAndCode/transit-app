@@ -2287,6 +2287,25 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
 
 
 @pytest.mark.asyncio
+async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aagency_id, ch_client, ch_async_client):
+    """Under a routes filter with every hour, only the hour profiles read the
+    grain, and only inside the period: every other figure comes from its agg_*
+    table. So the grain does not reach back at all, however wide the period."""
+    for day, dep in ((date(2026, 3, 26), 120), (date(2026, 4, 25), 600), (date(2026, 5, 24), 600)):
+        await _seed_update(aconn, aagency_id, datetime.combine(day, time(12, 0), tzinfo=timezone.utc), "R_RT", dep)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain
+
+    ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), routes=("R_RT",))
+    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    assert (grain.from_date, grain.to_date) == (date(2026, 4, 25), date(2026, 5, 24))
+    assert sorted(row[0] for row in grain.rows) == [date(2026, 4, 25), date(2026, 5, 24)]
+
+
+@pytest.mark.asyncio
 async def test_widest_period_reads_a_baseline_as_wide(aconn, aagency_id, ch_client, ch_async_client):
     """The widest period a request may ask for (365 days), on the slow path and
     under a service filter, reads its 365-day baseline: the grain and the day

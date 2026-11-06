@@ -77,31 +77,42 @@ _log = logging.getLogger(__name__)
 _MOVER_HISTORY_WEEKS = 4
 
 
-def _grain_lookback_days(ctx: RangeCtx) -> int:
-    """How many days before ``ctx.from_date`` the shared grain has to reach:
+def _baseline_reach_days(ctx: RangeCtx) -> int:
+    """How many days before ``ctx.from_date`` ``base_ctx`` can start:
     ``ctx``'s own width.
 
     :func:`compute_overview_summary` compares ``cur_ctx = [ctx.from_date,
     anchor]`` against ``base_ctx``, the same width immediately before it.
     ``anchor`` lies inside ``ctx``, so ``cur_ctx`` is at most ``ctx.days`` wide
     and ``base_ctx`` starts at most ``ctx.days`` before ``ctx.from_date``: the
-    exact worst case, reached whenever the data runs to ``ctx.to_date``. See
-    :func:`_fetch_grain`; :func:`_grain_window` enforces the bound at runtime.
+    exact worst case, reached whenever the data runs to ``ctx.to_date``.
     """
     return ctx.days
+
+
+def _grain_lookback_days(ctx: RangeCtx) -> int:
+    """How many days before ``ctx.from_date`` the shared grain has to reach.
+
+    Under a time band every figure reads the grain, ``base_ctx`` included, so
+    it reaches :func:`_baseline_reach_days` back. Under a routes filter alone
+    only the hour profiles read it, and only inside ``ctx``; every other figure
+    reads its ``agg_*`` table, so the grain reaches back not at all. See
+    :func:`_fetch_grain`; :func:`_grain_window` enforces the bound at runtime.
+    """
+    return _baseline_reach_days(ctx) if ctx.time_band != "all" else 0
 
 
 def _calendar_from(ctx: RangeCtx) -> date:
     """The first day of the span the overview resolves its day types over.
 
-    The payload reads before ``ctx.from_date`` twice: ``base_ctx`` reaches
-    :func:`_grain_lookback_days` back, and the movers' sparkline
-    ``_MOVER_HISTORY_WEEKS`` weeks back from a current window that ends inside
-    ``ctx``. The day types are resolved once over the whole span
+    The payload reads before ``ctx.from_date`` twice, whichever store serves it:
+    ``base_ctx`` reaches :func:`_baseline_reach_days` back, and the movers'
+    sparkline ``_MOVER_HISTORY_WEEKS`` weeks back from a current window that
+    ends inside ``ctx``. The day types are resolved once over the whole span
     (api.range.ServiceDates), so the service filter and the day-type split
     always agree.
     """
-    return ctx.from_date - timedelta(days=max(_grain_lookback_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1))
+    return ctx.from_date - timedelta(days=max(_baseline_reach_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1))
 
 
 def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> list:
@@ -195,8 +206,8 @@ def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
 def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
     """Fail loudly if a consumer asks for a window the grain never fetched.
 
-    The grain spans ``[ctx.from_date - ctx.days, ctx.to_date]``
-    (:func:`_grain_lookback_days`), which is derived from how
+    The grain spans ``[ctx.from_date - _grain_lookback_days(ctx), ctx.to_date]``,
+    which is derived from how
     :func:`compute_overview_summary` builds ``cur_ctx`` / ``base_ctx``. If that
     construction ever drifts — an off-by-one in a window's bounds, a baseline
     wider than the current window — the Python filters here would happily
@@ -282,9 +293,11 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       filter is applied here at all; each consumer applies its own in Python
       off each row's ``date`` (:func:`_dow_matches`).
     * The date windows differ (``ctx`` / ``cur_ctx`` / ``base_ctx``), so the
-      grain spans their union and each consumer re-filters. The union bound is
-      ``[ctx.from_date - ctx.days, ctx.to_date]`` (:func:`_grain_lookback_days`):
-      ``cur_ctx = [ctx.from_date, anchor]``, where ``anchor`` is either a date
+      grain spans their union and each consumer re-filters. Under a time band
+      the union bound is ``[ctx.from_date - ctx.days, ctx.to_date]``
+      (:func:`_grain_lookback_days`); under a routes filter alone only the hour
+      profiles read the grain, inside ``ctx``, so it starts at
+      ``ctx.from_date``. ``cur_ctx = [ctx.from_date, anchor]``, where ``anchor`` is either a date
       inside ``ctx`` or ``ctx.to_date`` itself, so ``cur_ctx`` ends no later
       than ``ctx.to_date`` and is at most ``ctx.days`` wide; ``base_ctx`` is
       the same width immediately before ``ctx.from_date``, so it starts at most
@@ -300,8 +313,8 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     every default 30-day request, but not a narrow one — so that helper checks
     coverage with :func:`_grain_covers` and keeps its own live scan for the
     uncovered case. Widening the grain to always cover it was rejected: it would
-    add up to three weeks of scan to every narrow slow-path request to save a
-    scan on the minority that find movers.
+    add up to ``27 - ctx.days`` days of scan to every narrow slow-path request,
+    most for the narrowest, to save a scan on the minority that find movers.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
     fetched separately for ``_peak_hour_by_dow``: adding it to the existing
@@ -518,8 +531,8 @@ async def _route_weekly_history(
 
     Slow path prefers the shared grain (:func:`_fetch_grain`) when it reaches
     far enough back, and only falls back to its own live ``updates``
-    (ClickHouse) scan when it doesn't. The grain reaches one period's width
-    before the payload's period (:func:`_grain_lookback_days`) while this
+    (ClickHouse) scan when it doesn't. Under a time band the grain reaches one
+    period's width before the payload's period (:func:`_grain_lookback_days`) while this
     function needs ``[ctx.to_date - (7 * weeks_back - 1), ctx.to_date]``, so
     for the default ``weeks_back=4`` the grain covers it whenever the period is
     at least two weeks wide and its data runs to its last day — i.e. every
@@ -1365,8 +1378,9 @@ async def compute_overview_summary(
         service_dates=ctx.service_dates,
     )
     # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it (see the
-    # docstring). It lies wholly before ctx, which is why the grain and the day
-    # types reach back (:func:`_grain_lookback_days`, :func:`_calendar_from`).
+    # docstring). It lies wholly before ctx, which is why the day types and,
+    # under a time band, the grain reach back (:func:`_calendar_from`,
+    # :func:`_grain_lookback_days`).
     base_to = cur_ctx.from_date - timedelta(days=1)
     base_from = base_to - timedelta(days=cur_ctx.days - 1)
     base_ctx = RangeCtx(
