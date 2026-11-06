@@ -67,7 +67,11 @@ function renderHero(overrides: {
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       periodAvgMin={overrides.periodAvgMin === undefined ? 2.7 : overrides.periodAvgMin}
-      headlineRange={formatDateRange("2026-06-03", "2026-06-09", { year: false })}
+      headlineRange={formatDateRange(
+        (overrides.headline ?? headline()).window_from,
+        (overrides.headline ?? headline()).window_to,
+        { year: false },
+      )}
       periodRange={formatDateRange("2026-05-11", "2026-06-09", { year: false })}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
@@ -91,8 +95,28 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.1);
     renderHero();
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
-    expect(screen.getByText(`Average delay, last 7 days (${week})`)).toBeInTheDocument();
+    expect(screen.getByText(`Average delay over 7 days (${week})`)).toBeInTheDocument();
     expect(document.querySelector(".ov-kpi-value")).toHaveTextContent(/^3\.3/);
+  });
+
+  it("names a whole 30-day period, and the 30 days before it, by their length", () => {
+    mockFeed(0.1);
+    renderHero({
+      headline: headline({
+        avg_min: 3.23,
+        baseline_avg_min: 2.91,
+        delta_min: 0.32,
+        delta_pct: 11,
+        window_from: "2026-05-11",
+        window_to: "2026-06-09",
+      }),
+    });
+    const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
+    expect(screen.getByText(`Average delay over 30 days (${period})`)).toBeInTheDocument();
+    expect(screen.getByText("+0.3 min on the 30 days before")).toBeInTheDocument();
+    expect(
+      screen.getByText("These 30 days averaged 3.2 min, 0.3 min (11%) longer than the 30 days before (2.9 min)."),
+    ).toBeInTheDocument();
   });
 
   it("states a longer window as a chip with its change, then both averages and the change in a sentence", () => {
@@ -100,7 +124,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 3.23, baseline_avg_min: 2.91, delta_min: 0.32, delta_pct: 11 }) });
     expect(screen.getByText("+0.3 min on the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 3.2 min, 0.3 min (11%) longer than the 7 days before (2.9 min)."),
+      screen.getByText("These 7 days averaged 3.2 min, 0.3 min (11%) longer than the 7 days before (2.9 min)."),
     ).toBeInTheDocument();
   });
 
@@ -109,7 +133,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 2.6, baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -31.6 }) });
     expect(screen.getByText("\u22121.2 min on the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 2.6 min, 1.2 min (32%) shorter than the 7 days before (3.8 min)."),
+      screen.getByText("These 7 days averaged 2.6 min, 1.2 min (32%) shorter than the 7 days before (3.8 min)."),
     ).toBeInTheDocument();
   });
 
@@ -118,7 +142,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 2.52, baseline_avg_min: 2.46, delta_min: 0.06, delta_pct: 2.4 }) });
     expect(screen.getByText("About the same as the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 2.5 min, about the same as the 7 days before (2.5 min)."),
+      screen.getByText("These 7 days averaged 2.5 min, about the same as the 7 days before (2.5 min)."),
     ).toBeInTheDocument();
   });
 
@@ -157,7 +181,7 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.1);
     const { container } = renderHero({ headline: headline({ avg_min: 3.7, delta_min: 0.9, delta_pct: 32.1 }) });
     expect(container.querySelector(".ov-hero-story")?.textContent).toBe(
-      "The last 7 days averaged 3.7 min, 0.9 min (32%) longer than the 7 days before (2.8 min).",
+      "These 7 days averaged 3.7 min, 0.9 min (32%) longer than the 7 days before (2.8 min).",
     );
   });
 

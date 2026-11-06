@@ -17,8 +17,8 @@ from pipeline.reports.overview import (
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES
 from pipeline.route_catalog import RETIRED, ZERO_DELAY
 
-_CTX = RangeCtx(date(2026, 9, 23), date(2026, 9, 29))
-_BASE = RangeCtx(date(2026, 9, 16), date(2026, 9, 22))
+_CTX = RangeCtx(date(2026, 9, 1), date(2026, 9, 30))
+_BASE = RangeCtx(date(2026, 8, 2), date(2026, 8, 31))
 
 
 def _row(code: str, avg: float, samples: int = TOP_DELAYED_MIN_SAMPLES) -> dict:
