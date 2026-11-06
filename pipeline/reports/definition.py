@@ -12,12 +12,12 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from datetime import datetime
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel
 
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.cache import clear_all
 from pipeline.clickhouse import jst_date
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
@@ -73,10 +73,13 @@ class DefinitionMeta(BaseModel):
     builder, but there is no tolerance value to show.
 
     ``method_version`` names the analysis method the figures were made with
-    (:data:`pipeline.agg_registry.METHOD_VERSION`). ``built_at`` is when
-    analyze last recorded the aggregates behind them
-    (:func:`aggregates_built_at`), which a router with a connection fills in;
-    ``None`` when no build is recorded, or for a view that reads no aggregate.
+    (:data:`pipeline.agg_registry.METHOD_VERSION`). ``source`` says whether
+    they came from the aggregates or from a live scan of the observations
+    (:func:`pipeline.reports.rankings.report_reads_aggregates`). ``built_at``
+    is when analyze last recorded the aggregates behind them
+    (:func:`stamp_build`), which a router with a connection fills in: always
+    ``None`` for a live scan, and ``None`` for aggregates with no build
+    recorded.
     """
 
     preset: str | None
@@ -86,25 +89,59 @@ class DefinitionMeta(BaseModel):
     measurement_point: str = MEASUREMENT_POINT
     dedup_rule: str = DEDUP_RULE
     method_version: str = METHOD_VERSION
+    source: Literal["aggregates", "live"] = "aggregates"
     built_at: AwareDatetime | None = None
 
 
-async def aggregates_built_at(conn, agency_ids: Iterable[int]) -> datetime | None:
-    """The newest time analyze recorded any aggregate table of *agency_ids*
-    (agg_table_state), or None when it has recorded none.
+# The newest build analyze had recorded, for any agency, when this process last
+# looked; _UNSEEN before its first look.
+_UNSEEN = object()
+_seen_newest_build: object = _UNSEEN
 
-    Every table of an agency is recorded in one run, so the newest across them
-    is that agency's last run; across agencies it is the latest of theirs.
+# Every table of an agency is recorded in one analyze run, so an agency's
+# newest row is its last run. With no agency named, built_at covers the
+# agencies the board lists, the ones not deleted.
+_BUILDS_SQL = """
+SELECT max(s.built_at) AS newest,
+       max(s.built_at) FILTER (WHERE s.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)) AS built_at
+FROM agg_table_state s
+JOIN agencies a USING (agency_id)
+"""
+
+
+async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None) -> DefinitionMeta:
+    """*meta* with ``built_at``: the newest time analyze recorded the
+    aggregates of *agency_id*, or of every agency the board lists when it is
+    None. A live definition is returned as it is.
+
+    Call it before computing the rows. The compute caches outlive a rebuild,
+    so when analyze has recorded a build this process has not seen, every
+    cache is forgotten first: rows served after this call are then no older
+    than the build it names.
     """
-    return await conn.fetchval(
-        "SELECT max(built_at) FROM agg_table_state WHERE agency_id = ANY($1::int[])", list(agency_ids)
-    )
+    if meta.source == "live":
+        return meta
+    newest, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
+    _note_newest_build(newest)
+    return meta.model_copy(update={"built_at": built_at})
+
+
+def _note_newest_build(newest: object) -> None:
+    """Forget every cached compute result when *newest* is not the build this
+    process last saw. The first look forgets too: rows cached before it are of
+    an unknown build."""
+    global _seen_newest_build
+    if newest != _seen_newest_build:
+        clear_all()
+        _seen_newest_build = newest
 
 
 def resolve_definition_meta(
     report_type: str,
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
+    *,
+    live: bool = False,
 ) -> DefinitionMeta:
     """Resolve the early/late tolerance actually applied for *report_type*,
     from the same (already-validated) query params ``get_report`` passes
@@ -112,8 +149,10 @@ def resolve_definition_meta(
     :func:`~pipeline.reports.rankings.compute_worst_5min`. Mirrors those two
     functions' own None-default resolution exactly, so this metadata block
     can never show a tolerance different from the one actually used to
-    compute the rows next to it.
+    compute the rows next to it. *live* marks rows from a live scan of the
+    observations rather than the aggregates.
     """
+    source: Literal["aggregates", "live"] = "live" if live else "aggregates"
     if report_type in ("on_time", "route_table", "council_summary"):
         # One resolution rule for every on-time figure: council_summary pools
         # on_time's window into one whole-agency figure, and route_table's
@@ -125,6 +164,7 @@ def resolve_definition_meta(
             preset=LEGACY_PRESET_NAME if is_legacy else "custom",
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=resolved_late,
+            source=source,
         )
     if report_type == "worst_5min":
         is_legacy = late_tolerance_sec is None
@@ -133,11 +173,12 @@ def resolve_definition_meta(
             preset=LEGACY_PRESET_NAME if is_legacy else "custom",
             early_tolerance_sec=None,
             late_tolerance_sec=resolved_late,
+            source=source,
         )
     # ranking/ranking_best/trend/compare_ranking/dow_weekend/dow_weekday: no
     # on-time/late tolerance concept -- dedup/exclusion/measurement-point
     # still apply (defaulted above), but there's no preset/tolerance to show.
-    return DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None)
+    return DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None, source=source)
 
 
 def format_definition_csv_line(meta: DefinitionMeta) -> str:
@@ -166,30 +207,38 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     # only having one entry each today.
     measurement_point = _MEASUREMENT_POINT_CSV_TEXT[meta.measurement_point]
     dedup_rule = _DEDUP_RULE_CSV_TEXT[meta.dedup_rule]
-    built_on = _built_on(meta) or "不明"
     return (
         f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; "
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
-        f"算出方法={meta.method_version}; 集計日={built_on}"
+        f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
 
 
-def _built_on(meta: DefinitionMeta) -> str | None:
-    """The JST day *meta*'s aggregates were built, as YYYY-MM-DD."""
-    return None if meta.built_at is None else jst_date(meta.built_at).isoformat()
+_LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
+_UNKNOWN_DAY = {"ja": "不明", "en": "unknown"}
+
+
+def _built_day(meta: DefinitionMeta, locale: str) -> str:
+    """The JST day *meta*'s aggregates were built, as YYYY-MM-DD; for a live
+    scan, that no build applies; for aggregates with no build recorded, that
+    it is unknown."""
+    if meta.source == "live":
+        return _LIVE_DAY[locale]
+    if meta.built_at is None:
+        return _UNKNOWN_DAY[locale]
+    return jst_date(meta.built_at).isoformat()
 
 
 def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
     """One footnote line naming the method version *meta*'s figures were made
-    with and the JST day their aggregates were built, the day left out when
-    *meta* has none. :func:`format_definition_footnotes` ends with it, and the
+    with and the JST day their aggregates were built, in the words of the CSV
+    preamble's 集計日. :func:`format_definition_footnotes` ends with it, and the
     delay record's text is footnoted with it, so a document says which method
     produced it."""
-    built_on = _built_on(meta)
     if locale == "en":
-        return f"Method version: {meta.method_version}" + (f" (aggregates built {built_on})" if built_on else "")
-    return f"算出方法: {meta.method_version}" + (f"（{built_on} 集計）" if built_on else "")
+        return f"Method version: {meta.method_version}, aggregates built: {_built_day(meta, 'en')}"
+    return f"算出方法: {meta.method_version}、集計日: {_built_day(meta, 'ja')}"
 
 
 def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> list[str]:

@@ -34,6 +34,7 @@ from pipeline.reports.rankings import (
     _read_dist_scalars,
     _read_dist_with_hist,
     _round1,
+    aggregates_serve,
 )
 
 # Each sort's row index, and whether the routes needing attention come first
@@ -70,7 +71,7 @@ async def compute_route_table(
     tolerance reads the merged delay histogram instead, as compute_on_time
     does, and a time_band filter scans ClickHouse.
     """
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("compute_route_table's time_band-filtered live fallback requires a ClickHouse client")
         return await _route_table_live(agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec)

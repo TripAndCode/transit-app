@@ -17,10 +17,10 @@ from pipeline.reports.council import (
 )
 from pipeline.reports.definition import (
     DefinitionMeta,
-    aggregates_built_at,
     format_definition_csv_line,
     format_definition_footnotes,
     resolve_definition_meta,
+    stamp_build,
 )
 from pipeline.reports.dwell_run import compute_dwell_run_decomposition
 from pipeline.reports.headway_quality import compute_headway_quality, compute_headway_quality_report
@@ -54,7 +54,6 @@ __all__ = [
     "RANKING_MIN_SAMPLES",
     "ROUTE_TABLE_SORTS",
     "DefinitionMeta",
-    "aggregates_built_at",
     "compute_compare_ranking",
     "compute_council_summary",
     "compute_delay_certificate",
@@ -78,4 +77,5 @@ __all__ = [
     "resolve_definition_meta",
     "simulation_disclaimer",
     "sort_route_table",
+    "stamp_build",
 ]

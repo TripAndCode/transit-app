@@ -17,6 +17,7 @@ from pipeline.histogram import (
     LEGACY_PRESET_NAME,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
 )
+from pipeline.reports import definition
 from pipeline.reports.definition import (
     DEDUP_RULE,
     MEASUREMENT_POINT,
@@ -259,36 +260,64 @@ def test_a_build_time_without_a_zone_is_refused():
         DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None, built_at=datetime(2026, 11, 6))
 
 
-def test_csv_line_names_the_method_version_and_the_jst_day_the_aggregates_were_built():
-    meta = resolve_definition_meta("on_time", None, None).model_copy(update={"built_at": _BUILT_AT})
-    line = format_definition_csv_line(meta)
-    assert line.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
-    assert "," not in line
+def test_a_live_scan_is_marked_live():
+    assert resolve_definition_meta("ranking", None, None).source == "aggregates"
+    assert resolve_definition_meta("ranking", None, None, live=True).source == "live"
 
 
-def test_csv_line_says_the_build_day_is_unknown_without_one():
-    line = format_definition_csv_line(resolve_definition_meta("on_time", None, None))
-    assert line.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=不明")
+_DATED = resolve_definition_meta("on_time", None, None).model_copy(update={"built_at": _BUILT_AT})
+_UNKNOWN = resolve_definition_meta("on_time", None, None)
+_LIVE = resolve_definition_meta("on_time", None, None, live=True)
 
 
 @pytest.mark.parametrize(
-    ("locale", "dated", "undated"),
+    ("meta", "day"),
+    [(_DATED, "2026-11-06"), (_UNKNOWN, "不明"), (_LIVE, "対象外（ライブ集計）")],
+    ids=["dated", "unknown", "live"],
+)
+def test_csv_line_names_the_method_version_and_the_jst_build_day(meta, day):
+    line = format_definition_csv_line(meta)
+    assert line.endswith(f"; 算出方法={METHOD_VERSION}; 集計日={day}")
+    assert "," not in line
+
+
+def test_a_live_definition_names_no_build_day_even_if_handed_one():
+    live = _LIVE.model_copy(update={"built_at": _BUILT_AT})
+    assert format_definition_csv_line(live).endswith("集計日=対象外（ライブ集計）")
+    assert format_method_stamp(live, "en").endswith("not applicable (live scan)")
+
+
+@pytest.mark.parametrize(
+    ("locale", "dated", "unknown", "live"),
     [
-        ("ja", f"算出方法: {METHOD_VERSION}（2026-11-06 集計）", f"算出方法: {METHOD_VERSION}"),
+        (
+            "ja",
+            f"算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
+            f"算出方法: {METHOD_VERSION}、集計日: 不明",
+            f"算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
+        ),
         (
             "en",
-            f"Method version: {METHOD_VERSION} (aggregates built 2026-11-06)",
-            f"Method version: {METHOD_VERSION}",
+            f"Method version: {METHOD_VERSION}, aggregates built: 2026-11-06",
+            f"Method version: {METHOD_VERSION}, aggregates built: unknown",
+            f"Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
         ),
     ],
 )
-def test_the_method_stamp_names_the_version_and_the_jst_build_day(locale, dated, undated):
-    meta = resolve_definition_meta("council_summary", None, None)
-    assert format_method_stamp(meta.model_copy(update={"built_at": _BUILT_AT}), locale) == dated
-    assert format_method_stamp(meta, locale) == undated
+def test_the_method_stamp_names_the_version_and_the_jst_build_day(locale, dated, unknown, live):
+    assert format_method_stamp(_DATED, locale) == dated
+    assert format_method_stamp(_UNKNOWN, locale) == unknown
+    assert format_method_stamp(_LIVE, locale) == live
     # A build later the same JST day is the same day.
-    later = meta.model_copy(update={"built_at": _BUILT_AT + timedelta(hours=23)})
+    later = _DATED.model_copy(update={"built_at": _BUILT_AT + timedelta(hours=23)})
     assert format_method_stamp(later, locale) == dated
+
+
+@pytest.mark.parametrize("meta", [_DATED, _UNKNOWN, _LIVE], ids=["dated", "unknown", "live"])
+def test_the_csv_line_and_the_footnote_name_the_same_build_day(meta):
+    csv_day = format_definition_csv_line(meta).rsplit("集計日=", 1)[1]
+    footnote_day = format_method_stamp(meta, "ja").rsplit("集計日: ", 1)[1]
+    assert csv_day == footnote_day
 
 
 @pytest.mark.parametrize("locale", ["ja", "en"])
@@ -296,3 +325,15 @@ def test_the_method_stamp_names_the_version_and_the_jst_build_day(locale, dated,
 def test_footnotes_end_with_the_method_stamp(locale, report_type):
     meta = resolve_definition_meta(report_type, None, None).model_copy(update={"built_at": _BUILT_AT})
     assert format_definition_footnotes(meta, locale)[-1] == format_method_stamp(meta, locale)
+
+
+def test_cached_rows_are_forgotten_whenever_the_newest_build_moves(monkeypatch):
+    """Rows cached before a build must not be served under its stamp, so the
+    caches are cleared the first time a process looks and on every move after."""
+    cleared: list[None] = []
+    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
+    monkeypatch.setattr(definition, "_seen_newest_build", definition._UNSEEN)
+    later = _BUILT_AT + timedelta(hours=1)
+    for newest, clears in [(_BUILT_AT, 1), (_BUILT_AT, 1), (later, 2), (later, 2), (None, 3), (None, 3)]:
+        definition._note_newest_build(newest)
+        assert len(cleared) == clears, newest

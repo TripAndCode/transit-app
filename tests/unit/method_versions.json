@@ -1,0 +1,23 @@
+{
+  "2026.11.0": {
+    "MAX_PLAUSIBLE_DELAY_SEC": 7200,
+    "agg_daily_trend": 1,
+    "agg_feed_health": 1,
+    "agg_hour_daily": 1,
+    "agg_route_daily": 1,
+    "agg_route_daily_dist": 1,
+    "agg_route_daily_dwell_run": 1,
+    "agg_route_headway": 1,
+    "agg_route_headway_daily": 1,
+    "agg_route_hour": 1,
+    "agg_route_hour_dow": 1,
+    "agg_route_stats": 1,
+    "agg_route_stop_daily": 1,
+    "agg_schedule_revision_daily": 1,
+    "agg_service_delivered_daily": 1,
+    "agg_stop_daily": 1,
+    "agg_stop_routes": 1,
+    "route_delay_counts": 1,
+    "stop_route_days": 1
+  }
+}

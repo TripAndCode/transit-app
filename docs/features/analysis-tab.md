@@ -481,10 +481,17 @@ the scope as one sentence above their content
   the column header; in the UI, `DefinitionMetaBlock` renders it from the
   API response's `definition` field.
 - The block also names the method version (`method_version`, see
-  `DELAY_ANALYSIS.md`'s "Method versions") and `built_at`, the newest time
-  analyze recorded the agency's aggregates (`agg_table_state`), null for the
-  delay record, which reads no aggregate. The CSV preamble, the council
-  report's footnotes and the delay record's summary each carry that stamp.
+  `DELAY_ANALYSIS.md`'s "Method versions"), its `source`, and `built_at`,
+  the newest time analyze recorded the agency's aggregates
+  (`agg_table_state`). `source` is `live` when the rows come from a live scan
+  (`pipeline/reports/rankings.py: report_reads_aggregates`: a time band, the
+  trend heatmap under a route filter, the delay record), and then `built_at`
+  is null and the stamp says 対象外（ライブ集計）; an aggregate view with no
+  build recorded says 不明. The CSV preamble, the council report's footnotes
+  and the delay record's summary each carry that stamp. `stamp_build` reads
+  it before the rows, and forgets the compute caches when analyze has
+  recorded a newer build, so cached rows never sit under a later build's
+  date.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

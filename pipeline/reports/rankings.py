@@ -26,9 +26,52 @@ from pipeline.reports.filters import (
 )
 from pipeline.service_day import service_date_ch
 
-# Reports read the precomputed per-day distribution (agg_route_daily_dist) and
-# sum across the range. The aggregate has no hour-of-day column, so a time_band
-# filter can't be served from it — those queries fall back to the live scan.
+
+def aggregates_serve(ctx: RangeCtx) -> bool:
+    """Whether the per-day aggregates can answer *ctx*. Reports sum them across
+    the range, and they keep no hour of day, so a time band falls back to a
+    live scan of the observations."""
+    return ctx.time_band == "all"
+
+
+def hourly_aggregates_serve(ctx: RangeCtx) -> bool:
+    """Whether agg_hour_daily can answer *ctx*: it pools every route, so a
+    route filter falls back to the live scan as well."""
+    return aggregates_serve(ctx) and not ctx.routes
+
+
+# The reports a time band sends to the live scan, by aggregates_serve.
+_BANDED_REPORTS = frozenset(
+    {
+        "route_table",
+        "ranking",
+        "ranking_best",
+        "on_time",
+        "worst_5min",
+        "compare_ranking",
+        "dow_weekend",
+        "dow_weekday",
+        "council_summary",
+    }
+)
+
+
+def report_reads_aggregates(report_type: str, ctx: RangeCtx, *, csv: bool = False) -> bool:
+    """Whether every figure *report_type* returns for *ctx* comes from the
+    aggregates, rather than a live scan of the observations, so that its
+    definition can name when they were built. *csv* is the export, which for
+    trend writes the daily series alone."""
+    if report_type in _BANDED_REPORTS:
+        return aggregates_serve(ctx)
+    if report_type == "trend":
+        # The JSON carries the hourly heatmap beside the daily series.
+        return aggregates_serve(ctx) if csv else hourly_aggregates_serve(ctx)
+    if report_type == "dwell_run":
+        return True  # never scanned live: a time band leaves it unavailable
+    if report_type == "delay_certificate":
+        return False  # always scanned live: no aggregate keeps single trips
+    raise ValueError(f"unknown report type {report_type!r}")
+
 
 # Named on-time/late tolerance presets exposed to API callers (see
 # api/routers/reports.py). "legacy_60s" is the only preset today: it is an
@@ -179,7 +222,7 @@ async def compute_ranking(
     than ``min_samples`` observations are left out; ``limit=None`` returns
     every remaining route.
     """
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("compute_ranking's time_band-filtered live fallback requires a ClickHouse client")
         return await _ranking_live(agency_id, ctx, conn, ch, sort_order, limit, min_samples)
@@ -321,7 +364,7 @@ async def compute_on_time(
     one.
     """
     if early_tolerance_sec is None and late_tolerance_sec is None:
-        if ctx.time_band != "all" or threshold_sec != LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+        if not aggregates_serve(ctx) or threshold_sec != LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
             if ch is None:
                 raise RuntimeError(
                     "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
@@ -355,7 +398,7 @@ async def compute_on_time(
     # Custom on-time window: estimate from the merged histogram at query time.
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("compute_on_time's time_band-filtered live fallback requires a ClickHouse client")
         return await _on_time_live_window(agency_id, ctx, conn, ch, low_sec, high_sec, limit, sort_order)
@@ -497,7 +540,7 @@ async def compute_worst_5min(
     dimension, and the exact column has none either.
     """
     late = LEGACY_SEVERE_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("compute_worst_5min's time_band-filtered live fallback requires a ClickHouse client")
         return await _worst_5min_live(agency_id, ctx, conn, ch, limit, late)
@@ -601,11 +644,11 @@ async def compute_dow_ranking(
     is None and its day-type slot names the side. ``routes`` and
     ``time_band`` are kept.
     """
-    if ctx.time_band != "all" and ch is None:
+    if not aggregates_serve(ctx) and ch is None:
         raise RuntimeError("compute_dow_ranking's time_band-filtered live fallback requires a ClickHouse client")
     label = _DAY_TYPE_SIDES[dow_group]
     overridden = await _day_type_ctx(agency_id, ctx, conn, label)
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         return await _dow_ranking_live(agency_id, overridden, ch, label, limit)
 
     # agg_daily_trend filtered to the day type's dates, sample-weighted.
@@ -693,10 +736,10 @@ async def compute_compare_ranking(
     route-restricted comparisons work. ``limit=None`` returns every compared
     route, for a caller that reports the total.
     """
-    if ctx.time_band != "all" and ch is None:
+    if not aggregates_serve(ctx) and ch is None:
         raise RuntimeError("compute_compare_ranking's time_band-filtered live fallback requires a ClickHouse client")
     weekday_dates, weekend_dates = await _day_type_dates(agency_id, ctx, conn)
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         return await _compare_ranking_live(agency_id, ctx, ch, weekday_dates, weekend_dates, limit)
 
     # Both sides from one agg_daily_trend pass (split by date via FILTER), summed
@@ -884,7 +927,7 @@ async def compute_hourly_heatmap(
     # a direct read. It has no route/hour-band dimension, so either filter
     # falls back to the live dedup scan (ClickHouse). DOW and the service
     # filter (both on the date column) are fine.
-    if ctx.time_band == "all" and not ctx.routes:
+    if hourly_aggregates_serve(ctx):
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (
             "SELECT date, hour, avg_min, samples, sum_delay_sec\n"
@@ -973,7 +1016,7 @@ async def compute_trend_series(
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
 
-    if ctx.time_band == "all":
+    if aggregates_serve(ctx):
         # Sum agg_daily_trend into one row per (bucket, route), across the raw
         # service ids a route's observations matched (see _service_label).
         # A week/month bucket pools MULTIPLE agg_daily_trend rows, so this reads

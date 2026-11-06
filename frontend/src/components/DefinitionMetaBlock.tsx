@@ -58,11 +58,17 @@ function onTimeSentence(definition: DefinitionMeta, t: TFunction): string | null
     : t("definitionMeta.on_time_late_early", { late, early: formatDuration(definition.early_tolerance_sec) });
 }
 
-/** The method version, with the day its aggregates were last built: the JST
- *  day, the one every date in the app is, never the viewer's own. */
+/** The method version and the day its aggregates were last built: the JST
+ *  day, the one every date in the app is, never the viewer's own. A live scan
+ *  has no build day, which the stamp says rather than leaving it out, as it
+ *  says when an aggregate view has no build recorded. */
 function methodSentence(definition: DefinitionMeta, t: TFunction): string {
-  const version = definition.method_version;
+  return t("definitionMeta.method_version", { version: definition.method_version, day: builtDay(definition, t) });
+}
+
+function builtDay(definition: DefinitionMeta, t: TFunction): string {
+  if (definition.source === "live") return t("definitionMeta.built_day_live");
   const built = definition.built_at == null ? null : new Date(definition.built_at);
-  if (built == null || isNaN(built.getTime())) return t("definitionMeta.method_version", { version });
-  return t("definitionMeta.method_version_built", { version, date: formatDate(toJstISO(built)) });
+  if (built == null || isNaN(built.getTime())) return t("definitionMeta.built_day_unknown");
+  return formatDate(toJstISO(built));
 }

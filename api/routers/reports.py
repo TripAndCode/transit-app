@@ -46,7 +46,6 @@ from pipeline.reports import (
     RANKING_MIN_SAMPLES,
     ROUTE_TABLE_SORTS,
     DefinitionMeta,
-    aggregates_built_at,
     compute_compare_ranking,
     compute_council_summary,
     compute_delay_certificate,
@@ -67,6 +66,7 @@ from pipeline.reports import (
     resolve_definition_meta,
     simulation_disclaimer,
     sort_route_table,
+    stamp_build,
 )
 from pipeline.reports.comparability import ComparableReason
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
@@ -80,6 +80,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.rankings import report_reads_aggregates
 from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.service_delivered import DeliveredMissing
@@ -302,9 +303,6 @@ _LATE_TOLERANCE_TYPES = frozenset({"on_time", "route_table", "worst_5min", "coun
 # route_table's over-5-min share, keep their own over-5-min threshold, so the
 # scope never moves them.
 _SCOPE_LATE_TYPES = frozenset({"on_time", "route_table", "council_summary"})
-# The reports that always scan the observations and read no aggregate: no
-# aggregate build governs their rows, so their definition names no built_at.
-_LIVE_ONLY_TYPES = frozenset({"delay_certificate"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
 # reports fix dow/service themselves; dwell_run cannot split by time band.
@@ -1375,9 +1373,10 @@ async def get_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
-    if report_type not in _LIVE_ONLY_TYPES:
-        definition = definition.model_copy(update={"built_at": await aggregates_built_at(conn, [agency_id])})
+    live = not report_reads_aggregates(report_type, ctx, csv=format == "csv")
+    definition = await stamp_build(
+        conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
+    )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
         if format == "csv"

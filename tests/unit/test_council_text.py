@@ -358,24 +358,30 @@ def test_a_custom_tolerance_says_the_comparison_keeps_the_shared_definition(loca
 
 
 @pytest.mark.parametrize(
-    ("locale", "dated", "undated"),
+    ("locale", "dated", "live"),
     [
-        ("ja", f"※算出方法: {METHOD_VERSION}（2026-11-06 集計）", f"※算出方法: {METHOD_VERSION}"),
+        (
+            "ja",
+            f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
+            f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
+        ),
         (
             "en",
-            f"* Method version: {METHOD_VERSION} (aggregates built 2026-11-06)",
-            f"* Method version: {METHOD_VERSION}",
+            f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06",
+            f"* Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
         ),
     ],
 )
-def test_the_report_is_footnoted_with_the_method_version_and_the_build_day(locale, dated, undated):
+def test_the_report_is_footnoted_with_the_method_version_and_the_build_day(locale, dated, live):
     """A council document names the method its figures were made with and the
-    JST day their aggregates were built, so a later rebuild can be told apart."""
+    JST day their aggregates were built, so a later rebuild can be told apart,
+    or that its figures came from a live scan with no build behind them."""
     built = _DEFINITION.model_copy(update={"built_at": datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)})
+    scanned = resolve_definition_meta("council_summary", None, None, live=True)
 
     def lines(definition):
         text = format_council_summary_text(_payload(), definition, "青森市バス", "2026-08-12", "2026-09-10", locale)
         return text.split("\n")
 
     assert dated in lines(built)
-    assert undated in lines(_DEFINITION)
+    assert live in lines(scanned)

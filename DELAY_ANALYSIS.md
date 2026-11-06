@@ -35,9 +35,12 @@ Every report, CSV export and council document names the method version its figur
 made with, and the day their aggregates were last built. The version covers every
 `agg_*` table's logic version and the plausibility clamp. A change to any of them is a
 new version: `METHOD_VERSIONS` in `pipeline/agg_registry.py` records what each version
-set, and `tests/unit/test_method_version.py` keeps that record, the registry and this
-table in step. A rebuild replaces the stored aggregates, so figures exported under an
-earlier version may differ from today's for the same period.
+set, `tests/unit/method_versions.json` pins each released one, and
+`tests/unit/test_method_version.py` keeps them, the registry and this table in step. A
+rebuild replaces the stored aggregates, so figures exported under an earlier version
+may differ from today's for the same period. Figures from a live scan of the
+observations, such as a time-band view or the delay record, name the version but no
+build day.
 
 | Version | What changed | Tables |
 |---|---|---|

@@ -222,12 +222,11 @@ class MethodVersion(NamedTuple):
     sets: dict[str, int | None]
 
 
-# Every version of the analysis method, oldest first. Any change to
-# method_inputs() is a new version: append an entry with a later version and
-# what it sets, and add its row to DELAY_ANALYSIS.md's "Method versions" table,
-# in the same commit. A recorded entry is never edited, because exported
-# figures name it. tests/unit/test_method_version.py fails until this matches
-# the registry.
+# Every version of the analysis method, oldest first. A change to
+# method_inputs() appends a later version with what it sets, and its row to
+# DELAY_ANALYSIS.md's "Method versions" table. A released entry never changes,
+# because exports name it: tests/unit/method_versions.json pins each one, and
+# tests/unit/test_method_version.py keeps the history, record and registry agreed.
 METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion(
         "2026.11.0",

@@ -304,8 +304,9 @@ export type ReportMeta = {
  *  `preset`/`early_tolerance_sec`/`late_tolerance_sec` are `null` for report
  *  types with no on-time/late tolerance concept (e.g. `ranking`, `trend`).
  *  `method_version` names the analysis method the figures were made with;
- *  `built_at` (ISO instant) is when their aggregates were last built, `null`
- *  when no build is recorded or the view reads no aggregate.
+ *  `source` whether they came from the aggregates or a live scan;
+ *  `built_at` (ISO instant) when the aggregates were last built, `null` for a
+ *  live scan or when no build is recorded.
  *  See pipeline/reports/definition.py, the single source of truth these
  *  values are resolved from. */
 export type DefinitionMeta = {
@@ -316,6 +317,7 @@ export type DefinitionMeta = {
   measurement_point: string;
   dedup_rule: string;
   method_version: string;
+  source: "aggregates" | "live";
   built_at: string | null;
 };
 

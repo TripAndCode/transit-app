@@ -31,7 +31,7 @@ const DEFINITION: DefinitionMeta = {
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
-  method_version: "2026.11.0",
+  method_version: "2026.11.0", source: "aggregates",
   built_at: null,
 };
 
@@ -345,7 +345,7 @@ function emptyReport(reportType: string): ReportResponse {
       exclusion_threshold_sec: 0,
       measurement_point: "departure",
       dedup_rule: "",
-      method_version: "2026.11.0",
+      method_version: "2026.11.0", source: "aggregates",
       built_at: null,
     },
   } as ReportResponse;
@@ -939,9 +939,10 @@ describe("AnalysisTab delay record", () => {
   });
 
   it("sets the summary's footnotes, the method version among them, apart from the count", async () => {
-    showCertificate(["delay_certificate"], "1 departure left more than 300 s late.\n* Method version: 2026.11.0");
+    const stamp = "* Method version: 2026.11.0, aggregates built: not applicable (live scan)";
+    showCertificate(["delay_certificate"], `1 departure left more than 300 s late.\n${stamp}`);
     await userEvent.click(screen.getByText(STAFF_LIST));
-    const footnote = screen.getByText("* Method version: 2026.11.0");
+    const footnote = screen.getByText(stamp);
     expect(footnote).toHaveClass("report-footnote");
     expect(footnote.closest(".cert-staff__summary")).toBeNull();
     expect(screen.getByText(/1 departure left more than 300 s late\./)).not.toHaveTextContent("Method version");

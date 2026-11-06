@@ -12,8 +12,11 @@ from pipeline.query.formatter import format_delay_certificate_footnotes, format_
 from pipeline.reports.definition import resolve_definition_meta
 
 _ROWS = [("青森市バス", "R1", "平日", "2026-06-20", "10:00:00", "10:05:01", 301)] * 2
-_DEFINITION = resolve_definition_meta("delay_certificate", None, None)
-_STAMP = {"ja": f"※算出方法: {METHOD_VERSION}", "en": f"* Method version: {METHOD_VERSION}"}
+_DEFINITION = resolve_definition_meta("delay_certificate", None, None, live=True)
+_STAMP = {
+    "ja": f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
+    "en": f"* Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
+}
 
 
 def _text(rows, total, locale, **kwargs):
@@ -71,18 +74,20 @@ def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale
 @pytest.mark.parametrize(
     ("locale", "expected"),
     [
-        ("ja", f"遅延300秒超の便: 2件\n※算出方法: {METHOD_VERSION}（2026-11-06 集計）"),
+        ("ja", f"遅延300秒超の便: 2件\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06"),
         (
             "en",
             "2 trip(s) exceeded the 300s delay threshold.\n"
-            f"* Method version: {METHOD_VERSION} (aggregates built 2026-11-06)",
+            f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06",
         ),
     ],
 )
-def test_the_summary_is_footnoted_with_the_definitions_stamp(locale, expected):
-    """The record reads no aggregate, so its router leaves the build day out;
-    the footnote still renders whatever the definition carries."""
-    built = _DEFINITION.model_copy(update={"built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc)})
+def test_the_summary_is_footnoted_with_whatever_stamp_the_definition_carries(locale, expected):
+    """The record is a live scan, so its router marks it live; the footnote
+    renders an aggregate definition's build day the same way."""
+    built = resolve_definition_meta("delay_certificate", None, None).model_copy(
+        update={"built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc)}
+    )
     assert format_delay_certificate_text(_ROWS, 300, total=2, locale=locale, definition=built) == expected
 
 

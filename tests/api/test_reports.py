@@ -1,7 +1,7 @@
 """Tests for the v2 reports endpoints (live queries, no snapshots table)."""
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -402,7 +402,12 @@ async def _record_builds(pool, *builds):
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
-_CERT_STAMP = f"※算出方法: {METHOD_VERSION}"
+_LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
+_CERT_STAMP = _LIVE_STAMP
+
+
+def _preamble(resp) -> str:
+    return resp.text.lstrip("\ufeff").splitlines()[0]
 
 
 @pytest.mark.asyncio
@@ -413,8 +418,8 @@ async def test_a_report_names_the_method_version_and_when_its_aggregates_were_bu
     url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
 
     unbuilt = (await client.get(url)).json()["definition"]
-    assert unbuilt["method_version"] == METHOD_VERSION
-    assert unbuilt["built_at"] is None
+    assert (unbuilt["method_version"], unbuilt["source"], unbuilt["built_at"]) == (METHOD_VERSION, "aggregates", None)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=不明")
 
     other = await pool.fetchval(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
@@ -426,11 +431,31 @@ async def test_a_report_names_the_method_version_and_when_its_aggregates_were_bu
         (other, "agg_route_daily", datetime(2026, 11, 7, tzinfo=timezone.utc)),
     )
     built = (await client.get(url)).json()["definition"]
-    assert built["method_version"] == METHOD_VERSION
+    assert (built["method_version"], built["source"]) == (METHOD_VERSION, "aggregates")
     assert datetime.fromisoformat(built["built_at"]) == _BUILT_AT
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
 
-    preamble = (await client.get(f"{url}&format=csv")).text.lstrip("\ufeff").splitlines()[0]
-    assert preamble.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
+
+@pytest.mark.asyncio
+async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(reports_client):
+    """The compute caches outlive a rebuild, so a response stamped with a new
+    build must have recomputed its rows since that build."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    before = (await client.get(url)).json()
+    assert float(before["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
 
 
 @pytest.mark.asyncio
@@ -438,13 +463,34 @@ async def test_the_council_report_text_names_the_method_version_and_the_build_da
     client, agency_id, pool = reports_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
     body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
-    assert f"※算出方法: {METHOD_VERSION}（2026-11-06 集計）" in body["text"].split("\n")
+    assert f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06" in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report_type", ["ranking", "council_summary"])
+async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_async_client, report_type):
+    """The aggregates keep no hour of day, so a time band's figures come from a
+    live scan, which no aggregate build governs."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/{report_type}?from=2026-05-18&to=2026-05-18&time_band=evening"
+
+    body = (await client.get(url)).json()
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）"
+    )
+    if report_type == "council_summary":
+        assert _LIVE_STAMP in body["text"].split("\n")
 
 
 @pytest.mark.asyncio
 async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch_async_client):
     """The record is a live scan of the observations, which no aggregate
-    build governs, so its stamp names the method version alone."""
+    build governs, so its stamp says so."""
     from api.main import app
     from tests.conftest import mirror_updates_to_ch
 
@@ -457,7 +503,7 @@ async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch
 
     body = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")).json()
     assert body["definition"]["method_version"] == METHOD_VERSION
-    assert body["definition"]["built_at"] is None
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
     assert body["text"].split("\n")[-1] == _CERT_STAMP
 
 
