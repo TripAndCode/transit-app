@@ -31,9 +31,25 @@ function evaluations(partial: Partial<MlEvaluations> = {}): MlEvaluations {
       { run_date: "2026-10-18", adopted: true, overall_skill: 0.063, point_metric: "mean" },
     ],
     forecast_in_use: true,
+    live: null,
     ...partial,
   };
 }
+
+const LIVE: NonNullable<MlEvaluations["live"]> = {
+  first_origin: "2026-10-11",
+  last_origin: "2026-11-05",
+  origins: 26,
+  target_days: 25,
+  skill_live: 0.012,
+  skill_counterfactual: 0.061,
+  live_slot_coverage: 0.772,
+  published_share: 0.931,
+  by_lead: [
+    { lead: 1, skill_live: -0.01, skill_counterfactual: 0.05 },
+    { lead: 2, skill_live: 0.02, skill_counterfactual: null },
+  ],
+};
 
 function withLatest(patch: Partial<NonNullable<MlEvaluations["latest"]>>): MlEvaluations {
   const data = evaluations();
@@ -75,6 +91,65 @@ afterEach(() => {
 });
 
 describe("ModelPage", () => {
+  it("shows how the published forecasts did, beside the same model given the trips that ran", () => {
+    renderPage(evaluations({ live: LIVE }));
+    const card = screen.getByTestId("model-live");
+    expect(card).toHaveTextContent("26 forecasts made 2026-10-11 to 2026-11-05, checked against 25 days that ran");
+    expect(card).toHaveTextContent("1.2% less error");
+    expect(card).toHaveTextContent("6.1% less error");
+    expect(card).toHaveTextContent("Copying a recent day's trips for the days ahead costs 4.9 points");
+    expect(card).toHaveTextContent("Runs inside the published range: 77.2%");
+    expect(card).toHaveTextContent("Runs the forecast covered: 93.1%");
+  });
+
+  it("breaks the live forecast down by how many days ahead it was made", () => {
+    renderPage(evaluations({ live: LIVE }));
+    const leads = screen.getByTestId("model-live-leads");
+    const first = within(leads).getByText("1 day ahead").closest("tr")!;
+    expect(first).toHaveTextContent("1.0% more error");
+    expect(first).toHaveTextContent("5.0% less error");
+    const second = within(leads).getByText("2 days ahead").closest("tr")!;
+    expect(second).toHaveTextContent("—");
+  });
+
+  it("lists the days-ahead breakdown on a phone", () => {
+    onPhone();
+    renderPage(evaluations({ live: LIVE }));
+    const leads = screen.getByTestId("model-live-leads");
+    expect(within(leads).getByText("1 day ahead").closest("li")).toHaveTextContent("1.0% more error");
+  });
+
+  it("says copying costs nothing when the published forecast did as well as the counterfactual", () => {
+    renderPage(evaluations({ live: { ...LIVE, skill_live: 0.061 } }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent(
+      "Copying a recent day's trips for the days ahead costs nothing measurable",
+    );
+  });
+
+  it("says so when the published forecast came out ahead of the counterfactual", () => {
+    renderPage(evaluations({ live: { ...LIVE, skill_live: 0.07 } }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent(
+      "The published forecasts came out 0.9 points ahead of the same model given the trips that ran",
+    );
+  });
+
+  it("counts a single forecast and day in the singular", () => {
+    renderPage(evaluations({ live: { ...LIVE, origins: 1, target_days: 1, last_origin: "2026-10-11" } }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent(
+      "1 forecast made 2026-10-11 to 2026-10-11, checked against 1 day that ran",
+    );
+  });
+
+  it("shows a published scorecard before the first weekly evaluation is in", () => {
+    renderPage(evaluations({ latest: null, history: [], live: LIVE }));
+    expect(screen.getByTestId("model-live")).toHaveTextContent("1.2% less error");
+  });
+
+  it("shows no live card until a scorecard is published", () => {
+    renderPage(evaluations());
+    expect(screen.queryByTestId("model-live")).not.toBeInTheDocument();
+  });
+
   it("shows an adopted week's verdict, skill and the model in use", () => {
     renderPage(evaluations());
     expect(screen.getByTestId("model-verdict")).toHaveTextContent("Adopted");

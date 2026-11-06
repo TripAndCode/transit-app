@@ -1,6 +1,7 @@
 """The weekly ML evaluation as the API serves it: the fields the model page
-reads, picked out of the stored summary (never the raw document), with each
-agency's name and whether its ML forecast is live on the heatmap joined in."""
+reads, picked out of the stored summary and live scorecard (never the raw
+documents), with each agency's name and whether its ML forecast is live on the
+heatmap joined in."""
 
 from __future__ import annotations
 
@@ -60,3 +61,29 @@ def shape_history(rows: Sequence[tuple[date, bool, float | None, str]]) -> list[
         {"run_date": run_date, "adopted": adopted, "overall_skill": skill, "point_metric": point_metric}
         for run_date, adopted, skill, point_metric in sorted(rows, key=lambda row: row[0], reverse=True)
     ]
+
+
+def shape_live(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The live scorecard's fields the page's card reads. The scorecard leaves
+    out a bucket that scored no runs, so each field falls back to empty."""
+    window = document.get("window") or {}
+    skill = document.get("skill") or {}
+    live_slot = (document.get("interval") or {}).get("live_slot") or {}
+    return {
+        "first_origin": window.get("first_origin"),
+        "last_origin": window.get("last_origin"),
+        "origins": window.get("origins", 0),
+        "target_days": window.get("target_days", 0),
+        "skill_live": skill.get("live"),
+        "skill_counterfactual": skill.get("counterfactual"),
+        "live_slot_coverage": live_slot.get("coverage"),
+        "published_share": document.get("published_share"),
+        "by_lead": [
+            {
+                "lead": row["lead"],
+                "skill_live": row.get("skill_live"),
+                "skill_counterfactual": row.get("skill_counterfactual"),
+            }
+            for row in document.get("by_lead") or []
+        ],
+    }

@@ -1,6 +1,6 @@
 """The ML forecast model's weekly evaluation, for the model page: the newest
-week's verdict and figures, the history of past weeks, and whether each
-agency's ML forecast is live on the heatmap now."""
+week's verdict and figures, the history of past weeks, whether each agency's
+ML forecast is live on the heatmap now, and the newest live scorecard."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from api.deps import get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.routers.reports import fetch_live_ml_agencies
 from pipeline.flags import aflag
-from pipeline.reports.ml_evaluation import shape_history, shape_latest
+from pipeline.reports.ml_evaluation import shape_history, shape_latest, shape_live
 
 router = APIRouter(prefix="/api/ml", tags=["ml"])
 
@@ -73,10 +73,32 @@ class MlEvaluationWeek(BaseModel):
     point_metric: str
 
 
+class MlLiveLead(BaseModel):
+    lead: int
+    skill_live: float | None
+    skill_counterfactual: float | None
+
+
+class MlLiveScorecard(BaseModel):
+    """How the published forecasts did against what ran, beside the same model
+    given the trips that ran (the counterfactual)."""
+
+    first_origin: date | None
+    last_origin: date | None
+    origins: int
+    target_days: int
+    skill_live: float | None
+    skill_counterfactual: float | None
+    live_slot_coverage: float | None
+    published_share: float | None
+    by_lead: list[MlLiveLead]
+
+
 class MlEvaluationsResponse(BaseModel):
     latest: MlEvaluationLatest | None
     history: list[MlEvaluationWeek]
     forecast_in_use: bool
+    live: MlLiveScorecard | None
 
 
 @router.get("/evaluations", response_model=MlEvaluationsResponse)
@@ -90,14 +112,17 @@ async def ml_evaluations(request: Request, conn: asyncpg.Connection = Depends(ge
         "FROM ml_evaluations ORDER BY run_date DESC"
     )
     forecast_in_use = await aflag("ml_forecast")
+    newest_live = await conn.fetchval("SELECT document FROM ml_live_evaluations ORDER BY run_date DESC LIMIT 1")
+    live = shape_live(json.loads(newest_live)) if newest_live else None
     if not weeks:
-        return {"latest": None, "history": [], "forecast_in_use": forecast_in_use}
+        return {"latest": None, "history": [], "forecast_in_use": forecast_in_use, "live": live}
     newest = weeks[0]["run_date"]
     summary = json.loads(await conn.fetchval("SELECT summary FROM ml_evaluations WHERE run_date = $1", newest))
     names = {r["agency_id"]: r["agency_name"] for r in await conn.fetch("SELECT agency_id, agency_name FROM agencies")}
-    live = await fetch_live_ml_agencies(conn) if forecast_in_use else set()
+    live_agencies = await fetch_live_ml_agencies(conn) if forecast_in_use else set()
     return {
-        "latest": shape_latest(summary, newest, names, live),
+        "latest": shape_latest(summary, newest, names, live_agencies),
         "history": shape_history([(w["run_date"], w["adopted"], w["overall_skill"], w["point_metric"]) for w in weeks]),
         "forecast_in_use": forecast_in_use,
+        "live": live,
     }
