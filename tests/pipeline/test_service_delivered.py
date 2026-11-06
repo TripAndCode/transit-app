@@ -254,6 +254,66 @@ async def test_saved_days_outside_the_window_or_of_another_agency_do_not_count(a
     assert (result[b]["planned_trips"], result[b]["covered_days"]) == (0, 0)
 
 
+async def _observed(aconn, agency_id: int, day: date, route_code: str, trips: int) -> None:
+    await aconn.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
+        "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, $2, $3, '', 60, 60, $4, $4, NOW(), $4 * 60)",
+        agency_id,
+        day,
+        route_code,
+        trips,
+    )
+
+
+async def test_observed_trips_count_on_the_days_a_plan_covers_across_routes(aconn):
+    """Observed trips are counted over the same days as the planned ones, so
+    the two make a ratio. A day the loaded timetable covers but plans
+    nothing on still counts: what ran then is service the plan doesn't name."""
+    a = await _agency(aconn, "a")
+    await _weekly(aconn, a, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 12))
+    await _trips(aconn, a, "WD", 3)
+    await _saved(aconn, a, date(2026, 4, 13), 4)
+    await _observed(aconn, a, date(2026, 4, 6), "R1", 2)
+    await _observed(aconn, a, date(2026, 4, 6), "R2", 1)
+    await _observed(aconn, a, date(2026, 4, 12), "R1", 5)  # a Sunday the timetable covers
+    await _observed(aconn, a, date(2026, 4, 13), "R1", 4)  # a saved day
+    await _observed(aconn, a, date(2026, 4, 14), "R1", 7)  # no plan covers it
+
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 14)))[a]
+    assert result["planned_trips"] == result["coverage_planned_trips"] == 5 * 3 + 4
+    assert result["observed_trips"] == 3 + 5 + 4
+
+
+async def test_both_sides_of_the_coverage_ratio_stop_at_the_day_given_and_the_plan_does_not(aconn):
+    a = await _agency(aconn, "a")
+    for day in (6, 7, 8):
+        await _saved(aconn, a, date(2026, 4, day), 10)
+        await _observed(aconn, a, date(2026, 4, day), "R1", 9)
+
+    result = (
+        await compute_service_delivered_by_agency(
+            aconn, [a], date(2026, 4, 6), date(2026, 4, 8), observed_through=date(2026, 4, 7)
+        )
+    )[a]
+    assert result["planned_trips"] == 30
+    assert (result["observed_trips"], result["coverage_planned_trips"]) == (18, 20)
+
+
+async def test_observed_trips_are_unknown_without_a_plan(aconn):
+    a = await _agency(aconn, "a")
+    await _observed(aconn, a, date(2026, 4, 6), "R1", 2)
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 6)))[a]
+    assert (result["planned_trips"], result["observed_trips"], result["coverage_planned_trips"]) == (0, None, 0)
+
+
+async def test_a_planned_day_with_nothing_observed_counts_zero_observed(aconn):
+    a = await _agency(aconn, "a")
+    await _saved(aconn, a, date(2026, 4, 6), 8)
+    result = (await compute_service_delivered_by_agency(aconn, [a], date(2026, 4, 6), date(2026, 4, 6)))[a]
+    assert (result["planned_trips"], result["observed_trips"]) == (8, 0)
+
+
 async def _reporting_agency(aconn, name: str) -> int:
     """A static_join agency whose live probe verdict says its feed carries
     the trip and stop status fields, the two gates before cancellations."""

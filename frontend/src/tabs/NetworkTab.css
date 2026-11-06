@@ -19,7 +19,7 @@
 
 .network-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.3fr) 84px minmax(120px, 2fr) 76px;
+  grid-template-columns: minmax(140px, 1.3fr) 84px minmax(120px, 2fr) 92px;
   align-items: center;
   gap: 4px 14px;
   padding: 10px 10px;
@@ -60,6 +60,15 @@
 .network-row__axis-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-tertiary); opacity: 0.5; }
 
 .network-row__secondary { text-align: right; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; }
+/* The interval sits under its rate on its own line, so the column stays narrow. */
+.network-row__ci { display: block; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.network-row__reason { color: var(--text-secondary); }
+
+/* The unranked agencies follow a quiet heading rather than continuing the
+   ranking: a rule and plain text, not a warning. */
+.network-unranked { margin: 16px 0 4px; padding: 12px 10px 0; border-top: 1px solid var(--border-soft); }
+.network-unranked__title { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+.network-unranked__criteria { max-width: 680px; margin: 4px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--text-secondary); }
 
 .network-row__meta {
   grid-column: 1 / -1;
@@ -91,6 +100,7 @@
   .network-row { grid-template-columns: minmax(0, 1fr) 76px; }
   .network-row__axis, .network-row__secondary { grid-column: 1 / -1; }
   .network-row__secondary { text-align: left; }
+  .network-row__ci { display: inline; }
   .network-row--head { display: none; }
   .network-howto-list { grid-template-columns: 1fr; }
 }

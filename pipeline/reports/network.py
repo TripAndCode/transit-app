@@ -4,6 +4,18 @@ Read-only. One GROUP BY agency_id read per source, merged on the full agencies
 list. Range-scoped (date window only — whole-agency comparison, so service/
 time_band/dow/routes are not applied). Reuses the pure freshness rule.
 
+Only the agencies whose data supports a comparison are ranked:
+`pipeline.reports.comparability` decides ``comparable`` and the first
+``comparable_reason`` it fails from ``coverage_pct`` (``observed_trips`` of
+``coverage_planned_trips``), the on-time interval ``ci_low``/``ci_high``,
+``clamp_pct`` and the agency's ingest strategy. Comparable rows come first,
+worst ``avg_delay_min`` first; the rest follow in name order, never by a
+figure the data cannot support. Coverage counts the planned days up to
+``coverage_through``, the newest day any agency has observations for in the
+range: a later day is one the aggregates have not reached for anyone yet,
+which is no one feed's missing trips, while a gap inside that span counts
+against the feed that has it.
+
 ``samples`` is the deduped observation count (from agg_route_daily_dist);
 ``raw_samples``/``clamp_count`` are raw poll counts (from agg_feed_health) —
 different populations. ``clamp_pct`` is the implausible-reading ratio
@@ -47,6 +59,12 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+from pipeline.reports.comparability import (
+    COMPARABLE_INGEST_STRATEGIES,
+    assess,
+    observation_coverage,
+    on_time_interval,
+)
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
@@ -76,15 +94,17 @@ _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
-    """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first.
+    """Per-agency rollups over [from_date, to_date]: the comparable agencies
+    worst-avg-delay first, then the rest by name.
 
     The planned and delivered figures are one column of the board, not the
     board: a failure reading them, such as a schema behind its migrations,
-    leaves every agency without a plan, as the freshness probe's degrade
-    leaves it not stale, rather than failing the delay figures too.
+    leaves every agency without a plan, and so unranked, as the freshness
+    probe's degrade leaves it not stale, rather than failing the delay
+    figures too.
     """
     agencies = await conn.fetch(
-        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+        "SELECT agency_id, agency_name, ingest_strategy FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
     )
     perf = {r["agency_id"]: r for r in await conn.fetch(_PERF_SQL, from_date, to_date)}
     feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
@@ -123,9 +143,10 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # service_delivered_pct also read the precomputed non-executed aggregate
     # (agg_service_delivered_daily). No ClickHouse scan on this request path;
     # see compute_service_delivered_by_agency.
+    coverage_through = max((perf[a["agency_id"]]["data_to"] for a in agencies if a["agency_id"] in perf), default=None)
     try:
         delivered = await compute_service_delivered_by_agency(
-            conn, [a["agency_id"] for a in agencies], from_date, to_date
+            conn, [a["agency_id"] for a in agencies], from_date, to_date, observed_through=coverage_through
         )
     except Exception:
         _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
@@ -152,7 +173,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         p = perf.get(aid)
         n = int(p["n"]) if p and p["n"] else 0
         avg_delay_min = round(float(p["sd"]) / n / 60, 1) if (p and n) else None
-        on_time_pct = round(p["ot"] / n * 100, 1) if p and n else None
+        on_time_count = int(p["ot"]) if p and p["ot"] else 0
+        on_time_pct = round(on_time_count / n * 100, 1) if n else None
         f = feed.get(aid)
         raw = int(f["raw"]) if f and f["raw"] else 0
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
@@ -160,6 +182,21 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         d = delivered[aid]
+        strategy = a["ingest_strategy"]
+        # A count of trip_ids the timetable doesn't name is no count of its trips.
+        matchable = strategy in COMPARABLE_INGEST_STRATEGIES
+        observed_trips = d["observed_trips"] if matchable else None
+        coverage_planned_trips = d["coverage_planned_trips"] if matchable else None
+        coverage_pct = observation_coverage(strategy, observed_trips, coverage_planned_trips)
+        ci_low, ci_high = on_time_interval(on_time_count, n, observed_trips)
+        comparable, comparable_reason = assess(
+            ingest_strategy=strategy,
+            coverage_pct=coverage_pct,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            clamp_pct=clamp_pct,
+            samples=n,
+        )
         s = supply.get(
             aid,
             {
@@ -176,6 +213,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "agency_name": a["agency_name"],
                 "avg_delay_min": avg_delay_min,
                 "on_time_pct": on_time_pct,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
                 "samples": n,
                 "raw_samples": raw,
                 "clamp_count": clamp,
@@ -189,6 +228,12 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "covered_days": d["covered_days"],
                 "window_days": d["window_days"],
                 "delivered_missing": d["delivered_missing"],
+                "observed_trips": observed_trips,
+                "coverage_planned_trips": coverage_planned_trips,
+                "coverage_through": coverage_through.isoformat() if coverage_through else None,
+                "coverage_pct": coverage_pct,
+                "comparable": comparable,
+                "comparable_reason": comparable_reason,
                 # has_ridership_weights distinguishes "not configured for
                 # this agency" (weighted_on_time_pct is meaningless, hide any
                 # toggle) from "configured, but None because there were no
@@ -202,16 +247,16 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "vehicle_km_delivered_pct": s["vehicle_km_delivered_pct"],
             }
         )
-    # None (no data yet) sorts last; among real values, worst delay first.
-    # Ties on avg_delay_min ARE already deterministic without an explicit
-    # tie-break: `rows` is built 1:1 from `agencies`, which the query above
-    # orders by agency_id, and Python's sort() is stable — so equal-delay
-    # rows keep their agency_id-ascending relative order. This differs from
-    # the reports family's other ranking sorts, which need an explicit
-    # route_code tie-break because their rows come from a GROUP BY with no
-    # such prior ordering guarantee.
-    rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
-    return rows
+    # Ranked: worst delay first, None (which a comparable row never has) last.
+    # Ties keep agency_id order: `rows` is built 1:1 from `agencies`, which
+    # the query orders by agency_id, and Python's sort() is stable.
+    ranked = sorted(
+        (r for r in rows if r["comparable"]),
+        key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)),
+    )
+    # Unranked: by name, so no figure the gate refused implies an order.
+    unranked = sorted((r for r in rows if not r["comparable"]), key=lambda r: (r["agency_name"], r["agency_id"]))
+    return ranked + unranked
 
 
 def invalidate_network_summary() -> None:

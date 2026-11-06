@@ -1118,11 +1118,19 @@ export type StopBounds = [number, number, number, number];
 /** `GET /api/{agency_id}/stops/bounds`: null for an agency with no located stop. */
 export type StopBoundsResponse = { bounds: StopBounds | null };
 
+/** Why the agencies board leaves an agency unranked: the first check of
+ *  pipeline.reports.comparability it fails, in that module's order. */
+type ComparableReason = "no_data" | "coverage_unknown" | "coverage_low" | "ci_wide" | "clamp_high";
+
 export type NetworkAgencyRow = {
   agency_id: number;
   agency_name: string;
   avg_delay_min: number | null;
   on_time_pct: number | null;
+  /** on_time_pct's 95% interval in percent, counting trips rather than
+   *  stop events; null without a trip count. */
+  ci_low: number | null;
+  ci_high: number | null;
   samples: number;
   raw_samples: number;
   clamp_count: number;
@@ -1141,6 +1149,19 @@ export type NetworkAgencyRow = {
   /** Why service_delivered_pct is null, or null beside a rate:
    *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
   delivered_missing: DeliveredMissing | null;
+  /** Trips the feed reported, and trips planned, on the days a timetable
+   *  plans through `coverage_through` (the newest day any agency has
+   *  observations for, the same on every row); coverage_pct is the first as
+   *  a share of the second, not capped at 100. Both counts are null for a
+   *  feed whose trips can't be matched to the timetable, or an unreadable
+   *  plan; coverage_planned_trips is 0 with no plan. */
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  coverage_through: string | null;
+  coverage_pct: number | null;
+  /** Whether the board ranks this agency; otherwise the first check it fails. */
+  comparable: boolean;
+  comparable_reason: ComparableReason | null;
   /** False whenever this agency has no manually-configured ridership weights
    * at all -- the weighted-view toggle must key off this, not off
    * weighted_on_time_pct being null (a configured agency with zero samples
@@ -1163,11 +1184,20 @@ export type NetworkAgencyRow = {
   vehicle_km_delivered_pct: number | null;
 };
 
+/** The comparability gate's thresholds, each inclusive. */
+export type ComparabilityThresholds = {
+  min_coverage_pct: number;
+  max_ci_half_width_pp: number;
+  max_clamp_pct: number;
+};
+
 export type NetworkSummary = {
   scope_applied?: ScopeApplied;
   from: string;
   to: string;
+  /** Comparable agencies first, worst delay first; then the rest by name. */
   agencies: NetworkAgencyRow[];
+  comparability: ComparabilityThresholds;
   definition: DefinitionMeta;
 };
 

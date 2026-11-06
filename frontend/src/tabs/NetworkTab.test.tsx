@@ -9,15 +9,18 @@ import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import { ApiError } from "../api/client";
-import type { DefinitionMeta, NetworkAgencyRow } from "../api/types";
+import type { ComparabilityThresholds, DefinitionMeta, NetworkAgencyRow } from "../api/types";
 
+/** A ranked agency unless a test says otherwise. */
 function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
   return {
-    agency_id: 1, agency_name: "A", avg_delay_min: 5, on_time_pct: 90,
+    agency_id: 1, agency_name: "A", avg_delay_min: 5, on_time_pct: 90, ci_low: 88.1, ci_high: 91.7,
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
     covered_days: 7, window_days: 7, delivered_missing: null,
+    observed_trips: 110, coverage_planned_trips: 120, coverage_through: "2026-04-07", coverage_pct: 91.7,
+    comparable: true, comparable_reason: null,
     has_ridership_weights: false, weighted_on_time_pct: null,
     static_version_id: null, planned_trip_count: null, planned_vehicle_km: null,
     vehicle_km_delivered_pct: null, ...over,
@@ -32,6 +35,8 @@ const definition: DefinitionMeta = {
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
 };
+
+const comparability: ComparabilityThresholds = { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 };
 
 function renderTab(agencyId = "1") {
   renderWithProviders(
@@ -55,7 +60,7 @@ describe("NetworkTab", () => {
 
   it("titles the agencies board as a section of the Compare page, which owns the level-1 heading", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ agency_id: 1, agency_name: "Hiroden" })] },
+      data: { from: "2026-04-01", to: "2026-04-07", definition, comparability, agencies: [row({ agency_id: 1, agency_name: "Hiroden" })] },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
@@ -66,7 +71,7 @@ describe("NetworkTab", () => {
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 10, on_time_pct: 50, clamp_pct: 0.14 }),
           row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true, data_from: "2026-04-03", data_to: "2026-04-04" }),
@@ -104,7 +109,7 @@ describe("NetworkTab", () => {
   it("shows the service-delivered % next to on-time %, and a dash when not available", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, planned_trips: 300, executed_trips: 290 }),
           // No populated schedule_relationship data for this agency's feed —
@@ -125,7 +130,7 @@ describe("NetworkTab", () => {
   it("says on the planned figure how many of the period's days a timetable plans, rate or no rate, with a footnote", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-03-02", to: "2026-03-31", definition,
+        from: "2026-03-02", to: "2026-03-31", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", planned_trips: 57887, service_delivered_pct: 96.7, covered_days: 16, window_days: 30 }),
           row({ agency_id: 2, agency_name: "HiroBus", planned_trips: 18415, service_delivered_pct: 98.1, covered_days: 30, window_days: 30 }),
@@ -152,7 +157,7 @@ describe("NetworkTab", () => {
   it("writes the timetable coverage note in Japanese", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-03-02", to: "2026-03-31", definition,
+        from: "2026-03-02", to: "2026-03-31", definition, comparability,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 16, window_days: 30 })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -168,7 +173,7 @@ describe("NetworkTab", () => {
   it("leaves the coverage footnote out when every plan spans the whole period or there is none", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-03-02", to: "2026-03-31", definition,
+        from: "2026-03-02", to: "2026-03-31", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, covered_days: 30, window_days: 30 }),
           row({ agency_id: 2, agency_name: "Onomichi", planned_trips: 0, service_delivered_pct: null, executed_trips: null, covered_days: 0, window_days: 30, delivered_missing: "no_plan" }),
@@ -184,7 +189,7 @@ describe("NetworkTab", () => {
   it("prints the period's planned trips, never the loaded timetable's trip definitions", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-09-24", to: "2026-10-23", definition,
+        from: "2026-09-24", to: "2026-10-23", definition, comparability,
         agencies: [
           row({
             agency_id: 8, agency_name: "Hiroden", planned_trips: 57887, covered_days: 30, window_days: 30,
@@ -204,7 +209,7 @@ describe("NetworkTab", () => {
   it("says why a delivered rate is missing, and never prints 0 planned trips for a read that failed", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Unverified", service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_unverified" }),
           row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_cannot_report" }),
@@ -232,7 +237,7 @@ describe("NetworkTab", () => {
   it("shows vehicle-km delivered % where it is computed, says why where only it is missing, and never calls vehicle-km itself unavailable", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", planned_vehicle_km: 1234.5, vehicle_km_delivered_pct: 91.2, service_delivered_pct: 91.2 }),
           // A rate, but no route shapes to turn it into vehicle-km.
@@ -254,7 +259,7 @@ describe("NetworkTab", () => {
   it("marks an agency whose data stopped, as the agency picker does, and lists it after the current ones", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-09-28", to: "2026-10-27", definition,
+        from: "2026-09-28", to: "2026-10-27", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Aomori", avg_delay_min: 5, data_from: "2026-09-28", data_to: "2026-10-14" }),
           row({ agency_id: 8, agency_name: "Hiroden", avg_delay_min: 3, data_from: "2026-09-28", data_to: "2026-10-23" }),
@@ -275,7 +280,7 @@ describe("NetworkTab", () => {
   it("writes the period and each agency's own data range in one date style, the range only where it differs", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Whole", data_from: "2026-04-01", data_to: "2026-04-07" }),
           row({ agency_id: 2, agency_name: "Part", data_from: "2026-04-01", data_to: "2026-04-06" }),
@@ -298,7 +303,7 @@ describe("NetworkTab", () => {
   it("leaves the route and stop filter off the agency links, since their codes belong to one agency", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 8, agency_name: "Aomori" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -322,7 +327,7 @@ describe("NetworkTab", () => {
   it("links each agency name to its operations view, carrying the current range", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 7, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -352,7 +357,7 @@ describe("NetworkTab", () => {
 
   it("renders the empty message and no agency cards when there are no agencies", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition },
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition, comparability },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
@@ -397,7 +402,7 @@ describe("NetworkTab", () => {
   it("marks the agency selected in the URL as the one being viewed, not as the visitor's own", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden" }),
           row({ agency_id: 2, agency_name: "HiroBus" }),
@@ -418,7 +423,7 @@ describe("NetworkTab", () => {
   it("shows no viewing badge when there is no agencyId in the URL", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -434,7 +439,7 @@ describe("NetworkTab", () => {
   it("writes the coverage range in the language's date style", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden", data_from: "2026-04-01", data_to: "2026-04-02" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -447,7 +452,7 @@ describe("NetworkTab", () => {
   it("keeps the definition metadata behind the aggregation-conditions disclosure", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -465,7 +470,7 @@ describe("NetworkTab", () => {
   it("hides the ridership-weighted toggle when no agency has configured weights", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -477,7 +482,7 @@ describe("NetworkTab", () => {
   it("shows the ridership-weighted toggle and swaps the on-time figure when checked", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", on_time_pct: 50, has_ridership_weights: true, weighted_on_time_pct: 82.7 }),
           // No configured weight for this agency -- toggling on must leave
@@ -501,7 +506,7 @@ describe("NetworkTab", () => {
 
   it("prints each agency's delay figure in the text colour", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 6.4 })] },
+      data: { from: "2026-04-01", to: "2026-04-07", definition, comparability, agencies: [row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 6.4 })] },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
@@ -512,7 +517,7 @@ describe("NetworkTab", () => {
   it("sorts rows worst-delay-first regardless of the order the API returned, nulls last", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Mild", avg_delay_min: 1.2 }),
           row({ agency_id: 2, agency_name: "Unknown", avg_delay_min: null }),
@@ -527,10 +532,134 @@ describe("NetworkTab", () => {
     expect(names).toEqual(["Worst", "Middle", "Mild", "Unknown"]);
   });
 
+  it("ranks only the comparable agencies by delay, then lists the rest under a divider by name, each with its reason", () => {
+    const unranked = { comparable: false, ci_low: null, ci_high: null, coverage_pct: null } as const;
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Zeta", avg_delay_min: 9, ...unranked, comparable_reason: "ci_wide", ci_low: 44.5, ci_high: 57.7, coverage_pct: 89.9 }),
+          row({ agency_id: 2, agency_name: "Mild", avg_delay_min: 1.2 }),
+          row({ agency_id: 3, agency_name: "Beta", avg_delay_min: 8, ...unranked, comparable_reason: "coverage_low", coverage_pct: 41 }),
+          row({ agency_id: 4, agency_name: "Worst", avg_delay_min: 4.8 }),
+          row({ agency_id: 5, agency_name: "Alpha", avg_delay_min: 2.5, ...unranked, comparable_reason: "coverage_unknown", observed_trips: null, coverage_planned_trips: null }),
+          row({ agency_id: 6, agency_name: "Gamma", avg_delay_min: 7, ...unranked, comparable_reason: "clamp_high", clamp_pct: 7.1, coverage_pct: 95 }),
+          row({ agency_id: 7, agency_name: "Delta", avg_delay_min: null, ...unranked, comparable_reason: "no_data", samples: 0, data_from: null, data_to: null }),
+          row({ agency_id: 8, agency_name: "Planless", avg_delay_min: 3, ...unranked, comparable_reason: "coverage_unknown", planned_trips: 0, coverage_planned_trips: 0, observed_trips: null }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const sequence = [...screen.getByTestId("network-card-list").children]
+      .filter((el) => !el.classList.contains("network-row--head"))
+      .map((el) => (el.getAttribute("data-testid") === "network-unranked" ? "|" : el.querySelector("a")?.textContent));
+    expect(sequence).toEqual(["Worst", "Mild", "|", "Alpha", "Beta", "Delta", "Gamma", "Planless", "Zeta"]);
+    expect(screen.getByRole("heading", { level: 3, name: "Not ranked: the data does not support a comparison" })).toBeInTheDocument();
+    expect(screen.getByTestId("network-unranked")).toHaveTextContent(
+      "Ranked only where observation coverage is at least 70%, the on-time % interval is within ±3 points and implausible readings are at most 5%.",
+    );
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Beta")).toHaveTextContent("Observation coverage 41.0% (below 70%)");
+    expect(card("Zeta")).toHaveTextContent("On-time % interval ±6.6 points (wider than ±3)");
+    expect(card("Gamma")).toHaveTextContent("Implausible readings 7.1% (above 5%)");
+    expect(card("Alpha")).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
+    expect(card("Planless")).toHaveTextContent("Observation coverage can't be measured: no timetable plans this period");
+    expect(card("Delta")).toHaveTextContent("No observations in the period");
+    // A ranked row carries no reason.
+    expect(card("Worst")).not.toHaveTextContent("Observation coverage can't");
+    expect(card("Worst")).not.toHaveTextContent("(below");
+  });
+
+  it("leaves the divider out when every agency is ranked", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" }), row({ agency_id: 2, agency_name: "HiroBus" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.queryByTestId("network-unranked")).not.toBeInTheDocument();
+  });
+
+  it("shows every row's on-time % with its interval and its observation coverage, over 100% included", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", on_time_pct: 86.2, ci_low: 84.9, ci_high: 87.5, observed_trips: 900, coverage_planned_trips: 1000, coverage_pct: 90 }),
+          row({ agency_id: 2, agency_name: "Onomichi", on_time_pct: 46.1, ci_low: 44.4, ci_high: 47.8, observed_trips: 1388, coverage_planned_trips: 1000, coverage_pct: 138.8 }),
+          row({ agency_id: 3, agency_name: "Aomori", comparable: false, comparable_reason: "coverage_unknown", on_time_pct: 24.2, ci_low: null, ci_high: null, observed_trips: null, coverage_planned_trips: null, coverage_pct: null }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("Hiroden")).toHaveTextContent("86.2% (84.9–87.5)");
+    expect(card("Hiroden")).toHaveTextContent("Observation coverage 90.0% (900 of 1,000 planned trips)");
+    expect(card("Onomichi")).toHaveTextContent("Observation coverage 138.8% (1,388 of 1,000 planned trips)");
+    // No trip count, no interval: the bare figure, never an invented range.
+    expect(card("Aomori")).toHaveTextContent("24.2%");
+    expect(card("Aomori")!.querySelector(".network-row__ci")).toBeNull();
+    expect(card("Aomori")).toHaveTextContent("Observation coverage —");
+  });
+
+  it("says when observation coverage stops short of the period's end", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden", coverage_through: "2026-04-05" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByTestId("network-coverage-through-footnote")).toHaveTextContent(
+      "Observation coverage counts the planned trips through Apr 5, the newest day any agency has observations for.",
+    );
+  });
+
+  it("writes the divider and the reasons in Japanese", async () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [
+          row({ agency_id: 1, agency_name: "広島電鉄" }),
+          row({ agency_id: 2, agency_name: "朝日交通", comparable: false, comparable_reason: "coverage_low", coverage_pct: 41 }),
+          row({ agency_id: 3, agency_name: "ささき観光", comparable: false, comparable_reason: "ci_wide", ci_low: 53.8, ci_high: 60.3 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    await i18n.changeLanguage("ja");
+    renderTab();
+    expect(screen.getByRole("heading", { level: 3, name: "順位を付けない事業者（データが比較に足りません）" })).toBeInTheDocument();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    expect(card("朝日交通")).toHaveTextContent("観測カバー率 41.0%（70%未満）");
+    expect(card("ささき観光")).toHaveTextContent("定時率の95%信頼区間 ±3.3ポイント（±3ポイント超）");
+    expect(card("広島電鉄")).toHaveTextContent("観測カバー率 91.7%（計画120便中110便）");
+  });
+
+  it("drops the interval from a ridership-weighted figure, which it does not describe", async () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden", on_time_pct: 50, ci_low: 48.9, ci_high: 51.1, has_ridership_weights: true, weighted_on_time_pct: 82.7 })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByText("(48.9–51.1)")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("ridership-weighted-toggle"));
+    expect(screen.getByText("82.7% (weighted)")).toBeInTheDocument();
+    expect(screen.queryByText("(48.9–51.1)")).not.toBeInTheDocument();
+  });
+
   it("draws every bar against one shared axis, stepped up from 6 minutes to hold the largest agency", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           // 7.5 min is past 6, so the shared axis steps up to 12 for every row.
           row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 7.5 }),
@@ -551,7 +680,7 @@ describe("NetworkTab", () => {
   it("shows the observation count as text, with no bar encoding it", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 3, samples: 233148 }),
         ],
@@ -570,7 +699,7 @@ describe("NetworkTab", () => {
   it("gives each row a stable flip key so a re-sort moves nodes instead of remounting them", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: [
           row({ agency_id: 7, agency_name: "Hiroden", avg_delay_min: 4 }),
           row({ agency_id: 9, agency_name: "HiroBus", avg_delay_min: 2 }),
@@ -584,7 +713,7 @@ describe("NetworkTab", () => {
 
   it("sets both range date inputs' lang attribute to the active UI language", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition },
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition, comparability },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
@@ -599,7 +728,7 @@ describe("NetworkTab", () => {
     // when nothing in them changed.
     const summary = () => ({
       data: {
-        from: "2026-04-01", to: "2026-04-07", definition,
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
         agencies: Array.from({ length: 250 }, (_, i) => row({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })),
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -642,7 +771,7 @@ describe("NetworkTab", () => {
     const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
     try {
       const summary = (avg: number) => ({
-        data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ avg_delay_min: avg })] },
+        data: { from: "2026-04-01", to: "2026-04-07", definition, comparability, agencies: [row({ avg_delay_min: avg })] },
         isPending: false, error: null, refetch: vi.fn(),
       });
       let current = summary(from);

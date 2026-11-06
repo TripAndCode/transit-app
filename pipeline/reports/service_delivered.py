@@ -66,7 +66,10 @@ CANCELLATION_LOOKBACK_DAYS = 90
 # missed trips are there whatever timetable is loaded now. It has a row only
 # for a day with a missed trip: a planned day without one reads 0 missed, and
 # an agency with no row at all in the look-back ($4 to $3) reported no
-# cancellation in it, so reports_cancellations is false.
+# cancellation in it, so reports_cancellations is false. Observed trips count
+# over the same planned days, up to $5, as do the planned trips coverage is
+# measured against, so the two make a ratio; a covered day that plans nothing
+# still counts what the feed reported then.
 _SERVICE_SQL = (
     "WITH"
     + plan_ctes("$1::int[]", "$2::date", "$3::date")
@@ -93,11 +96,26 @@ _SERVICE_SQL = (
         FROM agg_service_delivered_daily s
         JOIN planned_days p ON p.agency_id = s.agency_id AND p.day = s.date
         GROUP BY s.agency_id
+    ),
+    observed AS (
+        SELECT r.agency_id, SUM(r.trips_observed) AS observed
+        FROM agg_route_daily r
+        JOIN planned_days p ON p.agency_id = r.agency_id AND p.day = r.date
+        WHERE r.agency_id = ANY($1::int[]) AND r.date BETWEEN $2::date AND $5::date
+        GROUP BY r.agency_id
+    ),
+    coverage_plan AS (
+        SELECT agency_id, SUM(planned) AS planned
+        FROM planned_days
+        WHERE day <= $5::date
+        GROUP BY agency_id
     )
     SELECT a.agency_id,
            COALESCE(p.planned, 0) AS planned,
            COALESCE(p.covered_days, 0) AS covered_days,
            COALESCE(m.non_executed, 0) AS non_executed,
+           COALESCE(o.observed, 0) AS observed,
+           COALESCE(cp.planned, 0) AS coverage_planned,
            g.ingest_strategy,
            EXISTS (
                SELECT 1 FROM agg_service_delivered_daily r
@@ -108,6 +126,8 @@ _SERVICE_SQL = (
     FROM unnest($1::int[]) AS a(agency_id)
     LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
+    LEFT JOIN observed o USING (agency_id)
+    LEFT JOIN coverage_plan cp USING (agency_id)
     LEFT JOIN agencies g USING (agency_id)
 """
 )
@@ -115,9 +135,9 @@ _SERVICE_SQL = (
 
 def unreadable_service_delivered(from_date: date, to_date: date) -> dict[str, Any]:
     """The figures :func:`compute_service_delivered_by_agency` gives an agency
-    when its read fails outright: no plan counted, no rate, and
-    ``delivered_missing="unreadable"``, so a caller never shows the 0 as a
-    real plan of nothing."""
+    when its read fails outright: no plan counted, no rate, no observed
+    count, and ``delivered_missing="unreadable"``, so a caller never shows
+    the 0 as a real plan of nothing."""
     return {
         "planned_trips": 0,
         "executed_trips": None,
@@ -125,19 +145,32 @@ def unreadable_service_delivered(from_date: date, to_date: date) -> dict[str, An
         "covered_days": 0,
         "window_days": (to_date - from_date).days + 1,
         "delivered_missing": "unreadable",
+        "observed_trips": None,
+        "coverage_planned_trips": None,
     }
 
 
 async def compute_service_delivered_by_agency(
-    conn, agency_ids: list[int], from_date: date, to_date: date
+    conn, agency_ids: list[int], from_date: date, to_date: date, *, observed_through: date | None = None
 ) -> dict[int, dict[str, Any]]:
     """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct",
-    "covered_days", "window_days", "delivered_missing"}`` over
-    ``[from_date, to_date]``.
+    "covered_days", "window_days", "delivered_missing", "observed_trips",
+    "coverage_planned_trips"}`` over ``[from_date, to_date]``.
 
     ``covered_days`` counts the window's days with a plan, saved in
     ``planned_trips_daily`` or covered by the loaded timetable; both sides of
     the ratio count only those days.
+
+    ``observed_trips`` sums ``agg_route_daily.trips_observed`` over those same
+    days, the trips the feed reported, and ``coverage_planned_trips`` the
+    trips planned on them: the two sides of a coverage ratio. Both stop at
+    ``observed_through`` (default ``to_date``), so a caller comparing
+    agencies can end them at the newest day any of them has observations
+    for: a day no agency's aggregates have reached yet is a lag they all
+    share, not trips one feed missed. ``observed_trips`` is ``None`` when
+    nothing is planned through then, since there is no plan to measure it
+    against. Whether those trip_ids are the timetable's is the caller's
+    question (see :mod:`pipeline.reports.comparability`).
 
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
@@ -153,7 +186,11 @@ async def compute_service_delivered_by_agency(
         return {}
     window_days = (to_date - from_date).days + 1
     lookback_from = min(from_date, to_date - timedelta(days=CANCELLATION_LOOKBACK_DAYS - 1))
-    rows = {r["agency_id"]: r for r in await conn.fetch(_SERVICE_SQL, agency_ids, from_date, to_date, lookback_from)}
+    coverage_to = to_date if observed_through is None else min(observed_through, to_date)
+    rows = {
+        r["agency_id"]: r
+        for r in await conn.fetch(_SERVICE_SQL, agency_ids, from_date, to_date, lookback_from, coverage_to)
+    }
 
     # An agency must satisfy both halves of the shared gate: an ingest
     # strategy that CAN send this field, and a live probe verdict saying its
@@ -164,7 +201,13 @@ async def compute_service_delivered_by_agency(
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:
         p = int(rows[aid]["planned"])
-        coverage = {"covered_days": int(rows[aid]["covered_days"]), "window_days": window_days}
+        coverage_planned = int(rows[aid]["coverage_planned"])
+        coverage = {
+            "covered_days": int(rows[aid]["covered_days"]),
+            "window_days": window_days,
+            "observed_trips": int(rows[aid]["observed"]) if coverage_planned > 0 else None,
+            "coverage_planned_trips": coverage_planned,
+        }
         missing: DeliveredMissing | None = None
         if p <= 0:
             missing = "no_plan"

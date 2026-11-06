@@ -9,6 +9,12 @@ from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
+from pipeline.reports.comparability import (
+    MAX_CI_HALF_WIDTH_PP,
+    MAX_CLAMP_PCT,
+    MIN_COVERAGE_PCT,
+    ComparableReason,
+)
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
 from pipeline.reports.network import compute_network_summary
 from pipeline.reports.service_delivered import DeliveredMissing
@@ -24,6 +30,11 @@ class NetworkAgencyRow(BaseModel):
     agency_name: str
     avg_delay_min: float | None
     on_time_pct: float | None
+    # on_time_pct's 95% interval in percent, counting trips rather than stop
+    # events; None without a trip count to count. See
+    # pipeline.reports.comparability.on_time_interval.
+    ci_low: float | None
+    ci_high: float | None
     samples: int
     raw_samples: int
     clamp_count: int
@@ -47,6 +58,23 @@ class NetworkAgencyRow(BaseModel):
     # Why service_delivered_pct is None, or None beside a rate; see
     # pipeline.reports.service_delivered.DeliveredMissing.
     delivered_missing: DeliveredMissing | None
+    # Trips the feed reported on the days a timetable plans through
+    # coverage_through, the trips planned on those days, and the first as a
+    # share of the second (not capped at 100). coverage_through is the
+    # newest day any agency on the board has observations for in the range,
+    # the same for every row, so a day no agency's aggregates have reached
+    # yet counts against none of them. coverage_pct is None where coverage
+    # cannot be measured: observed_trips and coverage_planned_trips are both
+    # None for a feed whose trip_ids aren't the timetable's, or an unreadable
+    # plan; coverage_planned_trips is 0, observed_trips None, with no plan.
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    coverage_through: str | None
+    coverage_pct: float | None
+    # Whether the board ranks this agency, and otherwise the first check it
+    # fails; see pipeline.reports.comparability.
+    comparable: bool
+    comparable_reason: ComparableReason | None
     # pipeline.reports.ridership: has_ridership_weights is False (and
     # weighted_on_time_pct None) whenever this agency has no ridership_weights
     # rows at all -- the frontend toggle must key off has_ridership_weights,
@@ -67,10 +95,22 @@ class NetworkAgencyRow(BaseModel):
     vehicle_km_delivered_pct: float | None
 
 
+class ComparabilityThresholds(BaseModel):
+    """The gate's thresholds, served so the board's reasons quote the same
+    figures the server applied. Each is inclusive: a figure at it passes."""
+
+    min_coverage_pct: float
+    max_ci_half_width_pp: float
+    max_clamp_pct: float
+
+
 class NetworkSummary(BaseModel):
     from_: str = Field(serialization_alias="from")
     to: str
+    # Comparable agencies first, worst avg_delay_min first; then the rest by
+    # agency name.
     agencies: list[NetworkAgencyRow]
+    comparability: ComparabilityThresholds
     # This board's on_time_pct always reads agg_route_daily_dist's exact
     # on_time_count column -- there is no tolerance query param here (unlike
     # GET /api/{agency_id}/reports/on_time) -- so the definition is always
@@ -89,7 +129,8 @@ async def network_summary(
     ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
 ) -> NetworkSummary:
-    """Per-agency network health board over [from, to], ranked worst-avg-delay first.
+    """Per-agency network health board over [from, to]: the agencies the data
+    can compare, ranked worst-avg-delay first, then the rest by name.
 
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
@@ -99,6 +140,11 @@ async def network_summary(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
+        comparability=ComparabilityThresholds(
+            min_coverage_pct=MIN_COVERAGE_PCT,
+            max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
+            max_clamp_pct=MAX_CLAMP_PCT,
+        ),
         definition=resolve_definition_meta("on_time", None, None),
         scope_applied=_NETWORK_SCOPE,
     )
