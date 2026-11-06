@@ -38,13 +38,10 @@ async def reports_app(apply_schema):
     invalidate_network_summary()
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() declares ch=Depends(get_ch) alongside conn, and every
-    # report type resolves it, so something must be present at
-    # app.state.ch_client. None is safe because every ClickHouse read these
-    # tests reach degrades a failed or unavailable probe to None rather than
-    # raising: the council report's and the agencies board's freshness probes
+    # Every report type resolves get_report()'s ch=Depends(get_ch). None is safe:
+    # every ClickHouse read these tests reach degrades a failed probe to None
     # (api.clickhouse.max_captured_at_before_by_agency). No test here passes
-    # a time_band filter, the one path that needs a real client.
+    # time_band, the one path that needs a real client.
     app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",

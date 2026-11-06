@@ -3,7 +3,7 @@ import type { ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
 import { fixedTenth, formatNumber } from "../utils/format";
 
 /** The figures a reason reads: an agencies board row has them all, and the
- *  council report gathers the same ones from its verdict and its row. */
+ *  council report's verdict carries the same ones from the board's row. */
 type GateFigures = Pick<
   NetworkAgencyRow,
   | "comparable_reason"
