@@ -93,16 +93,19 @@ class DefinitionMeta(BaseModel):
     built_at: AwareDatetime | None = None
 
 
-# The newest build analyze had recorded, for any agency, when this process last
+# The builds analyze had recorded, for every agency, when this process last
 # looked; _UNSEEN before its first look.
 _UNSEEN = object()
-_seen_newest_build: object = _UNSEEN
+_seen_builds: object = _UNSEEN
 
-# Every table of an agency is recorded in one analyze run, so an agency's
-# newest row is its last run. With no agency named, built_at covers the
-# agencies the board lists, the ones not deleted.
+# The builds are named by every row's time, not the newest: analyze dates a
+# build when it writes the row and agencies commit concurrently, so a build
+# can become visible dated before one already seen. Every table of an agency
+# is recorded in one run, so an agency's newest row is its last run. With no
+# agency named, built_at covers the agencies the board lists, not deleted.
 _BUILDS_SQL = """
-SELECT max(s.built_at) AS newest,
+SELECT count(*) AS builds,
+       sum(extract(epoch FROM s.built_at)) AS stamps,
        max(s.built_at) FILTER (WHERE s.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)) AS built_at
 FROM agg_table_state s
 JOIN agencies a USING (agency_id)
@@ -115,25 +118,25 @@ async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None) -> Defi
     None. A live definition is returned as it is.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
-    so when analyze has recorded a build this process has not seen, every
+    so when analyze has recorded any build this process has not seen, every
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
     if meta.source == "live":
         return meta
-    newest, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
-    _note_newest_build(newest)
+    builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
+    _note_builds((builds, stamps))
     return meta.model_copy(update={"built_at": built_at})
 
 
-def _note_newest_build(newest: object) -> None:
-    """Forget every cached compute result when *newest* is not the build this
+def _note_builds(builds: object) -> None:
+    """Forget every cached compute result when *builds* are not the ones this
     process last saw. The first look forgets too: rows cached before it are of
-    an unknown build."""
-    global _seen_newest_build
-    if newest != _seen_newest_build:
+    unknown builds."""
+    global _seen_builds
+    if builds != _seen_builds:
         clear_all()
-        _seen_newest_build = newest
+        _seen_builds = builds
 
 
 def resolve_definition_meta(

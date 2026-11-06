@@ -327,13 +327,14 @@ def test_footnotes_end_with_the_method_stamp(locale, report_type):
     assert format_definition_footnotes(meta, locale)[-1] == format_method_stamp(meta, locale)
 
 
-def test_cached_rows_are_forgotten_whenever_the_newest_build_moves(monkeypatch):
+def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):
     """Rows cached before a build must not be served under its stamp, so the
-    caches are cleared the first time a process looks and on every move after."""
+    caches are cleared the first time a process looks and on every move after,
+    including a build that lands dated before one already seen."""
     cleared: list[None] = []
     monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
-    monkeypatch.setattr(definition, "_seen_newest_build", definition._UNSEEN)
-    later = _BUILT_AT + timedelta(hours=1)
-    for newest, clears in [(_BUILT_AT, 1), (_BUILT_AT, 1), (later, 2), (later, 2), (None, 3), (None, 3)]:
-        definition._note_newest_build(newest)
-        assert len(cleared) == clears, newest
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    seen = [((2, 10), 1), ((2, 10), 1), ((2, 11), 2), ((3, 11), 3), ((3, 11), 3), ((0, None), 4)]
+    for builds, clears in seen:
+        definition._note_builds(builds)
+        assert len(cleared) == clears, builds

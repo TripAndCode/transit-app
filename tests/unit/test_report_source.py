@@ -53,6 +53,11 @@ def test_trend_carries_the_hourly_heatmap_which_a_route_filter_scans_live():
     assert report_reads_aggregates("ranking", _ROUTES)
 
 
+def test_the_trend_export_writes_the_daily_series_alone():
+    assert report_reads_aggregates("trend", _ROUTES, csv=True)
+    assert not report_reads_aggregates("trend", _BAND, csv=True)
+
+
 def test_the_delay_record_always_scans_live():
     assert not report_reads_aggregates("delay_certificate", _ALL)
 

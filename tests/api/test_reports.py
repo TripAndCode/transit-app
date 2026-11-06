@@ -459,6 +459,35 @@ async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(repor
 
 
 @pytest.mark.asyncio
+async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_rows(reports_client):
+    """analyze stamps a build when it writes the row, not when it commits, so
+    a rebuild can land dated before another agency's newer build. It must
+    still forget the rows cached before it."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_daily_dist", _BUILT_AT),
+        (other, "agg_route_daily_dist", _BUILT_AT + timedelta(hours=2)),
+    )
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    assert float((await client.get(url)).json()["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
+
+
+@pytest.mark.asyncio
 async def test_the_council_report_text_names_the_method_version_and_the_build_day(reports_client):
     client, agency_id, pool = reports_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
