@@ -480,6 +480,11 @@ the scope as one sentence above their content
   the `legacy_60s` default. In the CSV it's a one-cell preamble row before
   the column header; in the UI, `DefinitionMetaBlock` renders it from the
   API response's `definition` field.
+- The block also names the method version (`method_version`, see
+  `DELAY_ANALYSIS.md`'s "Method versions") and `built_at`, the newest time
+  analyze recorded the agency's aggregates (`agg_table_state`), null for the
+  delay record, which reads no aggregate. The CSV preamble, the council
+  report's footnotes and the delay record's summary each carry that stamp.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

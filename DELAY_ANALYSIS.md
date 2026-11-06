@@ -29,6 +29,20 @@ After ingest, `analyze` turns the raw readings into summary tables:
    - `agg_route_stats` — route overall (avg, p50, p90, on-time %)
    - …and per-stop / per-hour / feed-health variants
 
+## Method versions
+
+Every report, CSV export and council document names the method version its figures were
+made with, and the day their aggregates were last built. The version covers every
+`agg_*` table's logic version and the plausibility clamp. A change to any of them is a
+new version: `METHOD_VERSIONS` in `pipeline/agg_registry.py` records what each version
+set, and `tests/unit/test_method_version.py` keeps that record, the registry and this
+table in step. A rebuild replaces the stored aggregates, so figures exported under an
+earlier version may differ from today's for the same period.
+
+| Version | What changed | Tables |
+|---|---|---|
+| `2026.11.0` | Baseline. The latest reading per trip, stop and service day counts, and readings more than 120 minutes off are dropped. Stop, dwell/run and headway rows join the timetable each reading's feed version archived, and each day's long gaps are measured against that timetable's own headway. | All |
+
 ## Serving
 
 By default a report endpoint just **reads** an `agg_*` table rather than scanning the raw

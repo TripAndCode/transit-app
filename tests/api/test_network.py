@@ -6,6 +6,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.reports.network import compute_network_summary
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 
@@ -638,6 +639,34 @@ async def test_network_summary_includes_definition_metadata(net_client):
     assert definition["exclusion_threshold_sec"] == 7200
     assert definition["measurement_point"] == "all_stops_all_observations"
     assert definition["dedup_rule"] == "latest_observation_per_stop_event"
+
+
+async def test_the_board_names_the_method_version_and_its_newest_build(net_client):
+    """The board's figures rest on every listed agency's aggregates, so its
+    stamp carries the newest build analyze recorded across them."""
+    client, pool, a, b, _cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+
+    unbuilt = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert unbuilt["method_version"] == METHOD_VERSION
+    assert unbuilt["built_at"] is None
+
+    newest = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) VALUES ($1, $2, 'x', $3)",
+            [
+                (a, "agg_route_daily_dist", datetime(2026, 11, 4, tzinfo=timezone.utc)),
+                (b, "agg_route_daily_dist", newest),
+            ],
+        )
+    built = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert built["method_version"] == METHOD_VERSION
+    assert datetime.fromisoformat(built["built_at"]) == newest
+    # The shared board definition is copied, never stamped in place.
+    from pipeline.reports.comparability import BOARD_ON_TIME_DEFINITION
+
+    assert BOARD_ON_TIME_DEFINITION.built_at is None
 
 
 async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):

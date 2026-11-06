@@ -12,8 +12,13 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from collections.abc import Iterable
+from datetime import datetime
 
+from pydantic import AwareDatetime, BaseModel
+
+from pipeline.agg_registry import METHOD_VERSION
+from pipeline.clickhouse import jst_date
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -66,6 +71,12 @@ class DefinitionMeta(BaseModel):
     ``ranking``, ``trend``) -- the dedup/exclusion/measurement-point fields
     still apply to those, since every aggregate shares the one dedup
     builder, but there is no tolerance value to show.
+
+    ``method_version`` names the analysis method the figures were made with
+    (:data:`pipeline.agg_registry.METHOD_VERSION`). ``built_at`` is when
+    analyze last recorded the aggregates behind them
+    (:func:`aggregates_built_at`), which a router with a connection fills in;
+    ``None`` when no build is recorded, or for a view that reads no aggregate.
     """
 
     preset: str | None
@@ -74,6 +85,20 @@ class DefinitionMeta(BaseModel):
     exclusion_threshold_sec: int = MAX_PLAUSIBLE_DELAY_SEC
     measurement_point: str = MEASUREMENT_POINT
     dedup_rule: str = DEDUP_RULE
+    method_version: str = METHOD_VERSION
+    built_at: AwareDatetime | None = None
+
+
+async def aggregates_built_at(conn, agency_ids: Iterable[int]) -> datetime | None:
+    """The newest time analyze recorded any aggregate table of *agency_ids*
+    (agg_table_state), or None when it has recorded none.
+
+    Every table of an agency is recorded in one run, so the newest across them
+    is that agency's last run; across agencies it is the latest of theirs.
+    """
+    return await conn.fetchval(
+        "SELECT max(built_at) FROM agg_table_state WHERE agency_id = ANY($1::int[])", list(agency_ids)
+    )
 
 
 def resolve_definition_meta(
@@ -141,11 +166,30 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     # only having one entry each today.
     measurement_point = _MEASUREMENT_POINT_CSV_TEXT[meta.measurement_point]
     dedup_rule = _DEDUP_RULE_CSV_TEXT[meta.dedup_rule]
+    built_on = _built_on(meta) or "不明"
     return (
         f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; "
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
-        f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外"
+        f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
+        f"算出方法={meta.method_version}; 集計日={built_on}"
     )
+
+
+def _built_on(meta: DefinitionMeta) -> str | None:
+    """The JST day *meta*'s aggregates were built, as YYYY-MM-DD."""
+    return None if meta.built_at is None else jst_date(meta.built_at).isoformat()
+
+
+def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
+    """One footnote line naming the method version *meta*'s figures were made
+    with and the JST day their aggregates were built, the day left out when
+    *meta* has none. :func:`format_definition_footnotes` ends with it, and the
+    delay record's text is footnoted with it, so a document says which method
+    produced it."""
+    built_on = _built_on(meta)
+    if locale == "en":
+        return f"Method version: {meta.method_version}" + (f" (aggregates built {built_on})" if built_on else "")
+    return f"算出方法: {meta.method_version}" + (f"（{built_on} 集計）" if built_on else "")
 
 
 def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
@@ -185,6 +229,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
         lines.append(f"集計範囲: {measurement_point}")
         lines.append(f"重複排除: {dedup_rule}")
         lines.append(f"除外基準: |遅延|>{meta.exclusion_threshold_sec}秒を除外")
+    lines.append(format_method_stamp(meta, locale))
     return lines
 
 

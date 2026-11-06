@@ -5,8 +5,12 @@ Mirrors compute_on_time/compute_worst_5min's own None-default resolution
 silently drift from what a report actually computes.
 """
 
-import pytest
+from datetime import datetime, timedelta, timezone
 
+import pytest
+from pydantic import ValidationError
+
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -16,10 +20,15 @@ from pipeline.histogram import (
 from pipeline.reports.definition import (
     DEDUP_RULE,
     MEASUREMENT_POINT,
+    DefinitionMeta,
     format_definition_csv_line,
     format_definition_footnotes,
+    format_method_stamp,
     resolve_definition_meta,
 )
+
+# 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+_BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
 
 
 def test_on_time_no_params_resolves_to_legacy_preset():
@@ -233,3 +242,57 @@ def test_footnotes_dedup_rule_text_is_read_from_the_field_not_hardcoded():
     meta = resolve_definition_meta("on_time", None, None).model_copy(update={"dedup_rule": "some_other_dedup_rule"})
     with pytest.raises(KeyError):
         format_definition_footnotes(meta, "ja")
+
+
+@pytest.mark.parametrize("report_type", ["on_time", "worst_5min", "ranking", "council_summary", "delay_certificate"])
+def test_every_definition_names_the_method_version_and_no_build_until_told(report_type):
+    """resolve_definition_meta stays pure: the build time is the caller's,
+    read from agg_table_state where it holds a connection."""
+    meta = resolve_definition_meta(report_type, None, None)
+    assert meta.method_version == METHOD_VERSION
+    assert meta.built_at is None
+
+
+def test_a_build_time_without_a_zone_is_refused():
+    """The stamp names the build's JST day, which a naive time cannot give."""
+    with pytest.raises(ValidationError):
+        DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None, built_at=datetime(2026, 11, 6))
+
+
+def test_csv_line_names_the_method_version_and_the_jst_day_the_aggregates_were_built():
+    meta = resolve_definition_meta("on_time", None, None).model_copy(update={"built_at": _BUILT_AT})
+    line = format_definition_csv_line(meta)
+    assert line.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
+    assert "," not in line
+
+
+def test_csv_line_says_the_build_day_is_unknown_without_one():
+    line = format_definition_csv_line(resolve_definition_meta("on_time", None, None))
+    assert line.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=不明")
+
+
+@pytest.mark.parametrize(
+    ("locale", "dated", "undated"),
+    [
+        ("ja", f"算出方法: {METHOD_VERSION}（2026-11-06 集計）", f"算出方法: {METHOD_VERSION}"),
+        (
+            "en",
+            f"Method version: {METHOD_VERSION} (aggregates built 2026-11-06)",
+            f"Method version: {METHOD_VERSION}",
+        ),
+    ],
+)
+def test_the_method_stamp_names_the_version_and_the_jst_build_day(locale, dated, undated):
+    meta = resolve_definition_meta("council_summary", None, None)
+    assert format_method_stamp(meta.model_copy(update={"built_at": _BUILT_AT}), locale) == dated
+    assert format_method_stamp(meta, locale) == undated
+    # A build later the same JST day is the same day.
+    later = meta.model_copy(update={"built_at": _BUILT_AT + timedelta(hours=23)})
+    assert format_method_stamp(later, locale) == dated
+
+
+@pytest.mark.parametrize("locale", ["ja", "en"])
+@pytest.mark.parametrize("report_type", ["council_summary", "ranking"])
+def test_footnotes_end_with_the_method_stamp(locale, report_type):
+    meta = resolve_definition_meta(report_type, None, None).model_copy(update={"built_at": _BUILT_AT})
+    assert format_definition_footnotes(meta, locale)[-1] == format_method_stamp(meta, locale)

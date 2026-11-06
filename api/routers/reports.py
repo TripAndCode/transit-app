@@ -46,6 +46,7 @@ from pipeline.reports import (
     RANKING_MIN_SAMPLES,
     ROUTE_TABLE_SORTS,
     DefinitionMeta,
+    aggregates_built_at,
     compute_compare_ranking,
     compute_council_summary,
     compute_delay_certificate,
@@ -301,6 +302,9 @@ _LATE_TOLERANCE_TYPES = frozenset({"on_time", "route_table", "worst_5min", "coun
 # route_table's over-5-min share, keep their own over-5-min threshold, so the
 # scope never moves them.
 _SCOPE_LATE_TYPES = frozenset({"on_time", "route_table", "council_summary"})
+# The reports that always scan the observations and read no aggregate: no
+# aggregate build governs their rows, so their definition names no built_at.
+_LIVE_ONLY_TYPES = frozenset({"delay_certificate"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
 # reports fix dow/service themselves; dwell_run cannot split by time band.
@@ -1372,6 +1376,8 @@ async def get_report(
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
     definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
+    if report_type not in _LIVE_ONLY_TYPES:
+        definition = definition.model_copy(update={"built_at": await aggregates_built_at(conn, [agency_id])})
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
         if format == "csv"
@@ -1594,7 +1600,9 @@ async def get_report(
             except Exception:
                 _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
                 observed = None
-        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale, observed=observed)
+        text = format_delay_certificate_text(
+            rows, threshold, rows_total, locale=locale, observed=observed, definition=definition
+        )
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),

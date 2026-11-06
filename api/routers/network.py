@@ -18,7 +18,7 @@ from pipeline.reports.comparability import (
     MIN_COVERAGE_PCT,
     ComparableReason,
 )
-from pipeline.reports.definition import DefinitionMeta
+from pipeline.reports.definition import DefinitionMeta, aggregates_built_at
 from pipeline.reports.network import compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import DeliveredMissing
 
@@ -123,6 +123,7 @@ class NetworkSummary(BaseModel):
     # the legacy_60s preset. Surfaced anyway (rather than assumed) so a user
     # comparing this board against a per-agency report's on_time export can
     # see both are using the same definition. See pipeline.reports.definition.
+    # Its built_at is the newest build analyze recorded for any listed agency.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
 
@@ -153,6 +154,8 @@ async def network_summary(
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
         comparability=COMPARABILITY_THRESHOLDS,
         coverage_through=through.isoformat() if through else None,
-        definition=BOARD_ON_TIME_DEFINITION,
+        definition=BOARD_ON_TIME_DEFINITION.model_copy(
+            update={"built_at": await aggregates_built_at(conn, (r["agency_id"] for r in rows))}
+        ),
         scope_applied=_NETWORK_SCOPE,
     )

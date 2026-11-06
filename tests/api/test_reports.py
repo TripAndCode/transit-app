@@ -1,12 +1,13 @@
 """Tests for the v2 reports endpoints (live queries, no snapshots table)."""
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.reports.network import invalidate_network_summary
 from tests.api.test_network import (
     _seed_gated_agency,
@@ -388,6 +389,76 @@ async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(report
     rows = list(csv.reader(io.StringIO(resp.text)))
     preamble = rows[0][0]
     assert "legacy_60s" in preamble
+
+
+async def _record_builds(pool, *builds):
+    """agg_table_state rows as analyze records them: (agency_id, table_name, built_at)."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) VALUES ($1, $2, 'x', $3)",
+            builds,
+        )
+
+
+# 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+_BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+_CERT_STAMP = f"※算出方法: {METHOD_VERSION}"
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_the_method_version_and_when_its_aggregates_were_built(reports_client):
+    """The newest build analyze recorded for the agency, across its tables;
+    another agency's later build is not this report's."""
+    client, agency_id, pool = reports_client
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
+
+    unbuilt = (await client.get(url)).json()["definition"]
+    assert unbuilt["method_version"] == METHOD_VERSION
+    assert unbuilt["built_at"] is None
+
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_stats", datetime(2026, 11, 4, tzinfo=timezone.utc)),
+        (agency_id, "agg_route_daily", _BUILT_AT),
+        (other, "agg_route_daily", datetime(2026, 11, 7, tzinfo=timezone.utc)),
+    )
+    built = (await client.get(url)).json()["definition"]
+    assert built["method_version"] == METHOD_VERSION
+    assert datetime.fromisoformat(built["built_at"]) == _BUILT_AT
+
+    preamble = (await client.get(f"{url}&format=csv")).text.lstrip("\ufeff").splitlines()[0]
+    assert preamble.endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
+
+
+@pytest.mark.asyncio
+async def test_the_council_report_text_names_the_method_version_and_the_build_day(reports_client):
+    client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
+    assert f"※算出方法: {METHOD_VERSION}（2026-11-06 集計）" in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch_async_client):
+    """The record is a live scan of the observations, which no aggregate
+    build governs, so its stamp names the method version alone."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-20"
+    await _seed_route(pool, agency_id, "RCERT", "平日", day, [400])
+    mirror_updates_to_ch(ch_client, agency_id)
+    await _record_builds(pool, (agency_id, "agg_route_daily", _BUILT_AT))
+
+    body = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")).json()
+    assert body["definition"]["method_version"] == METHOD_VERSION
+    assert body["definition"]["built_at"] is None
+    assert body["text"].split("\n")[-1] == _CERT_STAMP
 
 
 @pytest.mark.asyncio
@@ -2939,12 +3010,14 @@ async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_cl
     capped = (await client.get(f"{url}&limit=2")).json()
     assert len(capped["rows"]) == 2
     assert capped["rows_total"] == 3
-    assert capped["text"] == "遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）"
+    assert capped["text"] == (
+        f"遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）\n{_CERT_STAMP}"
+    )
 
     whole = (await client.get(url)).json()
     assert len(whole["rows"]) == 3
     assert whole["rows_total"] == 3
-    assert whole["text"] == "遅延300秒超の便: 3件"
+    assert whole["text"] == f"遅延300秒超の便: 3件\n{_CERT_STAMP}"
 
     resp = await client.get(f"{url}&limit=2&format=csv")
     rows = list(csv.reader(io.StringIO(resp.text)))
@@ -3368,8 +3441,8 @@ async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_
     assert empty["rows"] == []
     assert empty["observed"] is False
     # The staff summary says the same, never "no trip exceeded the threshold".
-    assert empty["text"] == "この期間・条件のリアルタイムデータはありません。"
-    assert on_time["text"] == "遅延300秒超の便はありませんでした。"
+    assert empty["text"] == f"この期間・条件のリアルタイムデータはありません。\n{_CERT_STAMP}"
+    assert on_time["text"] == f"遅延300秒超の便はありませんでした。\n{_CERT_STAMP}"
 
     ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
     assert ranking["observed"] is None

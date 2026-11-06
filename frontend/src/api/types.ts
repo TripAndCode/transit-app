@@ -303,6 +303,9 @@ export type ReportMeta = {
  *  report or comparison view's numbers actually used -- always present, but
  *  `preset`/`early_tolerance_sec`/`late_tolerance_sec` are `null` for report
  *  types with no on-time/late tolerance concept (e.g. `ranking`, `trend`).
+ *  `method_version` names the analysis method the figures were made with;
+ *  `built_at` (ISO instant) is when their aggregates were last built, `null`
+ *  when no build is recorded or the view reads no aggregate.
  *  See pipeline/reports/definition.py, the single source of truth these
  *  values are resolved from. */
 export type DefinitionMeta = {
@@ -312,6 +315,8 @@ export type DefinitionMeta = {
   exclusion_threshold_sec: number;
   measurement_point: string;
   dedup_rule: string;
+  method_version: string;
+  built_at: string | null;
 };
 
 /** A report cell the backend computes as a Python `Decimal` (chosen so its

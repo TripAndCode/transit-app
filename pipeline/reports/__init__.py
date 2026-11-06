@@ -17,6 +17,7 @@ from pipeline.reports.council import (
 )
 from pipeline.reports.definition import (
     DefinitionMeta,
+    aggregates_built_at,
     format_definition_csv_line,
     format_definition_footnotes,
     resolve_definition_meta,
@@ -53,6 +54,7 @@ __all__ = [
     "RANKING_MIN_SAMPLES",
     "ROUTE_TABLE_SORTS",
     "DefinitionMeta",
+    "aggregates_built_at",
     "compute_compare_ranking",
     "compute_council_summary",
     "compute_delay_certificate",

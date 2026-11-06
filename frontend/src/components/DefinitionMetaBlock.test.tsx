@@ -12,7 +12,12 @@ const LEGACY: DefinitionMeta = {
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0",
+  built_at: null,
 };
+
+// 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+const BUILT_AT = "2026-11-05T15:30:00Z";
 
 describe("DefinitionMetaBlock", () => {
   afterEach(async () => {
@@ -68,5 +73,25 @@ describe("DefinitionMetaBlock", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("some_other_measurement_point");
     expect(block).toHaveTextContent("some_other_dedup_rule");
+  });
+
+  it("names the method version and the JST day the aggregates were built", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, built_at: BUILT_AT }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Method version 2026.11.0, aggregates built Nov 6, 2026.",
+    );
+  });
+
+  it("writes the stamp the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, built_at: BUILT_AT }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("算出方法 2026.11.0（2026年11月6日集計）。");
+  });
+
+  it("names the method version alone when no build is recorded", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Method version 2026.11.0.");
+    expect(block).not.toHaveTextContent("aggregates built");
   });
 });

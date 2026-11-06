@@ -340,6 +340,8 @@
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
     "on_time_late": "On time = no more than {{late}} late (early departures count as on time).",
     "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "method_version": "Method version {{version}}.",
+    "method_version_built": "Method version {{version}}, aggregates built {{date}}.",
     "sentence_separator": " "
   },
   "app": {

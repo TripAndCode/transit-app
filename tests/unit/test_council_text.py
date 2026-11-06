@@ -1,11 +1,13 @@
 """The council report's prose headline, as pasted into a council document."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import get_args
 
 import pytest
 
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query.formatter import format_council_summary_footnotes, format_council_summary_text
 from pipeline.reports.definition import resolve_definition_meta
 from pipeline.reports.service_delivered import DeliveredMissing
@@ -353,3 +355,27 @@ def test_a_custom_tolerance_says_the_comparison_keeps_the_shared_definition(loca
     assert _SAME_DEFINITION_NOTE[locale] not in format_council_summary_footnotes(spelled_out, payload, locale)
     without_gate = format_council_summary_footnotes(custom, _payload(), locale)
     assert _SAME_DEFINITION_NOTE[locale] not in without_gate
+
+
+@pytest.mark.parametrize(
+    ("locale", "dated", "undated"),
+    [
+        ("ja", f"※算出方法: {METHOD_VERSION}（2026-11-06 集計）", f"※算出方法: {METHOD_VERSION}"),
+        (
+            "en",
+            f"* Method version: {METHOD_VERSION} (aggregates built 2026-11-06)",
+            f"* Method version: {METHOD_VERSION}",
+        ),
+    ],
+)
+def test_the_report_is_footnoted_with_the_method_version_and_the_build_day(locale, dated, undated):
+    """A council document names the method its figures were made with and the
+    JST day their aggregates were built, so a later rebuild can be told apart."""
+    built = _DEFINITION.model_copy(update={"built_at": datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)})
+
+    def lines(definition):
+        text = format_council_summary_text(_payload(), definition, "青森市バス", "2026-08-12", "2026-09-10", locale)
+        return text.split("\n")
+
+    assert dated in lines(built)
+    assert undated in lines(_DEFINITION)
