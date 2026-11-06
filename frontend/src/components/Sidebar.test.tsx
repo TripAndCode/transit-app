@@ -116,6 +116,34 @@ describe("Sidebar", () => {
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
+  describe("the feedback link", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("is not shown when the deployment names no address", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({
+        data: { auth_enabled: false, local_admin_enabled: false, feedback_url: null },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).queryByRole("link", { name: "Send feedback" })).toBeNull();
+    });
+
+    it("links the deployment's address under Other, opening it outside the app", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({
+        data: { auth_enabled: false, local_admin_enabled: false, feedback_url: "https://forms.example.test/feedback" },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      const link = within(other).getByRole("link", { name: "Send feedback" });
+      expect(link).toHaveAttribute("href", "https://forms.example.test/feedback");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+  });
+
+
   it("does not list the model evaluation page for a visitor who is not an admin", () => {
     renderSidebar();
     const other = screen.getByRole("navigation", { name: "Other" });

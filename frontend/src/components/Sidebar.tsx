@@ -6,6 +6,7 @@ import {
   Gauge,
   HelpCircle,
   Info,
+  MessageSquare,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useIsAdmin } from "../api/useIsAdmin";
+import { useConfig } from "../api/config";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
@@ -132,6 +134,7 @@ export function Sidebar() {
   const agencyId = useRailAgencyId();
   const { pathname } = useLocation();
   const isAdmin = useIsAdmin();
+  const feedbackUrl = useConfig().data?.feedback_url;
   // Each screen opens with its own last filters (see api/screenScope), so
   // nothing set on the screen being left follows the visitor elsewhere.
   const screenQuery = useScreenQuery();
@@ -248,6 +251,26 @@ export function Sidebar() {
               {!collapsedFlag && <span>{t("nav.help")}</span>}
             </PendingNavLink>
           </RailTooltip>
+          {feedbackUrl && (
+            <RailTooltip collapsed={collapsedFlag} label={t("nav.feedback")}>
+              <a
+                href={feedbackUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={collapsedFlag ? t("nav.feedback") : undefined}
+                onClick={() => onNavigate?.()}
+                style={railLinkStyle(collapsedFlag)({ isActive: false })}
+              >
+                <MessageSquare
+                  size={18}
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                  style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }}
+                />
+                {!collapsedFlag && <span>{t("nav.feedback")}</span>}
+              </a>
+            </RailTooltip>
+          )}
           <RailTooltip collapsed={collapsedFlag} label={t("nav.about")}>
             <NavLink
               to="/welcome"

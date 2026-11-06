@@ -63,7 +63,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Ask** | Ready-made questions, answered as tables and charts |
 
-Under **Other** are **Help** (this manual) and **About this app**; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
+Under **Other** are **Help** (this manual) and **About this app**, plus **Send feedback** when this site offers a way to send it; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
 The account menu at the bottom of the sidebar (your name, or **Guest**) holds sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
 

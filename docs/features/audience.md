@@ -86,3 +86,7 @@ made a signed-in request (by session or by API key) over the last 30 days:
 SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily
 WHERE day > (now() AT TIME ZONE 'Asia/Tokyo')::date - interval '30 days';
 ```
+
+The other signal is what readers say. The sidebar's **Send feedback** link opens the
+address the deployment sets in `FEEDBACK_URL` (an https form or a `mailto:` address);
+without one, the link is not shown.
