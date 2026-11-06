@@ -255,6 +255,7 @@ def _no_evaluation_ingest(monkeypatch):
     import api.routers.internal as internal_module
 
     monkeypatch.setattr(internal_module, "ingest_evaluations", lambda conn, s3, bucket: 0)
+    monkeypatch.setattr(internal_module, "ingest_live_evaluations", lambda conn, s3, bucket: 0)
 
 
 def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
@@ -401,7 +402,7 @@ def _configured_store(monkeypatch):
         monkeypatch.setenv(name, value)
 
 
-def test_the_sweep_also_ingests_the_evaluation_summaries(monkeypatch):
+def test_the_sweep_also_ingests_the_evaluation_summaries_and_live_scorecards(monkeypatch):
     import api.routers.internal as internal_module
 
     calls = []
@@ -409,9 +410,26 @@ def test_the_sweep_also_ingests_the_evaluation_summaries(monkeypatch):
     monkeypatch.setattr(
         internal_module, "ingest_evaluations", lambda conn, s3, bucket: calls.append("evaluations") or 0
     )
+    monkeypatch.setattr(internal_module, "ingest_live_evaluations", lambda conn, s3, bucket: calls.append("live") or 0)
     _configured_store(monkeypatch)
     internal_module._ingest_ml_forecast(object())
-    assert calls == ["forecast", "evaluations"]
+    assert calls == ["forecast", "evaluations", "live"]
+
+
+def test_an_evaluation_step_that_raises_does_not_skip_the_live_scorecards(monkeypatch):
+    import api.routers.internal as internal_module
+
+    calls = []
+
+    def boom(conn, s3, bucket):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(internal_module, "ingest_forecast", lambda conn, s3, bucket: 0)
+    monkeypatch.setattr(internal_module, "ingest_evaluations", boom)
+    monkeypatch.setattr(internal_module, "ingest_live_evaluations", lambda conn, s3, bucket: calls.append("live") or 0)
+    _configured_store(monkeypatch)
+    internal_module._ingest_ml_forecast(object())  # must not raise
+    assert calls == ["live"]
 
 
 def test_a_forecast_step_that_raises_does_not_skip_the_evaluations(monkeypatch):

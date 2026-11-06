@@ -13,7 +13,9 @@ from pipeline.ml_evaluation_ingest import (
     EvaluationReadError,
     EvaluationWriteError,
     ingest_evaluations,
+    ingest_live_evaluations,
     load_evaluations,
+    load_live_evaluations,
 )
 from pipeline.ml_forecast_ingest import list_keys
 
@@ -179,3 +181,55 @@ def test_a_failed_fetch_is_a_read_error_not_a_skipped_document(captured):
     with pytest.raises(EvaluationReadError, match="AccessDenied on GetObject"):
         load_evaluations(_RecordingConn(), store, "transit-ml")
     assert captured == []
+
+
+def _live(run_date, schema=1):
+    return {"schema": schema, "run_date": run_date, "window": {"origins": 7, "target_days": 25}, "origins": []}
+
+
+def _published_live(*documents, extra=None):
+    objects = {f"evaluations/{d['run_date']}/live.json": json.dumps(d).encode() for d in documents}
+    objects.update(extra or {})
+    return _FakeS3(objects)
+
+
+def test_every_published_live_scorecard_is_upserted_and_no_summary_is_read_as_one(captured):
+    conn = _RecordingConn()
+    summary = {"evaluations/2026-11-08/summary.json": json.dumps(_summary("2026-11-08")).encode()}
+    store = _published_live(_live("2026-11-08"), _live("2026-11-15"), extra=summary)
+    assert load_live_evaluations(conn, store, "transit-ml") == EvaluationIngest(listed=2, upserted=2, skipped=())
+    assert sorted((str(r[0]), r[1]) for r in captured) == [("2026-11-08", 1), ("2026-11-15", 1)]
+    assert json.loads(captured[0][2])["window"] == {"origins": 7, "target_days": 25}
+    assert conn.committed
+
+
+_LIVE_KEY = "evaluations/2026-11-15/live.json"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"{not json", id="corrupt-json"),
+        pytest.param(json.dumps(_live("2026-11-15", schema=2)).encode(), id="newer-schema"),
+        pytest.param(json.dumps(_live("2026-11-08")).encode(), id="run-date-mismatch"),
+        pytest.param(json.dumps({"schema": 1}).encode(), id="missing-run-date"),
+        pytest.param(json.dumps({**_live("2026-11-15"), "skill": {"live": float("nan")}}).encode(), id="non-finite"),
+    ],
+)
+def test_one_untrustworthy_live_scorecard_is_skipped_by_name_and_the_rest_ingested(captured, caplog, body):
+    conn = _RecordingConn()
+    with caplog.at_level(logging.WARNING, logger="pipeline.ml_evaluation_ingest"):
+        result = load_live_evaluations(
+            conn, _published_live(_live("2026-11-08"), extra={_LIVE_KEY: body}), "transit-ml"
+        )
+    assert result == EvaluationIngest(listed=2, upserted=1, skipped=(_LIVE_KEY,))
+    assert [str(r[0]) for r in captured] == ["2026-11-08"]
+    assert _LIVE_KEY in caplog.text
+
+
+def test_the_live_cron_wrapper_never_raises(caplog):
+    with caplog.at_level(logging.ERROR, logger="pipeline.ml_evaluation_ingest"):
+        assert ingest_live_evaluations(_DroppedConn(), _published_live(_live("2026-11-08")), "transit-ml") == 0
+        assert ingest_live_evaluations(_RecordingConn(), _FakeS3({}, fail_listing=True), "transit-ml") == 0
+    assert "could not upsert the live scorecards" in caplog.text
+    assert "could not read the live scorecards from R2" in caplog.text

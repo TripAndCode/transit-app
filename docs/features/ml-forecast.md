@@ -202,16 +202,20 @@ evaluation summary under `evaluations/` into `ml_evaluations`
 skipping by name any document that is not JSON, uses a schema other than 1, is
 missing a field, names a run date other than its key's, or holds a non-finite
 number; a week whose document is unchanged is left as it is. A summary that
-cannot be fetched at all is a read failure, not a skipped document. Each of the two steps is guarded on its
-own, so one failing never skips the other.
+cannot be fetched at all is a read failure, not a skipped document. Every weekly
+live scorecard (`evaluations/<run_date>/live.json`, see Live scorecard) goes the
+same way into `ml_live_evaluations`, its own table because a live week can exist
+without a summary, under the same checks bar the summary's own fields. Each of the
+three steps is guarded on its own, so one failing never skips the others.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
-forecast and every evaluation summary into the database `.env`'s `DATABASE_URL` names, reading `ML_STORE_*`
-from the same file (a read-only token is enough). Unlike the sweep it exits
-non-zero on a missing variable, an unreadable publish or a failed upsert, and
-says "no forecast has been published yet" (and, for the summaries, "no evaluation
-summary has been published yet") rather than reporting zero rows; a summary it
-skips is named in a warning. The
+forecast, every evaluation summary and every live scorecard into the database
+`.env`'s `DATABASE_URL` names, reading `ML_STORE_*` from the same file (a read-only
+token is enough). Unlike the sweep it exits non-zero on a missing variable, an
+unreadable publish or a failed upsert, and says "no forecast has been published
+yet" (and likewise "no evaluation summary has been published yet" and "no live
+scorecard has been published yet") rather than reporting zero rows; a summary or
+scorecard it skips is named in a warning. The
 heatmap shows the ingested rows once the `ml_forecast` flag is on (admin → Flags),
 and marks them as the ML model's: each forecast cell shows its `q10`–`q90` range
 as the span about 8 runs in 10 fall in, and a cell the latest publish does not
