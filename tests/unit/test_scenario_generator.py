@@ -8,7 +8,7 @@ from fractions import Fraction
 
 import pytest
 
-from pipeline.strategies._pb import _fields
+from pipeline.strategies._pb import _fields, _int32
 from pipeline.strategies.static_join import _decode_rows
 from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import (
@@ -58,7 +58,7 @@ def _scenario(feed: FeedModel | None = None) -> Scenario:
 def test_the_oracle_counts_each_departure_once_under_its_trips_service_date():
     """Six departures: -61, 60, 61, 300, 301, 0. The 24:06 one is the
     service date's, not the next calendar day's."""
-    assert oracle.by_day(_scenario()) == {
+    assert oracle.by_day(oracle.outcome(_scenario())) == {
         DAY: oracle.Figures(
             departures=6,
             delay_sum_sec=661,
@@ -70,7 +70,7 @@ def test_the_oracle_counts_each_departure_once_under_its_trips_service_date():
             on_time_industry=4,
         )
     }
-    figures = oracle.by_route(_scenario())["R"]
+    figures = oracle.by_route(oracle.outcome(_scenario()))["R"]
     assert figures.mean_delay_sec == Fraction(661, 6)
     assert figures.on_time_share == Fraction(1, 2)
     assert figures.over_five_min_share == Fraction(1, 6)
@@ -93,6 +93,7 @@ def test_a_perfect_feed_lists_only_stops_not_yet_left_each_with_its_true_delay()
         for seq, (scheduled, actual) in enumerate(
             zip(scenario.trip(run.trip_id, run.service_date).scheduled_sec, run.actual_sec, strict=True), start=1
         )
+        if actual is not None
     }
     reported = set()
     for captured_at, rows in _decoded(polls(scenario)):
@@ -174,8 +175,10 @@ def test_a_revision_is_in_force_from_its_first_day_and_ships_as_its_own_zip():
     assert [v.name for v in scenario.versions] == ["scenario_revised", "timetable_b"]
     assert scenario.trip("R_0700", DAY).departures[0] == "07:00:00"
     assert scenario.trip("R_0700", NEXT).departures[0] == "07:30:00"
-    assert oracle.timetable_versions(scenario) == {DAY: "scenario_revised", NEXT: "timetable_b"}
-    assert oracle.version_trips(scenario) == {"scenario_revised": 2, "timetable_b": 2}
+    found = oracle.outcome(scenario)
+    assert found.day_versions == {DAY: "scenario_revised", NEXT: "timetable_b"}
+    assert found.version_trips == {"scenario_revised": 2, "timetable_b": 2}
+    assert oracle.revision_boundaries(found) == [NEXT]
     assert {
         (d.service_date, d.trip_id, d.scheduled_sec) for d in oracle.departures(scenario) if d.stop_sequence == 1
     } == {
@@ -211,20 +214,62 @@ def test_a_revision_loaded_after_its_days_polls_began_is_refused():
 
 def _statuses(scenario_polls):
     """Per poll, each TripUpdate's (trip_id, trip status, [(seq, departure delay, stop status)])."""
+    return [
+        (
+            p.captured_at,
+            [(t.trip_id, t.status, [(e.stop_sequence, e.departure_delay, e.status) for e in t.stops]) for t in p.trips],
+        )
+        for p in scenario_polls
+    ]
+
+
+def _wire(payload: bytes):
+    """Each TripUpdate of a payload as decoded from its bytes: (trip_id,
+    route_id, start_date, trip status, [(seq, stop_id, departure delay, stop status)])."""
     out = []
-    for p in scenario_polls:
-        trips = []
-        for entity in _fields(p.payload).get(2, []):
-            tu = _fields(_fields(entity)[3][0])
-            descriptor = _fields(tu[1][0])
-            stops = []
-            for raw in tu.get(2, []):
-                stu = _fields(raw)
-                delay = _fields(stu[3][0]).get(1, [None])[0] if 3 in stu else None
-                stops.append((stu[1][0], delay, stu.get(5, [None])[0]))
-            trips.append((descriptor[1][0].decode(), descriptor.get(4, [None])[0], stops))
-        out.append((p.captured_at, trips))
+    for entity in _fields(payload).get(2, []):
+        tu = _fields(_fields(entity)[3][0])
+        trip = _fields(tu[1][0])
+        stops = []
+        for raw in tu.get(2, []):
+            stu = _fields(raw)
+            delay = _int32(_fields(stu[3][0]).get(1, [None])[0]) if 3 in stu else None
+            stops.append((stu[1][0], stu[4][0].decode(), delay, stu.get(5, [None])[0]))
+        out.append((trip[1][0].decode(), trip[5][0].decode(), trip[3][0].decode(), trip.get(4, [None])[0], stops))
     return out
+
+
+def test_a_polls_wire_bytes_carry_exactly_its_entries():
+    """Every kind of entry, round-tripped: departures, skips predicted then
+    announced, and each form of a trip reported not running."""
+    scenario = Scenario(
+        name="every_kind",
+        routes=(_ROUTE,),
+        timetable=(_MORNING, _EVENING, ScheduledTrip("R_2300", "R", "平日", ("23:00:00", "23:08:00", "23:16:00"))),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(TripRun.from_delays(_MORNING, DAY, (-61, None, 61), skips_announced_sec=gtfs_seconds("06:58:00")),),
+        cancellations=(
+            Cancellation("R_2350", DAY, announced_sec=gtfs_seconds("23:47:00"), predicted_delay_sec=30),
+            Cancellation("R_2300", DAY, reported_as="canceled_without_stops"),
+        ),
+    )
+    statuses = set()
+    for poll in polls(scenario):
+        assert poll.trips
+        expected = [
+            (
+                t.trip_id,
+                t.route_id,
+                t.service_date.strftime("%Y%m%d"),
+                t.status,
+                [(e.stop_sequence, e.stop_id, e.departure_delay, e.status) for e in t.stops],
+            )
+            for t in poll.trips
+        ]
+        assert _wire(poll.payload) == expected
+        assert poll.stop_updates == len(list(_decode_rows(poll.payload)))
+        statuses |= {(t[3], e[3]) for t in expected for e in t[4]} | {(t[3], None) for t in expected if not t[4]}
+    assert statuses == {(SCHEDULED, SCHEDULED), (SCHEDULED, SKIPPED), (CANCELED, NO_DATA), (CANCELED, None)}
 
 
 def _skipping(announced: int | None) -> Scenario:
@@ -256,6 +301,29 @@ def test_a_skipped_stop_is_predicted_until_announced_then_reported_skipped_and_i
     assert [(d.stop_sequence, d.delay_sec) for d in oracle.departures(scenario)] == [(1, 30), (3, 90)]
     # A run that skipped a stop still ran: executed, and observed.
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=1, reported_not_run=0, observed=1)}
+
+
+def test_a_skipped_first_stop_is_predicted_at_the_delay_of_the_next_stop_served():
+    announced = gtfs_seconds("06:58:00")
+    scenario = Scenario(
+        name="skips_first",
+        routes=(_ROUTE,),
+        timetable=(_MORNING,),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(TripRun.from_delays(_MORNING, DAY, (None, 40, 90), skips_announced_sec=announced),),
+    )
+    first_stop = {
+        captured_at: next((delay, status) for seq, delay, status in stops if seq == 1)
+        for captured_at, ((_trip_id, _status, stops),) in _statuses(polls(scenario))
+        if any(seq == 1 for seq, _delay, _status in stops)
+    }
+    assert first_stop
+    for captured_at, listed in first_stop.items():
+        assert listed == ((40, SCHEDULED) if captured_at < service_day_instant(DAY, announced) else (None, SKIPPED))
+    assert {listed for listed in first_stop.values()} == {(40, SCHEDULED), (None, SKIPPED)}
+    # Listed until the run leaves stop 2, the next it serves.
+    assert max(first_stop) < service_day_instant(DAY, gtfs_seconds("07:08:40"))
+    assert [(d.stop_sequence, d.delay_sec) for d in oracle.departures(scenario)] == [(2, 40), (3, 90)]
 
 
 def test_a_skip_announced_only_after_the_stop_is_passed_is_refused():
@@ -290,7 +358,7 @@ def test_a_cancellation_is_predicted_until_announced_then_reported_canceled_with
     assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
     assert oracle.service(scenario)[DAY].executed == 1
-    assert oracle.delivered_rate_shown(scenario, DAY)
+    assert oracle.delivered_rate_shown(oracle.outcome(scenario), DAY)
 
 
 def test_a_cancellation_may_list_no_stop_at_all():
@@ -328,4 +396,4 @@ def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observe
     # and only coverage, one observed trip of two planned, shows the gap.
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
     assert oracle.service(scenario)[DAY].executed == 2
-    assert not oracle.delivered_rate_shown(scenario, DAY)
+    assert not oracle.delivered_rate_shown(oracle.outcome(scenario), DAY)

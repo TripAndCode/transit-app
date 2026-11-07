@@ -15,10 +15,14 @@ the runner promotes and analyzes, as the daily jobs would before the next
 version arrives, so the run that sees the new version updates aggregates
 built under the old one.
 
-The service days sit two days before the real JST today. Promotion moves only
-closed JST days, so every poll must land on one, the night route's
-after-midnight polls included. ``updates_live`` drops a row three days after
-its capture, so the polls cannot be older than that either. Day types are
+The service days sit two days before the service day in progress. Analyze
+saves a day's planned trips only once its service day is over, which is four
+hours after the JST calendar day ends, so days anchored on the calendar would
+leave the second day unsaved in a run between midnight and 04:00 JST.
+Promotion moves only closed JST days, so every poll must land on one, the
+night route's after-midnight polls included. ``updates_live`` drops a row
+three days after its capture, so the polls cannot be older than that either,
+which the four hours leave room for. Day types are
 declared with each day, not read from its weekday. A table keyed on the day
 of the week is compared under the service date's own weekday, which the
 oracle reads from the same date.
@@ -33,12 +37,16 @@ arrival times and a live probe would refute the arrival field.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
-from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from collections import Counter, defaultdict
+from collections.abc import Callable, Hashable, Mapping
+from dataclasses import dataclass, replace
+from datetime import date, datetime, time, timedelta, timezone
 from fractions import Fraction
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import clickhouse_connect
 import httpx
@@ -53,11 +61,13 @@ from tests.fixtures.scenario import (
     JST,
     Cancellation,
     FeedModel,
+    Poll,
     Route,
     Scenario,
     ScheduledTrip,
     ServiceDay,
     Stop,
+    StopEntry,
     TimetableVersion,
     TripRun,
     Unreported,
@@ -86,7 +96,7 @@ def _trip(route: Route, day_type: str, first: str, spacing_sec: int, trip_id: st
     )
 
 
-def _runs(route: Route, day_type: str, day: date, spacing_sec: int, delays: dict[str, tuple[int | None, ...]]):
+def _runs(route: Route, day_type: str, day: date, spacing_sec: int, delays: Mapping[str, tuple[int | None, ...]]):
     trips = [_trip(route, day_type, first, spacing_sec) for first in delays]
     runs = [TripRun.from_delays(trip, day, d) for trip, d in zip(trips, delays.values(), strict=True)]
     return trips, runs
@@ -220,9 +230,9 @@ def timetable_published_early(day: date) -> Scenario:
 
 
 # The cancellations scenario's routes, by what each carries besides ordinary
-# runs. Each route has its own stops, and the routes of each group below own
-# their scheduled hours on each day, so a table keyed by route, stop or
-# (service date, hour) holds each group's figures apart.
+# runs. Each route has its own stops, and the routes whose figures a known
+# divergence moves own their scheduled hours, so the cells it moves hold
+# nothing else.
 _CONTROL = "C0"
 _CANCELLED_LISTING_STOPS = "CL"
 _CANCELLED_WITHOUT_STOPS = "CT"
@@ -231,16 +241,6 @@ _UNREPORTED = "CS"
 _EVERY_STOP_SKIPPED = "CA"
 _SKIPPED_FROM_THE_START = "CK"
 _SKIPPED_AFTER_PREDICTIONS = "CP"
-_ROUTES_REPORTED_AT_ONCE = frozenset(
-    {
-        _CONTROL,
-        _CANCELLED_LISTING_STOPS,
-        _CANCELLED_WITHOUT_STOPS,
-        _UNREPORTED,
-        _EVERY_STOP_SKIPPED,
-        _SKIPPED_FROM_THE_START,
-    }
-)
 # Each route runs four trips of eight stops, six minutes apart, from these
 # first departures, all of a group's departures inside its hour.
 _CANCELLATION_TIMETABLE = {
@@ -358,7 +358,9 @@ def cancellations(day: date) -> Scenario:
 
 
 def _anchor_day() -> date:
-    return jst_today() - timedelta(days=2)
+    from pipeline.service_day import service_date_of
+
+    return service_date_of(datetime.now(timezone.utc)) - timedelta(days=2)
 
 
 @dataclass(frozen=True, repr=False)
@@ -384,26 +386,6 @@ def _matches(expected, actual) -> bool:
     if isinstance(expected, Rounded):
         return expected.matches(actual)
     return expected == actual
-
-
-def _diff(label: str, expected: dict, actual: dict, *, extra_ok: bool = False) -> list[str]:
-    """Each key or cell where *actual* departs from *expected*, as one line.
-    Only *expected*'s columns are compared; *extra_ok* lets *actual* hold keys
-    *expected* does not name."""
-    out = []
-    for key in sorted(expected.keys() | actual.keys(), key=str):
-        if key not in actual:
-            out.append(f"{label} {key}: expected {expected[key]}, missing")
-            continue
-        if key not in expected:
-            if not extra_ok:
-                out.append(f"{label} {key}: unexpected row {actual[key]}")
-            continue
-        for column, want in expected[key].items():
-            got = actual[key].get(column)
-            if not _matches(want, got):
-                out.append(f"{label} {key} {column}: expected {want}, actual {got}")
-    return out
 
 
 def _mean_min(f: oracle.Figures) -> Rounded:
@@ -443,12 +425,14 @@ _REPORTS = {
 
 @dataclass(frozen=True)
 class Observed:
-    """What the pipeline produced for one scenario: each table's rows, a
-    ``time`` or an ``interval`` as its ``HH:MM:SS`` text; each route report's
-    rows; the trend report's first row; and the council summary of every
-    window ``_windows`` names."""
+    """One scenario's run: the polls ingested under each timetable version,
+    and what the pipeline produced: each table's rows, a ``time`` or an
+    ``interval`` as its ``HH:MM:SS`` text; each route report's rows; the trend
+    report's first row; and the council summary of every window ``_windows``
+    names."""
 
     scenario: Scenario
+    batches: list[tuple[TimetableVersion, list[Poll]]]
     tables: dict[str, list[dict]]
     reports: dict[str, list]
     trend: dict[str, Any]
@@ -466,42 +450,35 @@ def _windows(scenario: Scenario) -> list[tuple[date, date]]:
     return [(days[0], days[-1]), *((d, d) for d in days if len(days) > 1)]
 
 
-def _keyed(rows: list[dict], columns: tuple[str, ...]) -> dict:
-    return {tuple(r[c] for c in columns): r for r in rows}
+def _council_label(part: str) -> str:
+    """A label for one part of the council summary; its cells are keyed by (from, to)."""
+    return f"GET reports/council_summary, {part}"
+
+
+# A comparison is a set of cells: (table or report, row key) -> {column: value}.
+Cells = dict[tuple[str, Hashable], dict[str, Any]]
+
+
+def _cells(label: str, rows: dict) -> Cells:
+    return {(label, key): columns for key, columns in rows.items()}
+
+
+def _keyed(label: str, rows: list[dict], columns: tuple[str, ...]) -> Cells:
+    return {(label, tuple(r[c] for c in columns)): r for r in rows}
 
 
 def _sums(f: oracle.Figures) -> dict:
     return {"samples": f.departures, "sum_delay_sec": f.delay_sum_sec}
 
 
-Routes = frozenset[str] | None
-
-
-def _on(routes: Routes):
-    """The oracle's filter for departures on *routes*, every route when None."""
-    return None if routes is None else (lambda d: d.route_id in routes)
-
-
-def _rows_on(rows: list[dict], routes: Routes) -> list[dict]:
-    return rows if routes is None else [r for r in rows if r["route_code"] in routes]
-
-
-def _of_routes(expected: dict, routes: Routes) -> dict:
-    """*expected* keyed with its route first, kept to *routes*."""
-    return expected if routes is None else {k: v for k, v in expected.items() if k[0] in routes}
-
-
-def _daily_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
-    days = _of_routes(oracle.by_route_day(observed.scenario), routes)
-    key = ("route_code", "date", "service_type")
-    tables = observed.tables
+def _daily_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    days = oracle.by_route_day(found)
     return (
-        _diff(
+        _cells(
             "agg_route_daily_dist",
             {k: {**_sums(f), "on_time_count": f.on_time, "late5_count": f.over_five_min} for k, f in days.items()},
-            _keyed(_rows_on(tables["agg_route_daily_dist"], routes), key),
         )
-        + _diff(
+        | _cells(
             "agg_route_daily",
             {
                 k: {
@@ -512,87 +489,60 @@ def _daily_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
                 }
                 for k, f in days.items()
             },
-            _keyed(_rows_on(tables["agg_route_daily"], routes), key),
         )
-        + _diff(
-            "agg_daily_trend",
-            {k: {**_sums(f), "avg_min": _mean_min(f)} for k, f in days.items()},
-            _keyed(_rows_on(tables["agg_daily_trend"], routes), key),
+        | _cells("agg_daily_trend", {k: {**_sums(f), "avg_min": _mean_min(f)} for k, f in days.items()})
+        | _cells(
+            "agg_stop_daily, time bands summed",
+            {k: {"samples": f.departures, "delay_sum": f.delay_sum_sec} for k, f in oracle.by_stop_day(found).items()},
+        )
+        | _cells(
+            "agg_route_stats",
+            {
+                k: {
+                    **_sums(f),
+                    "avg_min": _mean_min(f),
+                    "on_time_pct": _pct(f.on_time_share),
+                    "late5_pct": _pct(f.over_five_min_share),
+                    "late_5min_plus": f.over_five_min,
+                }
+                for k, f in oracle.by_route_day_type(found).items()
+            },
         )
     )
 
 
-def _stop_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
-    """Per stop, service date and day type, its time bands summed. The stop
-    comes from the timetable each row was ingested against, kept in the
-    archive once a revision replaces it."""
-    scenario = observed.scenario
-    route_of = {stop.stop_id: route.route_id for route in scenario.routes for stop in route.stops}
-    expected = {
-        k: {"samples": f.departures, "delay_sum": f.delay_sum_sec}
-        for k, f in oracle.by_stop_day(scenario, _on(routes)).items()
-    }
-    actual: dict = {}
-    for row in observed.tables["agg_stop_daily"]:
-        if routes is not None and route_of.get(row["stop_id"]) not in routes:
-            continue
-        cell = actual.setdefault((row["stop_id"], row["date"], row["service_type"]), {"samples": 0, "delay_sum": 0})
+def _daily_actual(observed: Observed) -> Cells:
+    """The daily and pooled tables. The stop table's rows are summed over
+    their time bands. The stop comes from the timetable each row was
+    ingested against, kept in the archive once a revision replaces it."""
+    tables = observed.tables
+    key = ("route_code", "date", "service_type")
+    stops: dict = {}
+    for row in tables["agg_stop_daily"]:
+        cell = stops.setdefault((row["stop_id"], row["date"], row["service_type"]), {"samples": 0, "delay_sum": 0})
         cell["samples"] += row["samples"]
         cell["delay_sum"] += row["delay_sum"]
-    return _diff("agg_stop_daily, time bands summed", expected, actual)
-
-
-def _pooled_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
-    expected = {
-        k: {
-            **_sums(f),
-            "avg_min": _mean_min(f),
-            "on_time_pct": _pct(f.on_time_share),
-            "late5_pct": _pct(f.over_five_min_share),
-            "late_5min_plus": f.over_five_min,
-        }
-        for k, f in _of_routes(oracle.by_route_day_type(observed.scenario), routes).items()
-    }
-    return _diff(
-        "agg_route_stats",
-        expected,
-        _keyed(_rows_on(observed.tables["agg_route_stats"], routes), ("route_code", "service_type")),
+    return (
+        _keyed("agg_route_daily_dist", tables["agg_route_daily_dist"], key)
+        | _keyed("agg_route_daily", tables["agg_route_daily"], key)
+        | _keyed("agg_daily_trend", tables["agg_daily_trend"], key)
+        | _cells("agg_stop_daily, time bands summed", stops)
+        | _keyed("agg_route_stats", tables["agg_route_stats"], ("route_code", "service_type"))
     )
 
 
-def _report_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
+def _reports_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     window = _window(observed.scenario)
-    by_route = oracle.by_route(observed.scenario)
-    kept = {route: f for route, f in by_route.items() if routes is None or route in routes}
-
-    def ours(rows: list) -> list:
-        return [r for r in rows if routes is None or r[0] in routes]
-
-    # on_time rows: (route_code, service, on_time_pct, avg_min, samples, ...)
-    # route_table rows: (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, early_pct, ...)
-    on_time = {r[0]: {"on_time_pct": r[2], "avg_min": r[3], "samples": r[4]} for r in ours(observed.reports["on_time"])}
-    table = {
-        r[0]: {
-            "avg_min": r[1],
-            "on_time_pct": r[2],
-            "late5_pct": r[3],
-            "late5_count": r[4],
-            "samples": r[5],
-            "early_pct": r[6],
-        }
-        for r in ours(observed.reports["route_table"])
-    }
-    industry = {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in ours(observed.reports["route_table_industry"])}
+    routes = oracle.by_route(found)
     return (
-        _diff(
+        _cells(
             f"GET reports/on_time {window}",
             {
                 route: {"on_time_pct": _pct(f.on_time_share), "avg_min": _mean_min(f), "samples": f.departures}
-                for route, f in kept.items()
+                for route, f in routes.items()
             },
-            on_time,
         )
-        + _diff(
+        | _cells(
             f"GET reports/route_table {window}",
             {
                 route: {
@@ -603,222 +553,463 @@ def _report_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
                     "samples": f.departures,
                     "early_pct": _pct(f.early_share),
                 }
-                for route, f in kept.items()
+                for route, f in routes.items()
             },
-            table,
         )
-        + _diff(
+        | _cells(
             f"GET reports/route_table {window}&preset=standard_m1_p5",
             {
                 route: {"on_time_pct": _pct(f.on_time_industry_share), "early_pct": _pct(f.early_share)}
-                for route, f in kept.items()
+                for route, f in routes.items()
             },
-            industry,
         )
     )
 
 
-def _after_midnight(d: oracle.Departure) -> bool:
-    return not oracle.before_midnight(d)
+def _reports_actual(observed: Observed) -> Cells:
+    window = _window(observed.scenario)
+    reports = observed.reports
+    # on_time rows: (route_code, service, on_time_pct, avg_min, samples, ...)
+    # route_table rows: (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, early_pct, ...)
+    return (
+        _cells(
+            f"GET reports/on_time {window}",
+            {r[0]: {"on_time_pct": r[2], "avg_min": r[3], "samples": r[4]} for r in reports["on_time"]},
+        )
+        | _cells(
+            f"GET reports/route_table {window}",
+            {
+                r[0]: {
+                    "avg_min": r[1],
+                    "on_time_pct": r[2],
+                    "late5_pct": r[3],
+                    "late5_count": r[4],
+                    "samples": r[5],
+                    "early_pct": r[6],
+                }
+                for r in reports["route_table"]
+            },
+        )
+        | _cells(
+            f"GET reports/route_table {window}&preset=standard_m1_p5",
+            {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in reports["route_table_industry"]},
+        )
+    )
 
 
-def _hours_of(scenario: Scenario, routes: Routes) -> set[tuple[date, int]]:
-    """The (service date, hour) cells *routes* hold a scheduled departure in,
-    every route's when None. A cell another route also holds is refused: a
-    table keyed only by date and hour could not tell the two apart."""
-
-    def cells(keep) -> set[tuple[date, int]]:
-        return {
-            (day.date, sec // 3600)
-            for day in scenario.days
-            for trip in scenario.scheduled(day.date)
-            if keep(trip.route_id)
-            for sec in trip.scheduled_sec
-        }
-
-    if routes is None:
-        return cells(lambda _route: True)
-    ours, others = cells(lambda r: r in routes), cells(lambda r: r not in routes)
-    if ours & others:
-        raise RuntimeError(f"routes {sorted(routes)} share hours {sorted(ours & others)} with other routes")
-    return ours
+def _side_label(table: str, after: bool) -> str:
+    return f"{table}, departures {'at 24:00 or later' if after else 'before 24:00'}"
 
 
-def _hourly_mismatches(observed: Observed, *, after: bool, routes: Routes = None) -> list[str]:
+def _hourly_expected(observed: Observed, found: oracle.Outcome, *, after: bool) -> Cells:
     """The departures on one side of 24:00 (*after* it, or before), bucket by
-    bucket under the oracle's hour, weekday and scheduled time, against the
-    rows of each hourly table on the same side. A departure after midnight
-    belongs to its service day's hour 24, 25, ..."""
-    scenario = observed.scenario
-    on_routes = _on(routes)
-    side_of = _after_midnight if after else oracle.before_midnight
+    bucket under the oracle's hour, weekday and scheduled time. A departure
+    after midnight belongs to its service day's hour 24, 25, ..."""
+    where = oracle.after_midnight if after else oracle.before_midnight
+    return (
+        _cells(_side_label("agg_hour_daily", after), {k: _sums(f) for k, f in oracle.by_day_hour(found, where).items()})
+        | _cells(
+            _side_label("agg_route_hour", after),
+            {
+                (route, day_type, gtfs_clock(sec)): _sums(f)
+                for (route, day_type, sec), f in oracle.by_route_day_type_time(found, where).items()
+            },
+        )
+        | _cells(
+            _side_label("agg_route_hour_dow", after),
+            {k: _sums(f) for k, f in oracle.by_route_day_type_weekday_hour(found, where).items()},
+        )
+    )
 
-    def where(d: oracle.Departure) -> bool:
-        return side_of(d) and (on_routes is None or on_routes(d))
 
-    label = "departures at 24:00 or later" if after else "departures before 24:00"
+def _hourly_actual(observed: Observed, *, after: bool) -> Cells:
     tables = observed.tables
-    hours = _hours_of(scenario, routes)
 
     def side(rows: list[dict], is_after) -> list[dict]:
         return [r for r in rows if is_after(r) == after]
 
     return (
-        _diff(
-            f"agg_hour_daily, {label}",
-            {k: _sums(f) for k, f in oracle.by_day_hour(scenario, where).items()},
-            _keyed(
-                [
-                    r
-                    for r in side(tables["agg_hour_daily"], lambda r: r["hour"] >= 24)
-                    if (r["date"], r["hour"]) in hours
-                ],
-                ("date", "hour"),
-            ),
+        _keyed(
+            _side_label("agg_hour_daily", after),
+            side(tables["agg_hour_daily"], lambda r: r["hour"] >= 24),
+            ("date", "hour"),
         )
-        + _diff(
-            f"agg_route_hour, {label}",
-            {
-                (route, day_type, gtfs_clock(sec)): _sums(f)
-                for (route, day_type, sec), f in oracle.by_route_day_type_time(scenario, where).items()
-            },
-            _keyed(
-                side(_rows_on(tables["agg_route_hour"], routes), lambda r: r["scheduled_time"] >= "24:00:00"),
-                ("route_code", "service_type", "scheduled_time"),
-            ),
+        | _keyed(
+            _side_label("agg_route_hour", after),
+            side(tables["agg_route_hour"], lambda r: r["scheduled_time"] >= "24:00:00"),
+            ("route_code", "service_type", "scheduled_time"),
         )
-        + _diff(
-            f"agg_route_hour_dow, {label}",
-            {k: _sums(f) for k, f in oracle.by_route_day_type_weekday_hour(scenario, where).items()},
-            _keyed(
-                side(_rows_on(tables["agg_route_hour_dow"], routes), lambda r: r["hour"] >= 24),
-                ("route_code", "service_type", "dow", "hour"),
-            ),
+        | _keyed(
+            _side_label("agg_route_hour_dow", after),
+            side(tables["agg_route_hour_dow"], lambda r: r["hour"] >= 24),
+            ("route_code", "service_type", "dow", "hour"),
         )
     )
 
 
-def _delay_mismatches(observed: Observed, routes: Routes = None) -> list[str]:
-    """Every delay figure of *routes*: the daily, stop, pooled and hourly
-    tables and the route reports."""
-    return (
-        _daily_mismatches(observed, routes)
-        + _stop_mismatches(observed, routes)
-        + _pooled_mismatches(observed, routes)
-        + _report_mismatches(observed, routes)
-        + _hourly_mismatches(observed, after=False, routes=routes)
-        + _hourly_mismatches(observed, after=True, routes=routes)
-    )
+def _trend_label(observed: Observed) -> str:
+    return f"GET reports/trend {_window(observed.scenario)}"
 
 
-def _council_label(window: tuple[date, date]) -> str:
-    return f"GET reports/council_summary from={window[0]}&to={window[1]}"
-
-
-def _timetable_mismatches(observed: Observed) -> list[str]:
+def _timetable_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     """Each day's timetable version and planned trips, each version's trip
     count, the trend report's revision boundaries, and the council summary's
     planned trips and the days they cover."""
-    scenario = observed.scenario
-    tables = observed.tables
-    service = oracle.service(scenario)
-    versions = oracle.timetable_versions(scenario)
-    out = (
-        _diff(
+    windows = {}
+    for window in _windows(observed.scenario):
+        days = [day for day in found.service if window[0] <= day <= window[1]]
+        windows[window] = {
+            "planned_trips": sum(found.service[day].planned for day in days),
+            "covered_days": len(days),
+            "window_days": (window[1] - window[0]).days + 1,
+        }
+    return (
+        _cells(
             "agg_schedule_revision_daily",
-            {(day,): {"static_version_id": name} for day, name in versions.items()},
-            _keyed(tables["agg_schedule_revision_daily"], ("date",)),
+            {(day,): {"static_version_id": name} for day, name in found.day_versions.items()},
         )
-        + _diff(
+        | _cells(
             "agg_static_version_summary",
-            {(name,): {"trip_count": trips} for name, trips in oracle.version_trips(scenario).items()},
-            _keyed(tables["agg_static_version_summary"], ("static_version_id",)),
+            {(name,): {"trip_count": trips} for name, trips in found.version_trips.items()},
         )
-        + _diff(
-            "planned_trips_daily",
-            {(day,): {"planned_trips": s.planned} for day, s in service.items()},
-            _keyed(tables["planned_trips_daily"], ("service_date",)),
+        | _cells("planned_trips_daily", {(day,): {"planned_trips": s.planned} for day, s in found.service.items()})
+        | _cells(
+            _trend_label(observed),
+            {"revision_boundaries": {"days": [d.isoformat() for d in oracle.revision_boundaries(found)]}},
         )
+        | _cells(_council_label("planned trips"), windows)
     )
-    boundaries = [
-        day.isoformat() for day, name in versions.items() if versions.get(day - timedelta(days=1), name) != name
-    ]
-    if observed.trend["revision_boundaries"] != boundaries:
-        out.append(
-            f"GET reports/trend {_window(scenario)} revision_boundaries: "
-            f"expected {boundaries}, actual {observed.trend['revision_boundaries']}"
-        )
-    for window, council in observed.council.items():
-        days = [day for day in service if window[0] <= day <= window[1]]
-        out += _diff(
-            _council_label(window),
-            {
-                window: {
-                    "planned_trips": sum(service[day].planned for day in days),
-                    "covered_days": len(days),
-                    "window_days": (window[1] - window[0]).days + 1,
-                }
-            },
-            {window: council},
-        )
-    return out
 
 
-def _delivered_mismatches(observed: Observed, days: set[date], windows: list[tuple[date, date]]) -> list[str]:
-    """The trips reported not run on each of *days*, and the council
-    summary's executed trips and service-delivered rate over each of
-    *windows*, under the oracle's service-delivered semantics."""
-    scenario = observed.scenario
-    service = oracle.service(scenario)
-    out = _diff(
-        "agg_service_delivered_daily",
-        {
-            (day,): {"non_executed_trips": s.reported_not_run}
-            for day, s in service.items()
-            if day in days and s.reported_not_run
-        },
-        _keyed([r for r in observed.tables["agg_service_delivered_daily"] if r["date"] in days], ("date",)),
+def _timetable_actual(observed: Observed) -> Cells:
+    tables = observed.tables
+    return (
+        _keyed("agg_schedule_revision_daily", tables["agg_schedule_revision_daily"], ("date",))
+        | _keyed("agg_static_version_summary", tables["agg_static_version_summary"], ("static_version_id",))
+        | _keyed("planned_trips_daily", tables["planned_trips_daily"], ("service_date",))
+        | _cells(_trend_label(observed), {"revision_boundaries": {"days": observed.trend["revision_boundaries"]}})
+        | _cells(_council_label("planned trips"), observed.council)
     )
-    for window in windows:
-        in_window = [s for day, s in service.items() if window[0] <= day <= window[1]]
-        planned, executed = sum(s.planned for s in in_window), sum(s.executed for s in in_window)
-        if oracle.delivered_rate_shown(scenario, window[1]):
-            expected = {
+
+
+def _service_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """The trips reported not run on each day, and over each council window
+    the executed trips and service-delivered rate and the observation
+    coverage, under the oracle's service-delivered semantics. Every
+    scenario's days all hold observations, so coverage runs to each window's
+    last day."""
+    delivered, coverage = {}, {}
+    for window in _windows(observed.scenario):
+        in_window = [s for day, s in found.service.items() if window[0] <= day <= window[1]]
+        planned = sum(s.planned for s in in_window)
+        executed, seen = sum(s.executed for s in in_window), sum(s.observed for s in in_window)
+        if oracle.delivered_rate_shown(found, window[1]):
+            delivered[window] = {
                 "executed_trips": executed,
                 "service_delivered_pct": _pct(Fraction(executed, planned)),
                 "delivered_missing": None,
             }
         else:
-            expected = {
+            delivered[window] = {
                 "executed_trips": None,
                 "service_delivered_pct": None,
                 "delivered_missing": "feed_reports_no_cancellations",
             }
-        out += _diff(_council_label(window), {window: expected}, {window: observed.council[window]})
-    return out
-
-
-def _coverage_mismatches(observed: Observed, windows: list[tuple[date, date]]) -> list[str]:
-    """The council summary's observation coverage over each of *windows*:
-    the trips observed against the trips planned. Every scenario's days all
-    hold observations, so coverage runs to each window's last day."""
-    service = oracle.service(observed.scenario)
-    out = []
-    for window in windows:
-        in_window = [s for day, s in service.items() if window[0] <= day <= window[1]]
-        planned, seen = sum(s.planned for s in in_window), sum(s.observed for s in in_window)
-        out += _diff(
-            f"{_council_label(window)} comparability",
+        coverage[window] = {
+            "observed_trips": seen,
+            "coverage_planned_trips": planned,
+            "coverage_pct": _pct(Fraction(seen, planned)),
+        }
+    return (
+        _cells(
+            "agg_service_delivered_daily",
             {
-                window: {
-                    "observed_trips": seen,
-                    "coverage_planned_trips": planned,
-                    "coverage_pct": _pct(Fraction(seen, planned)),
-                }
+                (day,): {"non_executed_trips": s.reported_not_run}
+                for day, s in found.service.items()
+                if s.reported_not_run
             },
-            {window: observed.council[window]},
         )
+        | _cells(_council_label("service delivered"), delivered)
+        | _cells(_council_label("coverage"), coverage)
+    )
+
+
+def _service_actual(observed: Observed) -> Cells:
+    return (
+        _keyed("agg_service_delivered_daily", observed.tables["agg_service_delivered_daily"], ("date",))
+        | _cells(_council_label("service delivered"), observed.council)
+        | _cells(_council_label("coverage"), observed.council)
+    )
+
+
+Expect = Callable[[Observed, oracle.Outcome], Cells]
+# Each test's comparison: the cells the oracle expects of an outcome, and the
+# cells the run produced.
+_DAILY = (_daily_expected, _daily_actual)
+_REPORTS_COMPARED = (_reports_expected, _reports_actual)
+_BEFORE_MIDNIGHT = (partial(_hourly_expected, after=False), partial(_hourly_actual, after=False))
+_AFTER_MIDNIGHT = (partial(_hourly_expected, after=True), partial(_hourly_actual, after=True))
+_TIMETABLE = (_timetable_expected, _timetable_actual)
+_SERVICE = (_service_expected, _service_actual)
+_COMPARISONS = (_DAILY, _REPORTS_COMPARED, _BEFORE_MIDNIGHT, _AFTER_MIDNIGHT, _TIMETABLE, _SERVICE)
+
+
+@dataclass(frozen=True)
+class Divergence:
+    """A known way the pipeline departs from the truth. ``view`` turns an
+    outcome into the outcome the pipeline computes instead, from the run's
+    scenario and polls; ``reason`` states the divergence as its strict xfail
+    does."""
+
+    reason: str
+    view: Callable[[Observed, oracle.Outcome], oracle.Outcome]
+
+
+def _last_predictions(observed: Observed) -> dict[tuple[str, date, int], StopEntry]:
+    """Each stop event's latest poll entry that predicted a departure delay."""
+    latest = {}
+    for _version, batch in observed.batches:
+        for poll in batch:
+            for trip in poll.trips:
+                for entry in trip.stops:
+                    if entry.departure_delay is not None:
+                        latest[(trip.trip_id, trip.service_date, entry.stop_sequence)] = entry
+    return latest
+
+
+def _stale_departure(scenario: Scenario, trip_id: str, day: date, entry: StopEntry) -> oracle.Departure:
+    trip = scenario.trip(trip_id, day)
+    return oracle.Departure(
+        trip.route_id,
+        trip_id,
+        day,
+        trip.day_type,
+        entry.stop_sequence,
+        entry.stop_id,
+        trip.scheduled_sec[entry.stop_sequence - 1],
+        cast(int, entry.departure_delay),
+    )
+
+
+def _with_service(found: oracle.Outcome, change: Callable[[date, oracle.Service], oracle.Service]) -> oracle.Outcome:
+    return replace(found, service={day: change(day, s) for day, s in found.service.items()})
+
+
+def _cancelled_trips_keep_their_predictions(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each stop of a trip reported not running keeps the latest delay the feed
+    predicted for it as a departure, and the trip counts as observed."""
+    scenario = observed.scenario
+    latest = _last_predictions(observed)
+    stale = [
+        _stale_departure(scenario, c.trip_id, c.service_date, entry)
+        for c in scenario.cancellations
+        for (trip_id, day, _seq), entry in latest.items()
+        if (trip_id, day) == (c.trip_id, c.service_date)
+    ]
+    seen = Counter(day for _trip_id, day in {(d.trip_id, d.service_date) for d in stale})
+    found = replace(found, departures=(*found.departures, *stale))
+    return _with_service(found, lambda day, s: replace(s, observed=s.observed + seen[day]))
+
+
+def _skipped_stops_keep_their_predictions(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each stop a run skipped keeps the latest delay the feed predicted for it
+    as a departure."""
+    scenario = observed.scenario
+    latest = _last_predictions(observed)
+    stale = [
+        _stale_departure(scenario, run.trip_id, run.service_date, latest[(run.trip_id, run.service_date, i + 1)])
+        for run in scenario.runs
+        for i, sec in enumerate(run.actual_sec)
+        if sec is None and (run.trip_id, run.service_date, i + 1) in latest
+    ]
+    return replace(found, departures=(*found.departures, *stale))
+
+
+def _cancellations_without_stops_are_lost(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """A trip reported CANCELED with no stop listed is not counted as not run."""
+    lost = Counter(c.service_date for c in observed.scenario.cancellations if c.reported_as == "canceled_without_stops")
+    return _with_service(found, lambda day, s: replace(s, reported_not_run=s.reported_not_run - lost[day]))
+
+
+def _partial_runs_count_as_not_run(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """A run that skipped some of its stops counts as not run."""
+    partial_runs = Counter(r.service_date for r in observed.scenario.runs if None in r.actual_sec)
+    return _with_service(found, lambda day, s: replace(s, reported_not_run=s.reported_not_run + partial_runs[day]))
+
+
+def _joined_to_the_timetable_loaded(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each poll joins the timetable loaded when it was captured. A departure
+    of a day whose polls joined a version not in force that day takes that
+    version's schedule for its trip, or none, with no day type and no stop,
+    when the version lacks the trip. A day's version is the one stamped on
+    the most rows, a row per listed stop, and a row joined to no trip has
+    none."""
+    scenario = observed.scenario
+    joined: dict[tuple[str, date], set[str]] = defaultdict(set)
+    rows: Counter[tuple[date, str]] = Counter()
+    for version, batch in observed.batches:
+        trips = {t.trip_id for t in version.trips}
+        for poll in batch:
+            for entry in poll.trips:
+                joined[(entry.trip_id, entry.service_date)].add(version.name)
+                if entry.trip_id in trips:
+                    rows[(entry.service_date, version.name)] += len(entry.stops)
+    misjoined = {key: names for key, names in joined.items() if names != {scenario.version_on(key[1]).name}}
+    if any(len(names) > 1 for names in misjoined.values()):
+        raise NotImplementedError("a trip whose polls span a timetable load")
+    departures = []
+    for d in found.departures:
+        if (d.trip_id, d.service_date) not in misjoined:
+            departures.append(d)
+            continue
+        (name,) = misjoined[(d.trip_id, d.service_date)]
+        version = next(v for v in scenario.versions if v.name == name)
+        trip = next((t for t in version.trips if t.trip_id == d.trip_id), None)
+        if trip is None:
+            departures.append(replace(d, day_type="", scheduled_sec=None, stop_id=None))
+        else:
+            departures.append(replace(d, day_type=trip.day_type, scheduled_sec=trip.scheduled_sec[d.stop_sequence - 1]))
+    day_versions = dict(found.day_versions)
+    for day in {day for _trip, day in misjoined}:
+        counts = {name: n for (row_day, name), n in rows.items() if row_day == day}
+        top = max(counts.values())
+        winners = [name for name, n in counts.items() if n == top]
+        if len(winners) > 1:
+            raise NotImplementedError(f"two versions stamped on as many rows of {day}")
+        day_versions[day] = winners[0]
+    return replace(found, departures=tuple(departures), day_versions=day_versions)
+
+
+_CANCELLED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
+    reason=(
+        "A trip the feed predicted and then reported CANCELED before it left keeps its last predictions as "
+        "departures: the delay dedup drops rows without a delay before it picks each stop's latest poll, so "
+        "the CANCELED polls never replace the predictions. Every delay table and route report counts the "
+        "cancelled trip's stops as departures, and the trip counts as observed in its day's coverage."
+    ),
+    view=_cancelled_trips_keep_their_predictions,
+)
+_SKIPPED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
+    reason=(
+        "A stop the feed predicted and then reported SKIPPED keeps its last prediction as a departure: the "
+        "delay dedup drops the SKIPPED rows, which carry no delay, before it picks the stop's latest poll."
+    ),
+    view=_skipped_stops_keep_their_predictions,
+)
+_CANCELLED_WITHOUT_STOPS_DIVERGENCE = Divergence(
+    reason=(
+        "A CANCELED TripUpdate that lists no StopTimeUpdate, which GTFS-RT allows, stores nothing: ingest "
+        "writes one row per StopTimeUpdate, so neither agg_service_delivered_daily nor the council summary's "
+        "executed trips count that cancellation."
+    ),
+    view=_cancellations_without_stops_are_lost,
+)
+_PARTIAL_RUN_DIVERGENCE = Divergence(
+    reason=(
+        "A trip is not run when it is CANCELED or every stop it reports is SKIPPED; a run that skipped only "
+        "some stops ran, so it counts as executed. agg_service_delivered_daily instead counts a trip as not "
+        "executed when the latest status of any one of its stops is SKIPPED, which lowers executed trips and "
+        "the service-delivered rate by every partial run."
+    ),
+    view=_partial_runs_count_as_not_run,
+)
+_PUBLISHED_EARLY_DIVERGENCE = Divergence(
+    reason=(
+        "Ingest joins each poll to the timetable loaded when it arrives, not to the one in force on its "
+        "service date, so the polls of a day before a revision's first day that arrive after the revision is "
+        "loaded take its schedule: a trip it moved is filed under its new times, a trip it dropped loses its "
+        "day type and its stops, and the day is recorded as running the revision."
+    ),
+    view=_joined_to_the_timetable_loaded,
+)
+# The divergences each scenario is known to meet, by scenario name.
+_KNOWN = {
+    "cancellations": (
+        _CANCELLED_WITHOUT_STOPS_DIVERGENCE,
+        _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE,
+        _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE,
+        _PARTIAL_RUN_DIVERGENCE,
+    ),
+    "timetable_published_early": (_PUBLISHED_EARLY_DIVERGENCE,),
+}
+
+
+def _outcomes(observed: Observed, divergences: tuple[Divergence, ...]) -> list[oracle.Outcome]:
+    """The truth's outcome, then its view under each combination of *divergences*."""
+    truth = oracle.outcome(observed.scenario)
+    out = []
+    for n in range(len(divergences) + 1):
+        for chosen in itertools.combinations(divergences, n):
+            found = truth
+            for divergence in chosen:
+                found = divergence.view(observed, found)
+            out.append(found)
     return out
+
+
+def _fits(want: dict | None, got: dict | None) -> bool:
+    if want is None or got is None:
+        return want is got
+    return all(_matches(value, got.get(column)) for column, value in want.items())
+
+
+def _shown(cell: dict | None, columns) -> str:
+    if cell is None:
+        return "no row"
+    return "{" + ", ".join(f"{c}: {cell.get(c)!r}" for c in columns) + "}"
+
+
+def _compare(actual: Cells, expected: list[Cells], keep: Callable[[tuple[str, Hashable]], bool]) -> list[str]:
+    """Each kept cell where *actual* fits none of the *expected* outcomes, the
+    truth first, as one line. A cell an outcome lacks expects no row."""
+    lines = []
+    for cell in sorted(set(actual).union(*expected), key=str):
+        if not keep(cell):
+            continue
+        options = [e.get(cell) for e in expected]
+        got = actual.get(cell)
+        if any(_fits(want, got) for want in options):
+            continue
+        columns = next((want for want in options if want is not None), {})
+        alternatives = {_shown(want, columns) for want in options[1:]} - {_shown(options[0], columns)}
+        known = f" (or, under a known divergence, {' or '.join(sorted(alternatives))})" if alternatives else ""
+        lines.append(
+            f"{cell[0]} {cell[1]}: expected {_shown(options[0], columns)}{known}, actual {_shown(got, columns)}"
+        )
+    return lines
+
+
+def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Observed], Cells]]) -> list[str]:
+    """Every cell of *comparison* against the truth, a cell a known divergence
+    of the scenario moves also accepting the figure that divergence, alone or
+    with others, gives it. Anything else a cell holds is a failure."""
+    expect, read = comparison
+    outcomes = _outcomes(observed, _KNOWN.get(observed.scenario.name, ()))
+    return _compare(read(observed), [expect(observed, found) for found in outcomes], lambda _cell: True)
+
+
+def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
+    """The cells *view* gives another figure than *truth* does, or a row it lacks."""
+    return {cell for cell in set(truth) | set(view) if truth.get(cell) != view.get(cell)}
+
+
+def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[str]:
+    """The cells *divergence* moves and no other known divergence of the
+    scenario does, against the truth alone."""
+    others = [d for d in _KNOWN[observed.scenario.name] if d is not divergence]
+    truth = oracle.outcome(observed.scenario)
+    lines: list[str] = []
+    own_cells = 0
+    for expect, read in _COMPARISONS:
+        expected = expect(observed, truth)
+        moved = _moved(expected, expect(observed, divergence.view(observed, truth)))
+        for other in others:
+            moved -= _moved(expected, expect(observed, other.view(observed, truth)))
+        own_cells += len(moved)
+        lines += _compare(read(observed), [expected], moved.__contains__)
+    if not own_cells:
+        raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
+    return lines
 
 
 def _closed_and_live(scenario_polls, today: date) -> None:
@@ -833,8 +1024,11 @@ def _closed_and_live(scenario_polls, today: date) -> None:
         raise RuntimeError("a poll is near updates_live's TTL")
 
 
-async def _run_scenario(scenario: Scenario, pg_conn, ch_client, tmp_dir: Path) -> int:
-    """Load, ingest, promote and analyze *scenario* for a new agency; return its id.
+async def _run_scenario(
+    scenario: Scenario, pg_conn, ch_client, tmp_dir: Path
+) -> tuple[int, list[tuple[TimetableVersion, list[Poll]]]]:
+    """Load, ingest, promote and analyze *scenario* for a new agency; return
+    its id and the polls ingested under each timetable version.
 
     Each timetable version is loaded as ``refresh_static`` loads a fetched
     zip, its polls are ingested, and the closed days are promoted and
@@ -882,7 +1076,7 @@ async def _run_scenario(scenario: Scenario, pg_conn, ch_client, tmp_dir: Path) -
             promote_closed_days(agency_id, pg_conn, ch_client)
             analyze(agency_id, pg_conn, ch_client)
             pg_conn.commit()
-    return agency_id
+    return agency_id, batches
 
 
 def _clock_text(value):
@@ -1018,7 +1212,9 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             pg_conn.commit()
             clear_all()
             limiter.reset()
-            agency_id = await _run_scenario(scenario, pg_conn, ch_client, tmp_path_factory.mktemp(scenario.name))
+            agency_id, batches = await _run_scenario(
+                scenario, pg_conn, ch_client, tmp_path_factory.mktemp(scenario.name)
+            )
             tables = _read_tables(pg_conn, agency_id)
             pool = await _test_pool()
             stack.push_async_callback(pool.close)
@@ -1027,7 +1223,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             reports, trend, council = await _read_reports(scenario, agency_id)
     except AssertionError as exc:
         raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
-    return Observed(scenario, tables, reports, trend, council)
+    return Observed(scenario, batches, tables, reports, trend, council)
 
 
 def _assert_clean(mismatches: list[str]) -> None:
@@ -1037,138 +1233,77 @@ def _assert_clean(mismatches: list[str]) -> None:
 # Every test parametrizes `observed` with these same param objects. pytest
 # keeps a module-scoped fixture's value per parameter value and runs the tests
 # that share one together, so each scenario's pipeline runs once for the
-# module. The cancellations scenario holds several cases the pipeline may
-# treat differently, so its tests compare its routes and days in groups that
-# each hold one case.
-_PLAIN = pytest.param(plain_weekday, id="plain_weekday")
-_NIGHT_ROUTE = pytest.param(night_route, id="night_route")
-_TIMETABLE_CHANGE = pytest.param(timetable_change, id="timetable_change")
-_TIMETABLE_PUBLISHED_EARLY = pytest.param(timetable_published_early, id="timetable_published_early")
-_CANCELLATIONS = pytest.param(cancellations, id="cancellations")
-_SCENARIOS = [_PLAIN, _NIGHT_ROUTE, _TIMETABLE_CHANGE]
-_ALL = [*_SCENARIOS, _CANCELLATIONS]
+# module.
+#
+# Each comparison test holds every cell of every scenario to the truth. A cell
+# a known divergence moves also accepts exactly the figure the divergence
+# gives it, so any other change to it still fails. Each divergence's strict
+# xfail holds the cells it alone moves to the truth; fixing it turns that
+# test into a pass.
+_ALL = [
+    pytest.param(plain_weekday, id="plain_weekday"),
+    pytest.param(night_route, id="night_route"),
+    pytest.param(timetable_change, id="timetable_change"),
+    _TIMETABLE_PUBLISHED_EARLY := pytest.param(timetable_published_early, id="timetable_published_early"),
+    _CANCELLATIONS := pytest.param(cancellations, id="cancellations"),
+]
 
 
-@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_daily_and_pooled_aggregates_match_the_truth(observed):
-    _assert_clean(_daily_mismatches(observed) + _stop_mismatches(observed) + _pooled_mismatches(observed))
+    _assert_clean(_hard_mismatches(observed, _DAILY))
 
 
-@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_reports_match_the_truth(observed):
-    _assert_clean(_report_mismatches(observed))
+    _assert_clean(_hard_mismatches(observed, _REPORTS_COMPARED))
 
 
-@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_hourly_tables_file_each_departure_before_midnight_under_its_scheduled_hour(observed):
-    _assert_clean(_hourly_mismatches(observed, after=False))
+    _assert_clean(_hard_mismatches(observed, _BEFORE_MIDNIGHT))
 
 
-@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_hourly_tables_hold_the_departures_after_midnight(observed):
-    _assert_clean(_hourly_mismatches(observed, after=True))
+    _assert_clean(_hard_mismatches(observed, _AFTER_MIDNIGHT))
 
 
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_each_day_is_planned_and_filed_under_the_timetable_in_force(observed):
-    _assert_clean(_timetable_mismatches(observed))
+    _assert_clean(_hard_mismatches(observed, _TIMETABLE))
 
 
-@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_service_delivered_and_coverage_match_the_truth(observed):
-    service_days = {d.date for d in observed.scenario.days}
-    windows = _windows(observed.scenario)
-    _assert_clean(_delivered_mismatches(observed, service_days, windows) + _coverage_mismatches(observed, windows))
+    _assert_clean(_hard_mismatches(observed, _SERVICE))
 
 
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_runs_reported_as_they_happened_beside_trips_not_run_and_skipping_runs_match_the_truth(observed):
-    _assert_clean(_delay_mismatches(observed, _ROUTES_REPORTED_AT_ONCE))
-
-
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_coverage_counts_only_the_trips_the_feed_reported_running(observed):
-    # The second day holds the trip the feed never mentioned and the trip
-    # it reported with every stop skipped; neither was observed.
-    second = max(d.date for d in observed.scenario.days)
-    _assert_clean(_coverage_mismatches(observed, [(second, second)]))
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "A trip the feed predicted and then reported CANCELED before it left keeps its last predictions as "
-        "departures: the delay dedup drops rows without a delay before it picks each stop's latest poll, so "
-        "the CANCELED polls never replace the predictions. Every delay table and route report counts the "
-        "cancelled trip's stops as departures, and the trip counts as observed in its day's coverage."
-    ),
-)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCELLED_AFTER_PREDICTIONS_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
 def test_a_trip_cancelled_after_it_was_predicted_has_no_departures(observed):
-    first = min(d.date for d in observed.scenario.days)
-    _assert_clean(
-        _delay_mismatches(observed, frozenset({_CANCELLED_AFTER_PREDICTIONS}))
-        + _coverage_mismatches(observed, [(first, first)])
-    )
+    _assert_clean(_divergence_mismatches(observed, _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "A stop the feed predicted and then reported SKIPPED keeps its last prediction as a departure: the "
-        "delay dedup drops the SKIPPED rows, which carry no delay, before it picks the stop's latest poll."
-    ),
-)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_SKIPPED_AFTER_PREDICTIONS_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
 def test_a_stop_skipped_after_it_was_predicted_has_no_departure(observed):
-    _assert_clean(_delay_mismatches(observed, frozenset({_SKIPPED_AFTER_PREDICTIONS})))
+    _assert_clean(_divergence_mismatches(observed, _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "A CANCELED TripUpdate that lists no StopTimeUpdate, which GTFS-RT allows, stores nothing: ingest "
-        "writes one row per StopTimeUpdate, so neither agg_service_delivered_daily nor the council summary's "
-        "executed trips count that cancellation."
-    ),
-)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCELLED_WITHOUT_STOPS_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
 def test_a_trip_cancelled_without_stop_updates_counts_as_not_run(observed):
-    first = min(d.date for d in observed.scenario.days)
-    _assert_clean(_delivered_mismatches(observed, {first}, [(first, first)]))
+    _assert_clean(_divergence_mismatches(observed, _CANCELLED_WITHOUT_STOPS_DIVERGENCE))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "A trip is not run when it is CANCELED or every stop it reports is SKIPPED; a run that skipped only "
-        "some stops ran, so it counts as executed. agg_service_delivered_daily instead counts a trip as not "
-        "executed when the latest status of any one of its stops is SKIPPED, which lowers executed trips and "
-        "the service-delivered rate by every partial run."
-    ),
-)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PARTIAL_RUN_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_run_that_skipped_some_stops_counts_as_executed_and_a_trip_with_every_stop_skipped_does_not(observed):
-    # The second day holds both kinds, and the trip the feed never mentioned,
-    # which counts as executed.
-    second = max(d.date for d in observed.scenario.days)
-    _assert_clean(_delivered_mismatches(observed, {second}, [(second, second)]))
+def test_a_run_that_skipped_some_stops_counts_as_executed(observed):
+    _assert_clean(_divergence_mismatches(observed, _PARTIAL_RUN_DIVERGENCE))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "Ingest joins each poll to the timetable loaded when it arrives, not to the one in force on its "
-        "service date, so the polls of a day before a revision's first day that arrive after the revision is "
-        "loaded take its schedule: a trip it moved is filed under its new times, a trip it dropped loses its "
-        "day type and its stops, and the day is recorded as running the revision."
-    ),
-)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PUBLISHED_EARLY_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_TIMETABLE_PUBLISHED_EARLY], indirect=True)
 def test_a_revision_loaded_before_its_first_day_leaves_the_days_before_it_on_their_own_timetable(observed):
-    _assert_clean(_delay_mismatches(observed) + _timetable_mismatches(observed))
+    _assert_clean(_divergence_mismatches(observed, _PUBLISHED_EARLY_DIVERGENCE))

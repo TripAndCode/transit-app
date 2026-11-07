@@ -392,13 +392,66 @@ def static_gtfs_zip(scenario: Scenario, version: TimetableVersion | None = None)
 
 
 @dataclass(frozen=True)
+class StopEntry:
+    """One StopTimeUpdate of a poll: its stop, the departure delay it
+    predicts (None for none) and its schedule relationship."""
+
+    stop_sequence: int
+    stop_id: str
+    departure_delay: int | None
+    status: int
+
+
+@dataclass(frozen=True)
+class TripEntry:
+    """One TripUpdate of a poll: its trip of one service day, the trip's
+    schedule relationship and the stops it lists."""
+
+    trip_id: str
+    route_id: str
+    service_date: date
+    status: int
+    stops: tuple[StopEntry, ...]
+
+
+@dataclass(frozen=True)
 class Poll:
-    """One captured TripUpdate feed, and the service days of the trips it carries."""
+    """One captured TripUpdate feed: what it lists, and its wire bytes."""
 
     captured_at: datetime
-    payload: bytes
-    stop_updates: int
-    service_dates: frozenset[date] = frozenset()
+    trips: tuple[TripEntry, ...]
+
+    @property
+    def service_dates(self) -> frozenset[date]:
+        return frozenset(t.service_date for t in self.trips)
+
+    @property
+    def stop_updates(self) -> int:
+        return sum(len(t.stops) for t in self.trips)
+
+    @property
+    def payload(self) -> bytes:
+        return trip_update_feed(
+            *(
+                trip_update(
+                    t.trip_id,
+                    *(
+                        stop_time_update(
+                            s.stop_sequence,
+                            departure_delay=s.departure_delay,
+                            stop_id=s.stop_id,
+                            schedule_relationship=s.status,
+                        )
+                        for s in t.stops
+                    ),
+                    route_id=t.route_id,
+                    start_date=t.service_date.strftime("%Y%m%d"),
+                    schedule_relationship=t.status,
+                )
+                for t in self.trips
+            ),
+            timestamp=int(self.captured_at.timestamp()),
+        )
 
     @property
     def source_file(self) -> str:
@@ -416,16 +469,16 @@ def _predicted_delay(feed: FeedModel, scheduled_sec: int, actual_sec: int) -> in
 @dataclass(frozen=True)
 class _InFeed:
     """One trip of one service day while it is in the feed, and what each
-    poll inside its window lists for it: (stop updates, trip status)."""
+    poll inside its window lists for it: the trip's status and its stops."""
 
     trip: ScheduledTrip
     service_date: date
     enters: datetime
     leaves: datetime
-    listing: Callable[[datetime], tuple[list[bytes], int]]
+    listing: Callable[[datetime], tuple[int, tuple[StopEntry, ...]]]
 
 
-def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip, reported: set) -> _InFeed:
+def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFeed:
     feed = scenario.feed
     stops = scenario.route(trip.route_id).stops
     served = {i: sec for i, sec in enumerate(run.actual_sec) if sec is not None}
@@ -441,32 +494,18 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip, reported
         nearest = [j for j in served if j < i][-1:] or [j for j in served if j > i][:1]
         return _predicted_delay(feed, trip.scheduled_sec[nearest[0]], served[nearest[0]])
 
-    def listing(at: datetime) -> tuple[list[bytes], int]:
-        updates = []
+    def listing(at: datetime) -> tuple[int, tuple[StopEntry, ...]]:
+        entries = []
         for i, (stop, scheduled, actual) in enumerate(zip(stops, trip.scheduled_sec, run.actual_sec, strict=True)):
-            seq = i + 1
             if actual is not None:
-                if service_day_instant(run.service_date, actual) <= at:
-                    continue
-                delay = _predicted_delay(feed, scheduled, actual)
-                reported.add(("departure", run.trip_id, run.service_date, seq))
-                updates.append(
-                    stop_time_update(seq, departure_delay=delay, stop_id=stop.stop_id, schedule_relationship=SCHEDULED)
-                )
+                if service_day_instant(run.service_date, actual) > at:
+                    entries.append(StopEntry(i + 1, stop.stop_id, _predicted_delay(feed, scheduled, actual), SCHEDULED))
             elif passes(i) > at:
                 if announced is None or at >= announced:
-                    reported.add(("skip", run.trip_id, run.service_date, seq))
-                    updates.append(stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=SKIPPED))
+                    entries.append(StopEntry(i + 1, stop.stop_id, None, SKIPPED))
                 else:
-                    updates.append(
-                        stop_time_update(
-                            seq,
-                            departure_delay=stand_in_delay(i),
-                            stop_id=stop.stop_id,
-                            schedule_relationship=SCHEDULED,
-                        )
-                    )
-        return updates, SCHEDULED
+                    entries.append(StopEntry(i + 1, stop.stop_id, stand_in_delay(i), SCHEDULED))
+        return SCHEDULED, tuple(entries)
 
     first = min(trip.scheduled_sec[0], run.served[0])
     enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
@@ -474,41 +513,49 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip, reported
     return _InFeed(trip, run.service_date, enters, leaves, listing)
 
 
-def _cancellation_listing(
-    scenario: Scenario, cancellation: Cancellation, trip: ScheduledTrip, reported: set
-) -> _InFeed:
+def _cancellation_listing(scenario: Scenario, cancellation: Cancellation, trip: ScheduledTrip) -> _InFeed:
     feed = scenario.feed
     day = cancellation.service_date
     stops = scenario.route(trip.route_id).stops
     announced = None if cancellation.announced_sec is None else service_day_instant(day, cancellation.announced_sec)
 
-    def listing(at: datetime) -> tuple[list[bytes], int]:
+    def listing(at: datetime) -> tuple[int, tuple[StopEntry, ...]]:
         if announced is not None and at < announced:
-            return [
-                stop_time_update(
-                    seq,
-                    departure_delay=cancellation.predicted_delay_sec,
-                    stop_id=stop.stop_id,
-                    schedule_relationship=SCHEDULED,
-                )
+            delay = cancellation.predicted_delay_sec
+            return SCHEDULED, tuple(
+                StopEntry(seq, stop.stop_id, delay, SCHEDULED)
                 for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
-                if service_day_instant(day, scheduled + cancellation.predicted_delay_sec) > at
-            ], SCHEDULED
-        reported.add(("cancellation", cancellation.trip_id, day, 0))
+                if service_day_instant(day, scheduled + delay) > at
+            )
         if cancellation.reported_as == "canceled_without_stops":
-            return [], CANCELED
+            return CANCELED, ()
         trip_status, stop_status = (
             (SCHEDULED, SKIPPED) if cancellation.reported_as == "every_stop_skipped" else (CANCELED, NO_DATA)
         )
-        return [
-            stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=stop_status)
+        return trip_status, tuple(
+            StopEntry(seq, stop.stop_id, None, stop_status)
             for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
             if service_day_instant(day, scheduled) > at
-        ], trip_status
+        )
 
     enters = service_day_instant(day, trip.scheduled_sec[0]) - timedelta(seconds=feed.lead_sec)
     leaves = service_day_instant(day, trip.scheduled_sec[-1])
     return _InFeed(trip, day, enters, leaves, listing)
+
+
+def _reports(entry: TripEntry) -> set[tuple[str, str, date, int]]:
+    """What *entry* tells the collector: each departure it predicts, each stop
+    it reports SKIPPED, and a trip reported not running, CANCELED or with
+    every stop it lists SKIPPED."""
+    out = set()
+    for stop in entry.stops:
+        if stop.status == SKIPPED:
+            out.add(("skip", entry.trip_id, entry.service_date, stop.stop_sequence))
+        elif stop.departure_delay is not None:
+            out.add(("departure", entry.trip_id, entry.service_date, stop.stop_sequence))
+    if entry.status == CANCELED or (entry.stops and all(s.status == SKIPPED for s in entry.stops)):
+        out.add(("not run", entry.trip_id, entry.service_date, 0))
+    return out
 
 
 def polls(scenario: Scenario) -> list[Poll]:
@@ -520,11 +567,9 @@ def polls(scenario: Scenario) -> list[Poll]:
     oracle would count something the pipeline never saw, so the scenario
     would be at fault, not the pipeline.
     """
-    reported: set[tuple[str, str, date, int]] = set()
-    in_feed = [_run_listing(scenario, r, scenario.trip(r.trip_id, r.service_date), reported) for r in scenario.runs]
+    in_feed = [_run_listing(scenario, r, scenario.trip(r.trip_id, r.service_date)) for r in scenario.runs]
     in_feed += [
-        _cancellation_listing(scenario, c, scenario.trip(c.trip_id, c.service_date), reported)
-        for c in scenario.cancellations
+        _cancellation_listing(scenario, c, scenario.trip(c.trip_id, c.service_date)) for c in scenario.cancellations
     ]
     if not in_feed:
         return []
@@ -532,40 +577,25 @@ def polls(scenario: Scenario) -> list[Poll]:
     start = math.ceil(min(w.enters for w in in_feed).timestamp() / step) * step
     end = max(w.leaves for w in in_feed)
     out: list[Poll] = []
+    reported: set[tuple[str, str, date, int]] = set()
     at = datetime.fromtimestamp(start, timezone.utc)
     while at < end:
-        updates, count, days = [], 0, set()
+        trips = []
         for item in in_feed:
-            if not item.enters <= at < item.leaves:
-                continue
-            stop_updates, status = item.listing(at)
-            count += len(stop_updates)
-            days.add(item.service_date)
-            updates.append(
-                trip_update(
-                    item.trip.trip_id,
-                    *stop_updates,
-                    route_id=item.trip.route_id,
-                    start_date=item.service_date.strftime("%Y%m%d"),
-                    schedule_relationship=status,
-                )
-            )
-        if updates:
-            out.append(Poll(at, trip_update_feed(*updates, timestamp=int(at.timestamp())), count, frozenset(days)))
+            if item.enters <= at < item.leaves:
+                status, stops = item.listing(at)
+                trips.append(TripEntry(item.trip.trip_id, item.trip.route_id, item.service_date, status, stops))
+        for entry in trips:
+            reported |= _reports(entry)
+        if trips:
+            out.append(Poll(at, tuple(trips)))
         at += timedelta(seconds=step)
     expected = {
-        ("departure", run.trip_id, run.service_date, i + 1)
+        ("departure" if sec is not None else "skip", run.trip_id, run.service_date, i + 1)
         for run in scenario.runs
         for i, sec in enumerate(run.actual_sec)
-        if sec is not None
     }
-    expected |= {
-        ("skip", run.trip_id, run.service_date, i + 1)
-        for run in scenario.runs
-        for i, sec in enumerate(run.actual_sec)
-        if sec is None
-    }
-    expected |= {("cancellation", c.trip_id, c.service_date, 0) for c in scenario.cancellations}
+    expected |= {("not run", c.trip_id, c.service_date, 0) for c in scenario.cancellations}
     missed = sorted(expected - reported, key=str)
     if missed:
         raise ValueError(f"no poll reports these before they happen: {missed}")
