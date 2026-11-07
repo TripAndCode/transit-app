@@ -173,20 +173,25 @@ class TripRun:
 @dataclass(frozen=True)
 class Cancellation:
     """A scheduled trip that did not run on a service day, which the feed
-    reported cancelled.
+    reported as not running.
 
     The trip is in the feed from the feed model's lead before its first
     scheduled departure until its last. Until ``announced_sec`` on the
     service date's clock (from the start when None) the feed predicts every
     stop ``predicted_delay_sec`` late, as for a trip about to run. From then
-    on it reports the trip CANCELED, listing each stop not yet due with
-    NO_DATA when ``lists_stops``, or no stop at all, which GTFS-RT allows
-    for a cancelled trip."""
+    on it reports the trip in one of the forms feeds use, ``reported_as``:
+
+    - ``canceled``: the trip CANCELED, each stop not yet due listed with NO_DATA;
+    - ``canceled_without_stops``: the trip CANCELED with no stop listed, which
+      GTFS-RT allows for a cancelled trip;
+    - ``every_stop_skipped``: the trip SCHEDULED, each stop not yet due listed
+      SKIPPED.
+    """
 
     trip_id: str
     service_date: date
     announced_sec: int | None = None
-    lists_stops: bool = True
+    reported_as: Literal["canceled", "canceled_without_stops", "every_stop_skipped"] = "canceled"
     predicted_delay_sec: int = 0
 
 
@@ -490,13 +495,16 @@ def _cancellation_listing(
                 if service_day_instant(day, scheduled + cancellation.predicted_delay_sec) > at
             ], SCHEDULED
         reported.add(("cancellation", cancellation.trip_id, day, 0))
-        if not cancellation.lists_stops:
+        if cancellation.reported_as == "canceled_without_stops":
             return [], CANCELED
+        trip_status, stop_status = (
+            (SCHEDULED, SKIPPED) if cancellation.reported_as == "every_stop_skipped" else (CANCELED, NO_DATA)
+        )
         return [
-            stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=NO_DATA)
+            stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=stop_status)
             for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
             if service_day_instant(day, scheduled) > at
-        ], CANCELED
+        ], trip_status
 
     enters = service_day_instant(day, trip.scheduled_sec[0]) - timedelta(seconds=feed.lead_sec)
     leaves = service_day_instant(day, trip.scheduled_sec[-1])
@@ -508,7 +516,7 @@ def polls(scenario: Scenario) -> list[Poll]:
     every multiple of the poll interval while some trip is in the feed.
 
     Raises when a departure gets no poll before it, a skipped stop is never
-    reported SKIPPED, or a cancellation is never reported CANCELED: the
+    reported SKIPPED, or a trip that did not run is never reported so: the
     oracle would count something the pipeline never saw, so the scenario
     would be at fault, not the pipeline.
     """

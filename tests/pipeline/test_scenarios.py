@@ -226,12 +226,20 @@ def timetable_published_early(day: date) -> Scenario:
 _CONTROL = "C0"
 _CANCELLED_LISTING_STOPS = "CL"
 _CANCELLED_WITHOUT_STOPS = "CT"
-_UNREPORTED = "CS"
-_SKIPPED_FROM_THE_START = "CK"
 _CANCELLED_AFTER_PREDICTIONS = "CC"
+_UNREPORTED = "CS"
+_EVERY_STOP_SKIPPED = "CA"
+_SKIPPED_FROM_THE_START = "CK"
 _SKIPPED_AFTER_PREDICTIONS = "CP"
 _ROUTES_REPORTED_AT_ONCE = frozenset(
-    {_CONTROL, _CANCELLED_LISTING_STOPS, _CANCELLED_WITHOUT_STOPS, _UNREPORTED, _SKIPPED_FROM_THE_START}
+    {
+        _CONTROL,
+        _CANCELLED_LISTING_STOPS,
+        _CANCELLED_WITHOUT_STOPS,
+        _UNREPORTED,
+        _EVERY_STOP_SKIPPED,
+        _SKIPPED_FROM_THE_START,
+    }
 )
 # Each route runs four trips of eight stops, six minutes apart, from these
 # first departures, all of a group's departures inside its hour.
@@ -239,10 +247,11 @@ _CANCELLATION_TIMETABLE = {
     (_CONTROL, "平日"): "07:00:00",
     (_CANCELLED_LISTING_STOPS, "平日"): "07:01:00",
     (_CANCELLED_WITHOUT_STOPS, "平日"): "07:02:00",
-    (_UNREPORTED, "平日"): "07:03:00",
     (_CANCELLED_AFTER_PREDICTIONS, "平日"): "08:00:00",
     (_CONTROL, "土曜"): "07:00:00",
     (_SKIPPED_FROM_THE_START, "土曜"): "07:01:00",
+    (_EVERY_STOP_SKIPPED, "土曜"): "07:02:00",
+    (_UNREPORTED, "土曜"): "07:03:00",
     (_SKIPPED_AFTER_PREDICTIONS, "土曜"): "08:00:00",
 }
 
@@ -261,13 +270,15 @@ def _drifting_delays(seed: int, n_stops: int) -> tuple[int, ...]:
 def cancellations(day: date) -> Scenario:
     """Trips that did not run, and runs that skipped stops.
 
-    On the first day, a 平日, routes CL, CT and CS each lose their last trip:
-    cancelled with its stops listed, cancelled with none listed, and not run
-    without the feed ever mentioning it. CC's last trip is predicted 90 s
-    late and then cancelled two minutes before it was due. On the second
-    day, a 土曜, CK's last run skips its third stop, reported SKIPPED from
-    the start, and CP's skips its third stop too, predicted until the feed
-    announces the skip. Every other trip runs, C0's on both days.
+    On the first day, a 平日, routes CL and CT each lose their last trip,
+    cancelled with its stops listed and with none listed, and CC's last trip
+    is predicted 90 s late and then cancelled two minutes before it was due.
+    On the second day, a 土曜, CA's last trip does not run and the feed
+    reports every stop of it SKIPPED, and CS's last trip does not run without
+    the feed ever mentioning it. CK's last run skips its third stop, reported
+    SKIPPED from the start, and CP's skips its third stop too, predicted
+    until the feed announces the skip. Every other trip runs, C0's on both
+    days.
 
     The feed is polled every two minutes."""
     second = day + timedelta(days=1)
@@ -275,9 +286,10 @@ def cancellations(day: date) -> Scenario:
         _CONTROL,
         _CANCELLED_LISTING_STOPS,
         _CANCELLED_WITHOUT_STOPS,
-        _UNREPORTED,
         _CANCELLED_AFTER_PREDICTIONS,
         _SKIPPED_FROM_THE_START,
+        _EVERY_STOP_SKIPPED,
+        _UNREPORTED,
         _SKIPPED_AFTER_PREDICTIONS,
     )
     routes = {code: _route(code, f"Line {code}", 8, 34.45 + i * 0.02) for i, code in enumerate(codes)}
@@ -304,8 +316,11 @@ def cancellations(day: date) -> Scenario:
         last(_SKIPPED_AFTER_PREDICTIONS, "土曜").trip_id: gtfs_seconds("08:21:00"),
     }
     not_run = {
-        last(code, "平日").trip_id
-        for code in (_CANCELLED_LISTING_STOPS, _CANCELLED_WITHOUT_STOPS, _UNREPORTED, _CANCELLED_AFTER_PREDICTIONS)
+        *(
+            last(code, "平日").trip_id
+            for code in (_CANCELLED_LISTING_STOPS, _CANCELLED_WITHOUT_STOPS, _CANCELLED_AFTER_PREDICTIONS)
+        ),
+        *(last(code, "土曜").trip_id for code in (_EVERY_STOP_SKIPPED, _UNREPORTED)),
     }
     runs = []
     for seed, ((_code, day_type), route_trips) in enumerate(trips.items()):
@@ -328,15 +343,16 @@ def cancellations(day: date) -> Scenario:
         runs=tuple(runs),
         cancellations=(
             Cancellation(last(_CANCELLED_LISTING_STOPS, "平日").trip_id, day),
-            Cancellation(last(_CANCELLED_WITHOUT_STOPS, "平日").trip_id, day, lists_stops=False),
+            Cancellation(last(_CANCELLED_WITHOUT_STOPS, "平日").trip_id, day, reported_as="canceled_without_stops"),
             Cancellation(
                 last(_CANCELLED_AFTER_PREDICTIONS, "平日").trip_id,
                 day,
                 announced_sec=gtfs_seconds("08:16:00"),
                 predicted_delay_sec=90,
             ),
+            Cancellation(last(_EVERY_STOP_SKIPPED, "土曜").trip_id, second, reported_as="every_stop_skipped"),
         ),
-        unreported=(Unreported(last(_UNREPORTED, "平日").trip_id, day),),
+        unreported=(Unreported(last(_UNREPORTED, "土曜").trip_id, second),),
         feed=FeedModel(poll_interval_sec=120, lead_sec=300),
     )
 
@@ -748,29 +764,28 @@ def _timetable_mismatches(observed: Observed) -> list[str]:
     return out
 
 
-def _service_mismatches(observed: Observed, days: set[date], windows: list[tuple[date, date]]) -> list[str]:
-    """The trips reported cancelled on each of *days*, and the council
+def _delivered_mismatches(observed: Observed, days: set[date], windows: list[tuple[date, date]]) -> list[str]:
+    """The trips reported not run on each of *days*, and the council
     summary's executed trips and service-delivered rate over each of
-    *windows*. The rate is shown only once the feed has reported a
-    cancellation, so a feed that never sends the status reads "not
-    available" rather than a 100% that measured nothing."""
-    service = oracle.service(observed.scenario)
+    *windows*, under the oracle's service-delivered semantics."""
+    scenario = observed.scenario
+    service = oracle.service(scenario)
     out = _diff(
         "agg_service_delivered_daily",
         {
-            (day,): {"non_executed_trips": s.reported_cancelled}
+            (day,): {"non_executed_trips": s.reported_not_run}
             for day, s in service.items()
-            if day in days and s.reported_cancelled
+            if day in days and s.reported_not_run
         },
         _keyed([r for r in observed.tables["agg_service_delivered_daily"] if r["date"] in days], ("date",)),
     )
     for window in windows:
         in_window = [s for day, s in service.items() if window[0] <= day <= window[1]]
-        planned, delivered = sum(s.planned for s in in_window), sum(s.delivered for s in in_window)
-        if any(s.reported_cancelled for day, s in service.items() if day <= window[1]):
+        planned, executed = sum(s.planned for s in in_window), sum(s.executed for s in in_window)
+        if oracle.delivered_rate_shown(scenario, window[1]):
             expected = {
-                "executed_trips": delivered,
-                "service_delivered_pct": _pct(Fraction(delivered, planned)),
+                "executed_trips": executed,
+                "service_delivered_pct": _pct(Fraction(executed, planned)),
                 "delivered_missing": None,
             }
         else:
@@ -780,6 +795,29 @@ def _service_mismatches(observed: Observed, days: set[date], windows: list[tuple
                 "delivered_missing": "feed_reports_no_cancellations",
             }
         out += _diff(_council_label(window), {window: expected}, {window: observed.council[window]})
+    return out
+
+
+def _coverage_mismatches(observed: Observed, windows: list[tuple[date, date]]) -> list[str]:
+    """The council summary's observation coverage over each of *windows*:
+    the trips observed against the trips planned. Every scenario's days all
+    hold observations, so coverage runs to each window's last day."""
+    service = oracle.service(observed.scenario)
+    out = []
+    for window in windows:
+        in_window = [s for day, s in service.items() if window[0] <= day <= window[1]]
+        planned, seen = sum(s.planned for s in in_window), sum(s.observed for s in in_window)
+        out += _diff(
+            f"{_council_label(window)} comparability",
+            {
+                window: {
+                    "observed_trips": seen,
+                    "coverage_planned_trips": planned,
+                    "coverage_pct": _pct(Fraction(seen, planned)),
+                }
+            },
+            {window: observed.council[window]},
+        )
     return out
 
 
@@ -870,6 +908,7 @@ def _council_figures(response: dict) -> dict[str, Any]:
     # rows[0]: (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips,
     #           service_delivered_pct, early_departure_pct)
     row = response["rows"][0]
+    comparability = response["comparability"] or {}
     return {
         "planned_trips": row[3],
         "executed_trips": row[4],
@@ -877,6 +916,9 @@ def _council_figures(response: dict) -> dict[str, Any]:
         "covered_days": response["covered_days"],
         "window_days": response["window_days"],
         "delivered_missing": response["delivered_missing"],
+        "observed_trips": comparability.get("observed_trips"),
+        "coverage_planned_trips": comparability.get("coverage_planned_trips"),
+        "coverage_pct": comparability.get("coverage_pct"),
     }
 
 
@@ -1033,14 +1075,23 @@ def test_each_day_is_planned_and_filed_under_the_timetable_in_force(observed):
 
 
 @pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
-def test_service_delivered_matches_the_truth(observed):
+def test_service_delivered_and_coverage_match_the_truth(observed):
     service_days = {d.date for d in observed.scenario.days}
-    _assert_clean(_service_mismatches(observed, service_days, _windows(observed.scenario)))
+    windows = _windows(observed.scenario)
+    _assert_clean(_delivered_mismatches(observed, service_days, windows) + _coverage_mismatches(observed, windows))
 
 
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_runs_reported_as_they_happened_beside_cancelled_unreported_and_skipping_trips_match_the_truth(observed):
+def test_runs_reported_as_they_happened_beside_trips_not_run_and_skipping_runs_match_the_truth(observed):
     _assert_clean(_delay_mismatches(observed, _ROUTES_REPORTED_AT_ONCE))
+
+
+@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
+def test_coverage_counts_only_the_trips_the_feed_reported_running(observed):
+    # The second day holds the trip the feed never mentioned and the trip
+    # it reported with every stop skipped; neither was observed.
+    second = max(d.date for d in observed.scenario.days)
+    _assert_clean(_coverage_mismatches(observed, [(second, second)]))
 
 
 @pytest.mark.xfail(
@@ -1049,13 +1100,17 @@ def test_runs_reported_as_they_happened_beside_cancelled_unreported_and_skipping
     reason=(
         "A trip the feed predicted and then reported CANCELED before it left keeps its last predictions as "
         "departures: the delay dedup drops rows without a delay before it picks each stop's latest poll, so "
-        "the CANCELED polls never replace the predictions, and every delay table and route report counts the "
-        "cancelled trip's stops as departures and the trip as observed."
+        "the CANCELED polls never replace the predictions. Every delay table and route report counts the "
+        "cancelled trip's stops as departures, and the trip counts as observed in its day's coverage."
     ),
 )
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
 def test_a_trip_cancelled_after_it_was_predicted_has_no_departures(observed):
-    _assert_clean(_delay_mismatches(observed, frozenset({_CANCELLED_AFTER_PREDICTIONS})))
+    first = min(d.date for d in observed.scenario.days)
+    _assert_clean(
+        _delay_mismatches(observed, frozenset({_CANCELLED_AFTER_PREDICTIONS}))
+        + _coverage_mismatches(observed, [(first, first)])
+    )
 
 
 @pytest.mark.xfail(
@@ -1076,45 +1131,32 @@ def test_a_stop_skipped_after_it_was_predicted_has_no_departure(observed):
     raises=AssertionError,
     reason=(
         "A CANCELED TripUpdate that lists no StopTimeUpdate, which GTFS-RT allows, stores nothing: ingest "
-        "writes one row per StopTimeUpdate, so agg_service_delivered_daily never counts that cancellation."
+        "writes one row per StopTimeUpdate, so neither agg_service_delivered_daily nor the council summary's "
+        "executed trips count that cancellation."
     ),
 )
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_trip_cancelled_without_stop_updates_counts_as_reported_cancelled(observed):
+def test_a_trip_cancelled_without_stop_updates_counts_as_not_run(observed):
     first = min(d.date for d in observed.scenario.days)
-    _assert_clean(_service_mismatches(observed, {first}, []))
+    _assert_clean(_delivered_mismatches(observed, {first}, [(first, first)]))
 
 
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
     reason=(
-        "Definition conflict: agg_service_delivered_daily counts a trip whose latest status at any stop is "
-        "SKIPPED as not executed, so a run that served its other stops lowers executed trips and the "
-        "service-delivered rate. The oracle counts a run that skipped stops as delivered."
+        "A trip is not run when it is CANCELED or every stop it reports is SKIPPED; a run that skipped only "
+        "some stops ran, so it counts as executed. agg_service_delivered_daily instead counts a trip as not "
+        "executed when the latest status of any one of its stops is SKIPPED, which lowers executed trips and "
+        "the service-delivered rate by every partial run."
     ),
 )
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_runs_that_skipped_stops_count_as_delivered(observed):
+def test_a_run_that_skipped_some_stops_counts_as_executed_and_a_trip_with_every_stop_skipped_does_not(observed):
+    # The second day holds both kinds, and the trip the feed never mentioned,
+    # which counts as executed.
     second = max(d.date for d in observed.scenario.days)
-    _assert_clean(_service_mismatches(observed, {second}, [(second, second)]))
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "Executed trips are the planned trips minus those reported not run, so a planned trip the feed never "
-        "reported counts as executed (a definition conflict), and so does the trip cancelled without stop "
-        "updates, which ingest never stores."
-    ),
-)
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_trips_that_did_not_run_are_not_counted_as_executed(observed):
-    # Compared day by day: errors of opposite sign on two days would offset
-    # over the whole period.
-    first = min(d.date for d in observed.scenario.days)
-    _assert_clean(_service_mismatches(observed, set(), [(first, first)]))
+    _assert_clean(_delivered_mismatches(observed, {second}, [(second, second)]))
 
 
 @pytest.mark.xfail(

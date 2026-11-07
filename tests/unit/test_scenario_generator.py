@@ -254,7 +254,8 @@ def test_a_skipped_stop_is_predicted_until_announced_then_reported_skipped_and_i
     assert seen == {True: True, False: True}
     scenario = _skipping(announced)
     assert [(d.stop_sequence, d.delay_sec) for d in oracle.departures(scenario)] == [(1, 30), (3, 90)]
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=1, delivered=1, reported_cancelled=0)}
+    # A run that skipped a stop still ran: executed, and observed.
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=1, reported_not_run=0, observed=1)}
 
 
 def test_a_skip_announced_only_after_the_stop_is_passed_is_refused():
@@ -287,18 +288,33 @@ def test_a_cancellation_is_predicted_until_announced_then_reported_canceled_with
             assert stops
             assert {(delay, status) for _seq, delay, status in stops} == {(None, NO_DATA)}
     assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, delivered=1, reported_cancelled=1)}
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert oracle.service(scenario)[DAY].executed == 1
+    assert oracle.delivered_rate_shown(scenario, DAY)
 
 
 def test_a_cancellation_may_list_no_stop_at_all():
-    scenario = _cancelling(Cancellation("R_0700", DAY, lists_stops=False))
+    scenario = _cancelling(Cancellation("R_0700", DAY, reported_as="canceled_without_stops"))
     morning = [trip for _at, trips in _statuses(polls(scenario)) for trip in trips if trip[0] == "R_0700"]
     assert morning
     assert all(trip_status == CANCELED and stops == [] for _trip_id, trip_status, stops in morning)
     assert all(p.stop_updates == len(list(_decode_rows(p.payload))) for p in polls(scenario))
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
-def test_an_unreported_trip_is_planned_but_neither_delivered_nor_in_any_poll():
+def test_a_trip_reported_with_every_stop_skipped_did_not_run():
+    scenario = _cancelling(Cancellation("R_0700", DAY, reported_as="every_stop_skipped"))
+    morning = [trip for _at, trips in _statuses(polls(scenario)) for trip in trips if trip[0] == "R_0700"]
+    assert morning
+    for _trip_id, trip_status, stops in morning:
+        assert trip_status == SCHEDULED
+        assert stops
+        assert {(delay, status) for _seq, delay, status in stops} == {(None, SKIPPED)}
+    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+
+
+def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observed():
     scenario = Scenario(
         name="silent",
         routes=(_ROUTE,),
@@ -308,4 +324,8 @@ def test_an_unreported_trip_is_planned_but_neither_delivered_nor_in_any_poll():
         unreported=(Unreported("R_0700", DAY),),
     )
     assert {trip[0] for _at, trips in _statuses(polls(scenario)) for trip in trips} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, delivered=1, reported_cancelled=0)}
+    # Silence is not evidence the trip did not run: it counts as executed,
+    # and only coverage, one observed trip of two planned, shows the gap.
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
+    assert oracle.service(scenario)[DAY].executed == 2
+    assert not oracle.delivered_rate_shown(scenario, DAY)

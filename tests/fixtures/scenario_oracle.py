@@ -35,14 +35,25 @@ Semantics assumed:
   service day its trip belongs to. Its weekday is its service date's ISO
   weekday, Monday 1.
 
-Service delivered, per service date:
+Service delivered, per service date, for a feed confirmed to send the trip
+and stop statuses:
 
 - Planned: the trips the timetable version in force that day schedules for
   its day type.
-- Delivered: the planned trips that ran. A run that skipped stops still ran,
-  so it counts; a cancelled trip and a trip the feed never reported did not.
-- Reported cancelled: the planned trips the feed reported CANCELED, whether
-  its update listed the trip's stops or none.
+- Reported not run: the planned trips the feed reported as not running,
+  either CANCELED (whether its update listed the trip's stops or none) or
+  with every stop it reports SKIPPED. A run that skipped only some stops ran:
+  a partial trip is still delivered.
+- Executed: planned minus reported not run. A planned trip the feed never
+  mentions counts as executed, since silence is not evidence that a trip did
+  not run; observation coverage measures that silence instead.
+- Observed: the planned trips the feed reported a departure for. Under the
+  ``perfect`` feed model that is every run, since a run serves at least one
+  stop and the feed reports each departure before it happens.
+- The service-delivered rate, executed over planned, is shown only once the
+  feed has reported a trip not run on some service day up to the period's
+  last. Until then a feed that never sends the status would read 100%
+  having measured nothing.
 """
 
 from __future__ import annotations
@@ -223,17 +234,26 @@ def version_trips(scenario: Scenario) -> dict[str, int]:
 @dataclass(frozen=True)
 class Service:
     planned: int
-    delivered: int
-    reported_cancelled: int
+    reported_not_run: int
+    observed: int
+
+    @property
+    def executed(self) -> int:
+        return self.planned - self.reported_not_run
 
 
 def service(scenario: Scenario) -> dict[date, Service]:
-    """Per service date, the planned, delivered and reported-cancelled trips."""
+    """Per service date, the planned, reported-not-run and observed trips."""
     return {
         day.date: Service(
             planned=len(scenario.scheduled(day.date)),
-            delivered=sum(1 for r in scenario.runs if r.service_date == day.date),
-            reported_cancelled=sum(1 for c in scenario.cancellations if c.service_date == day.date),
+            reported_not_run=sum(1 for c in scenario.cancellations if c.service_date == day.date),
+            observed=sum(1 for r in scenario.runs if r.service_date == day.date),
         )
         for day in scenario.days
     }
+
+
+def delivered_rate_shown(scenario: Scenario, last: date) -> bool:
+    """Whether the feed reported a trip not run on some service day up to *last*."""
+    return any(s.reported_not_run for day, s in service(scenario).items() if day <= last)
