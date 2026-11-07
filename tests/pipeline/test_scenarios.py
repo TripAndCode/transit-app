@@ -970,7 +970,7 @@ def _compare(actual: Cells, expected: list[Cells], keep: Callable[[tuple[str, Ha
         got = actual.get(cell)
         if any(_fits(want, got) for want in options):
             continue
-        columns = next((want for want in options if want is not None), {})
+        columns = next((want for want in options if want is not None), got or {})
         alternatives = {_shown(want, columns) for want in options[1:]} - {_shown(options[0], columns)}
         known = f" (or, under a known divergence, {' or '.join(sorted(alternatives))})" if alternatives else ""
         lines.append(
