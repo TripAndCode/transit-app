@@ -272,7 +272,7 @@ def test_cli_stale_candidates_names_the_untouched_comment(repository):
 
 
 def test_cli_stale_candidates_never_gates(repository):
-    """The review dimension reads this mode's output; it must not fail the caller."""
+    """The review dimension reads this mode's output; findings never fail the caller."""
 
     assert run_cli("--root", str(repository), "--stale-candidates", "HEAD~1").returncode == 0
 
@@ -379,13 +379,63 @@ def test_cli_stale_candidates_refuses_the_auto_base(repository):
     assert "explicit BASE" in result.stderr
 
 
-def test_cli_skips_a_missing_base_instead_of_failing(repository):
-    """A run that could not look is an anomaly, so it reports on stderr."""
+def test_cli_stale_candidates_fails_on_a_missing_base(repository):
+    """The caller names BASE explicitly, so a ref that does not resolve is a
+    mistake, and an empty list with exit 0 would read as nothing stale."""
 
     result = run_cli("--root", str(repository), "--stale-candidates", "no-such-ref")
-    assert result.returncode == 0
-    assert "no baseline ref" in result.stderr
+    assert result.returncode == 2
+    assert "stale candidates: no baseline ref for 'no-such-ref' — could not run" in result.stderr
+    assert "skipped" not in result.stderr
     assert "no baseline ref" not in result.stdout
+
+
+def test_cli_diff_mode_skips_a_missing_base_instead_of_failing(repository):
+    """A push from a clone without the baseline must not block."""
+
+    result = run_cli("--root", str(repository), "--diff", "no-such-ref")
+    assert result.returncode == 0
+    assert "comment policy: no baseline ref for 'no-such-ref' — skipped" in result.stderr
+
+
+def test_cli_stale_candidates_fails_on_an_empty_base(repository):
+    """An unset variable in a quoted expansion, `"$MERGE_BASE"`, passes an empty
+    BASE string: the same mistake as a mistyped ref."""
+
+    result = run_cli("--root", str(repository), "--stale-candidates", "")
+    assert result.returncode == 2
+    assert "stale candidates: no baseline ref for '' — could not run" in result.stderr
+    assert "skipped" not in result.stderr
+
+
+def test_cli_diff_mode_skips_an_empty_base(repository):
+    result = run_cli("--root", str(repository), "--diff", "")
+    assert result.returncode == 0
+    assert "comment policy: no baseline ref for '' — skipped" in result.stderr
+
+
+def blob_base(repo: Path) -> str:
+    """A ref that resolves, but to a blob, which `git diff` refuses as a base."""
+
+    return subprocess.run(
+        ("git", "-C", str(repo), "rev-parse", "HEAD~1:mod.py"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_cli_stale_candidates_fails_when_git_diff_fails(repository):
+    result = run_cli("--root", str(repository), "--stale-candidates", blob_base(repository))
+    assert result.returncode == 2
+    assert "stale candidates: could not run (CalledProcessError)" in result.stderr
+    assert "skipped" not in result.stderr
+
+
+def test_cli_diff_mode_skips_when_git_diff_fails(repository):
+    result = run_cli("--root", str(repository), "--diff", blob_base(repository))
+    assert result.returncode == 0
+    assert "comment policy: skipped (CalledProcessError)" in result.stderr
 
 
 def test_cli_diff_mode_flags_a_block_the_diff_extended(repository):
