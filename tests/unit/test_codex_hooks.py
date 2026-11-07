@@ -1,4 +1,4 @@
-"""Codex's local hook configuration must enforce the shared database boundary."""
+"""Codex's local hook configuration must enforce the shared database and shared-clone boundaries."""
 
 from __future__ import annotations
 
@@ -11,10 +11,15 @@ HOOKS = json.loads((ROOT / ".codex" / "hooks.json").read_text())
 PRE_TOOL_USE = HOOKS["hooks"]["PreToolUse"][0]
 
 
+def _hook_command(script: str) -> str:
+    """The registered command for the hook whose script is `script`, found by name so
+    the order of the entries can change without the tests running a different hook."""
+    return next(h["command"] for h in PRE_TOOL_USE["hooks"] if script in h["command"])
+
+
 def _run_guard(command: str) -> subprocess.CompletedProcess[str]:
-    configured_command = PRE_TOOL_USE["hooks"][0]["command"]
     return subprocess.run(
-        ("bash", "-c", configured_command),
+        ("bash", "-c", _hook_command("guard-dev-db.sh")),
         cwd=ROOT,
         input=json.dumps({"tool_input": {"command": command}}),
         capture_output=True,
@@ -34,6 +39,30 @@ def test_codex_db_hook_allows_throwaway_write():
     result = _run_guard("psql postgresql://transit@localhost:5544/transit_test -c 'DELETE FROM updates'")
 
     assert result.returncode == 0
+
+
+def _run_git_guard(command: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ("bash", "-c", _hook_command("guard-git-shared.sh")),
+        cwd=ROOT,
+        input=json.dumps({"tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_codex_git_hook_blocks_a_push_to_main():
+    result = _run_git_guard("git push origin HEAD:main")
+
+    assert result.returncode == 2
+    assert "BLOCKED" in result.stderr
+
+
+def test_codex_git_hook_allows_a_branch_push():
+    result = _run_git_guard("git push -u origin feature")
+
+    assert result.returncode == 0, result.stderr
 
 
 def _repo_with_feature_worktree(tmp_path: Path) -> tuple[Path, Path]:
@@ -60,7 +89,7 @@ def _repo_with_feature_worktree(tmp_path: Path) -> tuple[Path, Path]:
 
 def _run_push_hook(cwd: Path, command: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ("bash", "-c", PRE_TOOL_USE["hooks"][1]["command"]),
+        ("bash", "-c", _hook_command("pre-push.sh")),
         cwd=cwd,
         input=json.dumps({"tool_input": {"command": command}}),
         capture_output=True,

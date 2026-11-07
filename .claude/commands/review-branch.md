@@ -22,7 +22,9 @@ specific risk signal or a material fix.
    afterward. Treat `manifest.json` as canonical; do not recalculate its file list,
    line counts, exclusions, or test share in prose.
 3. Confirm the manifest's `head` still equals the reviewed worktree's `HEAD`. Deduce
-   the objective and state it in one short paragraph.
+   the objective and state it in one short paragraph. When the diff changes what a
+   user sees, name in that paragraph the audience job it serves from
+   `docs/features/audience.md`; the `logic` dimension measures the diff against it.
 
 The script writes committed, untracked, unstaged, and staged changes into one
 mode-0600 diff without serializing known lockfiles or credential carriers.
@@ -123,7 +125,8 @@ it; otherwise mark it as already raised and keep it active.
   claiming completion.
 - Invoke `superpowers:verification-before-completion` if available. Invoke
   `superpowers:systematic-debugging` (if available) only after a check fails; load
-  `postgres-perf` or `maplibre-map` only when the diff touches their domains.
+  `gtfs-rt-semantics`, `postgres-perf` or `maplibre-map` only when the diff touches
+  their domains.
 
 ## Boundaries
 

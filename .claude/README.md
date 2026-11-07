@@ -66,7 +66,7 @@ describes, never as the rule itself.
 
 | Agent | Role | Tools |
 |---|---|---|
-| `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
+| `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: opus) |
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`, `practices`,
 `comments`, `security`, `alternatives`, plus `api-contract` (conditional — endpoint
@@ -88,6 +88,11 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   blocks and of its known gaps; its block message names the forms that point a
   destructive command at the throwaway pair.
   Treat the rule in `AGENTS.md` as the protection, not the hook.
+- Shared clone: `hooks/guard-git-shared.sh` (a thin wrapper around
+  `hooks/guard_git_shared.py`) refuses a push that lands on `main`, a force-push
+  spelled `--force`, `-f` or `+refspec`, and `git stash pop`/`drop`/`clear`. The
+  module docstring is the canonical description of what it reads and of its known
+  gaps.
 - No command here commits or pushes without explicit user go-ahead.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
   `resolveReviewThread` mutation — resolving is always a manual step in the GitHub UI.
