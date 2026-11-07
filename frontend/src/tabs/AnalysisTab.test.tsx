@@ -31,6 +31,8 @@ const DEFINITION: DefinitionMeta = {
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0", source: "aggregates",
+  built_at: null,
 };
 
 function reportMeta(reportType: ReportType): ReportMeta {
@@ -343,6 +345,8 @@ function emptyReport(reportType: string): ReportResponse {
       exclusion_threshold_sec: 0,
       measurement_point: "departure",
       dedup_rule: "",
+      method_version: "2026.11.0", source: "aggregates",
+      built_at: null,
     },
   } as ReportResponse;
 }
@@ -894,7 +898,7 @@ describe("AnalysisTab delay record", () => {
 
   const ROW = ["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355, "Aomori Station", true];
 
-  function showCertificate(types: ReportType[] = ["delay_certificate"]) {
+  function showCertificate(types: ReportType[] = ["delay_certificate"], text = "1 departure left more than 300 s late.") {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: types.map(reportMeta), isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockImplementation(
@@ -905,7 +909,7 @@ describe("AnalysisTab delay record", () => {
               data: {
                 ...reportResponse("delay_certificate"),
                 rows: [ROW],
-                text: "1 departure left more than 300 s late.",
+                text,
                 ctx: { from: "2026-09-02", to: "2026-09-02" },
               },
               isFetching: false,
@@ -932,6 +936,16 @@ describe("AnalysisTab delay record", () => {
     expect(staff).toContainElement(screen.getByRole("table"));
     expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
+  });
+
+  it("sets the summary's footnotes, the method version among them, apart from the count", async () => {
+    const stamp = "* Method version: 2026.11.0, aggregates built: not applicable (live scan)";
+    showCertificate(["delay_certificate"], `1 departure left more than 300 s late.\n${stamp}`);
+    await userEvent.click(screen.getByText(STAFF_LIST));
+    const footnote = screen.getByText(stamp);
+    expect(footnote).toHaveClass("report-footnote");
+    expect(footnote.closest(".cert-staff__summary")).toBeNull();
+    expect(screen.getByText(/1 departure left more than 300 s late\./)).not.toHaveTextContent("Method version");
   });
 
   it("counts the late departures only once staff open them, and only for the lookup's day", async () => {

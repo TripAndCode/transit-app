@@ -325,6 +325,9 @@ function CertificateSection({ aid }: { aid: number }) {
   const day = certificateDayScope(date);
   const all = useReport(aid, staffOpen ? "delay_certificate" : null, day);
   const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
+  // The server writes the count first and its footnotes, the method version
+  // among them, on the lines after it.
+  const [summary, ...footnotes] = (data?.text ?? "").split("\n");
   return (
     <div>
       <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
@@ -346,8 +349,13 @@ function CertificateSection({ aid }: { aid: number }) {
                   list keeps showing until its own rows arrive. */}
               {t("reports.certificate.late_list_scope", { date: formatDate(data.ctx?.from ?? date, { weekday: true }) })}
               {FILTER_SEPARATOR}
-              {data.text}
+              {summary}
             </p>
+            {footnotes.map((line, i) => (
+              <p key={i} className="report-footnote">
+                {line}
+              </p>
+            ))}
             <CsvLink href={apiUrl(`/api/${aid}/reports/delay_certificate?${reportQueryString(day)}&format=csv`)} />
             {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
           </>

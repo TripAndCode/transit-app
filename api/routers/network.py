@@ -18,7 +18,7 @@ from pipeline.reports.comparability import (
     MIN_COVERAGE_PCT,
     ComparableReason,
 )
-from pipeline.reports.definition import DefinitionMeta
+from pipeline.reports.definition import DefinitionMeta, stamp_build
 from pipeline.reports.network import compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import DeliveredMissing
 
@@ -117,12 +117,8 @@ class NetworkSummary(BaseModel):
     # The newest day any agency has observations for in the range, where every
     # row's observation coverage stops; None when no agency has any.
     coverage_through: str | None
-    # This board's on_time_pct always reads agg_route_daily_dist's exact
-    # on_time_count column -- there is no tolerance query param here (unlike
-    # GET /api/{agency_id}/reports/on_time) -- so the definition is always
-    # the legacy_60s preset. Surfaced anyway (rather than assumed) so a user
-    # comparing this board against a per-agency report's on_time export can
-    # see both are using the same definition. See pipeline.reports.definition.
+    # Always the legacy_60s preset, since this board takes no tolerance, and
+    # surfaced anyway so it can be checked against a report's own definition.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
 
@@ -143,6 +139,7 @@ async def network_summary(
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
     """
+    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None)
     rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
     # The same rule compute_network_summary bounded each row's coverage by,
     # over the same per-agency last days.
@@ -153,6 +150,6 @@ async def network_summary(
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
         comparability=COMPARABILITY_THRESHOLDS,
         coverage_through=through.isoformat() if through else None,
-        definition=BOARD_ON_TIME_DEFINITION,
+        definition=definition,
         scope_applied=_NETWORK_SCOPE,
     )

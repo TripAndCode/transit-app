@@ -55,7 +55,7 @@ from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.network import compute_network_summary
-from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
+from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1, aggregates_serve
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
 
@@ -89,7 +89,7 @@ async def _agency_on_time_pooled(
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
 
-    if ctx.time_band != "all":
+    if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("council summary's time_band-filtered live fallback requires a ClickHouse client")
         cte_sql, ch_params = _dedup_cte_ch(ctx)

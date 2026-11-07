@@ -1,12 +1,26 @@
 """The delay record's summary line and CSV footnotes must give the true count
 of qualifying trips, say so when only the first rows are listed, and say the
-list is the service's reference document, not the operator's certificate."""
+list is the service's reference document, not the operator's certificate.
+The summary is footnoted with the method version it was drawn under."""
+
+from datetime import datetime, timezone
 
 import pytest
 
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query.formatter import format_delay_certificate_footnotes, format_delay_certificate_text
+from pipeline.reports.definition import resolve_definition_meta
 
 _ROWS = [("青森市バス", "R1", "平日", "2026-06-20", "10:00:00", "10:05:01", 301)] * 2
+_DEFINITION = resolve_definition_meta("delay_certificate", None, None, live=True)
+_STAMP = {
+    "ja": f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
+    "en": f"* Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
+}
+
+
+def _text(rows, total, locale, **kwargs):
+    return format_delay_certificate_text(rows, 300, total=total, locale=locale, definition=_DEFINITION, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -17,7 +31,7 @@ _ROWS = [("青森市バス", "R1", "平日", "2026-06-20", "10:00:00", "10:05:01
     ],
 )
 def test_summary_counts_every_row_when_none_were_cut(locale, expected):
-    assert format_delay_certificate_text(_ROWS, 300, total=2, locale=locale) == expected
+    assert _text(_ROWS, 2, locale) == f"{expected}\n{_STAMP[locale]}"
 
 
 @pytest.mark.parametrize(
@@ -32,7 +46,7 @@ def test_summary_counts_every_row_when_none_were_cut(locale, expected):
     ],
 )
 def test_summary_states_the_total_and_the_cut_when_rows_were_capped(locale, expected):
-    assert format_delay_certificate_text(_ROWS, 300, total=1234, locale=locale) == expected
+    assert _text(_ROWS, 1234, locale) == f"{expected}\n{_STAMP[locale]}"
 
 
 @pytest.mark.parametrize(
@@ -54,7 +68,27 @@ def test_summary_states_the_total_and_the_cut_when_rows_were_capped(locale, expe
 def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale, expected):
     """An empty list claims "no trip exceeded" only when the feed reported the
     scope, and says when that couldn't be checked."""
-    assert format_delay_certificate_text([], 300, total=0, locale=locale, observed=observed) == expected
+    assert _text([], 0, locale, observed=observed) == f"{expected}\n{_STAMP[locale]}"
+
+
+@pytest.mark.parametrize(
+    ("locale", "expected"),
+    [
+        ("ja", f"遅延300秒超の便: 2件\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06"),
+        (
+            "en",
+            "2 trip(s) exceeded the 300s delay threshold.\n"
+            f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06",
+        ),
+    ],
+)
+def test_the_summary_is_footnoted_with_whatever_stamp_the_definition_carries(locale, expected):
+    """The record is a live scan, so its router marks it live; the footnote
+    renders an aggregate definition's build day the same way."""
+    built = resolve_definition_meta("delay_certificate", None, None).model_copy(
+        update={"built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc)}
+    )
+    assert format_delay_certificate_text(_ROWS, 300, total=2, locale=locale, definition=built) == expected
 
 
 _REFERENCE_JA = (

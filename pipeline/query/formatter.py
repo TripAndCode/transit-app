@@ -24,7 +24,7 @@ from pipeline.reports.comparability import (
     ci_half_width_as_printed,
     tenth_as_printed,
 )
-from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
+from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes, format_method_stamp
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -676,9 +676,13 @@ def format_council_summary_text(
         if delivered is not None:
             key = "council_headline_delivered_agency_wide" if payload.get("filtered") else "council_headline_delivered"
             body += _t(key, locale, delivered=_r(delivered))
-    footnote_mark = "※" if locale != "en" else "* "
-    footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
+    footnotes = "\n".join(_footnote(f, locale) for f in format_council_summary_footnotes(definition, payload, locale))
     return f"{header}\n{body}\n{footnotes}"
+
+
+def _footnote(line: str, locale: str) -> str:
+    """*line* as a text body's footnote, under the mark the screens split on."""
+    return f"{'* ' if locale == 'en' else '※'}{line}"
 
 
 def format_delay_certificate_footnotes(threshold_sec: int, shown: int, total: int, locale: str = "ja") -> list[str]:
@@ -703,7 +707,13 @@ def format_day_marker(offset: int, locale: str = "ja") -> str:
 
 
 def format_delay_certificate_text(
-    rows: list, threshold_sec: int, total: int, locale: str = "ja", observed: bool | None = True
+    rows: list,
+    threshold_sec: int,
+    total: int,
+    locale: str = "ja",
+    observed: bool | None = True,
+    *,
+    definition: DefinitionMeta,
 ) -> str:
     """Locale-aware summary line for the delay-certificate export -- a short
     count + threshold statement, not a per-row transcript (this export can
@@ -712,7 +722,13 @@ def format_delay_certificate_text(
     the row cap can leave larger than ``len(rows)``. An empty list says "no
     trip exceeded" only when the feed reported the scope (``observed`` True);
     otherwise it says there is no data, or that which one couldn't be checked.
+    A footnote line names the method version, as the council report's do.
     """
+    summary = _delay_certificate_summary(rows, threshold_sec, total, locale, observed)
+    return f"{summary}\n{_footnote(format_method_stamp(definition, locale), locale)}"
+
+
+def _delay_certificate_summary(rows: list, threshold_sec: int, total: int, locale: str, observed: bool | None) -> str:
     if not rows:
         if observed is False:
             return _t("delay_certificate_no_data", locale)

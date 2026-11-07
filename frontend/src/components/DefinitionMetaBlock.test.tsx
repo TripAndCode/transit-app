@@ -12,7 +12,13 @@ const LEGACY: DefinitionMeta = {
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0",
+  source: "aggregates",
+  built_at: null,
 };
+
+// 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+const BUILT_AT = "2026-11-05T15:30:00Z";
 
 describe("DefinitionMetaBlock", () => {
   afterEach(async () => {
@@ -68,5 +74,39 @@ describe("DefinitionMetaBlock", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("some_other_measurement_point");
     expect(block).toHaveTextContent("some_other_dedup_rule");
+  });
+
+  it("names the method version and the JST day the aggregates were built", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, built_at: BUILT_AT }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Method version 2026.11.0, aggregates built: Nov 6, 2026.",
+    );
+  });
+
+  it("writes the stamp the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, built_at: BUILT_AT }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("算出方法 2026.11.0、集計日 2026年11月6日。");
+  });
+
+  it("says the build day is unknown when no build is recorded", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Method version 2026.11.0, aggregates built: unknown.");
+  });
+
+  it("says a live scan has no build day, even if handed one", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, source: "live", built_at: BUILT_AT }} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Method version 2026.11.0, aggregates built: not applicable (live scan).");
+    expect(block).not.toHaveTextContent("Nov 6");
+  });
+
+  it("writes the live and unknown stamps the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    const { unmount } = renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, source: "live" }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("算出方法 2026.11.0、集計日 対象外（ライブ集計）。");
+    unmount();
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("算出方法 2026.11.0、集計日 不明。");
   });
 });

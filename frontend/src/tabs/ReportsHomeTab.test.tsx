@@ -15,6 +15,8 @@ const DEFINITION: DefinitionMeta = {
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0", source: "aggregates",
+  built_at: null,
 };
 
 function agencies(): Agency[] {

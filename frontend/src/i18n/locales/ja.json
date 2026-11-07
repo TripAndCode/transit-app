@@ -340,6 +340,9 @@
     "exclusion_limit": "{{limit}}を超えてずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内（早発も定時に含む）。",
     "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "method_version": "算出方法 {{version}}、集計日 {{day}}。",
+    "built_day_unknown": "不明",
+    "built_day_live": "対象外（ライブ集計）",
     "sentence_separator": ""
   },
   "app": {
