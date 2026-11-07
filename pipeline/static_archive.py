@@ -84,7 +84,7 @@ def require_tables(ch) -> None:
     }
     missing = [table for table in (ARCHIVE, SCHEDULE, VERSION_MAP, SPANS) if table not in names]
     if missing:
-        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
+        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; run `make ch-bootstrap`")
 
 
 def loaded_stem(conn, agency_id: int) -> str | None:
@@ -230,11 +230,11 @@ def scheduled_contents(ch, agency_id: int) -> set[str]:
 def spans(ch, agency_id: int) -> dict[str, tuple[date, date]]:
     """Each of the agency's version names with a recorded span, at its latest one."""
     rows = ch.query(
-        f"SELECT static_version_id, argMax(first_day, recorded_at), argMax(last_day, recorded_at) FROM {SPANS} "
+        f"SELECT static_version_id, argMax(tuple(first_day, last_day), recorded_at) FROM {SPANS} "
         "WHERE agency_id = {agency:Int32} GROUP BY static_version_id",
         parameters={"agency": agency_id},
     ).result_rows
-    return {stem: (first, last) for stem, first, last in rows}
+    return {stem: (span[0], span[1]) for stem, span in rows}
 
 
 def record_span(ch, agency_id: int, stem: str, span: tuple[date, date]) -> None:
@@ -367,9 +367,11 @@ class ScheduleJoin(NamedTuple):
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         return [(s.first, s.last, s.stem, mapped[s.stem]) for s in self.force]
 
-    def params(self, present: Iterable[str] | None = None) -> dict:
+    def params(self, present: Iterable[str] | None = None, between: tuple[date, date] | None = None) -> dict:
         """The join's bound parameters. *present*, the version names of the rows
-        being joined, narrows the archive side to the contents they join."""
+        being joined, narrows the archive side to the contents they join, and
+        *between* the versions in force to those of the read's dates
+        (force_params)."""
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         if present is None:
             contents = {*self.hashes, self.current}
@@ -380,17 +382,24 @@ class ScheduleJoin(NamedTuple):
             "join_hashes": self.hashes,
             "join_current": self.current,
             "join_contents": sorted(contents - {""}),
-            **self.force_params(),
+            **self.force_params(between),
         }
 
-    def force_params(self) -> dict:
-        """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads."""
+    def force_params(self, between: tuple[date, date] | None = None) -> dict:
+        """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads.
+
+        *between*, the first and last service dates a read can reach (both
+        inclusive), keeps only the segments overlapping them, so a REFIT read
+        loads only those versions' schedules. A read must not reach a date
+        outside it: a row there would be read as having none in force.
+        """
         mapped = dict(zip(self.stems, self.hashes, strict=True))
+        force = [s for s in self.force if between is None or (s.first <= between[1] and between[0] <= s.last)]
         return {
-            "force_firsts": [s.first for s in self.force],
-            "force_lasts": [s.last for s in self.force],
-            "force_stems": [s.stem for s in self.force],
-            "force_contents": [mapped[s.stem] for s in self.force],
+            "force_firsts": [s.first for s in force],
+            "force_lasts": [s.last for s in force],
+            "force_stems": [s.stem for s in force],
+            "force_contents": [mapped[s.stem] for s in force],
         }
 
 
@@ -430,12 +439,18 @@ class Stamp(str, Enum):
 
     REFIT: IN_FORCE, and a row whose ingest joined other content than the
     version in force carries that version's schedule: its service, scheduled
-    time and seconds, and its route where the feed named none. A row whose stop
-    that version lacks carries none, as ingest leaves a row the timetable
-    misses. The content ingest joined is the one its version name maps to, and
-    for a row with no name or one the archive does not map, the loaded one, as
-    JOIN_CONTENT_SQL reads it: such a row is refiled only where the loaded
-    content is not in force.
+    time and seconds. A row whose stop that version lacks carries none, as
+    ingest leaves a row the timetable misses. The content ingest joined is the
+    one its version name maps to. A row with no name (its trip missed the
+    timetable then loaded) or a name the archive does not map joined content
+    that cannot be told, so it is read from the version in force whenever one
+    is; a trip no timetable has stays without a schedule.
+
+    The route is the one exception: a refiled row takes the version's route
+    only where it has none. Ingest writes the feed's route_id, or the loaded
+    timetable's route for the trip where the feed names none, and the stored
+    row does not say which, so a route ingest filled from another timetable
+    stays. A trip_id rarely changes route between revisions.
     """
 
     INGESTED = "ingested"
@@ -454,10 +469,9 @@ _FORCE_AT = (
 # The version name a row is filed under: the one in force on its service date, else its own stamp ('' for none).
 IN_FORCE_STEM_SQL = f"if({_FORCE_AT} = 0, ifNull(u.static_version_id, ''), {{force_stems:Array(String)}}[{_FORCE_AT}])"
 
-# The content ingest joined a row to: its version name's mapped one, else the loaded one (JOIN_CONTENT_SQL).
-_INGESTED_CONTENT = (
-    "transform(ifNull(u.static_version_id, ''), {join_stems:Array(String)}, {join_hashes:Array(String)}, "
-    "{join_current:String})"
+# The content ingest joined a row to: its version name's mapped one, or '' where it cannot be told.
+_STAMPED_CONTENT = (
+    "transform(ifNull(u.static_version_id, ''), {join_stems:Array(String)}, {join_hashes:Array(String)}, '')"
 )
 
 _REFIT_COLUMNS = {
@@ -473,7 +487,7 @@ def _marked_rows(where: str, table: str) -> str:
     in force, and whether REFIT reads its schedule from the archive."""
     return (
         f"SELECT u.*, {_FORCE_AT} AS force_at, {{force_contents:Array(String)}}[force_at] AS force_content, "
-        f"force_content != '' AND force_content != {_INGESTED_CONTENT} AS refit, "
+        f"force_content != '' AND force_content != {_STAMPED_CONTENT} AS refit, "
         "if(refit, force_content, '') AS refit_content "
         f"FROM {checked_table(table)} AS u WHERE {where}"
     )
@@ -517,12 +531,15 @@ def observation_rows(where: str, stamp: Stamp, table: str = UPDATES_TABLE) -> st
     )
 
 
-def refit_dates(ch, agency_id: int, where: str, params: dict, join: ScheduleJoin) -> set[date]:
+def refit_dates(
+    ch, agency_id: int, where: str, params: dict, join: ScheduleJoin, between: tuple[date, date] | None = None
+) -> set[date]:
     """The service dates holding a row matching *where* (on `u.` columns) whose
-    schedule Stamp.REFIT reads from the archive."""
+    schedule Stamp.REFIT reads from the archive. *between* bounds the dates
+    *where* can reach (ScheduleJoin.force_params)."""
     sql = (
         f"SELECT DISTINCT {service_date_ch('captured_at')} FROM "
         f"({_marked_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', UPDATES_TABLE)}) WHERE refit"
     )
-    rows = ch.query(sql, parameters={"agency_id": agency_id, **params, **join.params()}).result_rows
+    rows = ch.query(sql, parameters={"agency_id": agency_id, **params, **join.params(between=between)}).result_rows
     return {row[0] for row in rows}

@@ -186,6 +186,8 @@ class FakeConn:
             return (0,), []
         if "ingest_strategy FROM agencies" in sql:
             return ((self._ingest_strategy,) if self._ingest_strategy else None), []
+        if sql.startswith("SELECT to_regclass("):
+            return (analyze_mod.IN_FORCE_TABLE,), []
         return None, []
 
 

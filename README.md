@@ -158,8 +158,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   read as joined to the timetable in force on its service date
   (`pipeline/timetable_in_force.py`): the newest loaded timetable whose feed
   dates, or else calendar, cover that day. A row ingested against another
-  timetable takes that one's scheduled time, day type and route from the
-  archive below. A day no recorded timetable covers keeps the timetable its
+  timetable, or against none, takes the in-force timetable's scheduled time
+  and day type from the archive below, and its route only where the feed
+  named none. A day no recorded timetable covers keeps the timetable its
   rows were ingested against: its version name's archived one, or the loaded
   one when the name maps to none. Those that join the static schedule join
   the same timetable's stops. It builds the rest in Postgres; of those, dwell

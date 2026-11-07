@@ -699,18 +699,27 @@ class Plan(NamedTuple):
     join: static_archive.ScheduleJoin
 
 
+# The versions in force each run built against (db/migrations/0090).
+IN_FORCE_TABLE = "agg_timetable_in_force"
+
+
+def _span(scope: list | None) -> tuple | None:
+    """The first and last of *scope*'s dates, which bound the versions in force
+    its reads bind (ScheduleJoin.force_params); None for every date."""
+    return (min(scope), max(scope)) if scope else None
+
+
 def _in_force_at(segments: list[tuple], day) -> tuple[str, str] | None:
     return next(((stem, content) for first, last, stem, content in segments if first <= day <= last), None)
 
 
 def _dates_in_force_moved(agency_id: int, conn, join: static_archive.ScheduleJoin) -> list:
     """The service dates already built whose version in force, or its content,
-    is not the one the last run recorded (agg_timetable_in_force): a timetable
-    loaded after days it covers, or a span recorded for one, refiles them."""
+    is not the one the last run recorded (IN_FORCE_TABLE): a timetable loaded
+    after days it covers, or a span recorded for one, refiles them."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT first_day, last_day, static_version_id, content_hash FROM agg_timetable_in_force "
-            "WHERE agency_id = %s",
+            f"SELECT first_day, last_day, static_version_id, content_hash FROM {IN_FORCE_TABLE} WHERE agency_id = %s",
             (agency_id,),
         )
         built = cur.fetchall()
@@ -723,12 +732,12 @@ def _dates_in_force_moved(agency_id: int, conn, join: static_archive.ScheduleJoi
 def _record_in_force(conn, agency_id: int, join: static_archive.ScheduleJoin) -> None:
     """Record the versions in force this run built against, in its transaction."""
     with conn.cursor() as cur:
-        cur.execute("DELETE FROM agg_timetable_in_force WHERE agency_id = %s", (agency_id,))
+        cur.execute(f"DELETE FROM {IN_FORCE_TABLE} WHERE agency_id = %s", (agency_id,))
         segments = join.in_force()
         if segments:
             psycopg2.extras.execute_values(
                 cur,
-                "INSERT INTO agg_timetable_in_force (agency_id, first_day, last_day, static_version_id, content_hash) "
+                f"INSERT INTO {IN_FORCE_TABLE} (agency_id, first_day, last_day, static_version_id, content_hash) "
                 "VALUES %s",
                 [(agency_id, *segment) for segment in segments],
             )
@@ -747,7 +756,13 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     rebuild the tables that read it, the safe direction.
     """
     static_parts = _static_parts(agency_id, conn, has_static)
+    # Both stores are checked before anything is built: the run records the
+    # versions in force only at its end, after a rebuild that can take hours.
     static_archive.require_tables(ch_client)
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (IN_FORCE_TABLE,))
+        if cur.fetchone()[0] is None:
+            raise RuntimeError(f"Postgres has no {IN_FORCE_TABLE}; run `make migrate`")
     content_key = None
     if has_static:
         # A backstop for a timetable loaded before the archive existed:
@@ -1200,13 +1215,15 @@ def _refit_dates(agency_id: int, ch_client, join: static_archive.ScheduleJoin, s
     ]
     where: str = "1"
     params: dict = {}
+    between = None
     if all(scope is not None for scope in filed):
         days = sorted({day for scope in filed for day in scope or ()})
         if not days:
             return set()
         where, params = ch_aggregates.days_where(days)
+        between = (days[0], days[-1])
     with _step("plan: dates read from the schedule archive"):
-        dates = static_archive.refit_dates(ch_client, agency_id, where, params, join)
+        dates = static_archive.refit_dates(ch_client, agency_id, where, params, join, between)
     if dates:
         logger.info(f"  {len(dates)} date(s) hold rows ingested against another timetable than the one in force")
     return dates
@@ -1309,8 +1326,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # A range on captured_at, which prunes on the sort key; the visits
             # scan's own service-date test selects the same rows.
             where, params = ch_aggregates.days_where(dwell_scope) if dwell_scope is not None else ("1", {})
-            stems = ch_aggregates.version_names(ch_client, agency_id, where, params, join, visits_stamp)
-            visits_params = {**dwell_params, **join.params(stems)}
+            stems = ch_aggregates.version_names(
+                ch_client, agency_id, where, params, join, visits_stamp, _span(dwell_scope)
+            )
+            visits_params = {**dwell_params, **join.params(stems, _span(dwell_scope))}
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
@@ -1468,7 +1487,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             agency_id,
             ch_client,
             agg_sql.schedule_revision_ch_sql(where, Stamp.IN_FORCE if join.force else Stamp.INGESTED),
-            {**params, **join.params()},
+            {**params, **join.params(between=_span(scopes["agg_schedule_revision_daily"]))},
             conn,
             scopes["agg_schedule_revision_daily"],
         )
@@ -1539,7 +1558,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 agg_sql.route_headway_daily_ch_sql(where, _stamp(join, refit, headway_scope)),
                 {
                     **params,
-                    **join.params(),
+                    **join.params(between=_span(headway_scope)),
                     "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                 },

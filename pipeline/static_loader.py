@@ -221,6 +221,10 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     timetables and service exceptions cannot classify this feed's dates.
     """
     p = resolve_static_zip(path)
+    # Before any work: the load keeps the outgoing timetable and records the
+    # incoming one's span there, and stopping partway would leave the outgoing
+    # plan saved for a reload that never happened.
+    static_archive.require_tables(ch_client)
 
     # The loaded zip's filename stem (e.g. "gtfs_static_20260101" or the
     # legacy "hiroden_static") is the only identifier that survives past this
@@ -241,7 +245,6 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
         # The outgoing timetable is kept before any table is replaced: a day
         # ingested against it is joined to it after this load. Raising here
         # leaves every table as it was.
-        static_archive.require_tables(ch_client)
         outgoing = static_parts(agency_id, conn, True)
         key = static_archive.archive_loaded(conn, ch_client, agency_id, outgoing)
         if key and static_headways.record_route_headways(conn, agency_id, key, outgoing):

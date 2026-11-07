@@ -5,9 +5,11 @@ version is in force, keyed off `static_version_id`.
 one row per (agency_id, date) holding that day's version: the one in force on
 it (`pipeline.timetable_in_force`), or for a day no recorded version covers,
 the DOMINANT static_version_id its rows were ingested against.
-A day with no non-NULL static_version_id anywhere in `updates` (e.g. Aomori,
-whose ingest strategy never joins static data, or any day before RT rows were
-stamped with static_version_id) has NO ROW at all, never a NULL-version row.
+A day with a version in force has that version's row whatever its rows were
+stamped with. A day with none in force and no non-NULL static_version_id
+anywhere in `updates` (e.g. Aomori, whose ingest strategy never joins static
+data, or any day before RT rows were stamped with static_version_id) has NO
+ROW at all, never a NULL-version row.
 
 A "boundary" is the first day, within a caller-given range, whose dominant
 version differs from the immediately preceding CALENDAR day's — computed
