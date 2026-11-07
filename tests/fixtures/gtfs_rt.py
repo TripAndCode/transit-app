@@ -57,14 +57,21 @@ def stop_time_update(
     return body
 
 
-def trip_update(trip_id: str, *stop_time_updates: bytes, route_id: str | None = None) -> bytes:
-    """A TripUpdate whose TripDescriptor carries trip_id, plus route_id when given."""
+def trip_update(
+    trip_id: str, *stop_time_updates: bytes, route_id: str | None = None, start_date: str | None = None
+) -> bytes:
+    """A TripUpdate whose TripDescriptor carries trip_id, plus route_id and
+    start_date ("YYYYMMDD", the trip's service date) when given."""
     trip = _string(1, trip_id)
+    if start_date is not None:
+        trip += _string(3, start_date)
     if route_id is not None:
         trip += _string(5, route_id)
     return _len_delimited(1, trip) + b"".join(_len_delimited(2, stu) for stu in stop_time_updates)
 
 
-def trip_update_feed(*trip_updates: bytes) -> bytes:
-    """A FeedMessage with one FeedEntity per TripUpdate and no header."""
-    return b"".join(_len_delimited(2, _len_delimited(3, tu)) for tu in trip_updates)
+def trip_update_feed(*trip_updates: bytes, timestamp: int | None = None) -> bytes:
+    """A FeedMessage with one FeedEntity per TripUpdate. It has a FeedHeader
+    only when *timestamp* (POSIX seconds) is given, as a real poll does."""
+    header = header_only_feed(timestamp) if timestamp is not None else b""
+    return header + b"".join(_len_delimited(2, _len_delimited(3, tu)) for tu in trip_updates)
