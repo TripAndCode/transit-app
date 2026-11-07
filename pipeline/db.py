@@ -349,9 +349,8 @@ def hms_to_sec_sql(column: str) -> str:
     that doesn't match the expected shape (missing/malformed static data)
     resolves to NULL rather than raising and aborting the caller for the
     whole agency -- the same "degrade the one row, don't abort the batch"
-    convention `pipeline.reports.rankings.compute_hourly_heatmap`'s live
-    ClickHouse fallback already uses for its own
-    `toUInt8OrNull(substring(scheduled_time, 1, 2))` hour extraction.
+    convention `api.range.scheduled_sec_ch` follows for the ClickHouse
+    `scheduled_time` string.
 
     Lives here (not in `pipeline.analyze`, its original caller) so any
     Postgres-side reader needing a static `arrival_time`/`departure_time` in

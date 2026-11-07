@@ -26,7 +26,6 @@ const PAD_TOP = 28; // headroom for max-label callout
 const PAD_BOTTOM = 22;
 const PAD_LEFT = 0;
 const PAD_RIGHT = 32; // space for "avg" label at the right edge
-const CELL_W = (W - PAD_LEFT - PAD_RIGHT) / 24;
 
 type HoverState = {
   visible: boolean;
@@ -37,8 +36,9 @@ type HoverState = {
   value: string;
 };
 
-/** Standalone 24-bar peak-hour chart. Used by both card and modal,
- *  and rendered twice in the modal (once per DOW partition). */
+/** Standalone peak-hour chart, one bar per hour of the service day: 24, and
+ *  more when a departure ran past midnight (24, 25, …). Used by both card and
+ *  modal, and rendered twice in the modal (once per DOW partition). */
 function PeakHourChart({
   peak_hour,
   onHourClick,
@@ -57,6 +57,8 @@ function PeakHourChart({
   });
 
   const hourValues = peak_hour.by_hour;
+  const hours = Math.max(1, hourValues.length);
+  const cellW = (W - PAD_LEFT - PAD_RIGHT) / hours;
   const nonNull = hourValues.filter((v): v is number => v != null);
   const overallAvg =
     nonNull.length > 0
@@ -75,7 +77,7 @@ function PeakHourChart({
 
   const peakIdx = peak_hour.peak_hour;
   const peakV = hourValues[peakIdx] ?? peak_hour.peak_avg_min;
-  const peakBarX = PAD_LEFT + peakIdx * CELL_W;
+  const peakBarX = PAD_LEFT + peakIdx * cellW;
   // A late peak's callout and label go left, so the label stays on a narrow
   // card instead of running past the chart's right edge.
   const flip = peakIdx >= LATE_PEAK_HOUR;
@@ -88,7 +90,7 @@ function PeakHourChart({
   const spreadSegments: Segment[] = [];
   if (showSpread) {
     let segStart: number | null = null;
-    for (let h = 0; h < 24; h++) {
+    for (let h = 0; h < hours; h++) {
       const v = hourValues[h];
       const isWorse = v != null && v > overallAvg;
       if (isWorse && segStart == null) segStart = h;
@@ -98,7 +100,7 @@ function PeakHourChart({
       }
     }
     if (segStart != null)
-      spreadSegments.push({ startHour: segStart, endHour: 24 });
+      spreadSegments.push({ startHour: segStart, endHour: hours });
   }
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -109,14 +111,14 @@ function PeakHourChart({
     const localX = (e.clientX - rect.left) / scaleX;
     const idx = Math.max(
       0,
-      Math.min(23, Math.floor((localX - PAD_LEFT) / CELL_W)),
+      Math.min(hours - 1, Math.floor((localX - PAD_LEFT) / cellW)),
     );
     const v = hourValues[idx];
     if (v == null) {
       setHover((h) => ({ ...h, visible: false }));
       return;
     }
-    const barX = PAD_LEFT + idx * CELL_W + CELL_W / 2;
+    const barX = PAD_LEFT + idx * cellW + cellW / 2;
     const barY = clampY(toY(v));
     setHover({
       visible: true,
@@ -134,7 +136,7 @@ function PeakHourChart({
     const rect = svg.getBoundingClientRect();
     const scaleX = rect.width / W;
     const localX = (e.clientX - rect.left) / scaleX;
-    const idx = Math.max(0, Math.min(23, Math.floor((localX - PAD_LEFT) / CELL_W)));
+    const idx = Math.max(0, Math.min(hours - 1, Math.floor((localX - PAD_LEFT) / cellW)));
     if (hourValues[idx] == null) return;
     // The bar's own action replaces the card's: letting the click bubble
     // would open the card's detail dialog on top of the hour breakdown.
@@ -163,16 +165,16 @@ function PeakHourChart({
             <rect
               key={`spread-${i}`}
               className="ov-peak-spread"
-              x={PAD_LEFT + seg.startHour * CELL_W}
+              x={PAD_LEFT + seg.startHour * cellW}
               y={PAD_TOP - 4}
-              width={(seg.endHour - seg.startHour) * CELL_W}
+              width={(seg.endHour - seg.startHour) * cellW}
               height={H - PAD_BOTTOM - (PAD_TOP - 4)}
             />
           ))}
 
           {hourValues.map((v, h) => {
             if (v == null) return null;
-            const x = PAD_LEFT + h * CELL_W + 1;
+            const x = PAD_LEFT + h * cellW + 1;
             const y = clampY(toY(v));
             const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
             const isPeak = h === peakIdx;
@@ -183,7 +185,7 @@ function PeakHourChart({
                 key={h}
                 x={x}
                 y={y}
-                width={CELL_W - 2}
+                width={cellW - 2}
                 height={bar_h}
                 style={{ fill }}
                 opacity={opacity}
@@ -207,17 +209,17 @@ function PeakHourChart({
 
           <g>
             <line
-              x1={peakBarX + CELL_W / 2}
+              x1={peakBarX + cellW / 2}
               y1={peakBarY - 2}
-              x2={peakBarX + CELL_W / 2}
+              x2={peakBarX + cellW / 2}
               y2={peakBarY - 12}
               style={{ stroke: "var(--trend-bad)" }}
               strokeWidth="1"
             />
             <line
-              x1={peakBarX + CELL_W / 2}
+              x1={peakBarX + cellW / 2}
               y1={peakBarY - 12}
-              x2={peakBarX + CELL_W / 2 + (flip ? -4 : 4)}
+              x2={peakBarX + cellW / 2 + (flip ? -4 : 4)}
               y2={peakBarY - 12}
               style={{ stroke: "var(--trend-bad)" }}
               strokeWidth="1"
@@ -257,17 +259,17 @@ function PeakHourChart({
           className={`ov-peak-label ov-peak-label--max num${flip ? " ov-peak-label--flip" : ""}`}
           style={{
             top: `${((peakBarY - 9) / H) * 100}%`,
-            left: `${((peakBarX + CELL_W / 2 + (flip ? -6 : 6)) / W) * 100}%`,
+            left: `${((peakBarX + cellW / 2 + (flip ? -6 : 6)) / W) * 100}%`,
           }}
         >
           {t("overview.peak_hour.max_label", { avg: fixedTenth(peak_hour.peak_avg_min) })}
         </span>
-        {[0, 6, 12, 18].map((h) => (
+        {Array.from({ length: Math.ceil(hours / 6) }, (_, i) => i * 6).map((h) => (
           <span
             key={h}
             className="ov-peak-label ov-peak-label--tick num"
             style={{
-              left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%`,
+              left: `${((PAD_LEFT + h * cellW + cellW / 2) / W) * 100}%`,
               top: `${((H - PAD_BOTTOM + 2) / H) * 100}%`,
             }}
           >

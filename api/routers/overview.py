@@ -256,7 +256,9 @@ async def peak_hour_breakdown(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
-    hour: int = Query(ge=0, le=23),
+    # An hour of the service day's clock, which runs past 23 for a departure
+    # after midnight (24:10 is hour 24) and at most through the next day.
+    hour: int = Query(ge=0, le=47),
     dow: int | None = Query(default=None, ge=1, le=7),
 ) -> PeakHourBreakdown:
     """Top routes by average delay for a given hour (and optionally day-of-week).

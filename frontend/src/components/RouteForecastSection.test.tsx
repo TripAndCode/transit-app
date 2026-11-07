@@ -388,6 +388,23 @@ describe("RouteForecastSection", () => {
     expect(screen.getAllByTestId("hm-cell").length).toBe(7); // hour-12 only, 7 days
   });
 
+  it("runs the full grid and the by-hour bars on past 23 for a route that runs after midnight", () => {
+    const hm = heatmap();
+    // The server fills a grid as wide as the latest hour any row has.
+    for (let d = 1; d <= 7; d++) {
+      hm.cells.push({ dow: d, hour: 24, expected_avg_min: d === 3 ? 4 : null, samples: d === 3 ? 300 : 0, low_confidence: false });
+    }
+    renderSection(overview(), "100", hm);
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const grid = within(screen.getByTestId("fc-detail-fullgrid")).getByRole("grid");
+    expect(grid).toHaveAttribute("aria-colcount", "25");
+    expect(within(grid).getByRole("gridcell", { name: /^Wed 24:00/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId("hr-bar").map((bar) => bar.getAttribute("aria-label"))).toEqual([
+      expect.stringMatching(/^12:00 · /),
+      expect.stringMatching(/^24:00 · /),
+    ]);
+  });
+
   it("opens the by-day detail modal with stats + disclaimer", () => {
     renderSection(overview(), "100");
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));

@@ -1794,6 +1794,15 @@ async def test_peak_hour_breakdown_returns_top_routes(client, aconn, aagency_id)
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_breakdown_answers_an_hour_past_midnight(client, aconn, aagency_id):
+    """A service day's hour 24 (a 24:10 departure) is a row of its own."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 24, 4.0, 12)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 24, "dow": 5})
+    assert r.status_code == 200
+    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_breakdown_lists_a_route_once_across_raw_service_ids(client, aconn, aagency_id):
     """A route's observations split across raw service ids (and the '' of an
     unmatched trip) are one route: one entry, pooled, with no raw id in it.

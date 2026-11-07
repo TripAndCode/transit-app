@@ -147,7 +147,7 @@ describe("OverviewTab", () => {
 
   it.each([
     ["a non-numeric hour", "peak_hour=abc"],
-    ["an hour past 23", "peak_hour=24"],
+    ["an hour past the service day's clock", "peak_hour=48"],
     ["a negative hour", "peak_hour=-1"],
     ["a fractional hour", "peak_hour=7.5"],
     ["a weekday past 7", "peak_hour=8&peak_dow=9"],
@@ -164,6 +164,11 @@ describe("OverviewTab", () => {
   it("opens the breakdown for an in-range hour and weekday in the URL", () => {
     renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&peak_hour=8&peak_dow=3");
     expect(vi.mocked(hooks.usePeakHourBreakdown)).toHaveBeenLastCalledWith(8, 8, 3);
+  });
+
+  it("opens the breakdown for an hour past midnight on the service day's clock", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&peak_hour=24&peak_dow=3");
+    expect(vi.mocked(hooks.usePeakHourBreakdown)).toHaveBeenLastCalledWith(8, 24, 3);
   });
 
   it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {

@@ -126,7 +126,12 @@ def summarize_expected_delay_heatmap(
     locale: str = "ja",
     ml_cells: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
+    """Fill a full ISODOW(1..7) × hour grid. Pure.
+
+    The hours run 0..23, and on past 23 through the latest hour after
+    midnight (24, 25, ...) any row or forecast cell has, as the service day's
+    clock counts them, so the grid holds every hour the route ran and
+    168 cells when none ran past midnight.
 
     `rows`: per-(dow,hour) pooled mappings with keys ``dow``, ``hour``,
     ``avg_min`` (may be None), ``samples``. The endpoint SQL pools
@@ -154,9 +159,10 @@ def summarize_expected_delay_heatmap(
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
     ml_cells = list(ml_cells)
     ml_by = {(int(r["dow"]), int(r["hour"])): r for r in ml_cells}
+    hours = max([23, *(h for _, h in by), *(h for _, h in ml_by)]) + 1
     cells: list[dict[str, Any]] = []
     for d in range(1, 8):
-        for h in range(24):
+        for h in range(hours):
             r = by.get((d, h))
             n = int(r["samples"]) if r else 0
             ml = ml_by.get((d, h))
@@ -204,8 +210,9 @@ _HOUR_BAND = {h: key for key, hrs in BANDS for h in hrs}
 
 
 def band_of(hour: int) -> str:
-    """Band key for an hour 0..23."""
-    return _HOUR_BAND[int(hour)]
+    """Band key for an hour of the service day. Its hour 24 is 00:00 on the
+    clock, so an hour past 23 takes the band of its clock hour."""
+    return _HOUR_BAND[int(hour) % 24]
 
 
 def _pooled(pairs: list[tuple[float, int]]) -> tuple[float | None, int]:

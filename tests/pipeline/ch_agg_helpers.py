@@ -17,14 +17,21 @@ def update_row(
     service_type: str | None = "平日",
     stop_sequence: int = 1,
     file_name: str | None = None,
+    scheduled_sec: int | None = None,
 ) -> tuple:
     """One `updates` row for `pipeline.clickhouse.insert_updates`; *captured_jst* is a naive JST wall time.
 
-    Rows sharing a capture time share a file, as one poll's rows do.
+    Rows sharing a capture time share a file, as one poll's rows do. Without
+    *scheduled_sec* the row carries none, as an ingest that stores only the
+    `scheduled_time` string writes it.
     """
     captured = captured_jst.replace(tzinfo=JST).astimezone(timezone.utc)
     name = file_name or f"{captured_jst:%Y%m%d%H%M%S}.pb"
-    return (name, captured, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay)
+    row = (name, captured, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay)
+    if scheduled_sec is None:
+        return row
+    # stop_id, arr_delay, both schedule relationships and feed_timestamp precede scheduled_sec.
+    return (*row, None, None, None, None, None, scheduled_sec)
 
 
 def seed_schedule(pg_conn, agency_id: int, trip_ids: list[str]) -> None:
@@ -80,11 +87,15 @@ def edge_rows() -> list[tuple]:
 
 
 def normalized(value):
-    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC."""
+    """*value* as both stores can be compared on: floats at float32 precision, instants in UTC,
+    a time or an interval as ClickHouse's HH:MM:SS text."""
     if isinstance(value, float):
         return float(f"{value:.7g}")
     if isinstance(value, time):
         return value.isoformat()
+    if isinstance(value, timedelta):
+        seconds = int(value.total_seconds())
+        return f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
     return value

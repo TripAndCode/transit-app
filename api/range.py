@@ -153,16 +153,19 @@ def dow_isodays(dow: str) -> frozenset[int] | None:
     return frozenset(WEEKDAY_NAMES.index(name) + 1 for name in dow.split(","))
 
 
-# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Postgres
-# `scheduled_time` is a TIME column, so `time_band_case_sql` casts these
-# literals to TIME: they are sent over the wire as text and cast
-# server-side. '24:00' is a valid Postgres TIME (end-of-day).
+# (start_inclusive, end_exclusive) wall-clock times as 'HH:MM' strings. A
+# departure past 24:00 on its service day's clock falls in the band of its
+# time modulo 24 hours (`time_band_ch`). Postgres `scheduled_time` is a TIME
+# column, so `time_band_case_sql` casts these literals to TIME: they are sent
+# over the wire as text and cast server-side. '24:00' is a valid Postgres TIME
+# (end-of-day).
 #
-# Public because it is the single definition of the band grid: analyze's
-# ClickHouse bucketing (pipeline/ch_aggregates.py), the Postgres CASE
-# (`time_band_case_sql`), the ClickHouse filter (`time_band_clause_ch`) and
-# pipeline/reports/filters.py's TIME-column filter all read it, and a
-# second copy would let analyze's bucketing drift from the query filters.
+# Public because it is the single definition of the band grid: the ClickHouse
+# band (`time_band_ch`) that analyze stores and the live filter
+# (`time_band_clause_ch`) compares against, the Postgres CASE
+# (`time_band_case_sql`) and pipeline/reports/filters.py's TIME-column filter
+# all read it, and a second copy would let analyze's bucketing drift from the
+# query filters.
 TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
     "morning": ("05:00", "09:00"),
     "forenoon": ("09:00", "12:00"),
@@ -673,19 +676,52 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     return f"{day_expr} IN ({listed})", {}
 
 
-# ClickHouse expression normalizing `updates.scheduled_time` to a same-day,
-# zero-padded "HH:MM". GTFS expresses a trip that continues past midnight as
-# an hour >= 24 on the previous service day ("25:30:00" is 01:30 the next
-# calendar morning), and a band is a wall-clock window, so the hour must wrap
-# modulo 24 before it is compared — otherwise such a trip matches no band at
-# all and silently disappears from every time-band-filtered report.
-# `toUInt8OrNull` (not `toUInt8`) keeps a malformed or NULL scheduled_time
-# from aborting the whole query: it yields NULL, which the comparison then
-# excludes.
-_CH_SAME_DAY_HHMM = (
-    "concat(leftPad(toString(toUInt8OrNull(substring(scheduled_time, 1, 2)) % 24), 2, '0'), "
-    "substring(scheduled_time, 3, 3))"
-)
+def _clock_sec(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 3600 + int(minutes) * 60
+
+
+def scheduled_sec_ch(prefix: str = "") -> str:
+    """ClickHouse seconds from the service day's 00:00 to a departure's
+    scheduled time, over the `updates` or dedup columns named with *prefix*
+    (``"u."``, ``"d."`` or ``""``).
+
+    `scheduled_sec` where ingest stored one: only it holds a GTFS extended
+    hour (``"24:10:00"`` is 87000), for which `scheduled_time` is NULL.
+    Otherwise the `scheduled_time` string's hours, minutes and optional
+    seconds, which is all the aomori_regex strategy's ``"HH:MM"`` rows and
+    the rows ingested before `scheduled_sec` existed carry. NULL when neither
+    holds a time; a malformed string degrades to NULL rather than failing the
+    query.
+    """
+    parts = f"splitByChar(':', ifNull({prefix}scheduled_time, ''))"
+    from_text = f"toInt32OrNull({parts}[1]) * 3600 + toInt32OrNull({parts}[2]) * 60 + toInt32OrZero({parts}[3])"
+    return f"ifNull({prefix}scheduled_sec, {from_text})"
+
+
+def scheduled_hour_ch(prefix: str = "") -> str:
+    """The hour of :func:`scheduled_sec_ch` on the service day's own clock:
+    ``"24:10:00"`` is hour 24 and ``"25:05:00"`` hour 25, as Japanese
+    timetables write them, so a service day's hours run in time order."""
+    return f"intDiv({scheduled_sec_ch(prefix)}, 3600)"
+
+
+def time_band_ch(prefix: str = "") -> str:
+    """The :data:`TIME_BAND_RANGES` key a departure's scheduled time falls in,
+    ``'none'`` when it has none. A band is a wall-clock window, so the time is
+    taken modulo 24 hours first: ``"24:30:00"`` is 00:30, in ``late_night``.
+
+    Analyze's per-stop tables store this key and the live time-band filter
+    (:func:`time_band_clause_ch_for`) compares against it, so a filtered live
+    scan selects exactly the departures the stored band holds.
+    """
+    sec = scheduled_sec_ch(prefix)
+    clock = f"(({sec}) % 86400)"
+    arms = ", ".join(
+        f"{clock} >= {_clock_sec(start)} AND {clock} < {_clock_sec(end)}, '{band}'"
+        for band, (start, end) in TIME_BAND_RANGES.items()
+    )
+    return f"multiIf(({sec}) IS NULL, 'none', {arms}, 'none')"
 
 
 def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -694,34 +730,17 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 
 
 def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
-    """Return a WHERE fragment filtering ClickHouse's ``updates.scheduled_time``
-    to the range named by ``band``.
+    """Return a WHERE fragment keeping the `updates` rows whose scheduled time
+    falls in the band named by ``band`` (:func:`time_band_ch`).
 
     Takes the band alone rather than a whole :class:`RangeCtx`, so an endpoint
     that accepts a bare ``?time_band=`` without the rest of the range contract
     shares exactly this filter instead of re-deriving the clock bounds.
 
-    ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
-    (GTFS ``"HH:MM:SS"`` text), not a native
-    TIME column, so the comparison is a zero-padded lexicographic string
-    range rather than a ``::time`` cast.
-
-    Compares the normalized same-day 5-char ``"HH:MM"`` form of
-    `scheduled_time` (:data:`_CH_SAME_DAY_HHMM`), NOT the raw string: every
-    static_join agency writes 8-char
-    ``"HH:MM:SS"`` (GTFS `departure_time` TEXT), but agency 1 (青森市バス,
-    the `aomori_regex` ingest strategy — see
-    pipeline/strategies/aomori_regex.py) writes 5-char ``"HH:MM"`` with no
-    seconds. A Postgres `TIME` column would normalize both forms to the
-    same internal value; ClickHouse's `String` does not, so a raw compare of ``"09:00"``
-    against an 8-char bound like ``"09:00:00"`` is wrong — the 5-char
-    form sorts as lexicographically LESS than its own 8-char equivalent,
-    so every trip scheduled exactly on a band boundary (05:00, 09:00,
-    12:00, 14:00, 17:00, 20:00) would fall into the PREVIOUS band, and
-    00:00 departures wouldn't match any band at all. Truncating both
-    sides to 5 chars is exact for both ingest-strategy shapes, since a
-    zero-padded ``"HH:MM"`` alone is already enough to place a clock time
-    within these hour-granularity bands.
+    The columns are read as ``u.``-qualified: every caller aliases the table
+    ``u``, and a dedup that projects ``scheduled_sec`` as an aggregate would
+    otherwise substitute that aggregate for a bare reference in its own
+    WHERE.
 
     Anything not named in :data:`TIME_BAND_RANGES` — ``"all"``, and any
     value that isn't a band at all — yields the "no time filter" fragment
@@ -731,11 +750,7 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     """
     if band not in TIME_BAND_RANGES:
         return "1", {}
-    start, end = TIME_BAND_RANGES[band]
-    return (
-        f"({_CH_SAME_DAY_HHMM} >= {{ch_tb_start:String}} AND {_CH_SAME_DAY_HHMM} < {{ch_tb_end:String}})",
-        {"ch_tb_start": start, "ch_tb_end": end},
-    )
+    return f"({time_band_ch('u.')} = {{ch_time_band:String}})", {"ch_time_band": band}
 
 
 def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -795,7 +810,7 @@ def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, in
     """WHERE fragment for `agg_stop_daily` (date / DOW / service / time_band).
 
     `time_band` matches the stored band KEY directly (analyze pre-bucketed it
-    via `time_band_case_sql`), not a scheduled_time range.
+    via `time_band_ch`), not a scheduled_time range.
     """
     parts: list[str] = []
     params: list = []

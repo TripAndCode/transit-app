@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
@@ -212,7 +211,7 @@ _REPORTS = {"on_time": "", "route_table": "&include_sparse=1"}
 @dataclass(frozen=True)
 class Observed:
     """What the pipeline produced for one scenario: each table's rows, a
-    ``time`` as its ``HH:MM:SS`` text, and each report's rows."""
+    ``time`` or an ``interval`` as its ``HH:MM:SS`` text, and each report's rows."""
 
     scenario: Scenario
     tables: dict[str, list[dict]]
@@ -316,66 +315,45 @@ def _after_midnight(d: oracle.Departure) -> bool:
     return not oracle.before_midnight(d)
 
 
-def _hourly_mismatches_before_midnight(observed: Observed) -> list[str]:
-    """The departures scheduled before 24:00, bucket by bucket, under the
-    oracle's hour and weekday. Which bucket an hour-of-day table files a
-    24:10 departure under is the pipeline's to settle, so a scenario that has
-    such departures may show rows the oracle does not name here."""
+def _hourly_mismatches(observed: Observed, *, after: bool) -> list[str]:
+    """The departures on one side of 24:00 (*after* it, or before), bucket by
+    bucket under the oracle's hour, weekday and scheduled time, against the
+    rows of each hourly table on the same side. A departure after midnight
+    belongs to its service day's hour 24, 25, ..."""
     scenario = observed.scenario
-    before = oracle.before_midnight
-    extra_ok = any(_after_midnight(d) for d in oracle.departures(scenario))
+    where = _after_midnight if after else oracle.before_midnight
+    label = "departures at 24:00 or later" if after else "departures before 24:00"
     tables = observed.tables
+
+    def side(rows: list[dict], is_after) -> list[dict]:
+        return [r for r in rows if is_after(r) == after]
+
     return (
         _diff(
-            "agg_hour_daily",
-            {k: _sums(f) for k, f in oracle.by_day_hour(scenario, before).items()},
-            _keyed(tables["agg_hour_daily"], ("date", "hour")),
-            extra_ok=extra_ok,
+            f"agg_hour_daily, {label}",
+            {k: _sums(f) for k, f in oracle.by_day_hour(scenario, where).items()},
+            _keyed(side(tables["agg_hour_daily"], lambda r: r["hour"] >= 24), ("date", "hour")),
         )
         + _diff(
-            "agg_route_hour",
+            f"agg_route_hour, {label}",
             {
                 (route, day_type, gtfs_clock(sec)): _sums(f)
-                for (route, day_type, sec), f in oracle.by_route_day_type_time(scenario, before).items()
+                for (route, day_type, sec), f in oracle.by_route_day_type_time(scenario, where).items()
             },
-            _keyed(tables["agg_route_hour"], ("route_code", "service_type", "scheduled_time")),
-            extra_ok=extra_ok,
+            _keyed(
+                side(tables["agg_route_hour"], lambda r: r["scheduled_time"] >= "24:00:00"),
+                ("route_code", "service_type", "scheduled_time"),
+            ),
         )
         + _diff(
-            "agg_route_hour_dow",
-            {k: _sums(f) for k, f in oracle.by_route_day_type_weekday_hour(scenario, before).items()},
-            _keyed(tables["agg_route_hour_dow"], ("route_code", "service_type", "dow", "hour")),
-            extra_ok=extra_ok,
+            f"agg_route_hour_dow, {label}",
+            {k: _sums(f) for k, f in oracle.by_route_day_type_weekday_hour(scenario, where).items()},
+            _keyed(
+                side(tables["agg_route_hour_dow"], lambda r: r["hour"] >= 24),
+                ("route_code", "service_type", "dow", "hour"),
+            ),
         )
     )
-
-
-def _after_midnight_mismatches(observed: Observed) -> list[str]:
-    """The departures at 24:00 or later, wherever an hourly table files them:
-    its total over all buckets less what the departures before midnight
-    account for. A total, because the bucket is the pipeline's to settle."""
-    scenario = observed.scenario
-    by_day = {(day,): f for day, f in oracle.by_day(scenario, oracle.before_midnight).items()}
-    after_by_day = {(day,): f for day, f in oracle.by_day(scenario, _after_midnight).items()}
-    by_route = oracle.by_route_day_type(scenario, oracle.before_midnight)
-    after_by_route = oracle.by_route_day_type(scenario, _after_midnight)
-    out = []
-    for table, columns, before, after in (
-        ("agg_hour_daily", ("date",), by_day, after_by_day),
-        ("agg_route_hour", ("route_code", "service_type"), by_route, after_by_route),
-        ("agg_route_hour_dow", ("route_code", "service_type"), by_route, after_by_route),
-    ):
-        residue: dict = defaultdict(lambda: {"samples": 0, "sum_delay_sec": 0})
-        for row in observed.tables[table]:
-            key = tuple(row[c] for c in columns)
-            residue[key]["samples"] += row["samples"]
-            residue[key]["sum_delay_sec"] += row["sum_delay_sec"]
-        for key, f in before.items():
-            residue[key]["samples"] -= f.departures
-            residue[key]["sum_delay_sec"] -= f.delay_sum_sec
-        actual = {k: v for k, v in residue.items() if v != {"samples": 0, "sum_delay_sec": 0}}
-        out += _diff(f"{table}, departures at 24:00 or later", {k: _sums(f) for k, f in after.items()}, actual)
-    return out
 
 
 def _closed_and_live(scenario_polls, today: date) -> None:
@@ -433,16 +411,22 @@ async def _run_scenario(scenario: Scenario, pg_conn, ch_client, tmp_dir: Path) -
     return agency_id
 
 
+def _clock_text(value):
+    """A `time` or an `interval` as its ``HH:MM:SS``, hours past 23 kept; any other value as it is."""
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return gtfs_clock(int(value.total_seconds()))
+    return value
+
+
 def _read_tables(pg_conn, agency_id: int) -> dict[str, list[dict]]:
     out = {}
     with pg_conn.cursor() as cur:
         for table, columns in _TABLE_COLUMNS.items():
             cur.execute(f"SELECT {columns} FROM {table} WHERE agency_id = %s", (agency_id,))
             names = [c.name for c in cur.description]
-            out[table] = [
-                {n: v.isoformat() if isinstance(v, time) else v for n, v in zip(names, row, strict=True)}
-                for row in cur.fetchall()
-            ]
+            out[table] = [{n: _clock_text(v) for n, v in zip(names, row, strict=True)} for row in cur.fetchall()]
     return out
 
 
@@ -567,27 +551,9 @@ def test_reports_match_the_truth(observed):
 
 @pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
 def test_hourly_tables_file_each_departure_before_midnight_under_its_scheduled_hour(observed):
-    _assert_clean(_hourly_mismatches_before_midnight(observed))
+    _assert_clean(_hourly_mismatches(observed, after=False))
 
 
-# Ingest stores no scheduled_time for a GTFS time of 24:00:00 or later (it
-# keeps scheduled_sec), and the hour-keyed tables take the hour from
-# scheduled_time, so those departures fall out of every hour.
-_DROPS_EXTENDED_HOURS = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="agg_hour_daily, agg_route_hour and agg_route_hour_dow leave out every departure "
-    "scheduled at 24:00:00 or later, though the daily and pooled tables count it",
-)
-
-
-@pytest.mark.parametrize(
-    "observed",
-    [
-        pytest.param(plain_weekday, id="plain_weekday"),
-        pytest.param(night_route, id="night_route", marks=_DROPS_EXTENDED_HOURS),
-    ],
-    indirect=True,
-)
+@pytest.mark.parametrize("observed", _SCENARIOS, indirect=True)
 def test_hourly_tables_hold_the_departures_after_midnight(observed):
-    _assert_clean(_after_midnight_mismatches(observed))
+    _assert_clean(_hourly_mismatches(observed, after=True))

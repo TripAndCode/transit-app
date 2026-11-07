@@ -130,9 +130,12 @@ _ML_FRESHNESS_DAYS = 2
 _ML_HORIZON_DAYS = 7
 
 # The rows the heatmap overlays: inside the horizon, from a recent publish, and
-# within a day's 24 hours (no band covers a run's hour 24 or later). Only the
-# latest publish (one generated_at) counts: a slot it dropped still holds a
-# superseded model's row. Built from the constants above, never from input.
+# within a day's 24 hours. The model counts every run before the service-day
+# cutover past 24, whether its feed writes 00:10 or 24:10, while the past
+# averages count only GTFS's extended times there, so its later hours would not
+# meet the past hour they stand for. Only the latest publish (one generated_at)
+# counts: a slot it dropped still holds a superseded model's row. Built from the
+# constants above, never from input.
 _ML_FRESH_ROWS = (
     "service_date > now()::date "
     f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
@@ -887,7 +890,8 @@ class ForecastDay(BaseModel):
 
 
 class ForecastHeatmapResponse(BaseModel):
-    """Payload for ``GET /forecast/heatmap`` — the full 7×24 day×hour grid.
+    """Payload for ``GET /forecast/heatmap`` — the full day×hour grid, 7×24 and
+    wider when the route runs past midnight on its service day's clock.
     `forecast_days` names the dates this route's ML cells forecast, oldest
     first; `history_from`/`history_to` bound the analyzed days of this
     route that its past averages pool (null for a route with none)."""
@@ -910,7 +914,8 @@ async def forecast_heatmap(
     conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
 ) -> dict[str, Any]:
-    """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
+    """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23, then 24
+    and on for a departure after midnight on its service day's clock) for a
     route, pooled across service types (sample-weighted = exact pooled mean).
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
     """

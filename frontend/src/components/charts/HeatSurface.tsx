@@ -6,27 +6,27 @@ import { WEEK } from "../../utils/week";
 import { bandLabel } from "../../api/timeBands";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
-import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, worstHour, type Profile } from "./heatSurfaceModel";
+import { DOWS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, surfaceHours, worstHour, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
 import { DelayScaleLegend } from "./DelayScaleLegend";
 import "./HeatSurface.css";
 
-const DIM_RULES = heatSurfaceDimRules();
 const PROFILES: readonly Profile[] = ["hourly", "banded"];
 
 function cellOf(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>(".heat-surface__cell") : null;
 }
 
-/** Where an arrow, Home or End key moves from (dow, hour); null for any other key. */
-function step(key: string, dow: number, hour: number): [number, number] | null {
+/** Where an arrow, Home or End key moves from (dow, hour) on a surface
+ *  `hours` wide; null for any other key. */
+function step(key: string, dow: number, hour: number, hours: number): [number, number] | null {
   switch (key) {
-    case "ArrowRight": return [dow, Math.min(HOURS - 1, hour + 1)];
+    case "ArrowRight": return [dow, Math.min(hours - 1, hour + 1)];
     case "ArrowLeft": return [dow, Math.max(0, hour - 1)];
     case "ArrowDown": return [Math.min(DOWS, dow + 1), hour];
     case "ArrowUp": return [Math.max(1, dow - 1), hour];
     case "Home": return [dow, 0];
-    case "End": return [dow, HOURS - 1];
+    case "End": return [dow, hours - 1];
     default: return null;
   }
 }
@@ -76,6 +76,7 @@ export function HeatSurface({
   const pointerPressRef = useRef(false);
   const keyboardFocusRef = useRef(false);
   const { surface: observed, thin: observedThin } = observedProfile(hourly);
+  const hours = surfaceHours(observed);
   // The headline names the darkest cell's own hour and figure first, then the
   // band: a band pools an hour with the quieter hours around it, so its
   // figure alone would not match any cell the reader can see.
@@ -156,7 +157,7 @@ export function HeatSurface({
     // Alt/Cmd + arrow is the browser's history navigation, not a move.
     if (!cell || e.altKey || e.metaKey) return;
     keyboardFocusRef.current = true;
-    const next = step(e.key, Number(cell.dataset.dow), Number(cell.dataset.hour));
+    const next = step(e.key, Number(cell.dataset.dow), Number(cell.dataset.hour), hours);
     if (!next) return;
     e.preventDefault();
     gridRef.current?.querySelector<HTMLElement>(`.heat-surface__cell[data-dow="${next[0]}"][data-hour="${next[1]}"]`)?.focus();
@@ -174,7 +175,7 @@ export function HeatSurface({
 
   return (
     <div className="heat-surface-card">
-      <style>{DIM_RULES}</style>
+      <style>{heatSurfaceDimRules(SURFACE_DIM, hours)}</style>
       <div className="heat-surface__head">
         {title}
         <div className="heat-surface__seg" role="group" aria-label={t("reports.heat_surface.profile_label")}>
@@ -208,6 +209,7 @@ export function HeatSurface({
       <div
         ref={gridRef}
         className="heat-surface"
+        style={{ "--heat-hours": hours } as CSSProperties}
         role="grid"
         tabIndex={-1}
         aria-label={t("reports.heat_surface.aria")}
@@ -223,7 +225,7 @@ export function HeatSurface({
       >
         <div className="heat-surface__row" aria-hidden="true">
           <span />
-          {Array.from({ length: HOURS }, (_, h) => (
+          {Array.from({ length: hours }, (_, h) => (
             <span key={h} className="heat-surface__hl num">
               {h}
             </span>

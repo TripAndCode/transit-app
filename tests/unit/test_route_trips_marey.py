@@ -57,22 +57,22 @@ def test_route_trips_sql_orders_by_trip_then_stop_sequence():
 
 def test_route_trips_sql_all_band_adds_no_time_filter():
     sql, params = build_route_trips_sql("all")
-    assert "ch_tb_start" not in sql
-    assert "scheduled_time, 1, 2" not in sql
+    assert "ch_time_band" not in sql
+    assert "multiIf" not in sql
     assert params == {"rt_limit": MAX_ROUTE_TRIPS + 1}
 
 
 def test_route_trips_sql_named_band_filters_on_the_shared_clock_expression():
     """The fragment itself is api.range's: assert the contract, not its text.
 
-    That expression normalises the hour modulo 24 so a post-midnight clock
-    compares inside the day, and pinning one spelling of it here would break
-    the moment the shared helper is retuned.
+    That expression places a post-midnight clock in its wall-clock band,
+    and pinning one spelling of it here would break the moment the shared
+    helper is retuned.
     """
     sql, params = build_route_trips_sql("morning")
     frag, frag_params = time_band_clause_ch_for("morning")
     assert frag in sql
-    assert "{ch_tb_start:String}" in sql and "{ch_tb_end:String}" in sql
+    assert "{ch_time_band:String}" in sql
     assert params == {**frag_params, "rt_limit": MAX_ROUTE_TRIPS + 1}
 
 
