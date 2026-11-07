@@ -15,17 +15,12 @@ the runner promotes and analyzes, as the daily jobs would before the next
 version arrives, so the run that sees the new version updates aggregates
 built under the old one.
 
-The service days sit two days before the service day in progress. Analyze
-saves a day's planned trips only once its service day is over, which is four
-hours after the JST calendar day ends, so days anchored on the calendar would
-leave the second day unsaved in a run between midnight and 04:00 JST.
-Promotion moves only closed JST days, so every poll must land on one, the
-night route's after-midnight polls included. ``updates_live`` drops a row
-three days after its capture, so the polls cannot be older than that either,
-which the four hours leave room for. Day types are
-declared with each day, not read from its weekday. A table keyed on the day
-of the week is compared under the service date's own weekday, which the
-oracle reads from the same date.
+The service days sit two days before the service day in progress, and every
+poll must land on a closed JST day and outlast the run in ``updates_live``
+(``tests.fixtures.scenario_clock``). Day types are declared with each day,
+not read from its weekday. A table keyed on the day of the week is compared
+under the service date's own weekday, which the oracle reads from the same
+date.
 
 Each scenario runs through the pipeline once per module (the ``observed``
 fixture), and every test compares that one snapshot with the oracle. Every
@@ -44,7 +39,7 @@ from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from fractions import Fraction
-from functools import partial
+from functools import cached_property, partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -55,7 +50,6 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport
 
-from api.range import jst_today
 from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import (
     JST,
@@ -76,6 +70,7 @@ from tests.fixtures.scenario import (
     poll_batches,
     static_gtfs_zip,
 )
+from tests.fixtures.scenario_clock import anchor_day, check_closed_and_live
 
 _COLLECTOR_SECRET = "scenario-secret"
 
@@ -357,12 +352,6 @@ def cancellations(day: date) -> Scenario:
     )
 
 
-def _anchor_day() -> date:
-    from pipeline.service_day import service_date_of
-
-    return service_date_of(datetime.now(timezone.utc)) - timedelta(days=2)
-
-
 @dataclass(frozen=True, repr=False)
 class Rounded:
     """An exact figure a column or report holds rounded to *places* decimals.
@@ -437,6 +426,11 @@ class Observed:
     reports: dict[str, list]
     trend: dict[str, Any]
     council: dict[tuple[date, date], dict[str, Any]]
+
+    @cached_property
+    def choice(self) -> Choice:
+        """The outcome every comparison of this run is held to, chosen once."""
+        return _choose(self)
 
 
 def _window(scenario: Scenario) -> str:
@@ -979,23 +973,50 @@ def _compare(actual: Cells, expected: Cells, keep: Callable[[tuple[str, Hashable
     return lines
 
 
-def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Observed], Cells]]) -> list[str]:
-    """Every cell of *comparison* against one outcome: the truth, or its view
-    under one combination of the scenario's known divergences, the same for
-    every cell, so a cell two divergences move takes exactly the figure the
-    other cells show them to give. Reported against the outcome nearest the
-    run, the truth on a tie."""
-    expect, read = comparison
-    actual = read(observed)
-    reports = []
+@dataclass(frozen=True)
+class Choice:
+    """The truth under one combination of a scenario's known divergences, and
+    how many cells of the run, over every comparison, it does not fit."""
+
+    divergences: tuple[Divergence, ...]
+    outcome: oracle.Outcome
+    unfit_cells: int
+
+    def describe(self) -> str:
+        under = ", ".join(d.name for d in self.divergences) or "no known divergence"
+        fit = "every cell" if not self.unfit_cells else f"all but {self.unfit_cells} cells"
+        return f"held to the truth under {under}, the combination that fits {fit} of the run"
+
+
+def _choose(observed: Observed) -> Choice:
+    """The one combination of known divergences the whole run is held to: the
+    first that fits every cell of every comparison, or else the one that fits
+    the most, the truth and then the smallest winning a tie. Chosen over the
+    union of the comparisons, so tables and reports that disagree about the
+    same trip cannot each pass under a combination of their own."""
+    best: Choice | None = None
     for chosen, found in _outcomes(observed):
-        lines = _compare(actual, expect(observed, found), lambda _cell: True)
-        if not lines:
-            return []
-        reports.append((len(lines), chosen, lines))
-    _count, chosen, lines = min(reports, key=lambda report: report[0])
-    under = ", ".join(d.name for d in chosen) or "no known divergence"
-    return [f"(nearest outcome: the truth under {under})", *lines]
+        unfit = sum(
+            len(_compare(read(observed), expect(observed, found), lambda _cell: True)) for expect, read in _COMPARISONS
+        )
+        if best is None or unfit < best.unfit_cells:
+            best = Choice(chosen, found, unfit)
+        if not unfit:
+            break
+    assert best is not None
+    return best
+
+
+def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Observed], Cells]]) -> list[str]:
+    """Every cell of *comparison* against the scenario's one chosen outcome
+    (``Observed.choice``): the truth, or its view under the combination of
+    known divergences that fits the whole run. A cell a divergence moves
+    therefore takes exactly the figure every other comparison shows it to
+    give, and anything else a cell holds is a failure."""
+    expect, read = comparison
+    choice = observed.choice
+    lines = _compare(read(observed), expect(observed, choice.outcome), lambda _cell: True)
+    return [f"({choice.describe()})", *lines] if lines else []
 
 
 def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
@@ -1012,6 +1033,8 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
     own_cells = 0
     for expect, read in _COMPARISONS:
         expected = expect(observed, truth)
+        # Assumes each divergence moves cells on its own; one that shows only in
+        # combination needs this extended, never the RuntimeError below weakened.
         moved = _moved(expected, expect(observed, divergence.view(observed, truth)))
         for other in others:
             moved -= _moved(expected, expect(observed, other.view(observed, truth)))
@@ -1022,20 +1045,8 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
     return lines
 
 
-def _closed_and_live(scenario_polls, today: date) -> None:
-    """Every poll must sit on a closed JST day, which promotion moves, and
-    inside updates_live's three days, or the pipeline never sees it."""
-    if not scenario_polls:
-        return
-    today_start = datetime.combine(today, time(0), tzinfo=JST)
-    if max(p.captured_at for p in scenario_polls) >= today_start:
-        raise RuntimeError("a poll falls on today, which is not closed")
-    if min(p.captured_at for p in scenario_polls) <= datetime.now(JST) - timedelta(days=3) + timedelta(hours=1):
-        raise RuntimeError("a poll is near updates_live's TTL")
-
-
 async def _run_scenario(
-    scenario: Scenario, pg_conn, ch_client, tmp_dir: Path
+    scenario: Scenario, pg_conn, ch_client, tmp_dir: Path, now: datetime
 ) -> tuple[int, list[tuple[TimetableVersion, list[Poll]]]]:
     """Load, ingest, promote and analyze *scenario* for a new agency; return
     its id and the polls ingested under each timetable version.
@@ -1059,7 +1070,7 @@ async def _run_scenario(
     pg_conn.commit()
 
     batches = poll_batches(scenario)
-    _closed_and_live([poll for _version, batch in batches for poll in batch], jst_today())
+    check_closed_and_live([poll.captured_at for _version, batch in batches for poll in batch], now)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for version, batch in batches:
             zip_path = tmp_dir / f"{version.name}.zip"
@@ -1200,7 +1211,8 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
     from pipeline.cache import clear_all
     from tests.conftest import _CH_TEST, _ch_test_client, _database_url, _test_pool, confirm_rt_field_coverage
 
-    scenario = request.param(_anchor_day())
+    now = datetime.now(timezone.utc)
+    scenario = request.param(anchor_day(now))
     try:
         async with contextlib.AsyncExitStack() as stack:
             pg_conn = psycopg2.connect(_database_url())
@@ -1223,7 +1235,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             clear_all()
             limiter.reset()
             agency_id, batches = await _run_scenario(
-                scenario, pg_conn, ch_client, tmp_path_factory.mktemp(scenario.name)
+                scenario, pg_conn, ch_client, tmp_path_factory.mktemp(scenario.name), now
             )
             tables = _read_tables(pg_conn, agency_id)
             pool = await _test_pool()
@@ -1247,9 +1259,9 @@ def _assert_clean(mismatches: list[str]) -> None:
 #
 # Each comparison test holds every cell of every scenario to the truth, or to
 # the view of it under one combination of the scenario's known divergences,
-# the same combination for every cell of the test, so any other change to a
-# cell still fails. Each divergence's strict xfail holds the cells it alone
-# moves to the truth; fixing it turns that test into a pass.
+# chosen once for the whole run, so any other change to a cell still fails.
+# Each divergence's strict xfail holds the cells it alone moves to the truth;
+# fixing it turns that test into a pass.
 _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),
