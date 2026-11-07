@@ -663,15 +663,22 @@ def _stored_fingerprints(conn, agency_id: int, legacy: str, seed: dict[str, str]
     return {}
 
 
-def _record_fingerprints(conn, agency_id: int, current: dict[str, str]) -> None:
+def _record_fingerprints(conn, agency_id: int, current: dict[str, str], rebuilt: set[str]) -> None:
+    """Record each table's fingerprint, and as its built_at the time this run
+    rewrote it: a table in *rebuilt*, or one new to the agency. A table the run
+    left standing keeps its built_at, which is therefore when its rows last
+    changed. A report stamps that time beside rows it may have cached
+    (pipeline.reports.definition.stamp_build), so a run that changes nothing
+    must not move it."""
     rows = sorted(current.items())
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES "
             + ", ".join(["(%s, %s, %s)"] * len(rows))
-            + " ON CONFLICT (agency_id, table_name) DO UPDATE SET "
-            "fingerprint = EXCLUDED.fingerprint, built_at = clock_timestamp()",
-            [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)],
+            + " ON CONFLICT (agency_id, table_name) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, "
+            "built_at = CASE WHEN agg_table_state.table_name = ANY(%s) THEN clock_timestamp() "
+            "ELSE agg_table_state.built_at END",
+            [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)] + [sorted(rebuilt)],
         )
 
 
@@ -1571,7 +1578,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         with _step("agg_meta: max_captured_at"):
             max_cap = ch_max_captured_at(ch_client, agency_id)
         with _step("agg_meta: upsert"), conn.cursor() as cur:
-            _record_fingerprints(conn, agency_id, plan.current)
+            # ch_scopes is what the ClickHouse tables actually rebuilt, which
+            # can be more than the plan's scope when their two stores disagree.
+            rewritten = {name for name, scope in {**scopes, **ch_scopes}.items() if scope != []}
+            _record_fingerprints(conn, agency_id, plan.current, rewritten)
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
                 "VALUES (%s, clock_timestamp(), %s, %s) "

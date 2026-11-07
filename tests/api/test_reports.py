@@ -1,12 +1,13 @@
 """Tests for the v2 reports endpoints (live queries, no snapshots table)."""
 
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.reports.network import invalidate_network_summary
 from tests.api.test_network import (
     _seed_gated_agency,
@@ -388,6 +389,182 @@ async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(report
     rows = list(csv.reader(io.StringIO(resp.text)))
     preamble = rows[0][0]
     assert "legacy_60s" in preamble
+
+
+async def _record_builds(pool, *builds):
+    """agg_table_state rows as analyze records them: (agency_id, table_name, built_at)."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) VALUES ($1, $2, 'x', $3)",
+            builds,
+        )
+
+
+# 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+_BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+_LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
+_CERT_STAMP = _LIVE_STAMP
+
+
+def _preamble(resp) -> str:
+    return resp.text.lstrip("\ufeff").splitlines()[0]
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_the_method_version_and_when_its_aggregates_were_built(reports_client):
+    """The newest build analyze recorded for the agency, across its tables;
+    another agency's later build is not this report's."""
+    client, agency_id, pool = reports_client
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
+
+    unbuilt = (await client.get(url)).json()["definition"]
+    assert (unbuilt["method_version"], unbuilt["source"], unbuilt["built_at"]) == (METHOD_VERSION, "aggregates", None)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=不明")
+
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_stats", datetime(2026, 11, 4, tzinfo=timezone.utc)),
+        (agency_id, "agg_route_daily", _BUILT_AT),
+        (other, "agg_route_daily", datetime(2026, 11, 7, tzinfo=timezone.utc)),
+    )
+    built = (await client.get(url)).json()["definition"]
+    assert (built["method_version"], built["source"]) == (METHOD_VERSION, "aggregates")
+    assert datetime.fromisoformat(built["built_at"]) == _BUILT_AT
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
+
+
+@pytest.mark.asyncio
+async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(reports_client):
+    """The compute caches outlive a rebuild, so a response stamped with a new
+    build must have recomputed its rows since that build."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    before = (await client.get(url)).json()
+    assert float(before["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_rows(reports_client):
+    """analyze stamps a build when it writes the row, not when it commits, so
+    a rebuild can land dated before another agency's newer build. It must
+    still forget the rows cached before it."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_daily_dist", _BUILT_AT),
+        (other, "agg_route_daily_dist", _BUILT_AT + timedelta(hours=2)),
+    )
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    assert float((await client.get(url)).json()["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
+
+
+@pytest.mark.asyncio
+async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_client, ch_client, monkeypatch):
+    """A periodic analyze that finds nothing new must not forget every cache."""
+    import psycopg2
+
+    from pipeline.analyze import analyze
+    from pipeline.reports import definition
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route(pool, agency_id, "RNOOP", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    first = (await client.get(url)).json()
+
+    cleared: list[None] = []
+    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+    finally:
+        conn.close()
+
+    second = (await client.get(url)).json()
+    assert cleared == []
+    assert second["definition"]["built_at"] == first["definition"]["built_at"]
+    assert second["rows"] == first["rows"]
+
+
+@pytest.mark.asyncio
+async def test_the_council_report_text_names_the_method_version_and_the_build_day(reports_client):
+    client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
+    assert f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06" in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report_type", ["ranking", "council_summary"])
+async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_async_client, report_type):
+    """The aggregates keep no hour of day, so a time band's figures come from a
+    live scan, which no aggregate build governs."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/{report_type}?from=2026-05-18&to=2026-05-18&time_band=evening"
+
+    body = (await client.get(url)).json()
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）"
+    )
+    if report_type == "council_summary":
+        assert _LIVE_STAMP in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch_async_client):
+    """The record is a live scan of the observations, which no aggregate
+    build governs, so its stamp says so."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-20"
+    await _seed_route(pool, agency_id, "RCERT", "平日", day, [400])
+    mirror_updates_to_ch(ch_client, agency_id)
+    await _record_builds(pool, (agency_id, "agg_route_daily", _BUILT_AT))
+
+    body = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")).json()
+    assert body["definition"]["method_version"] == METHOD_VERSION
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    assert body["text"].split("\n")[-1] == _CERT_STAMP
 
 
 @pytest.mark.asyncio
@@ -2939,12 +3116,14 @@ async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_cl
     capped = (await client.get(f"{url}&limit=2")).json()
     assert len(capped["rows"]) == 2
     assert capped["rows_total"] == 3
-    assert capped["text"] == "遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）"
+    assert capped["text"] == (
+        f"遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）\n{_CERT_STAMP}"
+    )
 
     whole = (await client.get(url)).json()
     assert len(whole["rows"]) == 3
     assert whole["rows_total"] == 3
-    assert whole["text"] == "遅延300秒超の便: 3件"
+    assert whole["text"] == f"遅延300秒超の便: 3件\n{_CERT_STAMP}"
 
     resp = await client.get(f"{url}&limit=2&format=csv")
     rows = list(csv.reader(io.StringIO(resp.text)))
@@ -3368,8 +3547,8 @@ async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_
     assert empty["rows"] == []
     assert empty["observed"] is False
     # The staff summary says the same, never "no trip exceeded the threshold".
-    assert empty["text"] == "この期間・条件のリアルタイムデータはありません。"
-    assert on_time["text"] == "遅延300秒超の便はありませんでした。"
+    assert empty["text"] == f"この期間・条件のリアルタイムデータはありません。\n{_CERT_STAMP}"
+    assert on_time["text"] == f"遅延300秒超の便はありませんでした。\n{_CERT_STAMP}"
 
     ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
     assert ranking["observed"] is None

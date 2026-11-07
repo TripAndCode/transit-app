@@ -66,6 +66,7 @@ from pipeline.reports import (
     resolve_definition_meta,
     simulation_disclaimer,
     sort_route_table,
+    stamp_build,
 )
 from pipeline.reports.comparability import ComparableReason
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
@@ -79,6 +80,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.rankings import report_reads_aggregates
 from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.service_delivered import DeliveredMissing
@@ -1371,7 +1373,10 @@ async def get_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
+    live = not report_reads_aggregates(report_type, ctx, csv=format == "csv")
+    definition = await stamp_build(
+        conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
+    )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
         if format == "csv"
@@ -1594,7 +1599,9 @@ async def get_report(
             except Exception:
                 _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
                 observed = None
-        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale, observed=observed)
+        text = format_delay_certificate_text(
+            rows, threshold, rows_total, locale=locale, observed=observed, definition=definition
+        )
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),

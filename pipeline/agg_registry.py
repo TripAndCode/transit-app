@@ -9,12 +9,17 @@ rebuilds the table in full, with the tables computed from it, when the
 fingerprint changes. `render()` returns exactly that text, and
 tests/unit/test_agg_registry_versions.py fails when it changes while the
 version does not.
+
+The method as a whole has one version, METHOD_VERSION, which every exported
+figure names. A table's version bump or a clamp change is a new method
+version (METHOD_VERSIONS).
 """
 
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import NamedTuple
 
 from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways
 from pipeline.db import build_stop_visits_ch_sql
@@ -198,6 +203,60 @@ def _index(entries: list[AggTable]) -> dict[str, AggTable]:
 
 
 TABLES: dict[str, AggTable] = _index(_entries())
+
+
+def method_inputs() -> dict[str, int]:
+    """What the analysis method is made of now: every table's logic version
+    and the plausibility clamp, the one constant every table's fingerprint
+    folds in (pipeline.analyze.table_fingerprints). The ingest strategy and the
+    timetable an agency's fingerprints also carry describe its data, not the
+    method."""
+    return {"MAX_PLAUSIBLE_DELAY_SEC": db.MAX_PLAUSIBLE_DELAY_SEC} | {name: t.version for name, t in TABLES.items()}
+
+
+class MethodVersion(NamedTuple):
+    version: str  # YYYY.M.N
+    # What this version set of method_inputs(): every input for the first
+    # version, and only those it changed for each later one. None retires a
+    # table that is no longer built.
+    sets: dict[str, int | None]
+
+
+# Every version of the analysis method, oldest first. A change to
+# method_inputs() appends a later version with what it sets, and its row to
+# DELAY_ANALYSIS.md's "Method versions" table. A released entry never changes,
+# because exports name it: tests/unit/method_versions.json pins each one, and
+# tests/unit/test_method_version.py keeps the history, record and registry agreed.
+METHOD_VERSIONS: tuple[MethodVersion, ...] = (
+    MethodVersion(
+        "2026.11.0",
+        {
+            "MAX_PLAUSIBLE_DELAY_SEC": 7200,
+            "agg_daily_trend": 1,
+            "agg_feed_health": 1,
+            "agg_hour_daily": 1,
+            "agg_route_daily": 1,
+            "agg_route_daily_dist": 1,
+            "agg_route_daily_dwell_run": 1,
+            "agg_route_headway": 1,
+            "agg_route_headway_daily": 1,
+            "agg_route_hour": 1,
+            "agg_route_hour_dow": 1,
+            "agg_route_stats": 1,
+            "agg_route_stop_daily": 1,
+            "agg_schedule_revision_daily": 1,
+            "agg_service_delivered_daily": 1,
+            "agg_stop_daily": 1,
+            "agg_stop_routes": 1,
+            "route_delay_counts": 1,
+            "stop_route_days": 1,
+        },
+    ),
+)
+
+# The method every report, CSV and council document names beside its figures
+# (pipeline.reports.definition.DefinitionMeta).
+METHOD_VERSION = METHOD_VERSIONS[-1].version
 
 
 def table_scopes(

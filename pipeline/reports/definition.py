@@ -12,8 +12,13 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
 
+from pydantic import AwareDatetime, BaseModel
+
+from pipeline.agg_registry import METHOD_VERSION
+from pipeline.cache import clear_all
+from pipeline.clickhouse import jst_date
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -66,6 +71,15 @@ class DefinitionMeta(BaseModel):
     ``ranking``, ``trend``) -- the dedup/exclusion/measurement-point fields
     still apply to those, since every aggregate shares the one dedup
     builder, but there is no tolerance value to show.
+
+    ``method_version`` names the analysis method the figures were made with
+    (:data:`pipeline.agg_registry.METHOD_VERSION`). ``source`` says whether
+    they came from the aggregates or from a live scan of the observations
+    (:func:`pipeline.reports.rankings.report_reads_aggregates`). ``built_at``
+    is when analyze last rewrote the aggregates behind them
+    (:func:`stamp_build`), which a router with a connection fills in: always
+    ``None`` for a live scan, and ``None`` for aggregates with no build
+    recorded.
     """
 
     preset: str | None
@@ -74,12 +88,63 @@ class DefinitionMeta(BaseModel):
     exclusion_threshold_sec: int = MAX_PLAUSIBLE_DELAY_SEC
     measurement_point: str = MEASUREMENT_POINT
     dedup_rule: str = DEDUP_RULE
+    method_version: str = METHOD_VERSION
+    source: Literal["aggregates", "live"] = "aggregates"
+    built_at: AwareDatetime | None = None
+
+
+# The builds analyze had recorded, for every agency, when this process last
+# looked; _UNSEEN before its first look.
+_UNSEEN = object()
+_seen_builds: object = _UNSEEN
+
+# The builds are named by every row's time, not the newest: analyze dates a
+# build when it writes the row and agencies commit concurrently, so a build
+# can become visible dated before one already seen. A table's row moves only
+# when a run rewrites it (pipeline.analyze._record_fingerprints). With no
+# agency named, built_at covers the agencies the board lists, not deleted.
+_BUILDS_SQL = """
+SELECT count(*) AS builds,
+       sum(extract(epoch FROM s.built_at)) AS stamps,
+       max(s.built_at) FILTER (WHERE s.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)) AS built_at
+FROM agg_table_state s
+JOIN agencies a USING (agency_id)
+"""
+
+
+async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None) -> DefinitionMeta:
+    """*meta* with ``built_at``: the newest time analyze rewrote any
+    aggregate of *agency_id*, or of every agency the board lists when it is
+    None. A live definition is returned as it is.
+
+    Call it before computing the rows. The compute caches outlive a rebuild,
+    so when analyze has rewritten any table since this process last looked, every
+    cache is forgotten first: rows served after this call are then no older
+    than the build it names.
+    """
+    if meta.source == "live":
+        return meta
+    builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
+    _note_builds((builds, stamps))
+    return meta.model_copy(update={"built_at": built_at})
+
+
+def _note_builds(builds: object) -> None:
+    """Forget every cached compute result when *builds* are not the ones this
+    process last saw. The first look forgets too: rows cached before it are of
+    unknown builds."""
+    global _seen_builds
+    if builds != _seen_builds:
+        clear_all()
+        _seen_builds = builds
 
 
 def resolve_definition_meta(
     report_type: str,
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
+    *,
+    live: bool = False,
 ) -> DefinitionMeta:
     """Resolve the early/late tolerance actually applied for *report_type*,
     from the same (already-validated) query params ``get_report`` passes
@@ -87,8 +152,10 @@ def resolve_definition_meta(
     :func:`~pipeline.reports.rankings.compute_worst_5min`. Mirrors those two
     functions' own None-default resolution exactly, so this metadata block
     can never show a tolerance different from the one actually used to
-    compute the rows next to it.
+    compute the rows next to it. *live* marks rows from a live scan of the
+    observations rather than the aggregates.
     """
+    source: Literal["aggregates", "live"] = "live" if live else "aggregates"
     if report_type in ("on_time", "route_table", "council_summary"):
         # One resolution rule for every on-time figure: council_summary pools
         # on_time's window into one whole-agency figure, and route_table's
@@ -100,6 +167,7 @@ def resolve_definition_meta(
             preset=LEGACY_PRESET_NAME if is_legacy else "custom",
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=resolved_late,
+            source=source,
         )
     if report_type == "worst_5min":
         is_legacy = late_tolerance_sec is None
@@ -108,11 +176,11 @@ def resolve_definition_meta(
             preset=LEGACY_PRESET_NAME if is_legacy else "custom",
             early_tolerance_sec=None,
             late_tolerance_sec=resolved_late,
+            source=source,
         )
-    # ranking/ranking_best/trend/compare_ranking/dow_weekend/dow_weekday: no
-    # on-time/late tolerance concept -- dedup/exclusion/measurement-point
-    # still apply (defaulted above), but there's no preset/tolerance to show.
-    return DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None)
+    # No on-time/late tolerance concept: the dedup/exclusion/measurement-point
+    # defaults still apply, but there is no preset or tolerance to show.
+    return DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None, source=source)
 
 
 def format_definition_csv_line(meta: DefinitionMeta) -> str:
@@ -144,8 +212,35 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     return (
         f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; "
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
-        f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外"
+        f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
+        f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
+
+
+_LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
+_UNKNOWN_DAY = {"ja": "不明", "en": "unknown"}
+
+
+def _built_day(meta: DefinitionMeta, locale: str) -> str:
+    """The JST day *meta*'s aggregates were built, as YYYY-MM-DD; for a live
+    scan, that no build applies; for aggregates with no build recorded, that
+    it is unknown."""
+    if meta.source == "live":
+        return _LIVE_DAY[locale]
+    if meta.built_at is None:
+        return _UNKNOWN_DAY[locale]
+    return jst_date(meta.built_at).isoformat()
+
+
+def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
+    """One footnote line naming the method version *meta*'s figures were made
+    with and the JST day their aggregates were built, in the words of the CSV
+    preamble's 集計日. :func:`format_definition_footnotes` ends with it, and the
+    delay record's text is footnoted with it, so a document says which method
+    produced it."""
+    if locale == "en":
+        return f"Method version: {meta.method_version}, aggregates built: {_built_day(meta, 'en')}"
+    return f"算出方法: {meta.method_version}、集計日: {_built_day(meta, 'ja')}"
 
 
 def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
@@ -185,6 +280,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
         lines.append(f"集計範囲: {measurement_point}")
         lines.append(f"重複排除: {dedup_rule}")
         lines.append(f"除外基準: |遅延|>{meta.exclusion_threshold_sec}秒を除外")
+    lines.append(format_method_stamp(meta, locale))
     return lines
 
 

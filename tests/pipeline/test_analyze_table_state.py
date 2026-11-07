@@ -37,6 +37,16 @@ def _states(pg_conn, agency_id) -> dict[str, str]:
         return dict(cur.fetchall())
 
 
+def _built_at(pg_conn, agency_id) -> dict:
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT table_name, built_at FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        return dict(cur.fetchall())
+
+
+def _moved(before: dict, after: dict) -> set[str]:
+    return {name for name in after if after[name] != before.get(name)}
+
+
 def _count(pg_conn, table, agency_id) -> int:
     with pg_conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {table} WHERE agency_id = %s", (agency_id,))
@@ -56,6 +66,77 @@ def test_a_run_with_nothing_new_rebuilds_nothing(pg_conn, agency_id, ch_client, 
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+
+
+def test_a_run_with_nothing_new_keeps_every_build_time(pg_conn, agency_id, ch_client):
+    """built_at says when a table's rows last changed, which a run that
+    rebuilds nothing does not, so a report's stamp and its cached rows hold."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _built_at(pg_conn, agency_id) == before
+
+
+def test_a_run_moves_the_build_time_of_what_it_rebuilt_and_only_that(pg_conn, agency_id, ch_client, monkeypatch):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=9)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _moved(before, _built_at(pg_conn, agency_id)) == {"agg_hour_daily"}
+
+
+def test_a_run_over_changed_dates_moves_the_build_time_of_the_tables_it_rebuilt(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        # Mirroring the seed again adds rows to its dates, so the ledger reports them.
+        _analyze(agency_id, pg_conn, ch_client)
+    rebuilt = {name for name, scope in _scopes_logged(caplog).items() if scope != "unchanged"}
+    assert rebuilt and rebuilt != set(agg_registry.TABLES)
+    assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
+
+
+def _first_row(table: str) -> str:
+    return f"ctid = (SELECT ctid FROM {table} WHERE agency_id = %s LIMIT 1)"
+
+
+@pytest.mark.parametrize(
+    ("disagreement", "rebuilt"),
+    [
+        (f"DELETE FROM agg_route_daily WHERE {_first_row('agg_route_daily')}", {"agg_route_daily"}),
+        (f"DELETE FROM agg_route_hour WHERE {_first_row('agg_route_hour')}", {"agg_route_hour"}),
+        # agg_route_stats is the figure route_delay_counts is checked against,
+        # and every whole-history table built from route_delay_counts follows it.
+        (
+            f"UPDATE agg_route_stats SET samples = samples + 1 WHERE {_first_row('agg_route_stats')}",
+            {"route_delay_counts", "agg_route_stats", "agg_route_hour", "agg_route_hour_dow"},
+        ),
+    ],
+    ids=["copied monthly", "whole history", "internal"],
+)
+def test_a_table_rebuilt_because_its_stores_disagree_moves_its_build_time(
+    pg_conn, agency_id, ch_client, caplog, disagreement, rebuilt
+):
+    """A ClickHouse-computed table whose Postgres side no longer adds up is
+    rebuilt whole (pipeline.analyze._ch_agg_scopes) though the plan, which
+    reads fingerprints and the ledger, left it unchanged."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(disagreement, (agency_id,))
+        assert cur.rowcount == 1
+    pg_conn.commit()
+    before = _built_at(pg_conn, agency_id)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
 
 
 def _as_if_last_built_before_table_state(pg_conn, agency_id):

@@ -88,6 +88,8 @@ What the user sees/does:
   This board has no tolerance query param of its own, so it always resolves
   to the `legacy_60s` preset — surfaced explicitly so it can be checked
   against a per-agency report's own `definition` block instead of assumed.
+  It ends with the method version and the newest day any listed agency's
+  aggregates changed.
 - **Ridership-weighted on-time toggle** — a checkbox next to the from/to date
   pickers, present only when at least one agency in the current list has a
   manually-configured ridership weight (`pipeline/reports/ridership.py`,
