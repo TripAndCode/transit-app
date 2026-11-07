@@ -923,10 +923,7 @@ async def compute_hourly_heatmap(
     second, compounding rounding — see migration 0030's own rationale for
     the general defect class).
     """
-    # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
-    # a direct read. It has no route/hour-band dimension, so either filter
-    # falls back to the live dedup scan (ClickHouse). DOW and the service
-    # filter (both on the date column) are fine.
+    # DOW and the service filter select dates, which agg_hour_daily keeps.
     if hourly_aggregates_serve(ctx):
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (

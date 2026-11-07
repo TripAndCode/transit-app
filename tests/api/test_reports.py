@@ -488,6 +488,37 @@ async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_row
 
 
 @pytest.mark.asyncio
+async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_client, ch_client, monkeypatch):
+    """A periodic analyze that finds nothing new must not forget every cache."""
+    import psycopg2
+
+    from pipeline.analyze import analyze
+    from pipeline.reports import definition
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route(pool, agency_id, "RNOOP", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    first = (await client.get(url)).json()
+
+    cleared: list[None] = []
+    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+    finally:
+        conn.close()
+
+    second = (await client.get(url)).json()
+    assert cleared == []
+    assert second["definition"]["built_at"] == first["definition"]["built_at"]
+    assert second["rows"] == first["rows"]
+
+
+@pytest.mark.asyncio
 async def test_the_council_report_text_names_the_method_version_and_the_build_day(reports_client):
     client, agency_id, pool = reports_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))

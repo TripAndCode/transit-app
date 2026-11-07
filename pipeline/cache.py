@@ -23,13 +23,15 @@ from pipeline import perf
 
 T = TypeVar("T")
 
-# Every decorated function registers its cache_clear here so the perf debug
-# endpoint can wipe all caches for cold-run benchmarking.
+# Every decorated function registers its cache_clear here, for clear_all.
 _REGISTERED_CLEARS: list[Callable[[], None]] = []
 
 
 def clear_all() -> None:
-    """Clear every async_lru_cache in the process (bench cold runs)."""
+    """Clear every async_lru_cache in the process. The perf debug endpoint
+    calls it for cold-run benchmarks, and
+    pipeline.reports.definition.stamp_build when analyze records a build, so
+    rows served are never older than the build they are stamped with."""
     for clear in _REGISTERED_CLEARS:
         clear()
 

@@ -32,7 +32,8 @@ After ingest, `analyze` turns the raw readings into summary tables:
 ## Method versions
 
 Every report, CSV export and council document names the method version its figures were
-made with, and the day their aggregates were last built. The version covers every
+made with, and the day their aggregates last changed: a run that rebuilds nothing leaves
+that day alone. The version covers every
 `agg_*` table's logic version and the plausibility clamp. A change to any of them is a
 new version: `METHOD_VERSIONS` in `pipeline/agg_registry.py` records what each version
 set, `tests/unit/method_versions.json` pins each released one, and

@@ -76,7 +76,7 @@ class DefinitionMeta(BaseModel):
     (:data:`pipeline.agg_registry.METHOD_VERSION`). ``source`` says whether
     they came from the aggregates or from a live scan of the observations
     (:func:`pipeline.reports.rankings.report_reads_aggregates`). ``built_at``
-    is when analyze last recorded the aggregates behind them
+    is when analyze last rewrote the aggregates behind them
     (:func:`stamp_build`), which a router with a connection fills in: always
     ``None`` for a live scan, and ``None`` for aggregates with no build
     recorded.
@@ -100,8 +100,8 @@ _seen_builds: object = _UNSEEN
 
 # The builds are named by every row's time, not the newest: analyze dates a
 # build when it writes the row and agencies commit concurrently, so a build
-# can become visible dated before one already seen. Every table of an agency
-# is recorded in one run, so an agency's newest row is its last run. With no
+# can become visible dated before one already seen. A table's row moves only
+# when a run rewrites it (pipeline.analyze._record_fingerprints). With no
 # agency named, built_at covers the agencies the board lists, not deleted.
 _BUILDS_SQL = """
 SELECT count(*) AS builds,
@@ -113,12 +113,12 @@ JOIN agencies a USING (agency_id)
 
 
 async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None) -> DefinitionMeta:
-    """*meta* with ``built_at``: the newest time analyze recorded the
-    aggregates of *agency_id*, or of every agency the board lists when it is
+    """*meta* with ``built_at``: the newest time analyze rewrote any
+    aggregate of *agency_id*, or of every agency the board lists when it is
     None. A live definition is returned as it is.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
-    so when analyze has recorded any build this process has not seen, every
+    so when analyze has rewritten any table since this process last looked, every
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
@@ -178,9 +178,8 @@ def resolve_definition_meta(
             late_tolerance_sec=resolved_late,
             source=source,
         )
-    # ranking/ranking_best/trend/compare_ranking/dow_weekend/dow_weekday: no
-    # on-time/late tolerance concept -- dedup/exclusion/measurement-point
-    # still apply (defaulted above), but there's no preset/tolerance to show.
+    # No on-time/late tolerance concept: the dedup/exclusion/measurement-point
+    # defaults still apply, but there is no preset or tolerance to show.
     return DefinitionMeta(preset=None, early_tolerance_sec=None, late_tolerance_sec=None, source=source)
 
 

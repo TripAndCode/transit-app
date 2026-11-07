@@ -482,8 +482,8 @@ the scope as one sentence above their content
   API response's `definition` field.
 - The block also names the method version (`method_version`, see
   `DELAY_ANALYSIS.md`'s "Method versions"), its `source`, and `built_at`,
-  the newest time analyze recorded the agency's aggregates
-  (`agg_table_state`). `source` is `live` when the rows come from a live scan
+  the newest time analyze rewrote any of the agency's aggregates
+  (`agg_table_state`; a run that rebuilds nothing leaves it). `source` is `live` when the rows come from a live scan
   (`pipeline/reports/rankings.py: report_reads_aggregates`: a time band, the
   trend heatmap under a route filter, the delay record), and then `built_at`
   is null and the stamp says 対象外（ライブ集計）; an aggregate view with no
