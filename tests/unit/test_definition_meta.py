@@ -31,6 +31,7 @@ from pipeline.reports.definition import (
     resolve_definition_meta,
 )
 from pipeline.reports.rankings import ON_TIME_PRESETS
+from pipeline.reports.schedule_revision import ScheduleDays
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
@@ -428,9 +429,9 @@ def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_ti
     assert (
         "; 値の根拠=事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）; "
         f"算出方法={METHOD_VERSION}; 集計日=2026-11-06; "
-        "時刻表=gtfs_static_20260401（2026-04-01取得）28日、記録なし 3日（全31日）"
+        "時刻表=gtfs_static_20260401（2026-04-01取得）28日間、記録なし 3日間（全31日間）"
     ) in line
-    assert line.endswith("（全31日）")
+    assert line.endswith("（全31日間）")
     assert "," not in line
 
 
@@ -442,8 +443,8 @@ def test_csv_line_without_timetables_ends_with_the_build_day():
 @pytest.mark.parametrize(
     ("locale", "timetable"),
     [
-        ("ja", "時刻表: gtfs_static_20260401（2026-04-01取得）28日、記録なし 3日（全31日）"),
-        ("en", "Timetable: gtfs_static_20260401 (fetched 2026-04-01) on 28 days, none recorded on 3 days (of 31 days)"),
+        ("ja", "時刻表: gtfs_static_20260401（2026-04-01取得）28日間、記録なし 3日間（全31日間）"),
+        ("en", "Timetable: gtfs_static_20260401 (fetched 2026-04-01): 28 days; none recorded: 3 days (of 31 days)"),
     ],
 )
 def test_the_stamp_says_what_each_value_is_and_names_the_method_and_the_timetables(locale, timetable):
@@ -458,12 +459,12 @@ def test_the_stamp_says_what_each_value_is_and_names_the_method_and_the_timetabl
         (
             "ja",
             [TimetableVersion(agency_id=1, name="hiroden_static", fetched_on=None, days=1)],
-            "hiroden_static 1日（全1日）",
+            "hiroden_static 1日間（全1日間）",
         ),
         (
             "en",
             [TimetableVersion(agency_id=1, name="hiroden_static", fetched_on=None, days=1)],
-            "hiroden_static on 1 day (of 1 day)",
+            "hiroden_static: 1 day (of 1 day)",
         ),
         ("ja", [], "記録なし"),
         ("en", [], "none recorded"),
@@ -476,15 +477,22 @@ def test_a_timetable_whose_name_carries_no_day_is_named_as_it_is(locale, version
 
 
 def test_each_listed_agency_accounts_for_every_day_of_the_range():
-    """Each agency's versions in the order they first ran, then the days none
-    was recorded on, so its entries add up to the range."""
-    rows = [
-        (1, "gtfs_static_20260401", 20),
-        (1, "gtfs_static_20260501", 8),
-        (2, "hiroden_static", 31),
-        (3, None, 0),
-    ]
-    assert definition._timetables(rows, 31) == [
+    """Each agency's versions in the order they first ran within the range,
+    then the days none was recorded on, so its entries add up to the range.
+    The day before the range, read for the trend's boundaries, is not counted."""
+
+    def day(n):
+        return date(2026, 5, 1) + timedelta(days=n)
+
+    rows = (
+        [(1, date(2026, 4, 30), "gtfs_static_20260301")]
+        + [(1, day(n), "gtfs_static_20260401") for n in range(20)]
+        + [(1, day(n), "gtfs_static_20260501") for n in range(20, 28)]
+        + [(2, day(n), "hiroden_static") for n in range(31)]
+        + [(3, None, None)]
+    )
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 31), rows)
+    assert definition._timetables(schedule) == [
         TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=20),
         TimetableVersion(agency_id=1, name="gtfs_static_20260501", fetched_on=date(2026, 5, 1), days=8),
         TimetableVersion(agency_id=1, name=None, fetched_on=None, days=3),

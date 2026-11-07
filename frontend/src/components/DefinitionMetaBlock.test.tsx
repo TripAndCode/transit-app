@@ -142,7 +142,7 @@ describe("DefinitionMetaBlock", () => {
   it("names the timetables in force and the days each covers", () => {
     renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: ONE_AGENCY }} />);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent(
-      "Timetable: version fetched Apr 1, 2026 on 28 days, none recorded on 3 days (of 31 days).",
+      "Timetable: the version fetched Apr 1, 2026: 28 days; none recorded: 3 days (of 31 days).",
     );
   });
 
@@ -150,14 +150,14 @@ describe("DefinitionMetaBlock", () => {
     await i18n.changeLanguage("ja");
     renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: ONE_AGENCY }} />);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent(
-      "時刻表：2026年4月1日取得版 28日、記録なし 3日（全31日）。",
+      "時刻表：2026年4月1日取得版 28日間、記録なし 3日間（全31日間）。",
     );
   });
 
   it("names a timetable whose name carries no day by its name", () => {
     const undated: TimetableVersion[] = [{ agency_id: 1, name: "hiroden_static", fetched_on: null, days: 1 }];
     renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: undated }} />);
-    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetable: hiroden_static on 1 day (of 1 day).");
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetable: hiroden_static: 1 day (of 1 day).");
   });
 
   it("says nothing of timetables the API did not name", () => {
@@ -179,8 +179,8 @@ describe("DefinitionMetaBlock", () => {
     );
     const items = screen.getAllByRole("listitem").map((item) => item.textContent);
     expect(items).toEqual([
-      "Hiroden: version fetched Mar 1, 2026 on 7 days (of 7 days)",
-      "HiroBus: hiroden_static on 1 day, none recorded on 6 days (of 7 days)",
+      "Hiroden — the version fetched Mar 1, 2026: 7 days (of 7 days)",
+      "HiroBus — hiroden_static: 1 day; none recorded: 6 days (of 7 days)",
     ]);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetables");
   });

@@ -17,36 +17,62 @@ table by later `analyze()` runs.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import NamedTuple
 
+# Every scope agency's recorded days, the day before the range included. An
+# agency with none recorded in it is one row with no date, so it is still named.
 _SQL = """
-    SELECT date, static_version_id
-    FROM agg_schedule_revision_daily
-    WHERE agency_id = $1 AND date BETWEEN $2 AND $3
-    ORDER BY date
+    SELECT a.agency_id, v.date, v.static_version_id
+    FROM agencies a
+    LEFT JOIN agg_schedule_revision_daily v ON v.agency_id = a.agency_id AND v.date BETWEEN $2 AND $3
+    WHERE a.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
+    ORDER BY a.agency_id, v.date
 """
 
 
-async def get_schedule_revision_boundaries(conn, agency_id: int, from_date: date, to_date: date) -> list[str]:
-    """ISO date strings in ``[from_date, to_date]`` where the static
-    schedule version running that day differs from the previous CALENDAR
-    day's.
+class ScheduleDays(NamedTuple):
+    """Each day's dominant timetable over [from_date, to_date], plus the day
+    before it, for one agency or every agency the board lists. One read serves
+    both the definition stamp's timetables
+    (:func:`pipeline.reports.definition.stamp_build`) and the trend chart's
+    :meth:`boundaries`. *rows* are ``(agency_id, date, static_version_id)``,
+    by agency then date; the date is None for an agency with none recorded."""
 
-    A day whose immediately preceding calendar day has no row in
-    `agg_schedule_revision_daily` at all (a gap — unknown version) is never
-    flagged as a boundary against it: a gap means "unknown", not "known to
-    be different".
-    """
-    # One extra day fetched before from_date so a version change landing
-    # exactly on from_date is still detected against the day before the
-    # visible range, not just treated as the series' start.
+    from_date: date
+    to_date: date
+    rows: list
+
+    def boundaries(self) -> list[str]:
+        """ISO date strings in ``[from_date, to_date]`` where the static
+        schedule version running that day differs from the previous CALENDAR
+        day's, for a single agency's days.
+
+        A day whose immediately preceding calendar day has no row in
+        `agg_schedule_revision_daily` at all (a gap — unknown version) is never
+        flagged as a boundary against it: a gap means "unknown", not "known to
+        be different". The day before from_date is read so a version change
+        landing exactly on from_date is still detected against it, not just
+        treated as the series' start.
+        """
+        boundaries: list[str] = []
+        prev_date: date | None = None
+        prev_version: str | None = None
+        for _agency, d, version in self.rows:
+            if d is None:
+                continue
+            if (
+                prev_date is not None
+                and d == prev_date + timedelta(days=1)
+                and version != prev_version
+                and d >= self.from_date
+            ):
+                boundaries.append(d.isoformat())
+            prev_date, prev_version = d, version
+        return boundaries
+
+
+async def read_schedule_days(conn, agency_id: int | None, from_date: date, to_date: date) -> ScheduleDays:
+    """The :class:`ScheduleDays` of *agency_id*, or of every agency the board
+    lists when it is None."""
     rows = await conn.fetch(_SQL, agency_id, from_date - timedelta(days=1), to_date)
-    boundaries: list[str] = []
-    prev_date: date | None = None
-    prev_version: str | None = None
-    for r in rows:
-        d: date = r["date"]
-        version: str = r["static_version_id"]
-        if prev_date is not None and d == prev_date + timedelta(days=1) and version != prev_version and d >= from_date:
-            boundaries.append(d.isoformat())
-        prev_date, prev_version = d, version
-    return boundaries
+    return ScheduleDays(from_date, to_date, rows)

@@ -414,7 +414,7 @@ _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
 _BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
 # The stamp of a one-day delay record with no timetable recorded for its day.
-_CERT_STAMP = f"{_BASIS_NOTE}\n{_LIVE_STAMP}\n※時刻表: 記録なし 1日（全1日）"
+_CERT_STAMP = f"{_BASIS_NOTE}\n{_LIVE_STAMP}\n※時刻表: 記録なし 1日間（全1日間）"
 
 
 def _preamble(resp) -> str:
@@ -478,8 +478,8 @@ async def test_a_report_names_the_timetables_in_force_over_its_days(reports_clie
         {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3},
     ]
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
-        "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日、"
-        "gtfs_static_20260520（2026-05-20取得）1日、記録なし 3日（全7日）"
+        "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日間、"
+        "gtfs_static_20260520（2026-05-20取得）1日間、記録なし 3日間（全7日間）"
     )
 
 
@@ -575,7 +575,7 @@ async def test_the_council_report_text_names_the_method_version_the_build_day_an
     basis = lines.index(_BASIS_NOTE)
     assert lines[basis + 1 : basis + 3] == [
         f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
-        "※時刻表: gtfs_static_20260401（2026-04-01取得）1日（全1日）",
+        "※時刻表: gtfs_static_20260401（2026-04-01取得）1日間（全1日間）",
     ]
 
 
@@ -600,7 +600,7 @@ async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_
     ]
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
         f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）; "
-        "時刻表=gtfs_static_20260401（2026-04-01取得）1日（全1日）"
+        "時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
     )
     if report_type == "council_summary":
         assert _LIVE_STAMP in body["text"].split("\n")
@@ -1140,6 +1140,11 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
     assert resp.status_code == 200
     rows_out = resp.json()["rows"]
     assert rows_out[0]["revision_boundaries"] == ["2026-05-03"]
+    # The same read names the timetables in the definition.
+    assert resp.json()["definition"]["timetable_versions"] == [
+        {"agency_id": agency_id, "name": "v1", "fetched_on": None, "days": 2},
+        {"agency_id": agency_id, "name": "v2", "fetched_on": None, "days": 1},
+    ]
 
 
 @pytest.mark.asyncio

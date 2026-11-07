@@ -83,13 +83,13 @@ def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale
         (
             "ja",
             f"遅延300秒超の便: 2件\n{_BASIS['ja']}\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06\n"
-            "※時刻表: gtfs_static_20260601（2026-06-01取得）1日（全1日）",
+            "※時刻表: gtfs_static_20260601（2026-06-01取得）1日間（全1日間）",
         ),
         (
             "en",
             f"2 trip(s) exceeded the 300s delay threshold.\n{_BASIS['en']}\n"
             f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06\n"
-            "* Timetable: gtfs_static_20260601 (fetched 2026-06-01) on 1 day (of 1 day)",
+            "* Timetable: gtfs_static_20260601 (fetched 2026-06-01): 1 day (of 1 day)",
         ),
     ],
 )

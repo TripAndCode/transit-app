@@ -90,8 +90,8 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     const block = screen.getByTestId("definition-meta");
-    expect(block).toHaveTextContent("Hiroden: version fetched Mar 1, 2026 on 7 days (of 7 days)");
-    expect(block).toHaveTextContent("HiroBus: none recorded on 7 days (of 7 days)");
+    expect(block).toHaveTextContent("Hiroden — the version fetched Mar 1, 2026: 7 days (of 7 days)");
+    expect(block).toHaveTextContent("HiroBus — none recorded: 7 days (of 7 days)");
   });
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {

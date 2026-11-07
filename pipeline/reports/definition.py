@@ -28,6 +28,7 @@ from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
 )
 from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
+from pipeline.reports.schedule_revision import ScheduleDays
 from pipeline.static_archive import fetch_day
 
 # Stable identifiers (not resolved per request, unlike the tolerance fields
@@ -42,10 +43,10 @@ MEASUREMENT_POINT = "all_stops_all_observations"
 # Observed values would be a second basis beside it, under their own identifier.
 VALUE_BASIS: Literal["feed_prediction"] = "feed_prediction"
 
-# Locale-aware operator-facing text for MEASUREMENT_POINT/DEDUP_RULE, keyed by
+# Locale-aware operator-facing text for each identifier above, keyed by
 # (value, locale) tuples rather than re-typed string literals -- a dict keyed
 # by a bare name is resolved against that name's *current* value, so this
-# can't silently fall out of sync with either constant the way independently
+# can't silently fall out of sync with its constant the way independently
 # hand-typed copies could. Both format_definition_csv_line (Japanese-only, for
 # the CSV preamble cell) and format_definition_footnotes (locale-aware, for a
 # report template's footnote lines) render from this ONE source of truth, so
@@ -153,53 +154,41 @@ JOIN agencies a USING (agency_id)
 """
 
 
-async def stamp_build(
-    conn, meta: DefinitionMeta, agency_id: int | None, from_date: date, to_date: date
-) -> DefinitionMeta:
-    """*meta* with the timetables in force over [*from_date*, *to_date*] and
+async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedule: ScheduleDays) -> DefinitionMeta:
+    """*meta* with the timetables in force over *schedule*'s dates and
     ``built_at``: the newest time analyze rewrote any aggregate, both for
-    *agency_id*, or for every agency the board lists when it is None. A live
-    scan gets its timetables and no build.
+    *agency_id*, or for every agency the board lists when it is None.
+    *schedule* is that scope's
+    :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
+    gets its timetables and no build.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
     so when analyze has rewritten any table since this process last looked, every
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
-    update: dict[str, object] = {}
+    update: dict[str, object] = {"timetable_versions": _timetables(schedule)}
     if meta.source == "aggregates":
         builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
         _note_builds((builds, stamps))
         update["built_at"] = built_at
-    rows = await conn.fetch(_TIMETABLES_SQL, agency_id, from_date, to_date)
-    update["timetable_versions"] = _timetables(rows, (to_date - from_date).days + 1)
     return meta.model_copy(update=update)
 
 
-# Each scope agency's timetables over a range of service days, in the order
-# they first ran; an agency with none recorded on any of them is one row with
-# no name.
-_TIMETABLES_SQL = """
-SELECT a.agency_id, v.static_version_id AS name, count(v.date) AS days
-FROM agencies a
-LEFT JOIN agg_schedule_revision_daily v ON v.agency_id = a.agency_id AND v.date BETWEEN $2 AND $3
-WHERE a.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
-GROUP BY a.agency_id, v.static_version_id
-ORDER BY a.agency_id, min(v.date)
-"""
-
-
-def _timetables(rows, range_days: int) -> list[TimetableVersion]:
-    """Each agency's (agency_id, name, days) *rows* as its versions, then the
-    rest of its *range_days* as the days none was recorded on."""
+def _timetables(schedule: ScheduleDays) -> list[TimetableVersion]:
+    """Each agency's timetables over *schedule*'s range in the order they first
+    ran, each with its days, then the rest of the range as the days none was
+    recorded on."""
+    range_days = (schedule.to_date - schedule.from_date).days + 1
     versions: list[TimetableVersion] = []
-    for agency_id, group in groupby(rows, key=lambda row: row[0]):
-        recorded = 0
-        for _agency, name, days in group:
-            if name is None:
-                continue
-            versions.append(TimetableVersion(agency_id=agency_id, name=name, fetched_on=fetch_day(name), days=days))
-            recorded += days
+    for agency_id, days in groupby(schedule.rows, key=lambda row: row[0]):
+        counts: dict[str, int] = {}
+        for _agency, day, name in days:
+            if day is not None and schedule.from_date <= day <= schedule.to_date:
+                counts[name] = counts.get(name, 0) + 1
+        for name, count in counts.items():
+            versions.append(TimetableVersion(agency_id=agency_id, name=name, fetched_on=fetch_day(name), days=count))
+        recorded = sum(counts.values())
         if recorded < range_days:
             versions.append(
                 TimetableVersion(agency_id=agency_id, name=None, fetched_on=None, days=range_days - recorded)
@@ -338,16 +327,17 @@ def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
 
 
 def _days(n: int, locale: str) -> str:
+    """*n* days as a duration: 日間 in Japanese, so a count after a date never
+    reads as a day of the month."""
     if locale == "en":
         return f"{n} day" if n == 1 else f"{n} days"
-    return f"{n}日"
+    return f"{n}日間"
 
 
 def _timetable_text(meta: DefinitionMeta, locale: str) -> str | None:
     """*meta*'s timetables, each with the days it covers, then the range's
     length, for one agency's document: the board's several agencies are told
-    apart only on its screen. None when no router named them. The Japanese
-    text holds no raw comma, so the CSV preamble's cell can carry it."""
+    apart only on its screen. None when no router named them."""
     if meta.timetable_versions is None:
         return None
     if not meta.timetable_versions:
@@ -355,17 +345,17 @@ def _timetable_text(meta: DefinitionMeta, locale: str) -> str | None:
     parts = [_timetable_part(version, locale) for version in meta.timetable_versions]
     total = _days(sum(version.days for version in meta.timetable_versions), locale)
     if locale == "en":
-        return f"{', '.join(parts)} (of {total})"
+        return f"{'; '.join(parts)} (of {total})"
     return f"{'、'.join(parts)}（全{total}）"
 
 
 def _timetable_part(version: TimetableVersion, locale: str) -> str:
     days = _days(version.days, locale)
     if version.name is None:
-        return f"none recorded on {days}" if locale == "en" else f"記録なし {days}"
+        return f"none recorded: {days}" if locale == "en" else f"記録なし {days}"
     if locale == "en":
         fetched = "" if version.fetched_on is None else f" (fetched {version.fetched_on.isoformat()})"
-        return f"{version.name}{fetched} on {days}"
+        return f"{version.name}{fetched}: {days}"
     if version.fetched_on is None:
         return f"{version.name} {days}"
     return f"{version.name}（{version.fetched_on.isoformat()}取得）{days}"

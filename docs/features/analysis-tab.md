@@ -515,8 +515,10 @@ the scope as one sentence above their content
   These are days not yet analyzed, or days from an ingest that stamps no
   version. A version is named by its loaded zip's name, with the fetch day
   that `gtfs_static_YYYYMMDD` carries. A live scan names its timetables too.
-  `stamp_build` reads them in one indexed query per request, and they render
-  in the same four places as the method stamp.
+  They come from one indexed read per request
+  (`pipeline/reports/schedule_revision.py: read_schedule_days`), which also
+  gives the trend chart its timetable-revision markers, and they render in the
+  same four places as the method stamp.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so
