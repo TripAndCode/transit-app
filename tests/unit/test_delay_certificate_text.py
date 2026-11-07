@@ -15,9 +15,9 @@ from pipeline.reports.definition import TimetableVersion, resolve_definition_met
 _ROWS = [("青森市バス", "R1", "平日", "2026-06-20", "10:00:00", "10:05:01", 301)] * 2
 _DEFINITION = resolve_definition_meta("delay_certificate", None, None, live=True)
 _BASIS = {
-    "ja": "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）",
-    "en": "* Value basis: the departure delay the operator's feed last predicted for each stop "
-    "(not an observed passing time)",
+    "ja": "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）",
+    "en": "* Value basis: computed from the delays the operator's feed last predicted for each stop "
+    "(not observed passing times)",
 }
 _STAMP = {
     "ja": f"{_BASIS['ja']}\n※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",

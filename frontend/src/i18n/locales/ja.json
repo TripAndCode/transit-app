@@ -336,7 +336,7 @@
       "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
     },
     "valueBasis": {
-      "feed_prediction": "値は、事業者のフィードが停留所ごとに最後に配信した発車遅延の予測で、通過を観測した値ではありません。"
+      "feed_prediction": "数値は、事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出したもので、通過の観測値ではありません。"
     },
     "exclusion_hours_one": "{{count}}時間を超えてずれた値は誤りとして除外します。",
     "exclusion_hours_other": "{{count}}時間を超えてずれた値は誤りとして除外します。",

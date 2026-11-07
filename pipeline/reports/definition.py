@@ -37,9 +37,9 @@ from pipeline.static_archive import fetch_day
 # "measurement point" knob exists elsewhere in the pipeline today.
 DEDUP_RULE = "latest_observation_per_stop_event"
 MEASUREMENT_POINT = "all_stops_all_observations"
-# What every stored delay is: the operator feed's prediction for the stop, the
-# last one the dedup kept, never an observed passage. Observed values would be
-# a second basis beside it, under their own identifier.
+# What every figure is made from: the delays the operator feed predicted for
+# each stop, the last of each the dedup kept, never an observed passage.
+# Observed values would be a second basis beside it, under their own identifier.
 VALUE_BASIS: Literal["feed_prediction"] = "feed_prediction"
 
 # Locale-aware operator-facing text for MEASUREMENT_POINT/DEDUP_RULE, keyed by
@@ -59,9 +59,9 @@ _DEDUP_RULE_TEXT: dict[tuple[str, str], str] = {
     (DEDUP_RULE, "en"): "latest observation per stop event",
 }
 _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
-    (VALUE_BASIS, "ja"): "事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）",
+    (VALUE_BASIS, "ja"): "事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）",
     (VALUE_BASIS, "en"): (
-        "the departure delay the operator's feed last predicted for each stop (not an observed passing time)"
+        "computed from the delays the operator's feed last predicted for each stop (not observed passing times)"
     ),
 }
 
@@ -114,7 +114,7 @@ class DefinitionMeta(BaseModel):
     ``None`` for a live scan, and ``None`` for aggregates with no build
     recorded.
 
-    ``value_basis`` says what each stored value is (:data:`VALUE_BASIS`).
+    ``value_basis`` says what the figures are made from (:data:`VALUE_BASIS`).
     ``timetable_versions`` names the timetables in force over the request's
     days, each listed agency's adding up to the range (:class:`TimetableVersion`),
     for a live scan too; ``None`` until :func:`stamp_build` fills it in.
@@ -372,8 +372,8 @@ def _timetable_part(version: TimetableVersion, locale: str) -> str:
 
 
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
-    """The footnote lines that say where *meta*'s figures came from: what each
-    value is, the method and build day (:func:`format_method_stamp`), and the
+    """The footnote lines that say where *meta*'s figures came from: what they
+    are made from, the method and build day (:func:`format_method_stamp`), and the
     timetables in force when a router named them.
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""

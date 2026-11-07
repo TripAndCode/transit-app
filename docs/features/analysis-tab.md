@@ -505,9 +505,10 @@ the scope as one sentence above their content
   it before the rows, and forgets the compute caches when analyze has
   recorded a newer build, so cached rows never sit under a later build's
   date.
-- The stamp also says what each value is and which timetables were in force.
-  `value_basis` is `feed_prediction`: the departure delay the operator's feed
-  last predicted for the stop, never an observed passage (値の根拠).
+- The stamp also says what the figures are made from and which timetables
+  were in force. `value_basis` is `feed_prediction`: every figure is computed
+  from the delays the operator's feed last predicted for each stop, never from
+  an observed passage (値の根拠).
   `timetable_versions` lists, per agency, each timetable that most of a day's
   observations were ingested against (`agg_schedule_revision_daily`) and how
   many of the request's days it covers, then the days with none recorded (時刻表).

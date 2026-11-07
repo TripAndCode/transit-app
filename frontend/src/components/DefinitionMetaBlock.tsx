@@ -15,11 +15,11 @@ type BlockProps = Props & {
 };
 
 /** How the figures beside it were made, in plain words, behind one
- *  disclosure: what each value is, which departures count, how a repeated
- *  report is treated, which readings are dropped, what on time means and,
- *  where the figures carry an early-departure rate, what it counts, then the
- *  method version, the day the aggregates were built and the timetables in
- *  force. A reader comparing two agencies or two exports can open it to see
+ *  disclosure: what they are made from, which departures count, how a
+ *  repeated report is treated, which readings are dropped, what on time means
+ *  and, where the figures carry an early-departure rate, what it counts, then
+ *  the method version, the day the aggregates were built and the timetables
+ *  in force. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API

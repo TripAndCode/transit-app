@@ -411,7 +411,7 @@ async def _record_timetables(pool, agency_id, versions):
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
-_BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）"
+_BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
 # The stamp of a one-day delay record with no timetable recorded for its day.
 _CERT_STAMP = f"{_BASIS_NOTE}\n{_LIVE_STAMP}\n※時刻表: 記録なし 1日（全1日）"

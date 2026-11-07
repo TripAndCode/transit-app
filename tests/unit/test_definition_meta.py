@@ -416,9 +416,9 @@ _TIMETABLES = [
     TimetableVersion(agency_id=1, name=None, fetched_on=None, days=3),
 ]
 _VALUE_BASIS = {
-    "ja": "値の根拠: 事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）",
-    "en": "Value basis: the departure delay the operator's feed last predicted for each stop "
-    "(not an observed passing time)",
+    "ja": "値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）",
+    "en": "Value basis: computed from the delays the operator's feed last predicted for each stop "
+    "(not observed passing times)",
 }
 
 
@@ -426,7 +426,7 @@ def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_ti
     meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES})
     line = format_definition_csv_line(meta)
     assert (
-        "; 値の根拠=事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）; "
+        "; 値の根拠=事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）; "
         f"算出方法={METHOD_VERSION}; 集計日=2026-11-06; "
         "時刻表=gtfs_static_20260401（2026-04-01取得）28日、記録なし 3日（全31日）"
     ) in line

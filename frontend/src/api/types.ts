@@ -322,9 +322,9 @@ export type DefinitionMeta = {
   method_version: string;
   source: "aggregates" | "live";
   built_at: string | null;
-  /** What each value is: `"feed_prediction"`, the operator feed's last
-   *  predicted departure delay for the stop. A string, so a basis this build
-   *  has no words for is shown as sent. */
+  /** What the figures are made from: `"feed_prediction"`, the delays the
+   *  operator's feed last predicted for each stop. A string, so a basis this
+   *  build has no words for is shown as sent. */
   value_basis: string;
   /** The timetables in force over the request's days, each listed agency's
    *  adding up to the range; null when the API named none. */

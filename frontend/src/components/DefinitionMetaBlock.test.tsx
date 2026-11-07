@@ -119,18 +119,18 @@ describe("DefinitionMetaBlock", () => {
     expect(block).not.toHaveTextContent("Nov 6");
   });
 
-  it("says each value is the feed's prediction, not an observed passage", () => {
+  it("says the figures are made from the feed's predictions, not observed passages", () => {
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent(
-      "Each value is the departure delay the operator's feed last predicted for the stop, not an observed passing time.",
+      "Figures are computed from the delays the operator's feed last predicted for each stop, not from observed passing times.",
     );
   });
 
-  it("says what each value is the way a Japanese document does", async () => {
+  it("says what the figures are made from the way a Japanese document does", async () => {
     await i18n.changeLanguage("ja");
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent(
-      "値は、事業者のフィードが停留所ごとに最後に配信した発車遅延の予測で、通過を観測した値ではありません。",
+      "数値は、事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出したもので、通過の観測値ではありません。",
     );
   });
 
