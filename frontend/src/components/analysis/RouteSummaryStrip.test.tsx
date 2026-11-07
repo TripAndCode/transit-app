@@ -12,7 +12,8 @@ const CTX: Scope = {
 const DEFINITION = {
   preset: null, early_tolerance_sec: null, late_tolerance_sec: 60, early_departure_sec: null, exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations", dedup_rule: "latest_observation_per_stop_event",
-  method_version: "2026.11.0", source: "aggregates", built_at: null,
+  method_version: "2026.11.0", source: "aggregates", built_at: null, value_basis: "feed_prediction",
+  timetable_versions: null,
 };
 
 function reports(byType: Record<string, unknown[]>, rowsTotal = 174, pending: string[] = []) {

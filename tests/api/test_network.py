@@ -677,6 +677,31 @@ async def test_the_board_names_the_method_version_and_its_newest_build(net_clien
     assert datetime.fromisoformat(listed["built_at"]) == datetime(2026, 11, 4, tzinfo=timezone.utc)
 
 
+async def test_the_board_names_each_listed_agencys_timetables(net_client):
+    """The board's figures rest on every agency it lists, so its stamp names
+    each one's timetables over the range, every agency accounting for every
+    day, and leaves out an agency it no longer lists."""
+    client, pool, a, b, cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES ($1, $2, $3)",
+            [(a, date(2026, 4, day), "gtfs_static_20260301") for day in range(1, 6)]
+            + [(a, date(2026, 4, day), "gtfs_static_20260405") for day in (6, 7)]
+            + [(b, date(2026, 4, 2), "hiroden_static")],
+        )
+        await c.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
+
+    definition = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert definition["value_basis"] == "feed_prediction"
+    assert definition["timetable_versions"] == [
+        {"agency_id": a, "name": "gtfs_static_20260301", "fetched_on": "2026-03-01", "days": 5},
+        {"agency_id": a, "name": "gtfs_static_20260405", "fetched_on": "2026-04-05", "days": 2},
+        {"agency_id": b, "name": "hiroden_static", "fetched_on": None, "days": 1},
+        {"agency_id": b, "name": None, "fetched_on": None, "days": 6},
+    ]
+
+
 async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net_client):
     client, pool, a, _b, _cc = net_client
     params = {"from": "2026-04-01", "to": "2026-04-07"}

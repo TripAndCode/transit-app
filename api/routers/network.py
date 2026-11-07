@@ -20,6 +20,7 @@ from pipeline.reports.comparability import (
 )
 from pipeline.reports.definition import DefinitionMeta, stamp_build
 from pipeline.reports.network import compute_network_summary, coverage_through
+from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 
 router = APIRouter(prefix="/api/network", tags=["network"])
@@ -139,7 +140,8 @@ async def network_summary(
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
     """
-    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None)
+    schedule = await read_schedule_days(conn, None, ctx.from_date, ctx.to_date)
+    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None, schedule)
     rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
     # The same rule compute_network_summary bounded each row's coverage by,
     # over the same per-agency last days.

@@ -322,6 +322,24 @@ export type DefinitionMeta = {
   method_version: string;
   source: "aggregates" | "live";
   built_at: string | null;
+  /** What the figures are made from: `"feed_prediction"`, the delays the
+   *  operator's feed last predicted for each stop. A string, so a basis this
+   *  build has no words for is shown as sent. */
+  value_basis: string;
+  /** The timetables in force over the request's days, each listed agency's
+   *  adding up to the range; null when the API named none. */
+  timetable_versions: TimetableVersion[] | null;
+};
+
+/** A timetable an agency's observations were ingested against, and on how
+ *  many of the request's days it was the one most of them carried. `name` is
+ *  the loaded zip's version name and `fetched_on` (ISO date) the day it says
+ *  the zip was fetched; `name` is null for the days with none recorded. */
+export type TimetableVersion = {
+  agency_id: number;
+  name: string | null;
+  fetched_on: string | null;
+  days: number;
 };
 
 /** A report cell the backend computes as a Python `Decimal` (chosen so its

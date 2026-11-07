@@ -379,7 +379,12 @@ export function NetworkTab() {
       {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
           what you check once a comparison has raised a question, not what you
           read before making one. */}
-      {data && <DefinitionMetaBlock definition={data.definition} />}
+      {data && (
+        <DefinitionMetaBlock
+          definition={data.definition}
+          agencyNames={new Map(data.agencies.map((agency) => [agency.agency_id, agency.agency_name]))}
+        />
+      )}
 
       <AsyncSection
         loading={isPending}

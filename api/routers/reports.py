@@ -82,7 +82,7 @@ from pipeline.reports.forecast import (
 )
 from pipeline.reports.rankings import report_reads_aggregates
 from pipeline.reports.route_table import RouteTableOrder
-from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
+from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
@@ -1402,8 +1402,12 @@ async def get_report(
         early_tolerance_sec=early_tolerance_sec,
         late_tolerance_sec=late_tolerance_sec,
     )
+    schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
     definition = await stamp_build(
-        conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
+        conn,
+        resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live),
+        agency_id,
+        schedule,
     )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
@@ -1527,9 +1531,9 @@ async def get_report(
         # agg_schedule_revision_daily coverage at all (its ingest strategy
         # never joins static data, or its RT rows carry no static_version_id
         # yet).
-        # Skipped entirely for the CSV export above, which has no chart to
-        # annotate.
-        revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)
+        # Drawn from the read the definition's timetables came from; the CSV
+        # export above has no chart to annotate, so it skips them.
+        revision_boundaries = schedule.boundaries()
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,

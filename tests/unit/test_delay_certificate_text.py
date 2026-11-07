@@ -1,21 +1,27 @@
 """The delay record's summary line and CSV footnotes must give the true count
 of qualifying trips, say so when only the first rows are listed, and say the
 list is the service's reference document, not the operator's certificate.
-The summary is footnoted with the method version it was drawn under."""
+The summary is footnoted with what each value is, the method version it was
+drawn under and the timetables in force."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query.formatter import format_delay_certificate_footnotes, format_delay_certificate_text
-from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.definition import TimetableVersion, resolve_definition_meta
 
 _ROWS = [("青森市バス", "R1", "平日", "2026-06-20", "10:00:00", "10:05:01", 301)] * 2
 _DEFINITION = resolve_definition_meta("delay_certificate", None, None, live=True)
+_BASIS = {
+    "ja": "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）",
+    "en": "* Value basis: computed from the delays the operator's feed last predicted for each stop "
+    "(not observed passing times)",
+}
 _STAMP = {
-    "ja": f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
-    "en": f"* Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
+    "ja": f"{_BASIS['ja']}\n※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）",
+    "en": f"{_BASIS['en']}\n* Method version: {METHOD_VERSION}, aggregates built: not applicable (live scan)",
 }
 
 
@@ -74,19 +80,30 @@ def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale
 @pytest.mark.parametrize(
     ("locale", "expected"),
     [
-        ("ja", f"遅延300秒超の便: 2件\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06"),
+        (
+            "ja",
+            f"遅延300秒超の便: 2件\n{_BASIS['ja']}\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06\n"
+            "※時刻表: gtfs_static_20260601（2026-06-01取得）1日間（全1日間）",
+        ),
         (
             "en",
-            "2 trip(s) exceeded the 300s delay threshold.\n"
-            f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06",
+            f"2 trip(s) exceeded the 300s delay threshold.\n{_BASIS['en']}\n"
+            f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06\n"
+            "* Timetable: gtfs_static_20260601 (fetched 2026-06-01): 1 day (of 1 day)",
         ),
     ],
 )
 def test_the_summary_is_footnoted_with_whatever_stamp_the_definition_carries(locale, expected):
     """The record is a live scan, so its router marks it live; the footnote
-    renders an aggregate definition's build day the same way."""
+    renders an aggregate definition's build day the same way, and the
+    timetables its router named."""
     built = resolve_definition_meta("delay_certificate", None, None).model_copy(
-        update={"built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc)}
+        update={
+            "built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc),
+            "timetable_versions": [
+                TimetableVersion(agency_id=1, name="gtfs_static_20260601", fetched_on=date(2026, 6, 1), days=1)
+            ],
+        }
     )
     assert format_delay_certificate_text(_ROWS, 300, total=2, locale=locale, definition=built) == expected
 
