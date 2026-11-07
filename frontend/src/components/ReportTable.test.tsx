@@ -20,7 +20,7 @@ function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
 }
 
-type TableProps = Partial<Pick<Parameters<typeof ReportTable>[0], "minSamples" | "sortBy" | "sortDirection">>;
+type TableProps = Partial<Pick<Parameters<typeof ReportTable>[0], "minSamples" | "sortBy" | "sortDirection" | "earlyDepartureSec">>;
 
 function renderTable(rows: unknown[][], reportType = "route_table", props: TableProps = {}) {
   return renderWithProviders(
@@ -36,10 +36,14 @@ function renderTable(rows: unknown[][], reportType = "route_table", props: Table
 }
 
 /** A Routes table row: (route_code, avg_min, on_time_pct, late5_pct,
- *  late5_count, samples, low_confidence, margin_pp). */
-function tableRow(code: string, avg: number, extra: Partial<{ onTime: number; share: number; count: number; samples: number; wide: boolean; margin: number }> = {}) {
-  const { onTime = 60.0, share = 10.0, count = 12, samples = 120, wide = false, margin = 4.0 } = extra;
-  return [code, avg, onTime, share, count, samples, wide, margin];
+ *  late5_count, samples, early_pct, low_confidence, margin_pp). */
+function tableRow(
+  code: string,
+  avg: number,
+  extra: Partial<{ onTime: number; share: number; count: number; samples: number; early: number; wide: boolean; margin: number }> = {},
+) {
+  const { onTime = 60.0, share = 10.0, count = 12, samples = 120, early = 1.5, wide = false, margin = 4.0 } = extra;
+  return [code, avg, onTime, share, count, samples, early, wide, margin];
 }
 
 /** A pending-nav provider whose navigation stays pending until "settle". */
@@ -313,6 +317,22 @@ describe("ReportTable units and route names", () => {
     ]);
     expect(screen.getByText("6.0")).toBeInTheDocument();
     expect(within(screen.getAllByRole("row")[1]).queryByText(/\d\s?min$/)).toBeNull();
+  });
+
+  it("puts the early-departure rate beside the on-time rate, under the threshold it counts past", () => {
+    mockRoutes([]);
+    renderTable([tableRow("33101", 6.0, { early: 2.4 })], "route_table", { earlyDepartureSec: 60 });
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+      "#",
+      "Route",
+      "Avg (min)",
+      "On-time %",
+      "Early (> 1 min)",
+      "Share over 5 min",
+      "Over 5 min (count)",
+      "Samples",
+    ]);
+    expect(screen.getByText("2.4%")).toBeInTheDocument();
   });
 
   it("keeps the route column readable when the table scrolls sideways", () => {

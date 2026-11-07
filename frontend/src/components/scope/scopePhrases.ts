@@ -31,6 +31,10 @@ export function toleranceLabel(sec: number, t: LabelT): string {
   return secondsLabel(sec, t, "scope.tolerance_min", "scope.tolerance_sec");
 }
 
+export function earlyLabel(sec: number, t: LabelT): string {
+  return secondsLabel(sec, t, "scope.early_min", "scope.early_sec");
+}
+
 /** The scope as words, one token per condition, in sentence order. Each
  *  token names the `scope_applied` field that says whether a screen used it. */
 function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx): string {
@@ -84,7 +88,7 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   if (scope.stop) tokens.push({ key: "stop", label: tr("scope.stop", { id: scope.stop }), field: "stop" });
   if (scope.dir != null) tokens.push({ key: "dir", label: tr("scope.dir", { dir: scope.dir }), field: "dir" });
   if (scope.early != null) {
-    tokens.push({ key: "early", label: secondsLabel(scope.early, t, "scope.early_min", "scope.early_sec"), field: "early" });
+    tokens.push({ key: "early", label: earlyLabel(scope.early, t), field: "early" });
   }
   tokens.push({ key: "tolerance", label: toleranceLabel(scope.late ?? DEFAULT_LATE_SEC, t), field: "late" });
   return tokens;

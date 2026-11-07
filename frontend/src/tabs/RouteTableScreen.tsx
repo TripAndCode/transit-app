@@ -27,7 +27,7 @@ import {
   type RouteTableOrder,
   type RouteTableView,
 } from "../routes/destinations";
-import { formatDateRange } from "../utils/format";
+import { formatDateRange, formatDuration } from "../utils/format";
 import "./analysisTab.css";
 import "./routeTable.css";
 
@@ -173,6 +173,7 @@ export function RouteTableScreen() {
                   minSamples={data.reliable_min_samples}
                   sortBy={shown.sort}
                   sortDirection={sortDirection(shown)}
+                  earlyDepartureSec={data.definition.early_departure_sec}
                 />
                 {data.rows_total != null && data.rows_total > data.rows.length && (
                   <RowsShown
@@ -183,6 +184,9 @@ export function RouteTableScreen() {
                 )}
                 <div className="route-table__notes">
                   <OnTimeDefinition definition={data.definition} />
+                  {data.definition.early_departure_sec != null && (
+                    <p>{t("routeTable.early_note", { early: formatDuration(data.definition.early_departure_sec) })}</p>
+                  )}
                   <p>{t("routeTable.late5_note")}</p>
                 </div>
               </div>

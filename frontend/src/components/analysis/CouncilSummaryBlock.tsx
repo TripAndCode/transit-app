@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { ReportResponse } from "../../api/types";
-import { EM_DASH, fmtPct, formatMinutes, formatNumber } from "../../utils/format";
+import { EM_DASH, fmtPct, formatDuration, formatMinutes, formatNumber } from "../../utils/format";
 import { unrankedReason } from "../comparabilityReason";
 import "./CouncilSummaryBlock.css";
 
@@ -42,20 +42,25 @@ function comparisonFigure(report: CouncilReport, agencyWide: boolean, t: ReturnT
 }
 
 /** The council report as a page someone can read aloud or print: the
- *  headline figures as tiles, then the server's prose -- its header line,
+ *  headline figures as tiles, the early-departure rate's naming the threshold
+ *  it counts past, then the server's prose -- its header line,
  *  the headline sentence and its footnotes -- then a print action. Planned
  *  trips say how many of the period's days a timetable plans, and a missing
  *  service-delivered rate says why, in the words the agencies board uses, as
  *  does the comparison tile for an agency the board would not rank. */
 export function CouncilSummaryBlock({ report }: { report: CouncilReport }) {
   const { t } = useTranslation();
-  const [onTimePct, avgDelayMin, samples, plannedTrips, , deliveredPct] = report.rows[0];
+  const [onTimePct, avgDelayMin, samples, plannedTrips, , deliveredPct, earlyPct] = report.rows[0];
+  const earlySec = report.definition.early_departure_sec;
   const { covered_days: covered, window_days: days, delivered_missing: missing } = report;
   const agencyWide = plannedIsWider(report);
   const partlyPlanned = !!plannedTrips && covered != null && days != null && covered < days;
   const comparison = comparisonFigure(report, agencyWide, t);
   const figures: { label: string; value: string; note?: string }[] = [
     { label: t("reports.council.on_time"), value: fmtPct(onTimePct, t) },
+    ...(earlySec != null
+      ? [{ label: t("reports.council.early_departures", { early: formatDuration(earlySec) }), value: fmtPct(earlyPct, t) }]
+      : []),
     { label: t("reports.council.avg_delay"), value: formatMinutes(avgDelayMin) },
     { label: t("reports.council.observations"), value: count(samples) },
     {

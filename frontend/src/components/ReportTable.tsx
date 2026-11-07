@@ -61,6 +61,10 @@ type Schema = {
   /** The cell is the row's observation count; under the report's floor it
    *  carries the few-data badge. */
   samples?: true;
+  /** The cell is an early-departure rate. Its header names the threshold
+   *  the rate counts past, so the column shows only where the caller gives
+   *  that threshold. */
+  early?: true;
 };
 
 // The route column of every per-route report. Kept in view while a wide table
@@ -83,7 +87,8 @@ const DOW_COLS: Schema[] = [
 
 const SCHEMAS: Record<string, Schema[]> = {
   // (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
-  // low_confidence, margin_pp): every figure of a route, sorted by one.
+  // early_pct, low_confidence, margin_pp): every figure of a route, sorted by
+  // one of them.
   route_table: [
     { ...ROUTE_COL, route: "compact" },
     { index: 1, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes, sort: "avg" },
@@ -98,10 +103,11 @@ const SCHEMAS: Record<string, Schema[]> = {
       // pipeline/stats.py). It narrows toward 0% and 100%, so it says
       // nothing about the observation count on its own.
       caveat: (row, t) =>
-        row[6] === true
-          ? { mark: t("reports.wide_margin_mark"), tip: t("reports.wide_margin_tip", { margin: fixedTenth(Number(row[7])) }) }
+        row[7] === true
+          ? { mark: t("reports.wide_margin_mark"), tip: t("reports.wide_margin_tip", { margin: fixedTenth(Number(row[8])) }) }
           : undefined,
     },
+    { index: 6, labelKey: "reports.col.early_share", align: "right", early: true, format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.over_5min_share", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t), sort: "late5_share" },
     { index: 4, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t), sort: "late5_count" },
     { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
@@ -204,16 +210,19 @@ type Props = {
   sortBy?: RouteTableSort;
   /** Which way the sorted column runs, for assistive technology. */
   sortDirection?: "ascending" | "descending";
+  /** The threshold an early-departure column counts past, from the
+   *  response's definition; without it that column is left out. */
+  earlyDepartureSec?: number | null;
 };
 
 type Caveat = { mark: string; tip?: string };
 
-export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirection }: Props) {
+export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
   const { search } = useLocation();
-  const schema = SCHEMAS[reportType];
+  const schema = SCHEMAS[reportType]?.filter((c) => !c.early || earlyDepartureSec != null);
   // The visible row last clicked to travel; by row, not route, since a route
   // can fill several rows (a delay certificate lists each departure).
   const [travelling, setTravelling] = useState<number | null>(null);
@@ -230,6 +239,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
     return null;
   }
 
+  const label = (c: Schema) => (c.early ? t(c.labelKey, { early: formatDuration(earlyDepartureSec) }) : t(c.labelKey));
   const basis = sortBy == null ? undefined : schema.find((c) => c.sort === sortBy);
   const barred = (c: Schema) => c.bar != null && (basis == null || c === basis);
   const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
@@ -245,7 +255,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
   );
 
   if (compact) {
-    // Seven columns can't share a phone's width without characters stacking,
+    // A wide table's columns can't share a phone's width without characters stacking,
     // so each row becomes one item: rank, route and the sorted (else the
     // barred) figure on top, every other column on a wrapping line beneath.
     // A report without a route column has no title.
@@ -265,7 +275,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                 )}
                 {headline && (
                   <span className="report-cards__headline">
-                    <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    <span className="report-cards__label">{label(headline)}</span>{" "}
                     {headline.severeMarker && isSevere(row[headline.index]) && <DelayMarker />}
                     <CellValue column={headline} raw={row[headline.index]} text={cardValue(headline, row[headline.index], t)} caveats={caveatsOf(headline, row)} />
                   </span>
@@ -283,7 +293,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                       <span key={c.labelKey} className="report-cards__field">
                         {!c.service && (
                           <>
-                            <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
+                            <span className="report-cards__label">{label(c)}</span>{" "}
                           </>
                         )}
                         <CellValue column={c} raw={row[c.index]} text={text} caveats={caveatsOf(c, row)} />
@@ -323,7 +333,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                   ...(c === schema[0] && c.route ? STICKY_HEAD : null),
                 }}
               >
-                {c.unit ? t("reports.col.with_unit", { label: t(c.labelKey), unit: t("common.unit_min") }) : t(c.labelKey)}
+                {c.unit ? t("reports.col.with_unit", { label: label(c), unit: t("common.unit_min") }) : label(c)}
               </th>
             ))}
           </tr>

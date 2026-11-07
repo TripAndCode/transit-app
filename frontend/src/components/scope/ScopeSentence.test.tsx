@@ -85,7 +85,7 @@ describe("ScopeSentence", () => {
   it("closes when Tab walks focus out of the popover", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "within 1 min" }));
-    screen.getByRole("slider").focus();
+    screen.getByRole("button", { name: "Not on time if more than 1 min early" }).focus();
     await userEvent.tab();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "within 1 min" })).not.toHaveFocus();
@@ -137,7 +137,7 @@ describe("ScopeSentence", () => {
   it("shows a set early tolerance and lets it be cleared", async () => {
     mount("?from=2026-09-01&to=2026-09-30&early=120");
     await userEvent.click(screen.getByRole("button", { name: "early by up to 2 min" }));
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await userEvent.click(screen.getByRole("button", { name: "Count early departures as on time" }));
     expect(params().has("early")).toBe(false);
     expect(region()).toHaveFocus();
   });
