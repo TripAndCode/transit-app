@@ -7,7 +7,7 @@ no-ops on these overview cards. Tests seed the aggregates directly.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 import pytest
 
@@ -68,15 +68,21 @@ async def _seed_trend(pool, agency_id, rows):
 
 
 async def _seed_route_hour(pool, agency_id, rows):
-    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples[, sum_delay_sec])."""
+    """rows: (route_code, service_type, scheduled_time, avg_min, samples[, sum_delay_sec]), the time
+    a datetime.time, or a timedelta for one past 24:00 on the service day's clock.
+
+    The time goes in as the HH:MM:SS text analyze's copy writes, hours past 23
+    kept, so the interval holds them as hours (asyncpg would bind a timedelta
+    as days and hours)."""
     expanded = []
     for rc, st, sch, av, n, *rest in rows:
         sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
-        expanded.append((rc, st, sch, av, n, sds))
+        sec = int(sch.total_seconds()) if isinstance(sch, timedelta) else sch.hour * 3600 + sch.minute * 60 + sch.second
+        expanded.append((rc, st, f"{sec // 3600:02d}:{sec // 60 % 60:02d}:{sec % 60:02d}", av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "
-            "avg_min, p50_min, p90_min, samples, sum_delay_sec) VALUES ($1,$2,$3,$4,$5,$5,$5,$6,$7)",
+            "avg_min, p50_min, p90_min, samples, sum_delay_sec) VALUES ($1,$2,$3,$4::text::interval,$5,$5,$5,$6,$7)",
             [(agency_id, rc, st, sch, av, n, sds) for (rc, st, sch, av, n, sds) in expanded],
         )
         await c.executemany(
@@ -290,6 +296,24 @@ async def test_heatmap_hour_band_from_route_hour(movers_pool):
     assert res.cells[0][0] == 6.0
     assert res.cells[0][2] == 12.0
     assert res.cells[0][1] is None
+
+
+async def test_heatmap_hour_band_takes_an_hour_past_midnight_by_its_clock_hour(movers_pool):
+    """A service day's 25:30 is 01:30 (夜) and its 29:30 is 05:30 the next morning (朝)."""
+    pool, agency_id = movers_pool
+    await _seed_route_hour(
+        pool,
+        agency_id,
+        [
+            ("R1", "平日", timedelta(hours=25, minutes=30), 4.0, 100),  # 夜 -> 3
+            ("R1", "平日", timedelta(hours=29, minutes=30), 8.0, 100),  # 朝 -> 0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    async with pool.acquire() as c:
+        res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="hour_band", top_routes=20)
+    assert res.cells[0][0] == 8.0
+    assert res.cells[0][3] == 4.0
 
 
 async def test_delay_heatmap_cache_hit(movers_pool):

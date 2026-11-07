@@ -85,3 +85,13 @@ def test_parse_departure_time_never_raises_on_pathological_input():
     parse_departure_time shares the exact same regex match."""
     parse_departure_time("9" * 10_000)
     parse_departure_time(":" * 10_000)
+
+
+def test_the_latest_hour_ingest_can_store_is_the_bound_readers_accept():
+    """An hour reader bounds its input by MAX_SERVICE_HOUR, so it has to be
+    the latest hour this parse can yield, and no earlier."""
+    from pipeline.strategies._time import MAX_SERVICE_HOUR
+
+    _, status, seconds = parse_departure_time(f"{MAX_SERVICE_HOUR}:59:59")
+    assert status == "extended" and seconds is not None and seconds // 3600 == MAX_SERVICE_HOUR
+    assert parse_departure_time(f"{MAX_SERVICE_HOUR + 1}:00:00")[1] == "bad"

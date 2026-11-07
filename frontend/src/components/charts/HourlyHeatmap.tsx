@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useScope } from "../../api/scope";
-import { bandOf } from "../../api/timeBands";
+import { bandOf, serviceDayHours } from "../../api/timeBands";
 import { delayRampVar } from "../../styles/tokens";
 import { useFirstData } from "../../hooks/useFirstData";
 import { useRovingCells } from "../../hooks/useRovingCells";
@@ -24,7 +24,8 @@ type Props = { cells: HourlyCell[]; height?: number };
 const HOUR_LABEL_PX = 12;
 
 /**
- * Date × hour-of-day heatmap. Rows = hours 0-23, columns = dates.
+ * Date × hour-of-day heatmap. Rows = the service day's hours, 0-23 and on
+ * past 23 (24, 25, …) when a departure ran after midnight; columns = dates.
  *
  * Cells are shaded by the shared delay steps (`delayRampVar`), the scale the
  * weekday × hour surface above it uses, so a colour means the same minutes in
@@ -42,6 +43,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const entered = useFirstData(cells.length > 0);
 
   const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
+  const hours = serviceDayHours(cells.map((c) => c.hour));
 
   const map = new Map<string, HourlyCell>();
   for (const c of cells) map.set(`${c.date}|${c.hour}`, c);
@@ -49,7 +51,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   // Every cell, empty ones included, is a slot: a keyboard or screen-reader
   // user reads what the tooltip shows a pointer, with one tab stop for the
   // grid. Row-major by hour, matching the rows the grid exposes.
-  const slots = Array.from({ length: 24 * dates.length }, (_, k) => `${dates[k % dates.length]}|${Math.floor(k / dates.length)}`);
+  const slots = Array.from({ length: hours * dates.length }, (_, k) => `${dates[k % dates.length]}|${Math.floor(k / dates.length)}`);
   const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells<SVGGElement>(slots, dates.length);
   // Keyed by date and hour, not by slot index: a redraw with other dates
   // moves every index, and the ring must stay on the cell that has focus.
@@ -74,9 +76,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const padL = 38;
   const padT = 12;
   const padB = 28;
-  // Each hour's row is at least as tall as its label, so the 24 never overlap.
-  const cellH = Math.max(HOUR_LABEL_PX, (height - padT - padB) / 24);
-  const chartHeight = padT + padB + 24 * cellH;
+  // Each hour's row is at least as tall as its label, so the labels never overlap.
+  const cellH = Math.max(HOUR_LABEL_PX, (height - padT - padB) / hours);
+  const chartHeight = padT + padB + hours * cellH;
   const innerW = Math.max(360, dates.length * 14);
   const cellW = innerW / dates.length;
   const dateLabels = dates.map((d) => formatDate(d));
@@ -96,7 +98,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
       </div>
       <div style={{ overflowX: "auto" }}>
       <svg width={padL + innerW + 8} height={chartHeight} role="group" aria-label={t("reports.heatmap.svg_aria")}>
-        {Array.from({ length: 24 }, (_, h) => (
+        {Array.from({ length: hours }, (_, h) => (
           <text
             key={`h-${h}`}
             x={padL - 6}
@@ -141,11 +143,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
           role="grid"
           aria-label={t("reports.heatmap.title")}
           tabIndex={-1}
-          aria-rowcount={24}
+          aria-rowcount={hours}
           aria-colcount={dates.length}
           onKeyDown={onKeyDown}
         >
-          {Array.from({ length: 24 }, (_, h) => {
+          {Array.from({ length: hours }, (_, h) => {
             const hourText = String(h).padStart(2, "0");
             const hourLabel = t("reports.heatmap.tooltip_hour", { hour: hourText });
             return (
@@ -205,7 +207,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                         fill,
                         cursor: c ? "pointer" : "default",
                         "--cell-opacity": 1,
-                        ...staggerDelay(i * 24 + h),
+                        ...staggerDelay(i * hours + h),
                       } as CSSProperties
                     }
                     onMouseEnter={show}

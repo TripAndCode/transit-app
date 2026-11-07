@@ -68,7 +68,7 @@ What the user sees/does:
     top 20 + a Lorenz-curve overlay), plus the worsening/improving movers list.
     Its bars are one neutral tone, the service split's: they show a share of
     the delay, not minutes, so the delay ramp stays off them.
-  - `frontend/src/components/PeakHourRibbon.tsx` — 24-hour avg-delay ribbon;
+  - `frontend/src/components/PeakHourRibbon.tsx` — hour-by-hour avg-delay ribbon over the service day (24 and later after midnight);
     clicking an hour bar that has data opens
     `frontend/src/components/PeakHourModal.tsx` with the top routes for that
     hour (optionally split by day-of-week) instead of the card's
@@ -105,7 +105,7 @@ What the user sees/does:
 | `frontend/src/components/OverviewHeroRow.tsx` | Headline delta + sparkline + delayed-route count |
 | `frontend/src/components/RoutesToCheckList.tsx` | Top-5 routes by absolute avg delay |
 | `frontend/src/components/ConcentrationBar.tsx` | Pareto bar (card/modal variants) + movers list |
-| `frontend/src/components/PeakHourRibbon.tsx` | 24-hour avg-delay ribbon (card/modal variants) |
+| `frontend/src/components/PeakHourRibbon.tsx` | Hour-by-hour avg-delay ribbon over the service day (card/modal variants) |
 | `frontend/src/components/PeakHourModal.tsx` | Per-hour (optionally per-DOW) top-routes drill-down |
 | `frontend/src/components/ServiceSplit.tsx` | Day-type split (card/modal variants) |
 | `frontend/src/components/OverviewModal.tsx` | Shared modal chrome each expandable card opens into |

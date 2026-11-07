@@ -4,7 +4,7 @@
  * Renders the agency-wide forecast landing (worst-window headline, 7-day ×
  * time-band grid pooled across all routes, delay-ranked route list) when no
  * route is focused, or the per-route detail (band-collapsed grid, worst-window
- * sentence, day/hour summaries, full 7×24 grid behind a toggle) when exactly
+ * sentence, day/hour summaries, full day × hour grid behind a toggle) when exactly
  * one route is selected via the shared range-context route filter — mirrors
  * MapTab.tsx's own focused-route pattern (self-contained: reads/writes
  * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
@@ -39,7 +39,7 @@ import { forecastDelayText } from "../utils/delayPhrase";
 import { forecastRangeText } from "../utils/forecastRange";
 import { ForecastHistory, ForecastPeriodNote } from "./ForecastDates";
 import { datedDayLabel, forecastDayOfMonth } from "../utils/forecastDays";
-import { BAND_ORDER, bandLabel as namedBand, bandOf, type Band } from "../api/timeBands";
+import { BAND_ORDER, bandLabel as namedBand, bandOf, serviceDayHours, type Band } from "../api/timeBands";
 import {
   LOW_CONFIDENCE_SAMPLES,
   type ForecastHeatmapCell,
@@ -170,11 +170,11 @@ function HeatmapGrid({
   const labelW = dated ? DATED_ROW_LABEL_PX : big ? 30 : 22;
   const cellH = big ? 26 : 13;
   const gap = big ? 3 : 2;
-  const cols = `${labelW}px repeat(24, 1fr)`;
-
-  const HOURS = 24;
-  const slots = Array.from({ length: 7 * HOURS }, (_, i) => `${Math.floor(i / HOURS) + 1}-${i % HOURS}`);
-  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, HOURS);
+  // The server's grid spans every hour the route ran: 24, and more past midnight.
+  const hours = serviceDayHours(cells.map((c) => c.hour));
+  const cols = `${labelW}px repeat(${hours}, 1fr)`;
+  const slots = Array.from({ length: 7 * hours }, (_, i) => `${Math.floor(i / hours) + 1}-${i % hours}`);
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, hours);
 
   /** Everything a cell says, in one string. It is the cell's accessible name
    *  and the text of its tooltip; a screen reader reads a name once, where a
@@ -203,7 +203,7 @@ function HeatmapGrid({
       // programmatically, which is what the composite pattern asks for.
       tabIndex={-1}
       aria-rowcount={7}
-      aria-colcount={HOURS}
+      aria-colcount={hours}
       onKeyDown={onKeyDown}
       onMouseLeave={() => setHover(null)}
     >
@@ -220,9 +220,9 @@ function HeatmapGrid({
               >
                 {dayLabel(dow)}
               </div>
-              {Array.from({ length: HOURS }, (_, h) => {
+              {Array.from({ length: hours }, (_, h) => {
                 const key = `${dow}-${h}`;
-                const index = di * HOURS + h;
+                const index = di * hours + h;
                 const cell = byKey.get(key);
                 const value = cell?.expected_avg_min ?? null;
                 const text = cellText(dow, h);
@@ -300,7 +300,7 @@ function HeatmapGrid({
       {big && (
         <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }} aria-hidden="true">
           <span />
-          {Array.from({ length: HOURS }, (_, h) => (
+          {Array.from({ length: hours }, (_, h) => (
             // nowrap: an hour column is narrower than "12" on a phone; the
             // label overflows into its empty neighbours rather than stacking.
             <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center", whiteSpace: "nowrap" }}>
@@ -452,7 +452,7 @@ function ForecastLegend({ fallback = false }: { fallback?: boolean }) {
 }
 
 /**
- * Collapse a per-route 7×24 heatmap into a 7-day × time-band grid by the
+ * Collapse a per-route day × hour heatmap into a 7-day × time-band grid by the
  * rule pipeline/reports/forecast.py::summarize_agency_overview applies to the
  * agency grid: every hour of a band counts with the weight of its past
  * observations (`samples`), carrying the forecast's figure where there is one
@@ -715,7 +715,7 @@ function AgencyLanding({
   );
 }
 
-/** Per-route detail: band-collapsed grid + worst sentence + day/hour cards, full 7×24 behind a toggle. */
+/** Per-route detail: band-collapsed grid + worst sentence + day/hour cards, full day × hour grid behind a toggle. */
 function RouteDetail({
   aid,
   route,
@@ -774,7 +774,8 @@ function RouteDetail({
       return s ? cs.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / s : null;
     });
   const dowAvg = margin((c) => c.dow - 1, 7);
-  const hourAvg = margin((c) => c.hour, 24);
+  const hours = serviceDayHours(cells.map((c) => c.hour));
+  const hourAvg = margin((c) => c.hour, hours);
   const dowLabels = Array.from({ length: 7 }, (_, i) => forecastDay(i + 1));
   // Each day's axis column is narrow, so a forecast day shows its day of the
   // month under the weekday; its tooltip and name carry the whole date.
@@ -790,7 +791,7 @@ function RouteDetail({
       dayLabel(i + 1)
     );
   });
-  const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}:00`);
+  const hourLabels = Array.from({ length: hours }, (_, h) => `${h}:00`);
 
   const argExtreme = (vals: (number | null)[], worst: boolean) => {
     let idx = -1;

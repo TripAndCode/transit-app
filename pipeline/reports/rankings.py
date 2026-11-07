@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, ServiceType, build_updates_filter_ch, resolve_service_dates, selected_service_dates
+from api.range import (
+    RangeCtx,
+    ServiceType,
+    build_updates_filter_ch,
+    resolve_service_dates,
+    scheduled_hour_ch,
+    selected_service_dates,
+)
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import (
@@ -965,9 +972,10 @@ async def compute_hourly_heatmap(
     """Hour-of-day × date cells for the granular trend view.
 
     Returns ``[ { date, hour, avg_min, samples, sum_delay_sec } ]`` filtered
-    by the same ctx the rest of the trend uses. Hour is extracted from
-    ``scheduled_time`` (a TIME column post migration 0011); cells with too
-    few samples (<3) are dropped to keep the rendering signal-strong.
+    by the same ctx the rest of the trend uses. Hour is the departure's hour
+    on its service day's clock (``api.range.scheduled_hour_ch``), 24 and on
+    for a departure after midnight, on both paths; cells with too few
+    samples (<3) are dropped to keep the rendering signal-strong.
 
     ``sum_delay_sec`` is each cell's exact raw-seconds delay total — on the
     fast path, nullable until the next ``make analyze-all`` rewrites the row
@@ -994,20 +1002,13 @@ async def compute_hourly_heatmap(
         )
         rows = await conn.fetch(sql, agency_id, *params)
     else:
-        # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse
-        # (not a native TIME column) — see api.range.time_band_clause_ch's
-        # docstring — so the hour is read off the first two characters
-        # rather than EXTRACT(). Every group here has >= 3 rows (the HAVING
-        # gate), so avg() is never NaN.
+        # Every group here has >= 3 rows (the HAVING gate), so avg() is never
+        # NaN. A row with no scheduled time, or a malformed one, has a NULL
+        # hour and stays out of the histogram rather than failing the query.
         if ch is None:
             raise RuntimeError("compute_hourly_heatmap's live fallback requires a ClickHouse client")
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
-        # OrNull, not a bare cast: ingest now zero-pads every scheduled_time's
-        # hour (pipeline/strategies/static_join.py), but this degrades any
-        # already-ingested pre-fix row (or any future malformed value) out of
-        # the histogram instead of raising CANNOT_PARSE_TEXT and 500ing the
-        # whole /reports/trend heatmap over a handful of bad rows.
-        hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
+        cte_sql, ch_params = _dedup_cte_ch(ctx, include_scheduled_sec=True)
+        hour_expr = scheduled_hour_ch()
         result = await ch.query(
             f"WITH {cte_sql}\n"
             f"SELECT date, {hour_expr} AS hour,\n"
@@ -1015,7 +1016,6 @@ async def compute_hourly_heatmap(
             "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
-            "WHERE scheduled_time IS NOT NULL\n"
             f"GROUP BY date, {hour_expr}\n"
             "HAVING count(*) >= 3 AND hour IS NOT NULL\n"
             "ORDER BY date, hour",

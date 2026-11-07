@@ -60,7 +60,7 @@ async def test_query_is_scoped_and_does_not_require_coordinates():
     assert params["agency_id"] == 9
     assert "C10" in str(params)
     assert params["ch_from_date"] == ctx.from_date
-    assert params["ch_tb_start"] == "05:00"
+    assert (params["ch_tb_start"], params["ch_tb_end"]) == (5 * 3600, 9 * 3600)
     assert "toDayOfWeek" in ch.query.call_args.args[0]
     assert conn.fetch.call_args.args[1] == 9
     assert "lat" not in conn.fetch.call_args.args[0]

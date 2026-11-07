@@ -130,7 +130,8 @@ async def _seed_agg_route_hour(
     samples: int,
 ):
     """Insert one ``agg_route_hour`` row. ``scheduled_time`` is HH:MM text;
-    schema column is TIME (post 0011), so we cast on the server side.
+    the column is an interval from the service day's 00:00, so we cast on the
+    server side.
 
     ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)``, the
     same exact-reconstruction convention ``_seed_agg_daily`` above uses. The
@@ -141,7 +142,7 @@ async def _seed_agg_route_hour(
     await aconn.execute(
         "INSERT INTO agg_route_hour "
         "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples, sum_delay_sec) "
-        "VALUES ($1, $2, $3, ($4::text)::time, $5, NULL, NULL, $6, $7) "
+        "VALUES ($1, $2, $3, ($4::text)::interval, $5, NULL, NULL, $6, $7) "
         "ON CONFLICT (agency_id, route_code, service_type, scheduled_time) DO UPDATE "
         "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
@@ -1791,6 +1792,26 @@ async def test_peak_hour_breakdown_returns_top_routes(client, aconn, aagency_id)
     codes = [x["route_code"] for x in body["routes"]]
     assert codes == ["K31", "K37", "C12"]
     assert body["routes"][0]["avg_min"] == pytest.approx(6.5, rel=1e-4)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_answers_an_hour_past_midnight(client, aconn, aagency_id):
+    """A service day's hour 24 (a 24:10 departure) is a row of its own."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 24, 4.0, 12)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 24, "dow": 5})
+    assert r.status_code == 200
+    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_takes_every_hour_ingest_can_store(client, aconn, aagency_id):
+    """GTFS writes an hour in at most two digits, so ingest stores hours up to 99."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 99, 4.0, 12)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 99, "dow": 5})
+    assert r.status_code == 200
+    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 100, "dow": 5})
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,14 @@
 Each SQL below is the builder pipeline/analyze.py ran for that table before it
 moved to ClickHouse, copied verbatim. Never edit one to make a parity test pass:
 a parity test asks whether the ClickHouse build reproduces exactly this.
+
+These builders take the hour and band from a TIME `scheduled_time`, which holds
+no time past 24:00, so they leave every departure at 24:00 or later out of
+agg_hour_daily, agg_route_hour, agg_route_hour_dow and the hour-keyed rows of
+route_delay_counts, and band it 'none' in agg_stop_daily and
+agg_route_stop_daily. The ClickHouse build files it under its hour and band on
+purpose (method version 2026.11.1), so a parity fixture holding such a
+departure is expected to differ there; do not edit an oracle to match.
 """
 
 import psycopg2.extras

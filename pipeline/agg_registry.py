@@ -26,7 +26,14 @@ from pipeline.db import build_stop_visits_ch_sql
 
 # Versions of the tables built in the loops below, which default to 1. A bump
 # goes here rather than into a second entry, which _index would reject.
-_VERSIONS: dict[str, int] = {}
+_VERSIONS: dict[str, int] = {
+    "agg_hour_daily": 2,
+    "agg_route_hour": 2,
+    "agg_route_hour_dow": 2,
+    "agg_route_stop_daily": 2,
+    "agg_stop_daily": 2,
+    "route_delay_counts": 2,
+}
 
 # Any fixed month renders a monthly table's statement: only its date bounds
 # depend on the month, and those are bound parameters.
@@ -250,6 +257,17 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "agg_stop_routes": 1,
             "route_delay_counts": 1,
             "stop_route_days": 1,
+        },
+    ),
+    MethodVersion(
+        "2026.11.1",
+        {
+            "agg_hour_daily": 2,
+            "agg_route_hour": 2,
+            "agg_route_hour_dow": 2,
+            "agg_route_stop_daily": 2,
+            "agg_stop_daily": 2,
+            "route_delay_counts": 2,
         },
     ),
 )

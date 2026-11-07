@@ -19,5 +19,13 @@
     "agg_stop_routes": 1,
     "route_delay_counts": 1,
     "stop_route_days": 1
+  },
+  "2026.11.1": {
+    "agg_hour_daily": 2,
+    "agg_route_hour": 2,
+    "agg_route_hour_dow": 2,
+    "agg_route_stop_daily": 2,
+    "agg_stop_daily": 2,
+    "route_delay_counts": 2
   }
 }

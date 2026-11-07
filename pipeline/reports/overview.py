@@ -61,6 +61,7 @@ from api.range import (
     dow_clause,
     dow_isodays,
     resolve_service_dates,
+    scheduled_hour_ch,
     service_date_clause,
 )
 from pipeline import perf
@@ -137,9 +138,9 @@ OVERVIEW_FANOUT_LIMIT = 4
 
 # (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
 # ``service_type`` is Nullable in ClickHouse; ``hour`` is None for a row with
-# a NULL ``scheduled_time``: the time-band filter excludes those, but under a
-# routes filter alone they reach the grain (see _fetch_grain), so consumers
-# that need an hour skip None.
+# no scheduled time: the time-band filter excludes those, but under a routes
+# filter alone they reach the grain (see _fetch_grain), so consumers that need
+# an hour skip None.
 # ``sum_delay_sec`` / ``sum_late_sec`` stay in SECONDS as exact integers, so
 # summing partial groups in Python is lossless and the single trailing
 # ``/ 60.0`` reproduces the SQL's own ``/ 60.0`` bit-for-bit.
@@ -322,22 +323,18 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     365-day window under ``get_ch_client``'s 200 k-row ``max_result_rows`` cap,
     though not with so much headroom that adding another group-by dimension or
     widening the window further is free to do without rechecking against the
-    cap. A routes filter alone fetches all 24 hours for just those routes; were
+    cap. A routes filter alone fetches every hour for just those routes; were
     that ever to pass the cap, the client raises rather than truncating, and
     the caller degrades the hour profiles to null.
 
-    The hour is read off ``scheduled_time``'s first two characters: it is a
-    zero-padded ``'HH:MM[:SS]'``
-    ``Nullable(String)`` in ClickHouse, not a native TIME column (see
-    ``api.range.time_band_clause_ch``'s docstring). A NULL ``scheduled_time``
-    yields a NULL hour. Under ``time_band != 'all'`` none reach the grain,
-    since ``time_band_clause_ch``'s ``substring(scheduled_time, 1, 5) >= ...``
-    comparison is already NULL for those rows and so drops them; under a
+    The hour is the departure's hour on its service day's clock
+    (``api.range.scheduled_hour_ch``), the one agg_hour_daily files it under:
+    24 and on for a departure after midnight. A row with no scheduled time, or
+    a malformed one, has a NULL hour instead of failing the one query the
+    whole payload depends on. Under ``time_band != 'all'`` none reach the
+    grain, since the band filter places no such row in any band; under a
     ``routes`` filter alone they do, and the hour profiles, the only consumers
-    in that shape, skip them. ``toUInt8OrNull`` rather than a bare
-    ``toUInt8``: identical on a well-formed zero-padded 2-digit hour, but a
-    malformed value degrades to "excluded from the hour histogram" instead of
-    failing the one query the whole payload depends on.
+    in that shape, skip them.
     """
     span_ctx = RangeCtx(
         from_date=ctx.from_date - timedelta(days=_grain_lookback_days(ctx)),
@@ -348,8 +345,8 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    cte_sql, ch_params = _dedup_cte_ch(span_ctx)
-    hour_expr = "if(date >= {grain_hour_from:Date}, toUInt8OrNull(substring(scheduled_time, 1, 2)), NULL)"
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx, include_scheduled_sec=True)
+    hour_expr = f"if(date >= {{grain_hour_from:Date}}, {scheduled_hour_ch()}, NULL)"
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT date,\n"
@@ -933,7 +930,7 @@ async def _top_delayed_routes(
 async def _peak_hour_by_dow(
     agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
 ) -> dict | None:
-    """24-hour avg delay over ``ctx``'s window and the days of the week
+    """Hour-by-hour avg delay over ``ctx``'s window and the days of the week
     ``dow_group`` names, plus the peak hour: ``ctx.dow`` for the payload's
     ``peak_hour``, ``'weekday'``/``'weekend'`` for its pair.
 
@@ -973,7 +970,7 @@ async def _peak_hour_by_dow(
     # (the DOW filter here is `dow_group`, not `ctx.dow`), so the coverage
     # invariant has to be asserted explicitly.
     _check_grain_covers(grain, ctx.from_date, ctx.to_date)
-    # `hour is None` <=> the row's scheduled_time was NULL: no hour to bucket.
+    # `hour is None` <=> the row has no scheduled time: no hour to bucket.
     by_hour: dict[int, list[int]] = {}
     lo, hi = ctx.from_date, ctx.to_date
     for d, _route_code, _service_type, hour, samples, sum_delay, _sum_late in grain.rows:
@@ -986,17 +983,22 @@ async def _peak_hour_by_dow(
 
 
 def _peak_from_hour_rows(rows) -> dict | None:
-    """Shape ``(h, avg_min)`` rows into the ``by_hour[24]`` + peak payload."""
+    """Shape ``(h, avg_min)`` rows into the ``by_hour`` + peak payload.
+
+    ``by_hour`` holds the service day's hours: 0..23, and on through the
+    latest hour after midnight (24, 25, ...) a row has.
+    """
     if not rows:
         return None
-    by_hour: list[float | None] = [None] * 24
+    hours = [int(r["h"]) for r in rows if r["avg_min"] is not None and int(r["h"]) >= 0]
+    by_hour: list[float | None] = [None] * (max([23, *hours]) + 1)
     for r in rows:
         if r["avg_min"] is None:
             continue
         h = int(r["h"])
-        if 0 <= h < 24:
+        if h >= 0:
             by_hour[h] = float(_round2(r["avg_min"]))
-    valid = [h for h in range(24) if by_hour[h] is not None]
+    valid = [h for h in range(len(by_hour)) if by_hour[h] is not None]
     if not valid:
         return None
     # `valid` is ascending, and max() keeps the first max on a tie, so a tie
@@ -1007,6 +1009,16 @@ def _peak_from_hour_rows(rows) -> dict | None:
         "peak_hour": peak_h,
         "peak_avg_min": float(by_hour[peak_h]),  # type: ignore[arg-type]
     }
+
+
+def _on_one_hour_axis(*profiles: dict | None) -> tuple[dict | None, ...]:
+    """*profiles* with every ``by_hour`` as long as the longest, padded with
+    None: one profile can run past midnight where another does not, and the
+    weekday and weekend charts are drawn one above the other on one axis."""
+    hours = max((len(p["by_hour"]) for p in profiles if p is not None), default=0)
+    return tuple(
+        None if p is None else {**p, "by_hour": p["by_hour"] + [None] * (hours - len(p["by_hour"]))} for p in profiles
+    )
 
 
 async def _daily_totals(agency_id: int, ctx: RangeCtx, conn, grain: _Grain | None) -> list[tuple[date, int, int]]:
@@ -1489,6 +1501,7 @@ async def compute_overview_summary(
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
+    peak, peak_weekday, peak_weekend = _on_one_hour_axis(peak, peak_weekday, peak_weekend)
     return {
         "headline": {
             "avg_min": avg_min,

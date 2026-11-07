@@ -1,8 +1,10 @@
 import { LOW_CONFIDENCE_SAMPLES } from "../../api/types";
-import { bandOf, type Band } from "../../api/timeBands";
+import { bandOf, serviceDayHours, type Band } from "../../api/timeBands";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 import { isoDow } from "./trendFocus";
 
+/** A day's hours: the surface is this wide, and wider when a departure ran
+ *  past midnight on its service day's clock (`serviceDayHours`). */
 export const HOURS = 24;
 export const DOWS = 7;
 /** Opacity the cells outside the hovered row and column drop to. */
@@ -11,14 +13,20 @@ export const SURFACE_DIM = 0.55;
  *  SURFACE_DIM, so a hover still visibly keeps its row and column. */
 export const THIN_OPACITY = 0.75;
 
-/** `[dowIndex 0 = Monday … 6 = Sunday][hour]`, null where nothing is known. */
+/** `[dowIndex 0 = Monday … 6 = Sunday][hour]`, null where nothing is known.
+ *  Every row is as long as the service day's hours. */
 export type Surface = (number | null)[][];
 export type Profile = "hourly" | "banded";
 /** `[dowIndex][hour]`: drawn faint because too few observations back it. */
 export type Thin = boolean[][];
 
-export function emptySurface(): Surface {
-  return Array.from({ length: DOWS }, () => Array.from({ length: HOURS }, () => null));
+export function emptySurface(hours: number = HOURS): Surface {
+  return Array.from({ length: DOWS }, () => Array.from({ length: hours }, () => null));
+}
+
+/** How many hours wide `surface` is. */
+export function surfaceHours(surface: Surface): number {
+  return surface[0]?.length ?? HOURS;
 }
 
 type HourlyCell = { date: string; hour: number; avg_min: number | null; samples: number; sum_delay_sec?: number | null };
@@ -28,9 +36,10 @@ type BandCell = { dow: number; band: Band; expected_avg_min: number | null; low_
  *  cell with no samples or no average contributes nothing -- it is absence,
  *  not zero. */
 function pooled(cells: readonly HourlyCell[]): { sec: number; n: number }[][] {
-  const totals = Array.from({ length: DOWS }, () => Array.from({ length: HOURS }, () => ({ sec: 0, n: 0 })));
+  const hours = serviceDayHours(cells.map((c) => c.hour));
+  const totals = Array.from({ length: DOWS }, () => Array.from({ length: hours }, () => ({ sec: 0, n: 0 })));
   for (const c of cells) {
-    if (c.avg_min == null || !(c.samples > 0) || !Number.isInteger(c.hour) || c.hour < 0 || c.hour >= HOURS) continue;
+    if (c.avg_min == null || !(c.samples > 0) || !Number.isInteger(c.hour) || c.hour < 0) continue;
     const bucket = totals[isoDow(c.date) - 1][c.hour];
     bucket.sec += c.sum_delay_sec ?? c.avg_min * 60 * c.samples;
     bucket.n += c.samples;
@@ -53,20 +62,24 @@ export function observedSurface(cells: readonly HourlyCell[]): Surface {
   return observedProfile(cells).surface;
 }
 
-function eachBandHour(grid: readonly BandCell[], paint: (cell: BandCell, d: number, h: number) => void): void {
+function eachBandHour(
+  grid: readonly BandCell[],
+  hours: number,
+  paint: (cell: BandCell, d: number, h: number) => void,
+): void {
   for (const cell of grid) {
     if (!Number.isInteger(cell.dow) || cell.dow < 1 || cell.dow > DOWS) continue;
-    for (let h = 0; h < HOURS; h += 1) if (bandOf(h) === cell.band) paint(cell, cell.dow - 1, h);
+    for (let h = 0; h < hours; h += 1) if (bandOf(h) === cell.band) paint(cell, cell.dow - 1, h);
   }
 }
 
 /** The same range averaged by time band: the band grid is one column per
- *  band and the surface 24 hours wide, so a band's average is drawn across its
+ *  band and the surface an hour per column, so a band's average is drawn across its
  *  hours (`bandOf`) -- only those `observed` has a value for, so an hour no
  *  trip ran in stays empty in both profiles. */
 export function bandSurface(grid: readonly BandCell[], observed: Surface): Surface {
-  const s = emptySurface();
-  eachBandHour(grid, (cell, d, h) => {
+  const s = emptySurface(surfaceHours(observed));
+  eachBandHour(grid, surfaceHours(observed), (cell, d, h) => {
     if (cell.expected_avg_min != null && observed[d][h] != null) s[d][h] = cell.expected_avg_min;
   });
   return s;
@@ -75,8 +88,9 @@ export function bandSurface(grid: readonly BandCell[], observed: Surface): Surfa
 /** A low-confidence band's hours, at the same observed hours `bandSurface`
  *  paints: an empty cell is empty, not faint. */
 export function bandThin(grid: readonly BandCell[], observed: Surface): Thin {
-  const thin = Array.from({ length: DOWS }, () => Array.from({ length: HOURS }, () => false));
-  eachBandHour(grid, (cell, d, h) => {
+  const hours = surfaceHours(observed);
+  const thin = Array.from({ length: DOWS }, () => Array.from({ length: hours }, () => false));
+  eachBandHour(grid, hours, (cell, d, h) => {
     if (cell.low_confidence && observed[d][h] != null) thin[d][h] = true;
   });
   return thin;
@@ -116,11 +130,11 @@ export function ringFor(minutes: number | null): "0px" | "1px" | "2px" {
  *  carry; rendered once into a <style> by HeatSurface. The rule outranks
  *  `.focus-dim-opacity`, so it takes the lowest of its own dim, a linked
  *  chart's (--focus-dim) and the cell's resting opacity (--mark-opacity). */
-export function heatSurfaceDimRules(dim: number = SURFACE_DIM): string {
+export function heatSurfaceDimRules(dim: number = SURFACE_DIM, hours: number = HOURS): string {
   const opacity = `min(var(--focus-dim),var(--mark-opacity),${String(dim).replace(/^0\./, ".")})`;
   const rules: string[] = [];
   for (let d = 1; d <= DOWS; d += 1) {
-    for (let h = 0; h < HOURS; h += 1) {
+    for (let h = 0; h < hours; h += 1) {
       rules.push(
         `.heat-surface[data-focus-hour="${h}"][data-focus-dow="${d}"] .heat-surface__cell:not([data-hour="${h}"]):not([data-dow="${d}"]){opacity:${opacity}}`,
       );
