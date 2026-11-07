@@ -5,13 +5,20 @@ A scenario declares routes as ordered stops, a timetable of trips with
 scheduled departures on the GTFS service-day clock (``24:10:00`` is ten past
 midnight at the end of the service date), the service days it covers with the
 day type each runs, and the truth: when every trip run actually left every
-stop. A feed model turns the truth into the TripUpdate polls a collector
-captures. ``tests.fixtures.scenario_oracle`` computes the expected figures from
-the truth alone, so a test can push the polls through the real ingest path and
-compare what the pipeline reports with what happened.
+stop it served. A feed model turns the truth into the TripUpdate polls a
+collector captures. ``tests.fixtures.scenario_oracle`` computes the expected
+figures from the truth alone, so a test can push the polls through the real
+ingest path and compare what the pipeline reports with what happened.
 
-Every scheduled trip of a declared day has a run: a trip the feed never
-reports would be a cancellation, which this model does not declare yet.
+The timetable may be revised: each revision is a static GTFS version of its
+own, in force from its first day, and loaded at an instant the scenario
+states, as an operator loads a newly published zip.
+
+Every scheduled trip of a declared day is accounted for in one of three ways:
+it ran (a ``TripRun``, which may skip stops), it did not run and the feed
+reported it cancelled (a ``Cancellation``), or it did not run and the feed
+never mentioned it (an ``Unreported`` trip). A scheduled trip declared in none
+of them is refused, so a forgotten run cannot pass for a cancellation.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import io
 import itertools
 import math
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
@@ -29,6 +37,17 @@ from zoneinfo import ZoneInfo
 from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
 
 JST = ZoneInfo("Asia/Tokyo")
+
+# GTFS-RT's ScheduleRelationship values: StopTimeUpdate's SCHEDULED, SKIPPED
+# and NO_DATA, and TripDescriptor's SCHEDULED and CANCELED.
+SCHEDULED = 0
+SKIPPED = 1
+NO_DATA = 2
+CANCELED = 3
+
+# A revision is loaded at this hour of its first day unless it says otherwise:
+# after the previous service day's last poll and before the day's first.
+_DEFAULT_LOAD_HOUR = 3
 
 
 def gtfs_seconds(clock: str) -> int:
@@ -84,6 +103,25 @@ class ScheduledTrip:
 
 
 @dataclass(frozen=True)
+class TimetableVersion:
+    """One published static GTFS version: its trips, in force from
+    ``first_day`` until the next version's first day. ``name`` is the zip's
+    file stem, which the loader records as the version's name. The operator
+    loads it at ``loaded_at``, by default 03:00 JST on its first day."""
+
+    name: str
+    first_day: date
+    trips: tuple[ScheduledTrip, ...]
+    loaded_at: datetime | None = None
+
+    @property
+    def load_instant(self) -> datetime:
+        if self.loaded_at is not None:
+            return self.loaded_at
+        return datetime.combine(self.first_day, time(_DEFAULT_LOAD_HOUR), tzinfo=JST)
+
+
+@dataclass(frozen=True)
 class ServiceDay:
     date: date
     day_type: str
@@ -92,21 +130,73 @@ class ServiceDay:
 @dataclass(frozen=True)
 class TripRun:
     """The truth for one trip on one service day: the actual departure from
-    each stop, in seconds on the service date's clock."""
+    each stop, in seconds on the service date's clock, or None for a stop the
+    run skipped.
+
+    The feed reports a skipped stop SKIPPED from ``skips_announced_sec`` on
+    the service date's clock, or from the run's first poll when None. Until
+    then it predicts the stop like any other, at the delay of the nearest
+    stop before it that the run serves (after it, when none is before)."""
 
     trip_id: str
     service_date: date
-    actual_sec: tuple[int, ...]
+    actual_sec: tuple[int | None, ...]
+    skips_announced_sec: int | None = None
 
     @classmethod
-    def from_delays(cls, trip: ScheduledTrip, service_date: date, delays_sec: tuple[int, ...]) -> TripRun:
+    def from_delays(
+        cls,
+        trip: ScheduledTrip,
+        service_date: date,
+        delays_sec: tuple[int | None, ...],
+        *,
+        skips_announced_sec: int | None = None,
+    ) -> TripRun:
         """A run that left each stop ``delays_sec`` after its scheduled
-        departure; a negative delay is an early departure."""
+        departure; a negative delay is an early departure and None a skipped
+        stop."""
         if len(delays_sec) != len(trip.departures):
             raise ValueError(f"{trip.trip_id}: {len(delays_sec)} delays for {len(trip.departures)} stops")
         return cls(
-            trip.trip_id, service_date, tuple(s + d for s, d in zip(trip.scheduled_sec, delays_sec, strict=True))
+            trip.trip_id,
+            service_date,
+            tuple(None if d is None else s + d for s, d in zip(trip.scheduled_sec, delays_sec, strict=True)),
+            skips_announced_sec,
         )
+
+    @property
+    def served(self) -> tuple[int, ...]:
+        """The actual departures of the stops the run served, in order."""
+        return tuple(sec for sec in self.actual_sec if sec is not None)
+
+
+@dataclass(frozen=True)
+class Cancellation:
+    """A scheduled trip that did not run on a service day, which the feed
+    reported cancelled.
+
+    The trip is in the feed from the feed model's lead before its first
+    scheduled departure until its last. Until ``announced_sec`` on the
+    service date's clock (from the start when None) the feed predicts every
+    stop ``predicted_delay_sec`` late, as for a trip about to run. From then
+    on it reports the trip CANCELED, listing each stop not yet due with
+    NO_DATA when ``lists_stops``, or no stop at all, which GTFS-RT allows
+    for a cancelled trip."""
+
+    trip_id: str
+    service_date: date
+    announced_sec: int | None = None
+    lists_stops: bool = True
+    predicted_delay_sec: int = 0
+
+
+@dataclass(frozen=True)
+class Unreported:
+    """A scheduled trip that did not run on a service day, and that the feed
+    never mentioned."""
+
+    trip_id: str
+    service_date: date
 
 
 @dataclass(frozen=True)
@@ -114,9 +204,13 @@ class FeedModel:
     """How the feed reports the truth.
 
     Each poll carries every trip run that has entered the feed and not yet
-    left its last stop. A run enters ``lead_sec`` before its first departure,
-    scheduled or actual, whichever is earlier. A poll lists only the stops the
-    run has not left yet.
+    left its last served stop. A run enters ``lead_sec`` before its first
+    departure, scheduled or actual, whichever is earlier. A poll lists only
+    the stops the run has not left yet; a skipped stop stays listed until the
+    run leaves the next stop it serves.
+
+    Every TripUpdate and StopTimeUpdate carries its schedule relationship,
+    SCHEDULED unless the truth says otherwise, as the confirmed feeds do.
 
     ``perfect``: every poll predicts each listed stop's true delay, so the last
     poll before a departure carries the true delay too.
@@ -129,46 +223,94 @@ class FeedModel:
 
 @dataclass(frozen=True)
 class Scenario:
+    """An operation and its truth. ``timetable`` is in force from the first
+    service day; each of ``revisions`` replaces it from its own first day."""
+
     name: str
     routes: tuple[Route, ...]
     timetable: tuple[ScheduledTrip, ...]
     days: tuple[ServiceDay, ...]
     runs: tuple[TripRun, ...]
     feed: FeedModel = field(default_factory=FeedModel)
+    revisions: tuple[TimetableVersion, ...] = ()
+    cancellations: tuple[Cancellation, ...] = ()
+    unreported: tuple[Unreported, ...] = ()
 
     def __post_init__(self) -> None:
+        events: list[TripRun | Cancellation | Unreported] = [*self.runs, *self.cancellations, *self.unreported]
         _unique("route", [r.route_id for r in self.routes])
-        _unique("trip", [t.trip_id for t in self.timetable])
         _unique("service day", [d.date for d in self.days])
-        _unique("run", [(r.trip_id, r.service_date) for r in self.runs])
+        _unique("timetable version", [v.name for v in self.versions])
+        _unique("run, cancellation or unreported trip", [(e.trip_id, e.service_date) for e in events])
         stops: dict[str, Stop] = {}
         for route in self.routes:
             for stop in route.stops:
                 if stops.setdefault(stop.stop_id, stop) != stop:
                     raise ValueError(f"stop {stop.stop_id} is declared twice with different details")
-        for trip in self.timetable:
-            route = self.route(trip.route_id)
-            if len(trip.departures) != len(route.stops):
-                raise ValueError(f"{trip.trip_id}: {len(trip.departures)} departures for {len(route.stops)} stops")
-            _increasing(f"{trip.trip_id} schedule", trip.scheduled_sec)
+        first_days = [v.first_day for v in self.versions]
+        if any(later <= earlier for earlier, later in itertools.pairwise(first_days)):
+            raise ValueError(f"each revision must start after the previous timetable: {first_days}")
+        for version in self.versions:
+            _unique(f"{version.name} trip", [t.trip_id for t in version.trips])
+            for trip in version.trips:
+                route = self.route(trip.route_id)
+                if len(trip.departures) != len(route.stops):
+                    raise ValueError(f"{trip.trip_id}: {len(trip.departures)} departures for {len(route.stops)} stops")
+                _increasing(f"{trip.trip_id} schedule", trip.scheduled_sec)
+        for event in events:
+            trip = self.trip(event.trip_id, event.service_date)
+            if self.day_type(event.service_date) != trip.day_type:
+                raise ValueError(f"{event.trip_id} runs on {event.service_date}, which is not a {trip.day_type} day")
         for run in self.runs:
-            trip = self.trip(run.trip_id)
-            if self.day_type(run.service_date) != trip.day_type:
-                raise ValueError(f"{run.trip_id} runs on {run.service_date}, which is not a {trip.day_type} day")
+            trip = self.trip(run.trip_id, run.service_date)
             if len(run.actual_sec) != len(trip.departures):
                 raise ValueError(f"{run.trip_id} {run.service_date}: one actual departure per stop is required")
-            _increasing(f"{run.trip_id} {run.service_date} actual departures", run.actual_sec)
-        ran = {(r.trip_id, r.service_date) for r in self.runs}
+            if not run.served:
+                raise ValueError(f"{run.trip_id} {run.service_date} serves no stop; declare a cancellation")
+            if run.skips_announced_sec is not None and len(run.served) == len(run.actual_sec):
+                raise ValueError(f"{run.trip_id} {run.service_date} announces skips but skips no stop")
+            _increasing(f"{run.trip_id} {run.service_date} actual departures", run.served)
+        for cancellation in self.cancellations:
+            trip = self.trip(cancellation.trip_id, cancellation.service_date)
+            first_predicted = trip.scheduled_sec[0] + cancellation.predicted_delay_sec
+            if cancellation.announced_sec is not None and cancellation.announced_sec >= first_predicted:
+                raise ValueError(
+                    f"{cancellation.trip_id}: a cancellation must be announced before the trip is due to leave"
+                )
+        accounted = {(e.trip_id, e.service_date) for e in events}
         for day in self.days:
-            for trip in self.timetable:
-                if trip.day_type == day.day_type and (trip.trip_id, day.date) not in ran:
-                    raise ValueError(f"{trip.trip_id} is scheduled on {day.date} but has no run")
+            for trip in self.scheduled(day.date):
+                if (trip.trip_id, day.date) not in accounted:
+                    raise ValueError(
+                        f"{trip.trip_id} is scheduled on {day.date} but has no run, cancellation or unreported entry"
+                    )
+
+    @property
+    def versions(self) -> tuple[TimetableVersion, ...]:
+        """Every timetable version in force order; the first is ``timetable``,
+        named after the scenario."""
+        first = min(d.date for d in self.days)
+        return (TimetableVersion(f"scenario_{self.name}", first, self.timetable), *self.revisions)
+
+    def version_on(self, service_date: date) -> TimetableVersion:
+        """The timetable version in force on *service_date*."""
+        return [v for v in self.versions if v.first_day <= service_date][-1]
+
+    def scheduled(self, service_date: date) -> tuple[ScheduledTrip, ...]:
+        """The trips the timetable in force schedules on *service_date*."""
+        day_type = self.day_type(service_date)
+        return tuple(t for t in self.version_on(service_date).trips if t.day_type == day_type)
 
     def route(self, route_id: str) -> Route:
         return next(r for r in self.routes if r.route_id == route_id)
 
-    def trip(self, trip_id: str) -> ScheduledTrip:
-        return next(t for t in self.timetable if t.trip_id == trip_id)
+    def trip(self, trip_id: str, service_date: date) -> ScheduledTrip:
+        """The trip as the timetable in force on *service_date* schedules it."""
+        version = self.version_on(service_date)
+        found = [t for t in version.trips if t.trip_id == trip_id]
+        if not found:
+            raise ValueError(f"{trip_id} is not in {version.name}, in force on {service_date}")
+        return found[0]
 
     def day_type(self, service_date: date) -> str:
         return next(d.day_type for d in self.days if d.date == service_date)
@@ -195,9 +337,11 @@ def _csv(header: tuple[str, ...], rows: list[tuple]) -> str:
     return out.getvalue()
 
 
-def static_gtfs_zip(scenario: Scenario) -> bytes:
-    """The scenario's timetable as a GTFS static zip. Service runs only on the
-    declared days, through ``calendar_dates.txt``."""
+def static_gtfs_zip(scenario: Scenario, version: TimetableVersion | None = None) -> bytes:
+    """A timetable version, the first when None, as a GTFS static zip.
+    Service runs only on the declared days the version is in force on,
+    through ``calendar_dates.txt``. Every version names every route."""
+    version = version or scenario.versions[0]
     stops = {stop.stop_id: stop for route in scenario.routes for stop in route.stops}
     files = {
         "agency.txt": _csv(
@@ -214,13 +358,13 @@ def static_gtfs_zip(scenario: Scenario) -> bytes:
         ),
         "trips.txt": _csv(
             ("route_id", "service_id", "trip_id", "direction_id"),
-            [(t.route_id, t.day_type, t.trip_id, 0) for t in scenario.timetable],
+            [(t.route_id, t.day_type, t.trip_id, 0) for t in version.trips],
         ),
         "stop_times.txt": _csv(
             ("trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"),
             [
                 (t.trip_id, clock, clock, stop.stop_id, seq)
-                for t in scenario.timetable
+                for t in version.trips
                 for seq, (stop, clock) in enumerate(
                     zip(scenario.route(t.route_id).stops, t.departures, strict=True), start=1
                 )
@@ -228,7 +372,11 @@ def static_gtfs_zip(scenario: Scenario) -> bytes:
         ),
         "calendar_dates.txt": _csv(
             ("service_id", "date", "exception_type"),
-            [(d.day_type, d.date.strftime("%Y%m%d"), 1) for d in scenario.days],
+            [
+                (d.day_type, d.date.strftime("%Y%m%d"), 1)
+                for d in scenario.days
+                if scenario.version_on(d.date) == version
+            ],
         ),
     }
     buf = io.BytesIO()
@@ -240,11 +388,12 @@ def static_gtfs_zip(scenario: Scenario) -> bytes:
 
 @dataclass(frozen=True)
 class Poll:
-    """One captured TripUpdate feed."""
+    """One captured TripUpdate feed, and the service days of the trips it carries."""
 
     captured_at: datetime
     payload: bytes
     stop_updates: int
+    service_dates: frozenset[date] = frozenset()
 
     @property
     def source_file(self) -> str:
@@ -259,65 +408,177 @@ def _predicted_delay(feed: FeedModel, scheduled_sec: int, actual_sec: int) -> in
     raise ValueError(f"unknown prediction model {feed.prediction!r}")
 
 
+@dataclass(frozen=True)
+class _InFeed:
+    """One trip of one service day while it is in the feed, and what each
+    poll inside its window lists for it: (stop updates, trip status)."""
+
+    trip: ScheduledTrip
+    service_date: date
+    enters: datetime
+    leaves: datetime
+    listing: Callable[[datetime], tuple[list[bytes], int]]
+
+
+def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip, reported: set) -> _InFeed:
+    feed = scenario.feed
+    stops = scenario.route(trip.route_id).stops
+    served = {i: sec for i, sec in enumerate(run.actual_sec) if sec is not None}
+    announced = (
+        None if run.skips_announced_sec is None else service_day_instant(run.service_date, run.skips_announced_sec)
+    )
+
+    def passes(i: int) -> datetime:
+        later = [j for j in served if j > i]
+        return service_day_instant(run.service_date, served[later[0] if later else max(served)])
+
+    def stand_in_delay(i: int) -> int:
+        nearest = [j for j in served if j < i][-1:] or [j for j in served if j > i][:1]
+        return _predicted_delay(feed, trip.scheduled_sec[nearest[0]], served[nearest[0]])
+
+    def listing(at: datetime) -> tuple[list[bytes], int]:
+        updates = []
+        for i, (stop, scheduled, actual) in enumerate(zip(stops, trip.scheduled_sec, run.actual_sec, strict=True)):
+            seq = i + 1
+            if actual is not None:
+                if service_day_instant(run.service_date, actual) <= at:
+                    continue
+                delay = _predicted_delay(feed, scheduled, actual)
+                reported.add(("departure", run.trip_id, run.service_date, seq))
+                updates.append(
+                    stop_time_update(seq, departure_delay=delay, stop_id=stop.stop_id, schedule_relationship=SCHEDULED)
+                )
+            elif passes(i) > at:
+                if announced is None or at >= announced:
+                    reported.add(("skip", run.trip_id, run.service_date, seq))
+                    updates.append(stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=SKIPPED))
+                else:
+                    updates.append(
+                        stop_time_update(
+                            seq,
+                            departure_delay=stand_in_delay(i),
+                            stop_id=stop.stop_id,
+                            schedule_relationship=SCHEDULED,
+                        )
+                    )
+        return updates, SCHEDULED
+
+    first = min(trip.scheduled_sec[0], run.served[0])
+    enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
+    leaves = service_day_instant(run.service_date, run.served[-1])
+    return _InFeed(trip, run.service_date, enters, leaves, listing)
+
+
+def _cancellation_listing(
+    scenario: Scenario, cancellation: Cancellation, trip: ScheduledTrip, reported: set
+) -> _InFeed:
+    feed = scenario.feed
+    day = cancellation.service_date
+    stops = scenario.route(trip.route_id).stops
+    announced = None if cancellation.announced_sec is None else service_day_instant(day, cancellation.announced_sec)
+
+    def listing(at: datetime) -> tuple[list[bytes], int]:
+        if announced is not None and at < announced:
+            return [
+                stop_time_update(
+                    seq,
+                    departure_delay=cancellation.predicted_delay_sec,
+                    stop_id=stop.stop_id,
+                    schedule_relationship=SCHEDULED,
+                )
+                for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
+                if service_day_instant(day, scheduled + cancellation.predicted_delay_sec) > at
+            ], SCHEDULED
+        reported.add(("cancellation", cancellation.trip_id, day, 0))
+        if not cancellation.lists_stops:
+            return [], CANCELED
+        return [
+            stop_time_update(seq, stop_id=stop.stop_id, schedule_relationship=NO_DATA)
+            for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
+            if service_day_instant(day, scheduled) > at
+        ], CANCELED
+
+    enters = service_day_instant(day, trip.scheduled_sec[0]) - timedelta(seconds=feed.lead_sec)
+    leaves = service_day_instant(day, trip.scheduled_sec[-1])
+    return _InFeed(trip, day, enters, leaves, listing)
+
+
 def polls(scenario: Scenario) -> list[Poll]:
     """The polls a collector captures under the scenario's feed model: one at
-    every multiple of the poll interval while some trip run is in the feed.
+    every multiple of the poll interval while some trip is in the feed.
 
-    Raises when a departure gets no poll before it: the oracle would count a
-    departure the pipeline never saw, so the scenario would be at fault, not
-    the pipeline.
+    Raises when a departure gets no poll before it, a skipped stop is never
+    reported SKIPPED, or a cancellation is never reported CANCELED: the
+    oracle would count something the pipeline never saw, so the scenario
+    would be at fault, not the pipeline.
     """
-    feed = scenario.feed
-    windows = []
-    for run in scenario.runs:
-        trip = scenario.trip(run.trip_id)
-        first = min(trip.scheduled_sec[0], run.actual_sec[0])
-        enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
-        departs = [service_day_instant(run.service_date, s) for s in run.actual_sec]
-        windows.append((run, trip, enters, departs))
-    if not windows:
+    reported: set[tuple[str, str, date, int]] = set()
+    in_feed = [_run_listing(scenario, r, scenario.trip(r.trip_id, r.service_date), reported) for r in scenario.runs]
+    in_feed += [
+        _cancellation_listing(scenario, c, scenario.trip(c.trip_id, c.service_date), reported)
+        for c in scenario.cancellations
+    ]
+    if not in_feed:
         return []
-    step = feed.poll_interval_sec
-    start = math.ceil(min(w[2] for w in windows).timestamp() / step) * step
-    end = max(w[3][-1] for w in windows)
+    step = scenario.feed.poll_interval_sec
+    start = math.ceil(min(w.enters for w in in_feed).timestamp() / step) * step
+    end = max(w.leaves for w in in_feed)
     out: list[Poll] = []
-    reported: set[tuple[str, date, int]] = set()
     at = datetime.fromtimestamp(start, timezone.utc)
     while at < end:
-        updates, count = [], 0
-        for run, trip, enters, departs in windows:
-            if not enters <= at < departs[-1]:
+        updates, count, days = [], 0, set()
+        for item in in_feed:
+            if not item.enters <= at < item.leaves:
                 continue
-            stops = scenario.route(trip.route_id).stops
-            listed = [
-                (seq, stop, _predicted_delay(feed, scheduled, actual))
-                for seq, (stop, scheduled, actual, leaves) in enumerate(
-                    zip(stops, trip.scheduled_sec, run.actual_sec, departs, strict=True), start=1
-                )
-                if leaves > at
-            ]
-            reported.update((run.trip_id, run.service_date, seq) for seq, _stop, _delay in listed)
-            count += len(listed)
+            stop_updates, status = item.listing(at)
+            count += len(stop_updates)
+            days.add(item.service_date)
             updates.append(
                 trip_update(
-                    run.trip_id,
-                    *(
-                        stop_time_update(seq, departure_delay=delay, stop_id=stop.stop_id)
-                        for seq, stop, delay in listed
-                    ),
-                    route_id=trip.route_id,
-                    start_date=run.service_date.strftime("%Y%m%d"),
+                    item.trip.trip_id,
+                    *stop_updates,
+                    route_id=item.trip.route_id,
+                    start_date=item.service_date.strftime("%Y%m%d"),
+                    schedule_relationship=status,
                 )
             )
         if updates:
-            out.append(Poll(at, trip_update_feed(*updates, timestamp=int(at.timestamp())), count))
+            out.append(Poll(at, trip_update_feed(*updates, timestamp=int(at.timestamp())), count, frozenset(days)))
         at += timedelta(seconds=step)
-    missed = [
-        (run.trip_id, run.service_date, seq)
-        for run, _trip, _enters, departs in windows
-        for seq in range(1, len(departs) + 1)
-        if (run.trip_id, run.service_date, seq) not in reported
-    ]
+    expected = {
+        ("departure", run.trip_id, run.service_date, i + 1)
+        for run in scenario.runs
+        for i, sec in enumerate(run.actual_sec)
+        if sec is not None
+    }
+    expected |= {
+        ("skip", run.trip_id, run.service_date, i + 1)
+        for run in scenario.runs
+        for i, sec in enumerate(run.actual_sec)
+        if sec is None
+    }
+    expected |= {("cancellation", c.trip_id, c.service_date, 0) for c in scenario.cancellations}
+    missed = sorted(expected - reported, key=str)
     if missed:
-        raise ValueError(f"no poll reports these departures before they happen: {missed}")
+        raise ValueError(f"no poll reports these before they happen: {missed}")
     return out
+
+
+def poll_batches(scenario: Scenario) -> list[tuple[TimetableVersion, list[Poll]]]:
+    """The polls split by the timetable loaded when each was captured: each
+    version with the polls from its load until the next version's.
+
+    Raises when a poll carries a trip of a day whose timetable is not loaded
+    yet, since its stops could only be joined to an older timetable."""
+    versions = scenario.versions
+    loads = [v.load_instant for v in versions[1:]]
+    if any(later <= earlier for earlier, later in itertools.pairwise(loads)):
+        raise ValueError(f"timetable versions must be loaded in order: {loads}")
+    batches: list[tuple[TimetableVersion, list[Poll]]] = [(v, []) for v in versions]
+    for poll in polls(scenario):
+        index = sum(1 for load in loads if load <= poll.captured_at)
+        for day in poll.service_dates:
+            if versions.index(scenario.version_on(day)) > index:
+                raise ValueError(f"{poll.source_file} carries {day} before its timetable is loaded")
+        batches[index][1].append(poll)
+    return batches

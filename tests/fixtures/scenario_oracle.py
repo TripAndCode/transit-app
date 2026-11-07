@@ -8,9 +8,15 @@ scenario test says which.
 Semantics assumed:
 
 - A departure is one trip run leaving one stop: a (trip, service date, stop)
-  triple. Every stop of a trip is a departure, its last included.
+  triple. Every stop a run served is a departure, its last included.
+- A stop a run skipped is no departure, and a trip that did not run, whether
+  cancelled or never reported, has none: none of them has a delay, so none
+  counts in any delay figure. A prediction the feed later withdraws, for a
+  stop it then reports SKIPPED or a trip it then reports CANCELED, is not a
+  departure either.
 - Its delay is the actual departure minus the scheduled departure, in whole
-  seconds. Early is negative.
+  seconds. Early is negative. Its schedule is the timetable version in force
+  on its service date.
 - A departure belongs to its trip's service date, whichever calendar day it
   falls on: a 24:10:00 departure is part of the service day that began the
   previous morning.
@@ -28,6 +34,15 @@ Semantics assumed:
   service-day clock: 07:58:00 is hour 7, and 24:10:00 is hour 24 of the
   service day its trip belongs to. Its weekday is its service date's ISO
   weekday, Monday 1.
+
+Service delivered, per service date:
+
+- Planned: the trips the timetable version in force that day schedules for
+  its day type.
+- Delivered: the planned trips that ran. A run that skipped stops still ran,
+  so it counts; a cancelled trip and a trip the feed never reported did not.
+- Reported cancelled: the planned trips the feed reported CANCELED, whether
+  its update listed the trip's stops or none.
 """
 
 from __future__ import annotations
@@ -52,6 +67,7 @@ class Departure:
     service_date: date
     day_type: str
     stop_sequence: int
+    stop_id: str
     scheduled_sec: int
     delay_sec: int
 
@@ -107,11 +123,23 @@ class Figures:
 def departures(scenario: Scenario) -> list[Departure]:
     out = []
     for run in scenario.runs:
-        trip = scenario.trip(run.trip_id)
-        for seq, (scheduled, actual) in enumerate(zip(trip.scheduled_sec, run.actual_sec, strict=True), start=1):
+        trip = scenario.trip(run.trip_id, run.service_date)
+        stops = scenario.route(trip.route_id).stops
+        for seq, (stop, scheduled, actual) in enumerate(
+            zip(stops, trip.scheduled_sec, run.actual_sec, strict=True), start=1
+        ):
+            if actual is None:
+                continue
             out.append(
                 Departure(
-                    trip.route_id, trip.trip_id, run.service_date, trip.day_type, seq, scheduled, actual - scheduled
+                    trip.route_id,
+                    trip.trip_id,
+                    run.service_date,
+                    trip.day_type,
+                    seq,
+                    stop.stop_id,
+                    scheduled,
+                    actual - scheduled,
                 )
             )
     return out
@@ -175,3 +203,37 @@ def by_route_day_type_time(scenario: Scenario, where: Where = None) -> dict[tupl
 def by_route_day_type_weekday_hour(scenario: Scenario, where: Where = None) -> dict[tuple[str, str, int, int], Figures]:
     """Per (route, day type, weekday, hour), pooled over every service day."""
     return _grouped(scenario, lambda d: (d.route_id, d.day_type, d.weekday, d.hour), where)
+
+
+def by_stop_day(scenario: Scenario, where: Where = None) -> dict[tuple[str, date, str], Figures]:
+    """Per (stop, service date, day type), every route through the stop together."""
+    return _grouped(scenario, lambda d: (d.stop_id, d.service_date, d.day_type), where)
+
+
+def timetable_versions(scenario: Scenario) -> dict[date, str]:
+    """Each service date's timetable version: the one in force that day."""
+    return {d.date: scenario.version_on(d.date).name for d in scenario.days}
+
+
+def version_trips(scenario: Scenario) -> dict[str, int]:
+    """Each timetable version's trip count: one per trip it defines, whatever days it runs."""
+    return {v.name: len(v.trips) for v in scenario.versions}
+
+
+@dataclass(frozen=True)
+class Service:
+    planned: int
+    delivered: int
+    reported_cancelled: int
+
+
+def service(scenario: Scenario) -> dict[date, Service]:
+    """Per service date, the planned, delivered and reported-cancelled trips."""
+    return {
+        day.date: Service(
+            planned=len(scenario.scheduled(day.date)),
+            delivered=sum(1 for r in scenario.runs if r.service_date == day.date),
+            reported_cancelled=sum(1 for c in scenario.cancellations if c.service_date == day.date),
+        )
+        for day in scenario.days
+    }
