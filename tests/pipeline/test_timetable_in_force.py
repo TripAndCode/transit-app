@@ -219,3 +219,108 @@ def test_a_revision_loaded_after_its_first_day_refiles_the_days_it_covers(pg_con
     ) == [(day, 7, 4), (day, 12, 4), (first_day, 7, 4), (first_day, 13, 4)]
     assert _versions(pg_conn, agency_id) == {day: a, first_day: b}
     assert _boundaries(pg_conn, agency_id, day, first_day) == [first_day.isoformat()]
+
+
+def test_a_trip_a_revision_adds_polled_before_the_revision_loads_takes_its_schedule(pg_conn, ch_client, tmp_path, days):
+    """Ingest finds no timetable for the added trip, so its rows carry no
+    version: once the revision is loaded and in force, they are read with its
+    schedule."""
+    day, first_day = days
+    agency_id = _agency(pg_conn)
+    a, b = _stem(day - timedelta(days=30)), _stem(first_day + timedelta(days=1))
+    load_static(
+        _zip(tmp_path, a, day - timedelta(days=30), day + timedelta(days=150), {"a": "07:00"}),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
+    _poll(pg_conn, ch_client, agency_id, first_day, 7, 10, ["a"])
+    _poll(pg_conn, ch_client, agency_id, first_day, 9, 9, ["d"])
+    _promote_and_analyze(pg_conn, ch_client, agency_id)
+
+    # Published after its first day, adding trip d.
+    load_static(
+        _zip(tmp_path, b, first_day, day + timedelta(days=180), {"a": "07:00", "d": "09:00"}),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
+    _promote_and_analyze(pg_conn, ch_client, agency_id)
+
+    assert _rows(
+        pg_conn, "SELECT date, hour, samples FROM agg_hour_daily WHERE agency_id = %s ORDER BY date, hour", agency_id
+    ) == [(first_day, 7, 4), (first_day, 9, 4)]
+    assert _rows(
+        pg_conn,
+        "SELECT date, service_type, samples FROM agg_route_daily WHERE agency_id = %s ORDER BY date, service_type",
+        agency_id,
+    ) == [(first_day, SERVICE, 8)]
+    assert _rows(
+        pg_conn,
+        "SELECT stop_id, sum(samples)::int FROM agg_stop_daily WHERE agency_id = %s AND date = %s "
+        "GROUP BY stop_id ORDER BY stop_id",
+        agency_id,
+        first_day,
+    ) == [(stop, 2) for stop in STOPS]
+    assert _versions(pg_conn, agency_id) == {first_day: b}
+
+
+def test_analyze_refuses_to_start_without_the_in_force_record(pg_conn, ch_client, tmp_path, days, monkeypatch):
+    """A store that predates the record fails before anything is rebuilt, not
+    after: a full rebuild would otherwise be thrown away at its end."""
+    from pipeline import analyze as analyze_mod
+
+    day, _ = days
+    agency_id = _agency(pg_conn)
+    load_static(
+        _zip(tmp_path, _stem(day), day - timedelta(days=30), day + timedelta(days=150), {"a": "07:00"}),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
+    _poll(pg_conn, ch_client, agency_id, day, 7, 10, ["a"])
+    promote_closed_days(agency_id, pg_conn, ch_client)
+    monkeypatch.setattr(analyze_mod, "IN_FORCE_TABLE", "agg_timetable_in_force_never_migrated", raising=False)
+    with pytest.raises(RuntimeError, match="make migrate"):
+        analyze(agency_id, pg_conn, ch_client)
+    pg_conn.rollback()
+    assert _rows(pg_conn, "SELECT count(*) FROM agg_feed_health WHERE agency_id = %s", agency_id) == [(0,)]
+
+
+class _StoreWithout:
+    """A ClickHouse client whose store lacks *missing*: only the table listing is answered."""
+
+    def __init__(self, missing: str):
+        from pipeline import ch_aggregates
+
+        self._names = [name for name in ch_aggregates.STORE_TABLES if name != missing]
+
+    def query(self, sql, parameters=None):
+        class _Result:
+            result_rows = [(name,) for name in self._names]
+
+        return _Result()
+
+
+def test_a_load_refuses_to_start_without_the_span_store(pg_conn, ch_client, tmp_path, days):
+    """Nothing is saved or replaced: not even the outgoing timetable's planned trips."""
+    from pipeline import static_archive
+
+    day, first_day = days
+    agency_id = _agency(pg_conn)
+    load_static(
+        _zip(tmp_path, _stem(day), day - timedelta(days=30), day + timedelta(days=150), {"a": "07:00"}),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
+    with pytest.raises(RuntimeError, match="make ch-bootstrap"):
+        load_static(
+            _zip(tmp_path, _stem(first_day), first_day, day + timedelta(days=180), {"d": "09:00"}),
+            agency_id,
+            pg_conn,
+            ch_client=_StoreWithout(static_archive.SPANS),
+        )
+    pg_conn.rollback()
+    assert _rows(pg_conn, "SELECT count(*) FROM planned_trips_daily WHERE agency_id = %s", agency_id) == [(0,)]
+    assert _rows(pg_conn, "SELECT trip_id FROM static_trips WHERE agency_id = %s", agency_id) == [("a",)]

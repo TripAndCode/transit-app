@@ -353,3 +353,13 @@ def test_the_states_are_cleared_before_the_name_is_remapped(pg_conn, agency_id, 
     with pytest.raises(RuntimeError, match="injected failure"):
         static_archive.archive_loaded(pg_conn, ch_client, agency_id)
     assert _state_names(pg_conn, agency_id) == set(agg_registry.TABLES) - _archive_joined()
+
+
+def test_a_names_span_is_its_latest_recording_both_ends_together(ch_client, agency_id):
+    from datetime import date
+
+    static_archive.record_span(ch_client, agency_id, "gtfs_static_20261025", (date(2026, 10, 25), date(2027, 4, 25)))
+    static_archive.record_span(ch_client, agency_id, "gtfs_static_20261025", (date(2026, 10, 20), date(2026, 12, 31)))
+    assert static_archive.spans(ch_client, agency_id) == {
+        "gtfs_static_20261025": (date(2026, 10, 20), date(2026, 12, 31))
+    }
