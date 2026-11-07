@@ -416,22 +416,27 @@ def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: b
 
 
 class Stamp(str, Enum):
-    """Which timetable a read of `updates` files each row under (observation_rows)."""
+    """Which timetable a read of `updates` files each row under (observation_rows).
 
-    # The one ingest joined, as it stamped the row.
+    INGESTED: the one ingest joined, as it stamped the row.
+
+    IN_FORCE: the version in force on the row's service date
+    (ScheduleJoin.force) names the row, and its schedule columns stay as
+    ingested. Exact where that version's content is the one ingest joined,
+    which is every row but those REFIT reads.
+
+    REFIT: IN_FORCE, and a row whose ingest joined other content than the
+    version in force carries that version's schedule: its service, scheduled
+    time and seconds, and its route where the feed named none. A row whose stop
+    that version lacks carries none, as ingest leaves a row the timetable
+    misses. The content ingest joined is the one its version name maps to, and
+    for a row with no name or one the archive does not map, the loaded one, as
+    JOIN_CONTENT_SQL reads it: such a row is refiled only where the loaded
+    content is not in force.
+    """
+
     INGESTED = "ingested"
-    # The version in force on the row's service date (ScheduleJoin.force) names
-    # the row; its schedule columns stay as ingested. Exact where that version's
-    # content is the one ingest joined, which is every row but those REFIT reads.
     IN_FORCE = "in_force"
-    # IN_FORCE, and a row whose ingest joined other content than the version in
-    # force carries that version's schedule: its service, scheduled time and
-    # seconds, and its route where the feed named none. A row whose stop that
-    # version lacks carries none, as ingest leaves a row the timetable misses.
-    # The content ingest joined is the one its version name maps to, and for a
-    # row with no name or one the archive does not map, the loaded one, as
-    # JOIN_CONTENT_SQL reads it: such a row is refiled only where the loaded
-    # content is not in force.
     REFIT = "refit"
 
 
