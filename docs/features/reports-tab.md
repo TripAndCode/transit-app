@@ -117,7 +117,8 @@ reports.
   agencies board, and a footnote repeats it. Days from before the first save
   stay uncounted: the reload that replaced their timetable had already erased
   their plan.
-- The council document's tiles are 定時率, 平均遅延, 観測データ数（停留所単位）
+- The council document's tiles are 定時率, 早発率 (naming the threshold it counts
+  past, the definition's `early_departure_sec`), 平均遅延, 観測データ数（停留所単位）
   (one reading per trip per stop, so far larger than the planned trips), 計画便数,
   運行率 and 他事業者との比較 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
   missing 運行率 shows 「—」 with the response's `delivered_missing` reason in
@@ -128,7 +129,12 @@ reports.
   nothing. The
   on-time definition footnote states the tolerance in words, 「定時の定義：定刻
   から1分以内の遅れ（早発も定時として数えます）」, not its preset name; the CSV
-  preamble keeps the preset for comparing exports. Each figure keeps to one
+  preamble keeps the preset for comparing exports, and names it for the
+  industry window too (`standard_m1_p5`) when the scope sets `early=60&late=300`.
+  The next footnote defines the early-departure rate,
+  「早発率：定刻より1分を超えて早く発車した割合」; the CSV puts 早発率(%) after
+  運行実績率(%), and its preamble names the threshold
+  (早発率=60秒を超える早発の割合). Each figure keeps to one
   line (`white-space: nowrap`), so a phone never breaks a number in two.
 - The council document says whether the agency's figures meet the agencies
   board's comparability conditions, as defined in

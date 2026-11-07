@@ -31,6 +31,7 @@ const definition: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
   late_tolerance_sec: 60,
+  early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",

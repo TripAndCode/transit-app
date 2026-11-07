@@ -45,13 +45,22 @@ def test_the_oracle_counts_each_departure_once_under_its_trips_service_date():
     service date's, not the next calendar day's."""
     assert oracle.by_day(_scenario()) == {
         DAY: oracle.Figures(
-            departures=6, delay_sum_sec=661, on_time=3, over_five_min=1, worst_delay_sec=301, trip_runs=2
+            departures=6,
+            delay_sum_sec=661,
+            on_time=3,
+            over_five_min=1,
+            worst_delay_sec=301,
+            trip_runs=2,
+            early=1,
+            on_time_industry=4,
         )
     }
     figures = oracle.by_route(_scenario())["R"]
     assert figures.mean_delay_sec == Fraction(661, 6)
     assert figures.on_time_share == Fraction(1, 2)
     assert figures.over_five_min_share == Fraction(1, 6)
+    assert figures.early_share == Fraction(1, 6)
+    assert figures.on_time_industry_share == Fraction(2, 3)
 
 
 def _decoded(scenario_polls):

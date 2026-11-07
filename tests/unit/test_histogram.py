@@ -2,7 +2,22 @@
 
 import pytest
 
-from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH, bucketize, count_in_range, percentile_from_hist
+from pipeline.histogram import (
+    HI,
+    LO,
+    N_BUCKETS,
+    WIDTH,
+    bucketize,
+    count_early,
+    count_in_range,
+    count_on_time,
+    early_count_sql,
+    early_edge_buckets,
+    exact_window,
+    on_time_from_columns,
+    percentile_from_hist,
+    within_histogram,
+)
 
 
 def test_bucketize_boundaries():
@@ -142,3 +157,157 @@ def test_count_in_range_within_single_bucket_is_bounded_approximation():
     counts = _hist(*([10] * 20))  # all 20 in the [0, 60) bucket
     estimate = count_in_range(counts, None, 30)  # 30s is mid-bucket, not an edge
     assert 0 < estimate < 20
+
+
+_EARLY_EDGES = [-400, -301, -300, -299, -121, -120, -61, -60, -59, -1, 0, 59, 60, 400]
+
+
+@pytest.mark.parametrize("early_sec", [0, 60, 120, 300])
+def test_count_early_counts_departures_strictly_more_than_the_tolerance_early(early_sec):
+    """More than T early is ``dep_delay < -T``: a departure exactly T early
+    is not early. Every T that is a whole number of buckets inside the
+    histogram's early side puts -T on a bucket edge, so the count is exact."""
+    counts = _hist(*_EARLY_EDGES)
+    assert count_early(counts, early_sec) == sum(d < -early_sec for d in _EARLY_EDGES)
+
+
+def test_count_early_at_one_minute_leaves_out_a_departure_exactly_one_minute_early():
+    assert count_early(_hist(-61, -60, -59), 60) == 1
+
+
+@pytest.mark.parametrize("early_sec", [301, 330, 360, 600])
+def test_count_early_refuses_a_threshold_below_the_histograms_floor(early_sec):
+    """The underflow bucket is open below LO, so no share of it can be
+    attributed to either side of a threshold there; such a count comes from
+    the live scan instead."""
+    with pytest.raises(ValueError):
+        count_early(_hist(*_EARLY_EDGES), early_sec)
+
+
+@pytest.mark.parametrize(
+    ("early", "late", "inside"),
+    [
+        (None, None, True),
+        (0, 60, True),
+        (300, 1799, True),
+        (301, None, False),
+        (360, None, False),
+        (600, 60, False),
+        (None, 1800, False),
+        (None, 2400, False),
+    ],
+)
+def test_a_tolerance_lies_inside_the_histogram_only_between_its_open_end_buckets(early, late, inside):
+    assert within_histogram(early, late) is inside
+
+
+@pytest.mark.parametrize(("early_sec", "buckets"), [(0, 6), (60, 5), (120, 4), (300, 1)])
+def test_the_leading_buckets_wholly_below_an_edge_hold_the_exact_early_count(early_sec, buckets):
+    counts = _hist(*_EARLY_EDGES)
+    assert early_edge_buckets(early_sec) == buckets
+    assert sum(counts[:buckets]) == count_early(counts, early_sec) == sum(d < -early_sec for d in _EARLY_EDGES)
+
+
+@pytest.mark.parametrize("early_sec", [30, 90, 330, 360])
+def test_a_threshold_off_the_edges_has_no_exact_bucket_sum(early_sec):
+    assert early_edge_buckets(early_sec) is None
+    with pytest.raises(ValueError):
+        early_count_sql(early_sec)
+
+
+def test_the_early_count_column_sums_the_leading_buckets_by_postgres_index():
+    assert early_count_sql(60) == "SUM(hist[1] + hist[2] + hist[3] + hist[4] + hist[5])"
+    assert early_count_sql(300) == "SUM(hist[1])"
+
+
+# Whole-minute readings on every edge an on-time window can have: exactly a
+# minute early, exactly one and five minutes late, and one second past each.
+_WINDOW_EDGES = [-400, -301, -300, -120, -61, -60, -59, 0, 30, 60, 61, 120, 299, 300, 301, 400]
+
+
+def _exact_columns(delays: list[int]) -> dict:
+    """agg_route_daily_dist's exact columns for *delays*: the legacy on-time
+    count (at most 60 s late) and the over-five-minutes count."""
+    return {
+        "samples": len(delays),
+        "on_time_count": sum(d <= 60 for d in delays),
+        "late5_count": sum(d > 300 for d in delays),
+    }
+
+
+@pytest.mark.parametrize(
+    ("early", "late"),
+    [(None, 60), (60, 60), (None, 300), (60, 300), (0, 300), (300, 300), (120, 60)],
+)
+def test_count_on_time_is_exact_where_the_exact_columns_and_a_bucket_edge_bound_the_window(early, late):
+    """A late side at one or five minutes reads the exact columns, and an
+    early side on a bucket edge subtracts an exact early count, so readings
+    piled on either edge are counted exactly."""
+    low = -(early if early is not None else 10_000)
+    expected = sum(low <= d <= late for d in _WINDOW_EDGES)
+    assert count_on_time(_hist(*_WINDOW_EDGES), early, late, **_exact_columns(_WINDOW_EDGES)) == expected
+
+
+@pytest.mark.parametrize(("early", "late"), [(None, 120), (60, 180), (None, 0)])
+def test_count_on_time_estimates_from_the_histogram_where_no_exact_column_applies(early, late):
+    counts = _hist(*_WINDOW_EDGES)
+    estimate = count_in_range(counts, None if early is None else -early, late)
+    assert count_on_time(counts, early, late, **_exact_columns(_WINDOW_EDGES)) == estimate
+
+
+@pytest.mark.parametrize(("early", "late"), [(90, 300), (30, 60)])
+def test_count_on_time_keeps_an_exact_late_edge_under_an_early_tolerance_off_the_edges(early, late):
+    """Only the early side is estimated: the departures at most *late* late
+    still come from the exact column."""
+    counts = _hist(*_WINDOW_EDGES)
+    columns = _exact_columns(_WINDOW_EDGES)
+    at_most_late = sum(d <= late for d in _WINDOW_EDGES)
+    expected = at_most_late - count_in_range(counts, None, -early - 1)
+    assert count_on_time(counts, early, late, **columns) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("early", "late"), [(360, 60), (None, 1800), (None, 2400)])
+def test_count_on_time_refuses_a_window_past_the_histograms_open_end_buckets(early, late):
+    with pytest.raises(ValueError):
+        count_on_time(_hist(*_WINDOW_EDGES), early, late, **_exact_columns(_WINDOW_EDGES))
+
+
+@pytest.mark.parametrize(
+    ("early", "late", "exact"),
+    [
+        (None, 60, True),
+        (None, 300, True),
+        (60, 300, True),
+        (0, 60, True),
+        (300, 300, True),
+        (90, 300, False),
+        (None, 120, False),
+        (60, 180, False),
+        (360, 60, False),
+    ],
+)
+def test_the_exact_columns_answer_a_window_and_agree_with_the_histogram(early, late, exact):
+    """The query that sums leading buckets and the merged-histogram path give
+    one figure wherever the exact columns can answer, so the cheaper read can
+    never change a number."""
+    columns = _exact_columns(_WINDOW_EDGES)
+    assert exact_window(early, late) is exact
+    if not exact:
+        with pytest.raises(ValueError):
+            on_time_from_columns(early, late, early_count=0, **columns)
+        return
+    counts = _hist(*_WINDOW_EDGES)
+    early_count = 0 if early is None else sum(counts[: early_edge_buckets(early)])
+    low = -(early if early is not None else 10_000)
+    truth = sum(low <= d <= late for d in _WINDOW_EDGES)
+    from_columns = on_time_from_columns(early, late, early_count=early_count, **columns)
+    assert from_columns == count_on_time(counts, early, late, **columns) == truth
+
+
+def test_the_default_early_departure_threshold_sits_on_a_bucket_edge():
+    """With early departures on time, the route table and the council report
+    count the rate at this threshold from the leading buckets alone; off an
+    edge, their exact windows would have no exact early count to read."""
+    from pipeline.reports.rankings import DEFAULT_EARLY_DEPARTURE_SEC
+
+    assert early_edge_buckets(DEFAULT_EARLY_DEPARTURE_SEC) is not None

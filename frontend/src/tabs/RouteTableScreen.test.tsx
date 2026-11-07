@@ -14,6 +14,7 @@ const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
   late_tolerance_sec: 60,
+  early_departure_sec: 60,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
@@ -27,8 +28,8 @@ function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse 
     rendered_at: "2026-10-24T00:00:00Z",
     text: "",
     rows: [
-      ["42", "10.60", "12.3", "40.1", 496, 1236, false, 1.9],
-      ["70-3", "7.97", "11.3", "64.2", 28641, 44609, false, 0.3],
+      ["42", "10.60", "12.3", "40.1", 496, 1236, "3.5", false, 1.9],
+      ["70-3", "7.97", "11.3", "64.2", 28641, 44609, "0.2", false, 0.3],
     ],
     ctx: { from: "2026-09-24", to: "2026-10-23", dow: "all", time_band: "all", service: "all", routes: [] },
     definition: DEFINITION,
@@ -160,6 +161,19 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes");
     expect(screen.getByText("On time = no more than 1 min late (early departures count as on time).")).toBeInTheDocument();
     expect(screen.getByText(/^Over 5 min = departures more than 5 minutes late/)).toBeInTheDocument();
+  });
+
+  it("shows each route's early-departure rate, naming the threshold it counts past", () => {
+    setup("/agencies/1/routes");
+    expect(screen.getByRole("columnheader", { name: "Early (> 1 min)" })).toBeInTheDocument();
+    const row = screen.getAllByRole("row")[1];
+    expect(within(row).getByText("3.5%")).toBeInTheDocument();
+    expect(screen.getByText(/^Early = departures more than 1 min early/)).toBeInTheDocument();
+  });
+
+  it("follows the threshold the response names", () => {
+    setup("/agencies/1/routes?early=120", tableResponse({ definition: { ...DEFINITION, early_tolerance_sec: 120, early_departure_sec: 120 } }));
+    expect(screen.getByRole("columnheader", { name: "Early (> 2 min)" })).toBeInTheDocument();
   });
 
   it("puts the headway and targets panels beside the on-time sort only", () => {

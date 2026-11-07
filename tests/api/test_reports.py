@@ -581,6 +581,150 @@ async def test_reports_preset_combined_with_explicit_tolerance_is_rejected(repor
     assert resp.status_code == 400
 
 
+# Whole-minute readings on an on-time window's edges: exactly a minute early,
+# exactly five minutes late, and one step past each.
+_WINDOW_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(
+    ("query", "preset", "on_time"),
+    [("&preset=standard_m1_p5", "standard_m1_p5", 60.0), ("&late=300", "custom", 80.0)],
+)
+async def test_on_time_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, preset, on_time
+):
+    """standard_m1_p5 is the window operators publish: no more than a minute
+    early and five minutes late. A departure exactly a minute early or
+    exactly five minutes late is on time, and the aggregates count it as
+    the live scan does."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RSTD", "平日", day, "08:00", _WINDOW_EDGES)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}{query}")).json()
+    row = next(r for r in body["rows"] if r[0] == "RSTD")
+    assert float(row[2]) == on_time
+    assert body["definition"]["preset"] == preset
+    assert body["definition"]["late_tolerance_sec"] == 300
+
+
+@pytest.mark.asyncio
+async def test_an_exact_window_reads_the_exact_columns_without_merging_histograms(
+    reports_client, ch_client, ch_async_client, monkeypatch
+):
+    """Merging every route's histogram is the expensive read. A window the
+    exact columns answer, the default and the industry window among them,
+    never runs it; only an early tolerance off the bucket edges, or a late
+    one other than one or five minutes, does."""
+    from pipeline.reports import council, rankings, route_table
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RQ", "平日", day, "08:00", _WINDOW_EDGES)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+    merged: list[str] = []
+    for module in (council, rankings, route_table):
+        original = module._read_dist_with_hist
+
+        async def spy(*args, _original=original, _name=module.__name__, **kwargs):
+            merged.append(_name)
+            return await _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, "_read_dist_with_hist", spy)
+
+    async def read(report, query):
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        resp = await client.get(f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}")
+        assert resp.status_code == 200, (report, query, resp.text)
+
+    for report, query in [
+        ("route_table", ""),
+        ("route_table", "&preset=standard_m1_p5"),
+        ("route_table", "&late=300"),
+        ("route_table", "&early=0&late=60"),
+        ("council_summary", ""),
+        ("council_summary", "&preset=standard_m1_p5"),
+        ("council_summary", "&late=300"),
+        ("on_time", "&preset=standard_m1_p5"),
+        ("on_time", "&late=300"),
+    ]:
+        await read(report, query)
+    assert merged == []
+
+    await read("route_table", "&early=90")
+    await read("route_table", "&late=120")
+    await read("council_summary", "&early=90")
+    await read("on_time", "&early=90&late=300")
+    assert merged == [
+        "pipeline.reports.route_table",
+        "pipeline.reports.route_table",
+        "pipeline.reports.council",
+        "pipeline.reports.rankings",
+    ]
+
+
+# Departures past both of the histogram's open end buckets: earlier than
+# -300 s and later than 1800 s.
+_BEYOND = [-700] * 5 + [-400] * 5 + [-330] * 5 + [0] * 5 + [2000] * 5 + [2500] * 5
+
+
+@pytest.mark.asyncio
+async def test_a_tolerance_past_the_histograms_end_buckets_is_scanned_live(reports_client, ch_client, ch_async_client):
+    """No share of an open end bucket can be put on either side of a
+    tolerance there, so those requests scan the observations live, say so,
+    and agree with the time-band scan."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RB", "平日", day, "08:00", _BEYOND)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+
+    # (report, query, {row index: expected})
+    cases = [
+        ("route_table", "&early=360", {2: 33.3, 6: 33.3}),
+        ("route_table", "&early=600", {2: 50.0, 6: 16.7}),
+        ("route_table", "&late=2400", {2: 83.3, 6: 50.0}),
+        ("on_time", "&early_tolerance_sec=360", {2: 33.3}),
+        ("on_time", "&late=2400", {2: 83.3}),
+        ("council_summary", "&early=360", {0: 33.3, 6: 33.3}),
+        ("council_summary", "&late=2400", {0: 83.3}),
+        ("worst_5min", "&late_tolerance_sec=2400", {2: 5}),
+    ]
+    for report, query, expected in cases:
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        url = f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}"
+        whole_day = (await client.get(url)).json()
+        banded = (await client.get(url + "&time_band=morning")).json()
+        for body in (whole_day, banded):
+            row = next(r for r in body["rows"] if report == "council_summary" or r[0] == "RB")
+            assert {i: float(row[i]) for i in expected} == expected, (report, query)
+        assert whole_day["definition"]["source"] == "live", (report, query)
+        assert whole_day["definition"]["built_at"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", ["ranking", "worst_5min", "trend"])
+async def test_a_preset_with_a_window_is_rejected_where_no_on_time_window_applies(reports_client, report):
+    """worst_5min's late tolerance is its own over-5-minute cutoff, and the
+    ranking has no tolerance at all; legacy_60s, which overrides nothing,
+    stays accepted everywhere."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/{report}?preset=standard_m1_p5")
+    assert resp.status_code == 400
+    assert "preset" in resp.json()["detail"]
+    assert (await client.get(f"/api/{agency_id}/reports/{report}?preset=legacy_60s")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_industry_preset_is_named_on_the_csv_preamble(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=standard_m1_p5&format=csv")
+    assert resp.status_code == 200
+    assert "プリセット=standard_m1_p5" in _preamble(resp)
+
+
 @pytest.mark.asyncio
 async def test_reports_early_tolerance_sec_rejected_for_worst_5min(reports_client):
     client, agency_id, _ = reports_client
@@ -2402,6 +2546,88 @@ async def test_council_summary_custom_tolerance_pools_histogram_not_naive_averag
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_council_summary_pools_the_early_departure_rate_across_routes(
+    reports_client, ch_client, ch_async_client, path
+):
+    """The rate counts every departure more than a minute early, pooled over
+    the routes like the on-time rate: R1 has 10 of 25 (five more at exactly
+    -60 s are not early), R2 none of 15, so 10/40 = 25.0%. A limited early
+    tolerance moves the threshold to that limit, where -120 s is not early."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", [-120] * 5 + [-61] * 5 + [-60] * 5 + [0] * 10)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}")).json()
+    row = body["rows"][0]
+    # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct,
+    #  early_departure_pct)
+    assert row[2] == 40
+    assert row[6] == 25.0
+    assert row[0] == 100.0
+    assert body["definition"]["early_departure_sec"] == 60
+    limited = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}&early=120")).json()
+    assert limited["rows"][0][6] == 0.0
+    assert limited["definition"]["early_departure_sec"] == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(("query", "on_time"), [("&preset=standard_m1_p5", 75.0), ("&late=300", 87.5)])
+async def test_council_summary_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, on_time
+):
+    """R1 sits on the window's edges: 15 of its 25 departures are on time
+    under the industry window and 20 under five minutes with early
+    departures on time. R2's 15 are on time either way."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", _WINDOW_EDGES)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}{query}")).json()
+    row = body["rows"][0]
+    assert row[2] == 40
+    assert row[0] == on_time
+    assert row[6] == 12.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lang", "headline", "footnote"),
+    [
+        (
+            "ja",
+            "定時率 100.0%、早発率 40.0%（1分を超える早発）、平均遅延",
+            "※早発率：定刻より1分を超えて早く発車した割合",
+        ),
+        (
+            "en",
+            "On-time rate 100.0%, early departures 40.0% (more than 1 min early), mean delay",
+            "* Early-departure rate: the share of departures more than 1 min early",
+        ),
+    ],
+)
+async def test_council_summary_text_states_the_early_departure_rate_and_its_threshold(
+    reports_client, ch_client, lang, headline, footnote
+):
+    client, agency_id, pool = reports_client
+    day = "2026-06-12"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [-120] * 10 + [0] * 15)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/council_summary?from={day}&to={day}", headers={"Accept-Language": lang}
+    )
+    text = resp.json()["text"]
+    assert headline in text.split("\n")[1]
+    assert footnote in text.split("\n")
+
+
+@pytest.mark.asyncio
 async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
     """The report template's rendered footnotes must state the exact
     tolerance actually used, in plain words rather than a preset name --
@@ -2464,7 +2690,7 @@ async def test_council_summary_says_the_plan_could_not_be_read_when_the_planned_
     assert resp.status_code == 200
     body = resp.json()
     assert body["rows"][0][2] == 25  # samples
-    assert body["rows"][0][3:] == [0, None, None]
+    assert body["rows"][0][3:6] == [0, None, None]
     assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("unreadable", 0, 1)
     assert "運行率：—（計画を読み込めませんでした）" in body["text"]
 
@@ -2518,7 +2744,7 @@ async def test_council_summary_has_no_rate_for_a_feed_that_reports_no_cancellati
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["rows"][0][3:] == [4, None, None]  # planned, executed, delivered
+        assert body["rows"][0][3:6] == [4, None, None]  # planned, executed, delivered
         assert body["delivered_missing"] == "feed_reports_no_cancellations"
         assert line in body["text"].split("\n")
 
@@ -2590,6 +2816,9 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
+    assert data_row[6] == "0.0"  # early departures
+    assert "早発率=60秒を超える早発の割合" in rows[0][0]
+    assert "早発率：定刻より1分を超えて早く発車した割合" in footnote_cells
 
 
 _COUNCIL_CSV_HEADER = [
@@ -2599,6 +2828,7 @@ _COUNCIL_CSV_HEADER = [
     "計画本数",
     "運行本数",
     "運行実績率(%)",
+    "早発率(%)",
     "他事業者と比較できる",
     "比較できない理由",
     "観測カバー率(%)",
@@ -2782,7 +3012,7 @@ async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_d
     assert not any(line.startswith("※他事業者との比較") for line in body["text"].split("\n"))
     rows = list(csv.reader(io.StringIO((await client.get(_council_url(late, extra="&format=csv"))).text)))
     data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
-    assert data_row[6:] == ["", "", "", "", ""]
+    assert data_row[7:] == ["", "", "", "", ""]
 
 
 @pytest.mark.asyncio
@@ -2817,7 +3047,7 @@ async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be
     assert csv_resp.status_code == 200
     rows = list(csv.reader(io.StringIO(csv_resp.text)))
     data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
-    assert data_row[6:] == ["", "", "", "", ""]
+    assert data_row[7:] == ["", "", "", "", ""]
 
 
 @pytest.mark.asyncio
@@ -2914,10 +3144,10 @@ async def test_council_summary_csv_carries_the_comparability_columns(reports_cli
         header_idx = rows.index(_COUNCIL_CSV_HEADER)
         data_row = rows[header_idx + 1]
         assert len(data_row) == len(_COUNCIL_CSV_HEADER)
-        assert data_row[6 : 6 + len(status)] == status
+        assert data_row[7 : 7 + len(status)] == status
         assert any(r[0].startswith("他事業者との比較: ") for r in rows[1:header_idx])
     gate = (await client.get(_council_url(other))).json()["comparability"]
-    assert data_row[9:] == [str(gate["ci_low"]), str(gate["ci_high"])]
+    assert data_row[10:] == [str(gate["ci_low"]), str(gate["ci_high"])]
 
 
 _CERT_CSV_HEADER = [

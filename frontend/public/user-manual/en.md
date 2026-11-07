@@ -106,7 +106,7 @@ Each button with a ▼ is a condition. Click it to change it; the screen updates
 | Period | “Last 7 days”, “Last 14 days”, “Last 30 days” or “Since collection began”; a span dragged across the small daily chart; or exact “From” and “To” dates |
 | Days and timetable | “All”, “Weekdays”, “Weekend” or single days of the week, and a “Timetable type” |
 | Time of day | “All hours”, or a time band such as “Morning (05–09)” or “Evening (17–20)” |
-| On-time tolerance | How late a departure can leave and still count as on time (“Counted on time up to”): 1, 3 or 5 min, each shown with the on-time share it gives |
+| On-time tolerance | How late a departure can leave and still count as on time (“Counted on time up to”): 1, 3 or 5 min, each shown with the on-time share it gives. Under it, “Early departures” chooses whether early departures count as on time (the default) or not when more than 1 min early. With 5 min, that is the definition counting departures from 1 min early to 5 min late as on time |
 
 The “Timetable type” choices follow the agency’s own timetable: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. Each day counts under the timetable the agency’s schedule ran that day, so a public holiday falls under the Sunday or weekend one.
 
@@ -186,6 +186,7 @@ The columns:
 - **Route**: click a name to open that route’s page (5-6). Where several routes share a name, where each runs is shown beside it.
 - **Avg (min)**: the average delay.
 - **On-time %**: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “wide margin” mark means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points.
+- **Early (> 1 min)**: the share of departures that left more than 1 minute early. When the scope sets an early tolerance, it is the share that left earlier than that, and the header names it.
 - **Share over 5 min** and **Over 5 min (count)**: the departures that left more than five minutes late, as a share and as a count.
 - **Samples**: the number of observations behind the row. Fewer samples mean less certainty.
 
@@ -208,7 +209,7 @@ Routes observed fewer than 100 times in the period are left out, whatever the so
 
 The table also leaves out route codes the current timetable no longer runs, and routes whose feed always reports zero delay (a feed that repeats the timetable instead of reporting delay says nothing about punctuality). When it leaves any out, “Left out by default:” above the table shows a tick box per reason with how many, and ticking one brings them back. The counts stay the same whatever the sort or the number of rows shown.
 
-The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”) and what “over 5 min” counts.
+The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”) and what the early-departure rate and “over 5 min” count.
 
 **Download CSV** downloads the rows the table shows, in the table’s order.
 
@@ -352,12 +353,13 @@ The analyses you saved with **Save analysis** on a route’s page. Click one to 
 
 The list on the left holds **Council report** and **Delay record (for reference)**.
 
-**Council report** is the period’s service, summarised for the council: six headline figures (“On time”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”, “Comparison with other operators”), a written summary with its notes, and **Print / Save as PDF**.
+**Council report** is the period’s service, summarised for the council: seven headline figures (“On time”, “Early departures”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”, “Comparison with other operators”), a written summary with its notes, and **Print / Save as PDF**.
 
 - “Observations (stop level)” counts records of a trip leaving a stop (13-1). One trip counts once per stop, so the figure is far larger than the planned trips.
 - When a timetable plans only some of the period’s days, the planned trips say so, such as “* 16/30 days a timetable plans”. Service delivered % counts the same days.
 - When Service delivered % cannot be shown, “—” is followed by the reason, in the same words as Compare agencies (such as “the feed is not yet checked for cancellations”).
 - The notes’ “On-time definition” gives the on-time tolerance used, such as “no more than 1 min late (early departures count as on time)”.
+- “Early departures” is the share of departures that left more than 1 minute early (or more than the early tolerance, when one is set). The tile and the notes name that threshold.
 - Planned trips, Service delivered % and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tiles and the summary say “whole agency”.
 - “Comparison with other operators” says whether this agency’s figures meet the conditions **Compare agencies** ranks by (8-2): “Comparable” or “Not comparable”. Under “Not comparable” it gives the first condition missed, in the same words as Compare agencies (such as “Observation coverage 41.0% (below 70%)”), and the notes say not to rank this agency’s figures against other operators’. The verdict always reads the whole agency for the period and the on-time definition every operator is judged by, whatever conditions or on-time tolerance the report uses.
 
@@ -455,7 +457,8 @@ What the words on the screens and in this manual mean.
 
 - **Average delay**: the mean of the readings’ departure delays, in minutes. Early departures stay in the mean as negative delays.
 - **Early departure**: a reading that left before its scheduled time; its delay is negative.
-- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time. On-time % is the share of readings that were on time.
+- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time unless an early tolerance is set. On-time % is the share of readings that were on time.
+- **Early-departure rate**: the share of readings that left more than 1 minute early, or more than the early tolerance when one is set. It is counted whether or not early departures count as on time.
 - **Over 5 min**: a reading whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the samples, and “Over 5 min (count)” is how many there were.
 - **Live’s “On-time rate” and “5+ min late”**: Live takes the latest report of each trip reporting now. Trips 5 minutes or more late are “5+ min late”, and the share of the rest is the “On-time rate”, so it is counted differently from On-time % on the other screens.
 - **p50 and p90**: the values halfway along (the median) and 90% of the way along when the values are sorted from smallest. p90 is a guide to a value exceeded about one time in ten. They are approximations, worked out from counts grouped into fixed-width steps.

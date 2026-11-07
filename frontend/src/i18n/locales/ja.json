@@ -340,6 +340,7 @@
     "exclusion_limit": "{{limit}}を超えてずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内（早発も定時に含む）。",
     "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "early_departure": "早発率 = 定刻より{{early}}を超えて早い発車の割合。",
     "method_version": "算出方法 {{version}}、集計日 {{day}}。",
     "built_day_unknown": "不明",
     "built_day_live": "対象外（ライブ集計）",
@@ -1139,6 +1140,7 @@
       "avg": "平均",
       "samples": "観測数",
       "on_time_pct": "定時率",
+      "early_share": "早発率（{{early}}超）",
       "over_5min_count": "5分超回数",
       "over_5min_share": "5分超の割合",
       "diff": "差",
@@ -1371,6 +1373,7 @@
     "council": {
       "figures": "主な数値",
       "on_time": "定時率",
+      "early_departures": "早発率（{{early}}を超える早発）",
       "avg_delay": "平均遅延",
       "planned_trips": "計画便数",
       "planned_trips_agency_wide": "計画便数（事業者全体）",
@@ -1449,6 +1452,7 @@
       "worst": "悪い順",
       "best": "良い順"
     },
+    "early_note": "早発 = 定刻より{{early}}を超えて早い出発。割合はその系統の観測に占める割合です。",
     "late5_note": "5分超 = 5分を超えて遅れた出発。割合はその系統の観測に占める割合、回数はその数です。"
   },
   "insight_panel": {
@@ -2143,7 +2147,11 @@
       "whole_day_place": "この数値は時間帯・停留所・方向の条件を含みません",
       "readout": "{{n}}分までの遅れなら定時{{pct}}%",
       "weekday_colour": "色は曜日ごとの平均遅延",
-      "axis_lateness": "許容する遅れ"
+      "axis_lateness": "許容する遅れ",
+      "early_label": "早発の扱い",
+      "early_counted": "早発も定時に含める",
+      "early_limited": "{{n}}分を超える早発は定時に含めない",
+      "early_current": "いまは{{value}}"
     },
     "pin": "すべての条件を表示",
     "reset": "条件をリセット",

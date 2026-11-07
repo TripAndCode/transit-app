@@ -9,7 +9,7 @@ import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { sinceStart } from "./brushMath";
 import { PeriodBrush } from "./PeriodBrush";
-import { toleranceLabel } from "./scopePhrases";
+import { earlyLabel, toleranceLabel } from "./scopePhrases";
 import "./scope.css";
 import { fixedTenth, roundTenth } from "../../utils/format";
 
@@ -24,6 +24,9 @@ const PERIOD_PRESETS = [7, 14, 30] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
 const DEFAULT_LATE_SEC = 60;
 const MAX_LATE_SEC = 600;
+/** The early tolerance the early-departure choice offers: the industry
+ *  window's, one minute. */
+const EARLY_LIMIT_SEC = 60;
 
 function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: string }) {
   return (
@@ -326,7 +329,35 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
         onKeyUp={commit}
         onBlur={commit}
       />
+      <EarlyChoice scope={scope} update={update} />
     </div>
+  );
+}
+
+/** Whether an early departure counts as on time: every one, the default, or
+ *  none more than a minute early, which with a five-minute late tolerance is
+ *  the window operators publish. An early tolerance a link set to anything
+ *  else presses neither and is named beneath them. */
+function EarlyChoice({ scope, update }: ControlProps) {
+  const { t } = useTranslation();
+  const labelId = useId();
+  return (
+    <>
+      <span id={labelId} className="scope-field">
+        {t("scope.control.early_label")}
+      </span>
+      <div className="scope-pills" role="group" aria-labelledby={labelId}>
+        <Pill pressed={scope.early == null} onClick={() => update({ early: null })}>
+          {t("scope.control.early_counted")}
+        </Pill>
+        <Pill pressed={scope.early === EARLY_LIMIT_SEC} onClick={() => update({ early: EARLY_LIMIT_SEC })}>
+          {t("scope.control.early_limited", { n: EARLY_LIMIT_SEC / 60 })}
+        </Pill>
+      </div>
+      {scope.early != null && scope.early !== EARLY_LIMIT_SEC && (
+        <p className="scope-note">{t("scope.control.early_current", { value: earlyLabel(scope.early, t) })}</p>
+      )}
+    </>
   );
 }
 
@@ -347,7 +378,11 @@ export function StopControl({ scope, update }: ControlProps) {
 }
 
 export function EarlyControl({ scope, update }: ControlProps) {
-  return <ClearValue value={scope.early == null ? "" : String(scope.early)} onClear={() => update({ early: null })} />;
+  return (
+    <div className="scope-control">
+      <EarlyChoice scope={scope} update={update} />
+    </div>
+  );
 }
 
 export function DirControl({ scope, update }: ControlProps) {

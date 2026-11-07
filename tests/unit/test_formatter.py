@@ -287,12 +287,14 @@ def test_format_trend_text_matches_weighted_avg_min_helper():
 
 
 def test_fmt_route_table_names_its_sort_and_order_in_both_languages():
-    rows = [("S1", 1.666, 75.0, 25.0, 25, 100, True, 8.4)]
-    intent = {"sort": "on_time", "order": "best", "service": "平日"}
+    rows = [("S1", 1.666, 75.0, 25.0, 25, 100, 2.0, True, 8.4)]
+    intent = {"sort": "on_time", "order": "best", "service": "平日", "early_departure_sec": 60}
     assert format_result("route_table", rows, intent) == (
-        "【平日の系統一覧：定時率の高い順】\n1位: 路線S1 平均1.7分、定時率75.0%、5分超25.0%（25件）、観測100件"
+        "【平日の系統一覧：定時率の高い順】\n"
+        "1位: 路線S1 平均1.7分、定時率75.0%、1分を超える早発2.0%、5分超25.0%（25件）、観測100件"
     )
-    assert format_result("route_table", rows, {"sort": "avg", "order": "worst"}, locale="en") == (
+    en_intent = {"sort": "avg", "order": "worst", "early_departure_sec": 90}
+    assert format_result("route_table", rows, en_intent, locale="en") == (
         "[Routes, highest average delay first]\n"
-        "#1 route S1 mean 1.7 min, on-time 75.0%, over 5 min 25.0% (25), 100 samples"
+        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min 30 s early 2.0%, over 5 min 25.0% (25), 100 samples"
     )
