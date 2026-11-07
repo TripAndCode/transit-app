@@ -335,6 +335,9 @@
     "dedupRule": {
       "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
     },
+    "valueBasis": {
+      "feed_prediction": "値は、事業者のフィードが停留所ごとに最後に配信した発車遅延の予測で、通過を観測した値ではありません。"
+    },
     "exclusion_hours_one": "{{count}}時間を超えてずれた値は誤りとして除外します。",
     "exclusion_hours_other": "{{count}}時間を超えてずれた値は誤りとして除外します。",
     "exclusion_limit": "{{limit}}を超えてずれた値は誤りとして除外します。",
@@ -344,6 +347,18 @@
     "method_version": "算出方法 {{version}}、集計日 {{day}}。",
     "built_day_unknown": "不明",
     "built_day_live": "対象外（ライブ集計）",
+    "timetable_one": "時刻表：{{versions}}（全{{count}}日）。",
+    "timetable_other": "時刻表：{{versions}}（全{{count}}日）。",
+    "timetable_heading": "時刻表",
+    "timetable_agency_one": "{{agency}}：{{versions}}（全{{count}}日）",
+    "timetable_agency_other": "{{agency}}：{{versions}}（全{{count}}日）",
+    "timetable_fetched_one": "{{day}}取得版 {{count}}日",
+    "timetable_fetched_other": "{{day}}取得版 {{count}}日",
+    "timetable_named_one": "{{name}} {{count}}日",
+    "timetable_named_other": "{{name}} {{count}}日",
+    "timetable_unrecorded_one": "記録なし {{count}}日",
+    "timetable_unrecorded_other": "記録なし {{count}}日",
+    "timetable_separator": "、",
     "sentence_separator": ""
   },
   "app": {

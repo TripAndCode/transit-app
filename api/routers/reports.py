@@ -1400,7 +1400,11 @@ async def get_report(
         late_tolerance_sec=late_tolerance_sec,
     )
     definition = await stamp_build(
-        conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
+        conn,
+        resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live),
+        agency_id,
+        ctx.from_date,
+        ctx.to_date,
     )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)

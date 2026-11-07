@@ -12,6 +12,8 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
+from datetime import date
+from itertools import groupby
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel
@@ -26,6 +28,7 @@ from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
 )
 from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
+from pipeline.static_archive import fetch_day
 
 # Stable identifiers (not resolved per request, unlike the tolerance fields
 # below) so a caller can render/translate them instead of a fixed string
@@ -34,6 +37,10 @@ from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
 # "measurement point" knob exists elsewhere in the pipeline today.
 DEDUP_RULE = "latest_observation_per_stop_event"
 MEASUREMENT_POINT = "all_stops_all_observations"
+# What every stored delay is: the operator feed's prediction for the stop, the
+# last one the dedup kept, never an observed passage. Observed values would be
+# a second basis beside it, under their own identifier.
+VALUE_BASIS: Literal["feed_prediction"] = "feed_prediction"
 
 # Locale-aware operator-facing text for MEASUREMENT_POINT/DEDUP_RULE, keyed by
 # (value, locale) tuples rather than re-typed string literals -- a dict keyed
@@ -51,6 +58,12 @@ _DEDUP_RULE_TEXT: dict[tuple[str, str], str] = {
     (DEDUP_RULE, "ja"): "停留所イベントごとに最新観測を採用",
     (DEDUP_RULE, "en"): "latest observation per stop event",
 }
+_VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
+    (VALUE_BASIS, "ja"): "事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）",
+    (VALUE_BASIS, "en"): (
+        "the departure delay the operator's feed last predicted for each stop (not an observed passing time)"
+    ),
+}
 
 # format_definition_csv_line's own Japanese-only lookups: a plain
 # {value: text} dict, so an unrecognized value raises KeyError, sourced from
@@ -58,6 +71,20 @@ _DEDUP_RULE_TEXT: dict[tuple[str, str], str] = {
 # a second time.
 _MEASUREMENT_POINT_CSV_TEXT: dict[str, str] = {MEASUREMENT_POINT: _MEASUREMENT_POINT_TEXT[(MEASUREMENT_POINT, "ja")]}
 _DEDUP_RULE_CSV_TEXT: dict[str, str] = {DEDUP_RULE: _DEDUP_RULE_TEXT[(DEDUP_RULE, "ja")]}
+
+
+class TimetableVersion(BaseModel):
+    """A timetable an agency's observations were ingested against, and on how
+    many of a request's days it was the one most of them carried
+    (agg_schedule_revision_daily). ``name`` is the loaded zip's version name,
+    ``fetched_on`` the day that name says it was fetched; ``name`` is None for
+    the days with no timetable recorded: none analyzed yet, or an ingest that
+    stamps no version."""
+
+    agency_id: int
+    name: str | None
+    fetched_on: date | None
+    days: int
 
 
 class DefinitionMeta(BaseModel):
@@ -86,6 +113,11 @@ class DefinitionMeta(BaseModel):
     (:func:`stamp_build`), which a router with a connection fills in: always
     ``None`` for a live scan, and ``None`` for aggregates with no build
     recorded.
+
+    ``value_basis`` says what each stored value is (:data:`VALUE_BASIS`).
+    ``timetable_versions`` names the timetables in force over the request's
+    days, each listed agency's adding up to the range (:class:`TimetableVersion`),
+    for a live scan too; ``None`` until :func:`stamp_build` fills it in.
     """
 
     preset: str | None
@@ -98,6 +130,8 @@ class DefinitionMeta(BaseModel):
     method_version: str = METHOD_VERSION
     source: Literal["aggregates", "live"] = "aggregates"
     built_at: AwareDatetime | None = None
+    value_basis: Literal["feed_prediction"] = VALUE_BASIS
+    timetable_versions: list[TimetableVersion] | None = None
 
 
 # The builds analyze had recorded, for every agency, when this process last
@@ -119,21 +153,58 @@ JOIN agencies a USING (agency_id)
 """
 
 
-async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None) -> DefinitionMeta:
-    """*meta* with ``built_at``: the newest time analyze rewrote any
-    aggregate of *agency_id*, or of every agency the board lists when it is
-    None. A live definition is returned as it is.
+async def stamp_build(
+    conn, meta: DefinitionMeta, agency_id: int | None, from_date: date, to_date: date
+) -> DefinitionMeta:
+    """*meta* with the timetables in force over [*from_date*, *to_date*] and
+    ``built_at``: the newest time analyze rewrote any aggregate, both for
+    *agency_id*, or for every agency the board lists when it is None. A live
+    scan gets its timetables and no build.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
     so when analyze has rewritten any table since this process last looked, every
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
-    if meta.source == "live":
-        return meta
-    builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
-    _note_builds((builds, stamps))
-    return meta.model_copy(update={"built_at": built_at})
+    update: dict[str, object] = {}
+    if meta.source == "aggregates":
+        builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
+        _note_builds((builds, stamps))
+        update["built_at"] = built_at
+    rows = await conn.fetch(_TIMETABLES_SQL, agency_id, from_date, to_date)
+    update["timetable_versions"] = _timetables(rows, (to_date - from_date).days + 1)
+    return meta.model_copy(update=update)
+
+
+# Each scope agency's timetables over a range of service days, in the order
+# they first ran; an agency with none recorded on any of them is one row with
+# no name.
+_TIMETABLES_SQL = """
+SELECT a.agency_id, v.static_version_id AS name, count(v.date) AS days
+FROM agencies a
+LEFT JOIN agg_schedule_revision_daily v ON v.agency_id = a.agency_id AND v.date BETWEEN $2 AND $3
+WHERE a.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
+GROUP BY a.agency_id, v.static_version_id
+ORDER BY a.agency_id, min(v.date)
+"""
+
+
+def _timetables(rows, range_days: int) -> list[TimetableVersion]:
+    """Each agency's (agency_id, name, days) *rows* as its versions, then the
+    rest of its *range_days* as the days none was recorded on."""
+    versions: list[TimetableVersion] = []
+    for agency_id, group in groupby(rows, key=lambda row: row[0]):
+        recorded = 0
+        for _agency, name, days in group:
+            if name is None:
+                continue
+            versions.append(TimetableVersion(agency_id=agency_id, name=name, fetched_on=fetch_day(name), days=days))
+            recorded += days
+        if recorded < range_days:
+            versions.append(
+                TimetableVersion(agency_id=agency_id, name=None, fetched_on=None, days=range_days - recorded)
+            )
+    return versions
 
 
 def _note_builds(builds: object) -> None:
@@ -231,12 +302,15 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     # only having one entry each today.
     measurement_point = _MEASUREMENT_POINT_CSV_TEXT[meta.measurement_point]
     dedup_rule = _DEDUP_RULE_CSV_TEXT[meta.dedup_rule]
-    return (
+    line = (
         f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; 早発率={early_rate}; "
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
+        f"値の根拠={_VALUE_BASIS_TEXT[(meta.value_basis, 'ja')]}; "
         f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
+    timetables = _timetable_text(meta, "ja")
+    return line if timetables is None else f"{line}; 時刻表={timetables}"
 
 
 _LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
@@ -257,12 +331,59 @@ def _built_day(meta: DefinitionMeta, locale: str) -> str:
 def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
     """One footnote line naming the method version *meta*'s figures were made
     with and the JST day their aggregates were built, in the words of the CSV
-    preamble's 集計日. :func:`format_definition_footnotes` ends with it, and the
-    delay record's text is footnoted with it, so a document says which method
-    produced it."""
+    preamble's 集計日; one of :func:`format_stamp_lines`."""
     if locale == "en":
         return f"Method version: {meta.method_version}, aggregates built: {_built_day(meta, 'en')}"
     return f"算出方法: {meta.method_version}、集計日: {_built_day(meta, 'ja')}"
+
+
+def _days(n: int, locale: str) -> str:
+    if locale == "en":
+        return f"{n} day" if n == 1 else f"{n} days"
+    return f"{n}日"
+
+
+def _timetable_text(meta: DefinitionMeta, locale: str) -> str | None:
+    """*meta*'s timetables, each with the days it covers, then the range's
+    length, for one agency's document: the board's several agencies are told
+    apart only on its screen. None when no router named them. The Japanese
+    text holds no raw comma, so the CSV preamble's cell can carry it."""
+    if meta.timetable_versions is None:
+        return None
+    if not meta.timetable_versions:
+        return "none recorded" if locale == "en" else "記録なし"
+    parts = [_timetable_part(version, locale) for version in meta.timetable_versions]
+    total = _days(sum(version.days for version in meta.timetable_versions), locale)
+    if locale == "en":
+        return f"{', '.join(parts)} (of {total})"
+    return f"{'、'.join(parts)}（全{total}）"
+
+
+def _timetable_part(version: TimetableVersion, locale: str) -> str:
+    days = _days(version.days, locale)
+    if version.name is None:
+        return f"none recorded on {days}" if locale == "en" else f"記録なし {days}"
+    if locale == "en":
+        fetched = "" if version.fetched_on is None else f" (fetched {version.fetched_on.isoformat()})"
+        return f"{version.name}{fetched} on {days}"
+    if version.fetched_on is None:
+        return f"{version.name} {days}"
+    return f"{version.name}（{version.fetched_on.isoformat()}取得）{days}"
+
+
+def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
+    """The footnote lines that say where *meta*'s figures came from: what each
+    value is, the method and build day (:func:`format_method_stamp`), and the
+    timetables in force when a router named them.
+    :func:`format_definition_footnotes` ends with them, and the delay record's
+    text is footnoted with them."""
+    locale = "en" if locale == "en" else "ja"
+    basis = _VALUE_BASIS_TEXT[(meta.value_basis, locale)]
+    lines = [f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}", format_method_stamp(meta, locale)]
+    timetables = _timetable_text(meta, locale)
+    if timetables is not None:
+        lines.append(f"Timetable: {timetables}" if locale == "en" else f"時刻表: {timetables}")
+    return lines
 
 
 def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
@@ -304,7 +425,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
         lines.append(f"集計範囲: {measurement_point}")
         lines.append(f"重複排除: {dedup_rule}")
         lines.append(f"除外基準: |遅延|>{meta.exclusion_threshold_sec}秒を除外")
-    lines.append(format_method_stamp(meta, locale))
+    lines.extend(format_stamp_lines(meta, locale))
     return lines
 
 

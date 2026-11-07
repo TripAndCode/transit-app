@@ -3,7 +3,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
-import type { DefinitionMeta } from "../api/types";
+import type { DefinitionMeta, TimetableVersion } from "../api/types";
 
 const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
@@ -16,7 +16,14 @@ const LEGACY: DefinitionMeta = {
   method_version: "2026.11.0",
   source: "aggregates",
   built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
 };
+
+const ONE_AGENCY: TimetableVersion[] = [
+  { agency_id: 1, name: "gtfs_static_20260401", fetched_on: "2026-04-01", days: 28 },
+  { agency_id: 1, name: null, fetched_on: null, days: 3 },
+];
 
 // 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 const BUILT_AT = "2026-11-05T15:30:00Z";
@@ -110,6 +117,72 @@ describe("DefinitionMetaBlock", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("Method version 2026.11.0, aggregates built: not applicable (live scan).");
     expect(block).not.toHaveTextContent("Nov 6");
+  });
+
+  it("says each value is the feed's prediction, not an observed passage", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Each value is the departure delay the operator's feed last predicted for the stop, not an observed passing time.",
+    );
+  });
+
+  it("says what each value is the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "値は、事業者のフィードが停留所ごとに最後に配信した発車遅延の予測で、通過を観測した値ではありません。",
+    );
+  });
+
+  it("shows a value basis this build has no words for as the API sent it", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, value_basis: "some_other_basis" }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("some_other_basis");
+  });
+
+  it("names the timetables in force and the days each covers", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: ONE_AGENCY }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Timetable: version fetched Apr 1, 2026 on 28 days, none recorded on 3 days (of 31 days).",
+    );
+  });
+
+  it("names the timetables the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: ONE_AGENCY }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "時刻表：2026年4月1日取得版 28日、記録なし 3日（全31日）。",
+    );
+  });
+
+  it("names a timetable whose name carries no day by its name", () => {
+    const undated: TimetableVersion[] = [{ agency_id: 1, name: "hiroden_static", fetched_on: null, days: 1 }];
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: undated }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetable: hiroden_static on 1 day (of 1 day).");
+  });
+
+  it("says nothing of timetables the API did not name", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Timetable");
+  });
+
+  it("lists each agency's timetables under its name when the figures span several", () => {
+    const board: TimetableVersion[] = [
+      { agency_id: 1, name: "gtfs_static_20260301", fetched_on: "2026-03-01", days: 7 },
+      { agency_id: 2, name: "hiroden_static", fetched_on: null, days: 1 },
+      { agency_id: 2, name: null, fetched_on: null, days: 6 },
+    ];
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, timetable_versions: board }}
+        agencyNames={new Map([[1, "Hiroden"], [2, "HiroBus"]])}
+      />,
+    );
+    const items = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toEqual([
+      "Hiroden: version fetched Mar 1, 2026 on 7 days (of 7 days)",
+      "HiroBus: hiroden_static on 1 day, none recorded on 6 days (of 7 days)",
+    ]);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetables");
   });
 
   it("writes the live and unknown stamps the way a Japanese document does", async () => {

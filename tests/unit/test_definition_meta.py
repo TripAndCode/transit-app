@@ -5,7 +5,7 @@ Mirrors compute_on_time/compute_worst_5min's own None-default resolution
 silently drift from what a report actually computes.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -21,10 +21,13 @@ from pipeline.reports import definition
 from pipeline.reports.definition import (
     DEDUP_RULE,
     MEASUREMENT_POINT,
+    VALUE_BASIS,
     DefinitionMeta,
+    TimetableVersion,
     format_definition_csv_line,
     format_definition_footnotes,
     format_method_stamp,
+    format_stamp_lines,
     resolve_definition_meta,
 )
 from pipeline.reports.rankings import ON_TIME_PRESETS
@@ -389,9 +392,105 @@ def test_the_csv_line_and_the_footnote_name_the_same_build_day(meta):
 
 @pytest.mark.parametrize("locale", ["ja", "en"])
 @pytest.mark.parametrize("report_type", ["council_summary", "ranking"])
-def test_footnotes_end_with_the_method_stamp(locale, report_type):
-    meta = resolve_definition_meta(report_type, None, None).model_copy(update={"built_at": _BUILT_AT})
-    assert format_definition_footnotes(meta, locale)[-1] == format_method_stamp(meta, locale)
+def test_footnotes_end_with_the_stamp(locale, report_type):
+    meta = resolve_definition_meta(report_type, None, None).model_copy(
+        update={"built_at": _BUILT_AT, "timetable_versions": _TIMETABLES}
+    )
+    stamp = format_stamp_lines(meta, locale)
+    assert format_definition_footnotes(meta, locale)[-len(stamp) :] == stamp
+    assert format_method_stamp(meta, locale) in stamp
+
+
+@pytest.mark.parametrize("report_type", ["on_time", "worst_5min", "ranking", "council_summary", "delay_certificate"])
+@pytest.mark.parametrize("live", [False, True])
+def test_every_value_is_the_feeds_prediction_and_no_timetable_is_named_until_told(report_type, live):
+    """No figure is drawn from an observed passage, live or not; the timetables
+    are the caller's, read where it holds a connection."""
+    meta = resolve_definition_meta(report_type, None, None, live=live)
+    assert meta.value_basis == VALUE_BASIS == "feed_prediction"
+    assert meta.timetable_versions is None
+
+
+_TIMETABLES = [
+    TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=28),
+    TimetableVersion(agency_id=1, name=None, fetched_on=None, days=3),
+]
+_VALUE_BASIS = {
+    "ja": "値の根拠: 事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）",
+    "en": "Value basis: the departure delay the operator's feed last predicted for each stop "
+    "(not an observed passing time)",
+}
+
+
+def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_timetables():
+    meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES})
+    line = format_definition_csv_line(meta)
+    assert (
+        "; 値の根拠=事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）; "
+        f"算出方法={METHOD_VERSION}; 集計日=2026-11-06; "
+        "時刻表=gtfs_static_20260401（2026-04-01取得）28日、記録なし 3日（全31日）"
+    ) in line
+    assert line.endswith("（全31日）")
+    assert "," not in line
+
+
+def test_csv_line_without_timetables_ends_with_the_build_day():
+    """A definition no router stamped names no timetables, rather than none recorded."""
+    assert format_definition_csv_line(_DATED).endswith("; 集計日=2026-11-06")
+
+
+@pytest.mark.parametrize(
+    ("locale", "timetable"),
+    [
+        ("ja", "時刻表: gtfs_static_20260401（2026-04-01取得）28日、記録なし 3日（全31日）"),
+        ("en", "Timetable: gtfs_static_20260401 (fetched 2026-04-01) on 28 days, none recorded on 3 days (of 31 days)"),
+    ],
+)
+def test_the_stamp_says_what_each_value_is_and_names_the_method_and_the_timetables(locale, timetable):
+    meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES})
+    assert format_stamp_lines(meta, locale) == [_VALUE_BASIS[locale], format_method_stamp(meta, locale), timetable]
+    assert format_stamp_lines(_DATED, locale) == [_VALUE_BASIS[locale], format_method_stamp(_DATED, locale)]
+
+
+@pytest.mark.parametrize(
+    ("locale", "versions", "timetable"),
+    [
+        (
+            "ja",
+            [TimetableVersion(agency_id=1, name="hiroden_static", fetched_on=None, days=1)],
+            "hiroden_static 1日（全1日）",
+        ),
+        (
+            "en",
+            [TimetableVersion(agency_id=1, name="hiroden_static", fetched_on=None, days=1)],
+            "hiroden_static on 1 day (of 1 day)",
+        ),
+        ("ja", [], "記録なし"),
+        ("en", [], "none recorded"),
+    ],
+    ids=["ja-undated", "en-undated", "ja-none", "en-none"],
+)
+def test_a_timetable_whose_name_carries_no_day_is_named_as_it_is(locale, versions, timetable):
+    meta = _DATED.model_copy(update={"timetable_versions": versions})
+    assert format_stamp_lines(meta, locale)[-1].endswith(timetable)
+
+
+def test_each_listed_agency_accounts_for_every_day_of_the_range():
+    """Each agency's versions in the order they first ran, then the days none
+    was recorded on, so its entries add up to the range."""
+    rows = [
+        (1, "gtfs_static_20260401", 20),
+        (1, "gtfs_static_20260501", 8),
+        (2, "hiroden_static", 31),
+        (3, None, 0),
+    ]
+    assert definition._timetables(rows, 31) == [
+        TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=20),
+        TimetableVersion(agency_id=1, name="gtfs_static_20260501", fetched_on=date(2026, 5, 1), days=8),
+        TimetableVersion(agency_id=1, name=None, fetched_on=None, days=3),
+        TimetableVersion(agency_id=2, name="hiroden_static", fetched_on=None, days=31),
+        TimetableVersion(agency_id=3, name=None, fetched_on=None, days=31),
+    ]
 
 
 def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):

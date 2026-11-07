@@ -1,6 +1,11 @@
-"""The archive's content key and the schedule join's parameters."""
+"""The archive's content key, the schedule join's parameters, and the day a
+version name says its timetable was fetched."""
 
-from pipeline.static_archive import ScheduleJoin, content_hash
+from datetime import date
+
+import pytest
+
+from pipeline.static_archive import ScheduleJoin, content_hash, fetch_day
 
 
 def test_the_key_is_stable_for_the_same_parts():
@@ -36,3 +41,19 @@ def test_with_no_loaded_timetable_unmapped_rows_join_nothing():
 def test_a_name_joins_its_mapped_content_else_the_loaded_one():
     content_of = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc").content_of()
     assert [content_of(stem) for stem in ("s1", "", "gtfs_static_19990101")] == ["h1", "hc", "hc"]
+
+
+@pytest.mark.parametrize(
+    ("name", "day"),
+    [
+        ("gtfs_static_20260918", date(2026, 9, 18)),
+        ("hiroden_static", None),
+        ("gtfs_static_20261340", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_a_version_name_gives_the_day_its_zip_was_fetched(name, day):
+    """The fetchers name each zip `gtfs_static_YYYYMMDD` after the day they
+    fetched it; an older name carries no day, and a malformed one is no day."""
+    assert fetch_day(name) == day

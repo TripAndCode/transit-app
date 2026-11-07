@@ -400,10 +400,21 @@ async def _record_builds(pool, *builds):
         )
 
 
+async def _record_timetables(pool, agency_id, versions):
+    """agg_schedule_revision_daily rows as analyze records them: {day: version name}."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES ($1, $2, $3)",
+            [(agency_id, date.fromisoformat(day), name) for day, name in versions.items()],
+        )
+
+
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+_BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した発車遅延の予測値（通過の観測値ではない）"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
-_CERT_STAMP = _LIVE_STAMP
+# The stamp of a one-day delay record with no timetable recorded for its day.
+_CERT_STAMP = f"{_BASIS_NOTE}\n{_LIVE_STAMP}\n※時刻表: 記録なし 1日（全1日）"
 
 
 def _preamble(resp) -> str:
@@ -419,7 +430,7 @@ async def test_a_report_names_the_method_version_and_when_its_aggregates_were_bu
 
     unbuilt = (await client.get(url)).json()["definition"]
     assert (unbuilt["method_version"], unbuilt["source"], unbuilt["built_at"]) == (METHOD_VERSION, "aggregates", None)
-    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=不明")
+    assert f"; 算出方法={METHOD_VERSION}; 集計日=不明;" in _preamble(await client.get(f"{url}&format=csv"))
 
     other = await pool.fetchval(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
@@ -433,7 +444,43 @@ async def test_a_report_names_the_method_version_and_when_its_aggregates_were_bu
     built = (await client.get(url)).json()["definition"]
     assert (built["method_version"], built["source"]) == (METHOD_VERSION, "aggregates")
     assert datetime.fromisoformat(built["built_at"]) == _BUILT_AT
-    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06")
+    assert f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06;" in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_the_timetables_in_force_over_its_days(reports_client):
+    """Each timetable most of a day's observations carried, with how many of
+    the range's days it covers, then the days none was recorded on; another
+    agency's timetables are not this report's."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_timetables(
+        pool,
+        agency_id,
+        {
+            "2026-05-17": "gtfs_static_20260301",
+            "2026-05-18": "gtfs_static_20260401",
+            "2026-05-19": "gtfs_static_20260401",
+            "2026-05-20": "gtfs_static_20260401",
+            "2026-05-21": "gtfs_static_20260520",
+        },
+    )
+    await _record_timetables(pool, other, {"2026-05-18": "gtfs_static_20260402"})
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-24"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["value_basis"] == "feed_prediction"
+    assert definition["timetable_versions"] == [
+        {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 3},
+        {"agency_id": agency_id, "name": "gtfs_static_20260520", "fetched_on": "2026-05-20", "days": 1},
+        {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3},
+    ]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日、"
+        "gtfs_static_20260520（2026-05-20取得）1日、記録なし 3日（全7日）"
+    )
 
 
 @pytest.mark.asyncio
@@ -519,11 +566,17 @@ async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_cl
 
 
 @pytest.mark.asyncio
-async def test_the_council_report_text_names_the_method_version_and_the_build_day(reports_client):
+async def test_the_council_report_text_names_the_method_version_the_build_day_and_the_timetables(reports_client):
     client, agency_id, pool = reports_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
     body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
-    assert f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06" in body["text"].split("\n")
+    lines = body["text"].split("\n")
+    basis = lines.index(_BASIS_NOTE)
+    assert lines[basis + 1 : basis + 3] == [
+        f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
+        "※時刻表: gtfs_static_20260401（2026-04-01取得）1日（全1日）",
+    ]
 
 
 @pytest.mark.asyncio
@@ -536,12 +589,18 @@ async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_
     client, agency_id, pool = reports_client
     app.state.ch_client = ch_async_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
     url = f"/api/{agency_id}/reports/{report_type}?from=2026-05-18&to=2026-05-18&time_band=evening"
 
     body = (await client.get(url)).json()
     assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    # The scan joins the same timetables, so it names them all the same.
+    assert body["definition"]["timetable_versions"] == [
+        {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
+    ]
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
-        f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）"
+        f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）; "
+        "時刻表=gtfs_static_20260401（2026-04-01取得）1日（全1日）"
     )
     if report_type == "council_summary":
         assert _LIVE_STAMP in body["text"].split("\n")
@@ -564,7 +623,7 @@ async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch
     body = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")).json()
     assert body["definition"]["method_version"] == METHOD_VERSION
     assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
-    assert body["text"].split("\n")[-1] == _CERT_STAMP
+    assert body["text"].endswith(f"\n{_CERT_STAMP}")
 
 
 @pytest.mark.asyncio

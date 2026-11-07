@@ -37,6 +37,8 @@ const definition: DefinitionMeta = {
   dedup_rule: "latest_observation_per_stop_event",
   method_version: "2026.11.0", source: "aggregates",
   built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
 };
 
 const comparability: ComparabilityThresholds = { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 };
@@ -69,6 +71,27 @@ describe("NetworkTab", () => {
     renderTab();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "Compare agencies" })).toBeInTheDocument();
+  });
+
+  it("names each agency's timetables by the agency's name", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", comparability,
+        definition: {
+          ...definition,
+          timetable_versions: [
+            { agency_id: 1, name: "gtfs_static_20260301", fetched_on: "2026-03-01", days: 7 },
+            { agency_id: 2, name: null, fetched_on: null, days: 7 },
+          ],
+        },
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" }), row({ agency_id: 2, agency_name: "HiroBus" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Hiroden: version fetched Mar 1, 2026 on 7 days (of 7 days)");
+    expect(block).toHaveTextContent("HiroBus: none recorded on 7 days (of 7 days)");
   });
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {

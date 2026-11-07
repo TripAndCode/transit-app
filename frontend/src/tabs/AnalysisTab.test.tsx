@@ -34,6 +34,8 @@ const DEFINITION: DefinitionMeta = {
   dedup_rule: "latest_observation_per_stop_event",
   method_version: "2026.11.0", source: "aggregates",
   built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
 };
 
 function reportMeta(reportType: ReportType): ReportMeta {
@@ -349,6 +351,8 @@ function emptyReport(reportType: string): ReportResponse {
       dedup_rule: "",
       method_version: "2026.11.0", source: "aggregates",
       built_at: null,
+      value_basis: "feed_prediction",
+      timetable_versions: null,
     },
   } as ReportResponse;
 }

@@ -505,6 +505,17 @@ the scope as one sentence above their content
   it before the rows, and forgets the compute caches when analyze has
   recorded a newer build, so cached rows never sit under a later build's
   date.
+- The stamp also says what each value is and which timetables were in force.
+  `value_basis` is `feed_prediction`: the departure delay the operator's feed
+  last predicted for the stop, never an observed passage (値の根拠).
+  `timetable_versions` lists, per agency, each timetable that most of a day's
+  observations were ingested against (`agg_schedule_revision_daily`) and how
+  many of the request's days it covers, then the days with none recorded (時刻表).
+  These are days not yet analyzed, or days from an ingest that stamps no
+  version. A version is named by its loaded zip's name, with the fetch day
+  that `gtfs_static_YYYYMMDD` carries. A live scan names its timetables too.
+  `stamp_build` reads them in one indexed query per request, and they render
+  in the same four places as the method stamp.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

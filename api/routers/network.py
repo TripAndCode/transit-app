@@ -139,7 +139,7 @@ async def network_summary(
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
     """
-    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None)
+    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None, ctx.from_date, ctx.to_date)
     rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
     # The same rule compute_network_summary bounded each row's coverage by,
     # over the same per-agency last days.
