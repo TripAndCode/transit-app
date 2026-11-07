@@ -136,7 +136,7 @@ def _entries() -> list[AggTable]:
     if unknown:
         raise ValueError(f"_VERSIONS names tables not built in its loops: {', '.join(sorted(unknown))}")
     entries = [
-        AggTable("agg_feed_health", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
+        AggTable("agg_feed_health", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable(
             "agg_service_delivered_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
         ),
@@ -270,6 +270,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "route_delay_counts": 2,
         },
     ),
+    MethodVersion("2026.11.2", {"agg_feed_health": 2}),
 )
 
 # The method every report, CSV and council document names beside its figures

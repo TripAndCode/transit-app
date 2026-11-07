@@ -416,7 +416,7 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
     assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
         sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
     ]
-    assert not [s for s in conn.executed if "DELETE FROM agg_feed_health" in s]
+    assert not [s for s in conn.executed if "DELETE FROM agg_schedule_revision_daily" in s]
 
 
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():

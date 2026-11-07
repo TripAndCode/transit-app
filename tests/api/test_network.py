@@ -702,6 +702,29 @@ async def test_the_board_names_each_listed_agencys_timetables(net_client):
     ]
 
 
+async def test_the_board_names_where_each_listed_agencys_observations_came_from(net_client):
+    """Each listed agency's days over the range, filed under the source most of
+    each day's observations came from, adding up to the range; an agency the
+    board no longer lists is left out."""
+    client, pool, a, b, cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, "
+            "live_rows) VALUES ($1, $2, 0, 0, $3, $4, $5)",
+            [(a, date(2026, 4, day), 1000, 1000, 0) for day in range(1, 6)]
+            + [(a, date(2026, 4, 6), 100, 0, 100), (b, date(2026, 4, 2), 100, 0, 100)]
+            + [(cc, date(2026, 4, 2), 100, 100, 0)],
+        )
+        await c.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
+
+    definition = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert definition["source_mix"] == [
+        {"agency_id": a, "archive_days": 5, "live_days": 1, "none_days": 1},
+        {"agency_id": b, "archive_days": 0, "live_days": 1, "none_days": 6},
+    ]
+
+
 async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net_client):
     client, pool, a, _b, _cc = net_client
     params = {"from": "2026-04-01", "to": "2026-04-07"}

@@ -39,6 +39,7 @@ const definition: DefinitionMeta = {
   built_at: null,
   value_basis: "feed_prediction",
   timetable_versions: null,
+  source_mix: null,
 };
 
 const comparability: ComparabilityThresholds = { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 };
@@ -92,6 +93,27 @@ describe("NetworkTab", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("Hiroden — the version fetched Mar 1, 2026: 7 days (of 7 days)");
     expect(block).toHaveTextContent("HiroBus — none recorded: 7 days (of 7 days)");
+  });
+
+  it("names each agency's observation sources by the agency's name", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", comparability,
+        definition: {
+          ...definition,
+          source_mix: [
+            { agency_id: 1, archive_days: 5, live_days: 1, none_days: 1 },
+            { agency_id: 2, archive_days: 0, live_days: 0, none_days: 7 },
+          ],
+        },
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" }), row({ agency_id: 2, agency_name: "HiroBus" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Hiroden — archive 5 days, live 1 day, none recorded 1 day (of 7 days)");
+    expect(block).toHaveTextContent("HiroBus — none recorded 7 days (of 7 days)");
   });
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {

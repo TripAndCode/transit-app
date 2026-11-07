@@ -31,8 +31,8 @@ Aggregation tables produced:
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
-- agg_feed_health      — per-day row counts (every row, and those with a delay) and implausible-delay
-  count; doubles as the incremental ledger
+- agg_feed_health      — per-day row counts (every row, those with a delay, and every row by ingest
+  source) and implausible-delay count; doubles as the incremental ledger
 - agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
 - agg_route_headway    — scheduled-headway median + high-frequency classification + scheduled mean-wait
   per route (static GTFS only)
@@ -1266,7 +1266,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Persisted (not just logged) so the app can surface a feed-health
         # banner, and read back by _dates_needing_rebuild as the ledger that
         # decides which dates the next run rebuilds — which is why total_rows
-        # exists: it lets the ledger see delay-less rows too. A date whose rows
+        # exists: it lets the ledger see delay-less rows too. archive_rows and
+        # live_rows split total_rows by ingest source, for the definition
+        # stamp's per-day source (pipeline.reports.definition.stamp_build);
+        # the ledger does not compare them. A date whose rows
         # all lack a dep_delay therefore has a row here with raw_samples = 0;
         # every reader that divides by raw_samples treats zero as "nothing
         # measurable" (see pipeline/health.py, api/agency_diagnostics.py).
@@ -1278,7 +1281,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         where, params = _date_filter(scopes["agg_feed_health"], agency_id)
         _ch_build_and_insert(
             "agg_feed_health",
-            "(agency_id, date, raw_samples, clamp_count, total_rows)",
+            "(agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, live_rows)",
             agency_id,
             ch_client,
             agg_sql.feed_health_ch_sql(where),

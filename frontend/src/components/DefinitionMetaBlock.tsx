@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, SourceMix, TimetableVersion } from "../api/types";
 import { toJstISO } from "../api/scope";
 import { formatDate, formatDuration } from "../utils/format";
 
@@ -10,7 +10,7 @@ type Props = {
 
 type BlockProps = Props & {
   /** Each agency's name, for figures that span several agencies, whose
-   *  timetables are then listed under their agency's name. */
+   *  timetables and sources are then listed under their agency's name. */
   agencyNames?: ReadonlyMap<number, string>;
 };
 
@@ -18,8 +18,8 @@ type BlockProps = Props & {
  *  disclosure: what they are made from, which departures count, how a
  *  repeated report is treated, which readings are dropped, what on time means
  *  and, where the figures carry an early-departure rate, what it counts, then
- *  the method version, the day the aggregates were built and the timetables
- *  in force. A reader comparing two agencies or two exports can open it to see
+ *  the method version, the day the aggregates were built, the timetables
+ *  in force and where each day's observations came from. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
@@ -49,8 +49,54 @@ export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
       {definition.timetable_versions != null && definition.timetable_versions.length > 0 && (
         <Timetables versions={definition.timetable_versions} agencyNames={agencyNames} />
       )}
+      {definition.source_mix != null && definition.source_mix.length > 0 && (
+        <Sources mix={definition.source_mix} agencyNames={agencyNames} />
+      )}
     </details>
   );
+}
+
+/** The days each ingest source supplied the observations on: one sentence for
+ *  one agency, and a list under each agency's name for several. Counted in
+ *  days, not observations, because a live day holds far fewer of them; what
+ *  the two sources are follows whenever either supplied a day. */
+function Sources({ mix, agencyNames }: { mix: SourceMix[]; agencyNames?: ReadonlyMap<number, string> }) {
+  const { t } = useTranslation();
+  const explained = mix.some((own) => own.archive_days > 0 || own.live_days > 0);
+  return (
+    <>
+      {mix.length === 1 ? (
+        <p>{t("definitionMeta.observations", sourceParts(mix[0], t))}</p>
+      ) : (
+        <>
+          <p>{t("definitionMeta.observations_heading")}</p>
+          <ul>
+            {mix.map((own) => (
+              <li key={own.agency_id}>
+                {t("definitionMeta.observations_agency", {
+                  agency: agencyNames?.get(own.agency_id) ?? String(own.agency_id),
+                  ...sourceParts(own, t),
+                })}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {explained && <p>{t("definitionMeta.observations_explained")}</p>}
+    </>
+  );
+}
+
+/** One agency's sources as the `parts` and the range's day `count` the
+ *  sentences interpolate, leaving out a source that supplied no day. */
+function sourceParts(own: SourceMix, t: TFunction): { parts: string; count: number } {
+  const parts = [
+    own.archive_days > 0 ? t("definitionMeta.observations_archive", { count: own.archive_days }) : null,
+    own.live_days > 0 ? t("definitionMeta.observations_live", { count: own.live_days }) : null,
+    own.none_days > 0 ? t("definitionMeta.observations_unrecorded", { count: own.none_days }) : null,
+  ].filter((part) => part != null);
+  const count = own.archive_days + own.live_days + own.none_days;
+  return { parts: parts.join(t("definitionMeta.observations_separator")), count };
 }
 
 /** The timetables in force, with the days each covers: one sentence for one

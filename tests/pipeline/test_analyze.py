@@ -881,6 +881,37 @@ def test_agg_feed_health_counts_delayless_rows_in_total_rows_only(pg_conn, agenc
     assert by_date == {"2026-06-09": (1, 0, 2), "2026-06-10": (0, 0, 1)}
 
 
+def test_agg_feed_health_counts_each_days_rows_by_ingest_source(pg_conn, agency_id, ch_client):
+    """Archive ingest names a row after its archive file; the collector's push
+    and ingest_live name theirs in their own namespaces, which promotion keeps.
+    A day can hold either or both, and the two counts add up to total_rows."""
+
+    def at(day):
+        return datetime(2026, 6, day, 2, 0, tzinfo=timezone.utc)
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("20260609/a.pb", at(9), "T1", "平日", "11:00:00", "R1", 1, 60),
+            ("20260609/b.pb", at(9), "T2", "平日", "11:00:00", "R1", 1, None),
+            ("oracle/20260610/a.pb", at(10), "T3", "平日", "11:00:00", "R1", 1, 60),
+            ("live_20260610T020000", at(10), "T4", "平日", "11:00:00", "R1", 1, 60),
+            ("20260611/a.pb", at(11), "T5", "平日", "11:00:00", "R1", 1, 60),
+            ("oracle/20260611/a.pb", at(11), "T6", "平日", "11:00:00", "R1", 1, 60),
+            ("live_20260611T020000", at(11), "T7", "平日", "11:00:00", "R1", 1, 60),
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, archive_rows, live_rows, total_rows FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): (archive, live, total) for d, archive, live, total in cur.fetchall()}
+    assert by_date == {"2026-06-09": (2, 0, 2), "2026-06-10": (0, 2, 2), "2026-06-11": (1, 2, 3)}
+
+
 def _set_ingest_strategy(pg_conn, agency_id, strategy):
     with pg_conn.cursor() as cur:
         cur.execute("UPDATE agencies SET ingest_strategy = %s WHERE agency_id = %s", (strategy, agency_id))

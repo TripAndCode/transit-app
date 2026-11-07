@@ -519,6 +519,20 @@ the scope as one sentence above their content
   (`pipeline/reports/schedule_revision.py: read_schedule_days`), which also
   gives the trend chart its timetable-revision markers, and they render in the
   same four places as the method stamp.
+- The stamp then says where each day's observations came from (観測データ).
+  `source_mix` lists, per agency, how many of the request's days most of their
+  observations came from the collector's archive (`archive_days`: every poll
+  it made that day), from the live path (`live_days`: only what the app
+  received in real time), or from neither (`none_days`: no observations, a day
+  not analyzed yet, or one analyzed before sources were counted). The three add
+  up to the range, and a tie reads live. It counts days rather than
+  observations because a live day holds far fewer observations than an archive
+  day, so an observation share would read as almost all archive. analyze
+  counts each day's rows by source into `agg_feed_health.archive_rows`/
+  `live_rows` (`pipeline.clickhouse.LIVE_SOURCED` tells them apart), and
+  `stamp_build` reads them in one indexed read over the range, for a live scan
+  too. They render in the same four places, with one clause saying what the
+  two sources are.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

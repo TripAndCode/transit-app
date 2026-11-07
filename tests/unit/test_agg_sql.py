@@ -8,6 +8,7 @@ and module constants are interpolated with the values their helpers produce.
 import pytest
 
 from pipeline import agg_sql
+from pipeline.clickhouse import LIVE_SOURCED
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
@@ -58,6 +59,14 @@ def test_headway_daily_places_the_schedule_on_the_service_day_before_the_delay()
 
 def test_feed_health_counts_clamped_rows_with_the_server_side_bound():
     assert "countIf(abs(dep_delay) > {max_delay:Int32})" in agg_sql.feed_health_ch_sql("")
+
+
+def test_feed_health_splits_every_row_by_the_one_live_source_rule():
+    """Archive and live rows are told apart by the rule promotion and repair
+    use, so the two counts always add up to total_rows."""
+    sql = agg_sql.feed_health_ch_sql("")
+    assert f"countIf(NOT {LIVE_SOURCED}) AS archive_rows" in sql
+    assert f"countIf({LIVE_SOURCED}) AS live_rows" in sql
 
 
 def test_headway_daily_bounds_the_delay_with_server_side_parameters():

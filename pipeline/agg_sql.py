@@ -11,6 +11,7 @@ A change to what any of these statements produces is a builder change: bump
 the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
+from pipeline.clickhouse import LIVE_SOURCED
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
@@ -22,8 +23,9 @@ _SERVICE_DATE = service_date_ch()
 
 def feed_health_ch_sql(date_where: str) -> str:
     """Per service date: rows carrying a dep_delay, how many of those exceed the
-    plausibility clamp, and every row of the date, which is the ledger the next
-    run's rebuild decision reads."""
+    plausibility clamp, every row of the date, which is the ledger the next
+    run's rebuild decision reads, and those rows split by the source they were
+    ingested from: the collector's archive, or the live path."""
     return (
         """
             SELECT """
@@ -31,7 +33,13 @@ def feed_health_ch_sql(date_where: str) -> str:
         + """ AS date,
                    countIf(dep_delay IS NOT NULL) AS raw_samples,
                    countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count,
-                   count() AS total_rows
+                   count() AS total_rows,
+                   countIf(NOT """
+        + LIVE_SOURCED
+        + """) AS archive_rows,
+                   countIf("""
+        + LIVE_SOURCED
+        + """) AS live_rows
             FROM updates
             WHERE agency_id = {agency_id:UInt16}
             """

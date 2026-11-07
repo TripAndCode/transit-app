@@ -47,6 +47,7 @@ build day.
 |---|---|---|
 | `2026.11.0` | Baseline. The latest reading per trip, stop and service day counts, and readings more than 120 minutes off are dropped. Stop, dwell/run and headway rows join the timetable each reading's feed version archived, and each day's long gaps are measured against that timetable's own headway. | All |
 | `2026.11.1` | A departure scheduled at 24:00 or later counts under its service day's hour 24, 25, … and in the time band of its clock time (24:30 is late night), where the hourly and per-stop banded tables had left it out. | `agg_hour_daily`, `agg_route_hour`, `agg_route_hour_dow`, `agg_stop_daily`, `agg_route_stop_daily`, `route_delay_counts` |
+| `2026.11.2` | Each day's feed-health row also counts its observations by ingest source: from the collector's archive, or from the live path. The stamp files each day under the source most of its observations came from. No delay or on-time figure changes. | `agg_feed_health` |
 
 ## Serving
 

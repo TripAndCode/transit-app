@@ -88,6 +88,20 @@ class TimetableVersion(BaseModel):
     days: int
 
 
+class SourceMix(BaseModel):
+    """How many of a request's days an agency's observations came mostly from
+    the collector's archive, which holds every poll it made, or from the live
+    path, which holds only what the app received in real time and so is the
+    sparser of the two. The rest are the days with no source recorded: no
+    observations, a day not analyzed yet, or one analyzed before sources were
+    counted. The three add up to the range (:func:`_day_source`)."""
+
+    agency_id: int
+    archive_days: int
+    live_days: int
+    none_days: int
+
+
 class DefinitionMeta(BaseModel):
     """On-time/late definition actually used to produce a report or
     comparison view's numbers -- surfaced alongside any such view (and in
@@ -119,6 +133,9 @@ class DefinitionMeta(BaseModel):
     ``timetable_versions`` names the timetables in force over the request's
     days, each listed agency's adding up to the range (:class:`TimetableVersion`),
     for a live scan too; ``None`` until :func:`stamp_build` fills it in.
+    ``source_mix`` says, the same way, which ingest source each of those days'
+    observations came from (:class:`SourceMix`), counted in days rather than
+    observations because a live day holds far fewer of them.
     """
 
     preset: str | None
@@ -133,6 +150,7 @@ class DefinitionMeta(BaseModel):
     built_at: AwareDatetime | None = None
     value_basis: Literal["feed_prediction"] = VALUE_BASIS
     timetable_versions: list[TimetableVersion] | None = None
+    source_mix: list[SourceMix] | None = None
 
 
 # The builds analyze had recorded, for every agency, when this process last
@@ -154,20 +172,36 @@ JOIN agencies a USING (agency_id)
 """
 
 
+# Each scope agency's per-day counts by ingest source over the range, the scope
+# read_schedule_days names. An agency with none recorded in it is one row with
+# no date, so it is still named.
+_SOURCE_DAYS_SQL = """
+SELECT a.agency_id, h.date, h.archive_rows, h.live_rows
+FROM agencies a
+LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date BETWEEN $2 AND $3
+WHERE a.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
+ORDER BY a.agency_id, h.date
+"""
+
+
 async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedule: ScheduleDays) -> DefinitionMeta:
-    """*meta* with the timetables in force over *schedule*'s dates and
-    ``built_at``: the newest time analyze rewrote any aggregate, both for
-    *agency_id*, or for every agency the board lists when it is None.
-    *schedule* is that scope's
+    """*meta* with the timetables in force over *schedule*'s dates, the source
+    of each of those days' observations, and ``built_at``: the newest time
+    analyze rewrote any aggregate, all for *agency_id*, or for every agency
+    the board lists when it is None. *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and no build.
+    gets its timetables and sources and no build.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
     so when analyze has rewritten any table since this process last looked, every
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
-    update: dict[str, object] = {"timetable_versions": _timetables(schedule)}
+    sources = await conn.fetch(_SOURCE_DAYS_SQL, agency_id, schedule.from_date, schedule.to_date)
+    update: dict[str, object] = {
+        "timetable_versions": _timetables(schedule),
+        "source_mix": _source_mix(sources, schedule.from_date, schedule.to_date),
+    }
     if meta.source == "aggregates":
         builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
         _note_builds((builds, stamps))
@@ -194,6 +228,35 @@ def _timetables(schedule: ScheduleDays) -> list[TimetableVersion]:
                 TimetableVersion(agency_id=agency_id, name=None, fetched_on=None, days=range_days - recorded)
             )
     return versions
+
+
+def _day_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:
+    """The source most of a day's observations came from, or None when none
+    is recorded. A tie reads live, the sparser source, so a day is called
+    archive only when archive rows outnumber live ones."""
+    if archive_rows is None or live_rows is None or archive_rows + live_rows == 0:
+        return None
+    return "archive" if archive_rows > live_rows else "live"
+
+
+def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
+    """Each agency's days over [*from_date*, *to_date*] by source, from
+    ``(agency_id, date, archive_rows, live_rows)`` rows by agency; every day
+    with no source recorded, including those after its newest analyzed day,
+    is a none day."""
+    range_days = (to_date - from_date).days + 1
+    mix: list[SourceMix] = []
+    for agency_id, days in groupby(rows, key=lambda row: row[0]):
+        sources = [
+            _day_source(archive_rows, live_rows)
+            for _agency, day, archive_rows, live_rows in days
+            if day is not None and from_date <= day <= to_date
+        ]
+        archive, live = sources.count("archive"), sources.count("live")
+        mix.append(
+            SourceMix(agency_id=agency_id, archive_days=archive, live_days=live, none_days=range_days - archive - live)
+        )
+    return mix
 
 
 def _note_builds(builds: object) -> None:
@@ -299,7 +362,10 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
         f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
     timetables = _timetable_text(meta, "ja")
-    return line if timetables is None else f"{line}; 時刻表={timetables}"
+    if timetables is not None:
+        line = f"{line}; 時刻表={timetables}"
+    sources = _source_mix_text(meta, "ja")
+    return line if sources is None else f"{line}; 観測データ={sources}"
 
 
 _LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
@@ -361,10 +427,44 @@ def _timetable_part(version: TimetableVersion, locale: str) -> str:
     return f"{version.name}（{version.fetched_on.isoformat()}取得）{days}"
 
 
+# What each source is, said wherever a day of either is counted.
+_SOURCE_LABELS = {"ja": ("アーカイブ", "ライブ", "記録なし"), "en": ("archive", "live", "none recorded")}
+_SOURCE_NOTE = {
+    "ja": "アーカイブの日は収集サーバーがその日に取得した全データ、"
+    "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ",
+    "en": "Archive days hold every poll the collector made that day; "
+    "live days hold only the part the app received in real time",
+}
+
+
+def _source_mix_text(meta: DefinitionMeta, locale: str) -> str | None:
+    """The days *meta*'s observations came from each source, the sources with
+    none left out, then the range's length and, when either source supplied a
+    day, what the two are. Summed over the agencies, for one agency's
+    document as :func:`_timetable_text` is. None when no router named them."""
+    if meta.source_mix is None:
+        return None
+    if not meta.source_mix:
+        return "none recorded" if locale == "en" else "記録なし"
+    counts = (
+        sum(mix.archive_days for mix in meta.source_mix),
+        sum(mix.live_days for mix in meta.source_mix),
+        sum(mix.none_days for mix in meta.source_mix),
+    )
+    parts = [f"{label} {_days(n, locale)}" for label, n in zip(_SOURCE_LABELS[locale], counts, strict=True) if n]
+    total = _days(sum(counts), locale)
+    if locale == "en":
+        text = f"{', '.join(parts)} (of {total})"
+        return f"{text}. {_SOURCE_NOTE['en']}" if counts[0] or counts[1] else text
+    text = f"{'、'.join(parts)}（全{total}）"
+    return f"{text}。{_SOURCE_NOTE['ja']}" if counts[0] or counts[1] else text
+
+
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
     are made from, the method and build day (:func:`format_method_stamp`), and the
-    timetables in force when a router named them.
+    timetables in force and the source of each day's observations when a
+    router named them.
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
@@ -373,6 +473,9 @@ def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     timetables = _timetable_text(meta, locale)
     if timetables is not None:
         lines.append(f"Timetable: {timetables}" if locale == "en" else f"時刻表: {timetables}")
+    sources = _source_mix_text(meta, locale)
+    if sources is not None:
+        lines.append(f"Observations: {sources}" if locale == "en" else f"観測データ: {sources}")
     return lines
 
 
