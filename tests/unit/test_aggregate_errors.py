@@ -49,3 +49,21 @@ async def test_detail_is_the_exact_localized_string():
     ja = json.loads(bytes((await aggregate_not_ready_handler(_request("ja"), exc)).body))["detail"]
     assert en == "Data for this view hasn't been prepared in this environment yet. Please try again later."
     assert ja == "この画面のデータはこの環境ではまだ準備されていません。しばらくしてから再度お試しください。"
+
+
+@pytest.mark.parametrize("error", [asyncpg.exceptions.UndefinedTableError, asyncpg.exceptions.UndefinedColumnError])
+def test_a_schema_behind_the_code_answers_503_on_every_read(error):
+    """A column a later migration adds is as missing as a table it adds: a read
+    that reaches either answers the same 503, never an opaque 500."""
+    from api.main import app
+
+    assert app.exception_handlers[error] is aggregate_not_ready_handler
+
+
+@pytest.mark.asyncio
+async def test_a_missing_column_never_names_itself_to_the_client():
+    exc = asyncpg.exceptions.UndefinedColumnError("column h.archive_rows does not exist")
+    resp = await aggregate_not_ready_handler(_request("en"), exc)
+    body = json.loads(bytes(resp.body))
+    assert (resp.status_code, body["code"]) == (503, AGGREGATE_NOT_READY_CODE)
+    assert "archive_rows" not in body["detail"]

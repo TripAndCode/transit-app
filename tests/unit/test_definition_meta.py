@@ -7,6 +7,7 @@ silently drift from what a report actually computes.
 
 from datetime import date, datetime, timedelta, timezone
 
+import asyncpg
 import pytest
 from pydantic import ValidationError
 
@@ -629,3 +630,47 @@ def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):
     for builds, clears in seen:
         definition._note_builds(builds)
         assert len(cleared) == clears, builds
+
+
+class _BehindConn:
+    """A connection to a database whose schema is behind the code: the source
+    read fails with *error*, the build read answers."""
+
+    def __init__(self, error):
+        self.error = error
+
+    def is_in_transaction(self):
+        return False
+
+    async def fetch(self, _sql, *_args):
+        raise self.error("column h.archive_rows does not exist")
+
+    async def fetchrow(self, _sql, *_args):
+        return (1, 0.0, _BUILT_AT)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError])
+async def test_a_database_without_the_source_counts_stamps_everything_else(monkeypatch, error):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [(1, date(2026, 5, 1), "gtfs_static_20260401")])
+    meta = await definition.stamp_build(_BehindConn(error), resolve_definition_meta("on_time", None, None), 1, schedule)
+    assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+    assert meta.timetable_versions == [
+        TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_any_other_failure_of_the_source_read_is_raised(monkeypatch):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [])
+    with pytest.raises(asyncpg.exceptions.QueryCanceledError):
+        await definition.stamp_build(
+            _BehindConn(asyncpg.exceptions.QueryCanceledError),
+            resolve_definition_meta("on_time", None, None),
+            1,
+            schedule,
+        )

@@ -12,10 +12,12 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from itertools import groupby
 from typing import Literal
 
+import asyncpg
 from pydantic import AwareDatetime, BaseModel
 
 from pipeline.agg_registry import METHOD_VERSION
@@ -135,7 +137,8 @@ class DefinitionMeta(BaseModel):
     for a live scan too; ``None`` until :func:`stamp_build` fills it in.
     ``source_mix`` says, the same way, which ingest source each of those days'
     observations came from (:class:`SourceMix`), counted in days rather than
-    observations because a live day holds far fewer of them.
+    observations because a live day holds far fewer of them; it stays ``None``
+    on a database not yet migrated to the source counts.
     """
 
     preset: str | None
@@ -172,6 +175,8 @@ JOIN agencies a USING (agency_id)
 """
 
 
+_log = logging.getLogger(__name__)
+
 # Each scope agency's per-day counts by ingest source over the range, the scope
 # read_schedule_days names. An agency with none recorded in it is one row with
 # no date, so it is still named.
@@ -197,10 +202,10 @@ async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedul
     cache is forgotten first: rows served after this call are then no older
     than the build it names.
     """
-    sources = await conn.fetch(_SOURCE_DAYS_SQL, agency_id, schedule.from_date, schedule.to_date)
+    sources = await _read_source_days(conn, agency_id, schedule.from_date, schedule.to_date)
     update: dict[str, object] = {
         "timetable_versions": _timetables(schedule),
-        "source_mix": _source_mix(sources, schedule.from_date, schedule.to_date),
+        "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
     }
     if meta.source == "aggregates":
         builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
@@ -228,6 +233,32 @@ def _timetables(schedule: ScheduleDays) -> list[TimetableVersion]:
                 TimetableVersion(agency_id=agency_id, name=None, fetched_on=None, days=range_days - recorded)
             )
     return versions
+
+
+# Whether this process has said its database lacks the source counts.
+_warned_no_sources = False
+
+
+async def _read_source_days(conn, agency_id: int | None, from_date: date, to_date: date) -> list | None:
+    """The :data:`_SOURCE_DAYS_SQL` rows, or None on a database not yet
+    migrated to the source counts. They only enrich the stamp, so their
+    absence leaves the observations line out rather than failing the figures.
+
+    Inside a caller's transaction the read runs in its own savepoint: a failed
+    statement would otherwise abort that transaction, and the caller's next
+    statement with it. Outside one, a failed statement leaves nothing behind.
+    """
+    global _warned_no_sources
+    try:
+        if conn.is_in_transaction():
+            async with conn.transaction():
+                return await conn.fetch(_SOURCE_DAYS_SQL, agency_id, from_date, to_date)
+        return await conn.fetch(_SOURCE_DAYS_SQL, agency_id, from_date, to_date)
+    except (asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError) as exc:
+        if not _warned_no_sources:
+            _log.warning("definition stamp: no source counts in agg_feed_health (migrations behind?): %s", exc)
+            _warned_no_sources = True
+        return None
 
 
 def _day_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:

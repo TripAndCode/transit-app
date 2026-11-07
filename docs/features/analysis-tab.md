@@ -532,7 +532,10 @@ the scope as one sentence above their content
   `live_rows` (`pipeline.clickhouse.LIVE_SOURCED` tells them apart), and
   `stamp_build` reads them in one indexed read over the range, for a live scan
   too. They render in the same four places, with one clause saying what the
-  two sources are.
+  two sources are. On a database not yet migrated to those columns,
+  `source_mix` is null and the line is left out rather than failing the
+  report; any other read of a missing column answers the same 503 as a missing
+  aggregate table.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

@@ -533,6 +533,69 @@ async def test_a_report_names_where_each_of_its_days_observations_came_from(repo
     )
 
 
+_DROP_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health DROP COLUMN archive_rows, DROP COLUMN live_rows"
+_ADD_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health ADD COLUMN archive_rows BIGINT, ADD COLUMN live_rows BIGINT"
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_source_counts_still_serves_the_report(reports_client):
+    """The observations line is enrichment. On a database not yet migrated to
+    the source counts, the report is served with the rest of its stamp, and the
+    rows it reads after the stamp on the same connection still come back."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_timetables(pool, agency_id, {day: "gtfs_static_20260401"})
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    await pool.execute(_DROP_SOURCE_COLUMNS)
+    try:
+        resp = await client.get(url)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert float(next(r for r in body["rows"] if r[0] == "RGATE")[2]) == 40.0
+        definition = body["definition"]
+        assert definition["source_mix"] is None
+        assert datetime.fromisoformat(definition["built_at"]) == _BUILT_AT
+        assert definition["timetable_versions"] == [
+            {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
+        ]
+        assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+            "; 時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
+        )
+    finally:
+        await pool.execute(_ADD_SOURCE_COLUMNS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ddl", [_DROP_SOURCE_COLUMNS, "DROP TABLE agg_feed_health"], ids=["columns", "table"])
+async def test_a_failed_source_read_leaves_the_callers_transaction_usable(reports_client, ddl):
+    """Inside a caller's open transaction, the failed read rolls back to its
+    own savepoint, so the build read after it and the caller's next statement
+    still run."""
+    import asyncpg
+
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import read_schedule_days
+
+    _client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute(ddl)
+            schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
+            meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+            assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+            assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
+        finally:
+            await tx.rollback()
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
 async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(reports_client):
     """The compute caches outlive a rebuild, so a response stamped with a new

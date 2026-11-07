@@ -2,8 +2,9 @@
 
 Every read endpoint serves from precomputed ``agg_*`` tables. On a deployment
 whose schema is behind (e.g. the dev DB stuck at an old migration), a query hits
-a table that doesn't exist yet and asyncpg raises ``UndefinedTableError`` — which
-would otherwise surface as an opaque HTTP 500 / white screen.
+a table that doesn't exist yet and asyncpg raises ``UndefinedTableError``, or a
+column a later migration adds and it raises ``UndefinedColumnError`` — either of
+which would otherwise surface as an opaque HTTP 500 / white screen.
 
 Rather than 500, we answer **503** with a plain-language, localized message and a
 machine ``code`` so clients can distinguish "this environment hasn't built the
@@ -26,7 +27,7 @@ AGGREGATE_NOT_READY_CODE = "aggregate_not_ready"
 
 
 async def aggregate_not_ready_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Map a missing-aggregate ``UndefinedTableError`` to a localized 503."""
+    """Map a missing aggregate table or column to a localized 503."""
     # `str(exc)` is e.g. 'relation "agg_route_hour_dow" does not exist' — useful
     # for ops to know which migration/analyze is outstanding; never sent to the client.
     logger.error("Aggregate table missing (migrations/analyze behind?): %s", exc)

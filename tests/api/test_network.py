@@ -725,6 +725,26 @@ async def test_the_board_names_where_each_listed_agencys_observations_came_from(
     ]
 
 
+async def test_a_database_without_the_source_counts_still_serves_the_board(net_client):
+    """The board's observations line is enrichment: without the source counts
+    the board is served with its figures and the rest of its stamp."""
+    client, pool, a, _b, _cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+    async with pool.acquire() as c:
+        await c.execute("ALTER TABLE agg_feed_health DROP COLUMN archive_rows, DROP COLUMN live_rows")
+    try:
+        resp = await client.get("/api/network/summary", params=params)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert next(r for r in body["agencies"] if r["agency_id"] == a)["on_time_pct"] == 50.0
+        assert body["definition"]["source_mix"] is None
+        assert body["definition"]["timetable_versions"] is not None
+    finally:
+        async with pool.acquire() as c:
+            await c.execute("ALTER TABLE agg_feed_health ADD COLUMN archive_rows BIGINT, ADD COLUMN live_rows BIGINT")
+
+
 async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net_client):
     client, pool, a, _b, _cc = net_client
     params = {"from": "2026-04-01", "to": "2026-04-07"}
