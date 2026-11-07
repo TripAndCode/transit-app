@@ -28,7 +28,7 @@ from pipeline.reports.definition import (
     DefinitionMeta,
     duration_text,
     format_definition_footnotes,
-    format_method_stamp,
+    format_stamp_lines,
 )
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
@@ -744,10 +744,10 @@ def format_delay_certificate_text(
     the row cap can leave larger than ``len(rows)``. An empty list says "no
     trip exceeded" only when the feed reported the scope (``observed`` True);
     otherwise it says there is no data, or that which one couldn't be checked.
-    A footnote line names the method version, as the council report's do.
+    It is footnoted with the definition's stamp, as the council report is.
     """
     summary = _delay_certificate_summary(rows, threshold_sec, total, locale, observed)
-    return f"{summary}\n{_footnote(format_method_stamp(definition, locale), locale)}"
+    return "\n".join([summary, *(_footnote(line, locale) for line in format_stamp_lines(definition, locale))])
 
 
 def _delay_certificate_summary(rows: list, threshold_sec: int, total: int, locale: str, observed: bool | None) -> str:

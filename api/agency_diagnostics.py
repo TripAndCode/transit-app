@@ -16,11 +16,11 @@ cannot answer for.
 from __future__ import annotations
 
 import math
-import re
 from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
+from pipeline.static_archive import fetch_day
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
 __all__ = [
@@ -351,6 +351,12 @@ def _calendar_date(value: str | None) -> str | None:
     return value
 
 
+def _fetched_on(version: Mapping[str, Any] | None) -> str | None:
+    """The day the loaded zip's version name says it was fetched, as an ISO date."""
+    day = fetch_day(version["version"] if version else None)
+    return day.isoformat() if day else None
+
+
 def build_static_versions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Shape ``STATIC_VERSIONS_SQL`` rows into the drawer's version timeline,
     preserving the query's newest-first order."""
@@ -435,22 +441,6 @@ def _group_by_agency(rows: Sequence[Mapping[str, Any]]) -> dict[int, list[Mappin
     return grouped
 
 
-#: The fetchers name each zip they persist ``gtfs_static_YYYYMMDD`` after the
-#: day it was fetched, and the loader stamps that stem on every trip as its
-#: static version.
-_VERSION_DATE_RE = re.compile(r"(\d{4})(\d{2})(\d{2})$")
-
-
-def _version_date(version: str | None) -> str | None:
-    match = _VERSION_DATE_RE.search(version or "")
-    if match is None:
-        return None
-    try:
-        return date(int(match[1]), int(match[2]), int(match[3])).isoformat()
-    except ValueError:
-        return None
-
-
 def build_agency_health(
     *,
     headers: Sequence[Mapping[str, Any]],
@@ -513,9 +503,7 @@ def build_agency_health(
                     if version is None
                     else {"version": version["version"], "analyzed_at": _iso(version.get("analyzed_at"))}
                 ),
-                "static_loaded_on": (
-                    jst_date(loads_by_agency.get(aid)) or _version_date(version["version"] if version else None)
-                ),
+                "static_loaded_on": jst_date(loads_by_agency.get(aid)) or _fetched_on(version),
             }
         )
     return out

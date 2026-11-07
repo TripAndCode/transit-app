@@ -10,9 +10,10 @@ version map says which content each name carried.
 
 import hashlib
 import logging
+import re
 import secrets
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import NamedTuple
 
 from pipeline.static_content import static_parts
@@ -77,6 +78,23 @@ def require_tables(ch) -> None:
     missing = [table for table in (ARCHIVE, VERSION_MAP) if table not in names]
     if missing:
         raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
+
+
+# The fetchers name each zip they persist gtfs_static_YYYYMMDD after the day
+# they fetched it, and the loader stamps that stem on every trip as the
+# timetable's version name.
+_FETCH_DAY = re.compile(r"(\d{4})(\d{2})(\d{2})$")
+
+
+def fetch_day(stem: str | None) -> date | None:
+    """The day version name *stem* says its zip was fetched, or None for a name that carries none."""
+    match = _FETCH_DAY.search(stem or "")
+    if match is None:
+        return None
+    try:
+        return date(int(match[1]), int(match[2]), int(match[3]))
+    except ValueError:
+        return None
 
 
 def loaded_stem(conn, agency_id: int) -> str | None:

@@ -335,6 +335,9 @@
     "dedupRule": {
       "latest_observation_per_stop_event": "When a departure is reported more than once, the latest report counts."
     },
+    "valueBasis": {
+      "feed_prediction": "Figures are computed from the delays the operator's feed last predicted for each stop, not from observed passing times."
+    },
     "exclusion_hours_one": "Readings more than {{count}} hour off are ignored as errors.",
     "exclusion_hours_other": "Readings more than {{count}} hours off are ignored as errors.",
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
@@ -344,6 +347,18 @@
     "method_version": "Method version {{version}}, aggregates built: {{day}}.",
     "built_day_unknown": "unknown",
     "built_day_live": "not applicable (live scan)",
+    "timetable_one": "Timetable: {{versions}} (of {{count}} day).",
+    "timetable_other": "Timetable: {{versions}} (of {{count}} days).",
+    "timetable_heading": "Timetables",
+    "timetable_agency_one": "{{agency}} — {{versions}} (of {{count}} day)",
+    "timetable_agency_other": "{{agency}} — {{versions}} (of {{count}} days)",
+    "timetable_fetched_one": "the version fetched {{day}}: {{count}} day",
+    "timetable_fetched_other": "the version fetched {{day}}: {{count}} days",
+    "timetable_named_one": "{{name}}: {{count}} day",
+    "timetable_named_other": "{{name}}: {{count}} days",
+    "timetable_unrecorded_one": "none recorded: {{count}} day",
+    "timetable_unrecorded_other": "none recorded: {{count}} days",
+    "timetable_separator": "; ",
     "sentence_separator": " "
   },
   "app": {
