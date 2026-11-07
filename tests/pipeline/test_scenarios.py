@@ -22,6 +22,7 @@ fixture), and every test compares that one snapshot with the oracle.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections import defaultdict
 from dataclasses import dataclass
@@ -476,6 +477,15 @@ def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
 _ABSENT = object()
 
 
+def _restore_app_state(app, saved: dict) -> None:
+    for name, value in saved.items():
+        if value is _ABSENT:
+            if hasattr(app.state, name):
+                delattr(app.state, name)
+        else:
+            setattr(app.state, name, value)
+
+
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed:
     """One pipeline run per scenario, shared by every test of this module
@@ -484,9 +494,14 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
     The conftest's per-test fixtures reset both stores, so nothing the run
     wrote may outlive this fixture: it works on connections of its own,
     starts from emptied stores, reads everything the tests compare, empties
-    the stores again, and hands the tests plain data. Errors in any step
-    raise RuntimeError, never AssertionError, so an expected failure of a
-    comparison cannot absorb a broken run.
+    the stores again, and hands the tests plain data. Every connection it
+    opens is closed however the run ends.
+
+    A strict xfail on a comparison expects an AssertionError, and pytest
+    applies it to an error raised while this fixture sets up as well. So an
+    AssertionError from anywhere in the run, the pipeline's own asserts
+    included, is re-raised as RuntimeError: a broken run is an error, never
+    an expected failure.
     """
     if os.environ.get("RUN_CH_INTEGRATION") != "1":
         pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
@@ -497,15 +512,21 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
     from tests.conftest import _CH_TEST, _ch_test_client, _database_url, _test_pool
 
     scenario = request.param(_anchor_day())
-    pg_conn = psycopg2.connect(_database_url())
-    ch_client = _ch_test_client()
-    ch_async = await clickhouse_connect.get_async_client(**{**_CH_TEST, "port": int(_CH_TEST["port"])})
-    saved = {name: getattr(app.state, name, _ABSENT) for name in ("pool", "ch_client")}
     try:
-        with pytest.MonkeyPatch.context() as mp:
+        async with contextlib.AsyncExitStack() as stack:
+            pg_conn = psycopg2.connect(_database_url())
+            stack.callback(pg_conn.close)
+            ch_client = _ch_test_client()
+            stack.callback(ch_client.close)
+            ch_async = await clickhouse_connect.get_async_client(**{**_CH_TEST, "port": int(_CH_TEST["port"])})
+            stack.push_async_callback(ch_async.close)
+            stack.callback(_restore_app_state, app, {n: getattr(app.state, n, _ABSENT) for n in ("pool", "ch_client")})
+            stack.callback(_empty_stores, pg_conn, ch_client, reset_sql)
+            mp = stack.enter_context(pytest.MonkeyPatch.context())
             for var in SSO_ENV:
                 mp.delenv(var, raising=False)
             mp.setenv("COLLECTOR_INGEST_SECRET", _COLLECTOR_SECRET)
+
             _empty_stores(pg_conn, ch_client, reset_sql)
             with pg_conn.cursor() as cur:
                 cur.execute("SET TIME ZONE 'Asia/Tokyo'")
@@ -515,24 +536,11 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             agency_id = await _run_scenario(scenario, pg_conn, ch_client, tmp_path_factory.mktemp(scenario.name))
             tables = _read_tables(pg_conn, agency_id)
             pool = await _test_pool()
+            stack.push_async_callback(pool.close)
             app.state.pool, app.state.ch_client = pool, ch_async
-            try:
-                reports = await _read_reports(scenario, agency_id)
-            finally:
-                await pool.close()
-    finally:
-        for name, value in saved.items():
-            if value is _ABSENT:
-                if hasattr(app.state, name):
-                    delattr(app.state, name)
-            else:
-                setattr(app.state, name, value)
-        try:
-            _empty_stores(pg_conn, ch_client, reset_sql)
-        finally:
-            pg_conn.close()
-            ch_client.close()
-            await ch_async.close()
+            reports = await _read_reports(scenario, agency_id)
+    except AssertionError as exc:
+        raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
     return Observed(scenario, tables, reports)
 
 
@@ -540,9 +548,10 @@ def _assert_clean(mismatches: list[str]) -> None:
     assert not mismatches, "pipeline differs from the truth:\n" + "\n".join(mismatches)
 
 
-# Every test names the scenarios in this one order. pytest groups the tests
-# sharing a module-scoped parameter by its position in each list, so one
-# order keeps it to one pipeline run per scenario.
+# Every test parametrizes `observed` with these same scenarios under these
+# same ids. pytest keeps a module-scoped fixture's value per parameter value
+# and runs the tests that share one together, so each scenario's pipeline
+# runs once for the module.
 _SCENARIOS = [pytest.param(plain_weekday, id="plain_weekday"), pytest.param(night_route, id="night_route")]
 
 
