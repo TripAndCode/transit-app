@@ -759,8 +759,9 @@ class Divergence:
     """A known way the pipeline departs from the truth. ``view`` turns an
     outcome into the outcome the pipeline computes instead, from the run's
     scenario and polls; ``reason`` states the divergence as its strict xfail
-    does."""
+    does, and ``name`` names it in a mismatch report."""
 
+    name: str
     reason: str
     view: Callable[[Observed, oracle.Outcome], oracle.Outcome]
 
@@ -881,6 +882,7 @@ def _joined_to_the_timetable_loaded(observed: Observed, found: oracle.Outcome) -
 
 
 _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
+    name="a cancelled trip keeps its predictions",
     reason=(
         "A trip the feed predicted and then reported CANCELED before it left keeps its last predictions as "
         "departures: the delay dedup drops rows without a delay before it picks each stop's latest poll, so "
@@ -890,6 +892,7 @@ _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
     view=_cancelled_trips_keep_their_predictions,
 )
 _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
+    name="a skipped stop keeps its prediction",
     reason=(
         "A stop the feed predicted and then reported SKIPPED keeps its last prediction as a departure: the "
         "delay dedup drops the SKIPPED rows, which carry no delay, before it picks the stop's latest poll."
@@ -897,6 +900,7 @@ _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
     view=_skipped_stops_keep_their_predictions,
 )
 _CANCELLED_WITHOUT_STOPS_DIVERGENCE = Divergence(
+    name="a cancellation without stops is lost",
     reason=(
         "A CANCELED TripUpdate that lists no StopTimeUpdate, which GTFS-RT allows, stores nothing: ingest "
         "writes one row per StopTimeUpdate, so neither agg_service_delivered_daily nor the council summary's "
@@ -905,6 +909,7 @@ _CANCELLED_WITHOUT_STOPS_DIVERGENCE = Divergence(
     view=_cancellations_without_stops_are_lost,
 )
 _PARTIAL_RUN_DIVERGENCE = Divergence(
+    name="a partial run counts as not run",
     reason=(
         "A trip is not run when it is CANCELED or every stop it reports is SKIPPED; a run that skipped only "
         "some stops ran, so it counts as executed. agg_service_delivered_daily instead counts a trip as not "
@@ -914,6 +919,7 @@ _PARTIAL_RUN_DIVERGENCE = Divergence(
     view=_partial_runs_count_as_not_run,
 )
 _PUBLISHED_EARLY_DIVERGENCE = Divergence(
+    name="polls join the timetable loaded",
     reason=(
         "Ingest joins each poll to the timetable loaded when it arrives, not to the one in force on its "
         "service date, so the polls of a day before a revision's first day that arrive after the revision is "
@@ -934,8 +940,10 @@ _KNOWN = {
 }
 
 
-def _outcomes(observed: Observed, divergences: tuple[Divergence, ...]) -> list[oracle.Outcome]:
-    """The truth's outcome, then its view under each combination of *divergences*."""
+def _outcomes(observed: Observed) -> list[tuple[tuple[Divergence, ...], oracle.Outcome]]:
+    """The truth's outcome, then its view under each combination of the
+    scenario's known divergences, each with the divergences it applies."""
+    divergences = _KNOWN.get(observed.scenario.name, ())
     truth = oracle.outcome(observed.scenario)
     out = []
     for n in range(len(divergences) + 1):
@@ -943,7 +951,7 @@ def _outcomes(observed: Observed, divergences: tuple[Divergence, ...]) -> list[o
             found = truth
             for divergence in chosen:
                 found = divergence.view(observed, found)
-            out.append(found)
+            out.append((chosen, found))
     return out
 
 
@@ -959,33 +967,35 @@ def _shown(cell: dict | None, columns) -> str:
     return "{" + ", ".join(f"{c}: {cell.get(c)!r}" for c in columns) + "}"
 
 
-def _compare(actual: Cells, expected: list[Cells], keep: Callable[[tuple[str, Hashable]], bool]) -> list[str]:
-    """Each kept cell where *actual* fits none of the *expected* outcomes, the
-    truth first, as one line. A cell an outcome lacks expects no row."""
+def _compare(actual: Cells, expected: Cells, keep: Callable[[tuple[str, Hashable]], bool]) -> list[str]:
+    """Each kept cell where *actual* does not fit *expected*, as one line. A
+    cell *expected* lacks expects no row."""
     lines = []
-    for cell in sorted(set(actual).union(*expected), key=str):
-        if not keep(cell):
-            continue
-        options = [e.get(cell) for e in expected]
-        got = actual.get(cell)
-        if any(_fits(want, got) for want in options):
-            continue
-        columns = next((want for want in options if want is not None), got or {})
-        alternatives = {_shown(want, columns) for want in options[1:]} - {_shown(options[0], columns)}
-        known = f" (or, under a known divergence, {' or '.join(sorted(alternatives))})" if alternatives else ""
-        lines.append(
-            f"{cell[0]} {cell[1]}: expected {_shown(options[0], columns)}{known}, actual {_shown(got, columns)}"
-        )
+    for cell in sorted(set(actual) | set(expected), key=str):
+        want, got = expected.get(cell), actual.get(cell)
+        if keep(cell) and not _fits(want, got):
+            columns = want or got or {}
+            lines.append(f"{cell[0]} {cell[1]}: expected {_shown(want, columns)}, actual {_shown(got, columns)}")
     return lines
 
 
 def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Observed], Cells]]) -> list[str]:
-    """Every cell of *comparison* against the truth, a cell a known divergence
-    of the scenario moves also accepting the figure that divergence, alone or
-    with others, gives it. Anything else a cell holds is a failure."""
+    """Every cell of *comparison* against one outcome: the truth, or its view
+    under one combination of the scenario's known divergences, the same for
+    every cell, so a cell two divergences move takes exactly the figure the
+    other cells show them to give. Reported against the outcome nearest the
+    run, the truth on a tie."""
     expect, read = comparison
-    outcomes = _outcomes(observed, _KNOWN.get(observed.scenario.name, ()))
-    return _compare(read(observed), [expect(observed, found) for found in outcomes], lambda _cell: True)
+    actual = read(observed)
+    reports = []
+    for chosen, found in _outcomes(observed):
+        lines = _compare(actual, expect(observed, found), lambda _cell: True)
+        if not lines:
+            return []
+        reports.append((len(lines), chosen, lines))
+    _count, chosen, lines = min(reports, key=lambda report: report[0])
+    under = ", ".join(d.name for d in chosen) or "no known divergence"
+    return [f"(nearest outcome: the truth under {under})", *lines]
 
 
 def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
@@ -1006,7 +1016,7 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
         for other in others:
             moved -= _moved(expected, expect(observed, other.view(observed, truth)))
         own_cells += len(moved)
-        lines += _compare(read(observed), [expected], moved.__contains__)
+        lines += _compare(read(observed), expected, moved.__contains__)
     if not own_cells:
         raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
     return lines
@@ -1235,11 +1245,11 @@ def _assert_clean(mismatches: list[str]) -> None:
 # that share one together, so each scenario's pipeline runs once for the
 # module.
 #
-# Each comparison test holds every cell of every scenario to the truth. A cell
-# a known divergence moves also accepts exactly the figure the divergence
-# gives it, so any other change to it still fails. Each divergence's strict
-# xfail holds the cells it alone moves to the truth; fixing it turns that
-# test into a pass.
+# Each comparison test holds every cell of every scenario to the truth, or to
+# the view of it under one combination of the scenario's known divergences,
+# the same combination for every cell of the test, so any other change to a
+# cell still fails. Each divergence's strict xfail holds the cells it alone
+# moves to the truth; fixing it turns that test into a pass.
 _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),
