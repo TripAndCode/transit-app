@@ -32,7 +32,8 @@ def test_rolling_back_drops_the_columns_and_migrating_up_restores_them(apply_sch
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         assert _source_columns(conn) == _COLUMNS
-        migrate.migrate_down("0087", conn)
+        # Forced: the rollback also spans every later migration, and one is `-- DESTRUCTIVE`.
+        migrate.migrate_down("0087", conn, force_destructive=True)
         assert _source_columns(conn) == set()
 
         migrate.migrate_up(conn)
