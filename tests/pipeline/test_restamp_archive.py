@@ -104,15 +104,17 @@ def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_
     """A restamp moves rows between service dates, and the per-date count
     ledger misses a date whose moves in and out cancel; marking the agency
     makes its next analyze rebuild every table in full instead of trusting the ledger."""
-    from pipeline.analyze import _dates_needing_rebuild, _legacy_fingerprint, _plan, mark_for_full_rebuild
+    from pipeline.analyze import _dates_needing_rebuild, _plan, mark_for_full_rebuild, table_fingerprints
 
     row = _row("20260905/TripUpdate_054355.pb", "2026-09-05T05:43:55+00:00", "t", None)
     insert_updates(ch_client, agency_id, [row])
     with pg_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agg_meta (agency_id, analyzed_at, static_fingerprint) VALUES (%s, now(), %s)",
-            (agency_id, _legacy_fingerprint(None, [])),
-        )
+        cur.execute("INSERT INTO agg_meta (agency_id, analyzed_at) VALUES (%s, now())", (agency_id,))
+        for table, fingerprint in table_fingerprints(None, False, []).items():
+            cur.execute(
+                "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES (%s, %s, %s)",
+                (agency_id, table, fingerprint),
+            )
         cur.execute(
             "INSERT INTO agg_feed_health (agency_id, date, raw_samples, total_rows, clamp_count) "
             "VALUES (%s, '2026-09-05', 1, 1, 0)",

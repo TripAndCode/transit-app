@@ -7,7 +7,7 @@ import pytest
 
 from pipeline import agg_registry
 from pipeline.agg_registry import Timetable
-from pipeline.analyze import analyze
+from pipeline.analyze import _SEED_VERSIONS, analyze
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg, _seed_route_headway_schedule
 
@@ -183,7 +183,11 @@ def test_deploy_seeds_the_states_without_a_rebuild(pg_conn, agency_id, ch_client
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert any("seeded" in r.getMessage() for r in caplog.records)
-    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    # The seed vouches for the versions of the switch: a table bumped since
+    # rebuilds, with the tables computed from it, and every other one stands.
+    bumped = {n for n, t in agg_registry.TABLES.items() if t.version != _SEED_VERSIONS.get(n)}
+    rebuilt = {n for n, s in _scopes_logged(caplog).items() if s != "unchanged"}
+    assert rebuilt == bumped | {n for n, t in agg_registry.TABLES.items() if set(t.depends_on) & bumped}
     assert set(_states(pg_conn, agency_id)) == set(agg_registry.TABLES)
 
 
@@ -243,7 +247,9 @@ def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
     stats_before = _count(pg_conn, "agg_route_stats", agency_id)
-    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["route_delay_counts"], version=agg_registry.TABLES["route_delay_counts"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
@@ -257,7 +263,9 @@ def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id
 def test_a_bump_and_changed_dates_rebuild_side_by_side(pg_conn, agency_id, ch_client, caplog, monkeypatch):
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["route_delay_counts"], version=agg_registry.TABLES["route_delay_counts"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
