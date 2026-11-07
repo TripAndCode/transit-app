@@ -3,7 +3,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
-import type { DefinitionMeta, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, SourceMix, TimetableVersion } from "../api/types";
 
 const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
@@ -18,6 +18,7 @@ const LEGACY: DefinitionMeta = {
   built_at: null,
   value_basis: "feed_prediction",
   timetable_versions: null,
+  source_mix: null,
 };
 
 const ONE_AGENCY: TimetableVersion[] = [
@@ -183,6 +184,64 @@ describe("DefinitionMetaBlock", () => {
       "HiroBus — hiroden_static: 1 day; none recorded: 6 days (of 7 days)",
     ]);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetables");
+  });
+
+  const SOURCES: SourceMix[] = [{ agency_id: 1, archive_days: 28, live_days: 3, none_days: 0 }];
+  const SOURCES_EXPLAINED_EN =
+    "Archive days hold every poll the collector made that day; live days hold only the part the app received in real time.";
+
+  it("names the days each source supplied the observations on, and says what each source is", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, source_mix: SOURCES }} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Observations: archive 28 days, live 3 days (of 31 days).");
+    expect(block).toHaveTextContent(SOURCES_EXPLAINED_EN);
+  });
+
+  it("names the sources the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, source_mix: SOURCES }} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("観測データ：アーカイブ 28日間、ライブ 3日間（全31日間）。");
+    expect(block).toHaveTextContent(
+      "アーカイブの日は収集サーバーがその日に取得した全データ、ライブの日はアプリがリアルタイムで受け取った一部のデータのみです。",
+    );
+  });
+
+  it("names only the sources that supplied a day, and explains none when no day was recorded", () => {
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, source_mix: [{ agency_id: 1, archive_days: 0, live_days: 0, none_days: 1 }] }}
+      />,
+    );
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Observations: none recorded 1 day (of 1 day).");
+    expect(block).not.toHaveTextContent("Archive days");
+  });
+
+  it("says nothing of sources the API did not name", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Observations");
+  });
+
+  it("lists each agency's sources under its name when the figures span several", () => {
+    const board: SourceMix[] = [
+      { agency_id: 1, archive_days: 7, live_days: 0, none_days: 0 },
+      { agency_id: 2, archive_days: 0, live_days: 1, none_days: 6 },
+    ];
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, source_mix: board }}
+        agencyNames={new Map([[1, "Hiroden"], [2, "HiroBus"]])}
+      />,
+    );
+    const items = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toEqual([
+      "Hiroden — archive 7 days (of 7 days)",
+      "HiroBus — live 1 day, none recorded 6 days (of 7 days)",
+    ]);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("Observations");
+    expect(block).toHaveTextContent(SOURCES_EXPLAINED_EN);
   });
 
   it("writes the live and unknown stamps the way a Japanese document does", async () => {

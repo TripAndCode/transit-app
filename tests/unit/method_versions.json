@@ -27,5 +27,8 @@
     "agg_route_stop_daily": 2,
     "agg_stop_daily": 2,
     "route_delay_counts": 2
+  },
+  "2026.11.2": {
+    "agg_feed_health": 2
   }
 }

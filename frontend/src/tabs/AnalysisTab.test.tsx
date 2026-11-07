@@ -36,6 +36,7 @@ const DEFINITION: DefinitionMeta = {
   built_at: null,
   value_basis: "feed_prediction",
   timetable_versions: null,
+  source_mix: null,
 };
 
 function reportMeta(reportType: ReportType): ReportMeta {
@@ -353,6 +354,7 @@ function emptyReport(reportType: string): ReportResponse {
       built_at: null,
       value_basis: "feed_prediction",
       timetable_versions: null,
+      source_mix: null,
     },
   } as ReportResponse;
 }
