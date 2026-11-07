@@ -21,6 +21,10 @@ Semantics assumed:
   ``ON_TIME_MAX_LATE_SEC`` late.
 - Over five minutes late: more than ``OVER_FIVE_MIN_SEC`` late.
 - Mean delay: the plain mean over departures, early ones counting negative.
+- A departure's hour is the whole hour of its scheduled departure on the
+  service-day clock: 07:58:00 is hour 7, and 24:10:00 is hour 24 of the
+  service day its trip belongs to. Its weekday is its service date's ISO
+  weekday, Monday 1.
 """
 
 from __future__ import annotations
@@ -46,6 +50,22 @@ class Departure:
     stop_sequence: int
     scheduled_sec: int
     delay_sec: int
+
+    @property
+    def hour(self) -> int:
+        return self.scheduled_sec // 3600
+
+    @property
+    def weekday(self) -> int:
+        return self.service_date.isoweekday()
+
+
+def before_midnight(d: Departure) -> bool:
+    """Scheduled before 24:00:00 on its service day's clock."""
+    return d.scheduled_sec < 24 * 3600
+
+
+Where = Callable[[Departure], bool] | None
 
 
 @dataclass(frozen=True)
@@ -98,10 +118,11 @@ def figures(group: Iterable[Departure]) -> Figures:
     )
 
 
-def _grouped(scenario: Scenario, key: Callable[[Departure], Hashable]) -> dict:
+def _grouped(scenario: Scenario, key: Callable[[Departure], Hashable], where: Where = None) -> dict:
     groups: dict = defaultdict(list)
     for d in departures(scenario):
-        groups[key(d)].append(d)
+        if where is None or where(d):
+            groups[key(d)].append(d)
     return {k: figures(v) for k, v in groups.items()}
 
 
@@ -110,9 +131,9 @@ def by_route_day(scenario: Scenario) -> dict[tuple[str, date, str], Figures]:
     return _grouped(scenario, lambda d: (d.route_id, d.service_date, d.day_type))
 
 
-def by_route_day_type(scenario: Scenario) -> dict[tuple[str, str], Figures]:
+def by_route_day_type(scenario: Scenario, where: Where = None) -> dict[tuple[str, str], Figures]:
     """Per (route, day type), pooled over every service day."""
-    return _grouped(scenario, lambda d: (d.route_id, d.day_type))
+    return _grouped(scenario, lambda d: (d.route_id, d.day_type), where)
 
 
 def by_route(scenario: Scenario) -> dict[str, Figures]:
@@ -120,6 +141,21 @@ def by_route(scenario: Scenario) -> dict[str, Figures]:
     return _grouped(scenario, lambda d: d.route_id)
 
 
-def by_day(scenario: Scenario) -> dict[date, Figures]:
+def by_day(scenario: Scenario, where: Where = None) -> dict[date, Figures]:
     """Per service date, every route together."""
-    return _grouped(scenario, lambda d: d.service_date)
+    return _grouped(scenario, lambda d: d.service_date, where)
+
+
+def by_day_hour(scenario: Scenario, where: Where = None) -> dict[tuple[date, int], Figures]:
+    """Per (service date, hour), every route together."""
+    return _grouped(scenario, lambda d: (d.service_date, d.hour), where)
+
+
+def by_route_day_type_time(scenario: Scenario, where: Where = None) -> dict[tuple[str, str, int], Figures]:
+    """Per (route, day type, scheduled departure in seconds), pooled over every service day."""
+    return _grouped(scenario, lambda d: (d.route_id, d.day_type, d.scheduled_sec), where)
+
+
+def by_route_day_type_weekday_hour(scenario: Scenario, where: Where = None) -> dict[tuple[str, str, int, int], Figures]:
+    """Per (route, day type, weekday, hour), pooled over every service day."""
+    return _grouped(scenario, lambda d: (d.route_id, d.day_type, d.weekday, d.hour), where)
