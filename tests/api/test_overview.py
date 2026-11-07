@@ -1804,6 +1804,17 @@ async def test_peak_hour_breakdown_answers_an_hour_past_midnight(client, aconn, 
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_breakdown_takes_every_hour_ingest_can_store(client, aconn, aagency_id):
+    """GTFS writes an hour in at most two digits, so ingest stores hours up to 99."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 99, 4.0, 12)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 99, "dow": 5})
+    assert r.status_code == 200
+    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 100, "dow": 5})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_breakdown_lists_a_route_once_across_raw_service_ids(client, aconn, aagency_id):
     """A route's observations split across raw service ids (and the '' of an
     unmatched trip) are one route: one entry, pooled, with no raw id in it.

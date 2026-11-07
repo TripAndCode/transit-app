@@ -8,7 +8,7 @@
     "version": 1
   },
   "agg_hour_daily": {
-    "hash": "8b0de81b306872e8acd1066e3e57a6737cb71365b576bc51864b1caa6436a64e",
+    "hash": "32c9d96607f901f38411d5f97287f72e099a982541b55465cfaeddbafa0137ef",
     "version": 2
   },
   "agg_route_daily": {
@@ -32,19 +32,19 @@
     "version": 1
   },
   "agg_route_hour": {
-    "hash": "ac5074046792fcd26b741fce7e092e7f2e413cb543b2719e8d0ce459727fbc3e",
+    "hash": "4f3d7431a1ed999861139db14a2c8f90b808cde8ad4bb7e12003b6f7dbd9c4a9",
     "version": 2
   },
   "agg_route_hour_dow": {
-    "hash": "17bee1ab1765abf9099d8b29f50665dc77d5413a0810acf3c1fbb0a369401c2d",
+    "hash": "18b1766991c5d95b0cb363f784a6a33247c409e635b9522e1c581ddf0fa2468b",
     "version": 2
   },
   "agg_route_stats": {
-    "hash": "15606ffb9332051579b148b096163e4a1a9f60aed02a065d79336702fae57546",
+    "hash": "cbc13a7dd288c5737b9466cfca0fe3b70229762e1bcb2db10179e69555dba928",
     "version": 1
   },
   "agg_route_stop_daily": {
-    "hash": "0204e0ceaacaefbffd77b1c7836ff101ec59d52a1130a54dead56b2c968f19e9",
+    "hash": "6d9580d280bebd514854a239b85547dccf6a4db610a3bc0c95747435d6401393",
     "version": 2
   },
   "agg_schedule_revision_daily": {
@@ -56,7 +56,7 @@
     "version": 1
   },
   "agg_stop_daily": {
-    "hash": "a6e941ff6ad7cfc9f2d5b0c5ff86f923e673a74e5502b3d0eb60e1b60b83d0ee",
+    "hash": "977180471d84fb0cea683e780089b030d2f13f8927461e764f0123a8dfdbd2f3",
     "version": 2
   },
   "agg_stop_routes": {
@@ -64,7 +64,7 @@
     "version": 1
   },
   "route_delay_counts": {
-    "hash": "0fffc755c492606ce3f151cdba7df2bd7fcf714612ae809e46cc26b2ea14159e",
+    "hash": "22cad5d0b58910cce2d45d1790c34d7497e439febd4aaf9267fc85f7178c8a2f",
     "version": 2
   },
   "stop_route_days": {

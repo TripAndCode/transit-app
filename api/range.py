@@ -692,11 +692,12 @@ def scheduled_sec_ch(prefix: str = "") -> str:
     seconds, which is all the aomori_regex strategy's ``"HH:MM"`` rows and
     the rows ingested before `scheduled_sec` existed carry. NULL when neither
     holds a time; a malformed string degrades to NULL rather than failing the
-    query.
+    query. `if`, not `ifNull`: `if` evaluates only the branch a row takes, so
+    a row carrying `scheduled_sec` never pays for the string parse.
     """
     parts = f"splitByChar(':', ifNull({prefix}scheduled_time, ''))"
     from_text = f"toInt32OrNull({parts}[1]) * 3600 + toInt32OrNull({parts}[2]) * 60 + toInt32OrZero({parts}[3])"
-    return f"ifNull({prefix}scheduled_sec, {from_text})"
+    return f"if({prefix}scheduled_sec IS NOT NULL, {prefix}scheduled_sec, {from_text})"
 
 
 def scheduled_hour_ch(prefix: str = "") -> str:
@@ -706,22 +707,33 @@ def scheduled_hour_ch(prefix: str = "") -> str:
     return f"intDiv({scheduled_sec_ch(prefix)}, 3600)"
 
 
+def _wall_clock_ch(prefix: str) -> tuple[str, str]:
+    """(the departure's wall-clock seconds, :func:`scheduled_sec_ch` modulo 24
+    hours, defined under an alias; that alias) for the columns named with
+    *prefix*. A band test reads the alias, so the clock is computed once
+    however many ranges it is compared with. ClickHouse lets one query repeat
+    an alias only for the same expression, which the alias, named by
+    *prefix*, always names here."""
+    alias = f"__wall_clock_{prefix.rstrip('.') or 'row'}"
+    return f"(({scheduled_sec_ch(prefix)}) % 86400 AS {alias})", alias
+
+
 def time_band_ch(prefix: str = "") -> str:
     """The :data:`TIME_BAND_RANGES` key a departure's scheduled time falls in,
     ``'none'`` when it has none. A band is a wall-clock window, so the time is
     taken modulo 24 hours first: ``"24:30:00"`` is 00:30, in ``late_night``.
 
-    Analyze's per-stop tables store this key and the live time-band filter
-    (:func:`time_band_clause_ch_for`) compares against it, so a filtered live
-    scan selects exactly the departures the stored band holds.
+    Analyze's per-stop tables store this key. The live time-band filter
+    (:func:`time_band_clause_ch_for`) tests the named band's range on the same
+    wall clock, so a filtered live scan selects exactly the departures the
+    stored band holds.
     """
-    sec = scheduled_sec_ch(prefix)
-    clock = f"(({sec}) % 86400)"
+    clock, alias = _wall_clock_ch(prefix)
     arms = ", ".join(
-        f"{clock} >= {_clock_sec(start)} AND {clock} < {_clock_sec(end)}, '{band}'"
+        f"{alias} >= {_clock_sec(start)} AND {alias} < {_clock_sec(end)}, '{band}'"
         for band, (start, end) in TIME_BAND_RANGES.items()
     )
-    return f"multiIf(({sec}) IS NULL, 'none', {arms}, 'none')"
+    return f"multiIf(isNull({clock}), 'none', {arms}, 'none')"
 
 
 def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -731,7 +743,8 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 
 def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     """Return a WHERE fragment keeping the `updates` rows whose scheduled time
-    falls in the band named by ``band`` (:func:`time_band_ch`).
+    falls in the band named by ``band``: its range on the wall clock analyze
+    bands by (:func:`time_band_ch`).
 
     Takes the band alone rather than a whole :class:`RangeCtx`, so an endpoint
     that accepts a bare ``?time_band=`` without the rest of the range contract
@@ -750,7 +763,12 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     """
     if band not in TIME_BAND_RANGES:
         return "1", {}
-    return f"({time_band_ch('u.')} = {{ch_time_band:String}})", {"ch_time_band": band}
+    start, end = TIME_BAND_RANGES[band]
+    clock, alias = _wall_clock_ch("u.")
+    return (
+        f"({clock} >= {{ch_tb_start:UInt32}} AND {alias} < {{ch_tb_end:UInt32}})",
+        {"ch_tb_start": _clock_sec(start), "ch_tb_end": _clock_sec(end)},
+    )
 
 
 def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:

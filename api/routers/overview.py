@@ -23,6 +23,7 @@ from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
 from pipeline.route_catalog import pooled_left_out_codes, route_list, rows_to_fetch
+from pipeline.strategies._time import MAX_SERVICE_HOUR
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
@@ -257,8 +258,8 @@ async def peak_hour_breakdown(
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     # An hour of the service day's clock, which runs past 23 for a departure
-    # after midnight (24:10 is hour 24) and at most through the next day.
-    hour: int = Query(ge=0, le=47),
+    # after midnight (24:10 is hour 24).
+    hour: int = Query(ge=0, le=MAX_SERVICE_HOUR),
     dow: int | None = Query(default=None, ge=1, le=7),
 ) -> PeakHourBreakdown:
     """Top routes by average delay for a given hour (and optionally day-of-week).

@@ -24,6 +24,7 @@ from api.range import (
     build_updates_filter_ch,
     date_range_clause_ch,
     dow_clause_ch,
+    scheduled_sec_ch,
     time_band_ch,
     time_band_clause_ch,
 )
@@ -76,14 +77,29 @@ def test_time_band_clause_ch_all_is_noop():
     assert params == {}
 
 
-def test_time_band_clause_ch_compares_the_band_analyze_stores():
-    """The filter keeps a row whose band is the named one, by the same
-    expression analyze stores in agg_stop_daily.time_band, so the live scan
-    and the aggregate never place a departure in different bands. The
-    behavioural proof is the RUN_CH_INTEGRATION tests below."""
+def test_time_band_clause_ch_tests_one_range_on_the_clock_it_computes_once():
+    """The live filter runs over every row of the scan, so it computes the
+    departure's clock once and tests only the named band's range on it; the
+    behavioural proof that it selects what analyze stores is
+    tests/pipeline/test_extended_hours.py."""
     frag, params = time_band_clause_ch(_ctx(time_band="morning"))
-    assert frag == f"({time_band_ch('u.')} = {{ch_time_band:String}})"
-    assert params == {"ch_time_band": "morning"}
+    assert params == {"ch_tb_start": 5 * 3600, "ch_tb_end": 9 * 3600}
+    assert "{ch_tb_start:UInt32}" in frag and "{ch_tb_end:UInt32}" in frag
+    assert frag.count(scheduled_sec_ch("u.")) == 1
+    assert "multiIf" not in frag
+
+
+@pytest.mark.parametrize(
+    ("sql", "prefix"), [(time_band_clause_ch(_ctx(time_band="night"))[0], "u."), (time_band_ch("d."), "d.")]
+)
+def test_the_band_reads_scheduled_sec_before_it_parses_the_string(sql, prefix):
+    """`if` evaluates only the branch a row takes, where `ifNull` evaluates
+    both, so a row carrying `scheduled_sec` never pays for parsing
+    `scheduled_time`; and the seconds are computed once, however many bands
+    test them."""
+    assert f"ifNull({prefix}scheduled_sec" not in sql
+    assert f"if({prefix}scheduled_sec IS NOT NULL, {prefix}scheduled_sec, " in sql
+    assert sql.count(scheduled_sec_ch(prefix)) == 1
 
 
 def test_time_band_clause_ch_unknown_band_is_noop_not_keyerror():
@@ -123,7 +139,7 @@ def test_build_updates_filter_ch_all_clauses_combined():
     ctx = _ctx(dow="weekend", time_band="evening", service="土日祝", service_dates=resolved, routes=("R9",))
     frag, params = build_updates_filter_ch(ctx)
     assert " AND " in frag
-    for name in ("ch_from_date", "ch_to_date", "ch_time_band", "ch_service_dates", "ch_routes"):
+    for name in ("ch_from_date", "ch_to_date", "ch_tb_start", "ch_tb_end", "ch_service_dates", "ch_routes"):
         assert name in params
 
 

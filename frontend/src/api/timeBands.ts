@@ -30,10 +30,11 @@ export function bandOf(hour: number): Band {
   return hit ? hit.band : "night";
 }
 
-/** The last hour a service day's clock reaches: it runs past 23 for a
- *  departure after midnight, and at most through the next day. Mirrors the
- *  bound api/routers/overview.py's peak-hour breakdown accepts. */
-export const LAST_SERVICE_HOUR = 47;
+/** The latest hour a service day's clock can reach: it runs past 23 for a
+ *  departure after midnight, and GTFS writes an hour in at most two digits.
+ *  Mirrors pipeline/strategies/_time.py's MAX_SERVICE_HOUR, the bound the
+ *  peak-hour breakdown accepts. */
+export const LAST_SERVICE_HOUR = 99;
 
 /** How many hours a chart of the service day spans: 0 through 23, and on
  *  through the last hour past midnight (24, 25, …) that `hours` holds, so a

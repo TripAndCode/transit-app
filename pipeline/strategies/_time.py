@@ -19,6 +19,10 @@ from typing import Literal
 # points that int() raises ValueError on (e.g. superscript "²", category No).
 _GTFS_TIME_RE = re.compile(r"^([0-9]{1,2}):([0-5][0-9])(?::([0-5][0-9]))?$")
 
+# The latest hour `_GTFS_TIME_RE` admits: a reader of stored hours bounds its
+# input by this, so it never rejects an hour ingest wrote.
+MAX_SERVICE_HOUR = 99
+
 Status = Literal["ok", "empty", "extended", "bad"]
 
 

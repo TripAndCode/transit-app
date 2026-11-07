@@ -177,11 +177,13 @@ async def _heatmap_from_agg(
     if not route_codes:
         return DelayHeatmap(routes=[], dimensions=[], cells=[], baseline_min=1.0)
     rc_param = 2 + len(rparams)
+    # scheduled_time runs past 24:00 on the service day's clock; a bucket is a
+    # wall-clock window, so the hour is taken modulo 24 (29:30 is 朝).
     grid = await conn.fetch(
         "SELECT route_code, CASE "
-        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 5 AND 9 THEN 0 "
-        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 10 AND 15 THEN 1 "
-        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 16 AND 20 THEN 2 "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int % 24 BETWEEN 5 AND 9 THEN 0 "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int % 24 BETWEEN 10 AND 15 THEN 1 "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int % 24 BETWEEN 16 AND 20 THEN 2 "
         "ELSE 3 END AS bucket, "
         "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
         "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "

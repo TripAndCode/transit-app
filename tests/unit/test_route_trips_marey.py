@@ -57,7 +57,7 @@ def test_route_trips_sql_orders_by_trip_then_stop_sequence():
 
 def test_route_trips_sql_all_band_adds_no_time_filter():
     sql, params = build_route_trips_sql("all")
-    assert "ch_time_band" not in sql
+    assert "ch_tb_start" not in sql
     assert "multiIf" not in sql
     assert params == {"rt_limit": MAX_ROUTE_TRIPS + 1}
 
@@ -72,7 +72,7 @@ def test_route_trips_sql_named_band_filters_on_the_shared_clock_expression():
     sql, params = build_route_trips_sql("morning")
     frag, frag_params = time_band_clause_ch_for("morning")
     assert frag in sql
-    assert "{ch_time_band:String}" in sql
+    assert "{ch_tb_start:UInt32}" in sql and "{ch_tb_end:UInt32}" in sql
     assert params == {**frag_params, "rt_limit": MAX_ROUTE_TRIPS + 1}
 
 
