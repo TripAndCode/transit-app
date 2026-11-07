@@ -4,7 +4,8 @@
 // HourlyHeatmap/DowBandGrid's per-cell data-driven opacity, ConcentrationBar's
 // per-row rank opacity, MapTab's resizable queue-column width, RevealSection's
 // place in its tab's one entrance group, HeatSurface's per-cell inset ring
-// (--heat-ring), and a bar's share of its axis (--bar-share: the compare bars,
+// (--heat-ring) and its hour-column count (--heat-hours: more than 24 when a
+// departure ran past midnight on its service day's clock), and a bar's share of its axis (--bar-share: the compare bars,
 // the routes-to-check bars). A literal fallback on one of these means "the
 // instance hasn't set it yet", not "this design token is missing", so
 // check-css-tokens exempts them even though nothing in global.css defines them.
@@ -16,4 +17,4 @@
 // inside the checker: its exact membership is pinned by a test, and a name
 // added to silence the check for a real token has to survive changing that
 // test too.
-export const DYNAMIC_PER_INSTANCE_PROPERTIES = new Set(["--len", "--cell-opacity", "--rank-opacity", "--ops-queue-width", "--stagger", "--heat-ring", "--bar-share"]);
+export const DYNAMIC_PER_INSTANCE_PROPERTIES = new Set(["--len", "--cell-opacity", "--rank-opacity", "--ops-queue-width", "--stagger", "--heat-ring", "--heat-hours", "--bar-share"]);

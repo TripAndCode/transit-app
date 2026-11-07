@@ -32,7 +32,7 @@ function step(key: string, dow: number, hour: number, hours: number): [number, n
 }
 
 /**
- * The trend view's weekday × hour surface. Two profiles over the same 168
+ * The trend view's weekday × hour surface. Two profiles over the same
  * cells, both of the selected range -- its delay hour by hour, and the same
  * delay averaged by time band -- and switching between them changes each
  * cell's colour and inset ring in place, so the eye follows the morning peak
@@ -40,8 +40,8 @@ function step(key: string, dow: number, hour: number, hours: number): [number, n
  * pooled from few observations is drawn faint (--mark-opacity).
  *
  * Hover and keyboard focus never re-render it: the handlers write
- * `data-focus-dow` / `data-focus-hour` on the grid (the generated rules in
- * DIM_RULES keep that column and row and recede the rest), copy the cell's
+ * `data-focus-dow` / `data-focus-hour` on the grid (the rules
+ * heatSurfaceDimRules generates keep that column and row and recede the rest), copy the cell's
  * label into the readout through a ref, and publish the weekday to the
  * linked trend charts as the `dow` source. As the `dow` viewer, its cells
  * carry `data-mark-dow` and recede through `.focus-dim-opacity` when another

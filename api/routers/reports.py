@@ -129,13 +129,11 @@ _ML_FRESHNESS_DAYS = 2
 # share a weekday with the new horizon's row for that slot.
 _ML_HORIZON_DAYS = 7
 
-# The rows the heatmap overlays: inside the horizon, from a recent publish, and
-# within a day's 24 hours. The model counts every run before the service-day
-# cutover past 24, whether its feed writes 00:10 or 24:10, while the past
-# averages count only GTFS's extended times there, so its later hours would not
-# meet the past hour they stand for. Only the latest publish (one generated_at)
-# counts: a slot it dropped still holds a superseded model's row. Built from the
-# constants above, never from input.
+# The rows the heatmap overlays: inside the horizon, from the latest publish
+# (a slot it dropped still holds a superseded model's row), and below hour 24.
+# The model counts any run before the service-day cutover past 24, the past
+# averages only a time its feed writes past 24:00, so those hours do not meet.
+# Built from the constants above, never from input.
 _ML_FRESH_ROWS = (
     "service_date > now()::date "
     f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
